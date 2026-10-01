@@ -1,21 +1,9 @@
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
 use crate::pty::{write_paste_via, PaneError, PaneInputWriter, PaneKey, PaneTable};
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum PaneEvent {
-    Enter { pane: PaneKey, epoch: u64 },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ClearOutcome {
-    Cleared,
-    PreservedNewerInput,
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SanitizeError {
@@ -45,27 +33,21 @@ impl std::error::Error for SanitizeError {}
 #[derive(Debug)]
 pub enum ArbiterError {
     Stale,
-    Draft,
     Busy,
     InputFailed,
-    EpochOverflow,
     InvalidBody(SanitizeError),
     Pane(PaneError),
-    EventChannelClosed,
     LockPoisoned,
 }
 
 impl fmt::Display for ArbiterError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Stale => write!(formatter, "stale pane generation or input epoch"),
-            Self::Draft => write!(formatter, "human draft is latched"),
+            Self::Stale => write!(formatter, "stale pane generation"),
             Self::Busy => write!(formatter, "a paste is already in flight"),
             Self::InputFailed => write!(formatter, "pane input is failed until restart"),
-            Self::EpochOverflow => write!(formatter, "input epoch overflow"),
             Self::InvalidBody(error) => write!(formatter, "invalid paste body: {error}"),
             Self::Pane(error) => error.fmt(formatter),
-            Self::EventChannelClosed => write!(formatter, "pane event channel is closed"),
             Self::LockPoisoned => write!(formatter, "input arbiter lock is poisoned"),
         }
     }
@@ -88,33 +70,23 @@ impl From<SanitizeError> for ArbiterError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ArbiterSnapshot {
     pub generation: u64,
-    pub input_epoch: u64,
-    pub draft_latched: bool,
     pub paste_in_flight: bool,
     pub input_failed: bool,
     pub queued_human_bytes: usize,
-    pub last_submission_id: Option<String>,
     /// How long the pane has printed nothing, once it has printed anything:
     /// a harness still drawing its screen is not ready for input.
     pub output_quiet_ms: Option<u64>,
 }
 
-struct QueuedHumanInput {
-    bytes: Vec<u8>,
-    enter_epochs: Vec<u64>,
-}
-
+/// One pane's input. The human's keys go straight in and hold nothing back:
+/// a delivery is pasted into a window whatever its input box holds, the
+/// human's unsent text included (the owner's choice, 2026-10-01). Only a paste
+/// going in holds the human's keys, so none land inside it or before its Enter.
 struct PaneInputState {
     generation: u64,
-    input_epoch: u64,
-    draft_epoch: Option<u64>,
-    emitted_enter_epochs: BTreeSet<u64>,
-    human_bracketed_paste: bool,
-    human_marker_position: usize,
     paste_in_flight: bool,
     input_failed: bool,
-    queued_human: VecDeque<QueuedHumanInput>,
-    last_submission_id: Option<String>,
+    queued_human: VecDeque<Vec<u8>>,
     last_output: Option<Instant>,
 }
 
@@ -125,15 +97,9 @@ impl PaneInputState {
     fn new(generation: u64) -> Self {
         Self {
             generation,
-            input_epoch: 0,
-            draft_epoch: None,
-            emitted_enter_epochs: BTreeSet::new(),
-            human_bracketed_paste: false,
-            human_marker_position: 0,
             paste_in_flight: false,
             input_failed: false,
             queued_human: VecDeque::new(),
-            last_submission_id: None,
             last_output: None,
         }
     }
@@ -141,59 +107,26 @@ impl PaneInputState {
     fn snapshot(&self) -> ArbiterSnapshot {
         ArbiterSnapshot {
             generation: self.generation,
-            input_epoch: self.input_epoch,
-            draft_latched: self.draft_epoch.is_some(),
             paste_in_flight: self.paste_in_flight,
             input_failed: self.input_failed,
-            queued_human_bytes: self
-                .queued_human
-                .iter()
-                .map(|queued| queued.bytes.len())
-                .sum(),
-            last_submission_id: self.last_submission_id.clone(),
+            queued_human_bytes: self.queued_human.iter().map(Vec::len).sum(),
             output_quiet_ms: self
                 .last_output
                 .map(|at| u64::try_from(at.elapsed().as_millis()).unwrap_or(u64::MAX)),
         }
-    }
-
-    fn human_enter_epochs(&mut self, bytes: &[u8], first_epoch: u64) -> Vec<u64> {
-        let mut enters = Vec::new();
-        for (index, byte) in bytes.iter().copied().enumerate() {
-            let marker = if self.human_bracketed_paste {
-                b"\x1b[201~"
-            } else {
-                b"\x1b[200~"
-            };
-            if byte == marker[self.human_marker_position] {
-                self.human_marker_position += 1;
-                if self.human_marker_position == marker.len() {
-                    self.human_bracketed_paste = !self.human_bracketed_paste;
-                    self.human_marker_position = 0;
-                }
-            } else {
-                self.human_marker_position = usize::from(byte == 0x1b);
-            }
-            if byte == b'\r' && !self.human_bracketed_paste {
-                enters.push(first_epoch + index as u64 + 1);
-            }
-        }
-        enters
     }
 }
 
 pub struct InputArbiter {
     panes: Mutex<PaneStateMap>,
     enter_delay_ms: u64,
-    events: Sender<PaneEvent>,
 }
 
 impl InputArbiter {
-    pub fn new(enter_delay_ms: u64, events: Sender<PaneEvent>) -> Self {
+    pub fn new(enter_delay_ms: u64) -> Self {
         Self {
             panes: Mutex::new(HashMap::new()),
             enter_delay_ms,
-            events,
         }
     }
 
@@ -291,25 +224,15 @@ impl InputArbiter {
         Ok(snapshot)
     }
 
+    /// The human's keys: written at once, or, while a paste is going in,
+    /// after it, Enter included.
     pub fn write_human(
         &self,
         table: &PaneTable,
         pane: &PaneKey,
         bytes: &[u8],
-    ) -> Result<u64, ArbiterError> {
+    ) -> Result<(), ArbiterError> {
         self.write_human_via(table, pane, bytes)
-    }
-
-    /// Keys that type nothing (arrows, function keys, mouse and wheel reports,
-    /// Escape): they reach the pane in order with the typing, but leave no
-    /// draft behind, so they never hold a paste.
-    pub fn write_control(
-        &self,
-        table: &PaneTable,
-        pane: &PaneKey,
-        bytes: &[u8],
-    ) -> Result<u64, ArbiterError> {
-        self.write_human_latching(table, pane, bytes, false)
     }
 
     fn write_human_via<W: PaneInputWriter + ?Sized>(
@@ -317,17 +240,7 @@ impl InputArbiter {
         writer: &W,
         pane: &PaneKey,
         bytes: &[u8],
-    ) -> Result<u64, ArbiterError> {
-        self.write_human_latching(writer, pane, bytes, true)
-    }
-
-    fn write_human_latching<W: PaneInputWriter + ?Sized>(
-        &self,
-        writer: &W,
-        pane: &PaneKey,
-        bytes: &[u8],
-        latch: bool,
-    ) -> Result<u64, ArbiterError> {
+    ) -> Result<(), ArbiterError> {
         let state = self.pane_state(pane)?;
         let mut state = lock_state(&state)?;
         validate_generation(&state, pane)?;
@@ -335,34 +248,17 @@ impl InputArbiter {
             return Err(ArbiterError::InputFailed);
         }
         if bytes.is_empty() {
-            return Ok(state.input_epoch);
+            return Ok(());
         }
-
-        let byte_count = u64::try_from(bytes.len()).map_err(|_| ArbiterError::EpochOverflow)?;
-        let first_epoch = state.input_epoch;
-        let next_epoch = first_epoch
-            .checked_add(byte_count)
-            .ok_or(ArbiterError::EpochOverflow)?;
-        let enter_epochs = state.human_enter_epochs(bytes, first_epoch);
-        state.input_epoch = next_epoch;
-        if latch {
-            state.draft_epoch = Some(next_epoch);
-        }
-
         if state.paste_in_flight {
-            state.queued_human.push_back(QueuedHumanInput {
-                bytes: bytes.to_vec(),
-                enter_epochs,
-            });
-            return Ok(next_epoch);
+            state.queued_human.push_back(bytes.to_vec());
+            return Ok(());
         }
-
         if let Err(error) = writer.write(pane, bytes) {
             state.input_failed = true;
             return Err(error.into());
         }
-        self.emit_enters(pane, &mut state, enter_epochs)?;
-        Ok(next_epoch)
+        Ok(())
     }
 
     pub fn write_reply(
@@ -400,42 +296,31 @@ impl InputArbiter {
         &self,
         table: &PaneTable,
         pane: &PaneKey,
-        epoch: u64,
         body: &[u8],
     ) -> Result<(), ArbiterError> {
-        self.write_paste_via(table, pane, epoch, body)
+        self.write_paste_via(table, pane, body)
     }
 
-    /**
-     * Admit a native-channel send under the same epoch and draft guard as a
-     * PTY paste, without reserving the writer or sending any bytes.
-     */
-    pub fn claim_epoch(&self, pane: &PaneKey, epoch: u64) -> Result<(), ArbiterError> {
+    /// Admit a native-channel send (a harness's own server, inbox or socket)
+    /// as a paste is admitted: the pane is current, its input works and no
+    /// paste is going in. It reserves nothing and sends nothing.
+    pub fn claim(&self, pane: &PaneKey) -> Result<(), ArbiterError> {
         let state = self.pane_state(pane)?;
         let state = lock_state(&state)?;
-        validate_epoch_claim(&state, pane, epoch, true)
-    }
-
-    /// Native Pi checks its own editor at admission; this only fences input.
-    /// It neither clears the opaque draft latch nor authorizes a PTY paste.
-    pub fn claim_native_epoch(&self, pane: &PaneKey, epoch: u64) -> Result<(), ArbiterError> {
-        let state = self.pane_state(pane)?;
-        let state = lock_state(&state)?;
-        validate_epoch_claim(&state, pane, epoch, false)
+        validate_admission(&state, pane)
     }
 
     fn write_paste_via<W: PaneInputWriter + ?Sized>(
         &self,
         writer: &W,
         pane: &PaneKey,
-        epoch: u64,
         body: &[u8],
     ) -> Result<(), ArbiterError> {
         let body = sanitize(body)?;
         let state = self.pane_state(pane)?;
         {
             let mut state = lock_state(&state)?;
-            validate_epoch_claim(&state, pane, epoch, true)?;
+            validate_admission(&state, pane)?;
             state.paste_in_flight = true;
         }
 
@@ -449,67 +334,26 @@ impl InputArbiter {
         self.finish_paste(writer, pane, &state)
     }
 
-    pub fn clear_draft(
-        &self,
-        pane_id: &str,
-        generation: u64,
-        submitted_epoch: u64,
-        submission_id: &str,
-    ) -> Result<ClearOutcome, ArbiterError> {
-        let state = self
-            .lock_panes()?
-            .get(pane_id)
-            .cloned()
-            .ok_or(ArbiterError::Stale)?;
-        let mut state = lock_state(&state)?;
-        if state.generation != generation {
-            return Err(ArbiterError::Stale);
-        }
-        if !state.emitted_enter_epochs.contains(&submitted_epoch) {
-            return Err(ArbiterError::Stale);
-        }
-        state
-            .emitted_enter_epochs
-            .retain(|epoch| *epoch > submitted_epoch);
-        state.last_submission_id = Some(submission_id.to_string());
-        if state
-            .draft_epoch
-            .is_some_and(|draft_epoch| draft_epoch > submitted_epoch)
-        {
-            return Ok(ClearOutcome::PreservedNewerInput);
-        }
-        state.draft_epoch = None;
-        Ok(ClearOutcome::Cleared)
-    }
-
+    /// The human's keys held during the paste go in after its Enter, in order.
     fn finish_paste<W: PaneInputWriter + ?Sized>(
         &self,
         writer: &W,
         pane: &PaneKey,
         state: &PaneState,
     ) -> Result<(), ArbiterError> {
-        let mut event_channel_closed = false;
         loop {
             let queued = {
                 let mut state = lock_state(state)?;
                 validate_generation(&state, pane)?;
                 match state.queued_human.pop_front() {
-                    Some(queued) => Some(queued),
+                    Some(queued) => queued,
                     None => {
                         state.paste_in_flight = false;
-                        None
+                        return Ok(());
                     }
                 }
             };
-            let Some(queued) = queued else {
-                return if event_channel_closed {
-                    Err(ArbiterError::EventChannelClosed)
-                } else {
-                    Ok(())
-                };
-            };
-
-            if let Err(error) = writer.write(pane, &queued.bytes) {
+            if let Err(error) = writer.write(pane, &queued) {
                 if let Ok(mut state) = lock_state(state) {
                     state.queued_human.push_front(queued);
                     state.paste_in_flight = false;
@@ -517,33 +361,7 @@ impl InputArbiter {
                 }
                 return Err(error.into());
             }
-            let mut state = lock_state(state)?;
-            validate_generation(&state, pane)?;
-            if self
-                .emit_enters(pane, &mut state, queued.enter_epochs)
-                .is_err()
-            {
-                event_channel_closed = true;
-            }
         }
-    }
-
-    fn emit_enters(
-        &self,
-        pane: &PaneKey,
-        state: &mut PaneInputState,
-        enter_epochs: Vec<u64>,
-    ) -> Result<(), ArbiterError> {
-        for epoch in enter_epochs {
-            self.events
-                .send(PaneEvent::Enter {
-                    pane: pane.clone(),
-                    epoch,
-                })
-                .map_err(|_| ArbiterError::EventChannelClosed)?;
-            state.emitted_enter_epochs.insert(epoch);
-        }
-        Ok(())
     }
 
     fn pane_state(&self, pane: &PaneKey) -> Result<PaneState, ArbiterError> {
@@ -572,23 +390,10 @@ fn validate_generation(state: &PaneInputState, pane: &PaneKey) -> Result<(), Arb
     }
 }
 
-fn validate_epoch_claim(
-    state: &PaneInputState,
-    pane: &PaneKey,
-    epoch: u64,
-    require_draft_clear: bool,
-) -> Result<(), ArbiterError> {
+fn validate_admission(state: &PaneInputState, pane: &PaneKey) -> Result<(), ArbiterError> {
     validate_generation(state, pane)?;
     if state.input_failed {
         return Err(ArbiterError::InputFailed);
-    }
-    // Once human input is latched, Draft is the useful refusal even when
-    // those bytes also advanced the epoch after the caller's snapshot.
-    if require_draft_clear && state.draft_epoch.is_some() {
-        return Err(ArbiterError::Draft);
-    }
-    if state.input_epoch != epoch {
-        return Err(ArbiterError::Stale);
     }
     if state.paste_in_flight {
         return Err(ArbiterError::Busy);
@@ -639,17 +444,14 @@ mod tests {
     #[cfg(unix)]
     use portable_pty::PtySize;
 
-    #[cfg(unix)]
-    use super::ClearOutcome;
-    use super::{sanitize, ArbiterError, InputArbiter, PaneEvent, SanitizeError};
+    use super::{sanitize, ArbiterError, InputArbiter, SanitizeError};
     #[cfg(unix)]
     use crate::pty::{serial_pty_test, OpenedPane, PaneTable};
     use crate::pty::{PaneError, PaneInputWriter, PaneKey};
 
     #[test]
     fn a_snapshot_says_how_long_the_pane_has_printed_nothing() {
-        let (events, _received) = mpsc::channel();
-        let arbiter = InputArbiter::new(0, events);
+        let arbiter = InputArbiter::new(0);
         let pane = PaneKey::new("quiet-pane", 1);
         arbiter.register(&pane).expect("register");
         assert_eq!(
@@ -693,22 +495,6 @@ mod tests {
             .expect("open raw recorder");
         await_ready(&mut reader);
         (key, reader)
-    }
-
-    #[cfg(unix)]
-    fn raw_recorder_at(table: &PaneTable, key: PaneKey, byte_count: usize) -> Box<dyn Read + Send> {
-        let script = format!("stty raw -echo; printf ready; od -An -tx1 -N {byte_count}");
-        let mut reader = table
-            .open_at(
-                key,
-                Path::new("/tmp"),
-                &["/bin/sh".to_string(), "-c".to_string(), script],
-                &HashMap::new(),
-                terminal_size(),
-            )
-            .expect("open raw recorder at key");
-        await_ready(&mut reader);
-        reader
     }
 
     /// The recorder's first word, read with a watchdog: on a CI runner this
@@ -872,51 +658,47 @@ mod tests {
         }
     }
 
+    /// Unsent typing holds nothing: a paste admitted after it goes in behind
+    /// the human's text, and a native send is admitted too (the owner's choice
+    /// on 2026-10-01: an idle window gets its message at once).
     #[test]
-    fn multiline_bracketed_paste_does_not_emit_enter_events_even_across_chunk_boundaries() {
-        let body = format!("\x1b[200~{}\x1b[201~", "line\r".repeat(2_000));
-        for chunk_size in 1..=7 {
-            let key = PaneKey::new("human-paste", chunk_size);
-            let (writer, _observed) = RecordingWriter::new(None);
-            let (events, receiver) = mpsc::channel();
-            let arbiter = InputArbiter::new(0, events);
-            arbiter.register(&key).unwrap();
-            for chunk in body.as_bytes().chunks(chunk_size as usize) {
-                arbiter
-                    .write_human_via(writer.as_ref(), &key, chunk)
-                    .unwrap();
-            }
-            assert!(
-                receiver.try_recv().is_err(),
-                "pasted lines must not become submission events"
-            );
-            assert_eq!(
-                arbiter.snapshot(&key).unwrap().input_epoch,
-                body.len() as u64
-            );
-            assert!(arbiter.snapshot(&key).unwrap().draft_latched);
-            arbiter
-                .write_human_via(writer.as_ref(), &key, b"\r")
-                .unwrap();
-            assert!(
-                matches!(receiver.try_recv().unwrap(), PaneEvent::Enter { epoch, .. } if epoch == body.len() as u64 + 1)
-            );
-            assert!(receiver.try_recv().is_err());
-            let written: Vec<u8> = writer.records().into_iter().flat_map(|r| r.bytes).collect();
-            assert_eq!(written, format!("{body}\r").as_bytes());
-        }
+    fn typing_never_holds_a_paste_or_a_claim() {
+        let key = PaneKey::new("typed", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(0);
+        arbiter.register(&key).expect("register pane");
+
+        arbiter
+            .write_human_via(writer.as_ref(), &key, b"half a thought")
+            .expect("type without sending");
+        arbiter.claim(&key).expect("a native send is admitted");
+        arbiter
+            .write_paste_via(writer.as_ref(), &key, b"result")
+            .expect("a paste is admitted");
+
+        assert_eq!(
+            writer
+                .records()
+                .into_iter()
+                .map(|record| record.bytes)
+                .collect::<Vec<_>>(),
+            vec![
+                b"half a thought".to_vec(),
+                b"\x1b[200~result\x1b[201~".to_vec(),
+                b"\r".to_vec(),
+            ]
+        );
     }
 
     #[test]
     fn paste_is_bracketed_then_enter_is_a_delayed_separate_write() {
         let key = PaneKey::new("recorded", 1);
         let (writer, _observed) = RecordingWriter::new(None);
-        let (events, _receiver) = mpsc::channel();
-        let arbiter = InputArbiter::new(25, events);
+        let arbiter = InputArbiter::new(25);
         arbiter.register(&key).expect("register pane");
 
         arbiter
-            .write_paste_via(writer.as_ref(), &key, 0, b"body")
+            .write_paste_via(writer.as_ref(), &key, b"body")
             .expect("write paste");
 
         let records = writer.records();
@@ -926,45 +708,11 @@ mod tests {
         assert!(records[1].at.duration_since(records[0].at) >= Duration::from_millis(25));
     }
 
-    #[cfg(unix)]
-
     #[test]
-    fn human_bytes_latch_the_draft_bump_epoch_and_emit_enter() {
-        let _pty_guard = serial_pty_test();
-        let table = PaneTable::new();
-        let (key, reader) = raw_recorder(&table, 2);
-        let (events, receiver) = mpsc::channel();
-        let arbiter = InputArbiter::new(5, events);
-        arbiter.register(&key).expect("register pane");
-
-        assert_eq!(
-            arbiter
-                .write_human(&table, &key, b"x\r")
-                .expect("write human bytes"),
-            2
-        );
-
-        let state = arbiter.snapshot(&key).expect("read arbiter state");
-        assert!(state.draft_latched);
-        assert_eq!(state.input_epoch, 2);
-        assert_eq!(
-            receiver
-                .recv_timeout(Duration::from_secs(1))
-                .expect("Enter event"),
-            PaneEvent::Enter {
-                pane: key,
-                epoch: 2,
-            }
-        );
-        assert_eq!(read_hex(reader), "780d");
-    }
-
-    #[test]
-    fn emulator_reply_writes_without_latching_a_draft_or_advancing_the_epoch() {
+    fn emulator_reply_writes_straight_to_the_pane() {
         let key = PaneKey::new("reply", 1);
         let (writer, _observed) = RecordingWriter::new(None);
-        let (events, receiver) = mpsc::channel();
-        let arbiter = InputArbiter::new(5, events);
+        let arbiter = InputArbiter::new(5);
         arbiter.register(&key).expect("register pane");
 
         arbiter
@@ -981,13 +729,9 @@ mod tests {
         );
         let snapshot = arbiter.snapshot(&key).expect("reply state");
         assert_eq!(snapshot.generation, 1);
-        assert_eq!(snapshot.input_epoch, 0);
-        assert!(!snapshot.draft_latched);
         assert!(!snapshot.paste_in_flight);
         assert!(!snapshot.input_failed);
         assert_eq!(snapshot.queued_human_bytes, 0);
-        assert_eq!(snapshot.last_submission_id, None);
-        assert!(receiver.recv_timeout(Duration::from_millis(50)).is_err());
     }
 
     #[cfg(unix)]
@@ -1016,8 +760,7 @@ mod tests {
             .expect("blocked pane ready");
         assert_eq!(&ready, b"ready");
         let (responsive_key, reader) = raw_recorder(&table, 1);
-        let (events, _receiver) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(5, events));
+        let arbiter = Arc::new(InputArbiter::new(5));
         arbiter
             .register(&blocked_key)
             .expect("register blocked pane");
@@ -1087,220 +830,56 @@ mod tests {
             .join()
             .expect("responsive human writer thread");
 
-        assert_eq!(responsive_result.expect("responsive write epoch"), 1);
+        responsive_result.expect("responsive write");
         assert_eq!(read_hex(reader), "52");
         let _ = table.kill(&responsive_key);
     }
 
-    #[cfg(unix)]
-
+    /// What still refuses a delivery: a pane replaced since, failed input
+    /// (see below), or another paste going in.
     #[test]
-    fn native_editor_claim_preserves_latch_and_rejects_newer_input() {
-        let _pty_guard = serial_pty_test();
-        let table = PaneTable::new();
-        let (key, _reader) = raw_recorder(&table, 20);
-        let (events, _receiver) = mpsc::channel();
-        let arbiter = InputArbiter::new(0, events);
+    fn claims_and_pastes_refuse_a_stale_pane_and_a_paste_in_flight() {
+        let key = PaneKey::new("guarded", 1);
+        let first_write = Arc::new(Barrier::new(2));
+        let release_first_write = Arc::new(Barrier::new(2));
+        let writer = Arc::new(GatedRecordingWriter {
+            attempts: AtomicUsize::new(0),
+            records: Mutex::new(Vec::new()),
+            first_write: Arc::clone(&first_write),
+            release_first_write: Arc::clone(&release_first_write),
+        });
+        let arbiter = Arc::new(InputArbiter::new(0));
         arbiter.register(&key).expect("register pane");
-        let epoch = arbiter
-            .write_human(&table, &key, b"sent\r")
-            .expect("human question");
-        arbiter
-            .claim_native_epoch(&key, epoch)
-            .expect("native editor owns the draft check");
-        assert!(arbiter.snapshot(&key).expect("snapshot").draft_latched);
+        let stale = PaneKey::new(&key.id, key.generation + 1);
+        assert!(matches!(arbiter.claim(&stale), Err(ArbiterError::Stale)));
         assert!(matches!(
-            arbiter.claim_epoch(&key, epoch),
-            Err(ArbiterError::Draft)
-        ));
-        assert!(matches!(
-            arbiter.write_paste(&table, &key, epoch, b"reply"),
-            Err(ArbiterError::Draft)
-        ));
-        let newer = arbiter
-            .write_human(&table, &key, b"new draft")
-            .expect("new input");
-        assert!(matches!(
-            arbiter.claim_native_epoch(&key, epoch),
-            Err(ArbiterError::Stale)
-        ));
-        assert!(matches!(
-            arbiter.claim_native_epoch(&PaneKey::new(&key.id, key.generation + 1), newer),
-            Err(ArbiterError::Stale)
-        ));
-        assert!(arbiter.snapshot(&key).expect("snapshot").draft_latched);
-        table.kill(&key).expect("kill pane");
-    }
-
-    #[cfg(unix)]
-
-    #[test]
-    fn epoch_claims_and_pastes_share_stale_and_draft_guards() {
-        let _pty_guard = serial_pty_test();
-        let table = PaneTable::new();
-        let (key, _reader) = raw_recorder(&table, 1);
-        let (events, _receiver) = mpsc::channel();
-        let arbiter = InputArbiter::new(5, events);
-        arbiter.register(&key).expect("register pane");
-        arbiter.claim_epoch(&key, 0).expect("current epoch claims");
-        assert!(matches!(
-            arbiter.claim_epoch(&key, 1),
-            Err(ArbiterError::Stale)
-        ));
-        arbiter
-            .write_human(&table, &key, b"x")
-            .expect("write human byte");
-
-        assert!(matches!(
-            arbiter.write_paste(&table, &key, 0, b"automated"),
-            Err(ArbiterError::Draft)
-        ));
-        assert!(matches!(
-            arbiter.write_paste(&table, &key, 1, b"automated"),
-            Err(ArbiterError::Draft)
-        ));
-        assert!(matches!(
-            arbiter.claim_epoch(&key, 0),
-            Err(ArbiterError::Draft)
-        ));
-        let stale_generation = PaneKey::new(&key.id, key.generation + 1);
-        assert!(matches!(
-            arbiter.write_paste(&table, &stale_generation, 1, b"automated"),
-            Err(ArbiterError::Stale)
-        ));
-        assert!(matches!(
-            arbiter.claim_epoch(&stale_generation, 1),
-            Err(ArbiterError::Stale)
-        ));
-    }
-
-    #[cfg(unix)]
-
-    #[test]
-    fn delayed_clear_for_submission_a_preserves_newer_draft_b() {
-        let _pty_guard = serial_pty_test();
-        const ENTER_DELAY_MS: u64 = 2;
-
-        let table = PaneTable::new();
-        let key = PaneKey::new("worker", 2);
-        let reader = raw_recorder_at(&table, key.clone(), 10);
-        let (events, receiver) = mpsc::channel();
-        let arbiter = InputArbiter::new(ENTER_DELAY_MS, events);
-        arbiter.register(&key).expect("register pane");
-
-        arbiter
-            .write_human(&table, &key, b"draftA\r")
-            .expect("submit A");
-        assert_eq!(
-            receiver
-                .recv_timeout(Duration::from_secs(1))
-                .expect("A Enter event"),
-            PaneEvent::Enter {
-                pane: key.clone(),
-                epoch: 7,
-            }
-        );
-        arbiter
-            .write_human(&table, &key, b"B!")
-            .expect("type draft B");
-        thread::sleep(Duration::from_millis(ENTER_DELAY_MS * 10));
-        assert!(
-            arbiter
-                .snapshot(&key)
-                .expect("state after timer")
-                .draft_latched
-        );
-
-        assert_eq!(
-            arbiter
-                .clear_draft(&key.id, key.generation, 7, "submission-A")
-                .expect("delayed clear for A"),
-            ClearOutcome::PreservedNewerInput
-        );
-        let after_a = arbiter.snapshot(&key).expect("state after A clear");
-        assert!(after_a.draft_latched);
-        assert_eq!(after_a.input_epoch, 9);
-
-        arbiter
-            .write_human(&table, &key, b"\r")
-            .expect("submit draft B");
-        assert_eq!(
-            receiver
-                .recv_timeout(Duration::from_secs(1))
-                .expect("B Enter event"),
-            PaneEvent::Enter {
-                pane: key.clone(),
-                epoch: 10,
-            }
-        );
-        assert!(matches!(
-            arbiter.clear_draft(&key.id, key.generation - 1, 10, "stale-generation"),
+            arbiter.write_paste_via(writer.as_ref(), &stale, b"late"),
             Err(ArbiterError::Stale)
         ));
 
-        assert_eq!(
-            arbiter
-                .clear_draft(&key.id, key.generation, 10, "submission-B")
-                .expect("clear B"),
-            ClearOutcome::Cleared
-        );
-        assert!(!arbiter.snapshot(&key).expect("cleared state").draft_latched);
-        assert_eq!(read_hex(reader), "6472616674410d42210d");
-    }
-
-    #[cfg(unix)]
-
-    #[test]
-    fn clear_rejects_unissued_and_future_submission_epochs() {
-        let _pty_guard = serial_pty_test();
-        let table = PaneTable::new();
-        let (key, reader) = raw_recorder(&table, 2);
-        let (events, receiver) = mpsc::channel();
-        let arbiter = InputArbiter::new(5, events);
-        arbiter.register(&key).expect("register pane");
-
+        let paste_arbiter = Arc::clone(&arbiter);
+        let paste_writer = Arc::clone(&writer);
+        let paste_key = key.clone();
+        let paste = thread::spawn(move || {
+            paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, b"first")
+        });
+        first_write.wait();
+        assert!(matches!(arbiter.claim(&key), Err(ArbiterError::Busy)));
         assert!(matches!(
-            arbiter.clear_draft(&key.id, key.generation, 0, "never-submitted"),
-            Err(ArbiterError::Stale)
+            arbiter.write_paste_via(writer.as_ref(), &key, b"second"),
+            Err(ArbiterError::Busy)
         ));
-        arbiter
-            .write_human(&table, &key, b"x")
-            .expect("write non-Enter input");
-        assert!(matches!(
-            arbiter.clear_draft(&key.id, key.generation, 1, "not-an-Enter"),
-            Err(ArbiterError::Stale)
-        ));
-        arbiter
-            .write_human(&table, &key, b"\r")
-            .expect("submit input");
-        assert_eq!(
-            receiver
-                .recv_timeout(Duration::from_secs(1))
-                .expect("Enter event"),
-            PaneEvent::Enter {
-                pane: key.clone(),
-                epoch: 2,
-            }
-        );
-        assert!(matches!(
-            arbiter.clear_draft(&key.id, key.generation, 3, "future"),
-            Err(ArbiterError::Stale)
-        ));
-        assert_eq!(
-            arbiter
-                .clear_draft(&key.id, key.generation, 2, "submitted")
-                .expect("clear emitted Enter"),
-            ClearOutcome::Cleared
-        );
-        assert_eq!(read_hex(reader), "780d");
+        release_first_write.wait();
+        paste.join().expect("paste thread").expect("first paste");
+        arbiter.claim(&key).expect("admitted once the paste is in");
+        assert_eq!(writer.records.lock().expect("gated records").len(), 2);
     }
 
     #[test]
     fn generation_replacement_cannot_detach_an_admitted_paste_and_its_queue() {
         let old_key = PaneKey::new("worker", 1);
         let new_key = PaneKey::new("worker", 2);
-        let (events, _receiver) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(0, events));
+        let arbiter = Arc::new(InputArbiter::new(0));
         arbiter.register(&old_key).expect("register old generation");
 
         let registration_checked = Arc::new(Barrier::new(2));
@@ -1329,15 +908,12 @@ mod tests {
         let paste_writer = Arc::clone(&writer);
         let paste_key = old_key.clone();
         let paste = thread::spawn(move || {
-            paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, 0, b"body")
+            paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, b"body")
         });
         first_write.wait();
-        assert_eq!(
-            arbiter
-                .write_human_via(writer.as_ref(), &old_key, b"H")
-                .expect("queue human input behind paste"),
-            1
-        );
+        arbiter
+            .write_human_via(writer.as_ref(), &old_key, b"H")
+            .expect("queue human input behind paste");
 
         resume_registration.wait();
         let replacement_result = replacement.join().expect("replacement thread");
@@ -1359,15 +935,13 @@ mod tests {
             .expect("old generation remains active");
         assert!(!snapshot.paste_in_flight);
         assert_eq!(snapshot.queued_human_bytes, 0);
-        assert!(snapshot.draft_latched);
     }
 
     #[test]
     fn generation_replacement_that_holds_the_cell_rejects_old_input_before_write() {
         let old_key = PaneKey::new("worker", 1);
         let new_key = PaneKey::new("worker", 2);
-        let (events, _receiver) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(0, events));
+        let arbiter = Arc::new(InputArbiter::new(0));
         arbiter.register(&old_key).expect("register old generation");
         let cell = arbiter
             .lock_panes()
@@ -1395,7 +969,7 @@ mod tests {
         let paste_writer = Arc::clone(&writer);
         let paste_key = old_key.clone();
         let paste = thread::spawn(move || {
-            paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, 0, b"old")
+            paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, b"old")
         });
         let clone_deadline = Instant::now() + Duration::from_secs(1);
         while Arc::strong_count(&cell) < 4 && Instant::now() < clone_deadline {
@@ -1420,56 +994,26 @@ mod tests {
             arbiter.snapshot(&new_key).expect("new generation state"),
             super::ArbiterSnapshot {
                 generation: 2,
-                input_epoch: 0,
-                draft_latched: false,
                 paste_in_flight: false,
                 input_failed: false,
                 queued_human_bytes: 0,
-                last_submission_id: None,
                 output_quiet_ms: None,
             }
         );
     }
 
     #[test]
-    fn control_keys_reach_the_pane_in_order_without_latching_a_draft() {
-        let key = PaneKey::new("recorded", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let (events, _receiver) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(100, events));
-        arbiter.register(&key).expect("register pane");
-
-        // An arrow key, a wheel report and Escape: written, counted, no draft.
-        let epoch = arbiter
-            .write_human_latching(writer.as_ref(), &key, b"\x1b[A", false)
-            .expect("arrow key");
-        assert_eq!(epoch, 3);
-        assert!(!arbiter.snapshot(&key).expect("snapshot").draft_latched);
-        // A typed letter after them is a draft as before.
-        let typed = arbiter
-            .write_human_via(writer.as_ref(), &key, b"h")
-            .expect("typed letter");
-        assert_eq!(typed, 4);
-        assert!(arbiter.snapshot(&key).expect("snapshot").draft_latched);
-        let records = writer.records();
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[0].bytes, b"\x1b[A");
-        assert_eq!(records[1].bytes, b"h");
-    }
-
-    #[test]
     fn human_bytes_during_paste_are_queued_after_automated_enter() {
         let key = PaneKey::new("recorded", 1);
         let (writer, observed) = RecordingWriter::new(None);
-        let (events, receiver) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(100, events));
+        let arbiter = Arc::new(InputArbiter::new(100));
         arbiter.register(&key).expect("register pane");
 
         let paste_writer = Arc::clone(&writer);
         let paste_arbiter = Arc::clone(&arbiter);
         let paste_key = key.clone();
         let paste = thread::spawn(move || {
-            paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, 0, b"body")
+            paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, b"body")
         });
         assert_eq!(
             observed
@@ -1483,7 +1027,6 @@ mod tests {
             .write_human_via(writer.as_ref(), &key, b"H\r")
             .expect("queue human bytes");
         let queued = arbiter.snapshot(&key).expect("queued state");
-        assert_eq!(queued.input_epoch, 2);
         assert_eq!(queued.queued_human_bytes, 2);
         paste.join().expect("paste thread").expect("write paste");
 
@@ -1493,77 +1036,20 @@ mod tests {
         assert_eq!(records[1].bytes, b"\r");
         assert_eq!(records[2].bytes, b"H\r");
         assert!(records[2].at >= records[1].at);
-        assert_eq!(
-            receiver
-                .recv_timeout(Duration::from_secs(1))
-                .expect("queued Enter event"),
-            PaneEvent::Enter {
-                pane: key.clone(),
-                epoch: 2,
-            }
-        );
         let final_state = arbiter.snapshot(&key).expect("final state");
         assert!(!final_state.paste_in_flight);
         assert_eq!(final_state.queued_human_bytes, 0);
     }
 
     #[test]
-    fn disconnected_enter_events_flush_the_queue_and_release_the_paste_lock() {
-        let key = PaneKey::new("recorded", 1);
-        let (writer, observed) = RecordingWriter::new(None);
-        let (events, receiver) = mpsc::channel();
-        drop(receiver);
-        let arbiter = Arc::new(InputArbiter::new(25, events));
-        arbiter.register(&key).expect("register pane");
-
-        let paste_writer = Arc::clone(&writer);
-        let paste_arbiter = Arc::clone(&arbiter);
-        let paste_key = key.clone();
-        let paste = thread::spawn(move || {
-            paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, 0, b"body")
-        });
-        observed
-            .recv_timeout(Duration::from_secs(1))
-            .expect("observe bracketed paste");
-        arbiter
-            .write_human_via(writer.as_ref(), &key, b"H\r")
-            .expect("queue human Enter");
-
-        assert!(matches!(
-            paste.join().expect("paste thread"),
-            Err(ArbiterError::EventChannelClosed)
-        ));
-        assert_eq!(
-            writer
-                .records()
-                .into_iter()
-                .map(|record| record.bytes)
-                .collect::<Vec<_>>(),
-            vec![
-                b"\x1b[200~body\x1b[201~".to_vec(),
-                b"\r".to_vec(),
-                b"H\r".to_vec(),
-            ]
-        );
-        let state = arbiter.snapshot(&key).expect("state after event failure");
-        assert!(!state.paste_in_flight);
-        assert_eq!(state.queued_human_bytes, 0);
-        assert!(matches!(
-            arbiter.clear_draft(&key.id, key.generation, 2, "unobserved"),
-            Err(ArbiterError::Stale)
-        ));
-    }
-
-    #[test]
     fn write_failures_poison_input_and_preserve_unwritten_human_input() {
         let key = PaneKey::new("recorded", 1);
         let (first_write_fails, _observed) = RecordingWriter::new(Some(1));
-        let (events, _receiver) = mpsc::channel();
-        let arbiter = InputArbiter::new(0, events);
+        let arbiter = InputArbiter::new(0);
         arbiter.register(&key).expect("register pane");
 
         assert!(matches!(
-            arbiter.write_paste_via(first_write_fails.as_ref(), &key, 0, b"body"),
+            arbiter.write_paste_via(first_write_fails.as_ref(), &key, b"body"),
             Err(ArbiterError::Pane(PaneError::Io(_)))
         ));
         assert!(
@@ -1583,17 +1069,18 @@ mod tests {
             arbiter.write_human_via(first_write_fails.as_ref(), &key, b"later"),
             Err(ArbiterError::InputFailed)
         ));
+        assert!(matches!(
+            arbiter.claim(&key),
+            Err(ArbiterError::InputFailed)
+        ));
         assert_eq!(first_write_fails.records().len(), writes_after_failure);
         let restarted_key = PaneKey::new(&key.id, key.generation + 1);
         arbiter
             .register(&restarted_key)
             .expect("restart input with a new generation");
-        assert_eq!(
-            arbiter
-                .write_human_via(first_write_fails.as_ref(), &restarted_key, b"R")
-                .expect("new generation accepts input"),
-            1
-        );
+        arbiter
+            .write_human_via(first_write_fails.as_ref(), &restarted_key, b"R")
+            .expect("new generation accepts input");
         assert!(
             !arbiter
                 .snapshot(&restarted_key)
@@ -1603,14 +1090,13 @@ mod tests {
 
         let key = PaneKey::new("queued", 1);
         let (queued_write_fails, observed) = RecordingWriter::new(Some(3));
-        let (events, _receiver) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(25, events));
+        let arbiter = Arc::new(InputArbiter::new(25));
         arbiter.register(&key).expect("register queued pane");
         let paste_writer = Arc::clone(&queued_write_fails);
         let paste_arbiter = Arc::clone(&arbiter);
         let paste_key = key.clone();
         let paste = thread::spawn(move || {
-            paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, 0, b"body")
+            paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, b"body")
         });
         observed
             .recv_timeout(Duration::from_secs(1))
@@ -1626,7 +1112,6 @@ mod tests {
         let state = arbiter.snapshot(&key).expect("state after queued failure");
         assert!(!state.paste_in_flight);
         assert_eq!(state.queued_human_bytes, 1);
-        assert!(state.draft_latched);
         assert!(state.input_failed);
         let writes_after_failure = queued_write_fails.records().len();
         assert!(matches!(
@@ -1645,14 +1130,13 @@ mod tests {
             records: Mutex::new(Vec::new()),
             observed: observed_sender,
         });
-        let (events, _receiver) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(25, events));
+        let arbiter = Arc::new(InputArbiter::new(25));
         arbiter.register(&key).expect("register pane");
         let paste_arbiter = Arc::clone(&arbiter);
         let paste_writer = Arc::clone(&writer);
         let paste_key = key.clone();
         let paste = thread::spawn(move || {
-            paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, 0, b"body")
+            paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, b"body")
         });
         observed
             .recv_timeout(Duration::from_secs(1))
@@ -1674,8 +1158,6 @@ mod tests {
             ]
         );
         let failed = arbiter.snapshot(&key).expect("failed pane state");
-        assert!(failed.draft_latched);
-        assert_eq!(failed.input_epoch, 5);
         assert_eq!(failed.queued_human_bytes, 5);
         assert!(failed.input_failed);
 
@@ -1709,10 +1191,8 @@ mod tests {
     #[cfg(windows)]
     mod windows {
         use std::collections::HashMap;
-        use std::sync::mpsc;
-        use std::time::Duration;
 
-        use super::super::{InputArbiter, PaneEvent};
+        use super::super::InputArbiter;
         use crate::pty::conpty_test::{line_echo, open, read_until};
         use crate::pty::{serial_pty_test, PaneTable};
 
@@ -1723,37 +1203,31 @@ mod tests {
             let _pty_guard = serial_pty_test();
             let table = PaneTable::new();
             let (key, output) = open(&table, &line_echo(), &HashMap::new(), 1 << 20);
-            let (events, _received) = mpsc::channel();
-            let arbiter = InputArbiter::new(5, events);
+            let arbiter = InputArbiter::new(5);
             arbiter.register(&key).expect("register pane");
             read_until(&table, &key, &output, "READY");
 
             arbiter
-                .write_paste(&table, &key, 0, b"pasted words")
+                .write_paste(&table, &key, b"pasted words")
                 .expect("paste into the pane");
             let text = read_until(&table, &key, &output, "#");
             assert!(text.contains("GOT=[pasted words]"), "{text:?}");
             table.kill(&key).expect("kill the pane");
         }
 
-        /// A human's typing reaches the child, and their Enter is heard.
+        /// A human's typing reaches the child, Enter and all.
         #[test]
-        fn human_typing_reaches_the_child_and_its_enter_is_heard() {
+        fn human_typing_reaches_the_child() {
             let _pty_guard = serial_pty_test();
             let table = PaneTable::new();
             let (key, output) = open(&table, &line_echo(), &HashMap::new(), 1 << 20);
-            let (events, received) = mpsc::channel();
-            let arbiter = InputArbiter::new(5, events);
+            let arbiter = InputArbiter::new(5);
             arbiter.register(&key).expect("register pane");
             read_until(&table, &key, &output, "READY");
 
             arbiter
                 .write_human(&table, &key, b"typed\r")
                 .expect("type into the pane");
-            assert!(matches!(
-                received.recv_timeout(Duration::from_secs(5)),
-                Ok(PaneEvent::Enter { .. })
-            ));
             let text = read_until(&table, &key, &output, "#");
             assert!(text.contains("GOT=[typed]"), "{text:?}");
             table.kill(&key).expect("kill the pane");

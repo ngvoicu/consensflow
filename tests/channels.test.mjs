@@ -46,7 +46,7 @@ function closeServer(server) {
 it('OpenCode worker messages claim native authority and preserve raw text (TEST-PANE-109)', async () => {
   const { node, rust } = bridgePair()
   const claims = []
-  rust.on('pane.claim_native_epoch', (body) => {
+  rust.on('pane.claim', (body) => {
     claims.push(body)
     return { ok: true }
   })
@@ -64,19 +64,17 @@ it('OpenCode worker messages claim native authority and preserve raw text (TEST-
       {
         pane: 'worker',
         generation: 3,
-        epoch: 7,
         bridge: node,
         session: 'ses_probe',
         launch: {
           kind: 'opencode-server',
-          preservesDraft: 1,
           endpoint: `http://127.0.0.1:${port}`,
         },
       },
       text,
     )
     assert.equal(result.admitted, true)
-    assert.deepEqual(claims, [{ pane: 'worker', generation: 3, epoch: 7 }])
+    assert.deepEqual(claims, [{ pane: 'worker', generation: 3 }])
     assert.deepEqual(received, [
       { url: '/session/ses_probe/prompt_async', body: { parts: [{ type: 'text', text }] } },
     ])
@@ -97,7 +95,6 @@ it('Codex launch enables only an installed native queue capability (TEST-PANE-10
       executable,
     })
     assert.equal(configured.channel.kind, 'codex-queue')
-    assert.equal(configured.channel.preservesDraft, 1)
     assert.equal(configured.channel.executable, executable)
     assert.equal(configured.channel.cwd, root)
     assert.deepEqual(configured.args, [])
@@ -163,7 +160,6 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
         assert.deepEqual(configuration.env, {}, version)
         if (process.platform === 'darwin') {
           assert.equal(configuration.channel?.kind, 'claude-peer', version)
-          assert.equal(configuration.channel?.preservesDraft, 1)
         } else assert.equal(configuration.channel, null, version)
       }
       const missing = await launchConfiguration('claude-code', {
@@ -240,7 +236,6 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
       session: '11111111-2222-4333-8444-555555555555',
       pane: 'chief-pane',
       generation: 4,
-      epoch: 19,
       enabledChannels: enabledChannels('claude-code'),
       launch: {
         kind: 'claude-channel',
@@ -249,7 +244,7 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
         ack,
         ackTimeoutMs: 50,
       },
-      claimEpoch: async (request) => {
+      claim: async (request) => {
         claims.push(request)
         return { ok: true }
       },
@@ -260,7 +255,7 @@ describe('retired Claude development channel (TEST-PANE-121)', () => {
       bytesWritten: 0,
       error: 'channel-disabled',
     })
-    assert.deepEqual(claims, [], 'no input epoch is claimed')
+    assert.deepEqual(claims, [], 'nothing is claimed')
     assert.deepEqual(await readdir(inbox), [], 'no inbox record is offered')
     assert.deepEqual(await readdir(ack), [], 'no acknowledgement is minted')
     await rm(root, { recursive: true, force: true })

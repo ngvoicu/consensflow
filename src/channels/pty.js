@@ -1,26 +1,27 @@
-function paneEpoch(target) {
+/** The pane a native send goes to, as the caller named it. */
+export function paneOf(target) {
   const pane = target?.pane
   const id = typeof pane === 'string' ? pane : pane?.id
   const generation = typeof pane === 'object' ? pane?.generation : target?.generation
   if (typeof id !== 'string' || !Number.isSafeInteger(generation) || generation < 1) {
-    throw new Error('PTY delivery needs pane {id, generation}')
-  }
-  if (!Number.isSafeInteger(target.epoch) || target.epoch < 0) {
-    throw new Error('PTY delivery needs the caller-observed input epoch')
+    throw new Error('native delivery needs pane {id, generation}')
   }
   return { id, generation }
 }
 
-/** Guard a native send with Rust's current draft and input epoch, without I/O. */
-export async function claimEpoch(target, operation = 'pane.claim_epoch') {
-  const pane = paneEpoch(target)
+/**
+ * Admit a native send as Rust admits a paste: the pane is current, its input
+ * works and no paste is going in. No I/O; what the human typed holds nothing.
+ */
+export async function claim(target) {
+  const pane = paneOf(target)
   try {
-    const request = { pane: pane.id, generation: pane.generation, epoch: target.epoch }
-    if (typeof target.claimEpoch === 'function') return await target.claimEpoch(request, operation)
+    const request = { pane: pane.id, generation: pane.generation }
+    if (typeof target.claim === 'function') return await target.claim(request)
     if (target.bridge === null || typeof target.bridge?.request !== 'function') {
-      throw new Error('native delivery needs pane.claim_epoch')
+      throw new Error('native delivery needs pane.claim')
     }
-    return await target.bridge.request(operation, request, {
+    return await target.bridge.request('pane.claim', request, {
       deadlineMs: target.deadlineMs,
     })
   } catch (cause) {

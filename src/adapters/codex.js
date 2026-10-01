@@ -159,23 +159,12 @@ export function codexAdapter({
           ? true
           : 'the Codex window cannot take a message yet: starting, resuming or reconnecting'
       const snapshot = await host.request('pane.snapshot', pane)
-      return snapshot?.ok === true && snapshot.draftLatched !== true && !snapshot.pasteInFlight
+      return snapshot?.ok === true && !snapshot.pasteInFlight
     },
 
     async deliver({ launch, pane, host, text }) {
-      const snapshot = await host.request('pane.snapshot', pane)
-      if (snapshot?.ok !== true) {
-        return {
-          admitted: false,
-          reason: `the window cannot be read: ${snapshot?.error ?? 'no answer'}`,
-        }
-      }
       if (launch.channel === null) {
-        const written = await host.request('pane.write_paste', {
-          ...pane,
-          epoch: snapshot.inputEpoch,
-          body: text,
-        })
+        const written = await host.request('pane.write_paste', { ...pane, body: text })
         return admission(written, 'the window refused the paste')
       }
       const sent = await send(
@@ -185,7 +174,6 @@ export function codexAdapter({
           bridge: host,
           pane: pane.id,
           generation: pane.generation,
-          epoch: snapshot.inputEpoch,
         },
         text,
       )

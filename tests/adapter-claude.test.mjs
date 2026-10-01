@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { claudeCodeAdapter, DRAFT_GRACE_MS } from '../src/adapters/claude-code.js'
+import { claudeCodeAdapter } from '../src/adapters/claude-code.js'
 import { fakeExecutable } from './helpers.mjs'
 
 /**
@@ -279,51 +279,36 @@ describe('the Claude Code adapter', () => {
     })
   })
 
-  it('pastes a message into the window by default, and waits while a human is typing there', async () => {
+  it('pastes a message into the window by default, waiting only for a paste on its way', async () => {
     await withHome(async ({ env }) => {
-      let clock = 1_000_000
-      const adapter = claudeCodeAdapter({ env, now: () => clock })
+      const adapter = claudeCodeAdapter({ env })
       const requests = []
-      let draftLatched = false
-      let inputEpoch = 4
+      let pasteInFlight = false
       const host = {
         async request(op, body) {
           requests.push([op, body])
-          if (op === 'pane.snapshot') return { ok: true, inputEpoch, draftLatched }
+          if (op === 'pane.snapshot') return { ok: true, pasteInFlight }
           if (op === 'pane.write_paste') return { ok: true }
-          if (op === 'draft.clear') return { ok: true, outcome: 'cleared' }
           return { ok: false, error: 'unexpected' }
         },
       }
       const pane = { id: 's1-zeus', generation: 7 }
       const launch = { nativeSession: 'e2c56db5-dffb-48d2-b060-d0f5a71096e0' }
+      // Text the human typed and left unsent holds nothing (the owner's choice,
+      // 2026-10-01): the window is ready, and the paste goes in behind it.
       assert.equal(await adapter.ready({ launch, pane, host }), true)
       assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hello' }), {
         admitted: true,
       })
       assert.deepEqual(requests.at(-1), [
         'pane.write_paste',
-        { id: 's1-zeus', generation: 7, epoch: 4, body: 'hello' },
+        { id: 's1-zeus', generation: 7, body: 'hello' },
       ])
-      draftLatched = true
-      assert.match(await adapter.ready({ launch, pane, host }), /someone is typing in the window/)
-      // A latch nobody types behind any more lets go after the grace; a
-      // keystroke meanwhile starts it over.
-      clock += DRAFT_GRACE_MS - 1
-      assert.match(await adapter.ready({ launch, pane, host }), /typed in the window \d+s ago/)
-      inputEpoch = 9
-      clock += 10
-      assert.match(
+      pasteInFlight = true
+      assert.equal(
         await adapter.ready({ launch, pane, host }),
-        /someone is typing in the window/,
-        'typed again: a fresh grace',
+        'a paste is on its way to the window',
       )
-      clock += DRAFT_GRACE_MS
-      assert.equal(await adapter.ready({ launch, pane, host }), true)
-      assert.deepEqual(requests.at(-1), [
-        'draft.clear',
-        { id: 's1-zeus', generation: 7, epoch: 9, submission: 'stale-9' },
-      ])
     })
   })
 

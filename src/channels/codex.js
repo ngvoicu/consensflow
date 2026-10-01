@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { isAbsolute } from 'node:path'
 import { runnable, terminate } from '../harnesses.js'
-import { claimEpoch } from './pty.js'
+import { claim } from './pty.js'
 
 export const DEFAULT_DEADLINE_MS = 3_000
 export const MAX_CAPTURE_BYTES = 64 * 1024
@@ -20,9 +20,6 @@ function paneTarget(target) {
     generation < 1
   ) {
     throw new Error('codex-queue delivery needs pane {id, generation}')
-  }
-  if (!Number.isSafeInteger(target?.epoch) || target.epoch < 0) {
-    throw new Error('codex-queue delivery needs the caller-observed input epoch')
   }
 }
 
@@ -253,12 +250,8 @@ async function sendText(target, text) {
   const deadline = deadlineAt(target, config)
   if (deadline <= Date.now()) return zeroByteRefusal(undefined, 'expired')
 
-  const claimed = await claimEpoch(target, 'pane.claim_native_epoch')
-  if (claimed?.ok !== true)
-    return zeroByteRefusal(
-      claimed,
-      claimed?.error === 'stale-input-epoch' ? claimed.error : undefined,
-    )
+  const claimed = await claim(target)
+  if (claimed?.ok !== true) return zeroByteRefusal(claimed)
   if (deadline <= Date.now()) return zeroByteRefusal(undefined, 'expired')
 
   if (config.sessionBridge) return await sendCurrent(config, session, text, deadline)

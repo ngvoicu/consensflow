@@ -369,8 +369,11 @@ fn pane_open_drop_env_removes_after_overlay_and_inherits_unlisted_parent() {
     helper.close_input_and_wait();
 }
 
+/// A claim admits a native send whatever the human typed and left unsent (the
+/// owner's choice, 2026-10-01). It writes nothing and reserves nothing; only a
+/// replaced pane is refused.
 #[test]
-fn claim_epoch_observes_intervening_typing_without_writing_to_the_pane() {
+fn a_claim_after_unsent_typing_is_admitted_and_writes_nothing() {
     let _pty_guard = serial_headless_test();
     let mut helper = Headless::spawn();
     let mut events = Vec::new();
@@ -386,115 +389,58 @@ fn claim_epoch_observes_intervening_typing_without_writing_to_the_pane() {
     let generation = opened["generation"].as_u64().expect("opened generation");
     let _ = output_until(&helper, &mut events, &pane_id, generation, b"ready");
 
-    let snapshot = helper.request(
-        "pane.snapshot",
-        json!({"id":pane_id,"generation":generation}),
-        &mut events,
-    );
-    assert_eq!(snapshot["ok"], true);
-    assert_eq!(snapshot["inputEpoch"], 0);
     assert_eq!(
         helper.request(
             "pane.input",
             json!({"id":pane_id,"generation":generation,"bytes":[120]}),
             &mut events,
         ),
-        json!({"ok":true,"epoch":1})
-    );
-    let claimed = helper.request(
-        "pane.claim_epoch",
-        json!({"pane":pane_id,"generation":generation,"epoch":snapshot["inputEpoch"]}),
-        &mut events,
+        json!({"ok":true})
     );
     assert_eq!(
-        claimed,
-        json!({"ok":false,"error":"human draft is latched"})
+        helper.request(
+            "pane.claim",
+            json!({"pane":pane_id,"generation":generation}),
+            &mut events,
+        ),
+        json!({"ok":true})
     );
     assert!(
         events
             .drain(..)
             .all(|event| output_bytes(&event, &pane_id, generation).is_none()),
-        "claiming an epoch wrote a second byte before its response"
+        "a claim wrote a second byte before its response"
     );
     assert!(matches!(
         helper.receive_timeout(Duration::from_millis(150)),
         Err(mpsc::RecvTimeoutError::Timeout)
     ));
-
-    assert_eq!(
-        helper.request(
-            "pane.claim_native_epoch",
-            json!({"pane":pane_id,"generation":generation,"epoch":0}),
-            &mut events
-        ),
-        json!({"ok":false,"error":"stale-input-epoch"})
-    );
-    assert_eq!(
-        helper.request(
-            "pane.claim_native_epoch",
-            json!({"pane":pane_id,"generation":generation,"epoch":1}),
-            &mut events
-        ),
-        json!({"ok":true})
-    );
-    let still_latched = helper.request(
+    let after_claim = helper.request(
         "pane.snapshot",
         json!({"id":pane_id,"generation":generation}),
         &mut events,
     );
     assert_eq!(
-        still_latched["draftLatched"], true,
-        "native claims cannot clear terminal protection"
+        after_claim["pasteInFlight"], false,
+        "a claim does not reserve the paste writer"
     );
-    assert_eq!(
-        still_latched["inputEpoch"], 1,
-        "native claims write no bytes"
-    );
-
-    let clean = helper.request(
-        "pane.open",
-        open_body("/bin/stty raw -echo; /bin/sleep 1000", 1024),
-        &mut events,
-    );
-    let clean_id = clean["id"].as_str().expect("clean pane id").to_string();
-    let clean_generation = clean["generation"].as_u64().expect("clean generation");
     assert_eq!(
         helper.request(
-            "pane.claim_epoch",
-            json!({"pane":clean_id,"generation":clean_generation,"epoch":0}),
+            "pane.claim",
+            json!({"pane":pane_id,"generation":generation + 1}),
+            &mut events,
+        ),
+        json!({"ok":false,"error":"stale pane generation"})
+    );
+
+    assert_eq!(
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
             &mut events,
         ),
         json!({"ok":true})
     );
-    let after_claim = helper.request(
-        "pane.snapshot",
-        json!({"id":clean_id,"generation":clean_generation}),
-        &mut events,
-    );
-    assert_eq!(after_claim["inputEpoch"], 0);
-    assert_eq!(
-        after_claim["pasteInFlight"], false,
-        "claiming an epoch does not reserve the paste writer"
-    );
-    assert_eq!(
-        helper.request(
-            "pane.claim_epoch",
-            json!({"pane":clean_id,"generation":clean_generation,"epoch":1}),
-            &mut events,
-        ),
-        json!({"ok":false,"error":"stale pane generation or input epoch"})
-    );
-
-    for (id, pane_generation) in [(pane_id, generation), (clean_id, clean_generation)] {
-        assert_eq!(
-            helper.request(
-                "pane.kill",
-                json!({"id":id,"generation":pane_generation}),
-                &mut events,
-            ),
-            json!({"ok":true})
-        );
-    }
     helper.close_input_and_wait();
 }
 
@@ -547,7 +493,7 @@ fn stdio_protocol_opens_pastes_lists_and_kills_a_raw_recorder() {
     assert_eq!(
         helper.request(
             "pane.write_paste",
-            json!({"id":pane_id,"generation":generation,"epoch":0,"body":"body"}),
+            json!({"id":pane_id,"generation":generation,"body":"body"}),
             &mut events,
         ),
         json!({"ok":true})
@@ -897,7 +843,6 @@ fn stdin_eof_kills_a_pane_before_draining_its_blocked_paste_handler() {
         json!({
             "id":pane_id,
             "generation":generation,
-            "epoch":0,
             "body":"x".repeat(512 * 1024),
         }),
     );
@@ -1141,49 +1086,6 @@ fn product_bridge_contract_preserves_app_identity_and_launch_deduplication() {
     );
     assert_eq!(duplicate["id"], "product-pane");
     assert_eq!(duplicate["deduplicated"], true);
-    helper.close_input_and_wait();
-}
-
-#[test]
-fn product_bridge_cannot_clear_a_human_draft_even_with_the_exact_enter_epoch() {
-    let _pty_guard = serial_headless_test();
-    let mut helper = Headless::spawn();
-    let mut events = Vec::new();
-    let opened = helper.request("pane.open", open_body("exec /bin/cat", 1024), &mut events);
-    assert_eq!(opened["ok"], true);
-    let id = opened["id"].as_str().expect("pane id");
-    let generation = opened["generation"].as_u64().expect("generation");
-    let entered = helper.request(
-        "pane.input",
-        json!({
-            "id":id, "generation":generation, "bytes":b"hello\r".to_vec()
-        }),
-        &mut events,
-    );
-    assert_eq!(entered["ok"], true);
-    while !events.iter().any(|event| event["op"] == "pane.enter") {
-        events.push(helper.receive());
-    }
-    let event = events
-        .iter()
-        .find(|event| event["op"] == "pane.enter")
-        .expect("enter event");
-    assert_eq!(event["body"]["id"], id);
-    let epoch = event["body"]["epoch"].as_u64().expect("enter epoch");
-    let cleared = helper.request("draft.clear", json!({
-        "id":id, "generation":generation, "submittedEpoch":epoch, "submissionId":"submission-one"
-    }), &mut events);
-    assert_ne!(
-        cleared["ok"], true,
-        "legacy draft clear remained exposed: {cleared}"
-    );
-    let snapshot = helper.request(
-        "pane.snapshot",
-        json!({"id":id,"generation":generation}),
-        &mut events,
-    );
-    assert_eq!(snapshot["draftLatched"], true);
-    assert!(snapshot["lastSubmissionId"].is_null());
     helper.close_input_and_wait();
 }
 
@@ -1436,7 +1338,7 @@ fn pane_does_not_inherit_a_launchers_disabled_colors() {
 
 #[cfg(target_os = "macos")]
 #[test]
-fn native_peer_send_checks_the_connected_process_and_preserves_the_draft() {
+fn native_peer_send_checks_the_connected_process_while_the_human_types() {
     let _guard = serial_headless_test();
     let mut helper = Headless::spawn();
     let mut events = Vec::new();
@@ -1484,24 +1386,17 @@ while True:
         }),
         &mut events,
     );
-    let epoch = typed["epoch"].as_u64().unwrap();
-    let request = json!({"id":id,"generation":generation,"epoch":epoch,
+    assert_eq!(typed, json!({"ok":true}));
+    let request = json!({"id":id,"generation":generation,
         "socket":socket,"peerPid":pid,"body":"CF_PEER_BODY\n","timeoutMs":1000});
 
     let other = helper.request("pane.open", open_body("/bin/sleep 1000", 1024), &mut events);
     let mut wrong_owner = request.clone();
     wrong_owner["id"] = other["id"].clone();
     wrong_owner["generation"] = other["generation"].clone();
-    wrong_owner["epoch"] = json!(0);
     let mut wrong_pid = request.clone();
     wrong_pid["peerPid"] = json!(std::process::id());
-    let mut stale = request.clone();
-    stale["epoch"] = json!(0);
-    for (denied, code) in [
-        (wrong_owner, "peer-refused"),
-        (wrong_pid, "peer-refused"),
-        (stale, "stale-input-epoch"),
-    ] {
+    for (denied, code) in [(wrong_owner, "peer-refused"), (wrong_pid, "peer-refused")] {
         let result = helper.request("pane.send_peer", denied, &mut events);
         assert_eq!(result["admitted"], false, "{result}");
         assert_eq!(result["bytesWritten"], 0, "{result}");
@@ -1511,13 +1406,6 @@ while True:
     assert_eq!(sent["ok"], true, "{sent}");
     let observed = output_until(&helper, &mut events, &id, generation, b":DONE");
     assert!(String::from_utf8_lossy(&observed).contains("PEER:CF_PEER_BODY\r\n:DONE"));
-    let snapshot = helper.request(
-        "pane.snapshot",
-        json!({"id":id,"generation":generation}),
-        &mut events,
-    );
-    assert_eq!(snapshot["draftLatched"], true);
-    assert_eq!(snapshot["inputEpoch"], epoch);
     helper.close_input_and_wait();
     std::fs::remove_file(socket).unwrap();
 }

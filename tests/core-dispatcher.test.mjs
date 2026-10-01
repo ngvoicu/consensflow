@@ -117,7 +117,6 @@ const windowOf = (id, handle) =>
 /** A pane host that opens nothing real and exits panes when told to. */
 function fakeHost() {
   const exits = []
-  const enters = []
   const host = {
     opened: [],
     killed: [],
@@ -127,14 +126,7 @@ function fakeHost() {
     holdExits: false,
     async request(op, body) {
       host.requests.push([op, body])
-      return { ok: true, outcome: 'cleared', ...(op === 'pane.snapshot' ? host.snapshot : {}) }
-    },
-    onEnter(listener) {
-      enters.push(listener)
-    },
-    enter(handle, epoch) {
-      const body = host.opened.filter((b) => windowOf(b.id, handle)).at(-1)
-      for (const listener of enters) listener({ id: body.id, generation: body.generation, epoch })
+      return { ok: true, ...(op === 'pane.snapshot' ? host.snapshot : {}) }
     },
     async open(body) {
       if (host.refuse) {
@@ -442,7 +434,7 @@ describe('the dispatcher', () => {
       const pane = context.host.last('zeus')
       assert.deepEqual(
         context.host.requests.filter(([op]) => op === 'pane.input'),
-        [['pane.input', { id: pane.id, generation: pane.generation, bytes: [27], draft: false }]],
+        [['pane.input', { id: pane.id, generation: pane.generation, bytes: [27] }]],
         'the agent is interrupted first',
       )
       const zeus = context.adapter.agent('zeus')
@@ -582,8 +574,8 @@ describe('the dispatcher', () => {
       assert.deepEqual(
         context.host.requests.filter(([op]) => op === 'pane.input'),
         [
-          ['pane.input', { id: pane.id, generation: pane.generation, bytes: [27], draft: false }],
-          ['pane.input', { id: pane.id, generation: pane.generation, bytes: [27], draft: false }],
+          ['pane.input', { id: pane.id, generation: pane.generation, bytes: [27] }],
+          ['pane.input', { id: pane.id, generation: pane.generation, bytes: [27] }],
         ],
       )
     })
@@ -684,13 +676,13 @@ describe('the dispatcher', () => {
     await setup(async (context) => {
       const { project, id } = await withStaff(context)
       context.adapter.deliver = async () => {
-        throw new Error('the channel needs pane, generation and observed epoch')
+        throw new Error('the channel needs pane and generation')
       }
       const note = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'hello' })
       await context.dispatcher.pass()
       const message = context.ledger.inbox(id('chief')).find((m) => m.id === note.id)
       assert.deepEqual([message.state, message.attempts], ['queued', 1])
-      assert.match(message.reason, /the channel needs pane, generation and observed epoch/)
+      assert.match(message.reason, /the channel needs pane and generation/)
     })
   })
 
@@ -773,7 +765,7 @@ describe('the dispatcher', () => {
       const escapes = () => context.host.requests.filter(([op]) => op === 'pane.input')
       assert.deepEqual(
         escapes(),
-        [['pane.input', { id: pane.id, generation: pane.generation, bytes: [27], draft: false }]],
+        [['pane.input', { id: pane.id, generation: pane.generation, bytes: [27] }]],
         'Escape, once',
       )
       assert.deepEqual(context.host.killed, [], 'the window stays')
@@ -999,45 +991,6 @@ describe('the dispatcher', () => {
         context.adapter.answer('chief', 'Read.')
         await context.dispatcher.pass()
       }
-    })
-  })
-
-  it('releases the typing latch once the harness shows the message the human submitted', async () => {
-    await setup(async (context) => {
-      await withStaff(context)
-      await context.dispatcher.pass()
-      const clears = () => context.host.requests.filter(([op]) => op === 'draft.clear')
-      context.host.enter('chief', 5)
-      await context.dispatcher.pass()
-      assert.deepEqual(clears(), [], 'an Enter alone proves nothing')
-
-      context.adapter.agent('chief').items.push(item('user', 'the human asks something'))
-      await context.dispatcher.pass()
-      const chief = context.host.last('chief')
-      assert.deepEqual(clears(), [
-        [
-          'draft.clear',
-          { id: chief.id, generation: chief.generation, epoch: 5, submission: 'human-1' },
-        ],
-      ])
-      await context.dispatcher.pass()
-      assert.equal(clears().length, 1, 'each Enter is released once')
-    })
-  })
-
-  it('does not count its own deliveries as the human submitting', async () => {
-    await setup(async (context) => {
-      const { project } = await withStaff(context)
-      await context.dispatcher.pass()
-      context.host.enter('chief', 9)
-      context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'from zeus' })
-      await context.dispatcher.pass()
-      await context.dispatcher.pass()
-      assert.deepEqual(
-        context.host.requests.filter(([op]) => op === 'draft.clear'),
-        [],
-        'a ConsensFlow message is not the human submitting their draft',
-      )
     })
   })
 
@@ -1550,6 +1503,9 @@ describe('the dispatcher watches quota', () => {
         'the task goes back to the board and the answer in flight goes with it',
       )
 
+      // A pass runs every window at once, so the note may reach the chief on
+      // this pass or the next; it answers, then takes its own work.
+      await context.dispatcher.pass()
       context.adapter.answer('chief', 'noted')
       const own = context.ledger.createTask(1, { from: 'human', to: 'chief', body: 'Plan' })
       await context.dispatcher.pass()

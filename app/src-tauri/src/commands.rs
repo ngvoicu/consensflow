@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-use crate::arbiter::{ArbiterError, ClearOutcome, InputArbiter, PaneEvent};
+use crate::arbiter::InputArbiter;
 use crate::bridge::{Bridge, BridgeBuilder, ConnectedBridge};
 use crate::pty::{
     validate_drop_env, PaneEnvironment, PaneKey, PaneOutput, PaneTable, StreamedPane,
@@ -97,28 +97,23 @@ struct OutputHub {
 }
 
 enum InputWork {
-    Human { bytes: Vec<u8>, draft: bool },
+    Human(Vec<u8>),
     Reply(Vec<u8>),
-    Paste { epoch: u64, body: Vec<u8> },
-    ClaimEpoch { epoch: u64, native_editor: bool },
+    Paste(Vec<u8>),
+    Claim,
 }
 
 impl InputWork {
     fn byte_count(&self) -> usize {
         match self {
-            Self::Human { bytes, .. } | Self::Reply(bytes) => bytes.len(),
-            Self::Paste { body, .. } => body.len().saturating_add(13),
-            Self::ClaimEpoch { .. } => 0,
+            Self::Human(bytes) | Self::Reply(bytes) => bytes.len(),
+            Self::Paste(body) => body.len().saturating_add(13),
+            Self::Claim => 0,
         }
     }
 }
 
-enum InputSuccess {
-    Human { epoch: u64 },
-    Written,
-}
-
-type InputResponse = Result<InputSuccess, String>;
+type InputResponse = Result<(), String>;
 
 struct InputJob {
     work: InputWork,
@@ -286,9 +281,10 @@ impl InputQueue {
 
         page.last_sequences.insert(key.clone(), sequence);
         match &work {
-            InputWork::Human { bytes, .. } | InputWork::Reply(bytes) => validate_input(bytes)?,
-            InputWork::Paste { body, .. } => validate_input(body)?,
-            InputWork::ClaimEpoch { .. } => {}
+            InputWork::Human(bytes) | InputWork::Reply(bytes) | InputWork::Paste(bytes) => {
+                validate_input(bytes)?
+            }
+            InputWork::Claim => {}
         }
         if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
             return Err("pane-input-ticket-capacity".to_string());
@@ -318,9 +314,8 @@ impl InputQueue {
         &self,
         key: PaneKey,
         bytes: Vec<u8>,
-        draft: bool,
     ) -> Result<oneshot::Receiver<InputResponse>, String> {
-        self.submit(key, InputWork::Human { bytes, draft })
+        self.submit(key, InputWork::Human(bytes))
     }
 
     fn reply(
@@ -334,25 +329,15 @@ impl InputQueue {
     fn paste(
         &self,
         key: PaneKey,
-        epoch: u64,
         body: Vec<u8>,
     ) -> Result<oneshot::Receiver<InputResponse>, String> {
-        self.submit(key, InputWork::Paste { epoch, body })
+        self.submit(key, InputWork::Paste(body))
     }
 
-    fn claim_epoch(
-        &self,
-        key: PaneKey,
-        epoch: u64,
-        native_editor: bool,
-    ) -> Result<oneshot::Receiver<InputResponse>, String> {
-        self.submit(
-            key,
-            InputWork::ClaimEpoch {
-                epoch,
-                native_editor,
-            },
-        )
+    /// Admit a native-channel send: the pane is current, its input works and
+    /// no paste is going in.
+    fn claim(&self, key: PaneKey) -> Result<oneshot::Receiver<InputResponse>, String> {
+        self.submit(key, InputWork::Claim)
     }
 
     fn submit(
@@ -453,39 +438,12 @@ fn input_worker(
 ) {
     for job in jobs {
         let result = match job.work {
-            InputWork::Human { bytes, draft: true } => arbiter
-                .write_human(&panes, &key, &bytes)
-                .map(|epoch| InputSuccess::Human { epoch })
-                .map_err(|error| error.to_string()),
-            InputWork::Human { bytes, draft: false } => arbiter
-                .write_control(&panes, &key, &bytes)
-                .map(|epoch| InputSuccess::Human { epoch })
-                .map_err(|error| error.to_string()),
-            InputWork::Reply(bytes) => arbiter
-                .write_reply(&panes, &key, &bytes)
-                .map(|()| InputSuccess::Written)
-                .map_err(|error| error.to_string()),
-            InputWork::Paste { epoch, body } => arbiter
-                .write_paste(&panes, &key, epoch, &body)
-                .map(|()| InputSuccess::Written)
-                .map_err(|error| error.to_string()),
-            InputWork::ClaimEpoch {
-                epoch,
-                native_editor,
-            } => {
-                let claimed = if native_editor {
-                    arbiter.claim_native_epoch(&key, epoch)
-                } else {
-                    arbiter.claim_epoch(&key, epoch)
-                };
-                claimed
-                    .map(|()| InputSuccess::Written)
-                    .map_err(|error| match error {
-                        ArbiterError::Stale if native_editor => "stale-input-epoch".to_string(),
-                        error => error.to_string(),
-                    })
-            }
-        };
+            InputWork::Human(bytes) => arbiter.write_human(&panes, &key, &bytes),
+            InputWork::Reply(bytes) => arbiter.write_reply(&panes, &key, &bytes),
+            InputWork::Paste(body) => arbiter.write_paste(&panes, &key, &body),
+            InputWork::Claim => arbiter.claim(&key),
+        }
+        .map_err(|error| error.to_string());
         job.pending_bytes
             .fetch_sub(job.reserved_bytes, Ordering::AcqRel);
         let _ = job.response.send(result);
@@ -577,8 +535,7 @@ impl AppRuntime {
         let panes = Arc::new(PaneTable::new());
         let output = Arc::new(OutputHub::new());
         let launches = Arc::new(LaunchRegistry::new());
-        let (event_sender, event_receiver) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(ENTER_DELAY_MS, event_sender));
+        let arbiter = Arc::new(InputArbiter::new(ENTER_DELAY_MS));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
 
         let started = start_editor(
@@ -600,7 +557,6 @@ impl AppRuntime {
                         return Self::unavailable(panes, output, inputs, error);
                     }
                 };
-                forward_input_events(event_receiver, connected.bridge.clone());
                 Self {
                     panes,
                     bridge: Some(connected.bridge),
@@ -783,24 +739,11 @@ struct BytesRequest {
     bytes: Vec<u8>,
 }
 
-/// `pane.input`: `draft: false` for keys that type nothing (the daemon's
-/// Escape on a pause), which reach the pane without latching a draft, as the
-/// page's own control keys do.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct InputRequest {
-    id: String,
-    generation: u64,
-    bytes: Vec<u8>,
-    draft: Option<bool>,
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PasteRequest {
     id: String,
     generation: u64,
-    epoch: u64,
     body: String,
 }
 
@@ -809,7 +752,6 @@ struct PasteRequest {
 struct PeerSendRequest {
     id: String,
     generation: u64,
-    epoch: u64,
     socket: PathBuf,
     peer_pid: i32,
     #[serde(default)]
@@ -821,21 +763,9 @@ struct PeerSendRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ClaimEpochRequest {
+struct ClaimRequest {
     pane: String,
     generation: u64,
-    epoch: u64,
-}
-
-/// A human submission the core saw the harness record: the Enter at `epoch`
-/// released the draft, unless the human typed again after it.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DraftClearRequest {
-    id: String,
-    generation: u64,
-    epoch: u64,
-    submission: String,
 }
 
 #[derive(Deserialize)]
@@ -1095,14 +1025,11 @@ fn register_pane_handlers(
 
     let input_queue = Arc::clone(&inputs);
     builder.on("pane.input", move |_bridge, body| {
-        let request: InputRequest = parse_body(body)?;
+        let request: BytesRequest = parse_body(body)?;
         validate_input(&request.bytes)?;
         let key = pane_key(&request.id, request.generation)?;
-        let draft = request.draft.unwrap_or(true);
-        match wait_for_input_blocking(input_queue.human(key, request.bytes, draft)?)? {
-            InputSuccess::Human { epoch } => Ok(json!({"ok":true,"epoch":epoch})),
-            InputSuccess::Written => Err("pane.input returned the wrong outcome".to_string()),
-        }
+        wait_for_input_blocking(input_queue.human(key, request.bytes)?)?;
+        Ok(json!({"ok":true}))
     });
 
     let reply_queue = Arc::clone(&inputs);
@@ -1110,48 +1037,25 @@ fn register_pane_handlers(
         let request: BytesRequest = parse_body(body)?;
         validate_input(&request.bytes)?;
         let key = pane_key(&request.id, request.generation)?;
-        match wait_for_input_blocking(reply_queue.reply(key, request.bytes)?)? {
-            InputSuccess::Written => Ok(json!({"ok":true})),
-            InputSuccess::Human { .. } => Err("pane.reply returned the wrong outcome".to_string()),
-        }
+        wait_for_input_blocking(reply_queue.reply(key, request.bytes)?)?;
+        Ok(json!({"ok":true}))
     });
 
     let paste_queue = Arc::clone(&inputs);
     builder.on("pane.write_paste", move |_bridge, body| {
         let request: PasteRequest = parse_body(body)?;
         let key = pane_key(&request.id, request.generation)?;
-        match wait_for_input_blocking(paste_queue.paste(
-            key,
-            request.epoch,
-            request.body.into_bytes(),
-        )?)? {
-            InputSuccess::Written => Ok(json!({"ok":true})),
-            InputSuccess::Human { .. } => {
-                Err("pane.write_paste returned the wrong outcome".to_string())
-            }
-        }
+        wait_for_input_blocking(paste_queue.paste(key, request.body.into_bytes())?)?;
+        Ok(json!({"ok":true}))
     });
 
-    for (operation, native_editor) in [
-        ("pane.claim_epoch", false),
-        ("pane.claim_native_epoch", true),
-    ] {
-        let claim_queue = Arc::clone(&inputs);
-        builder.on(operation, move |_bridge, body| {
-            let request: ClaimEpochRequest = parse_body(body)?;
-            let key = pane_key(&request.pane, request.generation)?;
-            match wait_for_input_blocking(claim_queue.claim_epoch(
-                key,
-                request.epoch,
-                native_editor,
-            )?)? {
-                InputSuccess::Written => Ok(json!({"ok":true})),
-                InputSuccess::Human { .. } => {
-                    Err(format!("{operation} returned the wrong outcome"))
-                }
-            }
-        });
-    }
+    let claim_queue = Arc::clone(&inputs);
+    builder.on("pane.claim", move |_bridge, body| {
+        let request: ClaimRequest = parse_body(body)?;
+        let key = pane_key(&request.pane, request.generation)?;
+        wait_for_input_blocking(claim_queue.claim(key)?)?;
+        Ok(json!({"ok":true}))
+    });
 
     let peer_panes = Arc::clone(&panes);
     let peer_queue = Arc::clone(&inputs);
@@ -1166,8 +1070,7 @@ fn register_pane_handlers(
         {
             let result = peer_panes.send_peer(&key, &request.socket, request.peer_pid, request.allow_descendant,
                 request.body.as_bytes(), std::time::Duration::from_millis(request.timeout_ms), || {
-                    wait_for_input_blocking(peer_queue.claim_epoch(key.clone(), request.epoch, true)?)
-                        .map(|_| ())
+                    wait_for_input_blocking(peer_queue.claim(key.clone())?)
                 });
             Ok(match result {
                 Ok(()) => json!({"ok":true}),
@@ -1177,7 +1080,7 @@ fn register_pane_handlers(
         }
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = (&peer_panes, &peer_queue, key, request.epoch);
+            let _ = (&peer_panes, &peer_queue, key);
             Ok(json!({"ok":false,"admitted":false,"bytesWritten":0,"error":"native peer identity is unsupported on this platform"}))
         }
     });
@@ -1236,29 +1139,6 @@ fn register_pane_handlers(
         Ok(json!({"ok":true,"panes":panes}))
     });
 
-    let clear_arbiter = Arc::clone(&arbiter);
-    builder.on("draft.clear", move |_bridge, body| {
-        let request: DraftClearRequest = parse_body(body)?;
-        if request.submission.is_empty() || request.submission.len() > 200 {
-            return Err("draft.clear needs a submission id of 1 to 200 bytes".to_string());
-        }
-        Ok(
-            match clear_arbiter.clear_draft(
-                &request.id,
-                request.generation,
-                request.epoch,
-                &request.submission,
-            ) {
-                Ok(ClearOutcome::Cleared) => json!({"ok":true,"outcome":"cleared"}),
-                Ok(ClearOutcome::PreservedNewerInput) => {
-                    json!({"ok":true,"outcome":"preserved-newer-input"})
-                }
-                Err(ArbiterError::Stale) => json!({"ok":false,"error":"stale"}),
-                Err(error) => json!({"ok":false,"error":error.to_string()}),
-            },
-        )
-    });
-
     let snapshot_arbiter = Arc::clone(&arbiter);
     builder.on("pane.snapshot", move |_bridge, body| {
         let request: PaneRequest = parse_body(body)?;
@@ -1268,12 +1148,9 @@ fn register_pane_handlers(
         Ok(json!({
             "ok":true,
             "generation":snapshot.generation,
-            "inputEpoch":snapshot.input_epoch,
-            "draftLatched":snapshot.draft_latched,
             "pasteInFlight":snapshot.paste_in_flight,
             "inputFailed":snapshot.input_failed,
             "queuedHumanBytes":snapshot.queued_human_bytes,
-            "lastSubmissionId":snapshot.last_submission_id,
             "outputQuietMs":snapshot.output_quiet_ms,
         }))
     });
@@ -1318,21 +1195,19 @@ fn stream_to_page(
 ///
 /// `consensflow-bridge` used to carry its own copy of the pane operations, and
 /// a copy is a contract that drifts: it had no launch deduplication, no pane
-/// id or generation on `pane.open`, no `draft.clear`, it threw the arbiter's
-/// event receiver away so no `pane.enter` was ever sent, and it never reported
-/// a natural `pane.exit`. The real Node side speaks to the window, so against
-/// the helper it could only be refused. There is nothing to keep in step here:
-/// this is `register_pane_handlers`, the same `InputQueue`, the same
-/// `LaunchRegistry`, the same event forwarding and the same shutdown drain the
-/// window uses, over stdin and stdout instead of a webview.
+/// id or generation on `pane.open`, and it never reported a natural
+/// `pane.exit`. The real Node side speaks to the window, so against the helper
+/// it could only be refused. There is nothing to keep in step here: this is
+/// `register_pane_handlers`, the same `InputQueue`, the same `LaunchRegistry`
+/// and the same shutdown drain the window uses, over stdin and stdout instead
+/// of a webview.
 ///
 /// Serves until the peer closes the transport, then reaps what it opened.
 pub fn run_headless() -> Result<(), String> {
     let panes = Arc::new(PaneTable::new());
     let output = Arc::new(OutputHub::new());
     let launches = Arc::new(LaunchRegistry::new());
-    let (event_sender, event_receiver) = mpsc::channel();
-    let arbiter = Arc::new(InputArbiter::new(ENTER_DELAY_MS, event_sender));
+    let arbiter = Arc::new(InputArbiter::new(ENTER_DELAY_MS));
     let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
 
     let mut builder = BridgeBuilder::new(MAX_FRAME_BYTES);
@@ -1363,7 +1238,6 @@ pub fn run_headless() -> Result<(), String> {
     output.register_sink(Arc::new(move |message: PaneOutputMessage| {
         sink.stream_event("pane.output", json!(message)).is_ok()
     }));
-    forward_input_events(event_receiver, bridge.clone());
 
     // The same order the window shuts down in, and for the same reason: the
     // peer's EOF is what closes admission, so the drain can only run after it.
@@ -1373,21 +1247,6 @@ pub fn run_headless() -> Result<(), String> {
     reap_all(&panes);
     inputs.close_and_drain();
     bridge.wait_closed().map_err(|error| error.to_string())
-}
-
-fn forward_input_events(events: mpsc::Receiver<PaneEvent>, bridge: Bridge) {
-    thread::spawn(move || {
-        for event in events {
-            match event {
-                PaneEvent::Enter { pane, epoch } => {
-                    let _ = bridge.event(
-                        "pane.enter",
-                        json!({"id":pane.id,"generation":pane.generation,"epoch":epoch}),
-                    );
-                }
-            }
-        }
-    });
 }
 
 #[derive(Deserialize)]
@@ -1506,11 +1365,7 @@ async fn input_result(result: Result<PageInputCompletion, String>) -> Value {
         Err(error) => return json!({"ok":false,"error":error}),
     };
     match wait_for_input(completion.receiver).await {
-        Ok(InputSuccess::Human { epoch }) if completion.human => {
-            json!({"ok":true,"epoch":epoch})
-        }
-        Ok(InputSuccess::Written) if !completion.human => json!({"ok":true}),
-        Ok(_) => json!({"ok":false,"error":"pane input returned the wrong outcome"}),
+        Ok(()) => json!({"ok":true}),
         Err(error) => json!({"ok":false,"error":error}),
     }
 }
@@ -1544,13 +1399,8 @@ pub fn pane_input_enqueue<R: Runtime>(
     generation: u64,
     sequence: u64,
     bytes: Vec<u8>,
-    draft: Option<bool>,
 ) -> Value {
-    let work = InputWork::Human {
-        bytes,
-        draft: draft.unwrap_or(true),
-    };
-    enqueue_page_input(app, id, generation, sequence, work, true)
+    enqueue_page_input(app, id, generation, sequence, InputWork::Human(bytes), true)
 }
 
 #[tauri::command]
@@ -1573,8 +1423,10 @@ pub async fn pane_input_wait<R: Runtime>(app: AppHandle<R>, ticket: String) -> V
         let state = app.state::<AppRuntime>();
         Arc::clone(&state.inputs)
     };
-    let result = input_result(inputs.take_page_completion(&ticket)).await;
-    if result.get("epoch").is_some() {
+    let completion = inputs.take_page_completion(&ticket);
+    let human = completion.as_ref().is_ok_and(|completion| completion.human);
+    let result = input_result(completion).await;
+    if human && result["ok"] == true {
         let _ = app.emit(PAGE_STATE_EVENT, json!({"reason":"human-input"}));
     }
     result
@@ -1993,8 +1845,7 @@ mod tests {
     fn production_ipc_arrivals_admit_1000_human_writes_in_order() {
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let (event_sender, _event_receiver) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(0, event_sender));
+        let arbiter = Arc::new(InputArbiter::new(0));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
         let key = PaneKey::new("ordered-command", 1);
         let mut reader = panes
@@ -2107,8 +1958,7 @@ mod tests {
     fn production_ipc_consumes_sequence_before_size_refusal() {
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let (event_sender, _event_receiver) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(0, event_sender));
+        let arbiter = Arc::new(InputArbiter::new(0));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
         let key = PaneKey::new("sequenced-command", 1);
         let mut reader = panes
@@ -2212,8 +2062,8 @@ mod tests {
         );
         let first_completed = invoke("pane_input_wait", json!({"ticket":first["ticket"]}));
         assert_eq!(first_completed["ok"], true);
-        // A rejected page input still consumes its sequence, although the
-        // epoch does not move, so the next sequence remains valid.
+        // A rejected page input still consumes its sequence, so the next
+        // sequence remains valid.
         let rejected = invoke(
             "pane_input_enqueue",
             json!({
@@ -2249,8 +2099,7 @@ mod tests {
     fn blocked_command_input_does_not_starve_another_pane_or_output_ack() {
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let (events, _receiver) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(0, events));
+        let arbiter = Arc::new(InputArbiter::new(0));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
         let size = PtySize {
             rows: 24,
@@ -2328,7 +2177,6 @@ mod tests {
                     blocked_key.generation,
                     index + 1,
                     vec![b'x'; MAX_INPUT_BYTES],
-                    None,
                 )
             })
             .collect::<Vec<_>>();
@@ -2342,7 +2190,6 @@ mod tests {
             responsive_key.generation,
             1,
             b"R".to_vec(),
-            None,
         );
         assert_eq!(responsive_admission["ok"], true);
         let responsive_ticket = responsive_admission["ticket"]
@@ -2396,7 +2243,7 @@ mod tests {
 
         assert_eq!(
             responsive_before_cleanup,
-            Some(json!({"ok":true,"epoch":1})),
+            Some(json!({"ok":true})),
             "one blocked pane consumed the shared blocking pool"
         );
         assert_eq!(
@@ -2404,7 +2251,7 @@ mod tests {
             Some(json!({"ok":true})),
             "output acks shared the blocked PTY pool"
         );
-        assert_eq!(responsive_result, Some(json!({"ok":true,"epoch":1})));
+        assert_eq!(responsive_result, Some(json!({"ok":true})));
         assert_eq!(ack_result, Some(json!({"ok":true})));
         assert!(
             blocked_outcomes
@@ -2466,8 +2313,7 @@ mod tests {
 
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let (event_sender, _event_receiver) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(0, event_sender));
+        let arbiter = Arc::new(InputArbiter::new(0));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
         let release = Arc::new(Barrier::new(2));
         let handler_release = Arc::clone(&release);
@@ -2586,8 +2432,7 @@ mod tests {
 
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let (event_sender, _event_receiver) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(0, event_sender));
+        let arbiter = Arc::new(InputArbiter::new(0));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
         let release = Arc::new(Barrier::new(2));
         let handler_release = Arc::clone(&release);
@@ -2702,8 +2547,7 @@ mod tests {
                 .read_line(&mut ready)
                 .expect("the stand-in says it is ready");
             assert_eq!(ready, "ready\n");
-            let (event_sender, _event_receiver) = mpsc::channel();
-            let arbiter = Arc::new(InputArbiter::new(0, event_sender));
+            let arbiter = Arc::new(InputArbiter::new(0));
             let panes = Arc::new(PaneTable::new());
             let runtime = AppRuntime {
                 panes: Arc::clone(&panes),
@@ -2788,16 +2632,18 @@ mod tests {
         wait.join().expect("wait thread");
     }
 
+    /// Over the bridge as the daemon speaks it: text the human typed and never
+    /// sent holds neither a paste nor a native send (the owner's choice,
+    /// 2026-10-01), and the snapshot has no draft to wait on.
     #[cfg(unix)]
     #[test]
-    fn draft_clear_releases_a_submitted_draft_and_keeps_newer_typing() {
+    fn unsent_typing_holds_no_paste_and_no_claim() {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixStream;
 
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let (event_sender, events) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(0, event_sender));
+        let arbiter = Arc::new(InputArbiter::new(0));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
         let mut builder = BridgeBuilder::new(1024 * 1024);
         register_pane_handlers(
@@ -2819,7 +2665,7 @@ mod tests {
         let mut number = 0;
         let mut ask = |op: &str, body: Value| -> Value {
             number += 1;
-            let id = format!("n-draft-{number}");
+            let id = format!("n-typing-{number}");
             let mut frame =
                 serde_json::to_vec(&json!({"v":1,"id":id,"kind":"req","op":op,"body":body}))
                     .expect("serialize request");
@@ -2834,76 +2680,34 @@ mod tests {
                 }
             }
         };
-        let pane = json!({"id":"draft-pane","generation":1});
         let opened = ask(
             "pane.open",
-            json!({"id":"draft-pane","generation":1,"cwd":"/tmp","argv":["/bin/sh","-c","sleep 30"],
+            json!({"id":"typing-pane","generation":1,"cwd":"/tmp","argv":["/bin/sh","-c","sleep 30"],
                    "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1024}),
         );
         assert_eq!(opened["ok"], true, "{opened}");
-        let latched = |ask: &mut dyn FnMut(&str, Value) -> Value| {
-            ask("pane.snapshot", pane.clone())["draftLatched"] == true
-        };
-
-        let escape = ask(
-            "pane.input",
-            json!({"id":"draft-pane","generation":1,"bytes":[27],"draft":false}),
-        );
-        assert_eq!(escape["ok"], true, "{escape}");
-        assert!(
-            !latched(&mut ask),
-            "the daemon's Escape types nothing, so it leaves no draft to hold a paste"
-        );
-
         let typed = ask(
             "pane.input",
-            json!({"id":"draft-pane","generation":1,"bytes":b"hi\r".to_vec()}),
+            json!({"id":"typing-pane","generation":1,"bytes":b"half a thought".to_vec()}),
         );
-        assert_eq!(typed["ok"], true, "{typed}");
-        let PaneEvent::Enter { epoch, .. } = events
-            .recv_timeout(Duration::from_secs(1))
-            .expect("the human Enter is announced");
-        assert!(latched(&mut ask));
-        let cleared = ask(
-            "draft.clear",
-            json!({"id":"draft-pane","generation":1,"epoch":epoch,"submission":"seen-1"}),
-        );
-        assert_eq!(cleared, json!({"ok":true,"outcome":"cleared"}));
-        assert!(!latched(&mut ask));
+        assert_eq!(typed, json!({"ok":true}));
         assert_eq!(
-            ask(
-                "draft.clear",
-                json!({"id":"draft-pane","generation":1,"epoch":epoch,"submission":"again"})
-            ),
-            json!({"ok":false,"error":"stale"}),
-            "an Enter is released once",
-        );
-
-        ask(
-            "pane.input",
-            json!({"id":"draft-pane","generation":1,"bytes":b"a\r".to_vec()}),
-        );
-        let PaneEvent::Enter { epoch: second, .. } = events
-            .recv_timeout(Duration::from_secs(1))
-            .expect("second Enter");
-        ask(
-            "pane.input",
-            json!({"id":"draft-pane","generation":1,"bytes":b"still typing".to_vec()}),
+            ask("pane.claim", json!({"pane":"typing-pane","generation":1})),
+            json!({"ok":true})
         );
         assert_eq!(
             ask(
-                "draft.clear",
-                json!({"id":"draft-pane","generation":1,"epoch":second,"submission":"seen-2"})
+                "pane.write_paste",
+                json!({"id":"typing-pane","generation":1,"body":"result"})
             ),
-            json!({"ok":true,"outcome":"preserved-newer-input"}),
+            json!({"ok":true})
         );
-        assert!(
-            latched(&mut ask),
-            "text typed after the Enter keeps the latch"
-        );
+        let snapshot = ask("pane.snapshot", json!({"id":"typing-pane","generation":1}));
+        assert_eq!(snapshot["pasteInFlight"], false, "{snapshot}");
+        assert!(snapshot.get("draftLatched").is_none(), "{snapshot}");
 
         panes
-            .kill(&PaneKey::new("draft-pane", 1))
+            .kill(&PaneKey::new("typing-pane", 1))
             .expect("kill the pane");
         inputs.close_and_drain();
         drop(reader);
@@ -2919,8 +2723,7 @@ mod tests {
 
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let (event_sender, _event_receiver) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(0, event_sender));
+        let arbiter = Arc::new(InputArbiter::new(0));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
         let launches = Arc::new(LaunchRegistry::new());
         let mut builder = BridgeBuilder::new(1024 * 1024);
@@ -3068,8 +2871,7 @@ mod tests {
         });
 
         let panes = Arc::new(PaneTable::new());
-        let (event_sender, _event_receiver) = mpsc::channel();
-        let arbiter = Arc::new(InputArbiter::new(0, event_sender));
+        let arbiter = Arc::new(InputArbiter::new(0));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
         let runtime = AppRuntime {
             panes,

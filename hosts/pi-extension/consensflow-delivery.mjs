@@ -7,24 +7,23 @@ const MESSAGE_ID = /^m-[a-f0-9]{32}$/
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/
 const MESSAGE_FIELDS = new Set(['id', 'type', 'launchId', 'session', 'text', 'expiresAt'])
 
-// Interactive Pi reads the expanded editor, including pasted attachment paths.
-// RPC/headless also return an empty string, so the native TUI mode is required.
-function nativeEditorState(ctx, session) {
+// A message goes to the interactive TUI (never a headless or RPC run) on the
+// expected conversation, once Pi is idle with nothing pending. Text the human
+// left in the editor holds nothing and stays there: Pi's own send never
+// touches the editor (the owner's choice, 2026-10-01).
+function nativeTuiState(ctx, session) {
   try {
     if (typeof session !== 'string' || sessionIdOf(ctx) !== session) {
       return { ready: false, reason: 'native session changed' }
     }
-    if (ctx?.mode !== 'tui' || ctx.hasUI !== true || typeof ctx.ui?.getEditorText !== 'function') {
-      return { ready: false, reason: 'native editor unavailable' }
+    if (ctx?.mode !== 'tui' || ctx.hasUI !== true) {
+      return { ready: false, reason: 'native TUI unavailable' }
     }
-    const text = ctx.ui.getEditorText()
-    if (typeof text !== 'string') return { ready: false, reason: 'native editor unavailable' }
-    if (text !== '') return { ready: false, reason: 'draft open' }
     if (ctx.isIdle?.() !== true || ctx.hasPendingMessages?.() !== false)
       return { ready: false, reason: 'chief busy' }
     return { ready: true }
   } catch {
-    return { ready: false, reason: 'native editor unavailable' }
+    return { ready: false, reason: 'native TUI unavailable' }
   }
 }
 
@@ -101,7 +100,6 @@ export function createDeliveryExtension(
     settled,
     expired,
     launchId,
-    editorGuard,
     receiver,
     logger = console,
     // How the inbox is watched, and how often it is read anyway: on macOS a
@@ -208,7 +206,8 @@ export function createDeliveryExtension(
     settledIds.add(id)
     if (entry.timer !== null) clearTimeout(entry.timer)
     const response = { id, admitted }
-    if (admitted === false && editorGuard === 1) response.bytesWritten = 0
+    // Every refusal comes before the send: nothing went in.
+    if (admitted === false) response.bytesWritten = 0
     if (admitted === true) response.mode = 'tui'
     else response.reason = reason
     const ackPath = join(ack, `${id}.json`)
@@ -322,14 +321,9 @@ export function createDeliveryExtension(
             continue
           }
           if (context?.isIdle?.() !== true) break
-          if (editorGuard === 1) {
-            const editor = nativeEditorState(context, record.session)
-            if (editor.ready !== true) {
-              await refuseBeforeSend(path, file, id, editor.reason)
-              continue
-            }
-          } else if (sessionIdOf(context) !== record.session) {
-            await refuseBeforeSend(path, file, id, 'native session changed')
+          const tui = nativeTuiState(context, record.session)
+          if (tui.ready !== true) {
+            await refuseBeforeSend(path, file, id, tui.reason)
             continue
           }
           const message = record.text
@@ -341,7 +335,7 @@ export function createDeliveryExtension(
           )
           try {
             // The raw text goes verbatim. Only message_start proves entry;
-            // the draft is only read, never cleared or overwritten.
+            // the editor is never touched.
             pi.sendUserMessage(message)
           } catch (cause) {
             void acknowledge(id, null, 'send-user-message-threw')
@@ -370,9 +364,9 @@ export function createDeliveryExtension(
         ...receiver,
         session: () =>
           context?.mode === 'tui' && context.hasUI === true ? sessionIdOf(context) : null,
-        ready: () => nativeEditorState(context, sessionIdOf(context)).ready,
+        ready: () => nativeTuiState(context, sessionIdOf(context)).ready,
         insert: (claim) => {
-          if (!nativeEditorState(context, claim.receiver.session).ready)
+          if (!nativeTuiState(context, claim.receiver.session).ready)
             return {
               admitted: false,
               bytesWritten: 0,
@@ -454,7 +448,6 @@ export default function consensflowDelivery(pi) {
     settled: process.env.CF_DELIVERY_SETTLED,
     expired: process.env.CF_DELIVERY_EXPIRED,
     launchId: process.env.CF_DELIVERY_LAUNCH_ID,
-    editorGuard: process.env.CF_DELIVERY_EDITOR_GUARD === '1' ? 1 : undefined,
     receiver: process.env.CF_RESULT_RECEIVER
       ? { config: process.env.CF_RESULT_RECEIVER }
       : undefined,

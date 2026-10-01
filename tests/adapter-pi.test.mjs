@@ -108,14 +108,13 @@ describe('the Pi adapter', () => {
     })
   })
 
-  it('delivers through the real channel: an epoch claim, then the extension inbox', async () => {
+  it('delivers through the real channel: a claim, then the extension inbox', async () => {
     await withHome(async ({ env }) => {
       const adapter = piAdapter({ env })
       const { launch } = await adapter.prepare(request())
       const claims = []
       const host = {
         async request(op, body) {
-          if (op === 'pane.snapshot') return { ok: true, inputEpoch: 3 }
           claims.push([op, body])
           return { ok: true }
         },
@@ -148,9 +147,7 @@ describe('the Pi adapter', () => {
           admitted: true,
           queued: true,
         })
-        assert.deepEqual(claims, [
-          ['pane.claim_native_epoch', { pane: 's1-zeus', generation: 2, epoch: 3 }],
-        ])
+        assert.deepEqual(claims, [['pane.claim', { pane: 's1-zeus', generation: 2 }]])
       } finally {
         clearInterval(extension)
       }

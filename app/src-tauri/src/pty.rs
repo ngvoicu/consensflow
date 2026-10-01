@@ -759,11 +759,7 @@ impl PaneTable {
         }
         before_write().map_err(|reason| PeerSendError {
             uncertain: false,
-            code: if reason == "stale-input-epoch" {
-                "stale-input-epoch"
-            } else {
-                "peer-refused"
-            },
+            code: "peer-refused",
             reason,
         })?;
         if self

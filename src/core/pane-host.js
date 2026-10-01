@@ -31,11 +31,6 @@ export class PaneHost {
     this.#bridge.onEvent('pane.exit', (body) => listener(body))
   }
 
-  /** A human pressed Enter in a window: `{id, generation, epoch}`. */
-  onEnter(listener) {
-    this.#bridge.onEvent('pane.enter', (body) => listener(body))
-  }
-
   request(op, body, options) {
     return this.#bridge.request(op, body, options)
   }

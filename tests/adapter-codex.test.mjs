@@ -198,7 +198,7 @@ describe('the Codex adapter', () => {
     })
   })
 
-  it('queues a message through the real channel: an epoch claim, then the broker', async () => {
+  it('queues a message through the real channel: a claim, then the broker', async () => {
     await withHome(async ({ env }) => {
       const posted = []
       const broker = createServer(async (request, response) => {
@@ -220,7 +220,6 @@ describe('the Codex adapter', () => {
         const claims = []
         const host = {
           async request(op, body) {
-            if (op === 'pane.snapshot') return { ok: true, inputEpoch: 6 }
             claims.push([op, body])
             return { ok: true }
           },
@@ -230,9 +229,7 @@ describe('the Codex adapter', () => {
           admitted: true,
           queued: true,
         })
-        assert.deepEqual(claims, [
-          ['pane.claim_native_epoch', { pane: 's1-diana', generation: 2, epoch: 6 }],
-        ])
+        assert.deepEqual(claims, [['pane.claim', { pane: 's1-diana', generation: 2 }]])
         assert.equal(posted[0].url, '/deliver')
         assert.deepEqual([posted[0].body.sessionId, posted[0].body.text], [thread, 'hi'])
       } finally {
@@ -252,16 +249,16 @@ describe('the Codex adapter', () => {
         const host = {
           async request(op, body) {
             requests.push([op, body])
-            return op === 'pane.snapshot'
-              ? { ok: true, inputEpoch: 1, draftLatched: false }
-              : { ok: true }
+            return { ok: true }
           },
         }
         const pane = { id: 's1-diana', generation: 2 }
         assert.deepEqual(await adapter.deliver({ launch: plan.launch, pane, host, text: 'hi' }), {
           admitted: true,
         })
-        assert.equal(requests.at(-1)[0], 'pane.write_paste')
+        assert.deepEqual(requests, [
+          ['pane.write_paste', { id: 's1-diana', generation: 2, body: 'hi' }],
+        ])
       },
       { queue: false },
     )

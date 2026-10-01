@@ -188,15 +188,13 @@ async function sendText(target, text) {
     typeof pane?.id !== 'string' ||
     !Number.isSafeInteger(pane.generation) ||
     pane.generation < 1 ||
-    !Number.isSafeInteger(target.epoch) ||
-    target.epoch < 0 ||
     launch?.kind !== 'claude-peer' ||
     typeof launch.configDir !== 'string' ||
     !isAbsolute(launch.configDir) ||
     typeof target.bridge?.request !== 'function' ||
     typeof text !== 'string'
   ) {
-    throw Error('claude-peer requires a native session, pane generation, epoch, launch and bridge')
+    throw Error('claude-peer requires a native session, pane generation, launch and bridge')
   }
   const budgets = [3000, target.deadlineMs, launch.ackTimeoutMs].filter((n) => n !== undefined)
   if (budgets.some((n) => !Number.isSafeInteger(n) || n < 0))
@@ -251,13 +249,12 @@ async function sendText(target, text) {
   if (timeoutMs <= 0) return refused('native Claude peer delivery expired')
   try {
     // Rust checks the CONNECTED peer PID, UID and pane process group, then
-    // claims this input epoch before the first byte. No terminal input occurs.
+    // claims the pane before the first byte. No terminal input occurs.
     const result = await target.bridge.request(
       'pane.send_peer',
       {
         id: pane.id,
         generation: pane.generation,
-        epoch: target.epoch,
         socket: peer.socket,
         peerPid: peer.pid,
         ...(allowDescendant ? { allowDescendant: true } : {}),

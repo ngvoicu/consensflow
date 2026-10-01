@@ -2,7 +2,7 @@ import { selectedSession } from '../../hosts/devin-receiver.mjs'
 
 /** Explicit user tasks only. Results enter through native hooks. */
 export async function send(target, text) {
-  const { channel, session, bridge, pane, generation, epoch } = target
+  const { channel, session, bridge, pane, generation } = target
   let current
   try {
     current = await selectedSession(channel.wire)
@@ -21,6 +21,5 @@ export async function send(target, text) {
       bytesWritten: 0,
       error: 'Devin is displaying another conversation',
     }
-  // Rust rejects typing or /new arriving since the caller's input snapshot.
-  return bridge.request('pane.write_paste', { id: pane, generation, epoch, body: text })
+  return bridge.request('pane.write_paste', { id: pane, generation, body: text })
 }

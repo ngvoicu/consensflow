@@ -60,7 +60,6 @@ async function setup(
   {
     idle = true,
     ackTimeoutMs = 1000,
-    editorGuard,
     editor = '',
     hasUI = true,
     mode = 'tui',
@@ -86,7 +85,6 @@ async function setup(
     settled,
     expired,
     launchId: 'launch-pi-test',
-    editorGuard,
     ackTimeoutMs,
     logger: { error: (...args) => logs.push(args.join(' ')) },
     ...(watchInbox ? { watchInbox } : {}),
@@ -141,27 +139,41 @@ const envelopeRecord = {
 const envelope = envelopeRecord.text
 
 describe('consensflow Pi extension', () => {
-  for (const [name, options, reason] of [
-    ['unsent text', { editor: 'my unfinished question' }, 'draft open'],
-    ['whitespace draft', { editor: ' ' }, 'draft open'],
-    ['headless empty-editor fallback', { hasUI: false }, 'native editor unavailable'],
-    ['RPC empty-editor fallback', { mode: 'rpc' }, 'native editor unavailable'],
-    ['missing editor text', { editor: null }, 'native editor unavailable'],
+  // Text the human left in the editor holds nothing and stays there (the
+  // owner's choice, 2026-10-01): Pi's own send never touches the editor.
+  for (const [name, editor] of [
+    ['unsent text', 'my unfinished question'],
+    ['a whitespace draft', ' '],
+    ['no editor text at all', null],
   ]) {
-    it(`refuses ${name} at the native send boundary without touching the editor`, async () => {
+    it(`delivers past ${name} and leaves the editor as it was`, async () => {
       const s = await setup(
         { ...envelopeRecord, text: envelope, session: 'native-pi-session' },
-        { editorGuard: 1, ...options },
+        { editor },
+      )
+      try {
+        assert.deepEqual(s.pi.sent, [envelope])
+        assert.equal(s.ctx.ui.getEditorText(), editor)
+      } finally {
+        await s.close()
+      }
+    })
+  }
+
+  for (const [name, options] of [
+    ['a headless run', { hasUI: false }],
+    ['an RPC run', { mode: 'rpc' }],
+  ]) {
+    it(`refuses ${name} at the native send boundary`, async () => {
+      const s = await setup(
+        { ...envelopeRecord, text: envelope, session: 'native-pi-session' },
+        options,
       )
       try {
         assert.deepEqual(s.pi.sent, [])
         assert.equal(
           (await waitFor(join(s.ack, 'm-00000000000000000000000000000051.json'))).reason,
-          reason,
-        )
-        assert.equal(
-          s.ctx.ui.getEditorText(),
-          Object.hasOwn(options, 'editor') ? options.editor : '',
+          'native TUI unavailable',
         )
       } finally {
         await s.close()
@@ -169,11 +181,8 @@ describe('consensflow Pi extension', () => {
     })
   }
 
-  it('refuses a guarded delivery addressed to a different native Pi session', async () => {
-    const s = await setup(
-      { ...envelopeRecord, text: envelope, session: 'previous-session' },
-      { editorGuard: 1 },
-    )
+  it('refuses a delivery addressed to a different native Pi session', async () => {
+    const s = await setup({ ...envelopeRecord, text: envelope, session: 'previous-session' })
     try {
       assert.deepEqual(s.pi.sent, [])
       assert.equal(
@@ -185,20 +194,21 @@ describe('consensflow Pi extension', () => {
     }
   })
 
-  it('rechecks the native editor after busy work settles', async () => {
+  it('delivers once busy work settles, leaving text typed meanwhile in the editor', async () => {
     const s = await setup(
       { ...envelopeRecord, text: envelope, session: 'native-pi-session' },
-      { editorGuard: 1, idle: false },
+      { idle: false },
     )
     try {
+      assert.deepEqual(s.pi.sent, [], 'nothing goes in while Pi works')
       s.setEditor('new draft')
       s.setIdle(true)
       await s.pi.handlers.get('agent_settled')({}, s.ctx)
-      assert.equal(
-        (await waitFor(join(s.ack, 'm-00000000000000000000000000000051.json'))).admitted,
-        false,
-      )
-      assert.deepEqual(s.pi.sent, [])
+      const deadline = Date.now() + 2_000
+      while (s.pi.sent.length === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      assert.deepEqual(s.pi.sent, [envelope])
       assert.equal(s.ctx.ui.getEditorText(), 'new draft')
     } finally {
       await s.close()
@@ -368,6 +378,7 @@ describe('consensflow Pi extension', () => {
       assert.deepEqual(await waitFor(join(s.ack, 'm-00000000000000000000000000000058.json')), {
         id: 'm-00000000000000000000000000000058',
         admitted: false,
+        bytesWritten: 0,
         reason: 'expired-before-send',
       })
       assert.equal(await exists(join(s.inbox, 'm-00000000000000000000000000000058.json')), false)
@@ -468,7 +479,7 @@ describe('consensflow Pi extension', () => {
 })
 
 it('a Pi session switch at admission reports a retryable zero-byte refusal', async () => {
-  const s = await setup(null, { editorGuard: 1 })
+  const s = await setup(null)
   try {
     const result = await send(
       'pi-extension',
@@ -476,15 +487,13 @@ it('a Pi session switch at admission reports a retryable zero-byte refusal', asy
         session: 'native-pi-session',
         pane: 'chief-pane',
         generation: 1,
-        epoch: 0,
-        claimEpoch: async () => {
+        claim: async () => {
           s.ctx.sessionManager.getSessionId = () => 'new-pi-session'
           return { ok: true }
         },
         launch: {
           channel: {
             kind: 'pi-extension',
-            editorGuard: 1,
             inbox: s.inbox,
             ack: s.ack,
             launchId: 'launch-pi-test',

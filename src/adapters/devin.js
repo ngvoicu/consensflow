@@ -79,17 +79,10 @@ export function devinAdapter({
 
     async ready({ pane, host }) {
       const snapshot = await host.request('pane.snapshot', pane)
-      return snapshot?.ok === true && snapshot.draftLatched !== true && !snapshot.pasteInFlight
+      return snapshot?.ok === true && !snapshot.pasteInFlight
     },
 
     async deliver({ launch, pane, host, text }) {
-      const snapshot = await host.request('pane.snapshot', pane)
-      if (snapshot?.ok !== true) {
-        return {
-          admitted: false,
-          reason: `the window cannot be read: ${snapshot?.error ?? 'no answer'}`,
-        }
-      }
       const sent = await send(
         {
           channel: launch.channel,
@@ -97,7 +90,6 @@ export function devinAdapter({
           bridge: host,
           pane: pane.id,
           generation: pane.generation,
-          epoch: snapshot.inputEpoch,
         },
         text,
       )

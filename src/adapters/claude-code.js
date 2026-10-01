@@ -16,18 +16,16 @@ import { executableFor } from './shared.js'
  * accepted, and a Stop hook on every turn so every finished turn is recorded.
  *
  * - The session id is ours: minted for a fresh window, resumed for a known one.
- * - A message is pasted into a live window as if the human typed it, once no
- *   human is typing there. Claude's own peer inbox (`peer: true`, macOS only,
- *   the Rust host checks the peer belongs to this pane) delivers while the
- *   human types, but Claude wraps each such message as a teammate's request
+ * - A message is pasted into a live window as if the human typed it, whatever
+ *   its input box holds: text the human left unsent goes in with it (the
+ *   owner's choice, 2026-10-01). Claude's own peer inbox (`peer: true`, macOS
+ *   only, the Rust host checks the peer belongs to this pane) bypasses the
+ *   input box, but Claude wraps each such message as a teammate's request
  *   from another Claude session, a hundred tokens of caution per delivery
  *   that misnames the human's own answers; since 2026-09-22 it is off.
  * - Claude's own `sessions/<pid>.json` says busy, idle or waiting (and why);
  *   the transcript holds the conversation and says whether the turn settled.
  */
-/** How long a human draft holds pastes after the last keystroke behind it. */
-export const DRAFT_GRACE_MS = 120_000
-
 /**
  * A member runs in full-permission mode and reads what others wrote, so it
  * starts without the human's MCP servers, claude.ai connectors and Claude in
@@ -37,14 +35,7 @@ export const DRAFT_GRACE_MS = 120_000
  */
 const MEMBER_ISOLATION = ['--strict-mcp-config', '--no-chrome']
 
-export function claudeCodeAdapter({
-  env,
-  peer = false,
-  answers = cachedAnswers(),
-  now = Date.now,
-}) {
-  // The latched drafts seen per window: the input epoch and since when.
-  const drafts = new Map()
+export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers() }) {
   const configDir = path.resolve(
     env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? homedir(), '.claude'),
   )
@@ -93,7 +84,6 @@ export function claudeCodeAdapter({
           nativeSession,
           channel: {
             kind: 'claude-peer',
-            preservesDraft: 1,
             launchId,
             configDir,
             ackTimeoutMs: 3000,
@@ -106,58 +96,23 @@ export function claudeCodeAdapter({
       return {}
     },
 
-    /**
-     * Pasting waits for the human to finish typing; the peer inbox never
-     * touches their draft. The pane latches on typed text and only a clear
-     * lets go, so a latch nobody types behind any more (a stray key, or a
-     * submission the record never showed) would hold every message for good:
-     * after the grace it is let go and the paste goes ahead. True when the
-     * window is ready; otherwise the reason, for the trace.
-     */
+    /** A paste waits only for the window to be readable and another paste to be in. */
     async ready({ pane, host }) {
       if (peer) return true
       const snapshot = await host.request('pane.snapshot', pane)
       if (snapshot?.ok !== true)
         return `the window cannot be read: ${snapshot?.error ?? 'no answer'}`
       if (snapshot.pasteInFlight) return 'a paste is on its way to the window'
-      const key = `${pane.id}#${pane.generation}`
-      if (snapshot.draftLatched !== true) {
-        drafts.delete(key)
-        return true
-      }
-      const seen = drafts.get(key)
-      if (seen === undefined || seen.epoch !== snapshot.inputEpoch) {
-        drafts.set(key, { epoch: snapshot.inputEpoch, since: now() })
-        return `someone is typing in the window (input epoch ${snapshot.inputEpoch})`
-      }
-      if (now() - seen.since < DRAFT_GRACE_MS)
-        return `someone typed in the window ${Math.round((now() - seen.since) / 1000)}s ago (input epoch ${snapshot.inputEpoch})`
-      const cleared = await host.request('draft.clear', {
-        ...pane,
-        epoch: snapshot.inputEpoch,
-        submission: `stale-${snapshot.inputEpoch}`,
-      })
-      if (cleared?.ok !== true || cleared.outcome !== 'cleared')
-        return `the window kept its draft: ${cleared?.outcome ?? cleared?.error ?? 'no answer'}`
-      drafts.delete(key)
       return true
     },
 
     async deliver({ launch, pane, host, text }) {
-      const snapshot = await host.request('pane.snapshot', pane)
-      if (snapshot?.ok !== true) {
-        return {
-          admitted: false,
-          reason: `the window cannot be read: ${snapshot?.error ?? 'no answer'}`,
-        }
-      }
       if (peer) {
         const sent = await sendPeer(
           {
             session: launch.nativeSession,
             pane: pane.id,
             generation: pane.generation,
-            epoch: snapshot.inputEpoch,
             launch: launch.channel,
             bridge: host,
           },
@@ -170,15 +125,8 @@ export function claudeCodeAdapter({
         if (sent?.error !== 'native-session-unavailable') {
           return { admitted: false, reason: sent?.cause ?? sent?.error ?? 'the peer refused it' }
         }
-        if (snapshot.draftLatched === true) {
-          return { admitted: false, reason: 'a human is typing in the window' }
-        }
       }
-      const written = await host.request('pane.write_paste', {
-        ...pane,
-        epoch: snapshot.inputEpoch,
-        body: text,
-      })
+      const written = await host.request('pane.write_paste', { ...pane, body: text })
       return written?.ok === true
         ? { admitted: true }
         : { admitted: false, reason: written?.error ?? 'the window refused the paste' }

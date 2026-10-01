@@ -31,7 +31,7 @@ function inbox() {
   return { request, queue, calls }
 }
 
-test('Pi receiver handles all replies, busy/draft holds, new/resume and native custom result visibility', async (t) => {
+test('Pi receiver handles all replies, holds while busy, new/resume and native custom result visibility', async (t) => {
   const f = inbox(),
     handlers = new Map(),
     sent = []
@@ -60,13 +60,12 @@ test('Pi receiver handles all replies, busy/draft holds, new/resume and native c
   busy = true
   await extension.receiver.poll()
   assert.equal(sent.length, 0)
+  // Unsent text holds nothing (the owner's choice, 2026-10-01) and stays put.
   busy = false
   draft = 'unsent question'
   await extension.receiver.poll()
-  assert.equal(sent.length, 0)
-  draft = ''
-  await extension.receiver.poll()
   assert.equal(sent[0].message.content, 'first complete result')
+  assert.equal(ctx.ui.getEditorText(), 'unsent question')
   assert.equal(sent[0].message.display, true)
   assert.equal(sent[0].message.customType, 'consensflow-worker-result')
   assert.deepEqual(sent[0].options, { triggerTurn: true, deliverAs: 'followUp' })

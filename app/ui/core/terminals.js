@@ -1,5 +1,5 @@
 import { EmulatorRegistry, paneKey } from '../term.js'
-import { isDraft, TerminalLink } from '../terminal-link.js'
+import { TerminalLink } from '../terminal-link.js'
 import { element, laneOrder } from './board.js'
 
 /**
@@ -29,7 +29,7 @@ export class TerminalsView {
     this.#onClose = onClose
     this.#registry = new EmulatorRegistry({
       ...(createEmulator ? { createEmulator } : {}),
-      onData: (pane, data) => void this.#link.input(pane, data, { draft: isDraft(data) }),
+      onData: (pane, data) => void this.#link.input(pane, data),
       onReply: (pane, data) => void this.#link.reply(pane, data),
       onResize: (pane, cols, rows) => this.#link.resize(pane, cols, rows),
     })

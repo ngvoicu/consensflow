@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { claimEpoch } from './pty.js'
+import { claim } from './pty.js'
 
 const ACK_POLL_MS = 10
 const ACK_GRACE_MS = ACK_POLL_MS * 3
@@ -38,7 +38,7 @@ function zeroByteClaimRefusal(claimed) {
   return {
     ok: false,
     admitted: false,
-    error: claimed?.error === 'stale-input-epoch' ? claimed.error : 'failed-with-zero-bytes',
+    error: 'failed-with-zero-bytes',
     bytesWritten: 0,
     cause: claimed?.cause ?? claimed?.error ?? 'claim-refused',
   }
@@ -63,7 +63,7 @@ function messageConfig(target) {
   if (typeof launchId !== 'string' || !/^[A-Za-z0-9._-]+$/.test(launchId)) {
     throw new Error('pi-extension delivery needs the launch id')
   }
-  return { config, inbox, ackDirectory, ackTimeoutMs, launchId }
+  return { inbox, ackDirectory, ackTimeoutMs, launchId }
 }
 
 async function publishRaw(inbox, ackDirectory, record) {
@@ -108,12 +108,12 @@ function readAckResult(ack) {
  * The inbox record is strictly bounded `{id, type, launchId, session, text,
  * expiresAt}` with a unique `m-<hex>` id, the launch's immutable launchId,
  * the target's native session and one absolute expiry. Native admission is
- * gated by pane.claim_epoch immediately before the inbox rename; a failed
+ * gated by pane.claim immediately before the inbox rename; a failed
  * claim is known zero bytes, a missing ack after publish is uncertain, and
  * the message is never retried automatically.
  */
 export async function send(target, text) {
-  const { config, inbox, ackDirectory, ackTimeoutMs, launchId } = messageConfig(target)
+  const { inbox, ackDirectory, ackTimeoutMs, launchId } = messageConfig(target)
   if (typeof text !== 'string' || text.length === 0) {
     return { ok: false, admitted: false, error: 'invalid-record' }
   }
@@ -134,10 +134,7 @@ export async function send(target, text) {
   if (prepared.error) return prepared.error
   const { inboxFile, ackFile, temporary } = prepared
   try {
-    const claimed = await claimEpoch(
-      target,
-      config.editorGuard === 1 ? 'pane.claim_native_epoch' : 'pane.claim_epoch',
-    )
+    const claimed = await claim(target)
     if (claimed?.ok !== true) {
       await rm(temporary, { force: true })
       return zeroByteClaimRefusal(claimed)

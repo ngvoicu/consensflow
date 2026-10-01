@@ -79,7 +79,6 @@ async function setup(
     settled,
     expired,
     launchId,
-    editorGuard: 1,
     logger: { error: (...args) => logs.push(args.join(' ')) },
   })
   let currentIdle = idle
@@ -93,12 +92,10 @@ async function setup(
     session: 'native-pi-session',
     pane: 'chief-pane',
     generation: 1,
-    epoch: 0,
-    claimEpoch: async () => ({ ok: true }),
+    claim: async () => ({ ok: true }),
     launch: {
       channel: {
         kind: 'pi-extension',
-        editorGuard: 1,
         launchId,
         inbox,
         ack,
@@ -180,19 +177,26 @@ describe('consensflow Pi worker followup', () => {
     }
   })
 
-  it('refuses a followup while unsent draft text exists without touching the draft', async () => {
+  // Unsent text holds nothing (the owner's choice, 2026-10-01); Pi's own send
+  // leaves it in the editor.
+  it('sends a followup past unsent text, leaving the text in the editor', async () => {
     const s = await setup({ editor: 'my unfinished question' })
     const pump = setInterval(() => void s.extension.consume(), 5)
     pump.unref()
     try {
       const text = 'worker followup while drafting'
-      const result = await send(s.targetFor(), text)
-      assert.deepEqual(s.pi.sent, [])
-      assert.equal(result.ok, false)
-      assert.equal(result.admitted, false)
-      assert.equal(result.error, 'failed-with-zero-bytes')
-      assert.equal(result.bytesWritten, 0)
-      assert.equal(result.ack.reason, 'draft open')
+      const pending = send(s.targetFor(), text)
+      const sendDeadline = Date.now() + 2_000
+      while (s.pi.sent.length === 0 && Date.now() < sendDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      assert.deepEqual(s.pi.sent, [text])
+      await s.pi.handlers.get('message_start')(
+        { message: { role: 'user', content: [{ type: 'text', text }] } },
+        s.ctx,
+      )
+      const result = await pending
+      assert.equal(result.admitted, true)
       assert.equal(s.ctx.ui.getEditorText(), 'my unfinished question')
     } finally {
       clearInterval(pump)

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { realpath } from 'node:fs/promises'
 import { runnable, terminate } from '../harnesses.js'
+import { claim, paneOf } from './pty.js'
 
 /**
  * The P5 prompt_async endpoint admits a request but may stay silent forever.
@@ -52,24 +53,10 @@ function authHeader(target, launch, endpoint) {
   return `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString('base64')}`
 }
 
-function claimRequest(target) {
-  const pane = typeof target?.pane === 'object' ? target.pane?.id : target?.pane
-  if (
-    typeof pane !== 'string' ||
-    !Number.isSafeInteger(target?.generation) ||
-    target.generation < 1 ||
-    !Number.isSafeInteger(target?.epoch) ||
-    target.epoch < 0
-  ) {
-    throw new Error('opencode-server delivery needs pane, generation and observed epoch')
-  }
-  return { pane, generation: target.generation, epoch: target.epoch }
-}
-
 function validateCaller(target) {
-  claimRequest(target)
-  if (typeof target?.claimEpoch !== 'function' && typeof target?.bridge?.request !== 'function') {
-    throw new Error('opencode-server delivery needs pane.claim_epoch')
+  paneOf(target)
+  if (typeof target?.claim !== 'function' && typeof target?.bridge?.request !== 'function') {
+    throw new Error('opencode-server delivery needs pane.claim')
   }
   const deadlineMs = target?.deadlineMs
   if (deadlineMs !== undefined && (!Number.isSafeInteger(deadlineMs) || deadlineMs < 0)) {
@@ -81,27 +68,10 @@ function zeroByteClaimRefusal(claimed) {
   return {
     ok: false,
     admitted: false,
-    error: claimed?.error === 'stale-input-epoch' ? claimed.error : 'failed-with-zero-bytes',
+    error: 'failed-with-zero-bytes',
     bytesWritten: 0,
     cause: claimed?.cause ?? claimed?.error ?? 'claim-refused',
   }
-}
-
-async function claimEpoch(target) {
-  const config = target.launch?.channel ?? target.launch
-  const operation = config?.preservesDraft === 1 ? 'pane.claim_native_epoch' : 'pane.claim_epoch'
-  const request = claimRequest(target)
-  try {
-    if (typeof target.claimEpoch === 'function') return await target.claimEpoch(request, operation)
-    if (typeof target.bridge?.request === 'function') {
-      return await target.bridge.request(operation, request, {
-        deadlineMs: target.deadlineMs,
-      })
-    }
-  } catch (cause) {
-    return { ok: false, error: 'transport', cause: cause?.error ?? cause?.message ?? String(cause) }
-  }
-  throw new Error('opencode-server delivery needs pane.claim_epoch')
 }
 
 /**
@@ -135,7 +105,7 @@ async function sendCurrent(target, text, config) {
   validateCaller(target)
   const expiresAt = Date.now() + (target.deadlineMs ?? DEFAULT_DEADLINE_MS)
   if (expiresAt <= Date.now()) return refused('expired')
-  const claimed = await claimEpoch(target)
+  const claimed = await claim(target)
   if (claimed?.ok !== true) return zeroByteClaimRefusal(claimed)
   if (expiresAt <= Date.now()) return refused('expired')
   try {
@@ -166,7 +136,7 @@ async function sendCurrent(target, text, config) {
 
 /**
  * POST one admitted user turn to the P5-discovered OpenCode TUI server after
- * pane.claim_epoch confirms the caller's observed epoch and clear draft. Any
+ * pane.claim admits it: the pane is current and no paste is going in. Any
  * failed claim is retryable: the HTTP request has not started yet.
  */
 async function sendText(target, text) {
@@ -204,7 +174,7 @@ async function sendText(target, text) {
     if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
       return { ok: false, admitted: false, error: 'expired', bytesWritten: 0 }
     }
-    const claimed = await claimEpoch(target)
+    const claimed = await claim(target)
     if (claimed?.ok !== true) {
       return zeroByteClaimRefusal(claimed)
     }

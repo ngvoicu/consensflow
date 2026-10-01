@@ -94,11 +94,6 @@ export function deliveryText(message) {
 
 const markerOf = (messageId) => `[ConsensFlow m-${messageId} ·`
 
-/** How many messages in a harness record the human typed (ConsensFlow's own carry its header). */
-const humanMessages = (observed) =>
-  observed.items.filter((item) => item.role === 'user' && !item.text.includes('[ConsensFlow m-'))
-    .length
-
 /** A reset this near holds a task with its window rather than sending it back to the board. */
 const HOLD_MS = 30 * 60_000
 
@@ -151,7 +146,6 @@ export class Dispatcher {
     this.#launchTimeoutMs = launchTimeoutMs
     this.#maxAttempts = maxAttempts
     host.onExit((pane) => this.paneExited(pane))
-    host.onEnter?.((enter) => this.#humanEnter(enter))
   }
 
   onChange(listener) {
@@ -501,7 +495,6 @@ export class Dispatcher {
       return
     }
     if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
-    await this.#releaseDraft(runtime, observed)
     if (participant.role !== 'chief') {
       await this.#interruptIfPaused(participant, runtime)
       this.#collect(project, participant, observed)
@@ -567,10 +560,7 @@ export class Dispatcher {
     const presses = runtime.adapter.interrupt?.presses ?? 1
     for (let press = 0; press < presses; press += 1) {
       if (press > 0) await new Promise((resolve) => setTimeout(resolve, DOUBLE_PRESS_MS))
-      // A key that types nothing: it must not look like the human's draft and hold the tell.
-      await this.#host
-        .request('pane.input', { ...runtime.pane, bytes: [ESCAPE], draft: false })
-        .catch(() => {})
+      await this.#host.request('pane.input', { ...runtime.pane, bytes: [ESCAPE] }).catch(() => {})
     }
   }
 
@@ -635,35 +625,6 @@ export class Dispatcher {
     this.#settleFailure(delivering, 'the harness record never showed it', { retry: true })
   }
 
-  #humanEnter({ id, generation, epoch }) {
-    const runtime = [...this.#runtime.values()].find(
-      (candidate) => candidate.pane?.id === id && candidate.pane.generation === generation,
-    )
-    runtime?.enters.push({ epoch, baseline: runtime.humanItems })
-  }
-
-  /** Each Enter counts once a new message of the human's (no ConsensFlow header) is on record. */
-  async #releaseDraft(runtime, observed) {
-    const human = humanMessages(observed)
-    let expected = null
-    let released = null
-    for (const enter of runtime.enters) {
-      enter.baseline ??= runtime.humanItems ?? human
-      expected = Math.max(enter.baseline, expected ?? enter.baseline) + 1
-      if (human >= expected) released = enter
-    }
-    runtime.humanItems = human
-    if (released === null) return
-    runtime.enters = runtime.enters.filter((enter) => enter.epoch > released.epoch)
-    await this.#host
-      .request('draft.clear', {
-        ...runtime.pane,
-        epoch: released.epoch,
-        submission: `human-${human}`,
-      })
-      .catch(() => {})
-  }
-
   /** A worker's answer to its task's latest message finishes the task. */
   #collect(project, participant, observed) {
     const task = this.#ledger.activeTask(participant.id)
@@ -718,7 +679,7 @@ export class Dispatcher {
             project: project?.id ?? null,
             participant: project?.participants.find((p) => p.id === runtime.id)?.handle ?? null,
             message: message.id,
-            reason: `the window is not ready for a paste: ${typeof ready === 'string' ? ready : 'someone is typing there, or a paste is on its way'}`,
+            reason: `the window is not ready for a paste: ${typeof ready === 'string' ? ready : 'a paste is on its way'}`,
           })
         }
         return
@@ -848,8 +809,6 @@ export class Dispatcher {
       launchId,
       token,
       delivering,
-      enters: [],
-      humanItems: null,
       activity: { state: 'starting' },
       drawn: false,
     })
@@ -870,12 +829,6 @@ export class Dispatcher {
     if (started.nativeSession && started.nativeSession !== plan.nativeSession) {
       this.#ledger.bindConversation(conversationId, started.nativeSession)
     }
-    // The human's messages so far, counted before anyone can type into the
-    // window: an Enter is released only by a message after this count.
-    const opening = await adapter
-      .observe({ launch: plan.launch, pane, host: this.#host })
-      .catch(() => null)
-    if (opening !== null) runtime.humanItems = humanMessages(opening)
     this.#changed()
   }
 
@@ -1142,8 +1095,6 @@ export class Dispatcher {
         lowUntil: null,
         running: null,
         retiring: false,
-        enters: [],
-        humanItems: null,
         copied: null,
         interrupted: null,
         pinned: false,

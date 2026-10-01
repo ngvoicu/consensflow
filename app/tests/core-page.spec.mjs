@@ -998,7 +998,9 @@ test('a note from an agent reads in its own list, marked read when seen', async 
   await expect.poll(() => calls(page, 'message.read')).toEqual([{ message: 16 }])
 })
 
-test('typed text is a draft the pane guards; arrows, mouse and Escape are not', async ({
+// Every key goes to the pane as typed, in order, and none of it holds a paste:
+// text the human leaves unsent no longer keeps a delivery out (2026-10-01).
+test('every key the human types reaches the pane in order, flagged as nothing', async ({
   page,
 }) => {
   await open(page)
@@ -1013,17 +1015,15 @@ test('typed text is a draft the pane guards; arrows, mouse and Escape are not', 
       page.evaluate(() =>
         window.__calls
           .filter(([command]) => command === 'pane_input_enqueue')
-          .map(([, args]) => [String.fromCharCode(...args.bytes).slice(0, 3), args.draft ?? true]),
+          .map(([, args]) => [String.fromCharCode(...args.bytes).slice(0, 3), Object.keys(args)]),
       ),
     )
-    .toEqual([
-      ['h', true],
-      ['\r', true],
-      ['\x1b[A', false],
-      ['\x1b[<', false],
-      ['\x1b', false],
-      ['\x1b[2', true],
-    ])
+    .toEqual(
+      ['h', '\r', '\x1b[A', '\x1b[<', '\x1b', '\x1b[2'].map((start) => [
+        start,
+        ['id', 'generation', 'sequence', 'bytes'],
+      ]),
+    )
 })
 
 test('shows the staff as one row per member and role, and adds any saved agent in any role', async ({

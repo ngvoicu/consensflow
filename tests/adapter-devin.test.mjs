@@ -145,16 +145,16 @@ describe('the Devin adapter', () => {
     })
   })
 
-  it('pastes only into the conversation it knows, and waits while the human is typing', async () => {
+  it('pastes only into the conversation it knows, whatever the human left unsent', async () => {
     await withHome(async ({ env }) => {
       const adapter = devinAdapter({ env })
       const { launch } = await adapter.prepare(request({ resume: 'mild-coin', message: null }))
       const requests = []
-      let draftLatched = false
+      let pasteInFlight = false
       const host = {
         async request(op, body) {
           requests.push([op, body])
-          if (op === 'pane.snapshot') return { ok: true, inputEpoch: 4, draftLatched }
+          if (op === 'pane.snapshot') return { ok: true, pasteInFlight }
           return { ok: true }
         },
       }
@@ -171,10 +171,10 @@ describe('the Devin adapter', () => {
       })
       assert.deepEqual(requests.at(-1), [
         'pane.write_paste',
-        { id: 's1-zeus', generation: 2, epoch: 4, body: 'hi' },
+        { id: 's1-zeus', generation: 2, body: 'hi' },
       ])
       assert.equal(await adapter.ready({ launch, pane, host }), true)
-      draftLatched = true
+      pasteInFlight = true
       assert.equal(await adapter.ready({ launch, pane, host }), false)
     })
   })

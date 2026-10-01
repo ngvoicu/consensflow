@@ -139,7 +139,7 @@ describe('the OpenCode adapter', () => {
     })
   })
 
-  it('delivers through the real channel: an epoch claim, then the plugin', async () => {
+  it('delivers through the real channel: a claim, then the plugin', async () => {
     await withHome(async ({ env }) => {
       const posted = []
       let answer = { ok: true, admitted: true }
@@ -165,7 +165,6 @@ describe('the OpenCode adapter', () => {
         const claims = []
         const host = {
           async request(op, body) {
-            if (op === 'pane.snapshot') return { ok: true, inputEpoch: 7 }
             claims.push([op, body])
             return { ok: true }
           },
@@ -175,9 +174,7 @@ describe('the OpenCode adapter', () => {
           admitted: true,
           queued: true,
         })
-        assert.deepEqual(claims, [
-          ['pane.claim_native_epoch', { pane: 's1-zeus', generation: 2, epoch: 7 }],
-        ])
+        assert.deepEqual(claims, [['pane.claim', { pane: 's1-zeus', generation: 2 }]])
         assert.equal(posted[0].url, '/deliver')
         assert.equal(posted[0].auth, `Bearer ${'t'.repeat(32)}`)
         assert.deepEqual(

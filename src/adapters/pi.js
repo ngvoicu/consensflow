@@ -69,13 +69,6 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
     },
 
     async deliver({ launch, pane, host, text }) {
-      const snapshot = await host.request('pane.snapshot', pane)
-      if (snapshot?.ok !== true) {
-        return {
-          admitted: false,
-          reason: `the window cannot be read: ${snapshot?.error ?? 'no answer'}`,
-        }
-      }
       const sent = await send(
         {
           launch: launch.channel,
@@ -83,7 +76,6 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
           bridge: host,
           pane: pane.id,
           generation: pane.generation,
-          epoch: snapshot.inputEpoch,
         },
         text,
       )

@@ -202,7 +202,8 @@ or clean installation. Gabriel subsequently directed that no backups be retained
       decision; PTY silence is a polling hint only. Otherwise the delivery
       waits, visibly, with its reason; **Deliver now** bypasses policy —
       never readiness, never a latched draft, and the blocked button says
-      why
+      why. *(Reversed 2026-10-01: a draft holds nothing; see "Drafts and
+      recovery".)*
 - [x] Every delivery is a record: id, source answer, target session and
       generation, payload digest, pre-submission transcript cursor, state
       `pending | submitting | accepted | uncertain | failed | cancelled`;
@@ -415,6 +416,17 @@ This applies equally to worker follow-ups. `cf read` needs no input recovery
 because it returns complete result parts through the lead's tool channel.
 The old `draft.clear` Node bridge endpoint is removed. Knowing an Enter
 epoch, including the current one, never authorizes a Node-side clear.
+
+**Reversed 2026-10-01: unsent text holds nothing.** Asked whether a result
+should wait while the human has typed in the chief's window but not sent it,
+the owner chose "Send right away": an idle window gets its message at once.
+On Claude Code, Codex and Devin the paste goes in behind whatever the input
+box holds and both are submitted together; Pi and OpenCode deliver through
+their own channels and leave the text where it is. Gone: the draft latch, the
+input epoch, `draft.clear`, `pane.enter`, the page's draft flag on keystrokes
+and every harness's draft guard. Rust still holds the human's keys while a
+paste goes in, so none land inside it, and `pane.claim` admits a native send
+on the pane's generation, working input and no paste in flight.
 
 **Session replacement.** A harness can replace its native session without
 replacing its process or pane (`/new`, `/resume`, a fork; pi has explicit

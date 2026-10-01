@@ -51,8 +51,7 @@ async function fixture(t) {
     session,
     pane: 'p-1',
     generation: 1,
-    epoch: 17,
-    launch: { kind: 'claude-peer', configDir: root, preservesDraft: 1 },
+    launch: { kind: 'claude-peer', configDir: root },
     bridge: {
       request: async (op, body) => {
         calls.push({ op, body })
@@ -84,7 +83,7 @@ test(
     assert.equal(f.calls.length, 1)
     assert.equal(f.calls[0].op, 'pane.send_peer')
     const { body } = f.calls[0]
-    assert.equal(body.epoch, 17)
+    assert.equal(body.epoch, undefined, 'the bridge refuses a field it does not know')
     assert.equal(body.peerPid, f.native.pid)
     const [auth, message] = body.body.trimEnd().split('\n').map(JSON.parse)
     assert.equal(auth.type, 'auth')

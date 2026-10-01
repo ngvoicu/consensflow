@@ -107,6 +107,7 @@ opens panes or types into them.
 - [x] [IMPL-BDC-10] Dispatcher (`src/core/dispatcher.js`), pane host (`pane-host.js`) and the daemon entry (`daemon.js`); satisfies TEST-BDC-09.
 - [x] [TEST-BDC-22] A human's Enter releases the typing latch once the harness records that submission; typing after it keeps the latch. Found by the Stage 2 harness map: no production code ever calls `clear_draft`, so one keystroke blocks every later paste into that window (Devin always pastes).
 - [x] [IMPL-BDC-23] Rust `draft.clear` bridge operation and the core's use of `pane.enter`; satisfies TEST-BDC-22.
+  - Removed 2026-10-01 with the latch itself: the owner chose that unsent text holds no delivery ("Send right away"), so there is nothing to release. See standalone-panes-delivery, "Drafts and recovery".
 
 ### Phase D: CLI, API and role skills [active]
 

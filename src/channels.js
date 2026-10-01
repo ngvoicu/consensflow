@@ -105,7 +105,6 @@ export async function launchConfiguration(kind, input) {
       env: {},
       channel: {
         kind: 'claude-peer',
-        preservesDraft: 1,
         launchId,
         configDir: resolve(env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? homedir(), '.claude')),
         ackTimeoutMs: 3000,
@@ -122,7 +121,6 @@ export async function launchConfiguration(kind, input) {
       channel: {
         kind: 'codex-queue',
         sessionBridge: { endpoint: `http://127.0.0.1:${port}`, token },
-        preservesDraft: 1,
         launchId,
         executable: input.executable,
         cwd: workspace,
@@ -159,7 +157,6 @@ export async function launchConfiguration(kind, input) {
       },
       channel: {
         kind: 'opencode-server',
-        preservesDraft: 1,
         launchId,
         endpoint,
         password,
@@ -197,13 +194,11 @@ export async function launchConfiguration(kind, input) {
         CF_DELIVERY_SETTLED: settled,
         CF_DELIVERY_EXPIRED: expired,
         CF_DELIVERY_LAUNCH_ID: launchId,
-        CF_DELIVERY_EDITOR_GUARD: '1',
         CF_DELIVERY_ACK_TIMEOUT_MS: String(ackTimeoutMs),
         CF_DELIVERY_EXTENSION_ACK_TIMEOUT_MS: String(extensionAckTimeoutMs),
       },
       channel: {
         kind: 'pi-extension',
-        editorGuard: 1,
         launchId,
         inbox,
         ack,

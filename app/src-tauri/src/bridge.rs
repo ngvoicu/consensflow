@@ -1898,7 +1898,7 @@ mod tests {
         fn rust_requests_events_and_responses_have_the_exact_frame_shape() {
             let (event_sender, event_receiver) = std::sync::mpsc::channel();
             let mut builder = BridgeBuilder::new(1024);
-            builder.on_event("pane.enter", move |body| {
+            builder.on_event("state.changed", move |body| {
                 event_sender.send(body).expect("record event");
             });
             let (connected, mut peer) = connect(builder, None);
@@ -1952,14 +1952,14 @@ mod tests {
                 "v":1,
                 "id":"n-2",
                 "kind":"evt",
-                "op":"pane.enter",
-                "body":{"epoch":9}
+                "op":"state.changed",
+                "body":{"reason":"board"}
             }));
             assert_eq!(
                 event_receiver
                     .recv_timeout(Duration::from_secs(1))
-                    .expect("receive pane.enter"),
-                json!({"epoch":9})
+                    .expect("receive state.changed"),
+                json!({"reason":"board"})
             );
         }
 
