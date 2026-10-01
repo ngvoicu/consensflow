@@ -258,3 +258,17 @@ test('kimi: the selected K3 effort reaches a resumed window through its environm
     assert.throws(() => interactiveResume(agent, 'session_abc'), /low.*high.*max/)
   }
 })
+
+test('window: devin joins a family and its level into the model id it writes', () => {
+  // Devin writes the level into the id (claude-opus-5-5-max); a catalog row
+  // names the family and the effort (2026-10-01).
+  const model = (agent) => {
+    const w = interactiveStart({ kind: 'devin', ...agent }, null, 's')
+    const at = w.args.indexOf('--model')
+    return at === -1 ? null : w.args[at + 1]
+  }
+  assert.equal(model({ model: 'claude-opus-5-5', effort: 'max' }), 'claude-opus-5-5-max')
+  assert.equal(model({ model: 'gpt-6-1-sol', effort: 'low' }), 'gpt-6-1-sol-low')
+  assert.equal(model({ model: 'swe-1-6-slow' }), 'swe-1-6-slow', 'an id without a level as it is')
+  assert.equal(model({ model: 'default', effort: 'max' }), null, "Devin's own setting")
+})

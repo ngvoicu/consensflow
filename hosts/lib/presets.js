@@ -91,6 +91,263 @@ export const AGENT_PRESETS = [
     kind: "devin",
     model: "default",
   },
+  // --- Devin's flagship models (Egyptian names, 2026-10-01) ---------------
+  // Devin lists 54 model families; these are the ladders Claude Code and Codex
+  // carry, at the same levels, and Devin's own SWE-2. Devin writes the level
+  // into the model id (claude-opus-5-5-max): a row names the family and the
+  // effort, and the launch joins them (windows.js). Each family answered
+  // "Upgrade to Pro to access this model" on the owner's plan (probed one level
+  // each with `devin -p`), so each says it needs Devin Pro.
+  {
+    preset: "thoth",
+    id: "thoth",
+    name: "Thoth",
+    label: "Devin Claude Fable 5.1 MAX",
+    description: "Complex debugging, architecture and detailed review.",
+    kind: "devin",
+    model: "claude-fable-5-1",
+    effort: "max",
+  },
+  {
+    preset: "seshat",
+    id: "seshat",
+    name: "Seshat",
+    label: "Devin Claude Fable 5.1 XHIGH",
+    description: "Complex debugging, architecture and detailed review.",
+    kind: "devin",
+    model: "claude-fable-5-1",
+    effort: "xhigh",
+  },
+  {
+    preset: "maat",
+    id: "maat",
+    name: "Maat",
+    label: "Devin Claude Fable 5.1 HIGH",
+    description: "Complex debugging, architecture and detailed review.",
+    kind: "devin",
+    model: "claude-fable-5-1",
+    effort: "high",
+  },
+  {
+    preset: "khonsu",
+    id: "khonsu",
+    name: "Khonsu",
+    label: "Devin Claude Fable 5.1 MEDIUM",
+    description: "Implementation, code review and planning.",
+    kind: "devin",
+    model: "claude-fable-5-1",
+    effort: "medium",
+  },
+  {
+    preset: "shu",
+    id: "shu",
+    name: "Shu",
+    label: "Devin Claude Fable 5.1 LOW",
+    description: "Small code changes and focused reviews.",
+    kind: "devin",
+    model: "claude-fable-5-1",
+    effort: "low",
+  },
+  {
+    preset: "osiris",
+    id: "osiris",
+    name: "Osiris",
+    label: "Devin Claude Opus 5.5 MAX",
+    description: "Feature work, code review and technical planning.",
+    kind: "devin",
+    model: "claude-opus-5-5",
+    effort: "max",
+  },
+  {
+    preset: "isis",
+    id: "isis",
+    name: "Isis",
+    label: "Devin Claude Opus 5.5 XHIGH",
+    description: "Feature work, code review and technical planning.",
+    kind: "devin",
+    model: "claude-opus-5-5",
+    effort: "xhigh",
+  },
+  {
+    preset: "horus",
+    id: "horus",
+    name: "Horus",
+    label: "Devin Claude Opus 5.5 HIGH",
+    description: "Feature work, code review and technical planning.",
+    kind: "devin",
+    model: "claude-opus-5-5",
+    effort: "high",
+  },
+  {
+    preset: "anubis",
+    id: "anubis",
+    name: "Anubis",
+    label: "Devin Claude Opus 5.5 MEDIUM",
+    description: "Feature work, code review and technical planning.",
+    kind: "devin",
+    model: "claude-opus-5-5",
+    effort: "medium",
+  },
+  {
+    preset: "ptah",
+    id: "ptah",
+    name: "Ptah",
+    label: "Devin Claude Sonnet 5.5 MAX",
+    description: "Everyday implementation and tests.",
+    kind: "devin",
+    model: "claude-sonnet-5-5",
+    effort: "max",
+  },
+  {
+    preset: "sekhmet",
+    id: "sekhmet",
+    name: "Sekhmet",
+    label: "Devin Claude Sonnet 5.5 XHIGH",
+    description: "Implementation, code review and planning.",
+    kind: "devin",
+    model: "claude-sonnet-5-5",
+    effort: "xhigh",
+  },
+  {
+    preset: "bastet",
+    id: "bastet",
+    name: "Bastet",
+    label: "Devin Claude Sonnet 5.5 MEDIUM",
+    description: "Small code changes and focused reviews.",
+    kind: "devin",
+    model: "claude-sonnet-5-5",
+    effort: "medium",
+  },
+  {
+    preset: "amun",
+    id: "amun",
+    name: "Amun",
+    label: "Devin GPT 6 Astra MAX",
+    description: "Complex debugging, architecture and detailed review.",
+    kind: "devin",
+    model: "gpt-6-astra",
+    effort: "max",
+  },
+  {
+    preset: "aten",
+    id: "aten",
+    name: "Aten",
+    label: "Devin GPT 6 Astra XHIGH",
+    description: "Complex debugging, architecture and detailed review.",
+    kind: "devin",
+    model: "gpt-6-astra",
+    effort: "xhigh",
+  },
+  {
+    preset: "hathor",
+    id: "hathor",
+    name: "Hathor",
+    label: "Devin GPT 6 Astra HIGH",
+    description: "Complex debugging, architecture and detailed review.",
+    kind: "devin",
+    model: "gpt-6-astra",
+    effort: "high",
+  },
+  {
+    preset: "nut",
+    id: "nut",
+    name: "Nut",
+    label: "Devin GPT 6 Astra MEDIUM",
+    description: "Implementation, code review and planning.",
+    kind: "devin",
+    model: "gpt-6-astra",
+    effort: "medium",
+  },
+  {
+    preset: "geb",
+    id: "geb",
+    name: "Geb",
+    label: "Devin GPT 6 Astra LOW",
+    description: "Small code changes and focused reviews.",
+    kind: "devin",
+    model: "gpt-6-astra",
+    effort: "low",
+  },
+  {
+    preset: "ra",
+    id: "ra",
+    name: "Ra",
+    label: "Devin GPT 6.1 Sol MAX",
+    description: "Feature work, code review and technical planning.",
+    kind: "devin",
+    model: "gpt-6-1-sol",
+    effort: "max",
+  },
+  {
+    preset: "khepri",
+    id: "khepri",
+    name: "Khepri",
+    label: "Devin GPT 6.1 Sol XHIGH",
+    description: "Feature work, code review and technical planning.",
+    kind: "devin",
+    model: "gpt-6-1-sol",
+    effort: "xhigh",
+  },
+  {
+    preset: "atum",
+    id: "atum",
+    name: "Atum",
+    label: "Devin GPT 6.1 Sol HIGH",
+    description: "Feature work, code review and technical planning.",
+    kind: "devin",
+    model: "gpt-6-1-sol",
+    effort: "high",
+  },
+  {
+    preset: "tefnut",
+    id: "tefnut",
+    name: "Tefnut",
+    label: "Devin GPT 6.1 Sol MEDIUM",
+    description: "Implementation, code review and planning.",
+    kind: "devin",
+    model: "gpt-6-1-sol",
+    effort: "medium",
+  },
+  {
+    preset: "nephthys",
+    id: "nephthys",
+    name: "Nephthys",
+    label: "Devin GPT 6.1 Sol LOW",
+    description: "Small code changes and focused reviews.",
+    kind: "devin",
+    model: "gpt-6-1-sol",
+    effort: "low",
+  },
+  {
+    preset: "sobek",
+    id: "sobek",
+    name: "Sobek",
+    label: "Devin SWE-2 MAX",
+    description: "Devin’s own model at its deepest: hard problems and reviews.",
+    kind: "devin",
+    model: "swe-2",
+    effort: "max",
+  },
+  {
+    preset: "neith",
+    id: "neith",
+    name: "Neith",
+    label: "Devin SWE-2 HIGH",
+    description: "Devin’s own model: demanding implementation and reviews.",
+    kind: "devin",
+    model: "swe-2",
+    effort: "high",
+  },
+  {
+    preset: "wadjet",
+    id: "wadjet",
+    name: "Wadjet",
+    label: "Devin SWE-2 MEDIUM",
+    description: "Devin’s own model: everyday implementation and tests.",
+    kind: "devin",
+    model: "swe-2",
+    effort: "medium",
+  },
   // Lower-effort choices; existing names and higher tiers stay stable.
   {
     preset: "hemera",
@@ -1156,7 +1413,14 @@ const MODEL_LABELS = {
   'laguna-s-2.1:free': 'Laguna S 2.1 (free)',
   'muse-spark-1.3': 'Muse Spark 1.3',
   'mimo-v2.6-pro': 'MiMo V2.6 Pro',
+  'swe-2': 'SWE-2',
 }
+
+// Devin families its paid plan gates: each answered "Upgrade to Pro to access
+// this model" on 2026-10-01.
+const DEVIN_PRO = new Set(['claude-fable-5.1', 'claude-opus-5.5', 'claude-sonnet-5.5', 'gpt-6-astra', 'gpt-6.1-sol', 'swe-2']);
+
+
 
 export const WORK_TIERS = {
   critical: { label: 'Critical work', description: 'Important reviews, architecture, hard problems and important questions. No coding or routine advice.' },
@@ -1197,7 +1461,9 @@ export function agentProfile(agent) {
 function modelProfile({ harness, kind, model, effort, thinking }) {
   harness ??= kind === "claude-code" ? "claude" : kind
   if (harness === "pi") effort = thinking ?? effort
-  if (harness === 'devin') return {
+  const known = AGENT_PRESETS.some((p) => (p.kind === "claude-code" ? "claude" : p.kind) === harness && p.model === model)
+  // Devin's own setting, or an agent off the catalog on whatever id it names.
+  if (harness === 'devin' && (!known || !model || model === 'default')) return {
     modelKey: model && model !== 'default' ? model : 'devin-configured',
     modelLabel: model && model !== 'default' ? model : 'Devin configured model',
     routeLabel: 'Devin account',
@@ -1208,7 +1474,6 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
       modelLabel: 'Codex Images',
       routeLabel: 'Codex login',
     }
-  const known = AGENT_PRESETS.some((p) => (p.kind === "claude-code" ? "claude" : p.kind) === harness && p.model === model)
   // Strip provider paths only AFTER an exact curated model/harness match.
   const key = known
     ? model
@@ -1216,10 +1481,13 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
         .at(-1)
         // Anthropic's own ids spell the version with a dash; the key with the dot, as OpenRouter does.
         .replace(/^claude-(fable|opus|sonnet)-(\d)-(\d)$/, 'claude-$1-$2.$3')
+        // Devin spells GPT versions with dashes too (gpt-6-1-sol).
+        .replace(/^gpt-(\d)-(\d)-([a-z]+)$/, 'gpt-$1.$2-$3')
         // Contributor/free are reviewed pricing and data-use routes for Muse 1.3.
         .replace(/^muse-spark-1\.3-contributor(?:-free)?$/, 'muse-spark-1.3')
     : (model ?? "default")
   const contributor = known && key === 'muse-spark-1.3' && model.includes('-contributor')
+  const devinPro = harness === 'devin' && DEVIN_PRO.has(key)
   const routeLabel = model?.startsWith('openrouter/')
     ? 'OpenRouter · API'
     : model?.startsWith('opencode/')
@@ -1228,7 +1496,7 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
           ? 'Codex subscription'
           : model?.startsWith('anthropic/')
             ? 'Anthropic · API'
-            : ({ claude: 'Claude Code account', codex: 'Codex login', kimi: 'Kimi Code account' }[
+            : ({ claude: 'Claude Code account', codex: 'Codex login', kimi: 'Kimi Code account', devin: 'Devin account' }[
                 harness
               ] ?? harness)
   return {
@@ -1236,6 +1504,7 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
     modelLabel: (known && MODEL_LABELS[key]) || model || "Default",
     routeLabel: routeLabel + (contributor ? (model.endsWith('-free') ? ' · Contributor · Free' : ' · Contributor') : ''),
     ...(contributor ? { routeNote: 'Prompts and replies may train Meta models.' } : {}),
+    ...(devinPro ? { routeNote: 'Needs a Devin Pro plan.' } : {}),
   }
 }
 

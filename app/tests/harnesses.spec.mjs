@@ -120,9 +120,9 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
   page.on('request', (request) => requests.push(new URL(request.url()).pathname))
   try {
     await page.goto(`${server.url}/?token=${server.token}`)
-    await expect(page.locator('#agents-count')).toHaveText('94 of 94 shown')
+    await expect(page.locator('#agents-count')).toHaveText('119 of 119 shown')
     await expect(page.locator('#lede')).toHaveText(
-      '94 agents, the catalog’s and your own; a project’s staff is picked from them.',
+      '119 agents, the catalog’s and your own; a project’s staff is picked from them.',
     )
     await expect(page.locator('#agents .offer')).toHaveCount(0)
     await expect(page.locator('#agents').getByRole('button', { name: /^Add/ })).toHaveCount(0)
@@ -157,7 +157,7 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
     expect(listAgents(t.env).find((a) => a.name === 'custom').workTier).toBe('complex')
     await expect(form.getByLabel('Work tier')).toHaveValue('auto')
     await expect(page.locator('#lede')).toContainText('1 is yours')
-    await expect(page.locator('#agents-count')).toHaveText('95 of 95 shown')
+    await expect(page.locator('#agents-count')).toHaveText('120 of 120 shown')
     // A catalog name is not yours to define again.
     await form.locator('[name="name"]').fill('gefjon')
     await form.locator('[name="harness"]').selectOption('claude')
@@ -568,12 +568,13 @@ test('model capability order takes precedence over agent names and reasoning eff
             group === 'model-reasoning' ? '.agent-group h3' : '.member__head > .tag:not(.tag--own)',
           )
           .allTextContents()
-        expect([...new Set(labels.map((label) => label.split(' · ')[0]))]).toEqual([
-          'GPT-6 Astra',
-          'GPT-6.1 Sol',
-          'GPT-5.6 Terra',
-          'GPT-5.6 Luna',
-        ])
+        // In capability order, whichever of them a group holds (Devin's: Astra and Sol).
+        const shown = [...new Set(labels.map((label) => label.split(' · ')[0]))]
+        expect(shown).toEqual(
+          ['GPT-6 Astra', 'GPT-6.1 Sol', 'GPT-5.6 Terra', 'GPT-5.6 Luna'].filter((name) =>
+            shown.includes(name),
+          ),
+        )
       }
     }
   } finally {
@@ -688,13 +689,13 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
         'Work tier',
       ])
       await expect(screen.getByRole('heading', { level: 3 })).toHaveCount(0)
-      await expect(screen.locator('#agents-count')).toHaveText('102 of 102 shown')
+      await expect(screen.locator('#agents-count')).toHaveText('127 of 127 shown')
     }
     await fixture.saved(own)
     await expect(own.locator('#agents-count')).toHaveText('8 of 8 shown')
     await search.fill('Astra')
     await expect(own.locator('#agents-count')).toHaveText('5 of 8 shown')
-    await expect(page.locator('#agents-count')).toHaveText('102 of 102 shown')
+    await expect(page.locator('#agents-count')).toHaveText('127 of 127 shown')
     await expect(own.locator('.callsign')).toHaveCount(5)
     await group.selectOption('model-reasoning')
     await expect(own.getByRole('heading', { level: 3 })).toHaveCount(4)
@@ -703,26 +704,28 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     ).toBeVisible()
     await page.getByRole('searchbox').fill('Astra')
     await page.getByLabel('Group by').selectOption('model-reasoning')
-    await expect(page.locator('#agents-count')).toHaveText('20 of 102 shown')
+    await expect(page.locator('#agents-count')).toHaveText('25 of 127 shown')
     await expect(page.getByRole('heading', { level: 3 })).toHaveText([
-      'GPT-6 Astra · Max · 3',
-      'GPT-6 Astra · Xhigh · 5',
-      'GPT-6 Astra · High · 3',
-      'GPT-6 Astra · Medium · 3',
-      'GPT-6 Astra · Low · 4',
+      'GPT-6 Astra · Max · 4',
+      'GPT-6 Astra · Xhigh · 6',
+      'GPT-6 Astra · High · 4',
+      'GPT-6 Astra · Medium · 4',
+      'GPT-6 Astra · Low · 5',
       'GPT-6 Astra · Minimal · 1',
       'GPT-6 Astra · Off · 1',
     ])
     const cardOf = (name) =>
       page.locator('.agent-group').filter({ has: page.getByRole('heading', { name, exact: true }) })
-    await expect(cardOf('GPT-6 Astra · Medium · 3').locator('.callsign')).toHaveText([
+    await expect(cardOf('GPT-6 Astra · Medium · 4').locator('.callsign')).toHaveText([
       'maia',
       'merope',
+      'nut',
       'skirnir',
     ])
     // An agent defined by hand sits with the catalog's agents of its model and reasoning.
-    await expect(cardOf('GPT-6 Astra · Xhigh · 5').locator('.callsign')).toHaveText([
+    await expect(cardOf('GPT-6 Astra · Xhigh · 6').locator('.callsign')).toHaveText([
       'asteria',
+      'aten',
       'chief-one',
       'delling',
       'hesperos',
@@ -731,7 +734,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     await expect(own.locator('.callsign')).toHaveCount(5)
     await search.fill('OpenRouter')
     await expect(own.locator('#agents')).toContainText('No agents match')
-    await expect(page.locator('#agents-count')).toHaveText('20 of 102 shown')
+    await expect(page.locator('#agents-count')).toHaveText('25 of 127 shown')
     await own.getByRole('button', { name: 'Clear filters' }).click()
     await expect(search).toHaveValue('')
     await expect(group).toHaveValue('model-reasoning')
@@ -752,11 +755,12 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
       'Codex · 8',
       'OpenCode · 5',
       'Pi · 7',
+      'Devin · 5',
     ])
     await page.getByRole('button', { name: 'Clear filters' }).click()
     await expect(page.getByRole('searchbox')).toHaveValue('')
     await expect(page.getByLabel('Group by')).toHaveValue('model-reasoning')
-    await expect(page.getByRole('heading', { level: 3 })).toHaveCount(47)
+    await expect(page.getByRole('heading', { level: 3 })).toHaveCount(50)
     await expect(group).toHaveValue('harness')
     await group.selectOption('model-reasoning')
     for (const name of [
@@ -770,7 +774,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     ]) {
       await expect(own.getByRole('heading', { name, exact: true })).toBeVisible()
     }
-    await expect(page.locator('#agents-count')).toHaveText('102 of 102 shown')
+    await expect(page.locator('#agents-count')).toHaveText('127 of 127 shown')
     await expect(member(page, 'astraeus')).toBeVisible()
     // No description of a model anywhere: its tier and scores say it all.
     await expect(page.locator('#agents')).not.toContainText('Good for')
@@ -816,7 +820,7 @@ test('shared model cards default to every model and reasoning across all harness
       if (!expected.has(key)) expected.set(key, [])
       expected.get(key).push(p.name)
     }
-    expect([...expected.values()].filter((names) => names.length > 1)).toHaveLength(31)
+    expect([...expected.values()].filter((names) => names.length > 1)).toHaveLength(37)
     for (const screen of [page, fixture.second]) {
       await expect(screen.getByLabel('Group by')).toHaveValue('model-reasoning')
       const cards = screen.locator('.model-group')
@@ -884,7 +888,7 @@ test('shared model cards return after reload and Clear filters in both tabs', as
   try {
     for (const screen of [page, fixture.second]) {
       const card = screen.locator('.model-group').filter({
-        has: screen.getByRole('heading', { name: 'Claude Fable 5.1 · Xhigh · 3', exact: true }),
+        has: screen.getByRole('heading', { name: 'Claude Fable 5.1 · Xhigh · 4', exact: true }),
       })
       await expect(card.locator('.model-summary .tier-pill')).toHaveCount(1)
       for (const alternate of ['none', 'harness']) {
@@ -895,7 +899,7 @@ test('shared model cards return after reload and Clear filters in both tabs', as
         await expect(screen.getByLabel('Group by')).toHaveValue('model-reasoning')
         await expect(screen.getByRole('searchbox')).toHaveValue('')
         await expect(card.locator('.model-summary .tier-pill')).toHaveCount(1)
-        await expect(card.locator('.member')).toHaveCount(3)
+        await expect(card.locator('.member')).toHaveCount(4)
       }
       await screen.reload()
       await expect(screen.getByLabel('Group by')).toHaveValue('model-reasoning')
@@ -917,13 +921,14 @@ test('a model card keeps its shared tier while an agent of your own joins and le
     const card = page
       .locator('.model-group')
       .filter({ has: page.getByRole('heading', { name: /^Claude Fable 5.1 · Xhigh ·/ }) })
-    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 3')
+    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 4')
     await expect(card.locator('.model-summary .tier-pill')).toHaveCount(1)
-    // Three harnesses run this model at this effort; each row says which.
+    // Four harnesses run this model at this effort; each row says which.
     await expect(card.locator('.member__head > .tag:not(.tag--own)')).toHaveText([
       'Claude Code',
       'Pi',
       'OpenCode',
+      'Devin',
     ])
     await expect(card.getByRole('button')).toHaveCount(0)
     await page.screenshot({ path: '/tmp/cf-model-card-fable.png' })
@@ -935,12 +940,12 @@ test('a model card keeps its shared tier while an agent of your own joins and le
     await form.getByRole('button', { name: 'Add agent' }).click()
     await expect(member(second, 'my-fable')).toBeVisible()
     await refreshAgents(page)
-    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 4')
+    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 5')
     await expect(card.locator('.model-summary .tier-pill')).toHaveCount(1)
     await expect(card.locator('.member .tier-pill')).toHaveCount(0)
     await expect(page.getByRole('searchbox')).toHaveValue('Fable')
     await member(page, 'my-fable').getByRole('button', { name: 'Remove', exact: true }).click()
-    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 3')
+    await expect(card.locator('h3')).toHaveText('Claude Fable 5.1 · Xhigh · 4')
     expect(listAgents(fixture.t.env).some((p) => p.name === 'my-fable')).toBe(false)
   } finally {
     await fixture.close()

@@ -141,7 +141,11 @@ export function interactiveStart(agent, sessionId, seed) {
       return {
         command: 'devin',
         args: [
-          ...(agent.model && agent.model !== 'default' ? ['--model', agent.model] : []),
+          // Devin writes the level into the id (claude-opus-5-5-max): an agent
+          // names the family and its effort, joined here.
+          ...(agent.model && agent.model !== 'default'
+            ? ['--model', agent.effort ? `${agent.model}-${agent.effort}` : agent.model]
+            : []),
           ...YOLO.devin,
         ],
         ...(seed ? { prompt: seed } : {}),

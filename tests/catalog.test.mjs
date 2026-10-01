@@ -56,6 +56,8 @@ describe('every tool ships a list of ready-made agents', () => {
       // where OpenRouter's does: that is why ymir names `high` and audhumla,
       // the same model on the other road, names nothing.
       'audhumla', // Nemotron 3 Ultra free on OpenCode Zen
+      // Devin's configured model: its level is whatever Devin's settings say.
+      'devin',
       // MiMo V2.6 Pro (2026-09-30): reasoning on or off, no level in any catalog.
       'selene', // on pi
       'idun', // on opencode
@@ -290,7 +292,7 @@ it('ships all compatible low/medium choices with stable identities and Pi OpenRo
       assert.equal(entry.effort, effort)
     }
   }
-  assert.equal(Object.values(CATALOG).flat().length, 94)
+  assert.equal(Object.values(CATALOG).flat().length, 119)
   for (const name of ['orpheus', 'linus', 'erato', 'kronos', 'atlas']) {
     assert.match(catalogEntry(name).model, /^openrouter\/anthropic\//)
     assert.equal(catalogEntry(name).profile.routeLabel, 'OpenRouter · API')
@@ -338,7 +340,9 @@ it('Devin preserves the native configured model without inventing an effort or a
   assert.equal(entry.effort, undefined)
   assert.equal(entry.profile.modelKey, 'devin-configured')
   assert.equal(entry.profile.modelLabel, 'Devin configured model')
-  assert.deepEqual(EFFORTS.devin, [])
+  // The levels Devin writes into its model ids (claude-opus-5-5-max), for
+  // an agent that names a family; the configured model names none.
+  assert.deepEqual(EFFORTS.devin, ['low', 'medium', 'high', 'xhigh', 'max'])
 })
 
 it('assigns four work tiers by model and effort across routes, without agent-name rules', () => {
@@ -448,4 +452,42 @@ it('carries GPT-6.1 Sol wherever Sol was, Sonnet 5.5, and MiMo V2.6 Pro through 
     assert.equal(entry.profile.modelLabel, 'MiMo V2.6 Pro')
     assert.equal(entry.profile.routeLabel, 'OpenRouter · API')
   }
+})
+
+it("offers Devin's flagship models as presets, each on its twin's tier and marked for Devin Pro", () => {
+  // 2026-10-01: Devin lists 54 model families; the catalog carries the ladders
+  // Claude Code and Codex carry (Fable 5.1, Opus 5.5, Sonnet 5.5, GPT-6 Astra,
+  // GPT-6.1 Sol) and Devin's own SWE-2. Devin writes the level into the model
+  // id: a row names family and effort, and the launch joins them. Every one
+  // answered "Upgrade to Pro" on Gabriel's plan, so each says it needs Devin Pro.
+  const devin = CATALOG.devin.filter((entry) => entry.model !== 'default')
+  assert.equal(devin.length, 25)
+  const twins = [...CATALOG.claude, ...CATALOG.codex]
+  for (const entry of devin) {
+    const level = entry.effort
+    assert.ok(['low', 'medium', 'high', 'xhigh', 'max'].includes(level), entry.name)
+    assert.match(entry.description, new RegExp(`^Devin .+ ${level.toUpperCase()}$`), entry.name)
+    assert.equal(entry.profile.routeLabel, 'Devin account', entry.name)
+    assert.equal(entry.profile.routeNote, 'Needs a Devin Pro plan.', entry.name)
+    if (entry.model === 'swe-2') {
+      assert.equal(entry.profile.modelLabel, 'SWE-2', entry.name)
+      continue
+    }
+    const twin = twins.find(
+      (t) => t.profile.modelKey === entry.profile.modelKey && t.effort === level,
+    )
+    assert.ok(twin, `${entry.name}: ${entry.model} has a Claude Code or Codex twin`)
+    assert.equal(entry.profile.modelLabel, twin.profile.modelLabel, entry.name)
+    assert.equal(entry.profile.workTier, twin.profile.workTier, `${entry.name} and ${twin.name}`)
+  }
+  assert.deepEqual(
+    [catalogEntry('osiris').model, catalogEntry('osiris').profile.workTier],
+    ['claude-opus-5-5', 'critical'],
+  )
+  assert.deepEqual([catalogEntry('ra').model, catalogEntry('ra').effort], ['gpt-6-1-sol', 'max'])
+  // Devin's own configured model stays, with no note.
+  assert.deepEqual(
+    [catalogEntry('devin').profile.modelLabel, catalogEntry('devin').profile.routeNote],
+    ['Devin configured model', undefined],
+  )
 })

@@ -108,6 +108,16 @@ describe('the Devin adapter', () => {
     })
   })
 
+  it("launches a catalog agent on Devin's own id: the family with its level", async () => {
+    await withHome(async ({ env }) => {
+      const plan = await devinAdapter({ env }).prepare(
+        request({ agent: { model: 'claude-opus-5-5', effort: 'max' } }),
+      )
+      const at = plan.argv.indexOf('--model')
+      assert.equal(plan.argv[at + 1], 'claude-opus-5-5-max')
+    })
+  })
+
   it('resumes the session it has', async () => {
     await withHome(async ({ env }) => {
       const plan = await devinAdapter({ env }).prepare(

@@ -46,7 +46,11 @@ export function devinAdapter({
       })
       const runner = await prepareDevinPrompt(
         resume === null
-          ? interactiveStart({ kind: 'devin', model: agent?.model }, null, message)
+          ? interactiveStart(
+              { kind: 'devin', model: agent?.model, effort: agent?.effort },
+              null,
+              message,
+            )
           : interactiveResume({ kind: 'devin' }, resume, message),
         configuration,
       )

@@ -350,6 +350,7 @@ const MODEL_ORDER = [
   /^glm-[0-9.]+$/, /^glm-[0-9.]+-flash(?:-|$)/, /^glm-/,
   /^grok-/, /^kimi-/, /^laguna-/, /^mimo-/, /^minimax-/, /^muse-/, /^nemotron-/,
   /^qwen[0-9.]+-max(?:-|$)/, /^qwen[0-9.]+-27b(?:-|$)/, /^qwen[0-9]/,
+  /^swe-/,
   /^codex-image$/,
 ];
 function modelRank(key) {

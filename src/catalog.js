@@ -36,7 +36,9 @@ export const EFFORTS = {
   opencode: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
   // K3 uses the supported per-process KIMI_MODEL_THINKING_EFFORT control.
   kimi: KIMI_EFFORTS,
-  devin: [],
+  // Devin writes the level into its model id (claude-opus-5-5-max): an agent
+  // names the family and one of these, and the launch joins them.
+  devin: ['low', 'medium', 'high', 'xhigh', 'max'],
 }
 
 /**
