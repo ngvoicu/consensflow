@@ -233,6 +233,7 @@ describe('the Codex adapter', () => {
       // /new: while Codex starts the new thread, the broker names none...
       shown = { sessionId: null, available: false }
       const switching = await adapter.observe({ launch })
+      assert.equal(switching.unnamed, true)
       assert.match(switching.waiting?.reason ?? '', /cannot take a message yet/)
       assert.equal(await adapter.ready({ launch }), switching.waiting.reason)
       // ...then names it.

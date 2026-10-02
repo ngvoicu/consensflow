@@ -190,9 +190,10 @@ describe('the Pi adapter', () => {
         )
       }
       // Until its extension starts, Pi has not said which conversation it shows.
-      const unnamed = await adapter.observe({ launch })
-      assert.match(unnamed.waiting?.reason ?? '', /Pi has not said/)
-      assert.equal(await adapter.ready({ launch }), unnamed.waiting.reason)
+      const before = await adapter.observe({ launch })
+      assert.equal(before.unnamed, true)
+      assert.match(before.waiting?.reason ?? '', /Pi has not said/)
+      assert.equal(await adapter.ready({ launch }), before.waiting.reason)
       await shows(launch.nativeSession)
       assert.equal((await adapter.observe({ launch })).settled, true)
       assert.equal(await adapter.ready({ launch }), true)

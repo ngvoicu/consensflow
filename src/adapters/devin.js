@@ -14,6 +14,7 @@ import {
   recordState,
   SHOWS_ANOTHER,
   switchedTo,
+  unnamed,
   windowText,
 } from './shared.js'
 
@@ -117,7 +118,7 @@ export function devinAdapter({
         readWire(launch.channel),
       ])
       const observed = { ...recordState(record), waiting: dialogWaiting(record), quota }
-      if (shown === undefined) return { ...observed, waiting: { reason: HOLD } }
+      if (shown === undefined) return unnamed(observed, HOLD)
       return shown === launch.nativeSession ? observed : switchedTo(observed, shown)
     },
 

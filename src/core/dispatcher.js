@@ -555,13 +555,19 @@ export class Dispatcher {
     // Quota belongs to the member: a session that runs out takes its member out.
     const owner = this.#memberOf(project, participant)
     // A window with nothing in its record may still be drawing its screen:
-    // Pi and Devin read idle before they could take a keystroke.
-    const drawing = observed.items.length === 0 && !(await this.#drawn(runtime))
+    // Pi and Devin read idle before they could take a keystroke. One that
+    // has not said which conversation it shows (a resumed window has its
+    // record from the start) holds its messages, and is starting while it
+    // draws its screen or until it names its first conversation.
+    const unnamed = observed.unnamed === true
+    if (!unnamed) runtime.named = true
+    const drawing = (observed.items.length === 0 || unnamed) && !(await this.#drawn(runtime))
+    const starting = drawing || (unnamed && !runtime.named)
     // An out member's window says so, and nothing else, until the reset.
     if (!this.#isOut(owner)) {
       this.#setActivity(
         runtime,
-        drawing
+        starting
           ? { state: 'starting' }
           : observed.waiting
             ? { state: 'waiting', reason: observed.waiting.reason ?? null }
@@ -1168,6 +1174,7 @@ export class Dispatcher {
       delivering,
       activity: { state: 'starting' },
       drawn: false,
+      named: false,
     })
     // A window that exited before its open was answered goes as any exit does.
     if (exited) {

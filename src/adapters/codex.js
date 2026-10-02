@@ -13,6 +13,7 @@ import {
   recordState,
   SHOWS_ANOTHER,
   switchedTo,
+  unnamed,
   windowText,
 } from './shared.js'
 
@@ -190,7 +191,7 @@ export function codexAdapter({
         sessionState(launch.channel),
       ])
       const observed = { ...recordState(record), waiting: null }
-      if (typeof shown?.sessionId !== 'string') return { ...observed, waiting: { reason: HOLD } }
+      if (typeof shown?.sessionId !== 'string') return unnamed(observed, HOLD)
       return shown.sessionId === launch.nativeSession
         ? observed
         : switchedTo(observed, shown.sessionId)

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
+import { unnamed } from '../src/adapters/shared.js'
 import { Dispatcher, deliveryText } from '../src/core/dispatcher.js'
 import { openLedger } from '../src/ledger/index.js'
 
@@ -84,13 +85,15 @@ function fakeAdapter(harness = 'claude-code') {
           switched: { nativeSession: agent.shows },
         }
       }
-      return {
+      const observed = {
         items: [...agent.items],
         settled: agent.settled,
         waiting: agent.waiting,
         quota: agent.quota,
         failed: false,
       }
+      // A window that has not said which conversation it shows, and why a message waits.
+      return agent.unnamed === undefined ? observed : unnamed(observed, agent.unnamed)
     },
   }
   // A member's latest window: its own, or its newest session's (`zeus` finds `zeus-amber-pine`).
@@ -614,6 +617,53 @@ describe('the dispatcher', () => {
       context.host.snapshot = { outputQuietMs: 2_000 }
       await context.dispatcher.pass()
       assert.equal(context.dispatcher.activity(chief.id).state, 'idle')
+    })
+  })
+
+  it('reads a window that has not named its first conversation as starting, its messages held', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withStaff(context)
+      // A resumed window has its record from the start; its harness has not
+      // said yet which conversation the window shows.
+      const chief = context.adapter.agent('chief')
+      chief.items.push(item('user', 'earlier'), item('assistant', 'earlier answer'))
+      chief.unnamed = 'the window has not said yet which conversation it shows'
+      const note = context.ledger.note(project.id, { to: 'chief', body: 'A result came' })
+      await context.dispatcher.pass()
+      assert.deepEqual(context.dispatcher.activity(id('chief')), { state: 'starting' })
+      assert.equal(context.ledger.message(note.id).state, 'queued', 'its message waits')
+
+      chief.unnamed = undefined
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(note.id).state, 'delivered')
+      // Once the window has named one, showing none is a wait the board names.
+      chief.unnamed = 'the window shows no conversation: its session list is open'
+      await context.dispatcher.pass()
+      assert.deepEqual(context.dispatcher.activity(id('chief')), {
+        state: 'waiting',
+        reason: 'the window shows no conversation: its session list is open',
+      })
+    })
+  })
+
+  it('reads a window that names no conversation as starting while it still draws its screen', async () => {
+    await setup(async (context) => {
+      context.host.snapshot = { outputQuietMs: 300 }
+      const { id } = await withStaff(context)
+      const chief = context.adapter.agent('chief')
+      chief.items.push(item('user', 'earlier'), item('assistant', 'earlier answer'))
+      await context.dispatcher.pass()
+      assert.equal(context.dispatcher.activity(id('chief')).state, 'idle', 'it named its own')
+      chief.unnamed = 'the window is reconnecting'
+      await context.dispatcher.pass()
+      assert.deepEqual(context.dispatcher.activity(id('chief')), { state: 'starting' })
+      context.host.snapshot = { outputQuietMs: 2_000 }
+      await context.dispatcher.pass()
+      assert.deepEqual(context.dispatcher.activity(id('chief')), {
+        state: 'waiting',
+        reason: 'the window is reconnecting',
+      })
     })
   })
 

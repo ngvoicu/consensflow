@@ -49,6 +49,14 @@ export const switchedTo = (observed, nativeSession) => ({
 export const SHOWS_ANOTHER = 'the window shows another conversation'
 
 /**
+ * A window that has not said which conversation it shows (it is starting,
+ * switching conversations or reconnecting): a message waits, for this
+ * reason. Until the window has named its first conversation, or while it
+ * still draws its screen, the dispatcher reads it as starting, not waiting.
+ */
+export const unnamed = (observed, reason) => ({ ...observed, waiting: { reason }, unnamed: true })
+
+/**
  * Text as a window can take it, for a first message and every later one. The
  * pane host refuses a frame with half a character in it (the dispatcher cuts
  * a long body at 3,000 code units, and an emoji across the cut leaves its

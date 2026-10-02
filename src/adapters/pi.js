@@ -11,6 +11,7 @@ import {
   recordState,
   SHOWS_ANOTHER,
   switchedTo,
+  unnamed,
   windowText,
 } from './shared.js'
 
@@ -108,7 +109,7 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
         shownSession(launch.channel),
       ])
       const observed = { ...recordState(record), waiting: null }
-      if (shown === null) return { ...observed, waiting: { reason: HOLD } }
+      if (shown === null) return unnamed(observed, HOLD)
       return shown === launch.nativeSession ? observed : switchedTo(observed, shown)
     },
 

@@ -17,6 +17,7 @@ import {
   recordState,
   SHOWS_ANOTHER,
   switchedTo,
+  unnamed,
   windowText,
 } from './shared.js'
 
@@ -157,8 +158,11 @@ export function openCodeAdapter({
         settled: showing && !retrying && (state.settled || idle),
         waiting: dialogWaiting(record),
       }
-      if (window?.sessionId === null) return { ...observed, waiting: { reason: HOLD } }
-      return window === undefined || showing ? observed : switchedTo(observed, window.sessionId)
+      // Until its plugin answers, the window names no conversation: a message
+      // waits, as ready() holds it.
+      if (window === undefined) return unnamed(observed, STARTING)
+      if (window.sessionId === null) return unnamed(observed, HOLD)
+      return showing ? observed : switchedTo(observed, window.sessionId)
     },
 
     transcript({ launch }) {
