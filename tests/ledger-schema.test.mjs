@@ -333,6 +333,24 @@ describe('schema 7: a task deleted from the board keeps its row', () => {
         'every row, with its id and references; every task still on the board',
       )
       assert.deepEqual(after.schema, contents(fresh).schema, "the schema is a fresh ledger's")
+
+      // Its tasks, once finished, leave the board as a new ledger's do.
+      const ledger = openLedger(file, { now: clock(), names: names() })
+      try {
+        const [app] = ledger.projects()
+        const lanes = () =>
+          ledger
+            .board(app.id)
+            .lanes.flatMap((lane) => lane.tasks)
+            .map((task) => task.number)
+        ledger.cancelTask(app.id, 1, { by: 'human' })
+        ledger.cancelTask(app.id, 2, { by: 'human' })
+        assert.deepEqual(lanes(), [1])
+        ledger.deleteTasks(app.id, [1, 2])
+        assert.deepEqual(lanes(), [])
+      } finally {
+        ledger.close()
+      }
     })
   })
 
