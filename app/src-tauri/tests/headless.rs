@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, RawFd};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Mutex, MutexGuard};
 use std::thread;
@@ -247,8 +248,13 @@ impl Drop for Headless {
     }
 }
 
+/// A `pane.open` for a script, at an identity of its own, as the daemon names
+/// every pane it opens.
 fn open_body(script: &str, backlog_bytes: usize) -> Value {
+    static OPENED: AtomicU64 = AtomicU64::new(0);
     json!({
+        "id":format!("pane-{}", OPENED.fetch_add(1, Ordering::Relaxed) + 1),
+        "generation":1,
         "cwd":"/tmp",
         "argv":["/bin/sh","-c",script],
         "env":{},
@@ -692,24 +698,31 @@ fn parked_page_probe_stops_at_1024_then_drains_14400_bytes_via_wire_acks() {
         );
         ack_count += 1;
     }
+    // The window ends once its last output is read and leaves the table after
+    // its exit, so an ack that comes later has nothing left to free.
+    let mut ended = false;
+    let gone = json!({"ok":false,"error":format!("pane {pane_id} generation {generation} is not open")});
     while received_bytes < OUTPUT_BYTES {
         if events.is_empty() {
             events.push(helper.receive());
         }
-        let mut received = events
-            .drain(..)
-            .filter_map(|event| output_bytes(&event, &pane_id, generation))
-            .collect::<Vec<_>>();
-        for (seq, bytes) in received.drain(..) {
+        let mut received = Vec::new();
+        for event in events.drain(..) {
+            ended |= event["op"] == "pane.exit";
+            received.extend(output_bytes(&event, &pane_id, generation));
+        }
+        for (seq, bytes) in received {
             received_bytes += bytes.len();
             assert!(received_bytes <= OUTPUT_BYTES);
-            assert_eq!(
-                helper.request(
-                    "pane.ack",
-                    json!({"id":pane_id,"generation":generation,"seq":seq}),
-                    &mut events,
-                ),
-                json!({"ok":true})
+            let acked = helper.request(
+                "pane.ack",
+                json!({"id":pane_id,"generation":generation,"seq":seq}),
+                &mut events,
+            );
+            ended |= events.iter().any(|event| event["op"] == "pane.exit");
+            assert!(
+                acked == json!({"ok":true}) || (ended && acked == gone),
+                "{acked}"
             );
             ack_count += 1;
         }
@@ -1066,26 +1079,35 @@ fn kill_process_group(process_group_id: i32) {
     let _ = unsafe { kill(-process_group_id, SIGKILL) };
 }
 
+/// A window opens at the identity the daemon reserved for it, and only there:
+/// the daemon names every pane it opens, once.
 #[test]
-fn product_bridge_contract_preserves_app_identity_and_launch_deduplication() {
+fn product_bridge_contract_preserves_app_identity_and_opens_it_once() {
     let _pty_guard = serial_headless_test();
     let mut helper = Headless::spawn();
     let mut events = Vec::new();
     let body = json!({
-        "id":"product-pane", "generation":7, "launch":"product-launch",
-        "cwd":"/tmp", "argv":["/bin/cat"], "env":{}
+        "id":"product-pane", "generation":7, "cwd":"/tmp", "argv":["/bin/cat"], "env":{}
     });
     let opened = helper.request("pane.open", body.clone(), &mut events);
     assert_eq!(opened["ok"], true, "production open rejected: {opened}");
-    assert_eq!(opened["id"], "product-pane");
-    assert_eq!(opened["generation"], 7);
-    let duplicate = helper.request("pane.open", body, &mut events);
+    assert_eq!(opened, json!({"ok":true,"id":"product-pane","generation":7}));
     assert_eq!(
-        duplicate["ok"], true,
-        "duplicate launch rejected: {duplicate}"
+        helper.request("pane.open", body, &mut events),
+        json!({"ok":false,"error":"pane product-pane generation 7 is already open"})
     );
-    assert_eq!(duplicate["id"], "product-pane");
-    assert_eq!(duplicate["deduplicated"], true);
+    let unnamed = helper.request(
+        "pane.open",
+        json!({"cwd":"/tmp", "argv":["/bin/cat"], "env":{}}),
+        &mut events,
+    );
+    assert_eq!(unnamed["ok"], false, "an open with no identity: {unnamed}");
+    assert_eq!(
+        helper.request("pane.list", json!({}), &mut events)["panes"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
     helper.close_input_and_wait();
 }
 
@@ -1105,6 +1127,66 @@ fn product_bridge_contract_forwards_a_natural_pane_exit() {
         .expect("exit event");
     assert_eq!(ended["body"]["id"], opened["id"]);
     assert_eq!(ended["body"]["generation"], opened["generation"]);
+    helper.close_input_and_wait();
+}
+
+/// A window whose program ends on its own leaves the pane table after its
+/// `pane.exit`, its child reaped: nothing waits for a `pane.kill` the daemon
+/// never sends, and an update is not held up by a window long gone.
+#[test]
+fn a_pane_whose_program_exits_leaves_the_table_after_its_exit_event() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body("printf 'PID:%s:' \"$$\"; read line", 1024),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true);
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let printed = output_until(&helper, &mut events, &pane_id, generation, b":");
+    let pid = String::from_utf8_lossy(&printed)
+        .trim_start_matches("PID:")
+        .trim_end_matches(':')
+        .parse::<i32>()
+        .expect("the pane's pid");
+    assert!(process_exists(pid));
+
+    assert_eq!(
+        helper.request(
+            "pane.input",
+            json!({"id":pane_id,"generation":generation,"bytes":[13]}),
+            &mut events,
+        ),
+        json!({"ok":true})
+    );
+    while !events.iter().any(|event| event["op"] == "pane.exit") {
+        events.push(helper.receive());
+    }
+    let deadline = Instant::now() + FRAME_TIMEOUT;
+    loop {
+        let listed = helper.request("pane.list", json!({}), &mut events);
+        if listed["panes"] == json!([]) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the ended window stayed in the table: {listed}"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!process_exists(pid), "the ended window's child was not reaped");
+    assert_eq!(
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events,
+        ),
+        json!({"ok":true}),
+        "closing a window that already ended is done, not an error"
+    );
     helper.close_input_and_wait();
 }
 
@@ -1364,6 +1446,7 @@ while True:
     let opened = helper.request(
         "pane.open",
         json!({
+            "id":"peer-pane", "generation":1,
             "cwd":"/tmp", "argv":["/usr/bin/python3", "-u", "-c", script, socket],
             "env":{}, "size":{"rows":24,"cols":80}, "backlogBytes":4096
         }),

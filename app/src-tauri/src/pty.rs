@@ -8,6 +8,15 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
+/// How long a pane whose output has ended waits for its program's exit to be
+/// readable: a program closes its terminal before it has finished exiting,
+/// and a large one takes a while to let go of its memory.
+const EXIT_GRACE: Duration = Duration::from_secs(5);
+/// How long ConPTY is given, once a pane's program has exited, to pass on
+/// what the program printed last.
+#[cfg(windows)]
+const EXIT_FLUSH: Duration = Duration::from_secs(1);
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PaneKey {
     pub id: String,
@@ -37,6 +46,7 @@ pub struct PaneInfo {
     pub idle_ms: u64,
 }
 
+#[cfg(test)]
 pub struct OpenedPane {
     pub key: PaneKey,
     pub reader: Box<dyn Read + Send>,
@@ -289,6 +299,7 @@ impl OutputFlow {
 
 pub struct PaneTable {
     panes: Mutex<HashMap<PaneKey, Pane>>,
+    #[cfg(test)]
     next_id: AtomicU64,
     updating: AtomicBool,
     teardown: Arc<Teardown>,
@@ -338,6 +349,7 @@ impl PaneTable {
     pub fn new() -> Self {
         Self {
             panes: Mutex::new(HashMap::new()),
+            #[cfg(test)]
             next_id: AtomicU64::new(1),
             updating: AtomicBool::new(false),
             teardown: Arc::new(Teardown::default()),
@@ -371,6 +383,10 @@ impl PaneTable {
         Ok(keys)
     }
 
+    /// A test's pane, under a name of the table's own and with its raw
+    /// output: the app opens every pane streamed, at the identity the daemon
+    /// reserved for it (`open_streamed_at`).
+    #[cfg(test)]
     pub fn open(
         &self,
         cwd: &Path,
@@ -378,24 +394,18 @@ impl PaneTable {
         env: &HashMap<String, String>,
         size: PtySize,
     ) -> Result<OpenedPane, PaneError> {
-        self.open_with_drop_env(cwd, argv, env, &[], size)
-    }
-
-    fn open_with_drop_env(
-        &self,
-        cwd: &Path,
-        argv: &[String],
-        env: &HashMap<String, String>,
-        drop_env: &[String],
-        size: PtySize,
-    ) -> Result<OpenedPane, PaneError> {
-        validate_drop_env(drop_env)?;
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let key = PaneKey::new(format!("pane-{id}"), 1);
-        let reader = self.open_at_with_drop_env(key.clone(), cwd, argv, env, drop_env, size)?;
+        let key = self.mint_key();
+        let reader = self.open_at(key.clone(), cwd, argv, env, size)?;
         Ok(OpenedPane { key, reader })
     }
 
+    #[cfg(test)]
+    fn mint_key(&self) -> PaneKey {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        PaneKey::new(format!("pane-{id}"), 1)
+    }
+
+    #[cfg(test)]
     pub fn open_at(
         &self,
         key: PaneKey,
@@ -516,36 +526,29 @@ impl PaneTable {
         Ok(reader)
     }
 
+    #[cfg(test)]
     pub fn open_streamed(
-        &self,
+        self: &Arc<Self>,
         cwd: &Path,
         argv: &[String],
         environment: PaneEnvironment<'_>,
         size: PtySize,
         backlog_bytes: usize,
     ) -> Result<StreamedPane, PaneError> {
-        if backlog_bytes == 0 {
-            return Err(PaneError::InvalidBacklog);
-        }
-
-        let OpenedPane { key, reader } =
-            self.open_with_drop_env(cwd, argv, environment.overlay, environment.drop, size)?;
-        let flow = Arc::new(OutputFlow::new(backlog_bytes));
-        self.lock_panes()?
-            .get_mut(&key)
-            .ok_or_else(|| PaneError::NotFound(key.clone()))?
-            .output_flow = Some(Arc::clone(&flow));
-
-        let (sender, output) = mpsc::channel();
-        let output_key = key.clone();
-        std::thread::spawn(move || stream_output(output_key, reader, flow, sender));
-        Ok(StreamedPane { key, output })
+        self.open_streamed_at(
+            self.mint_key(),
+            cwd,
+            argv,
+            environment,
+            size,
+            backlog_bytes,
+        )
     }
 
     /// Opens a streamed pane at the app-owned identity Node already reserved.
     /// The store mints pane ids; Rust owns the process living at that key.
     pub fn open_streamed_at(
-        &self,
+        self: &Arc<Self>,
         key: PaneKey,
         cwd: &Path,
         argv: &[String],
@@ -570,6 +573,8 @@ impl PaneTable {
             .get_mut(&key)
             .ok_or_else(|| PaneError::NotFound(key.clone()))?
             .output_flow = Some(Arc::clone(&flow));
+        #[cfg(windows)]
+        self.watch_exit(&key)?;
 
         let (sender, output) = mpsc::channel();
         let output_key = key.clone();
@@ -643,11 +648,60 @@ impl PaneTable {
         Ok(())
     }
 
+    /// Ends a pane and takes it out of the table. One that is gone already,
+    /// killed or retired when its program ended, is closed: the caller cannot
+    /// tell the two apart, and does not need to.
     pub fn kill(&self, key: &PaneKey) -> Result<(), PaneError> {
         let mut panes = self.lock_panes()?;
-        let mut pane = panes
-            .remove(key)
-            .ok_or_else(|| PaneError::NotFound(key.clone()))?;
+        let Some(pane) = panes.remove(key) else {
+            return Ok(());
+        };
+        self.tear_down(panes, pane)
+    }
+
+    /// A pane whose program has ended leaves the table by a kill's rules:
+    /// what the harness left running ends with it, its master goes and its
+    /// child is reaped, and a write still in progress hands the exit to the
+    /// reaper. Nothing else would take it out: the daemon closes a window
+    /// that ended on its own without a `pane.kill`, and the pane kept its
+    /// master, a zombie child and the update blocked until the app quit.
+    ///
+    /// `true` once the pane is out of the table (now, or already); `false`
+    /// while its program still runs, so the pane stays for a `pane.kill`. The
+    /// output ends a moment before the exit can be read, so it looks again
+    /// for a while before it says so.
+    pub fn retire_exited(&self, key: &PaneKey) -> Result<bool, PaneError> {
+        self.retire_exited_within(key, EXIT_GRACE)
+    }
+
+    fn retire_exited_within(&self, key: &PaneKey, grace: Duration) -> Result<bool, PaneError> {
+        let deadline = Instant::now() + grace;
+        loop {
+            let mut panes = self.lock_panes()?;
+            let Some(pane) = panes.get_mut(key) else {
+                return Ok(true);
+            };
+            if has_exited(pane)? {
+                if let Some(pane) = panes.remove(key) {
+                    self.tear_down(panes, pane)?;
+                }
+                return Ok(true);
+            }
+            drop(panes);
+            if Instant::now() >= deadline {
+                return Ok(false);
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Ends a pane just taken out of the table. Its teardown is counted before
+    /// the table's lock goes, so no installer is admitted in between.
+    fn tear_down(
+        &self,
+        panes: MutexGuard<'_, HashMap<PaneKey, Pane>>,
+        mut pane: Pane,
+    ) -> Result<(), PaneError> {
         self.teardown.begin();
         drop(panes);
         close_output(&pane);
@@ -658,6 +712,67 @@ impl PaneTable {
         } else {
             terminate_detached(pane, Arc::clone(&self.teardown))
         }
+    }
+
+    /// The built-in ConPTY keeps a pane's output open after its program exits
+    /// (node-pty closes it itself a second after the exit), so the end of the
+    /// output, which says on a Unix PTY that the window has ended, never came:
+    /// the chief's `/exit` or a crash went unseen. One watcher per pane waits
+    /// on the program, gives the pseudoconsole a moment to pass on what it
+    /// printed last, and retires the pane; its master's drop closes the
+    /// pseudoconsole, the output ends, and `pane.exit` follows as anywhere.
+    /// A window whose end could not be seen does not open.
+    #[cfg(windows)]
+    fn watch_exit(self: &Arc<Self>, key: &PaneKey) -> Result<(), PaneError> {
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE,
+        };
+
+        struct Program(HANDLE);
+        // SAFETY: a process handle is a kernel handle, usable from any thread.
+        unsafe impl Send for Program {}
+        impl Drop for Program {
+            fn drop(&mut self) {
+                // SAFETY: the handle is ours and closed once.
+                unsafe { CloseHandle(self.0) };
+            }
+        }
+
+        let pid = self
+            .lock_panes()?
+            .get(key)
+            .and_then(|pane| pane.child.process_id());
+        let watched = pid
+            .ok_or_else(|| io::Error::other("the harness has no process id"))
+            .and_then(|pid| {
+                // SAFETY: a wait-only handle; the pane's own child handle keeps
+                // the pid from being reused while the pane is open.
+                let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+                if handle.is_null() {
+                    return Err(io::Error::last_os_error());
+                }
+                let program = Program(handle);
+                let table = Arc::downgrade(self);
+                let key = key.clone();
+                std::thread::Builder::new()
+                    .name("consensflow-pty-exit".to_string())
+                    .spawn(move || {
+                        // SAFETY: the handle stays open until `program` drops.
+                        unsafe { WaitForSingleObject(program.0, INFINITE) };
+                        drop(program);
+                        std::thread::sleep(EXIT_FLUSH);
+                        if let Some(table) = table.upgrade() {
+                            let _ = table.retire_exited(&key);
+                        }
+                    })
+                    .map(|_| ())
+            });
+        if let Err(error) = watched {
+            let _ = self.kill(key);
+            return Err(PaneError::Io(error));
+        }
+        Ok(())
     }
 
     pub fn list(&self) -> Result<Vec<PaneInfo>, PaneError> {
@@ -1156,6 +1271,7 @@ fn signal_process_group(process_group_id: i32) -> Result<(), PaneError> {
 pub(crate) mod conpty_test {
     use std::collections::HashMap;
     use std::sync::mpsc::Receiver;
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     use portable_pty::PtySize;
@@ -1177,7 +1293,7 @@ pub(crate) mod conpty_test {
     }
 
     pub fn open(
-        table: &PaneTable,
+        table: &Arc<PaneTable>,
         argv: &[String],
         env: &HashMap<String, String>,
         backlog: usize,
@@ -1510,7 +1626,7 @@ mod tests {
     #[test]
     fn streamed_open_at_preserves_the_store_reserved_identity() {
         let _pty_guard = serial_pty_test();
-        let table = PaneTable::new();
+        let table = Arc::new(PaneTable::new());
         let key = PaneKey::new("reserved-worker", 7);
         let streamed = table
             .open_streamed_at(
@@ -1605,6 +1721,49 @@ mod tests {
             .kill(&key)
             .expect("a gone process group is already clean");
         assert!(table.list().expect("list after cleanup").is_empty());
+    }
+
+    /// A program that ended takes its pane out of the table as a kill would:
+    /// its child reaped, its master gone and installation admitted again.
+    #[cfg(unix)]
+    #[test]
+    fn a_pane_whose_program_ended_retires() {
+        let _pty_guard = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        let OpenedPane { key, reader } = open_shell(&table, "printf done");
+        let pid = child_process_id(&table, &key);
+
+        assert_eq!(read_to_end(reader), b"done");
+        assert!(table.retire_exited(&key).expect("retire the pane"));
+        assert!(table.list().expect("list").is_empty());
+        assert!(!process_exists(pid), "the ended child was not reaped");
+        assert!(
+            table.begin_update().is_ok(),
+            "an ended window holds up no update"
+        );
+        assert!(
+            table.retire_exited(&key).expect("retire again"),
+            "a pane that is gone already is out of the table"
+        );
+    }
+
+    /// A pane whose program still runs is never ended on its own, whatever
+    /// its output did: it waits for a kill.
+    #[cfg(unix)]
+    #[test]
+    fn a_pane_whose_program_runs_on_is_not_retired() {
+        let _pty_guard = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        let OpenedPane { key, reader: _reader } = open_shell(&table, "exec /bin/sleep 30");
+        let pid = child_process_id(&table, &key);
+
+        assert!(!table
+            .retire_exited_within(&key, Duration::from_millis(100))
+            .expect("look at the pane"));
+        assert!(process_exists(pid), "a running program was ended");
+        assert_eq!(table.list().expect("list").len(), 1);
+        table.kill(&key).expect("kill the pane");
+        assert!(table.list().expect("list").is_empty());
     }
 
     #[cfg(target_os = "macos")]
@@ -2010,7 +2169,7 @@ mod tests {
     #[test]
     fn reader_activity_resets_idle_then_silence_increases_it() {
         let _pty_guard = serial_pty_test();
-        let table = PaneTable::new();
+        let table = Arc::new(PaneTable::new());
         let streamed = table
             .open_streamed(
                 Path::new("/tmp"),
@@ -2048,7 +2207,7 @@ mod tests {
         let _pty_guard = serial_pty_test();
         const BACKLOG_BYTES: usize = 128;
 
-        let table = PaneTable::new();
+        let table = Arc::new(PaneTable::new());
         let streamed = table
             .open_streamed(
                 Path::new("/tmp"),
@@ -2086,7 +2245,7 @@ mod tests {
         const BACKLOG_BYTES: usize = 12;
 
         let _pty_guard = serial_pty_test();
-        let table = PaneTable::new();
+        let table = Arc::new(PaneTable::new());
         let streamed = table
             .open_streamed(
                 Path::new("/tmp"),
@@ -2285,6 +2444,7 @@ mod tests {
     mod windows {
         use std::collections::HashMap;
         use std::sync::mpsc::RecvTimeoutError;
+        use std::sync::Arc;
         use std::time::{Duration, Instant};
 
         use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
@@ -2322,7 +2482,7 @@ mod tests {
         #[test]
         fn the_environment_and_a_resize_reach_the_child() {
             let _pty_guard = serial_pty_test();
-            let table = PaneTable::new();
+            let table = Arc::new(PaneTable::new());
             let env = HashMap::from([("CF_PANE_VALUE".to_string(), "overlaid".to_string())]);
             let (key, output) = open(
                 &table,
@@ -2344,7 +2504,7 @@ mod tests {
         #[test]
         fn kill_ends_everything_the_harness_started() {
             let _pty_guard = serial_pty_test();
-            let table = PaneTable::new();
+            let table = Arc::new(PaneTable::new());
             let ping = system("PING.EXE");
             let (key, output) = open(
                 &table,
@@ -2370,10 +2530,44 @@ mod tests {
             );
         }
 
+        /// ConPTY keeps the output open after the program ends, so without
+        /// the exit watcher this pane's output never ended, and the end of a
+        /// pane's output is what sends `pane.exit`.
+        #[test]
+        fn a_program_that_exits_on_its_own_ends_its_output_and_leaves_the_table() {
+            let _pty_guard = serial_pty_test();
+            let table = Arc::new(PaneTable::new());
+            let (key, output) = open(
+                &table,
+                &powershell("Write-Output 'BYE#'"),
+                &HashMap::new(),
+                1 << 20,
+            );
+            read_until(&table, &key, &output, "BYE#");
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                match output.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                    // The pane may have left the table by the time this
+                    // chunk is read, and an ack then has nothing to free.
+                    Ok(chunk) => {
+                        let _ = table.ack(&key, chunk.seq);
+                    }
+                    Err(RecvTimeoutError::Disconnected) => break,
+                    Err(RecvTimeoutError::Timeout) => {
+                        panic!("the output went on after the program exited")
+                    }
+                }
+            }
+            assert!(
+                table.list().expect("list the panes").is_empty(),
+                "the ended pane stayed in the table"
+            );
+        }
+
         #[test]
         fn input_reaches_the_child() {
             let _pty_guard = serial_pty_test();
-            let table = PaneTable::new();
+            let table = Arc::new(PaneTable::new());
             let (key, output) = open(&table, &line_echo(), &HashMap::new(), 1 << 20);
             read_until(&table, &key, &output, "READY");
             table
@@ -2387,7 +2581,7 @@ mod tests {
         fn unacked_output_is_bounded_then_resumes_after_ack() {
             const BACKLOG_BYTES: usize = 128;
             let _pty_guard = serial_pty_test();
-            let table = PaneTable::new();
+            let table = Arc::new(PaneTable::new());
             let (key, output) = open(
                 &table,
                 &[

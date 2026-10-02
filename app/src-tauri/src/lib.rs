@@ -1,7 +1,9 @@
 use std::io::{BufRead, Write};
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+};
 
 pub mod arbiter;
 pub mod bridge;
@@ -255,11 +257,24 @@ fn inherited_session_variables<'a>(names: impl IntoIterator<Item = &'a str>) -> 
         .collect()
 }
 
-/// Where the app and its daemon write their error output: `<home>/app/app.log`,
-/// with one previous file kept once it passes `limit` bytes. A Finder-launched
-/// app's stderr is /dev/null, so panics and daemon errors used to leave no
-/// trace at all.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+/// How big the error log grows before it is moved aside.
+const ERROR_LOG_LIMIT: u64 = 10 * 1024 * 1024;
+
+/// Where the app and its daemon write their error output: `<home>/app/app.log`
+/// in ConsensFlow's home (`CONSENSFLOW_HOME`, or `.consensflow` in the user's
+/// home, as the daemon finds it), with one previous file kept once it passes
+/// its limit. A Finder-launched app's stderr is /dev/null and a windowed app
+/// on Windows has none, so panics and daemon errors used to leave no trace.
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
+pub(crate) fn error_log() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("CONSENSFLOW_HOME")
+        .filter(|home| !home.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::home_dir().map(|home| home.join(".consensflow")))?;
+    prepare_error_log(&home, ERROR_LOG_LIMIT).ok()
+}
+
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 fn prepare_error_log(home: &std::path::Path, limit: u64) -> std::io::Result<std::path::PathBuf> {
     let directory = home.join("app");
     std::fs::create_dir_all(&directory)?;
@@ -312,17 +327,8 @@ pub fn run() {
         std::env::remove_var(name);
     }
     #[cfg(target_os = "macos")]
-    if let Some(home) = std::env::var_os("CONSENSFLOW_HOME")
-        .filter(|value| !value.is_empty())
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            home.as_ref()
-                .map(|home| std::path::Path::new(home).join(".consensflow"))
-        })
-    {
-        if let Ok(log) = prepare_error_log(&home, 10 * 1024 * 1024) {
-            redirect_stderr(&log);
-        }
+    if let Some(log) = error_log() {
+        redirect_stderr(&log);
     }
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -345,7 +351,6 @@ pub fn run() {
                     commands::pane_input_wait,
                     commands::pane_resize,
                     commands::pane_ack,
-                    commands::roster_handle,
                     commands::open_agents_window,
                     commands::subscribe_output,
                     updates::update_status,
@@ -378,10 +383,31 @@ pub fn run() {
         .expect("error while building the ConsensFlow app");
 
     app.run(|handle, event| {
+        close_agents_with_the_board(handle, &event);
         if matches!(event, RunEvent::Exit) {
             handle.state::<AppRuntime>().shutdown();
         }
     });
+}
+
+/// The board's window takes the agents window with it when it closes. Left
+/// open, the agents window kept the app running with no way back to the
+/// board (nothing reopens it), while the daemon and every harness window went
+/// on behind it.
+fn close_agents_with_the_board<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
+    let RunEvent::WindowEvent {
+        label,
+        event: WindowEvent::CloseRequested { .. },
+        ..
+    } = event
+    else {
+        return;
+    };
+    if label == "main" {
+        if let Some(agents) = app.get_webview_window(commands::AGENTS_WINDOW) {
+            let _ = agents.close();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -500,5 +526,47 @@ mod tests {
     #[test]
     fn a_candidate_without_a_home_directory_refuses_to_start() {
         assert!(isolated_home("dev.ngvoicu.consensflow.candidate", false, None, None).is_err());
+    }
+
+    /// Closing the board takes the agents window with it, so the app quits as
+    /// it does without one.
+    #[test]
+    fn the_agents_window_closes_with_the_board() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
+            .build()
+            .expect("open the board");
+        WebviewWindowBuilder::new(&app, commands::AGENTS_WINDOW, WebviewUrl::default())
+            .build()
+            .expect("open the agents window");
+
+        // An app that goes on running is the failure, and the run never
+        // returns to say so: past any run's length, the watchdog does.
+        let returned = Arc::new(AtomicBool::new(false));
+        let watched = Arc::clone(&returned);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(15));
+            if !watched.load(Ordering::SeqCst) {
+                eprintln!("the app went on running after its board closed");
+                std::process::abort();
+            }
+        });
+        app.run(|handle, event| {
+            if matches!(event, RunEvent::Ready) {
+                handle
+                    .get_webview_window("main")
+                    .expect("the board")
+                    .close()
+                    .expect("close the board");
+            }
+            close_agents_with_the_board(handle, &event);
+        });
+        returned.store(true, Ordering::SeqCst);
     }
 }

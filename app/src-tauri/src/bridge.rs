@@ -23,6 +23,7 @@ const DEFAULT_REQUEST_DEADLINE_MS: u64 = 30_000;
 type RequestHandler = dyn Fn(Bridge, Value) -> Result<Value, String> + Send + Sync;
 type EventHandler = dyn Fn(Value) + Send + Sync;
 type ErrorHandler = dyn Fn(BridgeError) + Send + Sync;
+type CloseHandler = dyn Fn() + Send + Sync;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BridgeError {
@@ -100,6 +101,7 @@ struct BridgeInner {
     handlers: HashMap<String, RequestHandlerEntry>,
     event_handlers: HashMap<String, Vec<Arc<EventHandler>>>,
     on_error: Option<Arc<ErrorHandler>>,
+    on_close: Option<Arc<CloseHandler>>,
     next_id: AtomicU64,
     closed: AtomicBool,
     lifecycle: Mutex<Lifecycle>,
@@ -123,6 +125,7 @@ pub struct BridgeBuilder {
     handlers: HashMap<String, RequestHandlerEntry>,
     event_handlers: HashMap<String, Vec<Arc<EventHandler>>>,
     on_error: Option<Arc<ErrorHandler>>,
+    on_close: Option<Arc<CloseHandler>>,
     max_frame_bytes: usize,
     default_request_deadline: Duration,
 }
@@ -133,6 +136,7 @@ impl BridgeBuilder {
             handlers: HashMap::new(),
             event_handlers: HashMap::new(),
             on_error: None,
+            on_close: None,
             max_frame_bytes,
             default_request_deadline: Duration::from_millis(DEFAULT_REQUEST_DEADLINE_MS),
         }
@@ -189,6 +193,16 @@ impl BridgeBuilder {
         F: Fn(BridgeError) + Send + Sync + 'static,
     {
         self.on_error = Some(Arc::new(handler));
+        self
+    }
+
+    /// Told once, when the transport closes for whatever reason, after every
+    /// request still waiting on it has been answered.
+    pub fn on_close<F>(&mut self, handler: F) -> &mut Self
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        self.on_close = Some(Arc::new(handler));
         self
     }
 
@@ -322,6 +336,7 @@ impl BridgeBuilder {
                 handlers: self.handlers,
                 event_handlers: self.event_handlers,
                 on_error: self.on_error,
+                on_close: self.on_close,
                 next_id: AtomicU64::new(0),
                 closed: AtomicBool::new(false),
                 lifecycle: Mutex::new(Lifecycle {
@@ -877,6 +892,9 @@ impl Bridge {
         drop(lifecycle);
         if report {
             self.report(error);
+        }
+        if let Some(handler) = &self.inner.on_close {
+            handler();
         }
     }
 
@@ -2548,6 +2566,45 @@ mod tests {
             assert!(matches!(second_result, Err(BridgeError::Io(_))));
             assert!(closed_before_eof, "partial output failure left bridge open");
             assert_eq!(gate.bytes(), b"{\"v\":1,");
+        }
+
+        /// Whoever started the peer hears that the transport closed, once,
+        /// whether the peer ended it or a write to the peer failed.
+        #[test]
+        fn the_close_is_told_once_whatever_closed_it() {
+            let (closes, closed) = std::sync::mpsc::channel();
+            let mut builder = BridgeBuilder::new(1024);
+            builder.on_close(move || {
+                let _ = closes.send(());
+            });
+            let (connected, peer) = connect(builder, None);
+            drop(peer);
+            closed
+                .recv_timeout(Duration::from_secs(1))
+                .expect("the peer's end is told");
+            connected.bridge.wait_closed().expect("bridge closes");
+
+            let (closes, closed) = std::sync::mpsc::channel();
+            let mut builder = BridgeBuilder::new(1024);
+            builder.on_close(move || {
+                let _ = closes.send(());
+            });
+            let (writer, gate) = partial_fail_writer();
+            let (connected, peer) = connect_with_writer(builder, writer);
+            let failing = connected.bridge.clone();
+            let request = thread::spawn(move || failing.request("op", json!(null), None));
+            gate.wait_until_partial_write();
+            gate.release_failure();
+            assert!(request.join().expect("request thread").is_err());
+            closed
+                .recv_timeout(Duration::from_secs(1))
+                .expect("a failed write is told");
+            drop(peer);
+            connected.bridge.wait_closed().expect("bridge closes");
+            assert!(
+                closed.recv_timeout(Duration::from_millis(100)).is_err(),
+                "a close is told once"
+            );
         }
 
         #[test]

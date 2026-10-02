@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Condvar, Mutex};
+use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -14,8 +14,8 @@ use serde_json::{json, Value};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-use crate::arbiter::InputArbiter;
-use crate::bridge::{Bridge, BridgeBuilder, ConnectedBridge};
+use crate::arbiter::{ArbiterError, InputArbiter, OutputClock};
+use crate::bridge::{Bridge, BridgeBuilder, BridgeError};
 use crate::pty::{
     validate_drop_env, PaneEnvironment, PaneKey, PaneOutput, PaneTable, StreamedPane,
 };
@@ -23,8 +23,21 @@ use crate::pty::{
 const MAX_FRAME_BYTES: usize = 1024 * 1024;
 /// How long the daemon gets to stop on its own before it is killed.
 const EDITOR_STOP_GRACE: Duration = Duration::from_secs(2);
+/// How long quitting, or installing an update, waits for what was admitted
+/// before the daemon stopped to finish.
+const SHUTDOWN_DRAIN: Duration = Duration::from_secs(5);
 /// The page-side name of Node's `state.changed`. No dot: Tauri rejects it.
 const PAGE_STATE_EVENT: &str = "state-changed";
+/// What the page is told of the daemon (see `CoreStatus`).
+const CORE_STATUS_EVENT: &str = "core-status";
+/// Between starts of a daemon that failed to start.
+const CORE_RESTART: Backoff = Backoff {
+    first: Duration::from_secs(1),
+    most: Duration::from_secs(30),
+};
+const CORE_STOPPED: &str = "ConsensFlow's core stopped while the app was running";
+/// How long the human's login shell has to say its PATH.
+const LOGIN_PATH_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
 const MAX_INPUT_BYTES: usize = 64 * 1024;
 const INPUT_QUEUE_CAPACITY: usize = 1024;
@@ -58,7 +71,7 @@ impl From<PaneOutput> for PaneOutputMessage {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct RosterHandle {
     url: String,
     token: String,
@@ -96,9 +109,10 @@ struct OutputHub {
     state: Mutex<OutputHubState>,
 }
 
+/// What a pane's worker does, in order: the human's keys and the emulator's
+/// replies, a delivery's paste, a native send's claim.
 enum InputWork {
-    Human(Vec<u8>),
-    Reply(Vec<u8>),
+    Write(Vec<u8>),
     Paste(Vec<u8>),
     Claim,
 }
@@ -106,7 +120,7 @@ enum InputWork {
 impl InputWork {
     fn byte_count(&self) -> usize {
         match self {
-            Self::Human(bytes) | Self::Reply(bytes) => bytes.len(),
+            Self::Write(bytes) => bytes.len(),
             Self::Paste(body) => body.len().saturating_add(13),
             Self::Claim => 0,
         }
@@ -133,109 +147,20 @@ struct PageInputState {
     next_ticket: u64,
 }
 
-#[derive(Clone)]
 struct InputRoute {
     sender: mpsc::SyncSender<InputJob>,
     pending_bytes: Arc<AtomicUsize>,
 }
 
+/// Every open pane's input, in order: one worker and one bounded queue per
+/// pane, from its `pane.open` until it leaves the table.
 struct InputQueue {
     panes: Arc<PaneTable>,
     arbiter: Arc<InputArbiter>,
     senders: Mutex<HashMap<PaneKey, InputRoute>>,
-    workers: Mutex<Vec<JoinHandle<()>>>,
+    workers: Mutex<HashMap<PaneKey, JoinHandle<()>>>,
     page: Mutex<PageInputState>,
     accepting: AtomicBool,
-}
-
-struct LaunchSlot {
-    outcome: Mutex<Option<Result<PaneKey, String>>>,
-    ready: Condvar,
-}
-
-impl LaunchSlot {
-    fn new() -> Self {
-        Self {
-            outcome: Mutex::new(None),
-            ready: Condvar::new(),
-        }
-    }
-
-    fn complete(&self, outcome: Result<PaneKey, String>) {
-        *self
-            .outcome
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some(outcome);
-        self.ready.notify_all();
-    }
-
-    fn wait(&self) -> Result<PaneKey, String> {
-        let mut outcome = self
-            .outcome
-            .lock()
-            .map_err(|_| "launch result lock is poisoned".to_string())?;
-        while outcome.is_none() {
-            outcome = self
-                .ready
-                .wait(outcome)
-                .map_err(|_| "launch result lock is poisoned".to_string())?;
-        }
-        outcome
-            .as_ref()
-            .expect("launch outcome checked above")
-            .clone()
-    }
-}
-
-enum LaunchClaim {
-    Owner(Arc<LaunchSlot>),
-    Duplicate(Arc<LaunchSlot>),
-}
-
-struct LaunchRegistry {
-    entries: Mutex<HashMap<String, Arc<LaunchSlot>>>,
-}
-
-impl LaunchRegistry {
-    fn new() -> Self {
-        Self {
-            entries: Mutex::new(HashMap::new()),
-        }
-    }
-
-    fn reserve(&self, id: &str) -> Result<LaunchClaim, String> {
-        let mut entries = self
-            .entries
-            .lock()
-            .map_err(|_| "launch table lock is poisoned".to_string())?;
-        if let Some(slot) = entries.get(id) {
-            return Ok(LaunchClaim::Duplicate(Arc::clone(slot)));
-        }
-        let slot = Arc::new(LaunchSlot::new());
-        entries.insert(id.to_string(), Arc::clone(&slot));
-        Ok(LaunchClaim::Owner(slot))
-    }
-
-    fn remove_id(&self, id: &str) {
-        self.entries
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .remove(id);
-    }
-
-    fn remove_key(&self, key: &PaneKey) {
-        self.entries
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .retain(|_, slot| {
-                slot.outcome
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .as_ref()
-                    .and_then(|outcome| outcome.as_ref().ok())
-                    != Some(key)
-            });
-    }
 }
 
 impl InputQueue {
@@ -244,7 +169,7 @@ impl InputQueue {
             panes,
             arbiter,
             senders: Mutex::new(HashMap::new()),
-            workers: Mutex::new(Vec::new()),
+            workers: Mutex::new(HashMap::new()),
             page: Mutex::new(PageInputState {
                 last_sequences: HashMap::new(),
                 completions: HashMap::new(),
@@ -281,9 +206,7 @@ impl InputQueue {
 
         page.last_sequences.insert(key.clone(), sequence);
         match &work {
-            InputWork::Human(bytes) | InputWork::Reply(bytes) | InputWork::Paste(bytes) => {
-                validate_input(bytes)?
-            }
+            InputWork::Write(bytes) | InputWork::Paste(bytes) => validate_input(bytes)?,
             InputWork::Claim => {}
         }
         if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
@@ -301,6 +224,15 @@ impl InputQueue {
         Ok(ticket)
     }
 
+    /// A new page counts every pane's input from 1: the page that sent the
+    /// old numbers is gone (a reload replaced it), and so are the tickets it
+    /// never came back for. What it had admitted still goes in, in order.
+    fn begin_page(&self) {
+        let mut page = self.page.lock().unwrap_or_else(|error| error.into_inner());
+        page.last_sequences.clear();
+        page.completions.clear();
+    }
+
     fn take_page_completion(&self, ticket: &str) -> Result<PageInputCompletion, String> {
         self.page
             .lock()
@@ -310,20 +242,12 @@ impl InputQueue {
             .ok_or_else(|| "pane-input-ticket-not-found".to_string())
     }
 
-    fn human(
+    fn write(
         &self,
         key: PaneKey,
         bytes: Vec<u8>,
     ) -> Result<oneshot::Receiver<InputResponse>, String> {
-        self.submit(key, InputWork::Human(bytes))
-    }
-
-    fn reply(
-        &self,
-        key: PaneKey,
-        bytes: Vec<u8>,
-    ) -> Result<oneshot::Receiver<InputResponse>, String> {
-        self.submit(key, InputWork::Reply(bytes))
+        self.submit(key, InputWork::Write(bytes))
     }
 
     fn paste(
@@ -334,10 +258,64 @@ impl InputQueue {
         self.submit(key, InputWork::Paste(body))
     }
 
-    /// Admit a native-channel send: the pane is current, its input works and
-    /// no paste is going in.
+    /// Admit a native-channel send: the pane is current and its input works,
+    /// and no paste is going in, since the pane's worker runs one job at a
+    /// time.
     fn claim(&self, key: PaneKey) -> Result<oneshot::Receiver<InputResponse>, String> {
         self.submit(key, InputWork::Claim)
+    }
+
+    /// A pane just opened gets its worker and queue.
+    fn open(&self, key: &PaneKey) -> Result<(), String> {
+        let mut senders = self
+            .senders
+            .lock()
+            .map_err(|_| "pane input queue lock is poisoned".to_string())?;
+        if !self.accepting.load(Ordering::Acquire) {
+            return Err("pane input admission is closed".to_string());
+        }
+        let (sender, jobs) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
+        let panes = Arc::clone(&self.panes);
+        let arbiter = Arc::clone(&self.arbiter);
+        let worker_key = key.clone();
+        let worker = thread::Builder::new()
+            .name(format!("consensflow-input-{}", worker_key.id))
+            .spawn(move || input_worker(jobs, panes, arbiter, worker_key))
+            .map_err(|error| format!("could not start pane input queue: {error}"))?;
+        self.workers
+            .lock()
+            .map_err(|_| "pane input worker lock is poisoned".to_string())?
+            .insert(key.clone(), worker);
+        senders.insert(
+            key.clone(),
+            InputRoute {
+                sender,
+                pending_bytes: Arc::new(AtomicUsize::new(0)),
+            },
+        );
+        Ok(())
+    }
+
+    /// A pane gone from the table, killed or retired when its program ended,
+    /// takes its input with it: its queue closes (the worker ends once what
+    /// was queued has gone in or failed), and its page count and arbiter
+    /// state go. They used to stay until the app quit, a parked thread per
+    /// window ever opened.
+    fn retire(&self, key: &PaneKey) {
+        self.senders
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(key);
+        self.workers
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(key);
+        self.page
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .last_sequences
+            .remove(key);
+        self.arbiter.retire(key);
     }
 
     fn submit(
@@ -348,37 +326,18 @@ impl InputQueue {
         if !self.accepting.load(Ordering::Acquire) {
             return Err("pane input admission is closed".to_string());
         }
-        let mut senders = self
+        let senders = self
             .senders
             .lock()
             .map_err(|_| "pane input queue lock is poisoned".to_string())?;
         if !self.accepting.load(Ordering::Acquire) {
             return Err("pane input admission is closed".to_string());
         }
-        let route = match senders.get(&key) {
-            Some(route) => route.clone(),
-            None => {
-                let (sender, jobs) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
-                let pending_bytes = Arc::new(AtomicUsize::new(0));
-                let panes = Arc::clone(&self.panes);
-                let arbiter = Arc::clone(&self.arbiter);
-                let worker_key = key.clone();
-                let worker = thread::Builder::new()
-                    .name(format!("consensflow-input-{}", worker_key.id))
-                    .spawn(move || input_worker(jobs, panes, arbiter, worker_key))
-                    .map_err(|error| format!("could not start pane input queue: {error}"))?;
-                self.workers
-                    .lock()
-                    .map_err(|_| "pane input worker lock is poisoned".to_string())?
-                    .push(worker);
-                let route = InputRoute {
-                    sender,
-                    pending_bytes,
-                };
-                senders.insert(key.clone(), route.clone());
-                route
-            }
-        };
+        // A pane the table does not hold has no queue: it was never opened,
+        // or it is gone.
+        let route = senders
+            .get(&key)
+            .ok_or_else(|| ArbiterError::Stale.to_string())?;
         let reserved_bytes = work.byte_count();
         route
             .pending_bytes
@@ -424,7 +383,7 @@ impl InputQueue {
                 .lock()
                 .unwrap_or_else(|error| error.into_inner()),
         );
-        for worker in workers {
+        for worker in workers.into_values() {
             let _ = worker.join();
         }
     }
@@ -438,8 +397,7 @@ fn input_worker(
 ) {
     for job in jobs {
         let result = match job.work {
-            InputWork::Human(bytes) => arbiter.write_human(&panes, &key, &bytes),
-            InputWork::Reply(bytes) => arbiter.write_reply(&panes, &key, &bytes),
+            InputWork::Write(bytes) => arbiter.write(&panes, &key, &bytes),
             InputWork::Paste(body) => arbiter.write_paste(&panes, &key, &body),
             InputWork::Claim => arbiter.claim(&key),
         }
@@ -515,15 +473,282 @@ pub(crate) fn window_command_allowed(window: &str, _command: &str) -> bool {
     window == "main"
 }
 
+/// What the page is told about the daemon (its `core-status`): up, or down,
+/// why, and whether the app is starting it again.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+struct CoreStatus {
+    available: bool,
+    cause: Option<String>,
+    retrying: bool,
+}
+
+impl CoreStatus {
+    fn up() -> Self {
+        Self {
+            available: true,
+            cause: None,
+            retrying: false,
+        }
+    }
+
+    fn down(cause: &str, retrying: bool) -> Self {
+        Self {
+            available: false,
+            cause: Some(cause.to_string()),
+            retrying,
+        }
+    }
+}
+
+/// Why a start of the daemon failed, and whether another start could fare
+/// better: a runtime missing from the app does not come back.
+struct CoreFailure {
+    cause: String,
+    retry: bool,
+}
+
+impl CoreFailure {
+    fn transient(cause: String) -> Self {
+        Self { cause, retry: true }
+    }
+}
+
+/// A daemon that started: its process, its bridge, and the address of the
+/// agents screens it handed the app.
+struct StartedCore {
+    editor: Child,
+    bridge: Bridge,
+    roster: RosterHandle,
+}
+
+impl StartedCore {
+    fn stop(mut self) {
+        self.bridge.close_input();
+        stop_editor(&mut self.editor);
+    }
+}
+
+/// Starts the daemon once. What it is given is told when that daemon's bridge
+/// closes.
+type CoreStarter =
+    Arc<dyn Fn(Box<dyn Fn() + Send + Sync>) -> Result<StartedCore, CoreFailure> + Send + Sync>;
+type CoreReport = Arc<dyn Fn(&CoreStatus) + Send + Sync>;
+
+/// The waits between starts: the first, then twice as long each time, up to
+/// the most.
+#[derive(Clone, Copy)]
+struct Backoff {
+    first: Duration,
+    most: Duration,
+}
+
+/// The daemon as the app holds it, and what the page knows of it.
+///
+/// A start that failed (the ledger still held by a daemon finishing its stop
+/// after a force-quit, a migration that throws, a missing runtime) left the
+/// app without its core for the session, the cause in a detail the page never
+/// read; a daemon that died mid-session closed its bridge without a word and
+/// the board froze. Now the page is told every change, and a failed start is
+/// tried again: it ended before its handle line, so it left no window behind
+/// it. A daemon that stops later is not started again, because its windows
+/// still run in the pane host.
+struct Core {
+    state: Mutex<CoreState>,
+    report: CoreReport,
+}
+
+struct CoreState {
+    editor: Option<Child>,
+    bridge: Option<Bridge>,
+    roster: Option<RosterHandle>,
+    status: CoreStatus,
+    /// Starts so far, and the one whose bridge is in hand: only that bridge
+    /// closing is the core stopping.
+    starts: u64,
+    current: u64,
+    stopping: bool,
+}
+
+impl Core {
+    fn new(report: CoreReport) -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new(CoreState {
+                editor: None,
+                bridge: None,
+                roster: None,
+                status: CoreStatus::down("ConsensFlow's core has not started", false),
+                starts: 0,
+                current: 0,
+                stopping: false,
+            }),
+            report,
+        })
+    }
+
+    fn lock(&self) -> MutexGuard<'_, CoreState> {
+        self.state.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// Starts the daemon. A start that fails is tried again from a thread of
+    /// its own, waiting longer each time, while no pane is open and the app
+    /// is not stopping.
+    fn start(self: &Arc<Self>, starter: CoreStarter, panes: Arc<PaneTable>, backoff: Backoff) {
+        let Err(failure) = self.attempt(&starter) else {
+            return;
+        };
+        self.fail(&failure);
+        if !failure.retry {
+            return;
+        }
+        let core = Arc::clone(self);
+        if thread::Builder::new()
+            .name("consensflow-core-start".to_string())
+            .spawn(move || core.retry(&starter, &panes, backoff))
+            .is_err()
+        {
+            self.tell(CoreStatus::down(&failure.cause, false));
+        }
+    }
+
+    fn retry(self: &Arc<Self>, starter: &CoreStarter, panes: &PaneTable, backoff: Backoff) {
+        let mut wait = backoff.first;
+        loop {
+            thread::sleep(wait);
+            wait = (wait * 2).min(backoff.most);
+            let status = {
+                let state = self.lock();
+                if state.stopping {
+                    return;
+                }
+                state.status.clone()
+            };
+            if !matches!(panes.list(), Ok(open) if open.is_empty()) {
+                self.tell(CoreStatus {
+                    retrying: false,
+                    ..status
+                });
+                return;
+            }
+            match self.attempt(starter) {
+                Ok(()) => return,
+                Err(failure) => {
+                    self.fail(&failure);
+                    if !failure.retry {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    /// One start. What it starts is the core from then on, unless the app
+    /// began to stop meanwhile, which stops it again.
+    fn attempt(self: &Arc<Self>, starter: &CoreStarter) -> Result<(), CoreFailure> {
+        let start = {
+            let mut state = self.lock();
+            state.starts += 1;
+            state.starts
+        };
+        let core = Arc::downgrade(self);
+        let started = starter(Box::new(move || {
+            if let Some(core) = core.upgrade() {
+                core.closed(start);
+            }
+        }))?;
+        let mut state = self.lock();
+        if state.stopping {
+            drop(state);
+            started.stop();
+            return Ok(());
+        }
+        // A daemon that ended before it was in hand was not the core's yet
+        // when its bridge closed, so its end is read here.
+        state.status = if started.bridge.is_closed() {
+            CoreStatus::down(CORE_STOPPED, false)
+        } else {
+            CoreStatus::up()
+        };
+        state.current = start;
+        state.editor = Some(started.editor);
+        state.bridge = Some(started.bridge);
+        state.roster = Some(started.roster);
+        (self.report)(&state.status);
+        Ok(())
+    }
+
+    fn fail(&self, failure: &CoreFailure) {
+        eprintln!("consensflow: {}", failure.cause);
+        self.tell(CoreStatus::down(&failure.cause, failure.retry));
+    }
+
+    /// A start's bridge closed: if it is the core's, the daemon stopped.
+    fn closed(&self, start: u64) {
+        let mut state = self.lock();
+        if state.stopping || state.current != start || !state.status.available {
+            return;
+        }
+        eprintln!("consensflow: {CORE_STOPPED}");
+        state.status = CoreStatus::down(CORE_STOPPED, false);
+        (self.report)(&state.status);
+    }
+
+    /// A change, told to the page, unless the app is stopping.
+    fn tell(&self, status: CoreStatus) {
+        let mut state = self.lock();
+        if state.stopping {
+            return;
+        }
+        state.status = status;
+        (self.report)(&state.status);
+    }
+
+    /// Where the core stands, told again: a page that has just loaded missed
+    /// what was told before it listened. Under the same lock as every change,
+    /// so the last the page hears is the current one.
+    fn tell_again(&self) {
+        let state = self.lock();
+        (self.report)(&state.status);
+    }
+
+    /// The bridge to ask while the core is up; why not otherwise.
+    fn connection(&self) -> Result<Bridge, String> {
+        let state = self.lock();
+        match &state.bridge {
+            Some(bridge) if state.status.available => Ok(bridge.clone()),
+            _ => Err(state.status.cause.clone().unwrap_or_default()),
+        }
+    }
+
+    fn roster(&self) -> Option<RosterHandle> {
+        let state = self.lock();
+        state
+            .status
+            .available
+            .then(|| state.roster.clone())
+            .flatten()
+    }
+
+    /// The app is stopping: no start is taken in, nothing more is told. The
+    /// first call has the daemon and its bridge handed over to be stopped.
+    fn stop(&self) -> Option<(Option<Child>, Option<Bridge>)> {
+        let mut state = self.lock();
+        if state.stopping {
+            return None;
+        }
+        state.stopping = true;
+        Some((state.editor.take(), state.bridge.clone()))
+    }
+
+    fn bridge(&self) -> Option<Bridge> {
+        self.lock().bridge.clone()
+    }
+}
+
 pub struct AppRuntime {
     panes: Arc<PaneTable>,
-    bridge: Option<Bridge>,
-    editor: Mutex<Option<Child>>,
-    roster: Option<RosterHandle>,
-    startup_error: Option<String>,
+    core: Arc<Core>,
     output: Arc<OutputHub>,
     inputs: Arc<InputQueue>,
-    shutting_down: AtomicBool,
 }
 
 impl AppRuntime {
@@ -534,80 +759,63 @@ impl AppRuntime {
     pub fn start(app: &AppHandle) -> Self {
         let panes = Arc::new(PaneTable::new());
         let output = Arc::new(OutputHub::new());
-        let launches = Arc::new(LaunchRegistry::new());
         let arbiter = Arc::new(InputArbiter::new(ENTER_DELAY_MS));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
 
-        let started = start_editor(
-            app,
-            Arc::clone(&panes),
-            Arc::clone(&arbiter),
-            Arc::clone(&output),
-            Arc::clone(&launches),
-            Arc::clone(&inputs),
-        );
-
-        match started {
-            Ok((editor, connected)) => {
-                let roster = match RosterHandle::from_value(connected.handle) {
-                    Ok(roster) => roster,
-                    Err(error) => {
-                        let mut editor = editor;
-                        let _ = editor.kill();
-                        return Self::unavailable(panes, output, inputs, error);
-                    }
-                };
-                Self {
-                    panes,
-                    bridge: Some(connected.bridge),
-                    editor: Mutex::new(Some(editor)),
-                    roster: Some(roster),
-                    startup_error: None,
-                    output,
-                    inputs,
-                    shutting_down: AtomicBool::new(false),
-                }
+        let reporter = app.clone();
+        let core = Core::new(Arc::new(move |status: &CoreStatus| {
+            if let Err(error) = reporter.emit(CORE_STATUS_EVENT, status) {
+                eprintln!("consensflow page event {CORE_STATUS_EVENT}: {error}");
             }
-            Err(error) => Self::unavailable(panes, output, inputs, error),
-        }
-    }
-
-    fn unavailable(
-        panes: Arc<PaneTable>,
-        output: Arc<OutputHub>,
-        inputs: Arc<InputQueue>,
-        error: String,
-    ) -> Self {
-        eprintln!("consensflow: {error}");
+        }));
+        let starter: CoreStarter = {
+            let app = app.clone();
+            let panes = Arc::clone(&panes);
+            let output = Arc::clone(&output);
+            let inputs = Arc::clone(&inputs);
+            Arc::new(move |closed| {
+                let command = core_command(&app)?;
+                let mut builder = BridgeBuilder::new(MAX_FRAME_BYTES);
+                let page_app = app.clone();
+                let page_events: PageEventSink = Arc::new(move |name, body| {
+                    if let Err(error) = page_app.emit(name, body) {
+                        eprintln!("consensflow page event {name}: {error}");
+                    }
+                });
+                register_page_events(&mut builder, page_events);
+                register_pane_handlers(
+                    &mut builder,
+                    Arc::clone(&panes),
+                    Arc::clone(&arbiter),
+                    Arc::clone(&output),
+                    Arc::clone(&inputs),
+                );
+                builder.on_error(|error| eprintln!("consensflow bridge: {error}"));
+                builder.on_close(closed);
+                connect_core(command, builder)
+            })
+        };
+        core.start(starter, Arc::clone(&panes), CORE_RESTART);
         Self {
             panes,
-            bridge: None,
-            editor: Mutex::new(None),
-            roster: None,
-            startup_error: Some(error),
+            core,
             output,
             inputs,
-            shutting_down: AtomicBool::new(false),
         }
     }
 
     pub fn shutdown(&self) {
-        if self.begin_shutdown() {
-            self.finish_shutdown();
+        if self.begin_shutdown() && !self.finish_shutdown() {
+            eprintln!("consensflow: quitting with the drain unfinished after its deadline");
         }
     }
 
     pub(crate) fn begin_shutdown(&self) -> bool {
-        if self.shutting_down.swap(true, Ordering::AcqRel) {
+        let Some((editor, bridge)) = self.core.stop() else {
             return false;
-        }
-        if let Some(mut editor) = self
-            .editor
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .take()
-        {
-            if let Some(bridge) = &self.bridge {
+        };
+        if let Some(mut editor) = editor {
+            if let Some(bridge) = &bridge {
                 bridge.close_input();
             }
             stop_editor(&mut editor);
@@ -615,16 +823,43 @@ impl AppRuntime {
         true
     }
 
-    pub(crate) fn finish_shutdown(&self) {
-        if let Some(bridge) = &self.bridge {
-            let _ = bridge.wait_launches_closed();
-        }
-        reap_all(&self.panes);
-        self.inputs.close_and_drain();
-        if let Some(bridge) = &self.bridge {
-            let _ = bridge.wait_closed();
-        }
+    /// Waits for what was admitted before the stop (launches, pane input, the
+    /// bridge's last handlers) and reaps every pane, for `SHUTDOWN_DRAIN` at
+    /// most: quitting had no limit, and a launch that never finished kept the
+    /// app from quitting. `false` when the drain did not finish in time; the
+    /// quit or the update's restart goes on without it.
+    pub(crate) fn finish_shutdown(&self) -> bool {
+        let bridge = self.core.bridge();
+        let panes = Arc::clone(&self.panes);
+        let inputs = Arc::clone(&self.inputs);
+        finish_before_deadline(SHUTDOWN_DRAIN, move || {
+            if let Some(bridge) = &bridge {
+                let _ = bridge.wait_launches_closed();
+            }
+            reap_all(&panes);
+            inputs.close_and_drain();
+            if let Some(bridge) = &bridge {
+                let _ = bridge.wait_closed();
+            }
+        })
     }
+}
+
+/// Runs `finish` on a thread of its own and waits for it until `timeout`:
+/// `false` when it failed or was not done by then.
+fn finish_before_deadline(timeout: Duration, finish: impl FnOnce() + Send + 'static) -> bool {
+    let (sent, done) = mpsc::sync_channel(1);
+    if thread::Builder::new()
+        .name("consensflow-drain".into())
+        .spawn(move || {
+            finish();
+            let _ = sent.send(());
+        })
+        .is_err()
+    {
+        return false;
+    }
+    done.recv_timeout(timeout).is_ok()
 }
 
 fn reap_all(panes: &PaneTable) {
@@ -635,19 +870,10 @@ fn reap_all(panes: &PaneTable) {
     }
 }
 
-fn request_node(
-    bridge: Option<Bridge>,
-    startup_error: Option<String>,
-    operation: String,
-    body: Value,
-) -> Value {
-    let Some(bridge) = bridge else {
-        return not_available(
-            &operation,
-            startup_error
-                .as_deref()
-                .unwrap_or("the Node bridge is not running"),
-        );
+fn request_node(connection: Result<Bridge, String>, operation: String, body: Value) -> Value {
+    let bridge = match connection {
+        Ok(bridge) => bridge,
+        Err(cause) => return not_available(&operation, &cause),
     };
     match bridge.request(operation.clone(), body, None) {
         Ok(response) => normalize_node_response(&operation, response),
@@ -684,12 +910,10 @@ fn stop_editor(editor: &mut Child) {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct OpenRequest {
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    generation: Option<u64>,
-    #[serde(default, alias = "launch")]
-    launch_id: Option<String>,
+    /// The identity the daemon reserved for the window: it names every pane
+    /// it opens, once.
+    id: String,
+    generation: u64,
     cwd: PathBuf,
     argv: Vec<String>,
     #[serde(default)]
@@ -780,15 +1004,13 @@ fn default_backlog_bytes() -> usize {
     DEFAULT_BACKLOG_BYTES
 }
 
-fn start_editor(
-    app: &AppHandle,
-    panes: Arc<PaneTable>,
-    arbiter: Arc<InputArbiter>,
-    output: Arc<OutputHub>,
-    launches: Arc<LaunchRegistry>,
-    inputs: Arc<InputQueue>,
-) -> Result<(Child, ConnectedBridge), String> {
-    let (node, cli) = bundled_cli(app)?;
+/// The bundled daemon, `cf ui --json`, on the human's login PATH. A runtime
+/// or CLI missing from the app is not worth another start.
+fn core_command(app: &AppHandle) -> Result<Command, CoreFailure> {
+    let (node, cli) = bundled_cli(app).map_err(|cause| CoreFailure {
+        cause,
+        retry: false,
+    })?;
     let mut command = Command::new(node);
     command.arg(cli).args(["ui", "--json", "--no-open"]);
     if let Some(path) = login_path() {
@@ -803,67 +1025,74 @@ fn start_editor(
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
+    Ok(command)
+}
+
+/// Starts a daemon and connects to it: its output carries the handle line,
+/// then the bridge's frames; its input carries the app's.
+fn connect_core(mut command: Command, builder: BridgeBuilder) -> Result<StartedCore, CoreFailure> {
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(daemon_stderr())
         .spawn()
-        .map_err(|error| format!("the bundled ConsensFlow could not be started: {error}"))?;
-    let input = child
-        .stdout
-        .take()
-        .ok_or_else(|| "the editor process gave no output to read".to_string())?;
-    let writer = child
-        .stdin
-        .take()
-        .ok_or_else(|| "the editor process gave no input pipe".to_string())?;
-
-    let mut builder = BridgeBuilder::new(MAX_FRAME_BYTES);
-    let page_app = app.clone();
-    let page_events: PageEventSink = Arc::new(move |name, body| {
-        if let Err(error) = page_app.emit(name, body) {
-            eprintln!("consensflow page event {name}: {error}");
-        }
-    });
-    register_page_events(&mut builder, page_events);
-    register_pane_handlers(&mut builder, panes, arbiter, output, launches, inputs);
-    builder.on_error(|error| eprintln!("consensflow bridge: {error}"));
-    match builder.connect(input, writer) {
-        Ok(connected) => Ok((child, connected)),
-        Err(error) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            Err(format!(
-                "could not connect to the bundled ConsensFlow: {error}"
+        .map_err(|error| {
+            CoreFailure::transient(format!(
+                "the bundled ConsensFlow could not be started: {error}"
             ))
+        })?;
+    let input = child.stdout.take().ok_or_else(|| {
+        CoreFailure::transient("the editor process gave no output to read".to_string())
+    })?;
+    let writer = child.stdin.take().ok_or_else(|| {
+        CoreFailure::transient("the editor process gave no input pipe".to_string())
+    })?;
+    let failed = |child: &mut Child, cause: String| {
+        let _ = child.kill();
+        let _ = child.wait();
+        CoreFailure::transient(cause)
+    };
+    let connected = match builder.connect(input, writer) {
+        Ok(connected) => connected,
+        Err(BridgeError::Eof) => {
+            return Err(failed(
+                &mut child,
+                "ConsensFlow's core stopped before it was ready".to_string(),
+            ));
         }
+        Err(error) => {
+            return Err(failed(
+                &mut child,
+                format!("could not connect to the bundled ConsensFlow: {error}"),
+            ));
+        }
+    };
+    match RosterHandle::from_value(connected.handle) {
+        Ok(roster) => Ok(StartedCore {
+            editor: child,
+            bridge: connected.bridge,
+            roster,
+        }),
+        Err(cause) => Err(failed(&mut child, cause)),
     }
 }
 
 /// Where the daemon's error output goes. On Windows a windowed app has no
 /// stderr to hand down (inheriting an invalid handle fails the spawn), so the
-/// daemon writes to `<home>/app/app.log`, the file the macOS build redirects
-/// the app's own stderr to; elsewhere the daemon inherits the app's.
+/// daemon appends to the app's error log, the file the macOS build redirects
+/// the app's own stderr to, kept the same way; elsewhere the daemon inherits
+/// the app's.
 #[cfg(windows)]
 fn daemon_stderr() -> Stdio {
-    let home = std::env::var_os("CONSENSFLOW_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join(".consensflow")));
-    let Some(home) = home else {
-        return Stdio::null();
-    };
-    let directory = home.join("app");
-    if std::fs::create_dir_all(&directory).is_err() {
-        return Stdio::null();
-    }
-    match std::fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(directory.join("app.log"))
-    {
-        Ok(file) => Stdio::from(file),
-        Err(_) => Stdio::null(),
-    }
+    crate::error_log()
+        .and_then(|log| {
+            std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(log)
+                .ok()
+        })
+        .map_or_else(Stdio::null, Stdio::from)
 }
 
 #[cfg(not(windows))]
@@ -931,14 +1160,71 @@ fn plain_path(path: PathBuf) -> PathBuf {
     path
 }
 
+/// The PATH the human's login shell sets up, where their harness CLIs live,
+/// for the daemon and every pane it opens.
 fn login_path() -> Option<String> {
-    let shell = std::env::var("SHELL").ok()?;
-    let output = Command::new(shell)
-        .args(["-lc", "printf %s \"$PATH\""])
-        .output()
+    login_path_in(Path::new(&std::env::var_os("SHELL")?), LOGIN_PATH_TIMEOUT)
+}
+
+/// A login file may print (`nvm use` does), wait for input or never finish,
+/// and the PATH used to be the shell's whole output, read on the main thread
+/// before the window existed, for as long as the shell took. So the PATH is
+/// read between markers no login file prints, from a shell that exits
+/// cleanly within `timeout`; otherwise there is none, and the daemon keeps
+/// the PATH the app was started with.
+fn login_path_in(shell: &Path, timeout: Duration) -> Option<String> {
+    use std::hash::BuildHasher;
+    use std::io::Read;
+
+    let marker = format!(
+        "<consensflow-path-{:016x}>",
+        std::hash::RandomState::new().hash_one(std::process::id())
+    );
+    let mut child = Command::new(shell)
+        .args(["-lc", &format!("printf '{marker}%s{marker}' \"$PATH\"")])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
         .ok()?;
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!path.is_empty()).then_some(path)
+    let mut output = child.stdout.take()?;
+    let (chunks, printed) = mpsc::channel();
+    // Not joined: a process a login file started may hold the output open
+    // long after the shell has gone.
+    thread::spawn(move || {
+        let mut chunk = [0; 4096];
+        while let Ok(read) = output.read(&mut chunk) {
+            if read == 0 || chunks.send(chunk[..read].to_vec()).is_err() {
+                return;
+            }
+        }
+    });
+    let deadline = Instant::now() + timeout;
+    let succeeded = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.success(),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break false;
+            }
+        }
+    };
+    if !succeeded {
+        return None;
+    }
+    // The shell has gone, so what it printed is in the pipe, a moment from
+    // the reader at most.
+    let mut bytes = Vec::new();
+    loop {
+        let text = String::from_utf8_lossy(&bytes);
+        let mut parts = text.split(marker.as_str());
+        if let (Some(_), Some(path), Some(_)) = (parts.next(), parts.next(), parts.next()) {
+            return (!path.is_empty()).then(|| path.to_string());
+        }
+        bytes.extend(printed.recv_timeout(Duration::from_secs(1)).ok()?);
+    }
 }
 
 fn register_pane_handlers(
@@ -946,100 +1232,67 @@ fn register_pane_handlers(
     panes: Arc<PaneTable>,
     arbiter: Arc<InputArbiter>,
     output: Arc<OutputHub>,
-    launches: Arc<LaunchRegistry>,
     inputs: Arc<InputQueue>,
 ) {
     let open_panes = Arc::clone(&panes);
     let open_arbiter = Arc::clone(&arbiter);
+    let open_inputs = Arc::clone(&inputs);
     let open_output = Arc::clone(&output);
-    let open_launches = Arc::clone(&launches);
     builder.on_launch("pane.open", move |bridge, body| {
         let request: OpenRequest = parse_body(body)?;
-        validate_open_request(&request)?;
-        let owner_slot = match request.launch_id.as_deref() {
-            Some(launch_id) => match open_launches.reserve(launch_id)? {
-                LaunchClaim::Owner(slot) => Some(slot),
-                LaunchClaim::Duplicate(slot) => {
-                    return launch_response(slot.wait(), true);
-                }
-            },
-            None => None,
-        };
-
+        let key = validate_open_request(&request)?;
         let size = PtySize {
             rows: request.size.rows,
             cols: request.size.cols,
             pixel_width: 0,
             pixel_height: 0,
         };
-        let opened = match (&request.id, request.generation) {
-            (Some(id), Some(generation)) => open_panes.open_streamed_at(
-                pane_key(id, generation)?,
+        let streamed = open_panes
+            .open_streamed_at(
+                key,
                 &request.cwd,
                 &request.argv,
                 PaneEnvironment::new(&request.env, &request.drop_env),
                 size,
                 request.backlog_bytes,
-            ),
-            (None, None) => open_panes.open_streamed(
-                &request.cwd,
-                &request.argv,
-                PaneEnvironment::new(&request.env, &request.drop_env),
-                size,
-                request.backlog_bytes,
-            ),
-            _ => return Err("pane.open needs both id and generation, or neither".to_string()),
-        }
-        .map_err(|error| error.to_string());
-        let streamed = match opened {
-            Ok(streamed) => streamed,
+            )
+            .map_err(|error| error.to_string())?;
+        let printed = match open_arbiter
+            .register(&streamed.key)
+            .map_err(|error| error.to_string())
+            .and_then(|printed| open_inputs.open(&streamed.key).map(|()| printed))
+        {
+            Ok(printed) => printed,
             Err(error) => {
-                if let Some(slot) = owner_slot {
-                    slot.complete(Err(error.clone()));
-                }
+                let _ = open_panes.kill(&streamed.key);
+                open_inputs.retire(&streamed.key);
                 return Err(error);
             }
         };
-        if let Err(error) = open_arbiter.register(&streamed.key) {
-            let _ = open_panes.kill(&streamed.key);
-            let error = error.to_string();
-            if let Some(slot) = owner_slot {
-                slot.complete(Err(error.clone()));
-            }
-            return Err(error);
-        }
         let key = streamed.key.clone();
         stream_to_page(
             streamed,
             bridge,
-            Arc::clone(&open_arbiter),
+            Arc::clone(&open_panes),
+            printed,
+            Arc::clone(&open_inputs),
             Arc::clone(&open_output),
-            Arc::clone(&open_launches),
-            request.launch_id,
         );
-        if let Some(slot) = owner_slot {
-            slot.complete(Ok(key.clone()));
-        }
         Ok(json!({"ok":true,"id":key.id,"generation":key.generation}))
     });
 
-    let input_queue = Arc::clone(&inputs);
-    builder.on("pane.input", move |_bridge, body| {
-        let request: BytesRequest = parse_body(body)?;
-        validate_input(&request.bytes)?;
-        let key = pane_key(&request.id, request.generation)?;
-        wait_for_input_blocking(input_queue.human(key, request.bytes)?)?;
-        Ok(json!({"ok":true}))
-    });
-
-    let reply_queue = Arc::clone(&inputs);
-    builder.on("pane.reply", move |_bridge, body| {
-        let request: BytesRequest = parse_body(body)?;
-        validate_input(&request.bytes)?;
-        let key = pane_key(&request.id, request.generation)?;
-        wait_for_input_blocking(reply_queue.reply(key, request.bytes)?)?;
-        Ok(json!({"ok":true}))
-    });
+    // Keys typed into a pane and an emulator's replies (a page-less peer
+    // answers a cursor query itself) are written alike.
+    for operation in ["pane.input", "pane.reply"] {
+        let input_queue = Arc::clone(&inputs);
+        builder.on(operation, move |_bridge, body| {
+            let request: BytesRequest = parse_body(body)?;
+            validate_input(&request.bytes)?;
+            let key = pane_key(&request.id, request.generation)?;
+            wait_for_input_blocking(input_queue.write(key, request.bytes)?)?;
+            Ok(json!({"ok":true}))
+        });
+    }
 
     let paste_queue = Arc::clone(&inputs);
     builder.on("pane.write_paste", move |_bridge, body| {
@@ -1110,12 +1363,12 @@ fn register_pane_handlers(
     });
 
     let kill_panes = Arc::clone(&panes);
-    let kill_launches = Arc::clone(&launches);
+    let kill_inputs = Arc::clone(&inputs);
     builder.on("pane.kill", move |_bridge, body| {
         let request: PaneRequest = parse_body(body)?;
         let key = pane_key(&request.id, request.generation)?;
         kill_panes.kill(&key).map_err(|error| error.to_string())?;
-        kill_launches.remove_key(&key);
+        kill_inputs.retire(&key);
         Ok(json!({"ok":true}))
     });
 
@@ -1150,63 +1403,51 @@ fn register_pane_handlers(
             "generation":snapshot.generation,
             "pasteInFlight":snapshot.paste_in_flight,
             "inputFailed":snapshot.input_failed,
-            "queuedHumanBytes":snapshot.queued_human_bytes,
             "outputQuietMs":snapshot.output_quiet_ms,
         }))
     });
 }
 
-fn launch_response(result: Result<PaneKey, String>, deduplicated: bool) -> Result<Value, String> {
-    result.map(|key| {
-        json!({
-            "ok":true,
-            "id":key.id,
-            "generation":key.generation,
-            "deduplicated":deduplicated,
-        })
-    })
-}
-
+/// A pane's output, on to the page, and its end: `pane.exit`, after which a
+/// pane whose program has gone leaves the table.
 fn stream_to_page(
     streamed: StreamedPane,
     bridge: Bridge,
-    arbiter: Arc<InputArbiter>,
+    panes: Arc<PaneTable>,
+    printed: Arc<OutputClock>,
+    inputs: Arc<InputQueue>,
     output: Arc<OutputHub>,
-    launches: Arc<LaunchRegistry>,
-    launch_id: Option<String>,
 ) {
     thread::spawn(move || {
         let key = streamed.key;
         for message in streamed.output {
-            arbiter.note_output(&key);
+            printed.note();
             output.publish(message.into());
-        }
-        if let Some(launch_id) = launch_id {
-            launches.remove_id(&launch_id);
         }
         let _ = bridge.event(
             "pane.exit",
             json!({"id":key.id,"generation":key.generation}),
         );
+        if matches!(panes.retire_exited(&key), Ok(true)) {
+            inputs.retire(&key);
+        }
     });
 }
 
 /// The headless pane helper, running the WINDOW's handlers.
 ///
 /// `consensflow-bridge` used to carry its own copy of the pane operations, and
-/// a copy is a contract that drifts: it had no launch deduplication, no pane
-/// id or generation on `pane.open`, and it never reported a natural
-/// `pane.exit`. The real Node side speaks to the window, so against the helper
-/// it could only be refused. There is nothing to keep in step here: this is
-/// `register_pane_handlers`, the same `InputQueue`, the same `LaunchRegistry`
-/// and the same shutdown drain the window uses, over stdin and stdout instead
-/// of a webview.
+/// a copy is a contract that drifts: it had no pane id or generation on
+/// `pane.open`, and it never reported a natural `pane.exit`. The real Node
+/// side speaks to the window, so against the helper it could only be refused.
+/// There is nothing to keep in step here: this is `register_pane_handlers`,
+/// the same `InputQueue` and the same shutdown drain the window uses, over
+/// stdin and stdout instead of a webview.
 ///
 /// Serves until the peer closes the transport, then reaps what it opened.
 pub fn run_headless() -> Result<(), String> {
     let panes = Arc::new(PaneTable::new());
     let output = Arc::new(OutputHub::new());
-    let launches = Arc::new(LaunchRegistry::new());
     let arbiter = Arc::new(InputArbiter::new(ENTER_DELAY_MS));
     let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
 
@@ -1216,7 +1457,6 @@ pub fn run_headless() -> Result<(), String> {
         Arc::clone(&panes),
         Arc::clone(&arbiter),
         Arc::clone(&output),
-        Arc::clone(&launches),
         Arc::clone(&inputs),
     );
     builder.on_error(|error| eprintln!("consensflow-bridge: {error}"));
@@ -1257,10 +1497,10 @@ fn parse_body<T: DeserializeOwned>(body: Value) -> Result<T, String> {
     serde_json::from_value(body).map_err(|error| format!("invalid-body: {error}"))
 }
 
-fn validate_open_request(request: &OpenRequest) -> Result<(), String> {
-    if request.id.is_some() != request.generation.is_some() {
-        return Err("pane.open needs both id and generation, or neither".to_string());
-    }
+/// Everything a `pane.open` asks for, checked before anything is spawned; the
+/// answer is the pane's key.
+fn validate_open_request(request: &OpenRequest) -> Result<PaneKey, String> {
+    let key = pane_key(&request.id, request.generation)?;
     if !request.cwd.is_absolute() {
         return Err("pane cwd must be absolute".to_string());
     }
@@ -1272,16 +1512,7 @@ fn validate_open_request(request: &OpenRequest) -> Result<(), String> {
     }
     validate_drop_env(&request.drop_env).map_err(|error| error.to_string())?;
     validate_size(request.size.cols, request.size.rows)?;
-    if let Some(id) = &request.id {
-        validate_text(id, "pane id")?;
-    }
-    if request.generation == Some(0) {
-        return Err("generation must be a positive integer".to_string());
-    }
-    if let Some(launch_id) = &request.launch_id {
-        validate_text(launch_id, "launch id")?;
-    }
-    Ok(())
+    Ok(key)
 }
 
 fn pane_key(id: &str, generation: u64) -> Result<PaneKey, String> {
@@ -1330,7 +1561,7 @@ fn normalize_node_response(operation: &str, response: Value) -> Value {
     let unavailable = response
         .get("error")
         .and_then(Value::as_str)
-        .is_some_and(|error| matches!(error, "unknown-op" | "not yet" | "not-yet"));
+        .is_some_and(|error| error == "unknown-op");
     if unavailable {
         not_available(operation, "the Node handler has not landed yet")
     } else {
@@ -1400,7 +1631,7 @@ pub fn pane_input_enqueue<R: Runtime>(
     sequence: u64,
     bytes: Vec<u8>,
 ) -> Value {
-    enqueue_page_input(app, id, generation, sequence, InputWork::Human(bytes), true)
+    enqueue_page_input(app, id, generation, sequence, InputWork::Write(bytes), true)
 }
 
 #[tauri::command]
@@ -1411,7 +1642,7 @@ pub fn pane_reply_enqueue<R: Runtime>(
     sequence: u64,
     bytes: Vec<u8>,
 ) -> Value {
-    enqueue_page_input(app, id, generation, sequence, InputWork::Reply(bytes), false)
+    enqueue_page_input(app, id, generation, sequence, InputWork::Write(bytes), false)
 }
 
 #[tauri::command]
@@ -1489,12 +1720,9 @@ async fn task_operation<R: Runtime>(
     operation: &'static str,
     body: Value,
 ) -> Value {
-    let (bridge, startup_error) = {
-        let state = app.state::<AppRuntime>();
-        (state.bridge.clone(), state.startup_error.clone())
-    };
+    let connection = app.state::<AppRuntime>().core.connection();
     run_blocking(operation, move || {
-        request_node(bridge, startup_error, operation.to_string(), body)
+        request_node(connection, operation.to_string(), body)
     })
     .await
 }
@@ -1554,27 +1782,32 @@ pub async fn core_request<R: Runtime>(app: AppHandle<R>, operation: String, body
 /// anywhere, because the sends that followed still returned ok into a channel
 /// nothing was listening to. Only the packaged app could show it: a shimmed
 /// page test has no real channel to end.
+///
+/// Once per page is also what makes it the start of the page's input count.
+/// The page numbers its input in its own memory, so a reload (WebKit's content
+/// process replaced, or the human's Reload) starts again from 1; every pane's
+/// next keystrokes were refused as a regression until the app restarted.
+///
+/// And it is when a new page hears where the core stands: what was told
+/// before it listened (a first start fails before the window exists) is told
+/// again, so the page listens to `core-status` before it subscribes.
 #[tauri::command]
 pub async fn subscribe_output<R: Runtime>(
     app: AppHandle<R>,
     on_output: Channel<PaneOutputMessage>,
 ) -> Value {
-    let output = {
+    let (output, inputs, core) = {
         let state = app.state::<AppRuntime>();
-        Arc::clone(&state.output)
+        (
+            Arc::clone(&state.output),
+            Arc::clone(&state.inputs),
+            Arc::clone(&state.core),
+        )
     };
+    inputs.begin_page();
     output.register(on_output);
+    core.tell_again();
     json!({"ok":true})
-}
-
-/// Where the human's agents screens are: the daemon's URL and the UI token it
-/// handed the app, or null while the daemon is not up.
-#[tauri::command]
-pub fn roster_handle<R: Runtime>(app: AppHandle<R>) -> Value {
-    match app.state::<AppRuntime>().roster.clone() {
-        Some(roster) => serde_json::to_value(roster).unwrap_or(Value::Null),
-        None => Value::Null,
-    }
 }
 
 /// The agents screens (the agents, the harnesses) in their own
@@ -1587,7 +1820,7 @@ pub fn roster_handle<R: Runtime>(app: AppHandle<R>) -> Value {
 // deadlocks with the main thread (a white window that neither loads nor closes).
 #[tauri::command]
 pub async fn open_agents_window<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
-    let Some(roster) = app.state::<AppRuntime>().roster.clone() else {
+    let Some(roster) = app.state::<AppRuntime>().core.roster() else {
         return json!({"ok":false,"error":"the agents screens are not available: the daemon is not up"});
     };
     let url = match agents_url(&roster, &page) {
@@ -1611,7 +1844,7 @@ pub async fn open_agents_window<R: Runtime>(app: AppHandle<R>, page: String) -> 
     }
 }
 
-const AGENTS_WINDOW: &str = "agents";
+pub(crate) const AGENTS_WINDOW: &str = "agents";
 const AGENTS_PAGES: &[&str] = &["", "harnesses"];
 
 /// The daemon's page for one agents screen, carrying the UI token.
@@ -1635,6 +1868,309 @@ mod tests {
     use std::io::Read;
     #[cfg(unix)]
     use std::time::Duration;
+
+    /// A runtime around what a test stands up: its panes and input queue, and
+    /// a daemon and its bridge when the test has them.
+    fn runtime(
+        panes: Arc<PaneTable>,
+        inputs: Arc<InputQueue>,
+        editor: Option<Child>,
+        bridge: Option<Bridge>,
+    ) -> AppRuntime {
+        let core = Core::new(Arc::new(|_: &CoreStatus| {}));
+        {
+            let mut state = core.lock();
+            if bridge.is_some() {
+                state.status = CoreStatus::up();
+            }
+            state.editor = editor;
+            state.bridge = bridge;
+        }
+        AppRuntime {
+            panes,
+            core,
+            output: Arc::new(OutputHub::new()),
+            inputs,
+        }
+    }
+
+    /// Starts between failures, short enough for a test.
+    const QUICK: Backoff = Backoff {
+        first: Duration::from_millis(10),
+        most: Duration::from_millis(40),
+    };
+
+    /// What the page hears of the core, as a test hears it.
+    fn listener() -> (CoreReport, mpsc::Receiver<CoreStatus>) {
+        let (told, heard) = mpsc::channel();
+        (
+            Arc::new(move |status: &CoreStatus| {
+                let _ = told.send(status.clone());
+            }),
+            heard,
+        )
+    }
+
+    /// A stand-in for `cf ui --json`, started and connected the way the app
+    /// starts the daemon; it prints its handle line when `ready`.
+    #[cfg(unix)]
+    fn stand_in_core(
+        ready: bool,
+        then: &str,
+        closed: Box<dyn Fn() + Send + Sync>,
+    ) -> Result<StartedCore, CoreFailure> {
+        let handle = r#"printf '%s\n' '{"url":"http://localhost:1/","token":"t"}'; "#;
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg(format!("{}{then}", if ready { handle } else { "" }));
+        let mut builder = BridgeBuilder::new(1024);
+        builder.on_close(closed);
+        connect_core(command, builder)
+    }
+
+    /// A daemon that stops before it is ready (its ledger still held by one
+    /// finishing its stop) is started again, waiting longer each time, and
+    /// the page hears each failure and the start that worked.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_daemon_start_is_tried_again_and_the_page_is_told() {
+        let starts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&starts);
+        let starter: CoreStarter = Arc::new(move |closed| {
+            if counted.fetch_add(1, Ordering::SeqCst) < 2 {
+                stand_in_core(false, "exit 1", closed)
+            } else {
+                stand_in_core(true, "while read -r line; do :; done", closed)
+            }
+        });
+        let (report, heard) = listener();
+        let core = Core::new(report);
+        let panes = Arc::new(PaneTable::new());
+        core.start(starter, Arc::clone(&panes), QUICK);
+
+        let not_ready = CoreStatus::down("ConsensFlow's core stopped before it was ready", true);
+        for told in [not_ready.clone(), not_ready, CoreStatus::up()] {
+            assert_eq!(
+                heard.recv_timeout(Duration::from_secs(5)).expect("told"),
+                told
+            );
+        }
+        assert_eq!(starts.load(Ordering::SeqCst), 3);
+        assert!(core.connection().is_ok());
+        assert!(core.roster().is_some());
+
+        let arbiter = Arc::new(InputArbiter::new(0));
+        let runtime = AppRuntime {
+            inputs: Arc::new(InputQueue::new(Arc::clone(&panes), arbiter)),
+            panes,
+            core,
+            output: Arc::new(OutputHub::new()),
+        };
+        runtime.shutdown();
+        assert!(
+            heard.recv_timeout(Duration::from_millis(200)).is_err(),
+            "an app that is quitting tells the page nothing"
+        );
+    }
+
+    /// A daemon that stops while the app runs is not started again (its
+    /// windows still run in the pane host), and the page is told.
+    #[cfg(unix)]
+    #[test]
+    fn a_daemon_that_stops_mid_session_is_told_and_not_started_again() {
+        let starts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&starts);
+        let starter: CoreStarter = Arc::new(move |closed| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            stand_in_core(true, "sleep 0.5", closed)
+        });
+        let (report, heard) = listener();
+        let core = Core::new(report);
+        core.start(starter, Arc::new(PaneTable::new()), QUICK);
+
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(5)).expect("up"),
+            CoreStatus::up()
+        );
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(5)).expect("stopped"),
+            CoreStatus::down(CORE_STOPPED, false)
+        );
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(starts.load(Ordering::SeqCst), 1, "started again");
+        assert_eq!(core.connection().err().as_deref(), Some(CORE_STOPPED));
+        assert!(core.roster().is_none());
+    }
+
+    /// A runtime missing from the app does not come back: the page is told,
+    /// and nothing starts again.
+    #[test]
+    fn a_missing_runtime_is_told_and_not_tried_again() {
+        let starts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&starts);
+        let starter: CoreStarter = Arc::new(move |_closed| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            Err(CoreFailure {
+                cause: "the bundled runtime is missing from this app".to_string(),
+                retry: false,
+            })
+        });
+        let (report, heard) = listener();
+        Core::new(report).start(starter, Arc::new(PaneTable::new()), QUICK);
+
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(5)).expect("told"),
+            CoreStatus::down("the bundled runtime is missing from this app", false)
+        );
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(starts.load(Ordering::SeqCst), 1, "tried again");
+    }
+
+    /// A start is tried again only while no pane is open: one that is open
+    /// may be a window of a daemon that got past its handle line.
+    #[cfg(unix)]
+    #[test]
+    fn no_start_is_tried_again_while_a_pane_is_open() {
+        let _pty_guard = crate::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let opened = panes
+            .open(
+                Path::new("/tmp"),
+                &["/bin/sh".to_string(), "-c".to_string(), "sleep 30".to_string()],
+                &HashMap::new(),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("open a pane");
+        let starts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&starts);
+        let starter: CoreStarter = Arc::new(move |closed| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            stand_in_core(false, "exit 1", closed)
+        });
+        let (report, heard) = listener();
+        Core::new(report).start(starter, Arc::clone(&panes), QUICK);
+
+        let cause = "ConsensFlow's core stopped before it was ready";
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(5)).expect("failed"),
+            CoreStatus::down(cause, true)
+        );
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(5)).expect("gave up"),
+            CoreStatus::down(cause, false)
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+        panes.kill(&opened.key).expect("kill the pane");
+    }
+
+    /// A page that loads after the core failed hears it when it subscribes,
+    /// in the shape the page reads.
+    #[test]
+    fn a_new_page_hears_where_the_core_stands() {
+        use tauri::Listener;
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        let reporter = app.handle().clone();
+        let core = Core::new(Arc::new(move |status: &CoreStatus| {
+            reporter
+                .emit(CORE_STATUS_EVENT, status)
+                .expect("emit the core's status");
+        }));
+        core.tell(CoreStatus::down("the core is held up", true));
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(0));
+        app.manage(AppRuntime {
+            inputs: Arc::new(InputQueue::new(Arc::clone(&panes), arbiter)),
+            panes,
+            core,
+            output: Arc::new(OutputHub::new()),
+        });
+        let (told, heard) = mpsc::channel();
+        app.listen(CORE_STATUS_EVENT, move |event| {
+            let _ = told.send(event.payload().to_string());
+        });
+
+        let subscribed = tauri::async_runtime::block_on(subscribe_output(
+            app.handle().clone(),
+            Channel::new(|_| Ok(())),
+        ));
+        assert_eq!(subscribed["ok"], true);
+        let payload = heard
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the page hears where the core stands");
+        assert_eq!(
+            serde_json::from_str::<Value>(&payload).expect("JSON"),
+            json!({"available":false,"cause":"the core is held up","retrying":true})
+        );
+        drop(app);
+    }
+
+    /// A stand-in for the human's login shell: `body` runs with the command
+    /// the app gives it (`-lc <command>`) as `$2`.
+    #[cfg(unix)]
+    fn login_shell(home: &Path, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let shell = home.join("login-shell");
+        std::fs::write(&shell, format!("#!/bin/sh\n{body}\n")).expect("write the shell");
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755))
+            .expect("make the shell executable");
+        shell
+    }
+
+    /// What a login file prints (`nvm use` says which Node it took) is not
+    /// part of the PATH.
+    #[cfg(unix)]
+    #[test]
+    fn the_login_path_is_read_past_what_login_files_print() {
+        let home = tempfile::tempdir().expect("home");
+        let shell = login_shell(
+            home.path(),
+            "echo 'Now using node v22.9.0 (npm v10.8.3)'; exec /bin/sh -c \"$2\"",
+        );
+        assert_eq!(
+            login_path_in(&shell, Duration::from_secs(5)),
+            std::env::var("PATH").ok()
+        );
+    }
+
+    /// A login shell that fails, or takes too long, leaves the daemon on the
+    /// PATH the app was started with; the app's start does not wait on it.
+    #[cfg(unix)]
+    #[test]
+    fn a_login_shell_that_fails_or_hangs_gives_no_path() {
+        let home = tempfile::tempdir().expect("home");
+        let failing = login_shell(home.path(), "/bin/sh -c \"$2\"; exit 3");
+        assert_eq!(login_path_in(&failing, Duration::from_secs(5)), None);
+
+        let hanging = login_shell(home.path(), "exec /bin/sleep 3");
+        let started = Instant::now();
+        assert_eq!(login_path_in(&hanging, Duration::from_millis(300)), None);
+        assert!(started.elapsed() < Duration::from_secs(2), "the shell held up the start");
+    }
+
+    /// Something a login file starts may keep the shell's output open after
+    /// the shell has gone; what the shell printed is read all the same.
+    #[cfg(unix)]
+    #[test]
+    fn a_login_path_is_read_while_a_started_process_holds_the_output() {
+        let home = tempfile::tempdir().expect("home");
+        let shell = login_shell(home.path(), "/bin/sleep 3 & exec /bin/sh -c \"$2\"");
+        let started = Instant::now();
+        assert_eq!(
+            login_path_in(&shell, Duration::from_secs(5)),
+            std::env::var("PATH").ok()
+        );
+        assert!(started.elapsed() < Duration::from_secs(2), "the read waited for the process");
+    }
 
     #[test]
     fn headless_output_includes_companion_panes() {
@@ -1769,6 +2305,8 @@ mod tests {
             ("/tmp", "/bin/sh")
         };
         let relative: OpenRequest = parse_body(json!({
+            "id":"p-1",
+            "generation":1,
             "cwd":"relative",
             "argv":["sh"],
             "size":{"rows":24,"cols":80},
@@ -1785,19 +2323,27 @@ mod tests {
             "size":{"rows":24,"cols":80},
         }))
         .unwrap();
-        assert!(validate_open_request(&absolute).is_ok());
+        assert_eq!(validate_open_request(&absolute), Ok(PaneKey::new("p-1", 1)));
 
-        let half_reserved: OpenRequest = parse_body(json!({
+        assert!(parse_body::<OpenRequest>(json!({
             "id":"p-1",
-            "launchId":"launch-1",
             "cwd":directory,
             "argv":[program],
             "size":{"rows":24,"cols":80},
         }))
+        .is_err());
+        let first_generation: OpenRequest = parse_body(json!({
+            "id":"p-1",
+            "generation":0,
+            "cwd":directory,
+            "argv":[program],
+        }))
         .unwrap();
-        assert!(validate_open_request(&half_reserved).is_err());
+        assert!(validate_open_request(&first_generation).is_err());
 
         let invalid_drop_env: OpenRequest = parse_body(json!({
+            "id":"p-1",
+            "generation":1,
             "cwd":directory,
             "argv":[program],
             "dropEnv":["BAD=NAME"],
@@ -1808,6 +2354,8 @@ mod tests {
             .contains("environment variable name"));
 
         assert!(parse_body::<OpenRequest>(json!({
+            "id":"p-1",
+            "generation":1,
             "cwd":directory,
             "argv":[program],
             "dropEnv":[],
@@ -1868,6 +2416,7 @@ mod tests {
             )
             .expect("open ordered pane");
         arbiter.register(&key).expect("register ordered pane");
+        inputs.open(&key).expect("open the pane's input");
         let mut ready = [0; 5];
         reader
             .read_exact(&mut ready)
@@ -1879,16 +2428,7 @@ mod tests {
             output
         });
 
-        let runtime = AppRuntime {
-            panes: Arc::clone(&panes),
-            bridge: None,
-            editor: Mutex::new(None),
-            roster: None,
-            startup_error: None,
-            output: Arc::new(OutputHub::new()),
-            inputs,
-            shutting_down: AtomicBool::new(false),
-        };
+        let runtime = runtime(Arc::clone(&panes), inputs, None, None);
         let app = tauri::test::mock_builder()
             .manage(runtime)
             .invoke_handler(tauri::generate_handler![pane_input_enqueue])
@@ -1981,22 +2521,14 @@ mod tests {
             )
             .expect("open sequenced pane");
         arbiter.register(&key).expect("register sequenced pane");
+        inputs.open(&key).expect("open the pane's input");
         let mut ready = [0; 5];
         reader
             .read_exact(&mut ready)
             .expect("read readiness marker");
         assert_eq!(&ready, b"ready");
 
-        let runtime = AppRuntime {
-            panes: Arc::clone(&panes),
-            bridge: None,
-            editor: Mutex::new(None),
-            roster: None,
-            startup_error: None,
-            output: Arc::new(OutputHub::new()),
-            inputs,
-            shutting_down: AtomicBool::new(false),
-        };
+        let runtime = runtime(Arc::clone(&panes), inputs, None, None);
         let app = tauri::test::mock_builder()
             .manage(runtime)
             .invoke_handler(tauri::generate_handler![
@@ -2095,6 +2627,91 @@ mod tests {
         drop(app);
     }
 
+    /// A reloaded page counts every pane's input from 1 again: its
+    /// subscription starts the count anew, and what the page before it was
+    /// still owed answers goes with it.
+    #[cfg(unix)]
+    #[test]
+    fn a_reloaded_page_types_into_the_panes_it_finds() {
+        let _pty_guard = crate::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(0));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let key = PaneKey::new("reloaded-page", 1);
+        let mut reader = panes
+            .open_at(
+                key.clone(),
+                Path::new("/tmp"),
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "/bin/stty raw -echo; printf ready; /usr/bin/od -An -tx1 -N 3".to_string(),
+                ],
+                &HashMap::new(),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("open the pane");
+        arbiter.register(&key).expect("register the pane");
+        inputs.open(&key).expect("open the pane's input");
+        let mut ready = [0; 5];
+        reader.read_exact(&mut ready).expect("read readiness marker");
+        assert_eq!(&ready, b"ready");
+
+        let runtime = runtime(Arc::clone(&panes), inputs, None, None);
+        let app = tauri::test::mock_builder()
+            .manage(runtime)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        let handle = app.handle().clone();
+        let subscribe = || {
+            let subscribed = tauri::async_runtime::block_on(subscribe_output(
+                handle.clone(),
+                Channel::new(|_| Ok(())),
+            ));
+            assert_eq!(subscribed["ok"], true);
+        };
+        let wait = |ticket: &Value| {
+            tauri::async_runtime::block_on(pane_input_wait(
+                handle.clone(),
+                ticket.as_str().expect("a ticket").to_string(),
+            ))
+        };
+
+        subscribe();
+        let first = pane_input_enqueue(handle.clone(), key.id.clone(), 1, 1, b"A".to_vec());
+        assert_eq!(wait(&first["ticket"]), json!({"ok":true}));
+        // The page goes away with this one admitted and never waited for.
+        let orphaned = pane_input_enqueue(handle.clone(), key.id.clone(), 1, 2, b"B".to_vec());
+        assert_eq!(orphaned["ok"], true);
+
+        subscribe();
+        let typed = pane_input_enqueue(handle.clone(), key.id.clone(), 1, 1, b"C".to_vec());
+        assert_eq!(typed["ok"], true, "the new page's first keystroke: {typed}");
+        assert_eq!(wait(&typed["ticket"]), json!({"ok":true}));
+        assert_eq!(
+            wait(&orphaned["ticket"]),
+            json!({"ok":false,"error":"pane-input-ticket-not-found"}),
+            "the old page's tickets went with it"
+        );
+
+        let mut output = Vec::new();
+        reader.read_to_end(&mut output).expect("read what reached the pane");
+        assert_eq!(
+            String::from_utf8(output)
+                .expect("od output is UTF-8")
+                .split_whitespace()
+                .collect::<String>(),
+            "414243",
+            "every admitted keystroke reached the pane, in order"
+        );
+        drop(app);
+    }
+
     #[cfg(unix)]
     #[test]
     fn blocked_command_input_does_not_starve_another_pane_or_output_ack() {
@@ -2130,6 +2747,9 @@ mod tests {
         arbiter
             .register(&blocked_key)
             .expect("register blocked pane");
+        inputs
+            .open(&blocked_key)
+            .expect("open the blocked pane's input");
 
         let responsive_key = PaneKey::new("responsive-command", 1);
         let responsive = panes
@@ -2149,21 +2769,15 @@ mod tests {
         arbiter
             .register(&responsive_key)
             .expect("register responsive pane");
+        inputs
+            .open(&responsive_key)
+            .expect("open the responsive pane's input");
         let first_output = responsive
             .output
             .recv_timeout(Duration::from_secs(2))
             .expect("responsive pane output");
 
-        let runtime = AppRuntime {
-            panes: Arc::clone(&panes),
-            bridge: None,
-            editor: Mutex::new(None),
-            roster: None,
-            startup_error: None,
-            output: Arc::new(OutputHub::new()),
-            inputs: Arc::clone(&inputs),
-            shutting_down: AtomicBool::new(false),
-        };
+        let runtime = runtime(Arc::clone(&panes), Arc::clone(&inputs), None, None);
         let app = tauri::test::mock_builder()
             .manage(runtime)
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
@@ -2357,16 +2971,12 @@ mod tests {
                 rust_stream,
             )
             .expect("connect bridge");
-        let runtime = Arc::new(AppRuntime {
-            panes: Arc::clone(&panes),
-            bridge: Some(connected.bridge),
-            editor: Mutex::new(None),
-            roster: None,
-            startup_error: None,
-            output: Arc::new(OutputHub::new()),
+        let runtime = Arc::new(runtime(
+            Arc::clone(&panes),
             inputs,
-            shutting_down: AtomicBool::new(false),
-        });
+            None,
+            Some(connected.bridge),
+        ));
         node_stream
             .write_all(
                 b"{\"v\":1,\"id\":\"n-open\",\"kind\":\"req\",\"op\":\"pane.open\",\"body\":{}}\n",
@@ -2400,6 +3010,108 @@ mod tests {
             "GUI shutdown returned before its admitted launch finished"
         );
         assert!(panes.list().expect("pane list after shutdown").is_empty());
+    }
+
+    /// On Windows the daemon's errors go to the app's error log, kept as the
+    /// macOS app keeps it: a log past its limit is moved aside first. It used
+    /// to grow without end.
+    #[cfg(windows)]
+    #[test]
+    fn the_daemons_errors_go_to_an_app_log_kept_like_the_others() {
+        let home = tempfile::tempdir().expect("home");
+        let log = home.path().join("app").join("app.log");
+        std::fs::create_dir_all(home.path().join("app")).expect("the log's folder");
+        std::fs::write(&log, vec![b'x'; 10 * 1024 * 1024 + 1]).expect("a full log");
+        let configured = std::env::var_os("CONSENSFLOW_HOME");
+        std::env::set_var("CONSENSFLOW_HOME", home.path());
+        let stderr = daemon_stderr();
+        match configured {
+            Some(configured) => std::env::set_var("CONSENSFLOW_HOME", configured),
+            None => std::env::remove_var("CONSENSFLOW_HOME"),
+        }
+        drop(stderr);
+        assert!(
+            home.path().join("app").join("app.log.1").exists(),
+            "the full log was moved aside"
+        );
+        assert_eq!(
+            std::fs::metadata(&log).expect("a fresh log").len(),
+            0,
+            "the daemon writes to a fresh log"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stalled_drain_is_left_behind_at_its_deadline() {
+        use std::io::Read;
+        use std::os::unix::net::UnixStream;
+        let (mut reader, writer) = UnixStream::pair().unwrap();
+        let started = Instant::now();
+        assert!(!finish_before_deadline(
+            Duration::from_millis(30),
+            move || {
+                let _ = reader.read(&mut [0_u8; 1]);
+            }
+        ));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        drop(writer);
+        assert!(finish_before_deadline(Duration::from_secs(1), || {}));
+        assert!(!finish_before_deadline(Duration::from_secs(1), || panic!(
+            "drain failed"
+        )));
+    }
+
+    /// Quitting waits for the drain no longer than installing an update does:
+    /// a launch that never finishes cannot keep the app from quitting.
+    #[cfg(unix)]
+    #[test]
+    fn quitting_waits_for_the_drain_no_longer_than_an_update_does() {
+        use std::io::Write;
+        use std::os::unix::net::UnixStream;
+        use std::sync::Barrier;
+
+        let release = Arc::new(Barrier::new(2));
+        let handler_release = Arc::clone(&release);
+        let (admitted_sender, admitted_receiver) = mpsc::channel();
+        let mut builder = BridgeBuilder::new(1024);
+        builder.on_launch("pane.open", move |_bridge, _body| {
+            admitted_sender.send(()).expect("announce admitted launch");
+            handler_release.wait();
+            Ok(json!({"ok":true}))
+        });
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        node_stream
+            .write_all(
+                b"{\"v\":1,\"id\":\"n-open\",\"kind\":\"req\",\"op\":\"pane.open\",\"body\":{}}\n",
+            )
+            .expect("write pane.open");
+        admitted_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("launch admitted");
+        drop(node_stream);
+
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(0));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
+        let runtime = Arc::new(runtime(panes, inputs, None, Some(connected.bridge)));
+        let quitting = Arc::clone(&runtime);
+        let (quit, quitted) = mpsc::channel();
+        let started = Instant::now();
+        thread::spawn(move || {
+            quitting.shutdown();
+            let _ = quit.send(started.elapsed());
+        });
+        let took = quitted.recv_timeout(Duration::from_secs(8));
+        release.wait();
+        let took = took.expect("the quit waited on a launch that never finished");
+        assert!(took >= Duration::from_secs(5), "{took:?}");
     }
 
     /// Whether a pid is still there — signal 0 delivers nothing and only asks.
@@ -2483,16 +3195,12 @@ mod tests {
         let writer = editor.stdin.take().expect("editor stdin");
         let connected = builder.connect(reader, writer).expect("connect bridge");
 
-        let runtime = Arc::new(AppRuntime {
-            panes: Arc::clone(&panes),
-            bridge: Some(connected.bridge),
-            editor: Mutex::new(Some(editor)),
-            roster: None,
-            startup_error: None,
-            output: Arc::new(OutputHub::new()),
+        let runtime = Arc::new(runtime(
+            Arc::clone(&panes),
             inputs,
-            shutting_down: AtomicBool::new(false),
-        });
+            Some(editor),
+            Some(connected.bridge),
+        ));
         admitted_receiver
             .recv_timeout(Duration::from_secs(5))
             .expect("launch admitted over the real editor pipe");
@@ -2550,16 +3258,12 @@ mod tests {
             assert_eq!(ready, "ready\n");
             let arbiter = Arc::new(InputArbiter::new(0));
             let panes = Arc::new(PaneTable::new());
-            let runtime = AppRuntime {
-                panes: Arc::clone(&panes),
-                bridge: None,
-                editor: Mutex::new(Some(editor)),
-                roster: None,
-                startup_error: None,
-                output: Arc::new(OutputHub::new()),
-                inputs: Arc::new(InputQueue::new(panes, arbiter)),
-                shutting_down: AtomicBool::new(false),
-            };
+            let runtime = runtime(
+                Arc::clone(&panes),
+                Arc::new(InputQueue::new(panes, arbiter)),
+                Some(editor),
+                None,
+            );
             (runtime, pid)
         };
 
@@ -2652,7 +3356,6 @@ mod tests {
             Arc::clone(&panes),
             arbiter,
             Arc::new(OutputHub::new()),
-            Arc::new(LaunchRegistry::new()),
             Arc::clone(&inputs),
         );
         let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
@@ -2716,9 +3419,13 @@ mod tests {
         connected.bridge.wait_closed().expect("bridge closes");
     }
 
+    /// A pane's input lives as long as the pane: killed, or ended on its own,
+    /// it takes its input worker and queue, its page sequence and its arbiter
+    /// state with it. Each used to stay until the app quit, a parked thread
+    /// per window.
     #[cfg(unix)]
     #[test]
-    fn simultaneous_duplicate_launches_wait_for_and_share_one_result() {
+    fn a_pane_gone_from_the_table_takes_its_input_with_it() {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixStream;
 
@@ -2726,87 +3433,97 @@ mod tests {
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(0));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
-        let launches = Arc::new(LaunchRegistry::new());
         let mut builder = BridgeBuilder::new(1024 * 1024);
         register_pane_handlers(
             &mut builder,
             Arc::clone(&panes),
-            arbiter,
+            Arc::clone(&arbiter),
             Arc::new(OutputHub::new()),
-            Arc::clone(&launches),
             Arc::clone(&inputs),
         );
         let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
         node_stream
             .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
             .expect("write bridge handle");
-        node_stream.flush().expect("flush bridge handle");
         let connected = builder
-            .connect(
-                rust_stream.try_clone().expect("clone bridge socket"),
-                rust_stream,
-            )
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
             .expect("connect bridge");
-
-        let body = json!({
-            "id":"dedupe-pane",
-            "generation":1,
-            "launchId":"launch-shared",
-            "cwd":"/tmp",
-            "argv":["/bin/sh","-c","sleep 30"],
-            "env":{},
-            "size":{"rows":24,"cols":80},
-            "backlogBytes":1024,
-        });
-        let mut burst = Vec::new();
-        for index in 0..8 {
-            serde_json::to_writer(
-                &mut burst,
-                &json!({
-                    "v":1,
-                    "id":format!("n-dedupe-{index}"),
-                    "kind":"req",
-                    "op":"pane.open",
-                    "body":body,
-                }),
-            )
-            .expect("serialize duplicate request");
-            burst.push(b'\n');
-        }
-        node_stream
-            .write_all(&burst)
-            .expect("write duplicate burst");
-        node_stream.flush().expect("flush duplicate burst");
-
         let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
-        let mut responses = Vec::new();
-        while responses.len() < 8 {
-            let mut line = String::new();
-            reader
-                .read_line(&mut line)
-                .expect("read duplicate response");
-            let frame: Value = serde_json::from_str(line.trim()).expect("response JSON");
-            if frame["kind"] == "res" && frame["op"] == "pane.open" {
-                responses.push(frame["body"].clone());
+        let mut number = 0;
+        let mut ask = |op: &str, body: Value| -> Value {
+            number += 1;
+            let id = format!("n-retired-{number}");
+            let mut frame =
+                serde_json::to_vec(&json!({"v":1,"id":id,"kind":"req","op":op,"body":body}))
+                    .expect("serialize request");
+            frame.push(b'\n');
+            node_stream.write_all(&frame).expect("write request");
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read response");
+                let frame: Value = serde_json::from_str(line.trim()).expect("response JSON");
+                if frame["kind"] == "res" && frame["id"] == id.as_str() {
+                    return frame["body"].clone();
+                }
             }
-        }
-        assert!(
-            responses.iter().all(|response| {
-                response["ok"] == true
-                    && response["id"] == "dedupe-pane"
-                    && response["generation"] == 1
-            }),
-            "duplicates did not share the successful launch: {responses:?}"
-        );
-        assert_eq!(panes.list().expect("one launched pane").len(), 1);
+        };
+        let gone = |key: &PaneKey| {
+            !inputs.senders.lock().unwrap().contains_key(key)
+                && !inputs.workers.lock().unwrap().contains_key(key)
+                && !inputs.page.lock().unwrap().last_sequences.contains_key(key)
+                && arbiter.snapshot(key).is_err()
+        };
 
-        panes
-            .kill(&PaneKey::new("dedupe-pane", 1))
-            .expect("kill launched pane");
+        let killed = PaneKey::new("killed-pane", 1);
+        let ended = PaneKey::new("ended-pane", 1);
+        for (key, script) in [(&killed, "sleep 30"), (&ended, "read line")] {
+            let opened = ask(
+                "pane.open",
+                json!({"id":key.id,"generation":1,"cwd":"/tmp","argv":["/bin/sh","-c",script],
+                       "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1024}),
+            );
+            assert_eq!(opened["ok"], true, "{opened}");
+            inputs
+                .enqueue_page(key.clone(), 1, InputWork::Write(b"x".to_vec()), true)
+                .expect("the page types into the pane");
+            assert!(!gone(key), "the pane has its input");
+        }
+
+        assert_eq!(
+            ask("pane.kill", json!({"id":killed.id,"generation":1})),
+            json!({"ok":true})
+        );
+        assert!(gone(&killed), "a killed pane kept its input");
+
+        assert_eq!(
+            ask("pane.input", json!({"id":ended.id,"generation":1,"bytes":[13]})),
+            json!({"ok":true})
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !gone(&ended) {
+            assert!(
+                Instant::now() < deadline,
+                "a pane that ended kept its input"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+
         inputs.close_and_drain();
         drop(reader);
         drop(node_stream);
         connected.bridge.wait_closed().expect("bridge closes");
+    }
+
+    /// Input for a pane the table never held is refused, and starts no
+    /// worker: every key used to get a thread and a queue of its own.
+    #[test]
+    fn input_for_a_pane_never_opened_is_refused() {
+        let panes = Arc::new(PaneTable::new());
+        let inputs = InputQueue::new(Arc::clone(&panes), Arc::new(InputArbiter::new(0)));
+        let refused = inputs.write(PaneKey::new("never-opened", 1), b"x".to_vec());
+        assert_eq!(refused.err().as_deref(), Some("stale pane generation"));
+        assert!(inputs.senders.lock().unwrap().is_empty());
+        assert!(inputs.workers.lock().unwrap().is_empty());
     }
 
     #[cfg(unix)]
@@ -2874,16 +3591,7 @@ mod tests {
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(0));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
-        let runtime = AppRuntime {
-            panes,
-            bridge: Some(connected.bridge),
-            editor: Mutex::new(None),
-            roster: None,
-            startup_error: None,
-            output: Arc::new(OutputHub::new()),
-            inputs,
-            shutting_down: AtomicBool::new(false),
-        };
+        let runtime = runtime(panes, inputs, None, Some(connected.bridge));
         let app = tauri::test::mock_builder()
             .manage(runtime)
             .invoke_handler(tauri::generate_handler![core_request])
