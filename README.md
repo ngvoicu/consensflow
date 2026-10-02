@@ -3,8 +3,7 @@
 A control board for a staff of coding agents. You give a Chief of Staff its
 work; the chief hands bounded tasks to workers and asks advisors, a daemon
 opens each harness's own window for every task and brings every result back
-to the board, and reviewers judge workers' work on an independent model
-before you see it.
+to the board, and reviewers check finished work when the chief asks them to.
 
 Everything runs through the harness CLIs you already have installed and logged
 in (Claude Code, Codex, OpenCode, Pi, Devin). ConsensFlow stores no
@@ -27,8 +26,9 @@ chief's acceptance and your approval, not a fence around the run.
 - **Tiers, not names.** The chief names the tier of member a task needs
   (critical, complex, standard, light), never the member. The daemon gives the
   task to a free member of that role and tier with the fewest tasks so far,
-  the earliest joined first. No member of that tier on the staff and the task
-  is refused; none free and it waits on the board.
+  the earliest joined first. A tier nobody on the staff holds goes to the
+  nearest one somebody does, the next one up first; a role nobody holds is
+  refused, and with none free the task waits on the board.
 - **One task, one window.** A member's task runs in a session of its own,
   named after the member (`diana-amber-pine`): a fresh window that opens with
   the task and closes when the work leaves its hands. Nothing carries over,
@@ -48,10 +48,6 @@ chief's acceptance and your approval, not a fence around the run.
   the window that asked, through the harness's own question tool where it has
   one. The chief asks you in its own terminal, where you work with it: nothing
   asks you on the board.
-- **Review.** A project reviews its workers' finished work, or nothing. The
-  reviewer must run a different model than the author; a request for changes
-  goes back to the author once, and after a second round the chief decides with
-  both reviews in hand.
 - **Pause and resume.** The chief (or you) stops a worker's task by its
   number: `cf task pause T-5` interrupts the agent and keeps its window,
   conversation and work; `cf task resume T-5 "…"` sends the words into the
@@ -74,10 +70,10 @@ chief's acceptance and your approval, not a fence around the run.
   work that must come first, `--before T-9,T-10` puts a new task ahead of
   tasks still on the board. The board is the plan's memory.
 - **Human approval required.** With this project setting on, every message
-  between two agents (a task, a result after its review, a question, an
-  answer) waits in your bay until you pass it on. You may also decline a task
-  or an answer with a word to its sender. What you send, what reaches you
-  and what ConsensFlow itself notes never wait.
+  between two agents (a task, a result, a question, an answer) waits in your
+  bay until you pass it on. You may also decline a task or an answer with a
+  word to its sender. What you send, what reaches you and what ConsensFlow
+  itself notes never wait.
 
 ## Install
 

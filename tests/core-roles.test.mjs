@@ -55,6 +55,10 @@ describe('role instructions for the new core', () => {
         assert.ok(text.indexOf('## Your commands') < text.indexOf('## What you do'), 'card first')
         assert.match(text, /## Reviews\n\nNothing is reviewed unless you ask\./)
         assert.match(text, /When the human changes the\s+staff, ConsensFlow tells you in a note/)
+        assert.match(
+          text,
+          /A tier nobody on the staff holds\s+goes to the nearest one somebody does/,
+        )
         assert.match(text, /do not run the command to see the refusal: ask/)
         assert.doesNotMatch(text, /VERDICT|review policy|cf task review/)
       } else {
