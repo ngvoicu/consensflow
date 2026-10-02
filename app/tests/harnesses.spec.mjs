@@ -880,7 +880,6 @@ test('a model card keeps its shared tier while an agent of your own joins and le
       'Devin',
     ])
     await expect(card.getByRole('button')).toHaveCount(0)
-    await page.screenshot({ path: '/tmp/cf-model-card-fable.png' })
     const form = second.locator('#add')
     await form.locator('[name=name]').fill('my-fable')
     await form.locator('[name=harness]').selectOption('claude')
@@ -1071,7 +1070,6 @@ for (const colorScheme of ['light', 'dark']) {
             name: /Launch chief|Turn off|Reset everything|Update instructions/,
           }),
         ).toHaveCount(0)
-        await page.screenshot({ path: `/tmp/cf-model-card-${colorScheme}-${width}.png` })
         for (const screen of [page, fixture.second]) {
           await screen.getByRole('button', { name: 'Clear filters' }).click()
           const pills = screen.locator('.tier-pill')
@@ -1109,7 +1107,6 @@ for (const colorScheme of ['light', 'dark']) {
         const bounds = await head.boundingBox()
         expect(bounds.x).toBeGreaterThanOrEqual(0)
         expect(bounds.x + bounds.width).toBeLessThanOrEqual(width)
-        if (width === 760) await page.screenshot({ path: `/tmp/cf-agents-${colorScheme}.png` })
       } finally {
         await fixture.close()
       }
@@ -1166,7 +1163,6 @@ test('work tiers filter and group the list, and a saved override keeps its hones
     // A catalog agent's tier is the catalog's, whatever your own agents say.
     await page.getByLabel('Work tier', { exact: true }).selectOption('critical')
     await expect(page.locator('.callsign', { hasText: /^astraeus$/ })).toBeVisible()
-    await page.screenshot({ path: '/tmp/cf-tiers-agents.png', fullPage: true })
   } finally {
     await own.close()
     await server.close()

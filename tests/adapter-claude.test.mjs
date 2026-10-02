@@ -386,7 +386,7 @@ describe('the Claude Code adapter', () => {
       const pasted = []
       let answer = { ok: true }
       const host = {
-        async request(op, body) {
+        async request(_op, body) {
           pasted.push(body.body)
           if (answer instanceof Error) throw answer
           return answer

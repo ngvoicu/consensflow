@@ -254,7 +254,7 @@ done
  * A whole machine for the app to live in: its own HOME, its own state root,
  * its own PATH with one harness on it.
  *
- * `SHELL` is deliberately absent. `commands.rs` asks the login shell for a
+ * `SHELL` is deliberately absent. `daemon_command.rs` asks the login shell for a
  * PATH when it has one and REPLACES the child's with the answer, which would
  * hand the app the real machine's harnesses. With no `SHELL` that lookup
  * returns nothing and the PATH built here is the one the app uses — the
@@ -545,7 +545,7 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.match(agentsWindow.data.again.url, /\/harnesses\?token=/)
 
   const pasted = await app.waitFor('large-paste')
-  const expectedPaste = Buffer.from('\x1b[200~' + '漢字 résumé 🙂\r'.repeat(30_000) + '\x1b[201~')
+  const expectedPaste = Buffer.from(`\x1b[200~${'漢字 résumé 🙂\r'.repeat(30_000)}\x1b[201~`)
   assert.equal(pasted.data.bytes, expectedPaste.length)
   assert.equal(pasted.data.hash, createHash('sha256').update(expectedPaste).digest('base64'))
 

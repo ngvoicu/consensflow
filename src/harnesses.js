@@ -99,7 +99,7 @@ function candidateNames(command, env) {
  * A PATH entry may be relative — `PATH=.:…`, or a `bin` some launcher
  * exported from wherever it happened to be — and joining that with a
  * command name yields a relative candidate the pane host refuses outright
- * (`app/src-tauri/src/commands.rs:1121`). Resolving here means every caller
+ * (`validate_open_request` in `app/src-tauri/src/pane_handlers.rs`). Resolving here means every caller
  * gets a path it can spawn, not one that happened to work from this
  * process's current directory.
  */
@@ -149,9 +149,10 @@ function locate(harness, env) {
  * The absolute path to a harness's CLI on this machine, or null.
  *
  * A pane is opened with an argv the pane host refuses unless argv[0] is
- * absolute (`app/src-tauri/src/commands.rs:1121`), and the app's own PATH is
- * not the login shell's — the same reason detection looks past PATH at all.
- * So the launcher asks for the path, not the name.
+ * absolute (`validate_open_request` in `app/src-tauri/src/pane_handlers.rs`),
+ * and the app's own PATH is not the login shell's — the same reason
+ * detection looks past PATH at all. So the launcher asks for the path, not
+ * the name.
  */
 /** cmd.exe's own special characters; each is escaped with a caret. */
 const CMD_META = /([()\][%!^"`<>&|;, *?])/g

@@ -34,20 +34,19 @@ test('completion/pi: native custom inbox messages retain full receipt body witho
   const directory = path.join(root, '.pi', 'agent', 'sessions', 'project')
   await fs.mkdir(directory, { recursive: true })
   const body = '[consensflow receiver claim-one]\nComplete result\n[end of receiver claim-one]\n'
+  const records = [
+    { type: 'session', id: 'native-receipt' },
+    {
+      type: 'custom_message',
+      id: 'entry-one',
+      customType: 'consensflow-worker-result',
+      content: body,
+      display: true,
+    },
+  ]
   await fs.writeFile(
     path.join(directory, 'native-receipt.jsonl'),
-    [
-      { type: 'session', id: 'native-receipt' },
-      {
-        type: 'custom_message',
-        id: 'entry-one',
-        customType: 'consensflow-worker-result',
-        content: body,
-        display: true,
-      },
-    ]
-      .map(JSON.stringify)
-      .join('\n') + '\n',
+    `${records.map(JSON.stringify).join('\n')}\n`,
   )
   const parsed = await answers('pi', 'native-receipt', { HOME: root })
   assert.equal(parsed.items.length, 1)
@@ -404,10 +403,10 @@ test('completion/claude-code: late native user ancestors preserve completion and
   const { env, file, root } = await stageJsonl('claude-code', lateClaudeSession, lateClaudeFixture)
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const records = (await fs.readFile(file, 'utf8')).trim().split('\n').map(JSON.parse)
-  await fs.writeFile(file, records.slice(0, 6).map(JSON.stringify).join('\n') + '\n')
+  await fs.writeFile(file, `${records.slice(0, 6).map(JSON.stringify).join('\n')}\n`)
   const before = await answers('claude-code', lateClaudeSession, env)
   assert.equal(before.settlement.state, 'settled')
-  await fs.appendFile(file, records.slice(6).map(JSON.stringify).join('\n') + '\n')
+  await fs.appendFile(file, `${records.slice(6).map(JSON.stringify).join('\n')}\n`)
   const result = await answers('claude-code', lateClaudeSession, env)
   shape(result)
   assert.equal(result.inFlight, false)

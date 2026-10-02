@@ -432,7 +432,7 @@ async function startupOf(state, ms = 5000) {
   const until = Date.now() + ms
   for (;;) {
     try {
-      return JSON.parse(await readFile(state + '.startup', 'utf8'))
+      return JSON.parse(await readFile(`${state}.startup`, 'utf8'))
     } catch (cause) {
       if (Date.now() >= until || cause?.code !== 'ENOENT') throw cause
       await new Promise((r) => setTimeout(r, 50))
@@ -451,9 +451,9 @@ describe('opencode createSession', () => {
         configuration: s.configuration,
       })
       assert.match(id, /^ses_[A-Za-z0-9]+$/)
-      assert.equal(await readFile(s.state + '.creates', 'utf8'), '1')
-      assert.equal(await readFile(s.state + '.body', 'utf8'), '{}')
-      assert.equal(await readFile(s.state + '.query', 'utf8'), s.workspace)
+      assert.equal(await readFile(`${s.state}.creates`, 'utf8'), '1')
+      assert.equal(await readFile(`${s.state}.body`, 'utf8'), '{}')
+      assert.equal(await readFile(`${s.state}.query`, 'utf8'), s.workspace)
       const started = await startupOf(s.state)
       assert.deepEqual(started.argv, ['serve', ...s.configuration.args])
       assert.equal(started.cwd, s.workspace)
