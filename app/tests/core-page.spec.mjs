@@ -899,6 +899,16 @@ test('opens only the newest step of a story, and folds each of the others to its
       .locator('.step-preview')
       .evaluate((node) => [getComputedStyle(node).whiteSpace, getComputedStyle(node).textOverflow]),
   ).toEqual(['nowrap', 'ellipsis'])
+  // Opened, a step reads whole in place of its first line; from the keyboard too.
+  await question.locator('summary').click()
+  await expect(question.locator('.step-body')).toHaveText(
+    'Which grammar: the old one or the new one?\nThe old one is in lexer.old.',
+    { useInnerText: true },
+  )
+  await expect(question.locator('.step-preview')).toBeHidden()
+  await steps.nth(2).locator('summary').focus()
+  await page.keyboard.press('Enter')
+  await expect(steps.nth(2).locator('.step-body')).toHaveText('The new one.')
 })
 
 test('keeps each step of a story open or shut as the human left it when the task is drawn again', async ({
@@ -1016,6 +1026,134 @@ test('says in its step how a message is on its way, and nothing once it reached 
     'needs your approval',
     'queued: the harness ran out of quota',
   ])
+})
+
+/** Harbour with T-15's last result written as `body`, the agent's markdown. */
+function resultModel(body) {
+  const data = storyModel()
+  data.tasks['1:15'].messages[5].body = body
+  return data
+}
+
+test('draws the markdown an agent wrote in an open step: bold, italic, code, headings, lists, tables and quotes', async ({
+  page,
+}) => {
+  await open(
+    page,
+    resultModel(
+      [
+        '## Lexer done',
+        '',
+        'All **31 tests** pass; errors now say *where*.',
+        'Run them with `npm test`.',
+        '',
+        '| File | Change |',
+        '| --- | --- |',
+        '| `src/lexer.js` | tokens carry their position |',
+        '| src/errors.js | a new **LexError** |',
+        '',
+        '1. Read the tokens',
+        '2. Keep their place',
+        '   - line, from *1*',
+        '   - column',
+        '3. Say where it failed',
+        '',
+        '```js',
+        'const where = a*b*c // <b>as written</b>',
+        '```',
+        '',
+        '> Errors read as before.',
+        '',
+        'See [the notes](https://example.com/notes) for the grammar.',
+      ].join('\n'),
+    ),
+  )
+  await page.locator('button.card[data-task="15"]').click()
+  const body = page.getByRole('list', { name: "T-15's story" }).locator('.step').last()
+  const drawn = body.locator('.step-body')
+  // A heading is a bold line, not a heading of the page.
+  await expect(drawn.locator('.md-heading')).toHaveText('Lexer done')
+  await expect(drawn.locator('h1, h2, h3, h4, h5, h6')).toHaveCount(0)
+  // A paragraph keeps its line breaks.
+  const paragraph = drawn.locator('> p').nth(1)
+  await expect(paragraph).toHaveText(
+    'All 31 tests pass; errors now say where.\nRun them with npm test.',
+    {
+      useInnerText: true,
+    },
+  )
+  await expect(paragraph.locator('br')).toHaveCount(1)
+  await expect(paragraph.locator('strong')).toHaveText('31 tests')
+  await expect(paragraph.locator('em')).toHaveText('where')
+  await expect(paragraph.locator('code')).toHaveText('npm test')
+  const table = drawn.locator('table')
+  await expect(table.locator('th')).toHaveText(['File', 'Change'])
+  await expect(table.locator('td')).toHaveText([
+    'src/lexer.js',
+    'tokens carry their position',
+    'src/errors.js',
+    'a new LexError',
+  ])
+  await expect(table.locator('td code')).toHaveText(['src/lexer.js'])
+  await expect(table.locator('td strong')).toHaveText(['LexError'])
+  // A list nests by its indent.
+  const items = drawn.locator('> ol > li')
+  await expect(items).toHaveCount(3)
+  await expect(items.nth(1).locator('> ul > li')).toHaveText(['line, from 1', 'column'])
+  await expect(items.nth(1).locator('em')).toHaveText('1')
+  // Code is as written: no marks read in it, no markup either.
+  await expect(drawn.locator('pre code')).toHaveText('const where = a*b*c // <b>as written</b>')
+  await expect(drawn.locator('pre em, pre b')).toHaveCount(0)
+  await expect(drawn.locator('blockquote')).toHaveText('Errors read as before.')
+  // A link is its words, where it leads on hover: nothing to follow.
+  await expect(drawn.locator('a')).toHaveCount(0)
+  const link = drawn.getByTitle('https://example.com/notes')
+  await expect(link).toHaveText('the notes')
+  await expect(drawn.locator('> p').last()).toHaveText('See the notes for the grammar.')
+})
+
+test('shows markup in what an agent wrote as text, never as elements, its markdown drawn around it', async ({
+  page,
+}) => {
+  const dialogs = []
+  page.on('dialog', (dialog) => {
+    dialogs.push(dialog.message())
+    dialog.dismiss()
+  })
+  const script = '<script>alert(1)</script>'
+  const image = '<img src=x onerror=alert(1)>'
+  const data = resultModel(
+    [
+      script,
+      image,
+      '',
+      `**${image}** in bold, \`${script}\` as code.`,
+      '',
+      '| tag | what |',
+      '| --- | --- |',
+      `| ${image} | an image |`,
+      '',
+      `[${script}](javascript:alert(1))`,
+    ].join('\n'),
+  )
+  data.tasks['1:15'].messages[0].body = `${image} ${script}`
+  await open(page, data)
+  await page.locator('button.card[data-task="15"]').click()
+  const steps = page.getByRole('list', { name: "T-15's story" }).locator('.step')
+  const drawn = steps.last().locator('.step-body')
+  await expect(drawn.locator('> p').first()).toHaveText(`${script}\n${image}`, {
+    useInnerText: true,
+  })
+  await expect(drawn.locator('strong')).toHaveText(image)
+  await expect(drawn.locator('code')).toHaveText(script)
+  await expect(drawn.locator('td').first()).toHaveText(image)
+  await expect(drawn.getByTitle('javascript:alert(1)')).toHaveText(script)
+  // A folded step's line reads it as text too.
+  await expect(steps.first().locator('.step-preview')).toHaveText(`${image} ${script}`)
+  const drawer = page.getByRole('complementary', { name: 'Task T-15' })
+  await expect(drawer.locator('script, img, a, iframe')).toHaveCount(0)
+  await page.waitForTimeout(100)
+  expect(dialogs).toEqual([])
 })
 
 test('pauses a task from its drawer, shows it paused in the queue, and resumes it', async ({
@@ -1254,18 +1392,20 @@ test('says under a body cut to fit the page where it reads whole, and right afte
   await expect(story.locator('> li').nth(1)).toHaveText(
     '3 earlier messages not shown: cf task get T-2 shows the whole thread.',
   )
+  // An open step says under its body where it reads whole, when it was cut.
   const steps = story.locator('.step')
   const whole = 'Cut to fit here: cf task get T-2 shows it whole.'
-  for (const step of [0, 1, 3]) {
+  await expect(steps.last().locator('.drawer-cut')).toHaveText(whole)
+  await expect(steps.last().locator('.drawer-cut')).toBeVisible()
+  for (const step of [0, 1, 2]) await steps.nth(step).locator('summary').click()
+  for (const step of [0, 1]) {
     await expect(steps.nth(step).locator('.drawer-cut')).toHaveText(whole)
   }
-  await expect(steps.nth(2).locator('.drawer-cut')).toHaveCount(0)
-  await expect(steps.last().locator('.drawer-cut')).toBeVisible()
-  await steps.nth(1).locator('summary').click()
   await expect(steps.nth(1).locator('.step-body')).toHaveText(cut('Which grammar?', 700_000), {
     useInnerText: true,
   })
-  await expect(steps.nth(1).locator('.drawer-cut')).toBeVisible()
+  await expect(steps.nth(2).locator('.step-body')).toHaveText('The recursive one.')
+  await expect(steps.nth(2).locator('.drawer-cut')).toHaveCount(0)
 })
 
 test("shows what a task's window wrote, from ConsensFlow's own copy, under the thread", async ({

@@ -1,5 +1,5 @@
 import { button, element, redraw } from '../dom.js'
-import { preview } from './markdown.js'
+import { preview, render } from './markdown.js'
 
 /**
  * The board: a kanban of the project's tasks. One row per participant, one
@@ -938,7 +938,8 @@ function sentAt(iso, now) {
 /**
  * A step of a task's story: a fold whose line says what it is, who sent it
  * to whom, how its delivery went and when, then the first line of its
- * body; open, it reads whole.
+ * body; open, it reads whole, its markdown drawn. Its body is drawn once
+ * it is open, so a long story draws only what is read.
  */
 function storyStep(step, number, open, now) {
   const line = element('summary', 'step-head')
@@ -954,7 +955,17 @@ function storyStep(step, number, open, now) {
   fold.dataset.kind = step.kind
   if (step.id !== null) fold.dataset.message = String(step.id)
   fold.open = open
-  fold.append(line, element('p', 'step-body', step.body), ...cutNote(step, number))
+  fold.append(line)
+  const drawBody = () => {
+    const body = element('div', 'step-body')
+    body.append(...render(step.body))
+    fold.append(body, ...cutNote(step, number))
+  }
+  if (open) drawBody()
+  // The click that opens it draws its body before it opens, unless it is there from before.
+  line.addEventListener('click', () => {
+    if (!fold.open && fold.childElementCount === 1) drawBody()
+  })
   const item = element('li')
   item.append(fold)
   return item

@@ -609,7 +609,25 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
 .step-time { white-space: nowrap; }
 .step-preview { flex-basis: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--ui); color: var(--muted); }
 .step[open] .step-preview { display: none; }
-.step-body { margin: 6px 0 0; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* An open step's body, drawn from the markdown its agent wrote, in the page's own colours. */
+.step-body { margin-top: 6px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.step-body :is(p, pre, blockquote, ul, ol, .md-table) { margin: 0; }
+.step-body :is(p, pre, blockquote, ul, ol, .md-table) + :is(p, pre, blockquote, ul, ol, .md-table) { margin-top: 8px; }
+.step-body :is(ul, ol) { padding-left: 18px; }
+/* A list in a step is the body's own: its bullets start again from the outermost. */
+.step-body ul { list-style-type: disc; }
+.step-body li ul { list-style-type: circle; }
+.step-body li::marker { color: var(--muted); }
+.step-body li > :is(ul, ol) { margin-top: 2px; }
+.step-body .md-heading { font-weight: 700; }
+.step-body code { font: 11px var(--mono); padding: 1px 4px; border-radius: 3px; background: var(--panel-raised); }
+.step-body pre { padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--deep); overflow-x: auto; }
+.step-body pre code { padding: 0; background: none; }
+.step-body blockquote { padding-left: 10px; border-left: 2px solid var(--line); color: var(--muted); }
+.step-body .md-table { overflow-x: auto; }
+.step-body table { border-collapse: collapse; }
+.step-body :is(th, td) { padding: 3px 14px 3px 0; border-bottom: 1px solid var(--line-soft); text-align: left; vertical-align: top; }
+.step-body th { color: var(--muted); font-weight: 600; }
 .transcript { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .transcript-item { border-left: 3px solid var(--line); padding: 2px 0 2px 12px; }
 .transcript-item[data-role="assistant"] { border-color: var(--seafoam-dim); }
