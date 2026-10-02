@@ -1,3 +1,5 @@
+import { button, element, redraw } from '../dom.js'
+
 /**
  * The board: a kanban of the project's tasks. One row per participant, one
  * column per state, every task a card that stays where it ended, with its
@@ -13,8 +15,8 @@
  */
 
 const ACTIVE = ['working', 'waiting', 'queued', 'paused', 'open']
-/** The harnesses a lead runs on, as the human knows them. */
-const HARNESS_NAMES = {
+/** The harnesses a lead runs on, as the human knows them, in the order they are offered. */
+export const HARNESS_NAMES = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
   opencode: 'OpenCode',
@@ -69,74 +71,6 @@ const KIND_LABEL = {
   note: 'Note',
 }
 
-export function element(tag, className, text) {
-  const node = document.createElement(tag)
-  if (className) node.className = className
-  if (text !== undefined && text !== null) node.textContent = text
-  return node
-}
-
-/**
- * Draws `nodes` into `parent`, leaving whatever comes out the same where it
- * is: replacing it would take the keyboard from it, and lose a click whose
- * press came before the redraw and its release after. A changed element is
- * replaced whole, unless its own markup is the same and it holds only
- * elements: then it is drawn the same way inside. A changed button is
- * always replaced whole, its handler with it; a kept one acts on what its
- * own markup shows, or looks up the rest when it is clicked. If the element
- * that had the keyboard went all the same, the one drawn in its place takes
- * it back.
- */
-export function redraw(parent, nodes) {
-  const focused = parent.contains(document.activeElement) ? document.activeElement : null
-  const key = focused === null ? null : focusKey(focused, parent)
-  patch(parent, nodes)
-  if (focused === null || focused.isConnected) return
-  const again = [...parent.querySelectorAll('button, summary')].find(
-    (node) => focusKey(node, parent) === key,
-  )
-  again?.focus({ preventScroll: true })
-}
-
-function patch(parent, nodes) {
-  for (const [at, node] of nodes.entries()) {
-    const shown = parent.children[at]
-    if (shown === undefined) parent.append(node)
-    else if (shown.isEqualNode(node)) continue
-    else if (opens(shown, node)) patch(shown, [...node.children])
-    else shown.replaceWith(node)
-  }
-  while (parent.children.length > nodes.length) parent.lastElementChild.remove()
-}
-
-const opens = (shown, node) =>
-  shown.tagName === node.tagName &&
-  shown.tagName !== 'BUTTON' &&
-  shown.attributes.length === node.attributes.length &&
-  [...shown.attributes].every(({ name, value }) => node.getAttribute(name) === value) &&
-  [shown, node].every((element) => element.childNodes.length === element.children.length)
-
-/**
- * What tells an element from the others across redraws: a card its task,
- * wherever it moved, any other control its label; and what it sits in.
- */
-function focusKey(node, root) {
-  const path = [node.dataset.task ?? node.getAttribute('aria-label') ?? node.textContent]
-  for (let at = node; at !== root; at = at.parentElement) {
-    const { task, message, handle, role, project } = at.dataset
-    path.push([at.tagName, task, message, handle, role, project].join(':'))
-  }
-  return path.join('/')
-}
-
-function button(text, className, action, label) {
-  const node = element('button', className, text)
-  node.type = 'button'
-  if (label) node.setAttribute('aria-label', label)
-  node.addEventListener('click', action)
-  return node
-}
-
 /** "just now", or "4m ago": how long ago something last changed. */
 const ago = (iso, now) => {
   const since = age(iso, now)
@@ -144,7 +78,7 @@ const ago = (iso, now) => {
 }
 
 /** "just now", "4m", "2h", "3d": how long something has been in its state. */
-export function age(iso, now = Date.now()) {
+function age(iso, now = Date.now()) {
   const seconds = Math.max(0, Math.round((now - Date.parse(iso)) / 1000))
   if (!Number.isFinite(seconds) || seconds < 45) return 'just now'
   const minutes = Math.round(seconds / 60)
@@ -153,6 +87,14 @@ export function age(iso, now = Date.now()) {
   if (hours < 36) return `${hours}h`
   return `${Math.round(hours / 24)}d`
 }
+
+/**
+ * A member of the staff, as the ledger counts one: the lane of an agent of
+ * its own, neither one of its sessions nor the lead, which runs on a saved
+ * agent too once the lead is switched to one.
+ */
+export const isMember = (participant) =>
+  participant.agent !== null && participant.member === null && participant.role !== 'chief'
 
 /** The role a member's task is for: its pool's. */
 const roleOf = (task, roles) => task.pool ?? roles[0]
@@ -163,12 +105,10 @@ const roleOf = (task, roles) => task.pool ?? roles[0]
  * and a reviewer read as two things; everything else in lane order. The human
  * has no row: nothing assigns them a task, and what is for them is in For you.
  */
-export function boardRows(lanes) {
+function boardRows(lanes) {
   const ordered = laneOrder(lanes).filter((lane) => lane.participant.role !== 'human')
   const members = new Set(
-    ordered
-      .filter((lane) => lane.participant.agent !== null && lane.participant.member === null)
-      .map((lane) => lane.participant.handle),
+    ordered.filter((lane) => isMember(lane.participant)).map((lane) => lane.participant.handle),
   )
   const rows = []
   for (const lane of ordered) {
@@ -220,6 +160,9 @@ export const laneName = (participant) =>
     ? `@${participant.member} · ${participant.session}`
     : ({ human: 'You', chief: 'Chief of Staff' }[participant.handle] ?? `@${participant.handle}`)
 
+/** "1 note", "3 notes": how many of something. */
+const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`
+
 /** A member's row: how many of its sessions' terminals (of the row's role) are open now. */
 function sessionsNote(lane, board) {
   const open = board.lanes.filter(
@@ -230,11 +173,11 @@ function sessionsNote(lane, board) {
   ).length
   return open === 0
     ? 'Free: a terminal opens with its next task'
-    : `${open} terminal${open === 1 ? '' : 's'} open, one per task`
+    : `${plural(open, 'terminal')} open, one per task`
 }
 
 /** "T-3, T-4": task numbers in a sentence. */
-const tasks = (numbers) => numbers.map((number) => `T-${number}`).join(', ')
+const taskNumbers = (numbers) => numbers.map((number) => `T-${number}`).join(', ')
 
 /** Where a task is going or came from, on its card; what it waits for first. */
 function route(task) {
@@ -243,21 +186,67 @@ function route(task) {
       task.pool === 'designer' ? 'for an image designer' : `for a ${task.tier} ${task.pool}`
     return task.blockedBy.length === 0
       ? waitsFor
-      : `blocked by ${tasks(task.blockedBy)} · ${waitsFor}`
+      : `blocked by ${taskNumbers(task.blockedBy)} · ${waitsFor}`
   }
   if (task.state === 'paused' && task.heldUntil) {
     return `out of quota until ${clock(task.heldUntil)} · from ${who(task.requester)}`
   }
   return task.blockedBy.length === 0
     ? `from ${who(task.requester)}`
-    : `blocked by ${tasks(task.blockedBy)} · from ${who(task.requester)}`
+    : `blocked by ${taskNumbers(task.blockedBy)} · from ${who(task.requester)}`
 }
 
 /** A member between tasks: its work runs in sessions, so it has no window of its own. */
 const resting = (participant, activity) =>
-  ['worker', 'advisor', 'reviewer'].includes(participant.role) &&
-  participant.member === null &&
-  (activity?.state ?? 'closed') === 'closed'
+  isMember(participant) && (activity?.state ?? 'closed') === 'closed'
+
+/** A session's row says whose window it is; the member's row says what it is. */
+const identity = (participant, agent) =>
+  (participant.member
+    ? [`${participant.role} session of @${participant.member}`, participant.harness, agent?.model]
+    : [
+        participant.role === 'chief' ? null : participant.roles.join('+'),
+        participant.tier,
+        participant.harness,
+        agent?.model,
+      ]
+  )
+    .filter(Boolean)
+    .join(' · ')
+
+/**
+ * What a row says its participant is doing, and the state that colours it:
+ * an agent gone, a lead being switched or a member out of quota say so
+ * before anything its window does.
+ */
+function rowStatus(lane, board, now) {
+  const { participant, activity } = lane
+  if (lane.agentMissing) {
+    const remedy =
+      participant.role === 'chief'
+        ? 'switch the lead'
+        : `remove @${participant.handle} from the staff`
+    return [
+      'missing',
+      `No agent named ${participant.agent} any more: define one under Agents, or ${remedy}`,
+    ]
+  }
+  if (lane.switching) {
+    const { agent, harness } = lane.switching
+    return [
+      'switching',
+      `Switching the lead to ${agent ?? HARNESS_NAMES[harness] ?? harness} after this turn`,
+    ]
+  }
+  if (outOfQuota(participant, now)) {
+    return ['out', `Out of quota until ${clock(participant.outUntil)}`]
+  }
+  const state = activity?.state ?? 'closed'
+  if (state === 'waiting' && activity.reason) return [state, `Waiting: ${activity.reason}`]
+  if (resting(participant, activity)) return [state, sessionsNote(lane, board)]
+  if (participant.member !== null && state === 'closed') return [state, 'Terminal closed']
+  return [state, ACTIVITY_LABEL[state] ?? 'No window']
+}
 
 /** A participant's lamp: what its window is doing, at a glance. */
 export function lamp(activity) {
@@ -348,7 +337,7 @@ export class BoardView {
           ? 'Nothing waiting'
           : [
               waiting.length === 0 ? null : `${waiting.length} waiting`,
-              unread === 0 ? null : `${unread} note${unread === 1 ? '' : 's'}`,
+              unread === 0 ? null : plural(unread, 'note'),
             ]
               .filter(Boolean)
               .join(' · '),
@@ -381,7 +370,7 @@ export class BoardView {
           element(
             'li',
             'strips-more',
-            `${earlier} earlier note${earlier === 1 ? '' : 's'} not shown: mark these read to see ${earlier === 1 ? 'it' : 'them'}.`,
+            `${plural(earlier, 'earlier note')} not shown: mark these read to see ${earlier === 1 ? 'it' : 'them'}.`,
           ),
         )
       }
@@ -481,7 +470,7 @@ export class BoardView {
     }
     // A project with nobody on its staff looks like any other board, and every
     // task the chief hands out is refused: say it where the members would be.
-    if (!board.lanes.some((lane) => lane.participant.agent !== null)) {
+    if (!board.lanes.some((lane) => isMember(lane.participant))) {
       const row = element('tr', 'board-empty')
       const cell = element(
         'td',
@@ -523,70 +512,47 @@ export class BoardView {
   }
 
   #rowHead(lane, board, agent, now) {
-    const { participant, activity, pane } = lane
+    const { participant, activity } = lane
     const head = element('th', 'row-head')
     head.setAttribute('scope', 'row')
-    const coordinator = participant.role === 'chief'
-    // A session's row says whose window it is; the member's row says what it is.
-    const identity = (
-      participant.member
-        ? [
-            `${participant.role} session of @${participant.member}`,
-            participant.harness,
-            agent?.model,
-          ]
-        : [
-            coordinator ? null : participant.roles.join('+'),
-            participant.tier,
-            participant.harness,
-            agent?.model,
-          ]
+    const title = element('div', 'row-title')
+    title.append(
+      lamp(outOfQuota(participant, now) ? { state: 'out' } : activity),
+      element('span', 'row-name', laneName(participant)),
     )
-      .filter(Boolean)
-      .join(' · ')
-    const out = outOfQuota(participant, now)
-    const status = element(
-      'span',
-      'row-status',
-      lane.agentMissing
-        ? coordinator
-          ? `No agent named ${participant.agent} any more: define one under Agents, or switch the lead`
-          : `No agent named ${participant.agent} any more: define one under Agents, or remove @${participant.handle} from the staff`
-        : lane.switching
-          ? `Switching the lead to ${lane.switching.agent ?? HARNESS_NAMES[lane.switching.harness] ?? lane.switching.harness} after this turn`
-          : out
-            ? `Out of quota until ${clock(participant.outUntil)}`
-            : activity?.state === 'waiting' && activity.reason
-              ? `Waiting: ${activity.reason}`
-              : resting(participant, activity)
-                ? sessionsNote(lane, board)
-                : participant.member !== null && (activity?.state ?? 'closed') === 'closed'
-                  ? 'Terminal closed'
-                  : (ACTIVITY_LABEL[activity?.state] ?? 'No window'),
+    const [state, text] = rowStatus(lane, board, now)
+    const status = element('span', 'row-status', text)
+    status.dataset.state = state
+    head.append(
+      title,
+      element('span', 'row-meta', identity(participant, agent)),
+      status,
+      this.#rowTools(lane, board),
     )
-    status.dataset.state = lane.agentMissing
-      ? 'missing'
-      : lane.switching
-        ? 'switching'
-        : out
-          ? 'out'
-          : (activity?.state ?? 'closed')
+    return head
+  }
+
+  /**
+   * Only a session's terminal is the human's to open and close: a member's
+   * row heads its sessions and has no terminal of its own, and the chief's
+   * opens and closes with the project. An open terminal is in the dock; a
+   * closed one opens again on its own conversation, and its copy is on its
+   * last task's card. The session is deleted from here too. A closed
+   * project's rows keep only the copy.
+   */
+  #rowTools(lane, board) {
+    const { participant, pane } = lane
     const tools = element('div', 'row-tools')
-    // Only a session's terminal is the human's to open and close: a member's
-    // row heads its sessions and has no terminal of its own, and the chief's
-    // opens and closes with the project. An open terminal is in the dock; a
-    // closed one opens again on its own conversation, and its copy is on its
-    // last task's card. The session is deleted from here too. A closed
-    // project's rows keep only the copy.
     const session = participant.member !== null
     const acting = acts(board)
+    const name = laneName(participant)
     if (session && pane === null && acting) {
       tools.append(
         button(
           'Open terminal',
           'quiet-button',
           this.#onLane(this.#actions.onOpenTerminal, participant),
-          `Open ${laneName(participant)}'s terminal`,
+          `Open ${name}'s terminal`,
         ),
       )
     }
@@ -596,7 +562,7 @@ export class BoardView {
           'Transcript',
           'quiet-button',
           () => this.#actions.onOpenTask(this.#lane(participant).tasks.at(-1).number),
-          `What ${laneName(participant)}'s terminal wrote`,
+          `What ${name}'s terminal wrote`,
         ),
       )
     }
@@ -606,11 +572,11 @@ export class BoardView {
           'Close terminal',
           'quiet-button',
           this.#onLane(this.#actions.onCloseTerminal, participant),
-          `Close ${laneName(participant)}'s terminal`,
+          `Close ${name}'s terminal`,
         ),
       )
     }
-    if (coordinator && acting) {
+    if (participant.role === 'chief' && acting) {
       tools.append(
         button(
           'Switch lead',
@@ -626,17 +592,11 @@ export class BoardView {
           'Delete session',
           'danger-button',
           this.#onLane(this.#actions.onEndSession, participant),
-          `Delete ${laneName(participant)}'s session`,
+          `Delete ${name}'s session`,
         ),
       )
     }
-    const title = element('div', 'row-title')
-    title.append(
-      lamp(out ? { state: 'out' } : activity),
-      element('span', 'row-name', laneName(participant)),
-    )
-    head.append(title, element('span', 'row-meta', identity), status, tools)
-    return head
+    return tools
   }
 
   #card(task) {
@@ -722,76 +682,18 @@ export class TaskDrawer {
       'drawer-meta',
       `${who(task.requester)} asked ${task.assignee === null ? `for a ${task.tier} ${task.pool}` : who(task.assignee)} · ${STATE_LABEL[task.state]} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
-    const sections = [head, meta]
-    const panel = (name, label, count) => {
-      const section = element('section', 'drawer-section')
-      section.dataset.section = name
-      section.append(sectionHead('h3', label, count))
-      return section
-    }
-    // What the core cut to carry the task in one frame says where it reads whole.
-    const cutNote = (part) =>
-      part.bodyCut
-        ? [
-            element(
-              'p',
-              'drawer-cut',
-              `Cut to fit here: cf task get T-${task.number} shows it whole.`,
-            ),
-          ]
-        : []
     const brief = panel('brief', 'Brief')
-    brief.append(element('p', 'drawer-brief', task.body), ...cutNote(task))
-    sections.push(brief)
+    brief.append(element('p', 'drawer-brief', task.body), ...cutNote(task, task.number))
+    const sections = [head, meta, brief]
     const result = task.messages.findLast((message) => message.kind === 'result')
     if (result !== undefined) {
       const block = panel('result', 'Result')
-      block.append(element('p', 'drawer-result', result.body), ...cutNote(result))
+      block.append(element('p', 'drawer-result', result.body), ...cutNote(result, task.number))
       sections.push(block)
     }
-    // The thread keeps only what the rest of the drawer does not say: the
-    // questions, answers, follow-ups and earlier results. Each window's
-    // first task message is the brief it was given, a note is ConsensFlow
-    // talking to the chief, and a withdrawn message reached nobody.
-    const briefed = new Set()
-    const rest = task.messages.filter((message) => {
-      if (message === result || message.kind === 'note' || message.state === 'cancelled')
-        return false
-      if (message.kind !== 'task' || briefed.has(message.recipient)) return true
-      briefed.add(message.recipient)
-      return false
-    })
-    // The earliest messages of a thread too long for one frame are left out.
-    const left = task.messagesLeftOut ?? 0
-    if (rest.length > 0 || left > 0) {
-      const block = panel('thread', 'Thread', String(rest.length))
-      if (left > 0) {
-        block.append(
-          element(
-            'p',
-            'thread-more',
-            `${left} earlier message${left === 1 ? '' : 's'} not shown: cf task get T-${task.number} shows the whole thread.`,
-          ),
-        )
-      }
-      const thread = element('ol', 'thread')
-      thread.setAttribute('aria-label', `T-${task.number}'s thread`)
-      for (const message of rest) {
-        const item = element('li', 'thread-item')
-        item.dataset.kind = message.kind
-        item.append(
-          element(
-            'p',
-            'thread-head',
-            `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)} to ${who(message.recipient)} · ${message.state}${message.reason ? ` (${message.reason})` : ''}`,
-          ),
-          element('p', 'thread-body', message.body),
-          ...cutNote(message),
-        )
-        thread.append(item)
-      }
-      block.append(thread)
-      sections.push(block)
+    const thread = threadOf(task.messages, result)
+    if (thread.length > 0 || (task.messagesLeftOut ?? 0) > 0) {
+      sections.push(threadPanel(task, thread))
     }
     // What its window wrote is read only when asked for, folded until then.
     this.#fold = total > 0 ? ((same ? this.#fold : null) ?? this.#newFold()) : null
@@ -900,4 +802,69 @@ function sectionHead(tag, label, count) {
 }
 
 const transcriptHead = (total) =>
-  sectionHead('summary', 'What the agent did', `${total} item${total === 1 ? '' : 's'}`)
+  sectionHead('summary', 'What the agent did', plural(total, 'item'))
+
+/** Each part of a task is a panel of its own, headed by what it is. */
+function panel(name, label, count) {
+  const section = element('section', 'drawer-section')
+  section.dataset.section = name
+  section.append(sectionHead('h3', label, count))
+  return section
+}
+
+/** What the core cut to carry task T-`number` in one frame says where it reads whole. */
+const cutNote = (part, number) =>
+  part.bodyCut
+    ? [element('p', 'drawer-cut', `Cut to fit here: cf task get T-${number} shows it whole.`)]
+    : []
+
+/**
+ * The thread keeps only what the rest of the drawer does not say: the
+ * questions, answers, follow-ups and earlier results. Each window's first
+ * task message is the brief it was given, a note is ConsensFlow talking to
+ * the chief, and a withdrawn message reached nobody.
+ */
+function threadOf(messages, result) {
+  const briefed = new Set()
+  return messages.filter((message) => {
+    if (message === result || message.kind === 'note' || message.state === 'cancelled') {
+      return false
+    }
+    if (message.kind !== 'task' || briefed.has(message.recipient)) return true
+    briefed.add(message.recipient)
+    return false
+  })
+}
+
+/** The thread's panel; the earliest messages of a thread too long for one frame are left out. */
+function threadPanel(task, messages) {
+  const block = panel('thread', 'Thread', String(messages.length))
+  const left = task.messagesLeftOut ?? 0
+  if (left > 0) {
+    block.append(
+      element(
+        'p',
+        'thread-more',
+        `${plural(left, 'earlier message')} not shown: cf task get T-${task.number} shows the whole thread.`,
+      ),
+    )
+  }
+  const thread = element('ol', 'thread')
+  thread.setAttribute('aria-label', `T-${task.number}'s thread`)
+  for (const message of messages) {
+    const item = element('li', 'thread-item')
+    item.dataset.kind = message.kind
+    item.append(
+      element(
+        'p',
+        'thread-head',
+        `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)} to ${who(message.recipient)} · ${message.state}${message.reason ? ` (${message.reason})` : ''}`,
+      ),
+      element('p', 'thread-body', message.body),
+      ...cutNote(message, task.number),
+    )
+    thread.append(item)
+  }
+  block.append(thread)
+  return block
+}

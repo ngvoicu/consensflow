@@ -1,63 +1,21 @@
-test('a task held while its member is out of quota says when it goes on', async ({ page }) => {
-  const data = model()
-  const lane = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
-  lane.tasks.push(task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, { heldUntil: at(-25) }))
-  await open(page, data)
-  await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
-    /^out of quota until \d\d:\d\d · from /,
-  )
-})
-
-import { readFile } from 'node:fs/promises'
-import { createServer } from 'node:http'
-import { dirname, extname, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
-
 import { expect, test } from '@playwright/test'
+
+import { serveUi } from './serve-ui.mjs'
 
 /**
  * The board page of the new core (TEST-BDC-13), against a stand-in for the app:
  * `core_request` answers from an in-page model and records every call, the way
  * the Rust app forwards the page's requests to the core.
  */
-const UI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'ui')
-
-let server
-let origin
+let ui
 
 test.setTimeout(15_000)
 
 test.beforeAll(async () => {
-  server = createServer(async (request, response) => {
-    try {
-      const pathname = new URL(request.url, 'http://localhost').pathname
-      const file = resolve(
-        UI_ROOT,
-        pathname === '/' ? 'index.html' : decodeURIComponent(pathname.slice(1)),
-      )
-      if (file !== UI_ROOT && !file.startsWith(`${UI_ROOT}${sep}`)) {
-        response.writeHead(403).end('forbidden')
-        return
-      }
-      const type =
-        { '.css': 'text/css', '.html': 'text/html', '.js': 'text/javascript' }[extname(file)] ??
-        'application/octet-stream'
-      response.writeHead(200, {
-        'content-type': `${type}; charset=utf-8`,
-        'cache-control': 'no-store',
-      })
-      response.end(await readFile(file))
-    } catch {
-      response.writeHead(404).end('not found')
-    }
-  })
-  await new Promise((ready) => server.listen(0, '127.0.0.1', ready))
-  origin = `http://127.0.0.1:${server.address().port}`
+  ui = await serveUi()
 })
 
-test.afterAll(async () => {
-  await new Promise((closed) => server.close(closed))
-})
+test.afterAll(() => ui?.close())
 
 const at = (minutesAgo) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
 const MEMBER = ['worker', 'advisor', 'reviewer']
@@ -321,8 +279,12 @@ async function open(page, data = model()) {
           ? { ok: false, error: `no task T-${task} in this project` }
           : answer({ task: found })
       },
-      'task.resume': ({ project, task }) =>
-        answer({ task: { ...data.tasks[`${project}:${task}`], state: 'queued' } }),
+      // A resumed task goes on in its window, or back on the board when that
+      // window has ended (a test says so with `resumesOpen`).
+      'task.resume': ({ project, task }) => {
+        const found = data.tasks[`${project}:${task}`]
+        return answer({ task: { ...found, state: found.resumesOpen ? 'open' : 'queued' } })
+      },
       // The last `limit` items, as the core gives them, and how many came.
       'task.transcript': ({ project, task, limit = Number.POSITIVE_INFINITY }) => {
         const { items, total } = data.transcripts?.[`${project}:${task}`] ?? { items: [], total: 0 }
@@ -404,7 +366,7 @@ async function open(page, data = model()) {
           },
     }
   }, data)
-  await page.goto(`${origin}/index.html`)
+  await page.goto(`${ui.origin}/index.html`)
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
 }
 
@@ -753,6 +715,16 @@ test("shows a member out of quota, and a reviewer's review tasks as cards on its
   await expect(page.locator('.reviews')).toHaveCount(0)
 })
 
+test('a task held while its member is out of quota says when it goes on', async ({ page }) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
+  lane.tasks.push(task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, { heldUntil: at(-25) }))
+  await open(page, data)
+  await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
+    /^out of quota until \d\d:\d\d · from /,
+  )
+})
+
 test("opens a card's drawer with the result apart from the brief, and leaves accepting and reviews to the chief", async ({
   page,
 }) => {
@@ -796,6 +768,40 @@ test('pauses a task from its drawer, shows it paused in the queue, and resumes i
   await expect(drawer.getByRole('textbox')).toHaveCount(0)
   await drawer.getByRole('button', { name: 'Resume' }).click()
   await expect.poll(() => calls(page, 'task.resume')).toEqual([{ project: 1, task: 11 }])
+  await expect(page.locator('#status')).toHaveText('T-11 resumes in @zeus.')
+})
+
+test('says a resumed task is back on the board once the window that had it has ended', async ({
+  page,
+}) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  lane.tasks.push(task(11, 'Add the lexer', 'paused', 'chief', 'zeus', 4))
+  data.tasks['1:11'] = { ...lane.tasks.at(-1), messages: [], resumesOpen: true }
+  await open(page, data)
+  await page.locator('button.card[data-task="11"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-11' })
+  await drawer.getByRole('button', { name: 'Resume' }).click()
+  await expect(page.locator('#status')).toHaveText(
+    'T-11 is back on the board: the window that had it has ended.',
+  )
+})
+
+test("cancels a task from its drawer, and offers the chief's own work no Pause", async ({
+  page,
+}) => {
+  const data = model()
+  const chief = data.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+  data.tasks['1:1'] = { ...chief.tasks[0], messages: [] }
+  data.tasks['1:4'] = { ...task(4, 'Add the tests', 'queued', 'chief', 'zeus', 1), messages: [] }
+  await open(page, data)
+  await page.locator('button.card[data-task="1"]').click()
+  const own = page.getByRole('complementary', { name: 'Task T-1' })
+  await expect(own.getByRole('button')).toHaveText(['Close', 'Cancel task'])
+  await page.locator('button.card[data-task="4"]').click()
+  const queued = page.getByRole('complementary', { name: 'Task T-4' })
+  await queued.getByRole('button', { name: 'Cancel task' }).click()
+  await expect.poll(() => calls(page, 'task.cancel')).toEqual([{ project: 1, task: 4 }])
 })
 
 test("reassigns a task given by tier from its drawer, working or paused, never the chief's own", async ({
@@ -838,8 +844,38 @@ test('says so on the board when the project has no members yet', async ({ page }
   await expect(table.locator('tr.board-empty')).toHaveText(
     'No members yet: add the agents this project may use under Staff.',
   )
+  await page.getByRole('button', { name: 'Staff' }).click()
+  await expect(
+    page.getByRole('dialog', { name: 'Project staff' }).locator('tbody tr.staff-empty'),
+  ).toHaveText('Nobody yet: add the agents this project may use.')
   await open(page)
   await expect(table.locator('tr.board-empty')).toHaveCount(0)
+})
+
+test('takes a lead switched to a saved agent for no member: the board says it has none, and that agent joins the staff', async ({
+  page,
+}) => {
+  const data = model()
+  const board = data.boards[1]
+  board.lanes = board.lanes.filter((lane) => ['human', 'chief'].includes(lane.participant.role))
+  board.open = []
+  // Switch lead to a saved agent: the chief runs on hera now.
+  Object.assign(board.lanes[1].participant, { agent: 'hera', harness: 'codex' })
+  await open(page, data)
+  await expect(page.locator('tr.board-empty')).toHaveText(
+    'No members yet: add the agents this project may use under Staff.',
+  )
+  await page.getByRole('button', { name: 'Staff' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await expect(dialog.locator('tbody tr')).toHaveText([
+    'Nobody yet: add the agents this project may use.',
+  ])
+  await dialog.getByLabel('Agent').selectOption('hera')
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([{ project: 1, agent: 'hera', roles: ['worker'] }])
+  expect(await calls(page, 'member.roles')).toEqual([])
 })
 
 test("keeps only what is new in a task's thread: questions, answers, follow-ups and an earlier result", async ({
@@ -1082,6 +1118,21 @@ test('a member whose agent is gone says so on the board and in the staff, with R
     'no agent named diana any more: define one under Agents, or remove it',
   )
   await expect(member.getByRole('button', { name: 'Remove Worker @diana' })).toBeVisible()
+})
+
+test('a lead whose agent is gone says so on its row, and that Switch lead is the way on', async ({
+  page,
+}) => {
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  Object.assign(chief.participant, { agent: 'astraeus', harness: 'codex' })
+  chief.agentMissing = true
+  await open(page, data)
+  const status = page.locator('tr[data-handle="chief"] .row-status')
+  await expect(status).toHaveText(
+    'No agent named astraeus any more: define one under Agents, or switch the lead',
+  )
+  await expect(status).toHaveAttribute('data-state', 'missing')
 })
 
 test('a terminal and a board too narrow for its columns keep a visible scrollbar', async ({
@@ -1424,6 +1475,7 @@ test('shows the staff as one row per member and role, and adds any saved agent i
   await expect
     .poll(() => calls(page, 'member.add'))
     .toEqual([{ project: 1, agent: 'athena', roles: ['advisor'] }])
+  await expect(page.locator('#status')).toHaveText('@athena joined the staff as Advisor.')
   // A second role for a member already on the staff adds to its roles.
   await dialog.getByLabel('Role').selectOption('reviewer')
   // Each choice says what it runs, the model's effort level included; hera reviews already.
@@ -1437,6 +1489,7 @@ test('shows the staff as one row per member and role, and adds any saved agent i
   await expect
     .poll(() => calls(page, 'member.roles'))
     .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'reviewer'] }])
+  await expect(page.locator('#status')).toHaveText('@zeus is Reviewer now too.')
   // The image designer too: nothing on the card decides who may draw.
   await dialog.getByLabel('Role').selectOption('designer')
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveCount(4)
@@ -1475,6 +1528,7 @@ test('takes a member off the staff once the human confirms', async ({ page }) =>
   await dialog.getByRole('button', { name: 'Remove Worker @zeus' }).click()
   await dialog.getByRole('button', { name: 'Remove @zeus', exact: true }).click()
   await expect.poll(() => calls(page, 'member.remove')).toEqual([{ project: 1, agent: 'zeus' }])
+  await expect(page.locator('#status')).toHaveText('@zeus left the staff.')
 })
 
 test("offers, after a role is picked, the agents the staff shown does not hold it with: this project's, as it is now", async ({
@@ -1532,6 +1586,32 @@ test('keeps a pending removal and the chosen agent when the core redraws the sta
   await expect(dialog.getByLabel('Agent')).toHaveValue('hera')
 })
 
+test('says why the staff picker offers nobody: every saved agent holds the role, or none is saved', async ({
+  page,
+}) => {
+  const data = model()
+  // Only the staff's own agents are saved, and both are workers already.
+  data.agents = data.agents.filter((agent) => ['zeus', 'diana'].includes(agent.name))
+  await open(page, data)
+  await page.getByRole('button', { name: 'Staff' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  const hint = dialog.locator('#staff-hint')
+  await expect(hint).toHaveText('Every saved agent is on the staff as Worker already.')
+  await expect(dialog.getByLabel('Agent')).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeDisabled()
+  // Another role: both are on offer again.
+  await dialog.getByLabel('Role').selectOption('reviewer')
+  await expect(hint).toBeHidden()
+  await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeEnabled()
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await page.evaluate(() => {
+    window.__model.agents = []
+  })
+  await page.getByRole('button', { name: 'Staff' }).click()
+  await expect(hint).toHaveText('No saved agents yet: add one under Settings, Agents.')
+  await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeDisabled()
+})
+
 test('starts a project with human approval required, and posts the checkbox with the staff', async ({
   page,
 }) => {
@@ -1573,6 +1653,67 @@ test('offers a new project only the harnesses installed here, and no agent on an
   await expect(dialog.locator('option', { hasText: 'ares' })).toHaveCount(0)
 })
 
+test('refuses a new project when no harness is installed here, and says where to get one', async ({
+  page,
+}) => {
+  const data = model()
+  data.missing = ['claude', 'codex', 'opencode', 'pi', 'devin']
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  await expect(page.locator('#status')).toHaveText(
+    'No harness is installed here: install one from Agents, Harnesses.',
+  )
+  await expect(page.getByRole('dialog', { name: 'New project' })).toBeHidden()
+})
+
+test('starts no project without a folder: none chosen, or no picker in this window', async ({
+  page,
+}) => {
+  await open(page)
+  // The picker closed with no folder chosen: nothing is asked of the core.
+  await page.evaluate(() => {
+    window.__picked = 0
+    window.__TAURI__.dialog.open = async () => {
+      window.__picked += 1
+      return null
+    }
+  })
+  await page.getByRole('button', { name: 'New project' }).click()
+  await expect.poll(() => page.evaluate(() => window.__picked)).toBe(1)
+  expect(await calls(page, 'staff.last')).toEqual([])
+  await expect(page.getByRole('dialog', { name: 'New project' })).toBeHidden()
+  // A window with no folder picker says so.
+  await page.evaluate(() => {
+    delete window.__TAURI__.dialog
+  })
+  await page.getByRole('button', { name: 'New project' }).click()
+  await expect(page.locator('#status')).toHaveText(
+    'The folder picker is not available in this window.',
+  )
+  await expect(page.getByRole('dialog', { name: 'New project' })).toBeHidden()
+})
+
+test('says in New project who may be picked: nobody yet, or no agent saved at all', async ({
+  page,
+}) => {
+  await open(page)
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const rows = dialog.getByRole('table', { name: 'Agents for the staff' }).locator('tbody tr')
+  await page.getByRole('button', { name: 'New project' }).click()
+  await expect(rows).toHaveText(['Nobody yet: pick a role, then an agent whose model suits it.'])
+  await expect(dialog.locator('#new-project-hint')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await page.evaluate(() => {
+    window.__model.agents = []
+  })
+  await page.getByRole('button', { name: 'New project' }).click()
+  await expect(rows).toHaveText(['No agents saved yet: add some under Agents first.'])
+  await expect(dialog.locator('#new-project-hint')).toHaveText(
+    'No saved agents yet: add one under Settings, Agents.',
+  )
+  await expect(dialog.locator('[name="pickAgent"]')).toBeDisabled()
+})
+
 test('shows and sets human approval from the staff dialog, which has no review policy', async ({
   page,
 }) => {
@@ -1589,6 +1730,17 @@ test('shows and sets human approval from the staff dialog, which has no review p
   await expect(page.locator('#status')).toHaveText(
     'Messages between agents go straight through again.',
   )
+  await gate.check()
+  await expect
+    .poll(() => calls(page, 'project.gate'))
+    .toEqual([
+      { project: 1, gate: false },
+      { project: 1, gate: true },
+    ])
+  await expect(page.locator('#status')).toHaveText(
+    'Every message between agents now waits for your approval.',
+  )
+  await expect(gate).toBeChecked()
 })
 
 test('lists what waits for approval in For you, and approves or declines it, writing to no agent', async ({
@@ -1634,6 +1786,7 @@ test('lists what waits for approval in For you, and approves or declines it, wri
   )
   await answer.getByRole('button', { name: 'Decline m-33' }).click()
   await expect.poll(() => calls(page, 'message.decline')).toEqual([{ message: 33 }])
+  await expect(page.locator('#status')).toHaveText('m-33 declined; @chief is told.')
 
   const result = bay.locator('.strip-message[data-message="31"]')
   await expect(result.locator('.strip-route')).toHaveText(
@@ -1733,6 +1886,36 @@ test('shows a member between tasks as free, its window gone until the next task'
   const row = page.locator('tr[data-handle="diana"]')
   await expect(row.locator('.row-status')).toHaveText('Free: a terminal opens with its next task')
   await expect(row.getByTestId('lamp')).toHaveAttribute('data-state', 'closed')
+})
+
+test('shows an image designer between tasks as free, as any member, and counts its open terminals', async ({
+  page,
+}) => {
+  const data = model()
+  // An image designer has no tier; its tasks run in sessions like any member's.
+  const iris = participant(8, 'iris', 'designer', { agent: 'iris', harness: 'codex', tier: null })
+  data.boards[1].lanes.push({
+    participant: iris,
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  const row = page.locator('tr[data-handle="iris"]')
+  await expect(row.locator('.row-status')).toHaveText('Free: a terminal opens with its next task')
+  await changed(
+    page,
+    (iris) => {
+      window.__model.boards[1].lanes.push({
+        participant: { ...iris, id: 9, handle: 'iris-amber-pine', memberId: 8, member: 'iris' },
+        tasks: [],
+        activity: { state: 'working' },
+        pane: { id: 'p1-iris-amber-pine', generation: 1 },
+      })
+    },
+    iris,
+  )
+  await expect(row.locator('.row-status')).toHaveText('1 terminal open, one per task')
 })
 
 test('closes an open project from the list', async ({ page }) => {
@@ -2037,6 +2220,39 @@ test('folds the projects sidebar and the terminal dock away, and remembers it in
   await page.getByRole('button', { name: 'Show terminals' }).click()
   await expect(page.getByTestId('projects')).toBeVisible()
   await expect(page.getByRole('region', { name: 'Terminals' })).toBeVisible()
+})
+
+test('folds the panels for this page when the browser keeps no storage', async ({ page }) => {
+  // A browser that refuses storage (its data blocked, say) throws at every touch.
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('The operation is insecure.', 'SecurityError')
+      },
+    })
+  })
+  await open(page)
+  const projects = page.getByTestId('projects')
+  const board = page.getByRole('region', { name: 'Board' })
+  const stage = page.getByRole('region', { name: 'Terminals' })
+  await page.getByRole('button', { name: 'Hide projects' }).click()
+  await expect(projects).toBeHidden()
+  await page.getByRole('button', { name: 'Show projects' }).click()
+  await expect(projects).toBeVisible()
+  // Folding the board, then the windows, brings the board back.
+  await page.getByRole('button', { name: 'Hide board' }).click()
+  await expect(board).toBeHidden()
+  await page.getByRole('button', { name: 'Hide terminals' }).click()
+  await expect(board).toBeVisible()
+  await expect(stage).toBeHidden()
+  await page.getByRole('button', { name: 'Show terminals' }).click()
+  await expect(stage).toBeVisible()
+  // Inbox unfolds the board for the notes.
+  await page.getByRole('button', { name: 'Hide board' }).click()
+  await expect(board).toBeHidden()
+  await page.getByRole('button', { name: 'Inbox (1)' }).click()
+  await expect(board).toBeVisible()
 })
 
 test('starts a project in a chosen folder with the chosen chief, the staff ticked from the last one', async ({
@@ -2710,6 +2926,19 @@ test("the lead's row says when a switch waits for its turn", async ({ page }) =>
   )
 })
 
+test('refuses Switch lead when no harness is installed here, and says where to get one', async ({
+  page,
+}) => {
+  const data = model()
+  data.missing = ['claude', 'codex', 'opencode', 'pi', 'devin']
+  await open(page, data)
+  await page.getByRole('button', { name: 'Switch the lead to another harness or model' }).click()
+  await expect(page.locator('#status')).toHaveText(
+    'No harness is installed here: install one from Agents, Harnesses.',
+  )
+  await expect(page.getByRole('dialog', { name: 'Switch the lead' })).toBeHidden()
+})
+
 test('opens a task only over its own project, and every redraw after still draws', async ({
   page,
 }) => {
@@ -2853,4 +3082,33 @@ test('says the daemon is down while it is, why, and what comes next, and reads e
   await expect.poll(async () => (await calls(page, 'agents.list')).length).toBeGreaterThan(agents)
   await expect.poll(async () => (await calls(page, 'board.get')).length).toBeGreaterThan(boards)
   await expect(page.locator('tr[data-handle="zeus"]')).toHaveCount(1)
+})
+
+test('says what to do with no project yet: start one; there is no board to read, no staff to open', async ({
+  page,
+}) => {
+  await open(page, { ...model(), projects: [] })
+  await expect(page.locator('#project-title')).toHaveText('No project')
+  await expect(page.getByTestId('projects')).toHaveText('No projects yet.')
+  await expect(page.getByRole('region', { name: 'Board' })).toHaveText(
+    'Start a project to see its board: choose New project and pick the project folder.',
+  )
+  await expect(page.getByRole('region', { name: 'Terminals' })).toHaveText(
+    'No terminal is open yet.',
+  )
+  await expect(page.getByRole('button', { name: 'Staff' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Inbox', exact: true })).toHaveAttribute(
+    'data-waiting',
+    'false',
+  )
+  expect(await calls(page, 'board.get')).toEqual([])
+})
+
+test('says so when the page runs outside ConsensFlow, and never reads as ready', async ({
+  page,
+}) => {
+  await page.goto(`${ui.origin}/index.html`)
+  await expect(page.locator('#status')).toHaveText('ConsensFlow is not running this page.')
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'false')
+  await expect(page.locator('#project-title')).toHaveText('No project')
 })

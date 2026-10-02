@@ -28,7 +28,7 @@ export class TerminalLink {
   /** One message from `subscribe_output`: bytes for one pane, in order. */
   output(message, emulatorFor) {
     if (message === null || typeof message !== 'object') return
-    const key = `${message.id}:${message.generation}`
+    const key = paneKey(message)
     if (this.#retired.has(key)) return
     const previous = this.#outputs.get(key) ?? Promise.resolve()
     const next = previous
