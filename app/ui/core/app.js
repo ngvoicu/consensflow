@@ -472,9 +472,10 @@ staffButton.addEventListener('click', () =>
   }),
 )
 
-// New project: the native folder picker first, then the chief's harness, the
-// staff (the last project's ticked already) and the approval setting. The
-// agents it reads are the page's too, and the project it starts is shown.
+// New project: the native folder picker first, then the saved agent the lead
+// runs on, the staff (the last project's ticked already) and the approval
+// setting. The agents it reads are the page's too, and the project it starts
+// is shown.
 const newProject = new NewProjectDialog($('#new-project-dialog'), {
   agents: () => state.agents,
   core,
