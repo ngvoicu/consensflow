@@ -21,7 +21,8 @@ harnesses named logged in on this machine, and your word for the spend.
 
 Everything is real but the human. The daemon, the pane host and the harnesses
 are the ones the app uses (the live bench's shape). `--chief` names the
-chief's harness (claude, codex, pi, opencode, devin). Every chief but
+chief's harness (claude, codex, pi, opencode, devin), saved as the lead's
+agent with its model and effort. Every chief but
 Devin takes its model from `--model`; unless given, Claude Code runs Opus,
 Codex its cheap model, and Pi and OpenCode DeepSeek V4 Pro
 (`evals/plan.mjs`). Devin runs the model its own configuration names.

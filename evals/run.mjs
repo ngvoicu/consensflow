@@ -88,6 +88,18 @@ const { agents, staff } = staffFor(
 /** The chief's effort as it reached the chief: null where its harness has no switch for it. */
 const chiefEffort = ['claude', 'codex', 'pi'].includes(chief) ? values.effort : null
 const chiefSetup = chiefEnvironment(chief, values.model)
+/**
+ * The lead's agent, which the core opens no project without: the chief's
+ * harness, model and effort. A Devin chief runs the model its own
+ * configuration names, as before.
+ */
+const lead = {
+  id: `eval-${chief}-lead`,
+  kind: HARNESSES[chief].kind,
+  model: chief === 'devin' ? 'default' : chiefSetup.model,
+  workTier: 'standard',
+  ...(chiefEffort == null ? {} : { [chief === 'pi' ? 'thinking' : 'effort']: chiefEffort }),
+}
 
 /** The bench's clean environment: the real logins, never this shell's session identity. */
 /**
@@ -267,12 +279,12 @@ async function run(index) {
   try {
     writeFileSync(
       join(app.env.CONSENSFLOW_HOME, 'agents.json'),
-      `${JSON.stringify({ schemaVersion: 1, agents }, null, 2)}\n`,
+      `${JSON.stringify({ schemaVersion: 1, agents: [lead, ...agents] }, null, 2)}\n`,
     )
     file = join(app.env.CONSENSFLOW_HOME, 'consensflow.db')
     const opened = await app.requestNode('project.open', {
       directory: WORKSPACE,
-      harness: HARNESSES[chief].kind,
+      agent: lead.id,
       staff,
       ...(values.gate ? { gate: true } : {}),
     })
