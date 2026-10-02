@@ -75,6 +75,65 @@ export function staff(ledger) {
   return { project, id }
 }
 
+/**
+ * A project with a row in every table: T-1 taken back from a session of
+ * zeus and held in one of diana's, T-2 needing it, a question and its
+ * answer, an urgent tell, a note, a conversation bound to its native
+ * session with a transcript, and their events. Returns its ids by table.
+ */
+export function busyProject(ledger, directory) {
+  const project = ledger.createProject({
+    directory,
+    name: path.basename(directory),
+    chief: { harness: 'claude-code' },
+  })
+  const worker = (agent, harness) =>
+    ledger.addMember(project.id, { agent, harness, role: 'worker', tier: 'standard' })
+  const zeus = worker('zeus', 'claude-code')
+  const diana = worker('diana', 'codex')
+  const open = (body, needs) =>
+    ledger.createTask(project.id, { from: 'chief', pool: 'worker', tier: 'standard', body, needs })
+      .task
+  const tasks = [open('Parser', []), open('Docs', [1])]
+  const first = ledger.assignTask(project.id, 1, zeus.id)
+  deliver(ledger, first.message)
+  const conversation = ledger.startConversation(first.message.recipientId, {
+    harness: 'claude-code',
+  })
+  ledger.bindConversation(conversation.id, `native-${directory}`)
+  ledger.copyTranscript(conversation.id, [
+    { id: 'u1', role: 'user', text: 'Parser' },
+    { id: 'a1', role: 'assistant', text: 'Which grammar?' },
+  ])
+  const question = ledger.ask(project.id, {
+    from: first.task.assignee,
+    to: 'chief',
+    task: 1,
+    body: 'Which grammar?',
+  })
+  ledger.answer(question.id, { from: question.recipientId, body: 'The small one' })
+  ledger.releaseTask(project.id, 1, { because: 'ran out of quota' })
+  const second = ledger.assignTask(project.id, 1, diana.id)
+  deliver(ledger, second.message)
+  ledger.holdTask(project.id, 1, { until: '2026-09-20T10:00:00.000Z', because: 'out of quota' })
+  ledger.ask(project.id, {
+    from: 'chief',
+    to: second.task.assignee,
+    task: 1,
+    body: 'Where are you?',
+    urgent: true,
+  })
+  const note = ledger.note(project.id, { from: 'chief', to: 'human', body: 'T-1 waits' })
+  return {
+    project: [project.id],
+    participant: ledger.project(project.id).participants.map((p) => p.id),
+    conversation: [conversation.id],
+    task: tasks.map((task) => task.id),
+    message: [...ledger.task(project.id, 1).messages, note].map((message) => message.id),
+    event: ledger.events(project.id).map((event) => event.id),
+  }
+}
+
 /** The id of a session (or any participant) by handle. */
 export const sessionId = (ledger, projectId, handle) =>
   ledger.project(projectId).participants.find((p) => p.handle === handle).id
