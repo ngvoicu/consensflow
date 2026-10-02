@@ -592,18 +592,24 @@ mod tests {
         let key = PaneKey::new("unanswered-pane", 1);
         inputs.open(&key).expect("open the pane's input");
         let typed = || InputWork::Write(b"x".to_vec());
-        for sequence in 1..=MAX_PENDING_INPUT_TICKETS as u64 {
-            inputs
-                .enqueue_page(key.clone(), sequence, typed(), true)
-                .expect("admitted");
+        // The pane's queue holds fewer jobs than the bound holds tickets, and
+        // its worker may lag on a busy machine: input the full queue refuses
+        // is sent again under the next number (a refused number is spent).
+        let mut sequence = 0;
+        let mut admitted = 0;
+        while admitted < MAX_PENDING_INPUT_TICKETS {
+            sequence += 1;
+            match inputs.enqueue_page(key.clone(), sequence, typed(), true) {
+                Ok(_) => admitted += 1,
+                Err(error) if error == "the pane's input queue is full" => {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("refused: {error}"),
+            }
         }
+        // The bound is checked before the queue: refused whatever the queue holds.
         assert_eq!(
-            inputs.enqueue_page(
-                key.clone(),
-                MAX_PENDING_INPUT_TICKETS as u64 + 1,
-                typed(),
-                true
-            ),
+            inputs.enqueue_page(key.clone(), sequence + 1, typed(), true),
             Err("pane-input-ticket-capacity".to_string())
         );
 
