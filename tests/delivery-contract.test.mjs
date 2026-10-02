@@ -6,7 +6,9 @@ import { PassThrough } from 'node:stream'
 import { describe, it } from 'node:test'
 import { admission } from '../src/adapters/shared.js'
 import { Bridge } from '../src/bridge.js'
+import { send as sendDevin } from '../src/channels/devin.js'
 import { send as sendPi } from '../src/channels/pi.js'
+import { writePaste } from '../src/channels/pty.js'
 
 /**
  * One contract for every channel's answer to a send (the owner's rule,
@@ -31,20 +33,93 @@ const ROWS = {
 }
 
 /**
- * The pane host at the other end of a real bridge: it admits a claim, or
- * answers it as told.
+ * The pane host at the other end of a real bridge: it admits a claim and
+ * writes a paste, or answers either as told. A paste it never answers meets
+ * the bridge's own deadline; `end` closes the host's side of the bridge.
  */
-function paneHost(t, { claim = { ok: true } } = {}) {
+function paneHost(
+  t,
+  { claim = { ok: true }, paste = () => ({ ok: true }), deadlineMs = 5_000 } = {},
+) {
   const toHost = new PassThrough()
   const toDaemon = new PassThrough()
-  const daemon = new Bridge({ input: toDaemon, output: toHost, defaultDeadlineMs: 5_000 })
+  const daemon = new Bridge({ input: toDaemon, output: toHost, defaultDeadlineMs: deadlineMs })
   const host = new Bridge({ input: toHost, output: toDaemon, idPrefix: 'r-', peerIdPrefix: 'n-' })
   host.on('pane.claim', () => claim)
+  host.on('pane.write_paste', () => paste({ end: () => toDaemon.end() }))
   t.after(() => {
     daemon.close()
     host.close()
   })
   return daemon
+}
+
+/** The host's answer to a paste it refused before writing a byte of it. */
+const PASTE_REFUSED = {
+  ok: false,
+  admitted: false,
+  bytesWritten: 0,
+  error: 'stale-generation',
+  cause: 'p1-zeus is at generation 4 now',
+}
+/** Its answer to a paste whose write failed once bytes may have gone out. */
+const PASTE_UNCERTAIN = {
+  ok: false,
+  admitted: null,
+  error: 'uncertain',
+  cause: 'the pane input failed partway',
+}
+const never = () => new Promise(() => {})
+
+/** The rows of a paste into a window (Claude Code, Devin), whose handover point is its first byte. */
+function pasted(send, refused = {}) {
+  return {
+    refused: {
+      ...refused,
+      'the pane host refuses the paste before writing a byte': (t) =>
+        send(t, { paste: () => PASTE_REFUSED }),
+    },
+    uncertain: {
+      'the pane host fails the paste after writing bytes': (t) =>
+        send(t, { paste: () => PASTE_UNCERTAIN }),
+      "the bridge's own deadline passes before the host answers": (t) =>
+        send(t, { paste: never, deadlineMs: 50 }),
+      'the pane host goes away before it answers': (t) =>
+        send(t, {
+          paste: ({ end }) => {
+            end()
+            return never()
+          },
+        }),
+    },
+    accepted: {
+      'the pane host writes the paste': (t) => send(t, {}),
+    },
+  }
+}
+
+const DEVIN_SESSION = 'b7c2a0f4-5d1e-4a8b-9c3f-1e2d3c4b5a69'
+
+/** Devin's own wire log, naming the conversation its window shows. */
+async function sendThroughDevin(t, host, { shows = DEVIN_SESSION } = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'cf-contract-devin-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const wire = join(root, 'wire.jsonl')
+  const selected = {
+    sessionId: shows,
+    update: { sessionUpdate: 'config_option_update', configOptions: [{ id: 'mode' }] },
+  }
+  await writeFile(wire, `${JSON.stringify(selected)}\n`)
+  return sendDevin(
+    {
+      channel: { wire },
+      session: DEVIN_SESSION,
+      bridge: paneHost(t, host),
+      pane: 'p1-hera',
+      generation: 3,
+    },
+    'the cache key is per conversation',
+  )
 }
 
 /**
@@ -110,6 +185,17 @@ const acknowledge = (fields) => async (path, id) =>
   writeFile(path, JSON.stringify({ id, ...fields }))
 
 const CHANNELS = {
+  'Claude Code, pasted into its window': pasted((t, host) =>
+    writePaste(
+      paneHost(t, host),
+      { id: 'p1-zeus', generation: 3 },
+      'the cache key is per conversation',
+    ),
+  ),
+  'Devin, pasted into its window': pasted((t, host) => sendThroughDevin(t, host), {
+    'Devin shows another conversation': (t) =>
+      sendThroughDevin(t, {}, { shows: '0e9d8c7b-6a5f-4e3d-8c2b-1a0f9e8d7c6b' }),
+  }),
   'Pi, through its extension inbox': {
     refused: {
       'the pane host refuses its claim': (t) =>

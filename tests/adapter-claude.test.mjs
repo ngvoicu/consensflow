@@ -372,8 +372,11 @@ describe('the Claude Code adapter', () => {
       assert.deepEqual(await deliver(), { admitted: null, reason: 'deadline' })
       answer = Object.assign(new Error('eof'), { error: 'eof' })
       assert.deepEqual(await deliver(), { admitted: null, reason: 'eof' })
-      answer = { ok: false, error: 'stale pane' }
+      // The host's word: refused before a byte, or failed once bytes went out.
+      answer = { ok: false, admitted: false, bytesWritten: 0, error: 'stale', cause: 'stale pane' }
       assert.deepEqual(await deliver(), { admitted: false, reason: 'stale pane' })
+      answer = { ok: false, admitted: null, error: 'uncertain', cause: 'broken pipe' }
+      assert.deepEqual(await deliver(), { admitted: null, reason: 'broken pipe' })
     })
   })
 
