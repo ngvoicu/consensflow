@@ -160,6 +160,13 @@ const board = new BoardView(boardRoot, {
       await core('project.resume', { project: project.id })
       state.focus = 'chief'
     }),
+  onDeleteFinished: (project, { deletable, kept }) =>
+    askToDeleteTasks(
+      project.id,
+      deletable,
+      `Delete ${deletable.length} finished task${deletable.length === 1 ? '' : 's'}?`,
+      kept,
+    ),
 })
 
 // The drawer's actions are on its task's own project.
@@ -191,6 +198,7 @@ const drawer = new TaskDrawer($('#task-drawer'), {
           : `T-${task.number} resumes in @${resumed.assignee}.`,
       )
     }),
+  onDelete: (task) => askToDeleteTasks(task.projectId, [task.number], `Delete T-${task.number}?`),
   // What a task's window wrote, read when its fold opens.
   onTranscript: async (task) => {
     try {
@@ -407,6 +415,49 @@ $('#delete-confirm').addEventListener('click', () => {
 })
 deleteDialog.addEventListener('close', () => {
   deleting = null
+})
+
+// Deleting finished tasks is confirmed in a dialog that says what goes and
+// what stays: one task from its drawer, or every finished task that may go
+// from the Finished heading, with those kept because a task still needs them.
+const deleteTasksDialog = $('#delete-tasks-dialog')
+const deleteTasksTitle = $('#delete-tasks-title')
+const deleteTasksKept = $('#delete-tasks-kept')
+let deletingTasks = null
+function askToDeleteTasks(project, numbers, title, kept = []) {
+  deletingTasks = { project, numbers }
+  deleteTasksTitle.textContent = title
+  deleteTasksKept.replaceChildren(
+    ...kept.map(({ number, neededBy }) =>
+      element(
+        'li',
+        null,
+        `T-${number} stays: ${neededBy.map((other) => `T-${other}`).join(', ')} still need${neededBy.length === 1 ? 's' : ''} it.`,
+      ),
+    ),
+  )
+  deleteTasksKept.hidden = kept.length === 0
+  deleteTasksDialog.showModal()
+}
+// The ask is used up here, not when the dialog closes: a close event comes
+// later than the close, and would cancel an ask made again in between.
+$('#delete-tasks-confirm').addEventListener('click', () => {
+  const asked = deletingTasks
+  deletingTasks = null
+  deleteTasksDialog.close()
+  if (asked === null) return
+  const { project, numbers } = asked
+  void act(async () => {
+    await core('tasks.delete', { project, tasks: numbers })
+    if (state.openTask?.project === project && numbers.includes(state.openTask.number)) {
+      closeTask()
+    }
+    note(
+      numbers.length === 1
+        ? `T-${numbers[0]} is deleted.`
+        : `${numbers.length} finished tasks are deleted.`,
+    )
+  })
 })
 
 function renderProjects() {

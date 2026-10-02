@@ -19,6 +19,8 @@ const ACTIVE = ['working', 'waiting', 'queued', 'paused', 'open']
 const PAUSABLE = ['open', 'queued', 'working', 'waiting']
 /** What the human may give back to the board for another member of its tier. */
 const REASSIGNABLE = ['queued', 'working', 'waiting', 'paused']
+/** What is over, accepted or not: the human may delete it from the board. */
+const FINISHED = ['accepted', 'failed', 'cancelled']
 /** The columns, in reading order; whatever is over, accepted or not, shares the last one. */
 const COLUMNS = [
   ['open', 'Backlog'],
@@ -46,11 +48,7 @@ const ICONS = {
   remove: ['M4 7h16', 'M9 7V4h6v3', 'M6 7l1 13h10l1-13', 'M10 11v6', 'M14 11v6'],
 }
 const columnOf = (task) =>
-  ['accepted', 'failed', 'cancelled'].includes(task.state)
-    ? 'finished'
-    : task.state === 'paused'
-      ? 'queued'
-      : task.state
+  FINISHED.includes(task.state) ? 'finished' : task.state === 'paused' ? 'queued' : task.state
 const STATE_LABEL = {
   open: 'Open',
   queued: 'Queued',
@@ -282,6 +280,30 @@ export function lamp(activity) {
  */
 const acts = (board) => board.project.state === 'open'
 
+/**
+ * The finished tasks on a board as Delete finished takes them: those that
+ * may go, and those kept because a task not yet finished needs them, each
+ * with the tasks that do. The core decides again when it deletes them.
+ */
+function finishedTasks(board) {
+  const tasks = [...board.open, ...board.lanes.flatMap((lane) => lane.tasks)].sort(
+    (a, b) => a.number - b.number,
+  )
+  const unfinished = tasks.filter((task) => !FINISHED.includes(task.state))
+  const finished = tasks
+    .filter((task) => FINISHED.includes(task.state))
+    .map((task) => ({
+      number: task.number,
+      neededBy: unfinished
+        .filter((other) => other.needs.some((need) => need.number === task.number))
+        .map((other) => other.number),
+    }))
+  return {
+    deletable: finished.filter((task) => task.neededBy.length === 0).map((task) => task.number),
+    kept: finished.filter((task) => task.neededBy.length > 0),
+  }
+}
+
 export class BoardView {
   #root
   #actions
@@ -481,6 +503,7 @@ export class BoardView {
     for (const [state, label] of COLUMNS) {
       const cell = element('th', null, label)
       cell.dataset.state = state
+      if (state === 'finished') cell.append(...this.#deleteFinished(board))
       headRow.append(cell)
     }
     head.append(headRow)
@@ -503,6 +526,19 @@ export class BoardView {
     }
     table.append(head, body)
     return table
+  }
+
+  /**
+   * The Finished heading's control: every finished task that may go leaves
+   * the board, once the human confirms; nothing while the project is closed.
+   */
+  #deleteFinished(board) {
+    if (!acts(board) || finishedTasks(board).deletable.length === 0) return []
+    return [
+      button('Delete finished', 'danger-button', () =>
+        this.#actions.onDeleteFinished(this.#board.project, finishedTasks(this.#board)),
+      ),
+    ]
   }
 
   #row(lane, board, agent, now) {
@@ -810,6 +846,10 @@ export class TaskDrawer {
     }
     if (ACTIVE.includes(task.state)) {
       actions.push(button('Cancel task', 'danger-button', on(this.#actions.onCancel)))
+    }
+    // Over, it may leave the board for good, once the human confirms.
+    if (FINISHED.includes(task.state) && task.deletedAt === null) {
+      actions.push(button('Delete task', 'danger-button', on(this.#actions.onDelete)))
     }
     return actions
   }

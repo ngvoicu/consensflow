@@ -1,6 +1,7 @@
 import {
   ACTIVE_TASK_STATES,
   COORDINATOR_ROLES,
+  FINISHED_TASK_STATES,
   LedgerError,
   MAX_BODY,
   MEMBER_ROLES,
@@ -26,8 +27,9 @@ import { MESSAGE_SELECT, messageView, TASK_SELECT, taskView } from './views.js'
  * Tasks, along the state machine in index.js: given by a coordinator to a
  * participant by name, or opened for a pool and tier of the staff and
  * assigned by the daemon; finished with a result and accepted, or paused,
- * held, resumed, reopened, released, cancelled or failed; and the plan their
- * needs make on the board.
+ * held, resumed, reopened, released, cancelled or failed; deleted from the
+ * board by the human once finished; and the plan their needs make on the
+ * board.
  */
 
 /** When a task's tier moved to one the staff holds, the tier that was asked. */
@@ -144,6 +146,7 @@ export function createTask(
       )
     for (const number of needed) {
       const need = store.taskRow(projectId, number)
+      requireOnBoard(need, 'wait for')
       if (need.state === 'cancelled') {
         throw new LedgerError(
           'need-cancelled',
@@ -626,6 +629,49 @@ export function failTask(store, projectId, number, { reason }) {
 }
 
 /**
+ * The human takes finished tasks off the board for good: each leaves the
+ * board and `cf task list`, and keeps its row, so its number is never given
+ * again, the threads that name it stay whole and `cf task get` still reads
+ * it. Only a finished task goes, and none a task not yet finished still
+ * needs; all of them go, or none. Nobody is told: the human tidies the board.
+ */
+export function deleteTasks(store, projectId, numbers) {
+  const finished = FINISHED_TASK_STATES.map((state) => `'${state}'`).join(', ')
+  return store.write(() =>
+    [...new Set(numbers)].map((number) => {
+      const task = store.taskRow(projectId, number)
+      requireOnBoard(task, 'delete')
+      if (!FINISHED_TASK_STATES.includes(task.state)) {
+        throw new LedgerError(
+          'not-finished',
+          `T-${number} is ${task.state}: only a finished task leaves the board; ${task.state === 'done' ? 'the chief accepts it or sends it back first' : 'cancel it first'}`,
+          409,
+        )
+      }
+      const needing = store.db
+        .prepare(
+          `SELECT w.number FROM task_need n JOIN task w ON w.id = n.task_id
+           WHERE n.needs_id = ? AND w.state NOT IN (${finished}) ORDER BY w.number`,
+        )
+        .all(task.id)
+        .map((row) => `T-${row.number}`)
+      if (needing.length > 0) {
+        throw new LedgerError(
+          'task-needed',
+          needing.length === 1
+            ? `${needing[0]} still needs T-${number}: it stays on the board until ${needing[0]} is finished`
+            : `${needing.join(', ')} still need T-${number}: it stays on the board until they are finished`,
+          409,
+        )
+      }
+      store.db.prepare('UPDATE task SET deleted_at = ? WHERE id = ?').run(store.at(), task.id)
+      store.log(projectId, 'task.deleted', { task: number, state: task.state })
+      return taskById(store, task.id)
+    }),
+  )
+}
+
+/**
  * A task and its whole thread, oldest first; null when there is no such
  * task. `cf task get` reads it over the local API; the page reads
  * `taskThatFits`.
@@ -685,10 +731,22 @@ function taskById(store, id) {
 }
 
 function requireTaskState(task, states, action) {
+  requireOnBoard(task, action)
   if (!states.includes(task.state)) {
     throw new LedgerError(
       'invalid-transition',
       `cannot ${action} T-${task.number}: it is ${task.state}`,
+      409,
+    )
+  }
+}
+
+/** A task the human deleted from the board moves no more, and nothing new waits for it. */
+function requireOnBoard(task, action) {
+  if (task.deleted_at !== null) {
+    throw new LedgerError(
+      'task-deleted',
+      `cannot ${action} T-${task.number}: it was deleted from the board`,
       409,
     )
   }

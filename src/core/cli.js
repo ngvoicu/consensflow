@@ -339,7 +339,7 @@ async function taskCommand([action, ...rest], call, input) {
       )
       return {
         data: { task, ...copy },
-        text: `${taskLine(task)}\n\n${
+        text: `${taskHead(task)}\n\n${
           copy.total === 0
             ? 'Its window has written nothing yet.'
             : `What its window did, the last ${copy.items.length} of ${copy.total} items:\n\n${items.join('\n\n')}`
@@ -347,7 +347,7 @@ async function taskCommand([action, ...rest], call, input) {
       }
     }
     const thread = task.messages.map((m) => `${messageLine(m)}\n${m.body}`).join('\n\n')
-    return { data: task, text: `${taskLine(task)}\n\n${thread}` }
+    return { data: task, text: `${taskHead(task)}\n\n${thread}` }
   }
   if (['done', 'accept', 'cancel', 'reopen', 'pause', 'resume'].includes(action)) {
     const text = await textOf(rest.slice(1).join(' '), input)
@@ -475,5 +475,10 @@ function usage(message) {
 
 const taskLine = (task) =>
   `T-${task.number} [${task.state}] ${task.assignee === null ? `${task.blockedBy.length === 0 ? '' : `blocked by ${tasks(task.blockedBy)} · `}for ${aPool(task.pool, task.tier)}` : `@${task.assignee}`} ← @${task.requester}: ${task.title}`
+/** What `cf task get` heads a task with: its line, and when the human deleted it from the board, if they did. */
+const taskHead = (task) =>
+  task.deletedAt === null
+    ? taskLine(task)
+    : `${taskLine(task)}\nDeleted from the board by the human at ${task.deletedAt}.`
 const messageLine = (message) =>
   `m-${message.id} [${message.state}] ${message.kind}${(message.task ?? message.taskNumber) ? ` T-${message.task ?? message.taskNumber}` : ''} from ${message.sender === null ? 'ConsensFlow' : `@${message.sender}`}${message.preview === undefined ? '' : `: ${message.preview}`}`

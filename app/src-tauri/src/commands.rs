@@ -232,6 +232,7 @@ const CORE_OPERATIONS: &[&str] = &[
     "task.pause",
     "task.reassign",
     "task.resume",
+    "tasks.delete",
     "message.read",
     "message.approve",
     "message.decline",

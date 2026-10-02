@@ -673,3 +673,161 @@ describe('a task held with its window while its member is out of quota', () => {
     })
   })
 })
+
+describe('a finished task the human deletes from the board', () => {
+  const open = (ledger, project, body, extra = {}) =>
+    ledger.createTask(project.id, {
+      from: 'chief',
+      pool: 'worker',
+      tier: 'standard',
+      body,
+      ...extra,
+    }).task
+  /** A worker's task in its session's window: the session's message. */
+  const start = (ledger, project, id, number) => {
+    const { message } = ledger.assignTask(project.id, number, id('zeus'))
+    deliver(ledger, message)
+    return message
+  }
+  /** Every task on the board, by number: what waits for a member and every lane. */
+  const onBoard = (ledger, project) => {
+    const board = ledger.board(project.id)
+    return [...board.open, ...board.lanes.flatMap((lane) => lane.tasks)]
+      .map((task) => task.number)
+      .sort((a, b) => a - b)
+  }
+
+  it('leaves the board and the list for good, keeps its thread, tells nobody and gives its number to no other task', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      open(ledger, project, 'Lexer')
+      open(ledger, project, 'Parser')
+      start(ledger, project, id, 2)
+      ledger.recordResult(project.id, 2, { body: 'Parser done' })
+      ledger.acceptTask(project.id, 2, { by: 'chief' })
+      const told = ['chief', 'human'].map((handle) => ledger.inbox(id(handle)).length)
+
+      const [deleted] = ledger.deleteTasks(project.id, [2])
+      assert.deepEqual([deleted.number, deleted.state], [2, 'accepted'])
+      assert.match(deleted.deletedAt, /^2026-09-19T10:\d\d:\d\d\.000Z$/)
+      assert.deepEqual(onBoard(ledger, project), [1])
+      const kept = ledger.task(project.id, 2)
+      assert.deepEqual(
+        [kept.state, kept.deletedAt, kept.messages.map((message) => message.kind)],
+        ['accepted', deleted.deletedAt, ['task', 'result']],
+        'the ledger still reads it, thread and all',
+      )
+      const { kind, data } = ledger.events(project.id).at(-1)
+      assert.deepEqual([kind, data], ['task.deleted', { task: 2, state: 'accepted' }])
+      assert.deepEqual(
+        ['chief', 'human'].map((handle) => ledger.inbox(id(handle)).length),
+        told,
+        'the human tidies the board: nobody is told',
+      )
+      assert.equal(open(ledger, project, 'Docs').number, 3, 'T-2 is never given again')
+    })
+  })
+
+  it('deletes only a finished task, and says what to do with one that is not', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      for (const body of ['Open', 'Working', 'Paused', 'Done', 'Cancelled', 'Failed']) {
+        open(ledger, project, body)
+      }
+      start(ledger, project, id, 2)
+      start(ledger, project, id, 3)
+      ledger.pauseTask(project.id, 3, { by: 'chief' })
+      start(ledger, project, id, 4)
+      ledger.recordResult(project.id, 4, { body: 'Done' })
+      ledger.cancelTask(project.id, 5, { by: 'chief' })
+      start(ledger, project, id, 6)
+      ledger.failTask(project.id, 6, { reason: 'its window closed' })
+      const before = ledger.events(project.id).length
+      for (const [number, state] of [
+        [1, 'open'],
+        [2, 'working'],
+        [3, 'paused'],
+      ]) {
+        assert.throws(() => ledger.deleteTasks(project.id, [number]), {
+          code: 'not-finished',
+          message: `T-${number} is ${state}: only a finished task leaves the board; cancel it first`,
+        })
+      }
+      assert.throws(() => ledger.deleteTasks(project.id, [4]), {
+        code: 'not-finished',
+        message:
+          'T-4 is done: only a finished task leaves the board; the chief accepts it or sends it back first',
+      })
+      // One refused, none goes: the human confirmed them all.
+      assert.throws(() => ledger.deleteTasks(project.id, [5, 1]), { code: 'not-finished' })
+      assert.equal(ledger.task(project.id, 5).deletedAt, null)
+      assert.equal(ledger.events(project.id).length, before, 'nothing written')
+      assert.throws(() => ledger.deleteTasks(project.id, [9]), { code: 'unknown-task' })
+      assert.deepEqual(
+        ledger.deleteTasks(project.id, [5, 6]).map((task) => [task.number, task.state]),
+        [
+          [5, 'cancelled'],
+          [6, 'failed'],
+        ],
+      )
+      assert.deepEqual(onBoard(ledger, project), [1, 2, 3, 4])
+    })
+  })
+
+  it('keeps a finished task that a task not yet finished still needs, and names that task', async () => {
+    await withLedger((ledger) => {
+      const { project } = staff(ledger)
+      open(ledger, project, 'Lexer')
+      open(ledger, project, 'Parser', { needs: [1] })
+      open(ledger, project, 'Docs', { needs: [1] })
+      ledger.cancelTask(project.id, 1, { by: 'chief' })
+      assert.throws(() => ledger.deleteTasks(project.id, [1]), {
+        code: 'task-needed',
+        message: 'T-2, T-3 still need T-1: it stays on the board until they are finished',
+      })
+      ledger.cancelTask(project.id, 2, { by: 'chief' })
+      assert.throws(() => ledger.deleteTasks(project.id, [1]), {
+        code: 'task-needed',
+        message: 'T-3 still needs T-1: it stays on the board until T-3 is finished',
+      })
+      ledger.cancelTask(project.id, 3, { by: 'chief' })
+      ledger.deleteTasks(project.id, [1, 2, 3])
+      assert.deepEqual(onBoard(ledger, project), [])
+    })
+  })
+
+  it('moves no more once deleted, and nothing new waits for it; a window still on it is still stopped', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      open(ledger, project, 'Parser')
+      open(ledger, project, 'Lexer')
+      const parser = start(ledger, project, id, 1)
+      ledger.failTask(project.id, 1, { reason: 'its window closed' })
+      const lexer = start(ledger, project, id, 2)
+      ledger.cancelTask(project.id, 2, { by: 'human' })
+      ledger.deleteTasks(project.id, [1, 2])
+      assert.throws(() => ledger.reopenTask(project.id, 1, { by: 'chief', body: 'Again' }), {
+        code: 'task-deleted',
+        message: 'cannot reopen T-1: it was deleted from the board',
+      })
+      assert.throws(() => ledger.deleteTasks(project.id, [1]), {
+        code: 'task-deleted',
+        message: 'cannot delete T-1: it was deleted from the board',
+      })
+      assert.throws(() => open(ledger, project, 'Docs', { needs: [1] }), {
+        code: 'task-deleted',
+        message: 'cannot wait for T-1: it was deleted from the board',
+      })
+      assert.equal(ledger.task(project.id, 3), null, 'nothing of the refused task is left')
+      // The cancelled task its window may still be at work on is the one it is stopped for.
+      assert.deepEqual(
+        [ledger.lastTask(lexer.recipientId).number, ledger.lastTask(lexer.recipientId).state],
+        [2, 'cancelled'],
+      )
+      // A follow-up in the window that did it is new work, on the board.
+      const after = ledger.createTask(project.id, { from: 'chief', after: 1, body: 'Retry' })
+      assert.deepEqual([after.task.number, after.task.assignee], [3, parser.recipient])
+      assert.deepEqual(onBoard(ledger, project), [3])
+    })
+  })
+})

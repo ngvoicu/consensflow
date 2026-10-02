@@ -60,6 +60,7 @@ const task = (number, title, state, requester, assignee, minutesAgo = 3, extra =
   purpose: null,
   needs: [],
   blockedBy: [],
+  deletedAt: null,
   createdAt: at(minutesAgo + 1),
   updatedAt: at(minutesAgo),
   ...extra,
@@ -287,6 +288,20 @@ async function open(page, data = model()) {
           ? { ok: false, error: `no task T-${task} in this project` }
           : answer({ task: found })
       },
+      // Finished tasks leave the board and still read, or the core refuses
+      // them all in its own words (a test says which with `deleteRefusal`).
+      'tasks.delete': ({ project, tasks }) => {
+        if (data.deleteRefusal) return { ok: false, error: data.deleteRefusal }
+        const board = data.boards[project]
+        const stays = (task) => !tasks.includes(task.number)
+        board.open = board.open.filter(stays)
+        for (const lane of board.lanes) lane.tasks = lane.tasks.filter(stays)
+        for (const number of tasks) {
+          const kept = data.tasks[`${project}:${number}`]
+          if (kept !== undefined) kept.deletedAt = new Date().toISOString()
+        }
+        return answer({})
+      },
       // A resumed task goes on in its window, or back on the board when that
       // window has ended (a test says so with `resumesOpen`).
       'task.resume': ({ project, task }) => {
@@ -413,6 +428,7 @@ test('draws the kanban: a row per participant, a column per state, and cards tha
   await open(page)
   await expect(page.getByRole('heading', { name: 'harbour' })).toBeVisible()
   const table = page.getByRole('table', { name: 'Tasks' })
+  // The last heading holds its own control too (Delete finished).
   await expect(table.locator('thead th')).toHaveText([
     'Staff',
     'Backlog',
@@ -420,7 +436,7 @@ test('draws the kanban: a row per participant, a column per state, and cards tha
     'Working',
     'Waiting',
     'Done',
-    'Finished',
+    /^Finished/,
   ])
   const rows = table.locator('tbody tr')
   // Nothing assigns the human a task: what is for them is in For you, not a row.
@@ -902,6 +918,167 @@ test("reassigns a task given by tier from its drawer, working or paused, never t
   await page.locator('button.card[data-task="4"]').click()
   const named = page.getByRole('complementary', { name: 'Task T-4' })
   await expect(named.getByRole('button', { name: /^Reassign/ })).toHaveCount(0)
+})
+
+test('deletes a finished task from its drawer once the human confirms, and closes the drawer', async ({
+  page,
+}) => {
+  const data = model()
+  data.tasks['1:5'] = { ...task(5, 'Old spike', 'accepted', 'chief', 'zeus', 90), messages: [] }
+  data.inbox[1].push({
+    id: 10,
+    kind: 'note',
+    state: 'queued',
+    sender: 'chief',
+    recipient: 'human',
+    taskNumber: 5,
+    body: 'The spike is in.',
+    createdAt: at(1),
+  })
+  await open(page, data)
+  // A task the chief has still to decide is not over: it has no Delete.
+  await page.locator('button.card[data-task="2"]').click()
+  const done = page.getByRole('complementary', { name: 'Task T-2' })
+  await expect(done.getByRole('button', { name: /^Delete/ })).toHaveCount(0)
+  await done.getByRole('button', { name: 'Close the task' }).click()
+  await page.locator('button.card[data-task="5"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-5' })
+  await expect(drawer.getByRole('button')).toHaveText(['Close', 'Delete task'])
+  await drawer.getByRole('button', { name: 'Delete task' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Delete T-5?' })
+  await expect(dialog.locator('.dialog-help')).toHaveText(
+    'A deleted task leaves the board and cf task list for good. The ledger keeps it: the lead can still read it, its brief, result and thread, with cf task get. This cannot be undone.',
+  )
+  await expect(dialog.getByRole('list', { name: 'Kept on the board' })).toBeHidden()
+  await dialog.getByRole('button', { name: 'Keep' }).click()
+  await expect(dialog).toBeHidden()
+  expect(await calls(page, 'tasks.delete')).toEqual([])
+  await expect(drawer).toBeVisible()
+  await drawer.getByRole('button', { name: 'Delete task' }).click()
+  await dialog.getByRole('button', { name: 'Delete for good' }).click()
+  await expect(dialog).toBeHidden()
+  await expect.poll(() => calls(page, 'tasks.delete')).toEqual([{ project: 1, tasks: [5] }])
+  await expect(drawer).toBeHidden()
+  await expect(page.locator('#status')).toHaveText('T-5 is deleted.')
+  await expect(page.locator('button.card[data-task="5"]')).toHaveCount(0)
+  // Its record still reads, from a note about it, with nothing left to do on it.
+  await page
+    .locator('.strip-message[data-message="10"]')
+    .getByRole('button', { name: 'Open task' })
+    .click()
+  await expect(drawer.getByRole('button')).toHaveText(['Close'])
+})
+
+test('deletes every finished task that may go from the Finished heading, after one confirmation that says how many and which stay', async ({
+  page,
+}) => {
+  const data = model()
+  const zeus = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
+  zeus.tasks.push(task(8, 'Old docs', 'cancelled', 'chief', 'zeus', 60))
+  // Waiting on the board for diana's failed T-3: T-3 stays.
+  data.boards[1].open.push(
+    task(9, 'Retry the parser', 'open', 'chief', null, 1, {
+      pool: 'worker',
+      tier: 'standard',
+      needs: [{ number: 3, state: 'failed' }],
+      blockedBy: [3],
+    }),
+  )
+  data.tasks['1:5'] = { ...zeus.tasks.find((t) => t.number === 5), messages: [] }
+  await open(page, data)
+  await page.locator('button.card[data-task="5"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-5' })
+  await expect(drawer).toBeVisible()
+  // The drawer lies over the board's last columns: the heading is reached with the keyboard.
+  const heading = page.getByRole('table', { name: 'Tasks' }).locator('th[data-state="finished"]')
+  await heading.getByRole('button', { name: 'Delete finished' }).press('Enter')
+  const dialog = page.getByRole('dialog', { name: 'Delete 2 finished tasks?' })
+  await expect(
+    dialog.getByRole('list', { name: 'Kept on the board' }).getByRole('listitem'),
+  ).toHaveText(['T-3 stays: T-9 still needs it.'])
+  await dialog.getByRole('button', { name: 'Keep' }).click()
+  await expect(dialog).toBeHidden()
+  expect(await calls(page, 'tasks.delete')).toEqual([])
+  await heading.getByRole('button', { name: 'Delete finished' }).press('Enter')
+  await dialog.getByRole('button', { name: 'Delete for good' }).click()
+  await expect.poll(() => calls(page, 'tasks.delete')).toEqual([{ project: 1, tasks: [5, 8] }])
+  await expect(page.locator('#status')).toHaveText('2 finished tasks are deleted.')
+  await expect(drawer).toBeHidden()
+  await expect(page.locator('td[data-state="finished"] button.card')).toHaveText([/^T-3/])
+  // What is left is kept for T-9: nothing more may go, so the heading offers nothing.
+  await expect(heading.getByRole('button')).toHaveCount(0)
+})
+
+test('says why the core keeps a finished task on the board, from the drawer or the heading', async ({
+  page,
+}) => {
+  const data = model()
+  // Another window put T-7 on the board, needing T-3, since this board was read.
+  data.deleteRefusal = 'T-7 still needs T-3: it stays on the board until T-7 is finished'
+  await open(page, data)
+  await page.locator('button.card[data-task="3"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-3' })
+  await drawer.getByRole('button', { name: 'Delete task' }).click()
+  await page
+    .getByRole('dialog', { name: 'Delete T-3?' })
+    .getByRole('button', { name: 'Delete for good' })
+    .click()
+  await expect.poll(() => calls(page, 'tasks.delete')).toEqual([{ project: 1, tasks: [3] }])
+  const status = page.locator('#status')
+  await expect(status).toHaveText(
+    'T-7 still needs T-3: it stays on the board until T-7 is finished',
+  )
+  await expect(status).toHaveAttribute('data-tone', 'error')
+  await expect(drawer).toBeVisible()
+  await drawer.getByRole('button', { name: 'Close the task' }).click()
+  await page.evaluate(() => {
+    window.__model.deleteRefusal =
+      'T-8 still needs T-5: it stays on the board until T-8 is finished'
+  })
+  await page.getByRole('button', { name: 'Delete finished' }).click()
+  await page
+    .getByRole('dialog', { name: 'Delete 2 finished tasks?' })
+    .getByRole('button', { name: 'Delete for good' })
+    .click()
+  await expect
+    .poll(() => calls(page, 'tasks.delete'))
+    .toEqual([
+      { project: 1, tasks: [3] },
+      { project: 1, tasks: [3, 5] },
+    ])
+  await expect(status).toHaveText(
+    'T-8 still needs T-5: it stays on the board until T-8 is finished',
+  )
+  await expect(page.locator('td[data-state="finished"] button.card')).toHaveCount(2)
+})
+
+test('offers no delete on a closed project until it is resumed: its finished tasks only read', async ({
+  page,
+}) => {
+  const data = closedFoundry()
+  const lane = data.boards[2].lanes.find((l) => l.participant.handle === 'zeus-amber-pine')
+  lane.tasks.push(
+    task(4, 'Old spike', 'accepted', 'chief', 'zeus-amber-pine', 90, { projectId: 2 }),
+  )
+  data.tasks['2:4'] = { ...lane.tasks.at(-1), messages: [] }
+  await open(page, data)
+  await chooseProject(page, 'foundry')
+  await expect(page.locator('td[data-state="finished"] button.card[data-task="4"]')).toHaveCount(1)
+  const heading = page.getByRole('table', { name: 'Tasks' }).locator('th[data-state="finished"]')
+  await expect(heading.getByRole('button')).toHaveCount(0)
+  await page.locator('button.card[data-task="4"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-4' })
+  await expect(drawer.getByRole('button')).toHaveText(['Close'])
+  await drawer.getByRole('button', { name: 'Close the task' }).click()
+  // Resumed, the same board offers both again.
+  await page.evaluate(() => {
+    window.__model.projects[1].state = 'open'
+    window.__model.boards[2].project.state = 'open'
+    window.__listeners.get('state-changed')()
+  })
+  await expect(heading.getByRole('button')).toHaveText(['Delete finished'])
+  await page.locator('button.card[data-task="4"]').click()
+  await expect(drawer.getByRole('button')).toHaveText(['Close', 'Delete task'])
 })
 
 test('says so on the board when the project has no members yet', async ({ page }) => {

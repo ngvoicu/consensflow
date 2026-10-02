@@ -756,6 +756,33 @@ describe('cf inside a core window', () => {
     })
   })
 
+  it('leaves a task the human deleted out of cf task list, and says so in cf task get', async () => {
+    await withApi(async ({ ledger, project, token, cf }) => {
+      const chief = token('chief')
+      await cf(chief, 'task', 'add', '--tier', 'standard', 'Lexer')
+      await cf(chief, 'task', 'add', '--tier', 'standard', 'Parser')
+      assert.equal((await cf(chief, 'task', 'cancel', 'T-1')).code, 0)
+      const [{ deletedAt }] = ledger.deleteTasks(project.id, [1])
+      assert.equal(
+        (await cf(chief, 'task', 'list')).out,
+        'Waiting for a member\nT-2 [open] for a standard worker ← @chief: Parser',
+      )
+      const head = [
+        'T-1 [cancelled] for a standard worker ← @chief: Lexer',
+        `Deleted from the board by the human at ${deletedAt}.`,
+      ].join('\n')
+      assert.equal((await cf(chief, 'task', 'get', 'T-1')).out, `${head}\n\n`)
+      assert.equal(
+        (await cf(chief, 'task', 'get', 'T-1', '--transcript')).out,
+        `${head}\n\nIts window has written nothing yet.`,
+      )
+      assert.equal(
+        JSON.parse((await cf(chief, 'task', 'get', 'T-1', '--json')).out).deletedAt,
+        deletedAt,
+      )
+    })
+  })
+
   it('orders the board with --needs and --before, and says what waits for what', async () => {
     await withApi(async ({ ledger, project, token, cf }) => {
       const chief = token('chief')

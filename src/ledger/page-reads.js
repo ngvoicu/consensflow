@@ -92,9 +92,10 @@ export function board(store, projectId) {
   // Each task with the first line of its latest result: what its card shows.
   // Its brief stays out: the drawer reads it with the task, and a long-lived
   // board of briefs would outgrow the frame the page reads it in.
-  // A task of a session that has ended sits on its member's lane.
+  // A task of a session that has ended sits on its member's lane; one the
+  // human deleted is on no lane.
   const rows = store.db
-    .prepare(`${TASK_SELECT} WHERE t.project_id = ? ORDER BY t.number`)
+    .prepare(`${TASK_SELECT} WHERE t.project_id = ? AND t.deleted_at IS NULL ORDER BY t.number`)
     .all(projectId)
   const laneOf = new Map(
     rows.map((row) => [
