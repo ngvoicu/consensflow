@@ -1,6 +1,7 @@
 import { button, element, redraw } from '../dom.js'
 import { initializeUpdates } from '../updates.js'
-import { BoardView, HARNESS_NAMES, isMember, TaskDrawer } from './board.js'
+import { BoardView, TaskDrawer } from './board.js'
+import { NewProjectDialog, StaffDialog, SwitchLeadDialog } from './dialogs.js'
 import { Layout } from './layout.js'
 import { TerminalsView } from './terminals.js'
 
@@ -149,7 +150,7 @@ const board = new BoardView(boardRoot, {
       await core('session.end', { project: participant.projectId, handle: participant.handle })
       note(`@${participant.handle} is gone; its tasks stay on @${participant.member}'s lane.`)
     }),
-  onSwitchLead: (chief) => act(() => openSwitchLead(chief)),
+  onSwitchLead: (chief) => act(() => switchLead.open(chief)),
   onResume: (project) =>
     act(async () => {
       await core('project.resume', { project: project.id })
@@ -323,7 +324,7 @@ async function refresh() {
         new Set(open.map((project) => project.id)),
       )
       render()
-      if (staffDialog.open) renderStaff()
+      staff.render()
       await rereadTask()
     } catch (cause) {
       report(cause)
@@ -439,154 +440,37 @@ inboxButton.addEventListener('click', () => {
   boardRoot.querySelector('.foryou')?.scrollIntoView({ block: 'start' })
 })
 
-const ROLES = ['worker', 'advisor', 'reviewer', 'designer']
-const ROLE_LABEL = {
-  worker: 'Worker',
-  advisor: 'Advisor',
-  reviewer: 'Reviewer',
-  designer: 'Image designer',
-}
-/** The work tiers in the order the pick list groups them, most critical first, as the Agents screen names them. */
-const TIER_LABEL = {
-  critical: 'Critical work',
-  complex: 'Complex work',
-  standard: 'Standard work',
-  light: 'Light work',
-}
-/** The harnesses in the order agents of one tier are listed. */
-const HARNESS_ORDER = ['claude', 'codex', 'opencode', 'pi', 'devin', 'image']
-const TIERS = Object.keys(TIER_LABEL)
-const rank = (list, value) => (list.includes(value) ? list.indexOf(value) : list.length)
-/** A staff reads by role, in the order the picker offers them, then by tier, the most critical first, then by name. */
-const byRoleAndTier = (a, b) =>
-  rank(ROLES, a.role) - rank(ROLES, b.role) ||
-  rank(TIERS, a.tier) - rank(TIERS, b.tier) ||
-  a.name.localeCompare(b.name)
-/**
- * "claude-sonnet-5 · claude · high · standard": what an agent runs and the
- * tier a task finds it by, effort included when it has one.
- */
-const runsLabel = (agent, tier = agent.profile?.workTier) =>
-  [
-    agent.model ?? 'model unknown',
-    // An image agent runs through Codex: Codex is its harness to the human.
-    agent.harness === 'image' ? 'codex' : agent.harness,
-    agent.effort,
-    tier,
-  ]
-    .filter(Boolean)
-    .join(' · ')
-
-/**
- * The two selects that add a member: a role first, then the saved agents
- * that do not hold it yet; any agent may take any role. The chosen agent
- * survives a redraw when it is still on offer, and a role picked refills
- * the agents from the staff drawn last.
- */
-function rolePicker(roleSelect, agentSelect, hint, holding, onRefill = () => {}) {
-  if (roleSelect.options.length === 0) {
-    for (const role of ROLES) {
-      const option = element('option', null, ROLE_LABEL[role])
-      option.value = role
-      roleSelect.append(option)
-    }
-  }
-  const refill = () => {
-    const role = roleSelect.value
-    const chosen = agentSelect.value
-    const choices = state.agents.filter((agent) => !agent.hidden && !holding(agent.name, role))
-    // Every agent, the catalog's and the human's own, by the work it is for:
-    // the most critical tier first, then harness by harness, by name.
-    const groups = new Map()
-    for (const agent of choices) {
-      const tier = agent.profile?.workTier
-      if (!groups.has(tier)) groups.set(tier, [])
-      groups.get(tier).push(agent)
-    }
-    agentSelect.replaceChildren(
-      ...[...groups.entries()]
-        .sort(([a], [b]) => rank(TIERS, a) - rank(TIERS, b))
-        .map(([tier, agents]) => {
-          const group = element('optgroup')
-          group.label =
-            tier in TIER_LABEL
-              ? `T${TIERS.indexOf(tier) + 1} · ${TIER_LABEL[tier]}`
-              : 'Tier unknown'
-          agents.sort(
-            (a, b) =>
-              rank(HARNESS_ORDER, a.harness) - rank(HARNESS_ORDER, b.harness) ||
-              a.name.localeCompare(b.name),
-          )
-          for (const agent of agents) {
-            const option = element('option', null, `${agent.name} · ${runsLabel(agent, null)}`)
-            option.value = agent.name
-            group.append(option)
-          }
-          return group
-        }),
-    )
-    if (choices.some((agent) => agent.name === chosen)) agentSelect.value = chosen
-    agentSelect.disabled = choices.length === 0
-    // An empty list says why, so the answer is in the dialog, not in a guess.
-    hint.textContent =
-      choices.length === 0
-        ? state.agents.length === 0
-          ? 'No saved agents yet: add one under Settings, Agents.'
-          : `Every saved agent is on the staff as ${ROLE_LABEL[role]} already.`
-        : ''
-    hint.hidden = choices.length > 0
-    onRefill()
-  }
-  // One handler, this drawing's: one added once kept the staff of the first.
-  roleSelect.onchange = refill
-  refill()
-}
-
-/** One row of a staff table: the agent, one of its roles, and a Remove for that role. */
-function staffRow(who, role, remove) {
-  const row = element('tr')
-  row.dataset.role = role
-  row.append(who, element('td', null, ROLE_LABEL[role]))
-  const tools = element('td')
-  tools.append(remove)
-  row.append(tools)
-  return row
-}
-
-/** A staff table's first cell: who, and what it runs. */
-function whoCell(name, runs) {
-  const cell = element('td')
-  cell.append(
-    element('span', 'member-name', name),
-    element('br'),
-    element('span', 'member-meta', runs),
-  )
-  return cell
-}
-
-/** A staff table with nobody in it says so, and what to do, across its three columns. */
-function nobodyRow(text) {
-  const row = element('tr', 'staff-empty')
-  const cell = element('td', null, text)
-  cell.colSpan = 3
-  row.append(cell)
-  return row
-}
-
-/** The harness an agent names for a chief's kind: Claude Code's agents run on `claude`. */
-const harnessOf = (kind) => (kind === 'claude-code' ? 'claude' : kind)
-
-/** The chief harnesses installed here, as [kind, label]: what a lead may run in. */
-const installedChiefs = (missing) =>
-  Object.entries(HARNESS_NAMES).filter(([kind]) => !missing.includes(harnessOf(kind)))
-
-const NO_HARNESS = 'No harness is installed here: install one from Agents, Harnesses.'
+// The project staff, drawn from the board shown and the agents as the page
+// has them now; Staff reads the agents again before it opens.
+const staff = new StaffDialog($('#staff-dialog'), {
+  board: () => state.board,
+  agents: () => state.agents,
+  core,
+  act,
+  note,
+})
+staffButton.addEventListener('click', () =>
+  act(async () => {
+    await readAgents()
+    staff.open()
+  }),
+)
 
 // New project: the native folder picker first, then the chief's harness, the
-// staff (the last project's ticked already) and the approval setting.
-const newProjectDialog = $('#new-project-dialog')
-const newProjectForm = newProjectDialog.querySelector('form')
-const newProjectStaff = $('#new-project-staff')
+// staff (the last project's ticked already) and the approval setting. The
+// agents it reads are the page's too, and the project it starts is shown.
+const newProject = new NewProjectDialog($('#new-project-dialog'), {
+  agents: () => state.agents,
+  core,
+  act,
+  onAgents: (agents) => {
+    state.agents = agents
+  },
+  onStart: (project) => {
+    state.selected = project.id
+    state.focus = 'chief'
+  },
+})
 $('#new-project').addEventListener('click', async () => {
   if (typeof tauri.dialog?.open !== 'function') {
     report('The folder picker is not available in this window.')
@@ -599,331 +483,22 @@ $('#new-project').addEventListener('click', async () => {
       multiple: false,
     })
     if (typeof directory !== 'string' || directory.length === 0) return
-    const [{ agents, missing = [] }, { staff }] = await Promise.all([
-      core('agents.list'),
-      core('staff.last'),
-    ])
-    const chiefs = installedChiefs(missing)
-    if (chiefs.length === 0) {
-      report(NO_HARNESS)
-      return
-    }
-    newProjectForm.elements.harness.replaceChildren(
-      ...chiefs.map(([kind, label]) => new Option(label, kind)),
-    )
-    state.agents = agents
-    renderNewProjectStaff(staff)
-    newProjectForm.elements.directory.value = directory
-    newProjectDialog.showModal()
+    await newProject.open(directory)
   } catch (cause) {
     report(cause)
   }
 })
 
-/** The agents and roles picked for the new project, the last staff's to start with. */
-let picked = []
-
-function renderNewProjectStaff(lastStaff) {
-  picked = lastStaff.flatMap(({ agent, roles }) =>
-    state.agents.some((saved) => saved.name === agent && !saved.notInstalled)
-      ? roles.map((role) => ({ agent, role }))
-      : [],
-  )
-  drawNewProjectStaff()
-}
-
-function drawNewProjectStaff() {
-  const rows = picked
-    .map((pick) => ({
-      ...pick,
-      name: pick.agent,
-      tier: state.agents.find((candidate) => candidate.name === pick.agent)?.profile?.workTier,
-    }))
-    .sort(byRoleAndTier)
-    .map(({ agent, role }) => {
-      const saved = state.agents.find((candidate) => candidate.name === agent)
-      const remove = button(
-        'Remove',
-        'quiet-button',
-        () => {
-          picked.splice(
-            picked.findIndex((pick) => pick.agent === agent && pick.role === role),
-            1,
-          )
-          drawNewProjectStaff()
-        },
-        `Remove ${ROLE_LABEL[role]} ${agent}`,
-      )
-      const row = staffRow(whoCell(agent, runsLabel(saved)), role, remove)
-      row.dataset.agent = agent
-      return row
-    })
-  if (rows.length === 0) {
-    rows.push(
-      nobodyRow(
-        state.agents.length === 0
-          ? 'No agents saved yet: add some under Agents first.'
-          : 'Nobody yet: pick a role, then an agent whose model suits it.',
-      ),
-    )
-  }
-  newProjectStaff.replaceChildren(...rows)
-  rolePicker(
-    newProjectForm.elements.pickRole,
-    newProjectForm.elements.pickAgent,
-    $('#new-project-hint'),
-    (agent, role) => picked.some((pick) => pick.agent === agent && pick.role === role),
-  )
-}
-
-$('#new-project-add').addEventListener('click', () => {
-  const role = newProjectForm.elements.pickRole.value
-  const agent = newProjectForm.elements.pickAgent.value
-  if (!agent) return
-  picked.push({ agent, role })
-  drawNewProjectStaff()
-})
-
-/** The picked rows as the core takes a staff: each agent once, with its roles. */
-function pickedStaff() {
-  const staff = new Map()
-  for (const { agent, role } of picked) {
-    if (!staff.has(agent)) staff.set(agent, { agent, roles: [] })
-    staff.get(agent).roles.push(role)
-  }
-  return [...staff.values()]
-}
-
-newProjectForm.addEventListener('submit', (event) => {
-  event.preventDefault()
-  const directory = newProjectForm.elements.directory.value
-  const harness = newProjectForm.elements.harness.value
-  const gate = newProjectForm.elements.gate.checked
-  const staff = pickedStaff()
-  newProjectDialog.close()
-  void act(async () => {
-    const { project } = await core('project.open', { directory, harness, gate, staff })
-    state.selected = project.id
+// Switch lead opens only while the project it was asked for is the one
+// chosen; once the switch is taken, the lead's window is the one in front.
+const switchLead = new SwitchLeadDialog($('#switch-lead-dialog'), {
+  selected: () => state.selected,
+  core,
+  act,
+  onSwitch: () => {
     state.focus = 'chief'
-  })
+  },
 })
-newProjectDialog
-  .querySelector('[value="cancel"]')
-  .addEventListener('click', () => newProjectDialog.close())
-
-// Switch the lead: the chief goes on in a new window on another harness or
-// model, and the core hands it the lead (the dispatcher's switchChief).
-const switchLeadDialog = $('#switch-lead-dialog')
-const switchLeadForm = switchLeadDialog.querySelector('form')
-/** The project whose lead the dialog switches: the one it was opened for. */
-let switchingProject = null
-
-async function openSwitchLead(chief) {
-  const { agents, missing } = await core('agents.list')
-  // Asked for in a project the human has left since: it stays shut.
-  if (state.selected !== chief.projectId) return
-  const chiefs = installedChiefs(missing)
-  if (chiefs.length === 0) {
-    report(NO_HARNESS)
-    return
-  }
-  const select = switchLeadForm.elements.lead
-  select.replaceChildren(
-    ...chiefs.map(([kind, label]) => {
-      const group = element('optgroup')
-      group.label = label
-      group.append(new Option(`${label}, on its own default model`, `harness:${kind}`))
-      const runsHere = agents
-        .filter((agent) => !agent.hidden && agent.harness === harnessOf(kind))
-        .sort((a, b) => a.name.localeCompare(b.name))
-      for (const agent of runsHere) {
-        group.append(new Option(`${agent.name} · ${runsLabel(agent, null)}`, `agent:${agent.name}`))
-      }
-      return group
-    }),
-  )
-  // What the lead runs on now is no switch.
-  const current = chief.agent === null ? `harness:${chief.harness}` : `agent:${chief.agent}`
-  for (const option of select.options) option.disabled = option.value === current
-  select.value = [...select.options].find((option) => !option.disabled)?.value ?? ''
-  // Each switch starts from the gentle one: the lead finishes its turn, unasked.
-  switchLeadForm.elements.when.value = 'turn'
-  switchLeadForm.elements.note.checked = false
-  switchingProject = chief.projectId
-  switchLeadDialog.showModal()
-}
-
-switchLeadForm.addEventListener('submit', (event) => {
-  event.preventDefault()
-  const [type, name] = switchLeadForm.elements.lead.value.split(':')
-  const when = switchLeadForm.elements.when.value
-  const askFirst = switchLeadForm.elements.note.checked
-  const project = switchingProject
-  switchLeadDialog.close()
-  void act(async () => {
-    await core('chief.switch', {
-      project,
-      ...(type === 'agent' ? { agent: name } : { harness: name }),
-      when,
-      note: askFirst,
-    })
-    state.focus = 'chief'
-  })
-})
-switchLeadDialog
-  .querySelector('[value="cancel"]')
-  .addEventListener('click', () => switchLeadDialog.close())
-
-// The project staff: who the chief may hand work to.
-const staffDialog = $('#staff-dialog')
-const staffForm = staffDialog.querySelector('form')
-const staffMembers = $('#staff-members')
-const staffGate = $('#staff-gate')
-/** The member whose removal waits for the human's yes, kept across redraws. */
-let removing = null
-
-/** Draws the staff from the board, in place, so it stays current while open. */
-function renderStaff() {
-  const lanes = state.board?.lanes ?? []
-  // The members only: a member's sessions are lanes too, named after it.
-  const members = lanes.map((lane) => lane.participant).filter(isMember)
-  const rows = members
-    .flatMap((member) =>
-      memberRows(member).map((entry) => ({ ...entry, tier: member.tier, name: member.handle })),
-    )
-    .sort(byRoleAndTier)
-    .map((entry) => entry.row)
-  if (rows.length === 0) rows.push(nobodyRow('Nobody yet: add the agents this project may use.'))
-  redraw(staffMembers, rows)
-  staffGate.checked = state.board?.project.gate ?? false
-  rolePicker(
-    staffForm.elements.role,
-    staffForm.elements.agent,
-    $('#staff-hint'),
-    (agent, role) =>
-      members.some((member) => member.agent === agent && member.roles.includes(role)),
-    () => {
-      staffForm.querySelector('[type="submit"]').disabled = staffForm.elements.agent.disabled
-    },
-  )
-}
-
-/** A member as the board shown has it now, which a Remove kept across redraws acts on. */
-const memberNow = (member) =>
-  state.board?.lanes.find(
-    (lane) => lane.participant.handle === member.handle && isMember(lane.participant),
-  )?.participant ?? member
-
-/**
- * A member's rows, one per role, each with the role it stands for: Remove
- * drops that role, or, for its last role, asks first and takes the member
- * off the staff.
- */
-function memberRows(member) {
-  const name = `@${member.handle}`
-  // What the member runs, from its agent; the tier is the staff's own, which follows the agent.
-  const saved = state.agents.find((agent) => agent.name === member.agent)
-  const runs = saved
-    ? runsLabel(saved, member.tier)
-    : `no agent named ${member.agent} any more: define one under Agents, or remove it`
-  if (removing === member.handle) {
-    const row = element('tr')
-    row.dataset.handle = member.handle
-    row.append(whoCell(name, runs))
-    // The ask takes the role's column and the Remove's.
-    const cell = element('td')
-    cell.colSpan = 2
-    const keep = button(`Keep ${name}`, 'quiet-button', () => {
-      removing = null
-      renderStaff()
-    })
-    const yes = button(`Remove ${name}`, 'danger-button', () =>
-      act(async () => {
-        const { projectId, handle } = memberNow(member)
-        await core('member.remove', { project: projectId, agent: handle })
-        removing = null
-        note(`${name} left the staff.`)
-      }),
-    )
-    cell.append(
-      element('span', 'member-confirm', `Remove ${name}? Its open tasks are cancelled. `),
-      keep,
-      yes,
-    )
-    row.append(cell)
-    return [{ role: member.roles[0], row }]
-  }
-  return member.roles.map((role) => {
-    const remove = button(
-      'Remove',
-      'quiet-button',
-      () => {
-        const { projectId, handle, roles } = memberNow(member)
-        if (roles.length === 1) {
-          removing = handle
-          renderStaff()
-          return
-        }
-        void act(async () => {
-          await core('member.roles', {
-            project: projectId,
-            agent: handle,
-            roles: roles.filter((held) => held !== role),
-          })
-        })
-      },
-      `Remove ${ROLE_LABEL[role]} ${name}`,
-    )
-    const row = staffRow(whoCell(name, runs), role, remove)
-    row.dataset.handle = member.handle
-    return { role, row }
-  })
-}
-
-staffButton.addEventListener('click', () =>
-  act(async () => {
-    await readAgents()
-    removing = null
-    renderStaff()
-    staffDialog.showModal()
-  }),
-)
-// The dialog's staff is the shown board's, and so is what it changes.
-staffGate.addEventListener('change', () =>
-  act(async () => {
-    await core('project.gate', { project: state.board.project.id, gate: staffGate.checked })
-    note(
-      staffGate.checked
-        ? 'Every message between agents now waits for your approval.'
-        : 'Messages between agents go straight through again.',
-    )
-  }),
-)
-staffForm.addEventListener('submit', (event) => {
-  event.preventDefault()
-  const role = staffForm.elements.role.value
-  const agent = staffForm.elements.agent.value
-  if (!agent) return
-  const { project, lanes } = state.board
-  // Already on the staff: the lead's agent, after a Switch lead, is not.
-  const member = lanes
-    .map((lane) => lane.participant)
-    .find((participant) => isMember(participant) && participant.agent === agent)
-  void act(async () => {
-    if (member === undefined) {
-      await core('member.add', { project: project.id, agent, roles: [role] })
-      note(`@${agent} joined the staff as ${ROLE_LABEL[role]}.`)
-      return
-    }
-    await core('member.roles', {
-      project: project.id,
-      agent,
-      roles: [...member.roles, role],
-    })
-    note(`@${agent} is ${ROLE_LABEL[role]} now too.`)
-  })
-})
-staffDialog.querySelector('[value="cancel"]').addEventListener('click', () => staffDialog.close())
 
 // The agents screens open in their own window at the daemon's address: the
 // board's page cannot frame them (WebKit blocks a plain-HTTP frame inside the
@@ -945,7 +520,7 @@ for (const entry of settingsDialog.querySelectorAll('[data-agents-page]')) {
 window.addEventListener('focus', () => {
   void act(async () => {
     await readAgents()
-    if (staffDialog.open) renderStaff()
+    staff.render()
   })
 })
 
