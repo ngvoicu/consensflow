@@ -406,9 +406,14 @@ export class Dispatcher {
       ?.participants.find((participant) => participant.handle === handle)
     // Not in the staff: the ledger refuses it and says why.
     if (member === undefined) return this.#ledger.removeMember(projectId, handle)
+    const runtime = this.#runtimeOf(member.id)
     const { removed, left } = await this.#exclusive(
       member.id,
       () => {
+        // One forgotten meanwhile has left already, by another removal or with
+        // its project, whose ids may be another's by now: refused as the
+        // ledger refuses a member that left.
+        if (this.#forgotten(runtime)) throw new Error(`@${handle} left the staff`)
         const sessions = this.#ledger
           .project(projectId)
           .participants.filter((participant) => participant.memberId === member.id)

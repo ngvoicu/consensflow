@@ -2684,10 +2684,10 @@ const handoffsOf = (context, project) =>
     .filter((m) => m.body.startsWith('You are the lead now'))
 /**
  * The human closes and deletes a project while something of it waits, and
- * opens another, which the ledger gives the deleted one's ids. `gone` ends
- * once the old windows have closed.
+ * opens another (with these workers), which the ledger gives the deleted
+ * one's ids. `gone` ends once the old windows have closed.
  */
-async function replaceProject(context, old) {
+async function replaceProject(context, old, workers = []) {
   const gone = Promise.all([
     context.dispatcher.closeProject(old.id),
     context.dispatcher.deleteProject(old.id),
@@ -2696,6 +2696,12 @@ async function replaceProject(context, old) {
     directory: '/work/api',
     name: 'api',
     harness: 'claude-code',
+    staff: workers.map((agent) => ({
+      agent,
+      harness: 'claude-code',
+      role: 'worker',
+      tier: 'standard',
+    })),
   })
   assert.equal(fresh.id, old.id, 'the ledger gives its id again')
   return { fresh, gone }
@@ -3527,6 +3533,33 @@ describe('work in flight when its participant is forgotten', () => {
         ['delivered', 1],
         'it arrives, once',
       )
+    })
+  })
+
+  it('takes no member of a new project that took its ids off the staff for a removal that waited', async () => {
+    await setup(async (context) => {
+      const { project: old } = await withStaff(context)
+      // zeus's window takes long to come up with its task, and the removal waits for it.
+      const release = hold(
+        context.adapter,
+        'prepare',
+        (request) => request.participant.handle === 'zeus',
+      )
+      context.ledger.createTask(old.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      const removed = context.dispatcher.removeMember(old.id, 'zeus').then(
+        () => 'removed',
+        (cause) => cause.message,
+      )
+      const { fresh, gone } = await replaceProject(context, old, ['zeus'])
+      release()
+      await gone
+      await flush()
+      assert.ok(
+        context.ledger.project(fresh.id).participants.some((p) => p.handle === 'zeus'),
+        'its zeus stays on the staff',
+      )
+      assert.equal(await removed, '@zeus left the staff', 'the removal says its zeus has left')
     })
   })
 })
