@@ -73,9 +73,6 @@ const DOUBLE_PRESS_MS = 150
 /** How long a fresh window's output must hold still before its screen counts as drawn. */
 const DRAWN_QUIET_MS = 1_500
 
-/** A message as its window gets it (`delivery-text.js`): the dispatcher's tests compare a window's input with it. */
-export { deliveryText }
-
 /** A closed project starts and changes no work, whatever asks: it is resumed first. */
 export function requireOpen(project) {
   if (project.state !== 'open') throw new Error(`${project.name} is closed: resume it first`)

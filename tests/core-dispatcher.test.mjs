@@ -4,7 +4,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { unnamed } from '../src/adapters/shared.js'
-import { Dispatcher, deliveryText } from '../src/core/dispatcher.js'
+import { deliveryText } from '../src/core/delivery-text.js'
+import { Dispatcher } from '../src/core/dispatcher.js'
 import { openLedger } from '../src/ledger/index.js'
 
 /**
