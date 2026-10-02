@@ -1103,11 +1103,14 @@ export class Dispatcher {
     // it; a message that ended in a tool call never is). The result is
     // everything the member wrote in it, in order: a report written before a
     // last command, then "Committed.", is not the last word alone. A tool's
-    // output is not the member's words.
+    // output is not the member's words, and nor are the progress notes a
+    // harness marks as its commentary (Codex's "I'll read the diff…"): its
+    // final answer is the report.
     const written = observed.items.slice(start + 1).filter((item) => item.role === 'assistant')
     if (written.at(-1)?.complete !== true) return
     const body =
       written
+        .filter((item) => item.commentary !== true)
         .map((item) => item.text.trim())
         .filter((text) => text !== '')
         .join('\n\n') || '(the agent ended its turn without a written answer)'

@@ -659,6 +659,8 @@ async function codexAnswers(sessionId, env, options) {
         item.text = text
         item._nativeFinalText = text
       }
+      // Codex's progress notes ("I'll read the diff…"), marked by Codex itself.
+      if (native.phase === 'commentary') item.commentary = true
       if (turn && !turn.assistantIds.includes(item.id)) turn.assistantIds.push(item.id)
       return
     }

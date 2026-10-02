@@ -407,6 +407,37 @@ describe('the dispatcher', () => {
     })
   })
 
+  it("leaves a harness's commentary out of a result: Codex's progress notes are not its answer", async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context)
+      context.ledger.createTask(project.id, {
+        from: 'chief',
+        to: 'zeus',
+        body: 'Review the commit',
+      })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      // Codex writes notes as it works, each marked as commentary, and ends
+      // the turn with its final answer: the verdict, and all the chief needs.
+      const zeus = context.adapter.agent('zeus')
+      zeus.items.push(
+        item('assistant', "I'll read the commit, then check it on disk.", {
+          complete: false,
+          commentary: true,
+        }),
+        item('tool', 'git show --stat'),
+        item('assistant', 'The diff matches; checking the counts now.', {
+          complete: false,
+          commentary: true,
+        }),
+      )
+      context.adapter.answer('zeus', 'PASS: no findings.')
+      await context.dispatcher.pass()
+      const result = context.ledger.task(project.id, 1).messages.find((m) => m.kind === 'result')
+      assert.equal(result.body, 'PASS: no findings.')
+    })
+  })
+
   it('opens no window for a brief the human has not approved, and delivers a result only once approved', async () => {
     await setup(async (context) => {
       const { project, id } = await withStaff(context)
