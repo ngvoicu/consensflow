@@ -39,9 +39,10 @@ import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.j
  *   the staff has its window closed once its step in progress ends, and that
  *   exit fails nothing: its open tasks were cancelled when it left.
  * - A task for a tier of member starts open: each pass gives it to a free
- *   member of that pool and tier that is not out of quota, the one with the
- *   fewest tasks so far, then the earliest joined; a task taken back from a
- *   member goes to another one first. When none is free the requester is
+ *   member of that pool and tier that is not out of quota, on the harness
+ *   whose members of the tier have taken the fewest tasks, then the one with
+ *   the fewest tasks so far, then the earliest joined; a task taken back from
+ *   a member goes to another one first. When none is free the requester is
  *   told once. A review is such a task, for a reviewer. A member whose
  *   harness reports a fresh refusal (one after it was last marked out) is out
  *   until the reset it names (an hour when it names none): its tiered task
@@ -104,7 +105,7 @@ export class Dispatcher {
   #arrivalTimeoutMs
   #launchTimeoutMs
   #maxAttempts
-  /** Told each change of a window's activity, for the event file in the home. */
+  /** Told each change of a window's activity, a delivery a window is not ready for and a deleted project, for the event file in the home. */
   #trace
   /** The daemon's log, for a launch or a delivery that failed apart from any pass. */
   #log
