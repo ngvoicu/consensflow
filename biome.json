@@ -22,7 +22,6 @@
       "!!**/coverage",
       "!!**/test-results",
       "!!app/ui/vendor",
-      "!!**/.specs",
       "!!evals/reports"
     ]
   },

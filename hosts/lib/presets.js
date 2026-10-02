@@ -40,7 +40,8 @@
 // Pi 0.85.1 now carries low/medium on the OpenRouter model, the user-chosen route.
 // Omitted standard thinking-map keys can use provider defaults; explicit null
 // marks unsupported levels. Do not mistake an omitted key for a dropped effort.
-// Model/effort source and transport evidence: .specs/agent-catalog-redesign/.
+// Model/effort source and transport evidence: the agent-catalog-redesign spec,
+// in git history since the repo dropped its specs (2026-10-02).
 //
 // --- Gemini 3.8 Flash (2026-09-03) ---------------------------------------
 // nike and sif moved from Gemini 3.7 Flash to 3.8. The ceiling did NOT move and neither did the
@@ -1367,7 +1368,7 @@ export const AGENT_PRESETS = [
   },
 ];
 
-// Reviewed 2026-09-10; source notes live in .specs/agent-catalog-redesign.
+// Reviewed 2026-09-10; source notes: the agent-catalog-redesign spec, in git history.
 // Keys describe exact model identities, not callsigns or saved preset provenance.
 const MODEL_LABELS = {
   'gpt-6-astra': 'GPT-6 Astra',

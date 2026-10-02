@@ -8,7 +8,9 @@ before you see it.
 
 Everything runs through the harness CLIs you already have installed and logged
 in (Claude Code, Codex, OpenCode, Pi, Devin). ConsensFlow stores no
-credentials, takes no API key, and writes only inside its own home.
+credentials, takes no API key, and writes only inside its own home. Agents
+run with full permissions in their windows: the protection is the review, the
+chief's acceptance and your approval, not a fence around the run.
 
 ## The model
 
@@ -86,6 +88,11 @@ It carries its own Node runtime and its own copy of ConsensFlow. Nothing else to
 integrations it needs are prepared under its home the first time a window of
 that harness opens, and updated the same way.
 
+The app is not signed with an Apple or Microsoft certificate yet, so its first
+open asks. On a Mac, macOS blocks it once: allow it in System Settings →
+Privacy & Security → Open Anyway. On Windows, SmartScreen asks: choose More
+info → Run anyway.
+
 The development build is **ConsensFlow Candidate**, installed beside the
 release with its own home, so a build under test never touches your live
 projects.
@@ -129,25 +136,6 @@ projects.
 - **Harnesses** (Settings). Which harness CLIs are installed, their versions
   and whether ConsensFlow's integration with each is in place.
 
-## Inside a window
-
-`cf` is on the PATH of every window ConsensFlow opens, and the board is its
-only subject:
-
-    cf task add --tier <critical|complex|standard|light> "…"   work for a worker
-    cf task add --advice --tier <tier> "…"                     a question for an advisor (the chief)
-    cf task add --after T-3 "…"                                continue the window that did T-3
-    cf task add --self --needs T-3 "…"                         the chief's own later step, woken when T-3 is accepted
-    cf task list | get T-3 [--transcript] | done T-3 "…" | accept | reopen | cancel | pause | resume
-    cf tell T-3 "…"                                            stop T-3 and put this to its window; its answer comes back; then resume it
-    cf inbox [read m-12] · cf ask "…" · cf answer m-12 "…" · cf staff · cf whoami
-    cf note "…" [--human]                                     something to know; nothing waits on it
-
-Every role's window opens with its role text: what it does, what it never
-does, and these commands. Agents run with full permissions in their windows;
-the protection is the review, the chief's acceptance and your approval, not a fence
-around the run.
-
 ## Developing
 
     npm run check          lint and the Node suite
@@ -164,5 +152,10 @@ an error nobody caught, and every ten minutes that it is alive and how big it
 is. The app asks it to stop before quitting, so a start with no stop after it
 means something outside the app killed it.
 
-Requirements, decisions and status live in the `consensflow-sme` brain; the
-repo's `.specs/` folder tracks each piece of work.
+Requirements, decisions, status and the release runbook live in the
+`consensflow-sme` brain. A release is one tag: set the version in
+`package.json`, `package-lock.json`, `app/src-tauri/Cargo.toml`,
+`app/src-tauri/Cargo.lock` and `app/src-tauri/tauri.conf.json`, then push an
+annotated `v<version>` tag to GitHub, its message the release notes;
+`.github/workflows/release.yml` builds, checks and publishes the DMG, the
+signed update bundle, the Windows installer and the portable zip.

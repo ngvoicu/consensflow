@@ -78,6 +78,31 @@ describe('role instructions for the new core', () => {
     })
   }
 
+  it("gives every member one shared text with its role's own parts", () => {
+    const shared = [
+      'Run each of these in your shell (your Bash or terminal tool).',
+      "Do not hand out tasks, launch other agents or type into other windows, and\nnever read another agent's session files: the board is your only channel.",
+      'This window is for one task: it opened with the task and closes when the task\nleaves your hands.',
+    ]
+    const titles = {
+      worker: 'worker',
+      advisor: 'advisor',
+      reviewer: 'reviewer',
+      designer: 'image designer',
+    }
+    for (const [role, title] of Object.entries(titles)) {
+      const text = roleInstructions(role, [zeus])
+      for (const rule of shared) assert.ok(text.includes(rule), `${role} keeps: ${rule}`)
+      assert.match(text, new RegExp(`\\n# ConsensFlow ${title}\\n`))
+      assert.match(text, new RegExp(`Keep this\\n${role} role for the whole session\\.\\n$`))
+    }
+    assert.match(
+      roleInstructions('reviewer', []),
+      /cf task get T-3 {15}a task and its whole thread: the work under review, or this one\n/,
+    )
+    assert.throws(() => roleInstructions('pm', []), /no role instructions for pm/)
+  })
+
   it('says so when the staff is empty', () => {
     assert.match(roleInstructions('chief', []), /Nobody is on the staff yet/)
     const text = roleInstructions('chief', [zeus])
