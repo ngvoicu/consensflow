@@ -1872,6 +1872,94 @@ class Ledger {
     })
   }
 
+  /**
+   * Every message on its way to a window, oldest first. At start none of
+   * those windows is left (they died with the previous process), so each is
+   * settled before anything else is delivered.
+   */
+  inFlight() {
+    return this.#db
+      .prepare(`${MESSAGE_SELECT} WHERE m.state = 'delivering' ORDER BY m.id`)
+      .all()
+      .map(messageView)
+  }
+
+  /**
+   * The first item ConsensFlow's copy of the participant's current
+   * conversation shows it was given (a user item) that contains `text`, or
+   * null: a delivery's header there proves the delivery arrived.
+   */
+  copiedItemWith(participantId, text) {
+    const row = this.#db
+      .prepare(
+        `SELECT t.item_id FROM transcript t JOIN conversation c ON c.id = t.conversation_id
+         WHERE c.participant_id = ? AND c.ended_at IS NULL AND t.role = 'user'
+           AND instr(t.text, ?) > 0
+         ORDER BY t.seq LIMIT 1`,
+      )
+      .get(participantId, text)
+    return row?.item_id ?? null
+  }
+
+  /** What is on its way to a participant (queued, or being delivered), oldest first. */
+  pending(participantId) {
+    return this.#db
+      .prepare(
+        `${MESSAGE_SELECT} WHERE m.recipient_id = ? AND m.state IN ('queued', 'delivering')
+         ORDER BY m.id`,
+      )
+      .all(participantId)
+      .map(messageView)
+  }
+
+  /**
+   * A window the human switched to another conversation (/clear, /new,
+   * /resume): the participant's conversation is the one on `nativeSession`
+   * from now on, its own earlier one when it had it, else a new one bound to
+   * it, and the one in progress ends. A session that another participant's
+   * conversation holds stays with it: the new conversation is left unbound.
+   */
+  followConversation(participantId, { harness, nativeSession }) {
+    requireHarness(harness)
+    requireText(nativeSession, 'native session', 512)
+    return this.#write(() => {
+      const participant = this.#participantRow(participantId)
+      const held = this.#db
+        .prepare('SELECT * FROM conversation WHERE harness = ? AND native_session = ?')
+        .get(harness, nativeSession)
+      const own = held?.participant_id === participantId
+      if (own && held.ended_at === null) return conversationView(held)
+      const at = this.#at()
+      this.#db
+        .prepare(
+          'UPDATE conversation SET ended_at = ? WHERE participant_id = ? AND ended_at IS NULL',
+        )
+        .run(at, participantId)
+      let id = held?.id
+      if (own) {
+        this.#db.prepare('UPDATE conversation SET ended_at = NULL WHERE id = ?').run(id)
+      } else {
+        id = this.#db
+          .prepare(
+            `INSERT INTO conversation (participant_id, harness, native_session, started_at)
+             VALUES (?, ?, ?, ?)`,
+          )
+          .run(
+            participantId,
+            harness,
+            held === undefined ? nativeSession : null,
+            at,
+          ).lastInsertRowid
+      }
+      this.#log(participant.project_id, 'conversation.followed', {
+        participant: participant.handle,
+        conversation: id,
+        nativeSession,
+      })
+      return this.#conversation(id)
+    })
+  }
+
   /** The human read a message in the app. */
   markRead(messageId) {
     return this.#write(() => {

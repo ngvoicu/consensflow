@@ -61,6 +61,8 @@ export async function startApi({
   roster = () => null,
   ui = null,
 }) {
+  // Once the daemon stops, a door still waiting for an answer is answered at once.
+  let closing = false
   const server = createServer((request, reply) => {
     handle(request).then(
       ({ status, body, html }) => send(reply, status, body, html),
@@ -273,7 +275,7 @@ export async function startApi({
       const wait = Math.min(MAX_WAIT_MS, Math.max(0, Number(url.searchParams.get('wait')) || 0))
       const until = Date.now() + wait
       let answer = ledger.answerTo(asked.id)
-      while (answer === null && Date.now() < until) {
+      while (answer === null && Date.now() < until && !closing) {
         await sleep(Math.min(POLL_MS, until - Date.now()))
         answer = ledger.answerTo(asked.id)
       }
@@ -411,7 +413,17 @@ export async function startApi({
   const { port } = server.address()
   return {
     url: `http://127.0.0.1:${port}`,
-    close: () => new Promise((resolve) => server.close(() => resolve())),
+    close: () => {
+      closing = true
+      // A door's connection closes once its answer is out, not when its keep-alive runs out.
+      const sweep = setInterval(() => server.closeIdleConnections(), POLL_MS)
+      return new Promise((resolve) =>
+        server.close(() => {
+          clearInterval(sweep)
+          resolve()
+        }),
+      )
+    },
   }
 }
 

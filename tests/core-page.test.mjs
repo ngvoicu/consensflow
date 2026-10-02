@@ -78,6 +78,13 @@ async function withPage(fn) {
     activity: () => ({ state: 'idle' }),
     pane: () => null,
     pendingSwitch: () => null,
+    // The harnesses a test says the core has no adapter for.
+    adapterless: new Set(),
+    requireAdapter(harness) {
+      if (dispatcher.adapterless.has(harness)) {
+        throw new Error(`ConsensFlow cannot open ${harness} windows`)
+      }
+    },
   }
   const operations = pageOperations({ ledger, dispatcher, env, kick: () => kicks++ })
   try {
@@ -203,6 +210,24 @@ describe('the page protocol of the new core', () => {
       await assert.rejects(
         operations['member.add']({ project: project.id, agent: 'ghost' }),
         /no agent named ghost/,
+      )
+    })
+  })
+
+  it('adds no member on a harness the core cannot open a window of', async () => {
+    await withPage(async ({ ledger, operations, dispatcher }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+      })
+      dispatcher.adapterless.add('codex')
+      await assert.rejects(
+        operations['member.add']({ project: project.id, agent: 'diana' }),
+        /ConsensFlow cannot open codex windows/,
+      )
+      assert.deepEqual(
+        ledger.project(project.id).participants.map((p) => p.handle),
+        ['human', 'chief'],
       )
     })
   })
@@ -396,6 +421,31 @@ describe('the page protocol of the new core', () => {
       assert.equal(ledger.task(project.id, 2).state, 'cancelled')
       assert.equal(kicks(), before + 2, 'each decision wakes the dispatcher')
       assert.deepEqual((await operations['board.get']({ project: project.id })).board.gated, [])
+    })
+  })
+
+  it('passes nothing on in a closed project', async () => {
+    await withPage(async ({ ledger, operations }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+        gate: true,
+      })
+      await operations['member.add']({ project: project.id, agent: 'artemis' })
+      const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
+      ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'worker',
+        tier: artemis.tier,
+        body: 'One',
+      })
+      const brief = ledger.assignTask(project.id, 1, artemis.id).message
+      await operations['project.close']({ project: project.id })
+      await assert.rejects(
+        operations['message.approve']({ message: brief.id }),
+        /app is closed: resume it first/,
+      )
+      assert.equal(ledger.message(brief.id).state, 'gated')
     })
   })
 

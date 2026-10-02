@@ -358,6 +358,11 @@ export async function startIntegration({
     nodeFrames,
     rustFrames,
     openFrames,
+    /** A window's pane.open frame, once it is sent: an operation answers before its window opens. */
+    async openFrame(id, timeoutMs = 10_000) {
+      await waitFor(() => openFrames.some((frame) => frame.id === id), timeoutMs)
+      return openFrames.find((frame) => frame.id === id)
+    },
     exits,
     /** Everything a pane printed so far, control sequences stripped, newest last. */
     output(paneId) {
