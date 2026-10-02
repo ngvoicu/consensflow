@@ -1,8 +1,42 @@
 import { DatabaseSync } from 'node:sqlite'
+import {
+  ACTIVE_TASK_STATES,
+  AGENT_ID,
+  COORDINATOR_ROLES,
+  cut,
+  HELD_TASK_STATES,
+  LedgerError,
+  MAX_BODY,
+  MEMBER_ROLES,
+  POOLS,
+  PURPOSES,
+  requireActive,
+  requireChiefHarness,
+  requireGate,
+  requireHarness,
+  requireMember,
+  requireNumbers,
+  requireRoles,
+  requireText,
+  requireTier,
+  TIERS,
+  titleOf,
+} from './model.js'
 import { sessionName } from './names.js'
-import { MIGRATIONS, SCHEMA_VERSION } from './schema.js'
+import { renderChoices, renderQuestions, requireChoices, requireQuestions } from './questions.js'
+import { migrate } from './schema.js'
+import {
+  conversationView,
+  MESSAGE_SELECT,
+  messageView,
+  PARTICIPANT_SELECT,
+  participantView,
+  TASK_SELECT,
+  taskView,
+} from './views.js'
 
-export { SCHEMA_VERSION }
+export { CHIEF_HARNESSES, HARNESSES, LedgerError, PURPOSES, TIERS } from './model.js'
+export { SCHEMA_VERSION } from './schema.js'
 
 /**
  * The ledger: the one durable record of every project, participant, task and
@@ -52,17 +86,6 @@ export { SCHEMA_VERSION }
  * clock are arguments, and every refusal is a `LedgerError` with a stable code.
  */
 
-export const HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin', 'image']
-/** Where a project's chief runs: a harness with a terminal the human works in. */
-export const CHIEF_HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin']
-const MEMBER_ROLES = ['worker', 'advisor', 'reviewer', 'designer']
-/** Who hands out work and hears when the staff changes: the human and the chief. */
-const COORDINATOR_HANDLES = ['human', 'chief']
-const COORDINATOR_ROLES = ['human', 'chief']
-export const TIERS = ['critical', 'complex', 'standard', 'light']
-/** Who takes a task on the board: a worker, an advisor (advice), a reviewer, or an image designer (no tier). */
-const POOLS = ['worker', 'advisor', 'reviewer', 'designer']
-export const PURPOSES = ['critical-review', 'architecture', 'hard-problem', 'important-question']
 /** When a task's tier moved to one the staff holds, the tier that was asked. */
 const moved = (asked, tier) => (asked !== undefined && asked !== tier ? { asked } : {})
 /** "standard worker", "image designer": who an open task waits for; `aPool` adds the article. */
@@ -70,13 +93,9 @@ const poolName = (pool, tier) => (pool === 'designer' ? 'image designer' : `${ti
 const aPool = (pool, tier) => `${pool === 'designer' ? 'an' : 'a'} ${poolName(pool, tier)}`
 const CRITICAL_RULE =
   'No coding or implementation edits. Do not write or revise specifications. Return analysis, evidence and recommendations to your coordinator.'
-const ACTIVE_TASK_STATES = ['working', 'waiting']
-/** A task on a member's hands: from assignment until its result. */
-const HELD_TASK_STATES = ['queued', 'working', 'waiting']
 /** What a paused task's window is told when it goes on: the human's Resume and the daemon's alike. */
 export const RESUME_WORDS = 'Go on where you stopped.'
 const HOLDS_WORK = `SELECT 1 FROM task WHERE assignee_id = ? AND state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})`
-const MAX_BODY = 1_000_000
 /** How long a coordinator may leave a question before the human sees it too. */
 export const OVERDUE_MS = 10 * 60_000
 /**
@@ -101,18 +120,6 @@ export const PAGE_BYTES = 512 * 1024
  */
 const BAY_EXCERPT = 2_000
 const TRANSCRIPT_ROLES = ['user', 'assistant', 'tool', 'custom']
-const MAX_QUESTIONS = 4
-const MAX_TITLE = 120
-const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
-
-export class LedgerError extends Error {
-  constructor(code, message, status = 400) {
-    super(message)
-    this.name = 'LedgerError'
-    this.code = code
-    this.status = status
-  }
-}
 
 /** SQLite's primary result code, without the extended bits. */
 const primary = (cause) => (cause?.errcode ?? 0) & 0xff
@@ -151,132 +158,6 @@ export function openLedger(
   return new Ledger(db, now, names, trace)
 }
 
-function migrate(db) {
-  const version = db.prepare('PRAGMA user_version').get().user_version
-  if (version > SCHEMA_VERSION) {
-    throw new LedgerError(
-      'ledger-newer',
-      `this home was written by a newer ConsensFlow (schema ${version}; this build knows ${SCHEMA_VERSION})`,
-      409,
-    )
-  }
-  if (version === SCHEMA_VERSION) return
-  // A migration may rebuild a table others refer to; with foreign keys on,
-  // dropping it would cascade through them. Off for the migrations, every
-  // reference checked before each one commits, then on again: a start
-  // refused here leaves the version as it was, so the next start checks too.
-  db.exec('PRAGMA foreign_keys = OFF')
-  try {
-    for (let from = version; from < SCHEMA_VERSION; from += 1) {
-      db.exec('BEGIN IMMEDIATE')
-      try {
-        db.exec(MIGRATIONS[from])
-        db.exec(`PRAGMA user_version = ${from + 1}`)
-        const broken = db.prepare('PRAGMA foreign_key_check').all()
-        if (broken.length > 0) {
-          throw new LedgerError(
-            'ledger-broken',
-            `the ledger's references do not hold after migration: ${JSON.stringify(broken[0])}`,
-            500,
-          )
-        }
-        db.exec('COMMIT')
-      } catch (cause) {
-        db.exec('ROLLBACK')
-        throw cause
-      }
-    }
-  } finally {
-    db.exec('PRAGMA foreign_keys = ON')
-  }
-}
-
-function requireText(value, field, max) {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > max) {
-    throw new LedgerError(
-      'invalid-text',
-      `${field} must be text, not empty, at most ${max} characters`,
-    )
-  }
-  return value
-}
-
-function requireHarness(harness) {
-  if (!HARNESSES.includes(harness)) {
-    throw new LedgerError('invalid-harness', `unknown harness ${JSON.stringify(harness)}`)
-  }
-  return harness
-}
-
-/** A chief's harness: one of CHIEF_HARNESSES, when the project starts and at every Switch lead. */
-function requireChiefHarness(harness) {
-  if (!CHIEF_HARNESSES.includes(harness)) {
-    throw new LedgerError(
-      'invalid-harness',
-      `a chief runs on ${CHIEF_HARNESSES.join(', ')}, not ${JSON.stringify(harness)}`,
-    )
-  }
-  return harness
-}
-
-/** A participant that is still in the project; a member who left is refused. */
-function requireActive(row) {
-  if (row.left_at !== null) {
-    throw new LedgerError('member-left', `@${row.handle} left the staff`, 409)
-  }
-  return row
-}
-
-/** Task numbers a task needs or comes before: a list of distinct positive integers. */
-const requireNumbers = (value, field) => {
-  if (!Array.isArray(value) || value.some((number) => !Number.isInteger(number) || number <= 0)) {
-    throw new LedgerError('invalid-needs', `${field} is a list of task numbers (T-3, T-4)`)
-  }
-  return [...new Set(value)]
-}
-
-const requireGate = (gate) => {
-  if (typeof gate !== 'boolean') {
-    throw new LedgerError('invalid-gate', 'human approval is required (true) or not (false)')
-  }
-}
-
-function requireTier(tier) {
-  if (!TIERS.includes(tier)) {
-    throw new LedgerError(
-      'invalid-tier',
-      `a tier is ${TIERS.join(', ')}, not ${JSON.stringify(tier)}`,
-    )
-  }
-  return tier
-}
-
-/** A member's roles, one or more of worker, advisor, reviewer and designer; the first one leads. */
-function requireRoles(roles) {
-  if (
-    !Array.isArray(roles) ||
-    roles.length === 0 ||
-    !roles.every((r) => MEMBER_ROLES.includes(r))
-  ) {
-    throw new LedgerError(
-      'invalid-role',
-      `a member is one or more of ${MEMBER_ROLES.join(', ')}, not ${JSON.stringify(roles)}`,
-    )
-  }
-  return [...new Set(roles)]
-}
-
-/** Validates a member and returns its roles, normalized. */
-function requireMember({ agent, harness, role, roles, tier }) {
-  const set = requireRoles(roles ?? (role === undefined ? [] : [role]))
-  if (typeof agent !== 'string' || !AGENT_ID.test(agent) || COORDINATOR_HANDLES.includes(agent)) {
-    throw new LedgerError('invalid-agent', `not an agent id: ${JSON.stringify(agent)}`)
-  }
-  requireHarness(harness)
-  requireTier(tier)
-  return set
-}
-
 /** How a task reads when it is handed over: critical work leads with its purpose. */
 const deliveryBody = (task) =>
   task.purpose === null
@@ -285,126 +166,6 @@ const deliveryBody = (task) =>
 
 /** A result as its card shows it, the way a title reads; null before there is one. */
 const firstLine = (body) => (body === undefined ? null : titleOf(body))
-
-/** A card title: the first line that says something, shortened to fit. */
-function titleOf(body) {
-  const line = body
-    .split('\n')
-    .map((text) => text.trim())
-    .find(Boolean)
-  return line.length <= MAX_TITLE ? line : `${line.slice(0, MAX_TITLE - 1)}…`
-}
-
-const MESSAGE_SELECT = `
-  SELECT m.*, r.handle AS recipient, r.role AS recipient_role, s.handle AS sender,
-         t.number AS task_number
-  FROM message m
-  JOIN participant r ON r.id = m.recipient_id
-  LEFT JOIN participant s ON s.id = m.sender_id
-  LEFT JOIN task t ON t.id = m.task_id`
-
-const TASK_SELECT = `
-  SELECT t.*, q.handle AS requester, a.handle AS assignee,
-         am.handle AS assignee_member, a.left_at AS assignee_left_at,
-         (SELECT json_group_array(json_object('number', d.number, 'state', d.state))
-            FROM (SELECT d.number, d.state FROM task_need n JOIN task d ON d.id = n.needs_id
-                  WHERE n.task_id = t.id ORDER BY d.number) d) AS needs
-  FROM task t
-  JOIN participant q ON q.id = t.requester_id
-  LEFT JOIN participant a ON a.id = t.assignee_id
-  LEFT JOIN participant am ON am.id = a.member_id`
-
-/** A participant with its member's handle, when it is a member's session. */
-const PARTICIPANT_SELECT = `
-  SELECT p.*, m.handle AS member_handle
-  FROM participant p
-  LEFT JOIN participant m ON m.id = p.member_id`
-
-const participantView = (row) => ({
-  id: row.id,
-  projectId: row.project_id,
-  handle: row.handle,
-  role: row.role,
-  agent: row.agent,
-  harness: row.harness,
-  createdAt: row.created_at,
-  leftAt: row.left_at,
-  tier: row.tier,
-  roles: JSON.parse(row.roles),
-  outUntil: row.out_until,
-  outSince: row.out_since,
-  memberId: row.member_id ?? null,
-  member: row.member_handle ?? null,
-  session: row.member_handle ? row.handle.slice(row.member_handle.length + 1) : null,
-})
-
-const conversationView = (row) =>
-  row === undefined
-    ? null
-    : {
-        id: row.id,
-        participantId: row.participant_id,
-        harness: row.harness,
-        nativeSession: row.native_session,
-        startedAt: row.started_at,
-        endedAt: row.ended_at,
-      }
-
-/** The tasks a task needs, each with its state, and the ones not yet accepted: what blocks it. */
-const needsView = (json) => {
-  const needs = JSON.parse(json)
-  return {
-    needs,
-    blockedBy: needs.filter((need) => need.state !== 'accepted').map((need) => need.number),
-  }
-}
-
-const taskView = (row) => ({
-  id: row.id,
-  projectId: row.project_id,
-  number: row.number,
-  title: row.title,
-  body: row.body,
-  state: row.state,
-  requester: row.requester,
-  assignee: row.assignee ?? null,
-  pool: row.pool,
-  tier: row.tier,
-  purpose: row.purpose,
-  session: row.assignee_member ? row.assignee : null,
-  ...needsView(row.needs),
-  heldUntil: row.held_until ?? null,
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-})
-
-const messageView = (row) => ({
-  id: row.id,
-  projectId: row.project_id,
-  recipient: row.recipient,
-  recipientId: row.recipient_id,
-  recipientRole: row.recipient_role,
-  sender: row.sender,
-  kind: row.kind,
-  taskNumber: row.task_number,
-  replyTo: row.reply_to,
-  body: row.body,
-  state: row.state,
-  attempts: row.attempts,
-  reason: row.reason,
-  receipt: row.receipt === null ? null : JSON.parse(row.receipt),
-  questions: row.questions === null ? null : JSON.parse(row.questions),
-  choices: row.choices === null ? null : JSON.parse(row.choices),
-  urgent: row.urgent === 1,
-  createdAt: row.created_at,
-  deliveredAt: row.delivered_at,
-})
-
-/** `text` cut at `max` characters, then a line saying how long it was (at 0, only that line); shorter, as it is. */
-const cut = (text, max) =>
-  text.length <= max
-    ? text
-    : `${text.slice(0, max)}${max === 0 ? '' : '\n'}… (${text.length} characters; cut here)`
 
 /** A message as the bay shows it: a long one cut at BAY_EXCERPT, saying how long it was. */
 const bayView = (row) => {
@@ -435,101 +196,6 @@ function newestThatFit(items, field) {
   }
   return fit
 }
-
-const badQuestions = (why) => new LedgerError('bad-questions', `questions: ${why}`, 400)
-const shortText = (value, field) => {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > MAX_TITLE * 10) {
-    throw badQuestions(`${field} is a short text`)
-  }
-  return value.trim()
-}
-
-/**
- * Questions with options as a harness's question tool asks them: one to four,
- * each with its text, a short header, its options (a label, maybe a
- * description) and whether several may be picked.
- */
-function requireQuestions(questions) {
-  if (!Array.isArray(questions) || questions.length === 0 || questions.length > MAX_QUESTIONS) {
-    throw badQuestions(`one to ${MAX_QUESTIONS} questions`)
-  }
-  return questions.map((question) => {
-    if (question === null || typeof question !== 'object' || !Array.isArray(question.options)) {
-      throw badQuestions('each question is an object with an options array')
-    }
-    // The question itself may run as long as any message; its header and
-    // labels are what a picker shows, and stay short.
-    if (typeof question.question !== 'string' || question.question.trim().length === 0) {
-      throw badQuestions('each question has its text')
-    }
-    return {
-      question: requireText(question.question.trim(), 'question', MAX_BODY),
-      header: shortText(question.header, 'header'),
-      options: question.options.map((option) => ({
-        label: shortText(option?.label, 'an option label'),
-        description:
-          typeof option.description === 'string' && option.description.trim().length > 0
-            ? option.description.trim()
-            : null,
-      })),
-      multiple: question.multiple === true,
-    }
-  })
-}
-
-/** A question with options as text: what an inbox or a window shows. */
-const renderQuestions = (questions) =>
-  questions
-    .map((q) =>
-      [
-        `${q.header}: ${q.question}`,
-        ...q.options.map(
-          (o) => `- ${o.label}${o.description === null ? '' : `: ${o.description}`}`,
-        ),
-      ].join('\n'),
-    )
-    .join('\n\n')
-
-const badChoices = (why) => new LedgerError('bad-choices', `answer: ${why}`, 400)
-
-/**
- * The choices for a question with options: one array of picks per question,
- * from explicit `choices` or from text, one line per question, the labels
- * matched regardless of case and free text kept as it is.
- */
-function requireChoices(questions, { choices, body }) {
-  const picks =
-    choices !== undefined
-      ? choices
-      : String(body ?? '')
-          .split('\n')
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .map((line, at) => (questions[at]?.multiple ? line.split(',') : [line]))
-  if (!Array.isArray(picks) || picks.length !== questions.length) {
-    throw badChoices(`one answer per question (${questions.length})`)
-  }
-  return picks.map((pick, at) => {
-    const question = questions[at]
-    if (!Array.isArray(pick) || pick.length === 0 || (!question.multiple && pick.length > 1)) {
-      throw badChoices(
-        `${question.header}: ${question.multiple ? 'one or more picks' : 'one pick'}`,
-      )
-    }
-    return pick.map((text) => {
-      const wanted = String(text).trim()
-      if (wanted.length === 0) throw badChoices('empty pick')
-      // A pick in the human's own words ("Something else") is an answer like any other.
-      if (wanted.length > MAX_BODY)
-        throw badChoices(`pick too long (at most ${MAX_BODY} characters)`)
-      const label = question.options.find((o) => o.label.toLowerCase() === wanted.toLowerCase())
-      return label === undefined ? wanted : label.label
-    })
-  })
-}
-
-const renderChoices = (questions, choices) =>
-  questions.map((q, at) => `${q.header}: ${choices[at].join(', ')}`).join('\n')
 
 class Ledger {
   #db
