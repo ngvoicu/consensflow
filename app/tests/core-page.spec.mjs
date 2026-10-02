@@ -1,63 +1,21 @@
-test('a task held while its member is out of quota says when it goes on', async ({ page }) => {
-  const data = model()
-  const lane = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
-  lane.tasks.push(task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, { heldUntil: at(-25) }))
-  await open(page, data)
-  await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
-    /^out of quota until \d\d:\d\d · from /,
-  )
-})
-
-import { readFile } from 'node:fs/promises'
-import { createServer } from 'node:http'
-import { dirname, extname, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
-
 import { expect, test } from '@playwright/test'
+
+import { serveUi } from './serve-ui.mjs'
 
 /**
  * The board page of the new core (TEST-BDC-13), against a stand-in for the app:
  * `core_request` answers from an in-page model and records every call, the way
  * the Rust app forwards the page's requests to the core.
  */
-const UI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'ui')
-
-let server
-let origin
+let ui
 
 test.setTimeout(15_000)
 
 test.beforeAll(async () => {
-  server = createServer(async (request, response) => {
-    try {
-      const pathname = new URL(request.url, 'http://localhost').pathname
-      const file = resolve(
-        UI_ROOT,
-        pathname === '/' ? 'index.html' : decodeURIComponent(pathname.slice(1)),
-      )
-      if (file !== UI_ROOT && !file.startsWith(`${UI_ROOT}${sep}`)) {
-        response.writeHead(403).end('forbidden')
-        return
-      }
-      const type =
-        { '.css': 'text/css', '.html': 'text/html', '.js': 'text/javascript' }[extname(file)] ??
-        'application/octet-stream'
-      response.writeHead(200, {
-        'content-type': `${type}; charset=utf-8`,
-        'cache-control': 'no-store',
-      })
-      response.end(await readFile(file))
-    } catch {
-      response.writeHead(404).end('not found')
-    }
-  })
-  await new Promise((ready) => server.listen(0, '127.0.0.1', ready))
-  origin = `http://127.0.0.1:${server.address().port}`
+  ui = await serveUi()
 })
 
-test.afterAll(async () => {
-  await new Promise((closed) => server.close(closed))
-})
+test.afterAll(() => ui?.close())
 
 const at = (minutesAgo) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
 const MEMBER = ['worker', 'advisor', 'reviewer']
@@ -404,7 +362,7 @@ async function open(page, data = model()) {
           },
     }
   }, data)
-  await page.goto(`${origin}/index.html`)
+  await page.goto(`${ui.origin}/index.html`)
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
 }
 
@@ -751,6 +709,16 @@ test("shows a member out of quota, and a reviewer's review tasks as cards on its
   await expect(hera.locator('td[data-state="done"] button.card[data-task="10"]')).toHaveCount(1)
   // A review hangs under no other card: it is a task of its own.
   await expect(page.locator('.reviews')).toHaveCount(0)
+})
+
+test('a task held while its member is out of quota says when it goes on', async ({ page }) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
+  lane.tasks.push(task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, { heldUntil: at(-25) }))
+  await open(page, data)
+  await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
+    /^out of quota until \d\d:\d\d · from /,
+  )
 })
 
 test("opens a card's drawer with the result apart from the brief, and leaves accepting and reviews to the chief", async ({

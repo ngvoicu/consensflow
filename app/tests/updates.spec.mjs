@@ -1,49 +1,16 @@
-import { readFile } from 'node:fs/promises'
-import { createServer } from 'node:http'
-import { dirname, extname, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
-
 import { expect, test } from '@playwright/test'
 
-const UI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'ui')
+import { serveUi } from './serve-ui.mjs'
 
-let server
-let origin
+let ui
 
 test.setTimeout(12_000)
 
 test.beforeAll(async () => {
-  server = createServer(async (request, response) => {
-    try {
-      const pathname = new URL(request.url, 'http://localhost').pathname
-      const relative = pathname === '/' ? 'index.html' : decodeURIComponent(pathname.slice(1))
-      const file = resolve(UI_ROOT, relative)
-      if (file !== UI_ROOT && !file.startsWith(`${UI_ROOT}${sep}`)) {
-        response.writeHead(403).end('forbidden')
-        return
-      }
-      const type =
-        {
-          '.css': 'text/css; charset=utf-8',
-          '.html': 'text/html; charset=utf-8',
-          '.js': 'text/javascript; charset=utf-8',
-        }[extname(file)] ?? 'application/octet-stream'
-      response.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' })
-      response.end(await readFile(file))
-    } catch {
-      response.writeHead(404).end('not found')
-    }
-  })
-  await new Promise((resolveListening) => server.listen(0, '127.0.0.1', resolveListening))
-  origin = `http://127.0.0.1:${server.address().port}`
+  ui = await serveUi()
 })
 
-test.afterAll(async () => {
-  if (server === undefined) return
-  await new Promise((resolveClosed, reject) => {
-    server.close((error) => (error === undefined ? resolveClosed() : reject(error)))
-  })
-})
+test.afterAll(() => ui?.close())
 
 function updateSnapshot(overrides = {}) {
   return {
@@ -105,7 +72,6 @@ async function installTauriShim(page, { snapshot = updateSnapshot(), state = cor
       window.__calls = []
       window.__updateSnapshot = copy(initialSnapshot)
       window.__commandResults = {}
-      window.__listenCalls = []
       window.setTimeout = (callback, delay, ...args) => {
         if (delay === 10_000 || delay === 6 * 60 * 60 * 1_000) {
           const timer = { callback, delay, args, consumed: false }
@@ -159,34 +125,8 @@ async function installTauriShim(page, { snapshot = updateSnapshot(), state = cor
         return { ok: true }
       }
 
-      const windowApi = {
-        async maximize() {},
-        async unmaximize() {},
-        async setSize() {},
-        async setPosition() {},
-        async innerSize() {
-          return { width: 1120, height: 760 }
-        },
-        async outerPosition() {
-          return { x: 80, y: 90 }
-        },
-        async isMaximized() {
-          return false
-        },
-        async onMoved() {
-          return () => {}
-        },
-        async onResized() {
-          return () => {}
-        },
-      }
-
       window.__setCommandResult = (command, result) => {
-        if (result === null) delete window.__commandResults[command]
-        else window.__commandResults[command] = copy(result)
-      }
-      window.__setUpdateSnapshot = (snapshot) => {
-        window.__updateSnapshot = copy(snapshot)
+        window.__commandResults[command] = copy(result)
       }
       window.__runUpdateTimer = async (delay) => {
         for (const timer of timers.filter((candidate) => candidate.delay === delay)) {
@@ -207,14 +147,12 @@ async function installTauriShim(page, { snapshot = updateSnapshot(), state = cor
         core: { Channel, invoke },
         event: {
           async listen(name, handler) {
-            window.__listenCalls.push(name)
             const handlers = eventListeners.get(name) ?? []
             handlers.push(handler)
             eventListeners.set(name, handlers)
             return () => {}
           },
         },
-        window: { getCurrentWindow: () => windowApi },
       }
     },
     { initialSnapshot: snapshot, initialState: state },
@@ -223,7 +161,7 @@ async function installTauriShim(page, { snapshot = updateSnapshot(), state = cor
 
 async function boot(page, options = {}) {
   await installTauriShim(page, options)
-  await page.goto(origin)
+  await page.goto(ui.origin)
   await page.waitForLoadState('networkidle')
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true', { timeout: 2_000 })
 }
