@@ -160,7 +160,8 @@ function fakeHost() {
       }
       await host.hold
       host.opened.push(body)
-      return { ok: true, id: body.id, generation: body.generation }
+      // The window's process, when the test names one.
+      return { ok: true, id: body.id, generation: body.generation, pid: host.pid }
     },
     async kill(pane) {
       host.killed.push(pane)
@@ -617,6 +618,28 @@ describe('the dispatcher', () => {
       context.host.snapshot = { outputQuietMs: 2_000 }
       await context.dispatcher.pass()
       assert.equal(context.dispatcher.activity(chief.id).state, 'idle')
+    })
+  })
+
+  it("tells the adapter the window's process, when the pane host names it, before it starts", async () => {
+    await setup(async (context) => {
+      context.host.pid = 4242
+      const seen = []
+      const { started, observe } = context.adapter
+      context.adapter.started = async (request) => {
+        seen.push(['started', request.launch.pid])
+        return started(request)
+      }
+      context.adapter.observe = async (request) => {
+        seen.push(['observe', request.launch.pid])
+        return observe(request)
+      }
+      await withStaff(context)
+      await context.dispatcher.pass()
+      assert.deepEqual(seen, [
+        ['started', 4242],
+        ['observe', 4242],
+      ])
     })
   })
 

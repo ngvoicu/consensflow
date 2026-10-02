@@ -14,7 +14,10 @@ export class PaneHost {
     this.#bridge = bridge
   }
 
-  /** Opens a window; resolves `{ok, id, generation}` or `{ok: false, error}`. */
+  /**
+   * Opens a window; resolves `{ok, id, generation, pid}` (`pid`, the window's
+   * process, when the host knows it) or `{ok: false, error}`.
+   */
   async open(body) {
     return this.#bridge.request(
       'pane.open',

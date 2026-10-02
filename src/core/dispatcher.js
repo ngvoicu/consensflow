@@ -1155,6 +1155,9 @@ export class Dispatcher {
       )
       return
     }
+    // The window's own process, when the pane host knows it: an adapter may
+    // find the harness's own status by it from its first look.
+    if (opened.pid !== undefined) plan.launch.pid = opened.pid
 
     const resumed = resume !== null && plan.nativeSession === resume
     let conversationId = conversation?.id
