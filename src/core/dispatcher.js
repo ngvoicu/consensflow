@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { RESUME_WORDS } from '../ledger/index.js'
+import { deliveryText, markerOf } from './delivery-text.js'
 import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.js'
 
 /**
@@ -64,40 +65,12 @@ const ESCAPE = 27
 const INTERRUPT_ROUNDS = 3
 const INTERRUPT_AGAIN_MS = 3_000
 const DOUBLE_PRESS_MS = 150
-const INLINE_LIMIT = 4000
-const OPENING = 3000
 
 /** How long a fresh window's output must hold still before its screen counts as drawn. */
 const DRAWN_QUIET_MS = 1_500
 
-/** How a message reads in the recipient's pane. The header doubles as the arrival marker. */
-export function deliveryText(message) {
-  const from = message.sender === null ? 'ConsensFlow' : `@${message.sender}`
-  const task =
-    message.taskNumber === null || message.taskNumber === undefined
-      ? ''
-      : ` · T-${message.taskNumber}`
-  const body =
-    message.body.length <= INLINE_LIMIT
-      ? message.body
-      : `${message.body.slice(0, OPENING)}\n… (${message.body.length} characters; read all of it with: cf inbox read m-${message.id})`
-  // A question says how to answer it; a result says what to do with it, so
-  // the reader decides on the board even when its harness frames the message
-  // as a request.
-  const footer =
-    message.kind === 'question'
-      ? message.questions
-        ? `\n\nRun in your shell: cf answer m-${message.id} "…" (a label or your own words${message.questions.length > 1 ? '; one line per question' : ''})`
-        : message.urgent && message.taskNumber != null
-          ? `\n\nT-${message.taskNumber} is paused for this. Run in your shell: cf answer m-${message.id} "…"; the chief resumes the task.`
-          : `\n\nRun in your shell: cf answer m-${message.id} "…"`
-      : message.kind === 'result' && message.taskNumber != null
-        ? `\n\nDecide with: cf task accept T-${message.taskNumber} · cf task reopen T-${message.taskNumber} "…"`
-        : ''
-  return `[ConsensFlow m-${message.id}${task} · ${message.kind} from ${from}]\n${body}${footer}`
-}
-
-const markerOf = (messageId) => `[ConsensFlow m-${messageId} ·`
+/** A message as its window gets it (`delivery-text.js`): the dispatcher's tests compare a window's input with it. */
+export { deliveryText }
 
 /** A closed project starts and changes no work, whatever asks: it is resumed first. */
 export function requireOpen(project) {

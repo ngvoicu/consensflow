@@ -1472,49 +1472,6 @@ describe('a restart while a message is on its way', () => {
   })
 })
 
-describe('the delivered text', () => {
-  it('names the message, the task and the sender, and tells the reader how to answer a question', () => {
-    const base = { id: 12, taskNumber: 3, sender: 'zeus', body: 'Which format?' }
-    assert.equal(
-      deliveryText({ ...base, kind: 'question' }),
-      '[ConsensFlow m-12 · T-3 · question from @zeus]\nWhich format?\n\nRun in your shell: cf answer m-12 "…"',
-    )
-    const options = [{ question: 'Which?', header: 'Format', options: [], multiple: false }]
-    assert.equal(
-      deliveryText({ ...base, kind: 'question', questions: options }),
-      '[ConsensFlow m-12 · T-3 · question from @zeus]\nWhich format?\n\nRun in your shell: cf answer m-12 "…" (a label or your own words)',
-    )
-    assert.equal(
-      deliveryText({ ...base, kind: 'question', questions: [...options, ...options] }),
-      '[ConsensFlow m-12 · T-3 · question from @zeus]\nWhich format?\n\nRun in your shell: cf answer m-12 "…" (a label or your own words; one line per question)',
-    )
-    assert.equal(
-      deliveryText({ ...base, kind: 'note', sender: null, taskNumber: null, body: 'hi' }),
-      '[ConsensFlow m-12 · note from ConsensFlow]\nhi',
-    )
-    assert.equal(
-      deliveryText({ ...base, kind: 'result', body: 'Parser done' }),
-      '[ConsensFlow m-12 · T-3 · result from @zeus]\nParser done\n\nDecide with: cf task accept T-3 · cf task reopen T-3 "…"',
-      'a result says what to do with it: it is not a request',
-    )
-  })
-
-  it('sends a long body as its opening and the command that reads the rest', () => {
-    const text = deliveryText({
-      id: 7,
-      taskNumber: 1,
-      sender: 'zeus',
-      kind: 'result',
-      body: 'x'.repeat(20_000),
-    })
-    assert.ok(text.length < 5_000)
-    assert.match(
-      text,
-      /\n… \(20000 characters; read all of it with: cf inbox read m-7\)\n\nDecide with: /,
-    )
-  })
-})
-
 /** A tiered staff: standard workers (zeus and diana, unless told), a light worker, and two standard reviewers. */
 async function withTiers(context, { workers = ['zeus', 'diana'] } = {}) {
   const member = (agent, role, tier) => ({ agent, harness: 'claude-code', role, tier })
