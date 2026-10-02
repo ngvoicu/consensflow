@@ -40,8 +40,9 @@ import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.j
  *   deleted project) is forgotten at once, quota marks and all, so one that
  *   comes back or takes its id starts clean; its window closes once its step
  *   in progress ends, and that exit fails nothing: a member's open tasks
- *   were cancelled when it left. An Open or a Switch lead that waited on it
- *   then does nothing, to it or to one that took its id.
+ *   were cancelled when it left. Work on it that was waiting meanwhile (a
+ *   step, a launch, a delivery, an Open, a Switch lead, a removal) does
+ *   nothing more by its ids, to it or to one that took them.
  * - A task for a tier of member starts open: each pass gives it to a free
  *   member of that pool and tier that is not out of quota, on the harness
  *   whose members of the tier have taken the fewest tasks, then the one with
