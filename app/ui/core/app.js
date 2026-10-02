@@ -1,5 +1,6 @@
+import { button, element, redraw } from '../dom.js'
 import { initializeUpdates } from '../updates.js'
-import { BoardView, element, redraw, TaskDrawer } from './board.js'
+import { BoardView, TaskDrawer } from './board.js'
 import { TerminalsView } from './terminals.js'
 
 /**
@@ -392,35 +393,33 @@ function renderProjects() {
     // The item names its project: a redraw keeps it only for that one.
     item.dataset.project = String(project.id)
     item.dataset.current = String(project.id === shown)
-    const select = element('button', 'project-select')
-    select.type = 'button'
-    select.setAttribute('aria-current', String(project.id === shown))
-    // A closed project says so by its buttons (Delete, Resume), not by a pill.
-    select.append(element('span', 'project-name', project.name))
-    select.addEventListener('click', () => {
+    const select = button('', 'project-select', () => {
       state.selected = project.id
       state.focus = 'chief'
       closeTask()
       void refresh()
     })
+    select.setAttribute('aria-current', String(project.id === shown))
+    // A closed project says so by its buttons (Delete, Resume), not by a pill.
+    select.append(element('span', 'project-name', project.name))
     item.append(select)
     const open = project.state === 'open'
     const tools = element('div', 'project-tools')
     // A closed project may go for good; the ask is confirmed in a dialog.
     if (!open) {
-      const remove = element('button', 'quiet-button', 'Delete')
-      remove.type = 'button'
-      remove.setAttribute('aria-label', `Delete ${project.name}`)
-      remove.addEventListener('click', () => askToDelete(project))
-      tools.append(remove)
+      tools.append(
+        button('Delete', 'quiet-button', () => askToDelete(project), `Delete ${project.name}`),
+      )
     }
-    const toggle = element('button', 'quiet-button', open ? 'Close' : 'Resume')
-    toggle.type = 'button'
-    toggle.setAttribute('aria-label', `${open ? 'Close' : 'Resume'} ${project.name}`)
-    toggle.addEventListener('click', () =>
-      act(() => core(open ? 'project.close' : 'project.resume', { project: project.id })),
+    const verb = open ? 'Close' : 'Resume'
+    tools.append(
+      button(
+        verb,
+        'quiet-button',
+        () => act(() => core(open ? 'project.close' : 'project.resume', { project: project.id })),
+        `${verb} ${project.name}`,
+      ),
     )
-    tools.append(toggle)
     item.append(tools)
     return item
   })
@@ -622,16 +621,18 @@ function drawNewProjectStaff() {
         element('br'),
         element('span', 'member-meta', runsLabel(saved)),
       )
-      const remove = element('button', 'quiet-button', 'Remove')
-      remove.type = 'button'
-      remove.setAttribute('aria-label', `Remove ${ROLE_LABEL[role]} ${agent}`)
-      remove.addEventListener('click', () => {
-        picked.splice(
-          picked.findIndex((pick) => pick.agent === agent && pick.role === role),
-          1,
-        )
-        drawNewProjectStaff()
-      })
+      const remove = button(
+        'Remove',
+        'quiet-button',
+        () => {
+          picked.splice(
+            picked.findIndex((pick) => pick.agent === agent && pick.role === role),
+            1,
+          )
+          drawNewProjectStaff()
+        },
+        `Remove ${ROLE_LABEL[role]} ${agent}`,
+      )
       const row = teamRow(who, role, remove)
       row.dataset.agent = agent
       return row
@@ -834,15 +835,11 @@ function memberRows(member) {
     row.append(who())
     const cell = element('td')
     cell.colSpan = 3
-    const keep = element('button', 'quiet-button', `Keep ${name}`)
-    keep.type = 'button'
-    keep.addEventListener('click', () => {
+    const keep = button(`Keep ${name}`, 'quiet-button', () => {
       removing = null
       renderStaff()
     })
-    const yes = element('button', 'danger-button', `Remove ${name}`)
-    yes.type = 'button'
-    yes.addEventListener('click', () =>
+    const yes = button(`Remove ${name}`, 'danger-button', () =>
       act(async () => {
         const { projectId, handle } = memberNow(member)
         await core('member.remove', { project: projectId, agent: handle })
@@ -859,24 +856,26 @@ function memberRows(member) {
     return [{ role: member.roles[0], row }]
   }
   return member.roles.map((role) => {
-    const remove = element('button', 'quiet-button', 'Remove')
-    remove.type = 'button'
-    remove.setAttribute('aria-label', `Remove ${ROLE_LABEL[role]} ${name}`)
-    remove.addEventListener('click', () => {
-      const { projectId, handle, roles } = memberNow(member)
-      if (roles.length === 1) {
-        removing = handle
-        renderStaff()
-        return
-      }
-      void act(async () => {
-        await core('member.roles', {
-          project: projectId,
-          agent: handle,
-          roles: roles.filter((held) => held !== role),
+    const remove = button(
+      'Remove',
+      'quiet-button',
+      () => {
+        const { projectId, handle, roles } = memberNow(member)
+        if (roles.length === 1) {
+          removing = handle
+          renderStaff()
+          return
+        }
+        void act(async () => {
+          await core('member.roles', {
+            project: projectId,
+            agent: handle,
+            roles: roles.filter((held) => held !== role),
+          })
         })
-      })
-    })
+      },
+      `Remove ${ROLE_LABEL[role]} ${name}`,
+    )
     const row = teamRow(who(), role, remove)
     row.dataset.handle = member.handle
     return { role, row }

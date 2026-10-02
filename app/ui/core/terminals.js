@@ -1,6 +1,7 @@
+import { button, element, redraw } from '../dom.js'
 import { EmulatorRegistry, paneKey } from '../term.js'
 import { TerminalLink } from '../terminal-link.js'
-import { element, lamp, laneName, laneOrder, redraw } from './board.js'
+import { lamp, laneName, laneOrder } from './board.js'
 
 /**
  * The live windows beside the board: a horizontal strip of one terminal per
@@ -204,15 +205,20 @@ export class TerminalsView {
       // Only a session's window closes by hand, as on its board row; the
       // chief's stays with the project.
       const session = lane.participant.member !== null
-      const stop = element('button', 'quiet-button terminal-stop', 'Close')
-      stop.type = 'button'
-      stop.setAttribute('aria-label', `Close ${name}'s terminal`)
-      stop.addEventListener('click', () => this.#onClose(lane.participant))
       redraw(entry.head, [
         lamp(lane.activity),
         element('span', 'terminal-name', name),
         element('span', 'terminal-meta', lane.participant.harness ?? ''),
-        ...(session ? [stop] : []),
+        ...(session
+          ? [
+              button(
+                'Close',
+                'quiet-button terminal-stop',
+                () => this.#onClose(lane.participant),
+                `Close ${name}'s terminal`,
+              ),
+            ]
+          : []),
       ])
       entry.card.setAttribute('aria-label', `${name}'s terminal`)
       entry.card.dataset.handle = lane.participant.handle
