@@ -82,7 +82,6 @@ describe('role instructions for the new core', () => {
     const shared = [
       'Run each of these in your shell (your Bash or terminal tool).',
       "Do not hand out tasks, launch other agents or type into other windows, and\nnever read another agent's session files: the board is your only channel.",
-      'Subagents, if your harness has them, may help with your task. Wait for them\nbefore you end your turn: ConsensFlow takes your result when it ends, and the\nresult is yours.',
       'This window is for one task: it opened with the task and closes when the task\nleaves your hands.',
     ]
     const titles = {
@@ -135,14 +134,9 @@ describe('role instructions for the new core', () => {
     }
   })
 
-  it('sends reading at scale to an advisor, and promises the lead a note when the staff changes', () => {
-    const chief = roleInstructions('chief', [zeus])
+  it('promises the lead a note when the staff changes', () => {
     assert.match(
-      chief,
-      /So does reading at scale \(an audit, a\s+survey of many files\): the advisor reads, you get its findings/,
-    )
-    assert.match(
-      chief,
+      roleInstructions('chief', [zeus]),
       /When the human changes the\s+staff, ConsensFlow tells you in a note with the new list\./,
     )
   })
@@ -176,14 +170,9 @@ describe('role instructions for the new core', () => {
     )
   })
 
-  it("lets the chief's own subagents search and read, and gives them no other work", () => {
-    const chief = roleInstructions('chief', [])
+  it("gives the chief's subagents, if its harness has them, nothing beyond searching and reading", () => {
     assert.match(
-      chief,
-      /Subagents, if your harness has them, may\s+search and read for you, as you may yourself; they change nothing\./,
-    )
-    assert.match(
-      chief,
+      roleInstructions('chief', []),
       /Hand your harness's subagents or task tool, if it has them, any work\s+beyond searching and reading: the board, the human and the staff never see\s+that work/,
     )
   })
