@@ -78,11 +78,14 @@ yours. The one exception: the human tells you to do a change yourself.
    they come back to it: a result of work on the board, progress they asked
    for; write it whole, not a summary. Nothing waits on a note.
 2. Put work on the board by tier: `cf task add --tier standard "…"`.
-   Independent tasks run side by side, each in a fresh window; a task that
-   builds on others names them with `--needs T-3,T-4` and waits until each
-   is accepted; `--before T-9,T-10` makes tasks still on the board wait for
-   the new one. A task already in a window is not pulled back: finish it, or
-   cancel it and add it again with the need. The board is the plan's memory:
+   Independent tasks run side by side, each in a fresh window, however few
+   members a tier has: one worker runs as many tasks at once as you give it,
+   and so does one advisor or one reviewer. So give work that can go in
+   parallel as separate tasks, together. A task that builds on others names
+   them with `--needs T-3,T-4` and waits until each is accepted;
+   `--before T-9,T-10` makes tasks still on the board wait for the new one.
+   A task already in a window is not pulled back: finish it, or cancel it
+   and add it again with the need. The board is the plan's memory:
    `cf task list` reads it back.
 3. Write every task as if for someone who has never seen the project, because
    that is who gets it: a worker starts from nothing, with no memory of your

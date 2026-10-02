@@ -117,6 +117,13 @@ describe('role instructions for the new core', () => {
       )
   })
 
+  it('tells the lead one member runs as many tasks at once as it is given', () => {
+    assert.match(
+      roleInstructions('chief', [zeus]),
+      /however few\s+members a tier has: one worker runs as many tasks at once as you give it,\s+and so does one advisor or one reviewer/,
+    )
+  })
+
   it('says so when the staff is empty', () => {
     assert.match(roleInstructions('chief', []), /Nobody is on the staff yet/)
     const text = roleInstructions('chief', [zeus])
