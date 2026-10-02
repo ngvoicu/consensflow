@@ -1173,7 +1173,9 @@ pub(crate) mod conpty_test {
         output: &Receiver<PaneOutput>,
         needle: &str,
     ) -> String {
-        let deadline = Instant::now() + Duration::from_secs(20);
+        // A minute: a busy runner's PowerShell has twice taken longer than 20 s
+        // to print its READY (2026-10-01 and 10-02); output on time costs nothing.
+        let deadline = Instant::now() + Duration::from_secs(60);
         let mut seen = String::new();
         while !seen.contains(needle) {
             let left = deadline.saturating_duration_since(Instant::now());
