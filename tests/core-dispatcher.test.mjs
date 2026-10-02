@@ -1663,6 +1663,27 @@ describe('the dispatcher assigns open tasks', () => {
       assert.match(task(3).assignee, /^zeus-/, 'the earliest joined, once the hour has passed')
     })
   })
+
+  it("tells the requester of a waiting task, though a deleted project's waiting task had its id", async () => {
+    await setup(
+      async (context) => {
+        const waits =
+          'T-1 waits for a free standard worker: @zeus has no agent any more (zeus is not among your agents: define it, or remove the member).'
+        const first = await withTiers(context, { workers: ['zeus'] })
+        const gone = first.open()
+        await context.dispatcher.pass()
+        assert.deepEqual(first.notes('chief'), [waits])
+        await context.dispatcher.closeProject(first.project.id)
+        await context.dispatcher.deleteProject(first.project.id)
+
+        const second = await withTiers(context, { workers: ['zeus'] })
+        assert.equal(second.open().id, gone.id, "the ledger gives the deleted task's id again")
+        await context.dispatcher.pass()
+        assert.deepEqual(second.notes('chief'), [waits])
+      },
+      { roster: (name) => (name === 'zeus' ? null : { id: name, model: 'm', profile: {} }) },
+    )
+  })
 })
 
 describe('the dispatcher runs a review like any task', () => {

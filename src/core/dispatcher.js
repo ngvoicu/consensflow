@@ -134,7 +134,8 @@ export class Dispatcher {
   #log
   #runtime = new Map()
   #listeners = new Set()
-  #waitingNoted = new Set()
+  /** The open tasks whose requester heard that they wait for a free member, each with its project. */
+  #waitingNoted = new Map()
   #generation = 0
 
   constructor({
@@ -314,6 +315,11 @@ export class Dispatcher {
   async deleteProject(projectId) {
     const project = this.#ledger.project(projectId)
     const deleted = this.#ledger.deleteProject(projectId)
+    // The ledger gives the next rows it writes the ids this project's had:
+    // what is remembered of its tasks goes now, before another task has its id.
+    for (const [task, noted] of this.#waitingNoted) {
+      if (noted === deleted.id) this.#waitingNoted.delete(task)
+    }
     const participants = project?.participants ?? []
     await this.#closeWindows(participants)
     for (const participant of participants) {
@@ -1290,7 +1296,7 @@ export class Dispatcher {
         this.#waitingNoted.delete(task.id)
         this.#changed()
       } else if (!this.#waitingNoted.has(task.id)) {
-        this.#waitingNoted.add(task.id)
+        this.#waitingNoted.set(task.id, project.id)
         this.#ledger.note(project.id, {
           to: task.requester,
           task: task.number,
