@@ -338,15 +338,16 @@ export class Dispatcher {
     const deleted = this.#ledger.deleteProject(projectId)
     // The ledger gives the next rows it writes the ids this project's had:
     // what is remembered of its tasks and participants goes now, before
-    // anything can take one of their ids.
+    // anything can take one of their ids, and so do its own lines in the
+    // trace (a project created while its windows close keeps its own).
     for (const [task, noted] of this.#waitingNoted) {
       if (noted === deleted.id) this.#waitingNoted.delete(task)
     }
-    await this.#forget((project?.participants ?? []).map((participant) => participant.id))
-    // A deleted project leaves no trace but the line that says it was:
-    // its own lines go, and the record of it names no project id, so a
-    // later project with the same id never takes it along.
     this.#trace.forget?.(projectId)
+    await this.#forget((project?.participants ?? []).map((participant) => participant.id))
+    // A deleted project leaves no trace but the line that says it was, and
+    // that names no project id, so a later project with the same id never
+    // takes it along.
     this.#trace({
       at: new Date(this.#now()).toISOString(),
       kind: 'project.deleted',

@@ -3562,6 +3562,44 @@ describe('work in flight when its participant is forgotten', () => {
       assert.equal(await removed, '@zeus left the staff', 'the removal says its zeus has left')
     })
   })
+
+  it("keeps the trace of a new project that took its ids while the deleted one's windows closed", async () => {
+    // As the event file in the home: forgetting a project drops its lines.
+    const lines = []
+    const trace = Object.assign((entry) => lines.push(entry), {
+      forget: (project) => {
+        const kept = lines.filter((line) => line.project !== project)
+        lines.splice(0, lines.length, ...kept)
+      },
+    })
+    await setup(
+      async (context) => {
+        const { project: old } = await withStaff(context)
+        await context.dispatcher.pass()
+        // The old lead takes a paste its harness holds: its window closes once that is over.
+        const release = hold(
+          context.adapter,
+          'deliver',
+          looksAt(context.adapter.agent('chief').launchId),
+        )
+        context.ledger.note(old.id, { from: 'zeus', to: 'chief', body: 'Held' })
+        await context.dispatcher.pass()
+        const { fresh, gone } = await replaceProject(context, old)
+        // The new lead's window is looked at meanwhile, and the trace says so.
+        await context.dispatcher.pass()
+        release()
+        await gone
+        assert.deepEqual(
+          lines
+            .filter((line) => line.kind === 'window.activity' && line.project === fresh.id)
+            .map((line) => line.state),
+          ['idle'],
+          "the new lead's line stays, and the deleted lead's went",
+        )
+      },
+      { trace },
+    )
+  })
 })
 
 describe('a lead whose window does not come up', () => {
