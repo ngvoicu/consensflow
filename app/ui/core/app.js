@@ -25,11 +25,17 @@ const boardRoot = $('#board')
 const stage = $('#stage')
 const status = $('#status')
 
+/**
+ * No notes for the human, in the shape the core reads their unread ones:
+ * the newest one frame holds, how many there are and how many came.
+ */
+const NO_NOTES = { messages: [], total: 0, shown: 0 }
+
 const state = {
   projects: [],
   selected: null,
   board: null,
-  inbox: [],
+  inbox: NO_NOTES,
   agents: [],
   focus: 'chief',
   openTask: null,
@@ -295,10 +301,8 @@ async function refresh() {
           ? null
           : core('board.get', { project: selected }).then((read) => read.board),
         selected === null
-          ? []
-          : core('inbox.get', { project: selected, participant: 'human' }).then(
-              (read) => read.messages,
-            ),
+          ? NO_NOTES
+          : core('inbox.get', { project: selected, participant: 'human', unread: true }),
         ...elsewhere,
       ])
       if (state.selected !== selected) {
@@ -333,10 +337,8 @@ function render() {
   const project = state.board?.project ?? null
   projectTitle.textContent = project?.name ?? 'No project'
   projectDirectory.textContent = project?.directory ?? ''
-  // What For you lists for the human: their unread notes.
-  const waiting = state.inbox.filter(
-    (message) => message.state === 'queued' && message.kind === 'note',
-  ).length
+  // What For you lists for the human: their unread notes, shown or not.
+  const waiting = state.inbox.total
   inboxButton.textContent = waiting === 0 ? 'Inbox' : `Inbox (${waiting})`
   inboxButton.dataset.waiting = String(waiting > 0)
   // A closed project is read-only: nothing runs, so nothing here may act on

@@ -305,7 +305,16 @@ async function open(page, data = model()) {
         data.boards[project].project.gate = gate
         return answer({ project: data.boards[project].project })
       },
-      'inbox.get': ({ project }) => answer({ messages: data.inbox[project] ?? [] }),
+      // The newest messages one frame holds (all of them, unless a test says
+      // how many fit) and how many there are; asked for what For you lists,
+      // only the notes not yet read.
+      'inbox.get': ({ project, unread }) => {
+        const all = (data.inbox[project] ?? []).filter(
+          (message) => !unread || (message.state === 'queued' && message.kind === 'note'),
+        )
+        const messages = all.slice(0, data.inboxFit ?? all.length)
+        return answer({ messages, total: all.length, shown: messages.length })
+      },
       'task.get': ({ project, task }) => {
         const found = data.tasks[`${project}:${task}`]
         return found === undefined
@@ -314,10 +323,11 @@ async function open(page, data = model()) {
       },
       'task.resume': ({ project, task }) =>
         answer({ task: { ...data.tasks[`${project}:${task}`], state: 'queued' } }),
-      // The last `limit` items, as the core gives them.
+      // The last `limit` items, as the core gives them, and how many came.
       'task.transcript': ({ project, task, limit = Number.POSITIVE_INFINITY }) => {
         const { items, total } = data.transcripts?.[`${project}:${task}`] ?? { items: [], total: 0 }
-        return answer({ items: items.slice(Math.max(0, items.length - limit)), total })
+        const last = items.slice(Math.max(0, items.length - limit))
+        return answer({ items: last, total, shown: last.length })
       },
       'project.open': ({ directory }) => answer({ project: { id: 3, name: 'new', directory } }),
     }
@@ -1240,6 +1250,40 @@ test('a note from an agent reads in its own list, marked read when seen', async 
   await expect(note).toContainText('Note from @chief')
   await note.getByRole('button', { name: 'Mark m-16 read' }).click()
   await expect.poll(() => calls(page, 'message.read')).toEqual([{ message: 16 }])
+})
+
+test('says how many earlier notes one frame did not hold, and counts them all', async ({
+  page,
+}) => {
+  const data = model()
+  const note = (id, body, minutesAgo) => ({
+    id,
+    kind: 'note',
+    state: 'queued',
+    sender: 'chief',
+    recipient: 'human',
+    taskNumber: null,
+    body,
+    questions: null,
+    createdAt: at(minutesAgo),
+  })
+  // Newest first, as the core reads them: only the two newest fit in its answer.
+  data.inbox[1].unshift(note(18, 'The lexer is in.', 1), note(17, 'The parser is in.', 2))
+  data.inboxFit = 2
+  await open(page, data)
+  const bay = page.getByRole('region', { name: 'For you' })
+  await expect(bay.locator('.foryou-status')).toHaveText('3 notes')
+  await expect(page.getByRole('button', { name: 'Inbox (3)' })).toBeVisible()
+  const notes = bay.getByRole('list', { name: 'Notes for you' })
+  await expect(notes.locator('.strip-message')).toHaveCount(2)
+  await expect(notes.locator('.strips-more')).toHaveText(
+    '1 earlier note not shown: mark these read to see it.',
+  )
+  expect(await calls(page, 'inbox.get')).toContainEqual({
+    project: 1,
+    participant: 'human',
+    unread: true,
+  })
 })
 
 // Every key goes to the pane as typed, in order, and none of it holds a paste:

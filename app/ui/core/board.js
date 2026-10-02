@@ -331,8 +331,10 @@ export class BoardView {
       ...(board.gated ?? []),
       ...(board.overdue ?? []).map((message) => ({ ...message, overdue: true })),
     ]
-    // The human's inbox holds notes: each reads and is marked read, in its own list.
-    const notes = inbox.filter((message) => message.state === 'queued' && message.kind === 'note')
+    // The human's notes not yet read: each reads and is marked read, in its
+    // own list. The core reads the newest one frame holds, and says how many
+    // there are.
+    const { messages: notes, total: unread, shown } = inbox
     const section = element('section', 'foryou')
     section.setAttribute('role', 'region')
     section.setAttribute('aria-label', 'For you')
@@ -342,11 +344,11 @@ export class BoardView {
       element(
         'span',
         'foryou-status',
-        waiting.length === 0 && notes.length === 0
+        waiting.length === 0 && unread === 0
           ? 'Nothing waiting'
           : [
               waiting.length === 0 ? null : `${waiting.length} waiting`,
-              notes.length === 0 ? null : `${notes.length} note${notes.length === 1 ? '' : 's'}`,
+              unread === 0 ? null : `${unread} note${unread === 1 ? '' : 's'}`,
             ]
               .filter(Boolean)
               .join(' · '),
@@ -368,10 +370,21 @@ export class BoardView {
       )
     }
     section.append(strips)
-    if (notes.length > 0) {
+    if (unread > 0) {
       const list = element('ol', 'strips')
       list.setAttribute('aria-label', 'Notes for you')
       for (const message of notes) list.append(this.#messageStrip(message, board, now))
+      // Those shown, once read, make room for the earlier ones.
+      const earlier = unread - shown
+      if (earlier > 0) {
+        list.append(
+          element(
+            'li',
+            'strips-more',
+            `${earlier} earlier note${earlier === 1 ? '' : 's'} not shown: mark these read to see ${earlier === 1 ? 'it' : 'them'}.`,
+          ),
+        )
+      }
       section.append(element('h3', 'foryou-sub', 'Notes from your agents'), list)
     }
     return section
@@ -779,8 +792,8 @@ export class TaskDrawer {
     if (same && changed && this.#fold?.open) this.#actions.onTranscript(task)
   }
 
-  /** What the task's window wrote, read for its open fold. */
-  fill(task, { items, total }) {
+  /** What the task's window wrote, read for its open fold: the last items one frame holds. */
+  fill(task, { items, total, shown }) {
     if (!this.#drawn(task) || this.#fold === null) return
     const list = element('ol', 'transcript')
     list.setAttribute('aria-label', `What T-${task.number}'s window wrote`)
@@ -799,8 +812,8 @@ export class TaskDrawer {
     }
     redraw(this.#fold, [
       transcriptHead(total),
-      ...(total > items.length
-        ? [element('p', 'transcript-more', `The last ${items.length} of ${total} items.`)]
+      ...(total > shown
+        ? [element('p', 'transcript-more', `The last ${shown} of ${total} items.`)]
         : []),
       list,
     ])
