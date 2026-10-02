@@ -194,7 +194,8 @@ function teamOf(project) {
  * Runs `work` on a timer and on demand, never two at once; a kick during a
  * run runs it again after. A pass that fails or runs long goes to the log,
  * and every ten minutes a line says the daemon is alive, how big it is and
- * how its passes have been.
+ * how its passes have been. Exported for its tests, which need a pass they
+ * control: the daemon's own is the dispatcher's.
  */
 export function passLoop(work, log = null) {
   let running = null

@@ -17,7 +17,6 @@ import {
   agentRow,
   configRoot,
   editAgent,
-  legacyConfigRoot,
   listAgents,
   migrateStateRoot,
   normalizeRoster,
@@ -321,16 +320,22 @@ describe('a roster written before the rename keeps working', () => {
   })
 })
 
-it('legacy import never copies a link that could redirect a future write outside the home', () => {
+it('legacy import brings the old state in, and never a link that could redirect a future write outside the home', () => {
   const t = tempEnv()
   try {
-    const legacy = legacyConfigRoot(t.env)
+    // Where the state lived before the roots were merged.
+    const legacy = join(t.env.XDG_CONFIG_HOME, 'consensflow')
     mkdirSync(legacy, { recursive: true })
     const outside = join(t.root, 'outside.json')
     writeFileSync(outside, 'preserve')
     symlinkSync(outside, join(legacy, 'hosts.json'))
     writeFileSync(join(legacy, 'mode.json'), JSON.stringify({ mode: 'claude' }))
-    migrateStateRoot(t.env)
+    assert.deepEqual(migrateStateRoot(t.env), {
+      from: legacy,
+      to: configRoot(t.env),
+      copied: ['mode.json'],
+    })
+    assert.equal(readFileSync(join(configRoot(t.env), 'mode.json'), 'utf8'), '{"mode":"claude"}')
     assert.equal(existsSync(join(configRoot(t.env), 'hosts.json')), false)
     assert.equal(readFileSync(outside, 'utf8'), 'preserve')
     assert.equal(readFileSync(join(legacy, 'hosts.json'), 'utf8'), 'preserve')
