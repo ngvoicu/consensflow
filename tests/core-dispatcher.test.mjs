@@ -2414,6 +2414,30 @@ describe('a participant that leaves', () => {
       )
     })
   })
+
+  it("stops a closed project's windows acting at once, before their exits come", async () => {
+    // A token names a participant and a project by id, and once the project
+    // is deleted the ledger gives both ids to what it writes next: by then
+    // none of its windows may act for anyone, exit or no exit.
+    const revoked = []
+    await setup(
+      async (context) => {
+        const { project } = await withStaff(context)
+        await context.dispatcher.pass()
+        context.host.holdExits = true
+        await context.dispatcher.closeProject(project.id)
+        assert.deepEqual(revoked, ['token-chief'], 'closing revokes its windows')
+        await context.dispatcher.deleteProject(project.id)
+        assert.deepEqual(revoked, ['token-chief'], 'deleting finds none left')
+      },
+      {
+        credentials: {
+          issue: ({ participant }) => `token-${participant.handle}`,
+          revoke: (token) => revoked.push(token),
+        },
+      },
+    )
+  })
 })
 
 describe('a window that closes', () => {
