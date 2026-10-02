@@ -167,7 +167,11 @@ export async function startIntegration({
   existingRoot = null,
   editor = EDITOR,
 } = {}) {
-  assert.equal(existsSync(BRIDGE), true, `missing built bridge: ${BRIDGE}`)
+  assert.equal(
+    existsSync(BRIDGE),
+    true,
+    `missing built bridge: ${BRIDGE}; build it with npm run build:bridge`,
+  )
   const root = existingRoot ?? mkdtempSync(join(tmpdir(), 'consensflow-integration-'))
   const workspace = join(root, 'workspace')
   mkdirSync(workspace, { recursive: true })

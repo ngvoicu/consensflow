@@ -1,6 +1,6 @@
 # One version tag builds and publishes everything people download: the Mac
 # app (the DMG, and the signed update bundle installed apps fetch through the
-# update feed), the Windows installer and the portable Windows zip.
+# update feed), the Windows installer and the portable Windows exe.
 #
 #   git tag -a v<version> -m "<release notes>" && git push upstream v<version>
 #
@@ -144,7 +144,7 @@ jobs:
           assets=(
             "$mac.dmg" "$mac.app.tar.gz" "$mac.app.tar.gz.sig" latest.json
             "nsis/ConsensFlow_${version}_x64-setup.exe"
-            "portable/ConsensFlow_${version}_x64-portable.zip"
+            "portable/ConsensFlow_${version}_x64-portable.exe"
           )
           for asset in "${assets[@]}"; do test -s "$asset" || { echo "missing $asset"; exit 1; }; done
           for asset in "${assets[@]}"; do (cd "$(dirname "$asset")" && sha256sum "$(basename "$asset")"); done > SHA256SUMS
@@ -154,9 +154,11 @@ jobs:
             echo "**Downloads.** macOS on Apple silicon: the DMG. It is ad-hoc code-signed and"
             echo "not notarized, so the first launch may need System Settings → Privacy &"
             echo "Security → Open Anyway. Windows x64: the installer (\`-setup.exe\`), or the"
-            echo "portable zip: unpack it anywhere and run \`ConsensFlow.exe\`; its data stays in"
-            echo "your user folder either way. Neither Windows file is code-signed, so Windows"
-            echo "shows its unknown-publisher warning. The Mac app updates itself through"
+            echo "portable exe (\`-portable.exe\`), one file you run from anywhere: its first"
+            echo "start unpacks Node and the CLI into"
+            echo "\`%LOCALAPPDATA%\\dev.ngvoicu.consensflow\\runtime\`. Its data stays in your user"
+            echo "folder either way. Neither Windows file is code-signed, so Windows shows its"
+            echo "unknown-publisher warning. The Mac app updates itself through"
             echo "ConsensFlow → Check for Updates on the $([[ "$version" == *-* ]] && echo Alpha || echo Stable) channel."
           } > body.md
           prerelease=()
