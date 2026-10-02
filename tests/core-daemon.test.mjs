@@ -195,6 +195,44 @@ describe('the daemon and its log', () => {
     })
   }
 
+  it('touches no window of the running daemon when a second start is refused its ledger', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cf-daemon-'))
+    const running = openLedger(path.join(home, 'consensflow.db'))
+    const launch = path.join(home, 'integrations', 'claude', '0b9f2c1e-5d4a-4c3b-9a8f-7e6d5c4b3a21')
+    try {
+      await mkdir(launch, { recursive: true })
+      await writeFile(path.join(launch, 'settings.json'), '{}\n')
+      const child = spawn(process.execPath, [EDITOR], {
+        env: {
+          ...process.env,
+          HOME: home,
+          CONSENSFLOW_HOME: home,
+          CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+      let errors = ''
+      child.stderr.on('data', (chunk) => {
+        errors += chunk
+      })
+      await new Promise((resolve) => child.once('exit', resolve))
+      const log = await readFile(path.join(home, 'daemon.log'), 'utf8').catch(() => '')
+      assert.match(
+        `${errors}${log}`,
+        /another ConsensFlow has .*consensflow\.db open/,
+        'the second start is refused',
+      )
+      assert.equal(
+        await readFile(path.join(launch, 'settings.json'), 'utf8'),
+        '{}\n',
+        "the running daemon's window keeps its files",
+      )
+    } finally {
+      running.close()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('starts though its agents file cannot be used, and says why in its log', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'cf-daemon-'))
     const file = path.join(home, 'agents.json')

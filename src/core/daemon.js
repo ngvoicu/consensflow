@@ -65,10 +65,11 @@ export async function startCore(
   process.on('uncaughtException', uncaught('uncaught exception'))
   process.on('unhandledRejection', uncaught('unhandled rejection'))
   process.on('exit', (code) => log.info(`exit ${code}`))
-  // No window survives a restart: what every launch left in the home goes.
+  const ledger = openLedger(join(home, 'consensflow.db'), { trace })
+  // No window survives a restart: what every launch left in the home goes,
+  // once this daemon holds the ledger, so a second start refused touches nothing.
   const swept = sweepLaunches(home)
   if (swept > 0) log.info(`swept ${swept} launch folder${swept === 1 ? '' : 's'}`)
-  const ledger = openLedger(join(home, 'consensflow.db'), { trace })
   ledger.suspendForRestart()
   // What the app ships is what the roster and the teams have: the roster is
   // the catalog plus the human's own agents, and every
