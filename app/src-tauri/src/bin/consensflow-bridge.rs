@@ -1,5 +1,5 @@
 use app_lib::bridge::stdin_is_pipe;
-use app_lib::commands::run_headless;
+use app_lib::runtime::run_headless;
 
 fn main() {
     if !stdin_is_pipe() {

@@ -923,6 +923,19 @@ pub(crate) fn serial_pty_test() -> SerialPtyTest {
     SerialPtyTest { _lock: lock, done }
 }
 
+/// Whether a pid is still there — signal 0 delivers nothing and only asks.
+#[cfg(all(test, unix))]
+pub(crate) fn process_exists(pid: i32) -> bool {
+    unsafe extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+
+    // SAFETY: signal 0 does not deliver a signal; it only checks whether
+    // the process exists and is signalable by this process.
+    let result = unsafe { kill(pid, 0) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(1)
+}
+
 impl Drop for PaneTable {
     fn drop(&mut self) {
         let panes = match self.panes.get_mut() {
@@ -1217,7 +1230,7 @@ mod tests {
     use portable_pty::PtySize;
 
     #[cfg(unix)]
-    use super::{serial_pty_test, OpenedPane, PaneEnvironment, PaneKey};
+    use super::{process_exists, serial_pty_test, OpenedPane, PaneEnvironment, PaneKey};
     use super::{PaneError, PaneTable};
 
     fn terminal_size(rows: u16, cols: u16) -> PtySize {
@@ -1392,18 +1405,6 @@ mod tests {
             .recv_timeout(Duration::from_secs(3))
             .expect("PTY reader did not reach EOF")
             .expect("read PTY output")
-    }
-
-    #[cfg(unix)]
-    fn process_exists(pid: i32) -> bool {
-        unsafe extern "C" {
-            fn kill(pid: i32, signal: i32) -> i32;
-        }
-
-        // SAFETY: signal 0 does not deliver a signal; it only checks whether
-        // the process exists and is signalable by this process.
-        let result = unsafe { kill(pid, 0) };
-        result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(1)
     }
 
     #[cfg(unix)]
