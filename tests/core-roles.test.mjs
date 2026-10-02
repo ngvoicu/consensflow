@@ -82,7 +82,7 @@ describe('role instructions for the new core', () => {
     const shared = [
       'Run each of these in your shell (your Bash or terminal tool).',
       "Do not hand out tasks, launch other agents or type into other windows, and\nnever read another agent's session files: the board is your only channel.",
-      'Subagents, if your harness has them, may search and read for you; every\nchange is yours to make.',
+      'Subagents, if your harness has them, may help with your task. Wait for them\nbefore you end your turn: ConsensFlow takes your result when it ends, and the\nresult is yours.',
       'This window is for one task: it opened with the task and closes when the task\nleaves your hands.',
     ]
     const titles = {

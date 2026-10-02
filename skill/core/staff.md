@@ -27,8 +27,9 @@ written (in double quotes the shell runs backticks and `$( )`):
 {{result}}
 Do not hand out tasks, launch other agents or type into other windows, and
 never read another agent's session files: the board is your only channel.
-Subagents, if your harness has them, may search and read for you; every
-change is yours to make.
+Subagents, if your harness has them, may help with your task. Wait for them
+before you end your turn: ConsensFlow takes your result when it ends, and the
+result is yours.
 Questions go to the chief, never to another member. Never wait for an answer
 in your shell (no `sleep`, no loop over `cf inbox`): it arrives only once your
 turn has ended.
