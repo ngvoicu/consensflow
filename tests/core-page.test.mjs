@@ -561,9 +561,17 @@ describe('the page protocol of the new core', () => {
       const cancelled = await operations['task.cancel']({ project: project.id, task: 1 })
       assert.equal(cancelled.task.state, 'cancelled')
       const { task: thread } = await operations['task.get']({ project: project.id, task: 1 })
+      // Whoever asked for it hears it from ConsensFlow, with the window that had it.
       assert.deepEqual(
-        thread.messages.map((m) => [m.kind, m.sender.replace(/^artemis-.*$/, 'artemis-session')]),
-        [['task', 'chief']],
+        thread.messages.map((m) => [m.kind, m.sender, m.recipient.replace(/^artemis-.*$/, 'ar')]),
+        [
+          ['task', 'chief', 'ar'],
+          ['note', null, 'chief'],
+        ],
+      )
+      assert.equal(
+        thread.messages[1].body,
+        `@human cancelled T-1 (Write the parser): @${thread.assignee}'s window was stopped.`,
       )
       await assert.rejects(operations['task.get']({ project: project.id, task: 9 }), /no task T-9/)
       ledger.createTask(project.id, {

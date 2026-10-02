@@ -8,7 +8,7 @@ import {
 } from './model.js'
 import { renderChoices, renderQuestions, requireChoices, requireQuestions } from './questions.js'
 import { queue, send, withdraw } from './queue.js'
-import { cancelTask, pauseTask } from './tasks.js'
+import { callOff, pauseTask } from './tasks.js'
 import { MESSAGE_SELECT, messageView } from './views.js'
 
 /**
@@ -384,7 +384,7 @@ export function declineMessage(store, messageId, { by }) {
     let word = `@${by} declined your answer to m-${message.replyTo}. Answer it again: cf answer m-${message.replyTo} "…"`
     if (message.kind === 'task') {
       told = store.participantRow(task.requester_id).handle
-      cancelTask(store, message.projectId, task.number, { by })
+      callOff(store, message.projectId, task.number, by)
       word = `@${by} declined T-${task.number} (${task.title}). It is cancelled.`
     }
     if (told !== by) {

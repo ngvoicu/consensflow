@@ -3,6 +3,7 @@ import {
   COORDINATOR_ROLES,
   LedgerError,
   MAX_BODY,
+  MEMBER_ROLES,
   POOLS,
   PURPOSES,
   requireActive,
@@ -558,15 +559,57 @@ export function reopenTask(store, projectId, number, { by, body }) {
   })
 }
 
+/**
+ * A task is called off, and whoever asked for it hears so in the same step,
+ * unless it cancelled the task itself: what was cancelled, and the window
+ * that was stopped when a member's had begun on it (the daemon stops that
+ * window on its next look).
+ */
 export function cancelTask(store, projectId, number, { by }) {
   return store.write(() => {
-    store.participantByHandle(projectId, by)
-    const task = store.taskRow(projectId, number)
-    requireTaskState(task, ['open', 'queued', ...ACTIVE_TASK_STATES, 'paused'], 'cancel')
-    dropQueued(store, task.id)
-    store.moveTask(task, 'cancelled', { by })
+    const { task, window } = callOff(store, projectId, number, by)
+    const requester = store.participantRow(task.requester_id)
+    if (requester.handle !== by) {
+      send(store, projectId, {
+        to: requester.handle,
+        task: number,
+        kind: 'note',
+        body: `@${by} cancelled T-${number} (${task.title})${window === null ? '' : `: @${window.handle}'s window was stopped`}.`,
+      })
+    }
     return taskById(store, task.id)
   })
+}
+
+/**
+ * The cancel itself, for an operation that tells the requester in its own
+ * words (the human's decline of a brief). Whatever of the task is still on
+ * its way, a delivery into a window included, is withdrawn, so nothing of
+ * it is delivered or tried again. Says which member's window had begun on
+ * it, if one had: its brief or the words that resume it went in.
+ */
+export function callOff(store, projectId, number, by) {
+  store.participantByHandle(projectId, by)
+  const task = store.taskRow(projectId, number)
+  requireTaskState(task, ['open', 'queued', ...ACTIVE_TASK_STATES, 'paused'], 'cancel')
+  const assignee = task.assignee_id === null ? null : store.participantRow(task.assignee_id)
+  const began =
+    assignee !== null &&
+    MEMBER_ROLES.includes(assignee.role) &&
+    store.db
+      .prepare(
+        `SELECT 1 FROM message WHERE task_id = ? AND recipient_id = ? AND kind = 'task'
+           AND state IN ('delivering', 'delivered')`,
+      )
+      .get(task.id, assignee.id) !== undefined
+  store.db
+    .prepare(
+      `UPDATE message SET state = 'cancelled', reason = ?
+       WHERE task_id = ? AND state IN ('queued', 'delivering', 'gated')`,
+    )
+    .run(`cancelled by @${by}`, task.id)
+  store.moveTask(task, 'cancelled', { by })
+  return { task, window: began ? assignee : null }
 }
 
 /** The daemon gives up on a task: its pane died, or its launch never came up. */
