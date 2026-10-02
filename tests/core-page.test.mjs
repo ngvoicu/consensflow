@@ -682,6 +682,42 @@ describe('the page protocol of the new core', () => {
     })
   })
 
+  it('opens a task in one bridge frame however long its brief and result, and says what was cut', async () => {
+    await withPage(async ({ ledger, operations }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+      })
+      await operations['member.add']({ project: project.id, agent: 'artemis' })
+      const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
+      const long = 'The lexer is done, and here is why. '.repeat(20_000)
+      ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'worker',
+        tier: artemis.tier,
+        body: long,
+      })
+      const { message } = ledger.assignTask(project.id, 1, artemis.id)
+      ledger.beginDelivery(message.id)
+      ledger.confirmDelivery(message.id, {})
+      ledger.recordResult(project.id, 1, { body: long })
+      // What the Rust host's bridge carries: one frame of at most 1 MiB.
+      const reply = await operations['task.get']({ project: project.id, task: 1 })
+      const frame = Buffer.byteLength(JSON.stringify({ ok: true, ...reply }))
+      assert.ok(frame < 1024 * 1024, `the task takes ${frame} bytes`)
+      assert.deepEqual(
+        [reply.task.bodyCut, reply.task.messages.map((m) => [m.kind, m.bodyCut])],
+        [
+          true,
+          [
+            ['task', true],
+            ['result', true],
+          ],
+        ],
+      )
+    })
+  })
+
   it("shows the human's notes and marks them read; the human answers nothing on the page", async () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({

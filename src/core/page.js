@@ -126,8 +126,9 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       return ledger.latestMessages(owner.id, { unread: unread === true })
     },
 
+    // As much of the task as one frame carries, what was cut marked.
     'task.get': async ({ project, task }) => {
-      const found = ledger.task(project, task)
+      const found = ledger.taskThatFits(project, task)
       if (found === null) throw new Error(`no task T-${task} in this project`)
       return { task: found }
     },

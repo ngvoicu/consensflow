@@ -729,13 +729,24 @@ export class TaskDrawer {
       section.append(sectionHead('h3', label, count))
       return section
     }
+    // What the core cut to carry the task in one frame says where it reads whole.
+    const cutNote = (part) =>
+      part.bodyCut
+        ? [
+            element(
+              'p',
+              'drawer-cut',
+              `Cut to fit here: cf task get T-${task.number} shows it whole.`,
+            ),
+          ]
+        : []
     const brief = panel('brief', 'Brief')
-    brief.append(element('p', 'drawer-brief', task.body))
+    brief.append(element('p', 'drawer-brief', task.body), ...cutNote(task))
     sections.push(brief)
     const result = task.messages.findLast((message) => message.kind === 'result')
     if (result !== undefined) {
       const block = panel('result', 'Result')
-      block.append(element('p', 'drawer-result', result.body))
+      block.append(element('p', 'drawer-result', result.body), ...cutNote(result))
       sections.push(block)
     }
     // The thread keeps only what the rest of the drawer does not say: the
@@ -750,8 +761,19 @@ export class TaskDrawer {
       briefed.add(message.recipient)
       return false
     })
-    if (rest.length > 0) {
+    // The earliest messages of a thread too long for one frame are left out.
+    const left = task.messagesLeftOut ?? 0
+    if (rest.length > 0 || left > 0) {
       const block = panel('thread', 'Thread', String(rest.length))
+      if (left > 0) {
+        block.append(
+          element(
+            'p',
+            'thread-more',
+            `${left} earlier message${left === 1 ? '' : 's'} not shown: cf task get T-${task.number} shows the whole thread.`,
+          ),
+        )
+      }
       const thread = element('ol', 'thread')
       thread.setAttribute('aria-label', `T-${task.number}'s thread`)
       for (const message of rest) {
@@ -764,6 +786,7 @@ export class TaskDrawer {
             `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)} to ${who(message.recipient)} · ${message.state}${message.reason ? ` (${message.reason})` : ''}`,
           ),
           element('p', 'thread-body', message.body),
+          ...cutNote(message),
         )
         thread.append(item)
       }

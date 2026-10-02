@@ -1850,6 +1850,112 @@ describe('views', () => {
     })
   })
 
+  it('reads a task in a frame however long its brief and thread: the brief whole first, then the newest messages, a body that does not fit cut and marked', async () => {
+    await withLedger((ledger) => {
+      const { project } = staff(ledger)
+      const cutAt = (text, max) => `${text.slice(0, max)}\n… (${text.length} characters; cut here)`
+      /** A task for zeus with this brief, a question and its answer, then this result. */
+      const worked = (brief, result) => {
+        const { task, message } = ledger.createTask(project.id, {
+          from: 'chief',
+          to: 'zeus',
+          body: brief,
+        })
+        deliver(ledger, message)
+        const question = ledger.ask(project.id, {
+          from: 'zeus',
+          to: 'chief',
+          task: task.number,
+          body: 'JSON or YAML?',
+        })
+        ledger.answer(question.id, { from: question.recipientId, body: 'JSON.' })
+        ledger.recordResult(project.id, task.number, { body: result })
+        return task.number
+      }
+      // A brief and a result that pass the page's 1 MiB frame together, each
+      // longer than PAGE_BYTES alone.
+      const brief = `Fix the parser.\n${'Context, with "quotes" and a path, /src/x.js.\n'.repeat(13_000)}`
+      const result = 'A finding, with the evidence for it. '.repeat(16_000)
+      const long = worked(brief, result)
+      assert.ok(Buffer.byteLength(JSON.stringify(ledger.task(project.id, long))) > 1024 * 1024)
+
+      const read = ledger.taskThatFits(project.id, long)
+      const bytes = Buffer.byteLength(JSON.stringify(read))
+      assert.ok(bytes <= PAGE_BYTES, `the task takes ${bytes} bytes`)
+      assert.deepEqual(
+        [read.body, read.bodyCut],
+        [cutAt(brief, TRANSCRIPT_ITEM_MAX), true],
+        'its brief, cut and marked',
+      )
+      assert.deepEqual(
+        read.messages.map((m) => [m.kind, m.body, m.bodyCut === true]),
+        [
+          ['task', cutAt(brief, TRANSCRIPT_ITEM_MAX), true],
+          ['question', 'JSON or YAML?', false],
+          ['answer', 'JSON.', false],
+          ['result', cutAt(result, TRANSCRIPT_ITEM_MAX), true],
+        ],
+        'every message stays, a long body cut and marked',
+      )
+      assert.equal(ledger.task(project.id, long).body, brief, 'the whole stays with the task')
+
+      // A brief that fits stays whole, first in line, though the result is cut.
+      const shorter = brief.slice(0, 300_000)
+      const read2 = ledger.taskThatFits(project.id, worked(shorter, result))
+      assert.ok(Buffer.byteLength(JSON.stringify(read2)) <= PAGE_BYTES)
+      assert.deepEqual([read2.body, 'bodyCut' in read2], [shorter, false])
+      assert.deepEqual(read2.messages.at(-1).body, cutAt(result, TRANSCRIPT_ITEM_MAX))
+      // A task that fits is read as it is.
+      assert.deepEqual(
+        ledger.taskThatFits(project.id, worked('Lexer', 'Lexer done')),
+        ledger.task(project.id, 3),
+      )
+      assert.equal(ledger.taskThatFits(project.id, 99), null)
+    })
+  })
+
+  it('leaves out the earliest messages of a thread too long for the frame, never a task message, and says how many', async () => {
+    await withLedger((ledger) => {
+      const { project } = staff(ledger)
+      const brief = 'Keep the parser going. '.repeat(30_000)
+      const { message } = ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: brief })
+      deliver(ledger, message)
+      // Twelve hundred notes on the task: more than a frame even cut to their lines.
+      const notes = Array.from({ length: 1_200 }, (_, n) =>
+        ledger.note(project.id, {
+          from: 'zeus',
+          to: 'chief',
+          task: 1,
+          body: `Progress ${n}: ${'step '.repeat(100)}`,
+        }),
+      )
+      const read = ledger.taskThatFits(project.id, 1)
+      const bytes = Buffer.byteLength(JSON.stringify(read))
+      assert.ok(bytes <= PAGE_BYTES, `the task takes ${bytes} bytes`)
+      assert.equal(
+        read.body,
+        `${brief.slice(0, TRANSCRIPT_ITEM_MAX)}\n… (${brief.length} characters; cut here)`,
+      )
+      assert.ok(read.messagesLeftOut > 0)
+      assert.equal(read.messages.length + read.messagesLeftOut, 1_201)
+      // The brief as delivered stays, cut to its line; the newest notes are whole.
+      assert.deepEqual(
+        [read.messages[0].id, read.messages[0].body, read.messages[0].bodyCut],
+        [message.id, `… (${brief.length} characters; cut here)`, true],
+      )
+      assert.deepEqual(
+        read.messages.slice(-2).map((m) => [m.id, m.body]),
+        notes.slice(-2).map((m) => [m.id, m.body]),
+      )
+      assert.ok(
+        read.messages
+          .slice(1)
+          .every((m, at) => m.id === notes[notes.length - read.messages.length + 1 + at].id),
+        'the notes kept are the newest, with none between them left out',
+      )
+    })
+  })
+
   it('names the task a participant is on, with its thread', async () => {
     await withLedger((ledger) => {
       const { project, id } = staff(ledger)

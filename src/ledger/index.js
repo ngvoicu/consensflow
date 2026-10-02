@@ -400,9 +400,11 @@ const messageView = (row) => ({
   deliveredAt: row.delivered_at,
 })
 
-/** `text` cut at `max` characters, saying how long it was; shorter, as it is. */
+/** `text` cut at `max` characters, then a line saying how long it was (at 0, only that line); shorter, as it is. */
 const cut = (text, max) =>
-  text.length <= max ? text : `${text.slice(0, max)}\n… (${text.length} characters; cut here)`
+  text.length <= max
+    ? text
+    : `${text.slice(0, max)}${max === 0 ? '' : '\n'}… (${text.length} characters; cut here)`
 
 /** A message as the bay shows it: a long one cut at BAY_EXCERPT, saying how long it was. */
 const bayView = (row) => {
@@ -2409,7 +2411,11 @@ class Ledger {
       .map(bayView)
   }
 
-  /** A task and its whole thread, oldest first; null when there is no such task. */
+  /**
+   * A task and its whole thread, oldest first; null when there is no such
+   * task. `cf task get` reads it over the local API; the page reads
+   * `taskThatFits`.
+   */
   task(projectId, number) {
     const row = this.#db
       .prepare(`${TASK_SELECT} WHERE t.project_id = ? AND t.number = ?`)
@@ -2421,6 +2427,65 @@ class Ledger {
         .prepare(`${MESSAGE_SELECT} WHERE m.task_id = ? ORDER BY m.id`)
         .all(row.id)
         .map(messageView),
+    }
+  }
+
+  /**
+   * A task as the page reads it in one frame, null when there is no such
+   * task: its brief first, then its thread from the newest message back,
+   * each body whole while PAGE_BYTES allows. A body that does not fit is cut
+   * at TRANSCRIPT_ITEM_MAX characters, at BAY_EXCERPT, or to the line saying
+   * how long it was, whichever fits, and marked `bodyCut`; the earliest
+   * messages that do not fit even so are left out, and `messagesLeftOut`
+   * says how many. A task message (a brief delivered, a resume, a reopen)
+   * always stays, cut to its line at least: there are few, and a window's
+   * first one is how the drawer knows the brief it was given. `cf task get`
+   * reads it all whole.
+   */
+  taskThatFits(projectId, number) {
+    const task = this.task(projectId, number)
+    const bytes = (value) => Buffer.byteLength(JSON.stringify(value))
+    if (task === null || bytes(task) <= PAGE_BYTES) return task
+    const { messages, ...head } = task
+    // Each part's forms, from whole to the least it can be.
+    const forms = (part) =>
+      [
+        part,
+        ...[TRANSCRIPT_ITEM_MAX, BAY_EXCERPT, 0]
+          .filter((max) => part.body.length > max)
+          .map((max) => ({ ...part, body: cut(part.body, max), bodyCut: true })),
+      ].map((form) => ({ form, size: bytes(form) }))
+    const brief = forms(head)
+    const thread = messages.map(forms)
+    const stays = (at) => messages[at].kind === 'task'
+    // The least the answer takes: the brief and every task message cut to
+    // its line, and room to say how many messages were left out.
+    let used =
+      bytes({ ...brief.at(-1).form, messages: [], messagesLeftOut: messages.length }) +
+      thread.reduce((sum, options, at) => sum + (stays(at) ? options.at(-1).size + 1 : 0), 0)
+    // The first form that fits in the room left, past what is counted for it already.
+    const fit = (options, counted, comma) => {
+      const chosen = options.find(({ size }) => used + size + comma - counted <= PAGE_BYTES)
+      if (chosen !== undefined) used += chosen.size + comma - counted
+      return chosen?.form
+    }
+    const shown = fit(brief, brief.at(-1).size, 0) ?? brief.at(-1).form
+    const kept = []
+    let leaving = false
+    for (let at = messages.length - 1; at >= 0; at -= 1) {
+      const options = thread[at]
+      if (stays(at)) {
+        kept[at] = fit(options, options.at(-1).size + 1, 1) ?? options.at(-1).form
+      } else if (!leaving) {
+        kept[at] = fit(options, 0, 1)
+        leaving = kept[at] === undefined
+      }
+    }
+    const left = messages.filter((_, at) => kept[at] === undefined).length
+    return {
+      ...shown,
+      messages: kept.filter((message) => message !== undefined),
+      ...(left === 0 ? {} : { messagesLeftOut: left }),
     }
   }
 

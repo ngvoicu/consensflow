@@ -893,6 +893,52 @@ test("keeps only what is new in a task's thread: questions, answers, follow-ups 
   await expect(drawer.locator('.drawer-meta')).not.toContainText('just now ago')
 })
 
+test('says under a body cut to fit the page where it reads whole, and how many earlier messages it left out', async ({
+  page,
+}) => {
+  const data = model()
+  const cut = (start, length) => `${start}\n… (${length} characters; cut here)`
+  const message = (id, kind, sender, recipient, body, extra = {}) => ({
+    id,
+    kind,
+    sender,
+    recipient,
+    state: 'delivered',
+    reason: null,
+    body,
+    ...extra,
+  })
+  // As the core reads a task too long for one frame: what it cut is marked.
+  data.tasks['1:2'] = {
+    ...data.tasks['1:2'],
+    body: cut('Write the parser', 900_000),
+    bodyCut: true,
+    messagesLeftOut: 3,
+    messages: [
+      message(20, 'task', 'chief', 'zeus', '… (900000 characters; cut here)', { bodyCut: true }),
+      message(25, 'question', 'zeus', 'chief', cut('Which grammar?', 700_000), { bodyCut: true }),
+      message(26, 'answer', 'chief', 'zeus', 'The recursive one.'),
+      message(27, 'result', 'zeus', 'chief', cut('Parser done', 800_000), { bodyCut: true }),
+    ],
+  }
+  await open(page, data)
+  await page.locator('button.card[data-task="2"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-2' })
+  const whole = 'Cut to fit here: cf task get T-2 shows it whole.'
+  await expect(drawer.locator('[data-section="brief"] .drawer-cut')).toHaveText(whole)
+  await expect(drawer.locator('[data-section="result"] .drawer-cut')).toHaveText(whole)
+  const thread = drawer.locator('[data-section="thread"]')
+  await expect(thread.locator('.thread-more')).toHaveText(
+    '3 earlier messages not shown: cf task get T-2 shows the whole thread.',
+  )
+  await expect(thread.locator('.thread-body')).toHaveText([
+    cut('Which grammar?', 700_000),
+    'The recursive one.',
+  ])
+  await expect(thread.locator('.thread-item').nth(0).locator('.drawer-cut')).toHaveText(whole)
+  await expect(thread.locator('.thread-item').nth(1).locator('.drawer-cut')).toHaveCount(0)
+})
+
 test("shows what a task's window wrote, from ConsensFlow's own copy, under the thread", async ({
   page,
 }) => {
