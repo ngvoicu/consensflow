@@ -362,7 +362,7 @@ describe('the daemon over its bridge', () => {
     const d = await daemonOverItsBridge(t, { agents: [MYBUILDER] })
     const opened = await d.request('project.open', {
       directory: d.workspace,
-      harness: 'claude-code',
+      agent: 'mybuilder',
       staff: [{ agent: 'mybuilder', roles: ['worker', 'reviewer'] }],
     })
     assert.equal(opened.ok, true, JSON.stringify(opened))
@@ -406,7 +406,7 @@ describe('the daemon over its bridge', () => {
       )
     await d.request('project.open', {
       directory: d.workspace,
-      harness: 'claude-code',
+      agent: 'mybuilder',
       staff: [{ agent: 'mybuilder', roles: ['worker'] }],
     })
     await d.until(() => told('core').length > 0, 'told the page of the new project')

@@ -2,7 +2,7 @@ import { basename } from 'node:path'
 import { missingHarnesses, offerable } from '../harnesses.js'
 import { RESUME_WORDS } from '../ledger/index.js'
 import { agentRow, harnessForKind, listAgents } from '../roster.js'
-import { requireOpen } from './dispatcher.js'
+import { requireLeadAgent, requireOpen } from './dispatcher.js'
 
 /**
  * What the board page may ask of the new core: each operation is the human
@@ -19,12 +19,13 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
   return {
     'projects.list': async () => ({ projects: ledger.projects() }),
 
-    // The staff given, as the roster has those agents now; else the last staff.
-    'project.open': change(async ({ directory, name, harness, gate, staff }) => ({
+    // The lead on the saved agent given; the staff given, as the roster has
+    // those agents now, else the last staff.
+    'project.open': change(async ({ directory, name, agent, gate, staff }) => ({
       project: await dispatcher.openProject({
         directory,
         name: name ?? basename(directory),
-        harness,
+        chief: lead(agent, env),
         gate,
         staff:
           staff === undefined
@@ -53,24 +54,19 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
 
     'staff.last': async () => ({ staff: lastStaffNow(ledger, env) }),
 
-    // The human's Switch lead: a saved agent (its harness, model and effort),
-    // or a harness on its own default model. `when: 'turn'` lets a lead at
-    // work finish its turn; `note` first asks it where things stand.
-    'chief.switch': change(
-      async ({ project, agent = null, harness = null, when = 'now', note = false }) => {
-        if (!['now', 'turn'].includes(when)) throw new Error('when is now or turn')
-        const target =
-          agent === null
-            ? { harness, agent: null }
-            : { harness: membership(agent, env).harness, agent }
-        if (missingHarnesses(env).includes(harnessForKind(target.harness))) {
-          throw new Error(`${target.harness} is not installed here`)
-        }
-        return {
-          project: await dispatcher.switchChief(project, { ...target, when, note: note === true }),
-        }
-      },
-    ),
+    // The human's Switch lead: a saved agent (its harness, model and effort)
+    // on a harness installed here. `when: 'turn'` lets a lead at work finish
+    // its turn; `note` first asks it where things stand.
+    'chief.switch': change(async ({ project, agent, when = 'now', note = false }) => {
+      if (!['now', 'turn'].includes(when)) throw new Error('when is now or turn')
+      const target = lead(agent, env)
+      if (missingHarnesses(env).includes(harnessForKind(target.harness))) {
+        throw new Error(`${target.harness} is not installed here`)
+      }
+      return {
+        project: await dispatcher.switchChief(project, { ...target, when, note: note === true }),
+      }
+    }),
 
     'member.add': change(async ({ project, agent, roles = ['worker'] }) => {
       const member = membership(agent, env)
@@ -194,6 +190,12 @@ function membership(agent, env, agents = listAgents(env)) {
     throw new Error(`no agent named ${agent} in your agents`)
   }
   return { agent, harness: row.kind, tier: saved.profile.workTier }
+}
+
+/** A lead as the dispatcher takes it: the saved agent named, and the harness it runs on. */
+function lead(agent, env) {
+  const { harness } = membership(requireLeadAgent(agent), env)
+  return { harness, agent }
 }
 
 /** The last project's staff for a new one: the members still saved, as the roster has them now. */

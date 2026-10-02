@@ -1,7 +1,7 @@
 import {
-  AGENT_ID,
   cut,
   LedgerError,
+  requireAgentId,
   requireChiefHarness,
   requireHarness,
   requireText,
@@ -226,19 +226,17 @@ export function leadOpenWork(store, projectId) {
 }
 
 /**
- * The human's Switch lead: the chief runs on `harness` from now on, on the
- * saved `agent` (its model and effort) or else the harness's own default.
+ * The human's Switch lead: the chief runs on the saved `agent` (its model
+ * and effort) on `harness` from now on, never on a harness's own default.
  * Its conversation ends here: a conversation belongs to one harness, and
  * every switch starts a fresh one that reads the history. What it was out
  * of quota for was the old harness's account, so that clears. The window is
  * the caller's to close before and open after; `cut` records that the old
  * lead was stopped in the middle of a turn, for the handoff to say.
  */
-export function switchChief(store, projectId, { harness, agent = null, cut = false }) {
+export function switchChief(store, projectId, { harness, agent, cut = false }) {
   requireChiefHarness(harness)
-  if (agent !== null && (typeof agent !== 'string' || !AGENT_ID.test(agent))) {
-    throw new LedgerError('invalid-agent', `invalid agent ${JSON.stringify(agent)}`)
-  }
+  requireAgentId(agent)
   return store.write(() => {
     const chief = store.participantByHandle(projectId, 'chief')
     store.db

@@ -38,7 +38,7 @@ async function withPage(fn) {
       return ledger.createProject({
         directory: request.directory,
         name: request.name,
-        chief: { harness: request.harness },
+        chief: request.chief,
         staff: request.staff,
         ...(request.gate === undefined ? {} : { gate: request.gate }),
       })
@@ -108,7 +108,7 @@ describe('the page protocol of the new core', () => {
     })
   })
 
-  it("switches the lead to a saved agent on its own harness, or to a harness's default, and to nothing not installed here", async () => {
+  it('switches the lead to a saved agent on its own harness, never to a harness on its own, and to nothing not installed here', async () => {
     await withPage(async ({ operations, dispatcher, env }) => {
       // Codex and Claude Code are installed here: their commands are on PATH.
       const bin = path.join(env.HOME, 'bin')
@@ -119,7 +119,7 @@ describe('the page protocol of the new core', () => {
       env.PATH = bin
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       await operations['chief.switch']({
         project: project.id,
@@ -127,13 +127,18 @@ describe('the page protocol of the new core', () => {
         when: 'turn',
         note: true,
       })
-      await operations['chief.switch']({ project: project.id, harness: 'claude-code' })
+      await operations['chief.switch']({ project: project.id, agent: 'zeus' })
       assert.deepEqual(dispatcher.switched, [
         [project.id, { harness: 'codex', agent: 'diana', when: 'turn', note: true }],
-        [project.id, { harness: 'claude-code', agent: null, when: 'now', note: false }],
+        [project.id, { harness: 'claude-code', agent: 'zeus', when: 'now', note: false }],
       ])
+      // A harness on its own default model is no lead: the human picks an agent.
+      await assert.rejects(operations['chief.switch']({ project: project.id, harness: 'codex' }), {
+        message:
+          'pick one of your saved agents for the lead: its harness, model and effort come with it',
+      })
       await assert.rejects(
-        operations['chief.switch']({ project: project.id, harness: 'pi', when: 'later' }),
+        operations['chief.switch']({ project: project.id, agent: 'diana', when: 'later' }),
         /when is now or turn/,
       )
       await assert.rejects(
@@ -143,9 +148,35 @@ describe('the page protocol of the new core', () => {
       // Nothing is installed on a PATH that holds nothing.
       env.PATH = path.join(env.HOME, 'nowhere')
       await assert.rejects(
-        operations['chief.switch']({ project: project.id, harness: 'codex' }),
+        operations['chief.switch']({ project: project.id, agent: 'diana' }),
         /codex is not installed here/,
       )
+      assert.equal(dispatcher.switched.length, 2, 'nothing refused reached the dispatcher')
+    })
+  })
+
+  it('opens a project whose lead runs on a saved agent, and none without one: it says what to pick', async () => {
+    await withPage(async ({ ledger, operations, opened }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        agent: 'diana',
+      })
+      const chief = project.participants.find((p) => p.handle === 'chief')
+      assert.deepEqual([chief.harness, chief.agent], ['codex', 'diana'])
+      // A harness on its own default model is no lead.
+      await assert.rejects(
+        operations['project.open']({ directory: '/work/api', harness: 'claude-code' }),
+        {
+          message:
+            'pick one of your saved agents for the lead: its harness, model and effort come with it',
+        },
+      )
+      await assert.rejects(
+        operations['project.open']({ directory: '/work/api', agent: 'ghost' }),
+        /no agent named ghost/,
+      )
+      assert.equal(opened.length, 1, 'nothing refused reached the dispatcher')
+      assert.equal(ledger.projects().length, 1)
     })
   })
 
@@ -153,13 +184,13 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ operations, opened, kicks }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       assert.deepEqual(opened, [
         {
           directory: '/work/app',
           name: 'app',
-          harness: 'pi',
+          chief: { harness: 'pi', agent: 'leto' },
           gate: undefined,
           staff: [],
         },
@@ -199,7 +230,7 @@ describe('the page protocol of the new core', () => {
       )
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       const { member } = await operations['member.add']({
         project: project.id,
@@ -218,7 +249,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ ledger, operations, dispatcher }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       dispatcher.adapterless.add('codex')
       await assert.rejects(
@@ -236,7 +267,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ operations, opened, env }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       await operations['member.add']({ project: project.id, agent: 'zeus' })
       await operations['member.add']({ project: project.id, agent: 'diana', roles: ['reviewer'] })
@@ -247,7 +278,7 @@ describe('the page protocol of the new core', () => {
           agents: [{ id: 'zeus', kind: 'opencode', model: 'opencode/muse-spark-1.3' }],
         })}\n`,
       )
-      const next = await operations['project.open']({ directory: '/work/api', harness: 'pi' })
+      const next = await operations['project.open']({ directory: '/work/api', agent: 'leto' })
       const { agents } = await operations['agents.list']({})
       const zeus = agents.find((a) => a.name === 'zeus')
       const diana = agents.find((a) => a.name === 'diana')
@@ -268,7 +299,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ operations, env }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       addAgent({ name: 'mine', harness: 'codex', model: 'gpt-6-astra', effort: 'low' }, env)
       await operations['member.add']({ project: project.id, agent: 'mine' })
@@ -286,7 +317,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ operations, env }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       addAgent({ name: 'mine', harness: 'codex', model: 'gpt-6-astra', effort: 'low' }, env)
       await operations['member.add']({ project: project.id, agent: 'mine' })
@@ -305,7 +336,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ ledger, operations, removed, kicks }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       await operations['member.add']({ project: project.id, agent: 'artemis' })
       const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
@@ -336,7 +367,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ ledger, operations, kicks }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       await operations['member.add']({ project: project.id, agent: 'artemis' })
       const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
@@ -364,7 +395,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       await operations['member.add']({ project: project.id, agent: 'diana', roles: ['reviewer'] })
       const diana = ledger.project(project.id).participants.find((p) => p.handle === 'diana')
@@ -391,7 +422,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ ledger, operations, opened, kicks }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
         gate: true,
       })
       assert.equal(project.gate, true)
@@ -447,7 +478,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
         gate: true,
       })
       await operations['member.add']({ project: project.id, agent: 'artemis' })
@@ -472,7 +503,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ ledger, operations, dispatcher }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       await operations['member.add']({ project: project.id, agent: 'artemis' })
       const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
@@ -512,7 +543,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ operations, closed }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       const result = await operations['project.close']({ project: project.id })
       assert.deepEqual([closed, result.project.state], [[project.id], 'suspended'])
@@ -525,7 +556,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       await assert.rejects(operations['project.delete']({ project: project.id }), {
         code: 'project-open',
@@ -541,7 +572,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       await operations['member.add']({ project: project.id, agent: 'artemis' })
       const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
@@ -597,7 +628,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       await operations['member.add']({ project: project.id, agent: 'artemis' })
       const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
@@ -628,7 +659,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       await operations['member.add']({ project: project.id, agent: 'artemis' })
       const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
@@ -659,7 +690,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       await operations['member.add']({ project: project.id, agent: 'artemis' })
       const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
@@ -694,7 +725,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       await operations['member.add']({ project: project.id, agent: 'artemis' })
       const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
@@ -730,7 +761,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       const note = ledger.note(project.id, { from: 'chief', to: 'human', body: 'T-1 is done.' })
       const { messages } = await operations['inbox.get']({ project: project.id })
@@ -751,7 +782,7 @@ describe('the page protocol of the new core', () => {
     await withPage(async ({ operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
-        harness: 'pi',
+        agent: 'leto',
       })
       const { board } = await operations['board.get']({ project: project.id })
       assert.deepEqual(

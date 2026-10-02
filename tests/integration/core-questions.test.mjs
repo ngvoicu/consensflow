@@ -23,7 +23,7 @@ test("a worker's question with options goes to the chief's inbox and its answer 
   try {
     const opened = await app.requestNode('project.open', {
       directory: app.workspace,
-      harness: 'claude-code',
+      agent: 'lead',
     })
     assert.equal(opened.ok, true, JSON.stringify(opened))
     const project = opened.project.id

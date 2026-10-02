@@ -102,7 +102,8 @@ export async function runUpdateSelftest({ config, invoke, core, refresh }) {
     }
     const secondDir = `${config.dir}/${SECOND_WORKSPACE}`
     for (const directory of [config.dir, secondDir]) {
-      const { project } = await core('project.open', { directory, harness: 'claude-code' })
+      // Its lead on terpsichore, a catalog agent of Claude Code, which is the fake `claude` here.
+      const { project } = await core('project.open', { directory, agent: 'terpsichore' })
       if (!Number.isInteger(project?.id)) {
         throw new Error(`project.open returned no project: ${JSON.stringify(project)}`)
       }

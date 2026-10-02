@@ -1,13 +1,13 @@
 import { button, element, redraw } from '../dom.js'
-import { HARNESS_NAMES, isMember } from './board.js'
+import { isMember } from './board.js'
 
 /**
- * The dialogs that say who works on a project: New project (its folder, its
- * chief's harness, its first staff), Switch lead and the project staff. Each
- * keeps what it is in the middle of to itself, and reads the page's board
- * and saved agents as they are when it draws or acts; what it changes on the
- * page goes back through the page's callbacks. A dialog that cannot open
- * says why by throwing, as the core's refusals do.
+ * The dialogs that say who works on a project: New project (its folder, the
+ * saved agent its lead runs on, its first staff), Switch lead and the
+ * project staff. Each keeps what it is in the middle of to itself, and reads
+ * the page's board and saved agents as they are when it draws or acts; what
+ * it changes on the page goes back through the page's callbacks. A dialog
+ * that cannot open says why by throwing, as the core's refusals do.
  */
 
 const ROLES = ['worker', 'advisor', 'reviewer', 'designer']
@@ -145,19 +145,57 @@ function nobodyRow(text) {
   return row
 }
 
+/** The harnesses a lead runs in, as the human knows them, in the order their agents are offered. */
+const HARNESS_NAMES = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  pi: 'Pi',
+  devin: 'Devin',
+}
+
 /** The harness an agent names for a chief's kind: Claude Code's agents run on `claude`. */
 const harnessOf = (kind) => (kind === 'claude-code' ? 'claude' : kind)
-
-/** The chief harnesses installed here, as [kind, label]: what a lead may run in. */
-const installedChiefs = (missing) =>
-  Object.entries(HARNESS_NAMES).filter(([kind]) => !missing.includes(harnessOf(kind)))
 
 const NO_HARNESS = 'No harness is installed here: install one from Agents, Harnesses.'
 
 /**
- * New project, on the folder the human picked: the chief's harness, among
- * those installed here, the staff (the last project's picked already) and
- * the approval setting.
+ * Fills a lead's pick list: the saved agents a lead may run on, harness by
+ * harness for each harness a lead runs in that is installed here, by name,
+ * after an empty choice that asks for one. A lead runs on an agent the human
+ * picks, never on a harness's own default; the agent it runs on now
+ * (`current`) is no switch. With no harness installed here it refuses, and
+ * says where to get one.
+ */
+function fillLeads(select, agents, missing, current = null) {
+  const installed = Object.entries(HARNESS_NAMES).filter(
+    ([kind]) => !missing.includes(harnessOf(kind)),
+  )
+  if (installed.length === 0) throw new Error(NO_HARNESS)
+  const ask = new Option('Pick an agent', '')
+  ask.disabled = true
+  const groups = installed.flatMap(([kind, label]) => {
+    const runsHere = agents
+      .filter((agent) => !agent.hidden && agent.harness === harnessOf(kind))
+      .sort((a, b) => a.name.localeCompare(b.name))
+    if (runsHere.length === 0) return []
+    const group = element('optgroup')
+    group.label = label
+    for (const agent of runsHere) {
+      const option = new Option(`${agent.name} · ${runsLabel(agent, null)}`, agent.name)
+      option.disabled = agent.name === current
+      group.append(option)
+    }
+    return [group]
+  })
+  select.replaceChildren(ask, ...groups)
+  select.value = ''
+}
+
+/**
+ * New project, on the folder the human picked: the saved agent its lead runs
+ * on, among those on a harness installed here, the staff (the last
+ * project's picked already) and the approval setting.
  */
 export class NewProjectDialog {
   #dialog
@@ -191,12 +229,12 @@ export class NewProjectDialog {
     form.addEventListener('submit', (event) => {
       event.preventDefault()
       const directory = form.elements.directory.value
-      const harness = form.elements.harness.value
+      const agent = form.elements.lead.value
       const gate = form.elements.gate.checked
       const staff = this.#pickedStaff()
       dialog.close()
       void page.act(async () => {
-        const { project } = await page.core('project.open', { directory, harness, gate, staff })
+        const { project } = await page.core('project.open', { directory, agent, gate, staff })
         page.onStart(project)
       })
     })
@@ -209,11 +247,7 @@ export class NewProjectDialog {
       this.#page.core('agents.list'),
       this.#page.core('staff.last'),
     ])
-    const chiefs = installedChiefs(missing)
-    if (chiefs.length === 0) throw new Error(NO_HARNESS)
-    this.#form.elements.harness.replaceChildren(
-      ...chiefs.map(([kind, label]) => new Option(label, kind)),
-    )
+    fillLeads(this.#form.elements.lead, agents, missing)
     this.#page.onAgents(agents)
     this.#pickLast(staff)
     this.#form.elements.directory.value = directory
@@ -288,8 +322,9 @@ export class NewProjectDialog {
 }
 
 /**
- * Switch the lead: the chief goes on in a new window on another harness or
- * model, and the core hands it the lead (the dispatcher's switchChief).
+ * Switch the lead: the chief goes on in a new window on another saved agent,
+ * with its harness, model and effort, and the core hands it the lead (the
+ * dispatcher's switchChief).
  */
 export class SwitchLeadDialog {
   #dialog
@@ -310,18 +345,13 @@ export class SwitchLeadDialog {
     const form = this.#form
     form.addEventListener('submit', (event) => {
       event.preventDefault()
-      const [type, name] = form.elements.lead.value.split(':')
+      const agent = form.elements.lead.value
       const when = form.elements.when.value
       const askFirst = form.elements.note.checked
       const project = this.#project
       dialog.close()
       void page.act(async () => {
-        await page.core('chief.switch', {
-          project,
-          ...(type === 'agent' ? { agent: name } : { harness: name }),
-          when,
-          note: askFirst,
-        })
+        await page.core('chief.switch', { project, agent, when, note: askFirst })
         page.onSwitch()
       })
     })
@@ -329,38 +359,17 @@ export class SwitchLeadDialog {
   }
 
   /**
-   * Opens for `chief`'s project: every harness installed here, on its own
-   * default model or with a saved agent on it. With none installed it
-   * refuses, and says where to get one.
+   * Opens for `chief`'s project: the saved agents on every harness installed
+   * here, none picked yet. With none installed it refuses, and says where
+   * to get one.
    */
   async open(chief) {
     const { agents, missing } = await this.#page.core('agents.list')
     // Asked for in a project the human has left since: it stays shut.
     if (this.#page.selected() !== chief.projectId) return
-    const chiefs = installedChiefs(missing)
-    if (chiefs.length === 0) throw new Error(NO_HARNESS)
     const form = this.#form
-    const select = form.elements.lead
-    select.replaceChildren(
-      ...chiefs.map(([kind, label]) => {
-        const group = element('optgroup')
-        group.label = label
-        group.append(new Option(`${label}, on its own default model`, `harness:${kind}`))
-        const runsHere = agents
-          .filter((agent) => !agent.hidden && agent.harness === harnessOf(kind))
-          .sort((a, b) => a.name.localeCompare(b.name))
-        for (const agent of runsHere) {
-          group.append(
-            new Option(`${agent.name} · ${runsLabel(agent, null)}`, `agent:${agent.name}`),
-          )
-        }
-        return group
-      }),
-    )
-    // What the lead runs on now is no switch.
-    const current = chief.agent === null ? `harness:${chief.harness}` : `agent:${chief.agent}`
-    for (const option of select.options) option.disabled = option.value === current
-    select.value = [...select.options].find((option) => !option.disabled)?.value ?? ''
+    // A lead from before leads were agents runs on its harness's default: every agent is a switch.
+    fillLeads(form.elements.lead, agents, missing, chief.agent)
     // Each switch starts from the gentle one: the lead finishes its turn, unasked.
     form.elements.when.value = 'turn'
     form.elements.note.checked = false
@@ -415,7 +424,7 @@ export class StaffDialog {
       const agent = this.#form.elements.agent.value
       if (!agent) return
       const { project, lanes } = page.board()
-      // Already on the staff: the lead's agent, after a Switch lead, is not.
+      // Already on the staff: the lead runs on an agent too, but is no member.
       const member = lanes
         .map((lane) => lane.participant)
         .find((participant) => isMember(participant) && participant.agent === agent)

@@ -15,14 +15,6 @@ import { button, element, redraw } from '../dom.js'
  */
 
 const ACTIVE = ['working', 'waiting', 'queued', 'paused', 'open']
-/** The harnesses a lead runs on, as the human knows them, in the order they are offered. */
-export const HARNESS_NAMES = {
-  'claude-code': 'Claude Code',
-  codex: 'Codex',
-  opencode: 'OpenCode',
-  pi: 'Pi',
-  devin: 'Devin',
-}
 /** What the chief (or the human) may stop: a task on the board or in a window. */
 const PAUSABLE = ['open', 'queued', 'working', 'waiting']
 /** What the human may give back to the board for another member of its tier. */
@@ -91,7 +83,7 @@ function age(iso, now = Date.now()) {
 /**
  * A member of the staff, as the ledger counts one: the lane of an agent of
  * its own, neither one of its sessions nor the lead, which runs on a saved
- * agent too once the lead is switched to one.
+ * agent too.
  */
 export const isMember = (participant) =>
   participant.agent !== null && participant.member === null && participant.role !== 'chief'
@@ -232,11 +224,7 @@ function rowStatus(lane, board, now) {
     ]
   }
   if (lane.switching) {
-    const { agent, harness } = lane.switching
-    return [
-      'switching',
-      `Switching the lead to ${agent ?? HARNESS_NAMES[harness] ?? harness} after this turn`,
-    ]
+    return ['switching', `Switching the lead to ${lane.switching.agent} after this turn`]
   }
   if (outOfQuota(participant, now)) {
     return ['out', `Out of quota until ${clock(participant.outUntil)}`]
@@ -603,7 +591,7 @@ export class BoardView {
           'Switch lead',
           'quiet-button',
           this.#onLane(this.#actions.onSwitchLead, participant),
-          'Switch the lead to another harness or model',
+          'Switch the lead to another agent',
         ),
       )
     }

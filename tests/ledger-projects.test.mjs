@@ -100,6 +100,31 @@ describe('projects and participants', () => {
     })
   })
 
+  it('starts a project whose lead runs on the saved agent it is given, and refuses what is no agent id', async () => {
+    await withLedger((ledger) => {
+      const project = ledger.createProject({
+        directory: '/work/app',
+        name: 'app',
+        chief: { harness: 'codex', agent: 'astraeus' },
+      })
+      const chief = project.participants.find((p) => p.handle === 'chief')
+      assert.deepEqual([chief.harness, chief.agent], ['codex', 'astraeus'])
+      for (const agent of ['no such!', '', 42]) {
+        assert.throws(
+          () =>
+            ledger.createProject({
+              directory: '/work/site',
+              name: 'site',
+              chief: { harness: 'pi', agent },
+            }),
+          { code: 'invalid-agent' },
+          String(agent),
+        )
+      }
+      assert.equal(ledger.projects().length, 1)
+    })
+  })
+
   it('lets a member hold several roles, and asks for members by any of them', async () => {
     await withLedger((ledger) => {
       const { project } = staff(ledger)

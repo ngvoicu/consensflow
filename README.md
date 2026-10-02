@@ -108,15 +108,19 @@ projects.
   and what its window wrote, and to pause it, reassign it (back to the board
   for another member of its tier) or cancel it. The chief's window is docked beside the board; a strip holds every
   live window.
-- **New project.** A folder, the chief's harness, the staff (the last project's
-  ticked already) and whether human approval is required.
+- **New project.** A folder, the saved agent the lead runs on (its harness,
+  model and effort come with it), the staff (the last project's ticked
+  already) and whether human approval is required.
 - **Switch lead.** On the chief's row: the lead goes on in a new window on
-  another harness, on its default model or on any saved agent's. A lead at
-  work finishes its turn first, or is cut off if you say so; it can first be
-  asked to write down where things stand. Its first message hands it the lead:
-  what waits on the board, your last words, and `cf history`, which pages
-  through what you and the leads before it said. The staff keeps working, and
-  what was on its way to the lead goes to the new one.
+  another saved agent, with its harness, model and effort. A lead always runs
+  on a saved agent, never on a harness's own default model; a lead that was
+  started on its harness's default before keeps running on it until you
+  switch it. A lead at work finishes its turn first, or is cut off if you say
+  so; it can first be asked to write down where things stand. Its first
+  message hands it the lead: what waits on the board, your last words, and
+  `cf history`, which pages through what you and the leads before it said.
+  The staff keeps working, and what was on its way to the lead goes to the
+  new one.
 - **Staff.** Which agents this project may use, each with its roles and what
   it runs (model, harness, effort, tier), plus the approval setting. The
   rows read by role, then by work tier with the most critical first; the

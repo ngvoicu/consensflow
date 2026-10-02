@@ -16,13 +16,14 @@ import { startIntegration } from './harness.mjs'
 const CORE_EDITOR = fileURLToPath(new URL('./core-editor.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
 
-/** Three fake agents on the fake `claude`: two workers on one model, a reviewer on another. */
+/** Four fake agents on the fake `claude`: the lead, two workers on one model, a reviewer on another. */
 function staff(app) {
   writeFileSync(
     join(app.env.CONSENSFLOW_HOME, 'agents.json'),
     `${JSON.stringify({
       schemaVersion: 1,
       agents: [
+        { id: 'lead', kind: 'claude-code', model: 'fake-lead' },
         { id: 'worker', kind: 'claude-code', model: 'fake' },
         { id: 'worker2', kind: 'claude-code', model: 'fake' },
         { id: 'checker', kind: 'claude-code', model: 'fake-2' },
@@ -35,7 +36,7 @@ function staff(app) {
 async function project(app, { gate, members }) {
   const opened = await app.requestNode('project.open', {
     directory: app.workspace,
-    harness: 'claude-code',
+    agent: 'lead',
     ...(gate === undefined ? {} : { gate }),
     staff: members.map(([agent, role]) => ({ agent, roles: [role] })),
   })

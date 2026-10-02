@@ -101,18 +101,22 @@ describe('switching the lead', () => {
       })
       assert.deepEqual(ledger.lastSwitch(project.id), switched.at(-1).data)
 
-      ledger.switchChief(project.id, { harness: 'pi', cut: true })
+      ledger.switchChief(project.id, { harness: 'pi', agent: 'leto', cut: true })
       assert.equal(ledger.lastSwitch(project.id).cut, true, 'the old lead was cut mid-turn')
       const back = ledger.project(project.id).participants.find((p) => p.handle === 'chief')
-      assert.deepEqual([back.harness, back.agent], ['pi', null], "the harness's own default")
+      assert.deepEqual([back.harness, back.agent], ['pi', 'leto'])
       for (const harness of ['kimi', 'image', 'nope']) {
-        assert.throws(() => ledger.switchChief(project.id, { harness }), {
+        assert.throws(() => ledger.switchChief(project.id, { harness, agent: 'leto' }), {
           code: 'invalid-harness',
         })
       }
-      assert.throws(() => ledger.switchChief(project.id, { harness: 'pi', agent: 'no such!' }), {
-        code: 'invalid-agent',
-      })
+      // A lead is switched to a saved agent, never to a harness's own default.
+      for (const agent of ['no such!', undefined, null]) {
+        assert.throws(() => ledger.switchChief(project.id, { harness: 'pi', agent }), {
+          code: 'invalid-agent',
+        })
+      }
+      assert.equal(ledger.lastSwitch(project.id).to.agent, 'leto', 'nothing refused was logged')
     })
   })
 
@@ -124,10 +128,10 @@ describe('switching the lead', () => {
         { id: 'c1', role: 'user', text: 'the codeword is tern' },
         { id: 'c2', role: 'assistant', text: 'noted' },
       ])
-      ledger.switchChief(project.id, { harness: 'codex' })
+      ledger.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       const codex = ledger.startConversation(id('chief'), { harness: 'codex' })
       ledger.copyTranscript(codex.id, [{ id: 'x1', role: 'user', text: 'and the next step?' }])
-      ledger.switchChief(project.id, { harness: 'pi' })
+      ledger.switchChief(project.id, { harness: 'pi', agent: 'leto' })
       ledger.startConversation(id('chief'), { harness: 'pi' })
 
       const history = ledger.leadHistory(project.id)

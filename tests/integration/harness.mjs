@@ -135,7 +135,17 @@ function writeRoster(env) {
   mkdirSync(env.CONSENSFLOW_HOME, { recursive: true })
   writeFileSync(
     join(env.CONSENSFLOW_HOME, 'agents.json'),
-    `${JSON.stringify({ schemaVersion: 1, agents: [{ id: 'worker', kind: 'claude-code', model: 'fake' }] }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        agents: [
+          { id: 'lead', kind: 'claude-code', model: 'fake-lead' },
+          { id: 'worker', kind: 'claude-code', model: 'fake' },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
   )
 }
 
