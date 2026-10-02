@@ -15,6 +15,23 @@ rust-version = "1.95"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# consensflow-bridge is a test helper: the headless pane host the Rust and the
+# integration tests drive. Tauri bundles every binary it builds, so the helper
+# builds only with this feature, which no app build turns on:
+#   cargo build --release --features test-helper --bin consensflow-bridge
+[features]
+test-helper = []
+
+[[bin]]
+name = "consensflow-bridge"
+path = "src/bin/consensflow-bridge.rs"
+required-features = ["test-helper"]
+
+[[test]]
+name = "headless"
+path = "tests/headless.rs"
+required-features = ["test-helper"]
+
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
 

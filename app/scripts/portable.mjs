@@ -21,7 +21,7 @@ const APP = dirname(dirname(fileURLToPath(import.meta.url)))
 const RELEASE = join(APP, 'src-tauri', 'target', 'release')
 
 /** The installed layout (2026-09-30, %LOCALAPPDATA%\ConsensFlow), without uninstall.exe. */
-const LAYOUT = ['ConsensFlow.exe', 'consensflow-bridge.exe', 'node.exe', 'cli']
+const LAYOUT = ['ConsensFlow.exe', 'node.exe', 'cli']
 
 const { values } = parseArgs({
   options: {

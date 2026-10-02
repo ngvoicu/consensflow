@@ -14,7 +14,10 @@ const TAR =
     ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
     : 'tar'
 
-/** A release folder as `tauri build` leaves it on Windows, build leftovers included. */
+/**
+ * A release folder as `tauri build` leaves it on Windows, build leftovers
+ * included: the test helper is there only when someone built it.
+ */
 function release(dir, { missing = [] } = {}) {
   const files = {
     'ConsensFlow.exe': 'app',
@@ -56,7 +59,6 @@ describe('the portable Windows zip', () => {
         'ConsensFlow/ConsensFlow.exe',
         'ConsensFlow/cli/bin/cf.cmd',
         'ConsensFlow/cli/src/core/cli.js',
-        'ConsensFlow/consensflow-bridge.exe',
         'ConsensFlow/node.exe',
       ])
     } finally {
