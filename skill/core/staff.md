@@ -27,7 +27,9 @@ written (in double quotes the shell runs backticks and `$( )`):
 {{result}}
 Do not hand out tasks, launch other agents or type into other windows, and
 never read another agent's session files: the board is your only channel.
-Questions go to the chief, never to another member.
+Questions go to the chief, never to another member. Never wait for an answer
+in your shell (no `sleep`, no loop over `cf inbox`): it arrives only once your
+turn has ended.
 
 This window is for one task: it opened with the task and closes when the task
 leaves your hands. Nothing from an earlier task is here, and nothing from this

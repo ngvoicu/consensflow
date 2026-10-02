@@ -103,6 +103,20 @@ describe('role instructions for the new core', () => {
     assert.throws(() => roleInstructions('pm', []), /no role instructions for pm/)
   })
 
+  it('tells every window never to wait in its shell for what the board brings', () => {
+    // A turn spent sleeping is one no result or answer can reach (Devin waited so, 2026-10-02).
+    assert.match(
+      roleInstructions('chief', [zeus]),
+      /Never wait for\s+one in your shell: no `sleep`/,
+    )
+    for (const role of ['worker', 'advisor', 'reviewer', 'designer'])
+      assert.match(
+        roleInstructions(role, [zeus]),
+        /Never wait for an answer\s+in your shell \(no `sleep`/,
+        role,
+      )
+  })
+
   it('says so when the staff is empty', () => {
     assert.match(roleInstructions('chief', []), /Nobody is on the staff yet/)
     const text = roleInstructions('chief', [zeus])
