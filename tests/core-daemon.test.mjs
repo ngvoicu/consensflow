@@ -269,6 +269,8 @@ async function daemonOverItsBridge(t, { agents = [], preload = null } = {}) {
       ),
     ),
     HOME: path.join(root, 'home'),
+    // The home Node reads on Windows.
+    USERPROFILE: path.join(root, 'home'),
     CONSENSFLOW_HOME: home,
     CLAUDE_CONFIG_DIR: path.join(root, 'home', '.claude'),
     CODEX_HOME: path.join(root, 'home', '.codex'),

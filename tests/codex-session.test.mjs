@@ -325,8 +325,13 @@ it('restores a rejected switch, rejects invalid ingress, and reports a possible 
     [`${address}/other`, { authorization: `Bearer ${TOKEN}` }],
   ]) {
     const stranger = new WebSocket(url, { headers })
-    const [error] = await once(stranger, 'error')
-    assert.match(error.message, /socket hang up/)
+    const outcome = await new Promise((resolve) => {
+      stranger.on('open', () => resolve('opened'))
+      stranger.on('error', () => {})
+      stranger.on('close', () => resolve('turned away'))
+    })
+    stranger.terminate()
+    assert.equal(outcome, 'turned away', url)
   }
   const garbled = await fetch(`${f.broker.endpoint}/deliver`, {
     method: 'POST',
