@@ -89,10 +89,13 @@ const opens = (shown, node) =>
 
 /**
  * What tells an element from the others across redraws: a card its task,
- * wherever it moved, any other control its label; and what it sits in.
+ * wherever it moved, a cell's stack its column, whatever its count, any
+ * other control its label; and what it sits in.
  */
 function focusKey(node, root) {
-  const path = [node.dataset.task ?? node.getAttribute('aria-label') ?? node.textContent]
+  const path = [
+    node.dataset.task ?? node.dataset.stack ?? node.getAttribute('aria-label') ?? node.textContent,
+  ]
   for (let at = node; at !== root; at = at.parentElement) {
     const { task, message, handle, role, project } = at.dataset
     path.push([at.tagName, task, message, handle, role, project].join(':'))

@@ -1,4 +1,4 @@
-import { button, element, iconButton, redraw } from '../dom.js'
+import { button, element, icon, iconButton, redraw } from '../dom.js'
 import { preview, render } from './markdown.js'
 
 /**
@@ -31,8 +31,11 @@ const COLUMNS = [
   ['done', 'Done'],
   ['finished', 'Finished'],
 ]
-/** A session row's tools, each drawn as an icon: path data on a 24-unit grid. */
-const ICONS = {
+/**
+ * A session's tools, on its row and its card in the dock, and a crowded
+ * cell's stack, each drawn as an icon: path data on a 24-unit grid.
+ */
+export const ICONS = {
   show: ['M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z', 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z'],
   hide: [
     'M3 3l18 18',
@@ -47,7 +50,14 @@ const ICONS = {
   ],
   close: ['M12 3v9', 'M18.4 6.6a9 9 0 1 1-12.8 0'],
   remove: ['M4 7h16', 'M9 7V4h6v3', 'M6 7l1 13h10l1-13', 'M10 11v6', 'M14 11v6'],
+  stack: [
+    'M4 11h16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Z',
+    'M5 7.5h14',
+    'M7 4h10',
+  ],
 }
+/** How many cards a cell shows: more are one tile, a stack and how many, whose cards open in a dialog. */
+const CELL_HOLDS = 3
 const columnOf = (task) =>
   FINISHED.includes(task.state) ? 'finished' : task.state === 'paused' ? 'queued' : task.state
 const STATE_LABEL = {
@@ -108,13 +118,28 @@ export const isMember = (participant) =>
 const roleOf = (task, roles) => task.pool ?? roles[0]
 
 /**
+ * A row's tasks, the newest first: its own, and those it asked for that
+ * wait for a member, which sit in its backlog.
+ */
+const rowTasks = (lane, board) =>
+  [...lane.tasks, ...board.open.filter((task) => task.requester === lane.participant.handle)].sort(
+    (a, b) => b.number - a.number,
+  )
+
+/**
  * The board's rows: a member with several roles heads one row per role, each
  * followed by that role's sessions and holding that role's cards, so a worker
  * and a reviewer read as two things; everything else in lane order. The human
  * has no row: nothing assigns them a task, and what is for them is in For you.
+ * The lead has one only while a task is on it, its own or one it asked for:
+ * what it is doing is on its card in the dock.
  */
-function boardRows(lanes) {
-  const ordered = laneOrder(lanes).filter((lane) => lane.participant.role !== 'human')
+function boardRows(board) {
+  const ordered = laneOrder(board.lanes).filter(
+    (lane) =>
+      lane.participant.role !== 'human' &&
+      (lane.participant.role !== 'chief' || rowTasks(lane, board).length > 0),
+  )
   const members = new Set(
     ordered.filter((lane) => isMember(lane.participant)).map((lane) => lane.participant.handle),
   )
@@ -212,9 +237,9 @@ const resting = (participant, activity) =>
 /**
  * A session's row says whose window it is; the member's row says what it
  * is. Each says what its agent runs: its model, and its effort when it has
- * one, as the staff dialog does.
+ * one, as the staff dialog does; so does the lead's card in the dock.
  */
-const identity = (participant, agent) =>
+export const identity = (participant, agent) =>
   (participant.member
     ? [
         `${participant.role} session of @${participant.member}`,
@@ -234,12 +259,13 @@ const identity = (participant, agent) =>
     .join(' · ')
 
 /**
- * What a row says its participant is doing, and the state that colours it:
- * an agent gone, a lead being switched or a member out of quota say so
- * before anything its window does. A member with no terminal open says
- * nothing (null): its row has no status line.
+ * What a row, or the lead's card in the dock, says its participant is
+ * doing, and the state that colours it: an agent gone, a lead being
+ * switched or a member out of quota say so before anything its window
+ * does. A member with no terminal open says nothing (null): its row has no
+ * status line.
  */
-function rowStatus(lane, board, now) {
+export function laneStatus(lane, board, now) {
   const { participant, activity } = lane
   if (lane.agentMissing) {
     const remedy =
@@ -268,11 +294,11 @@ function rowStatus(lane, board, now) {
   return [state, ACTIVITY_LABEL[state] ?? 'No window']
 }
 
-/** A participant's lamp: what its window is doing, at a glance. */
-export function lamp(activity) {
+/** A participant's lamp: what its window is doing, at a glance, or that it is out of quota. */
+export function lamp({ participant, activity }, now) {
   const node = element('span', 'lamp')
   node.dataset.testid = 'lamp'
-  node.dataset.state = activity?.state ?? 'closed'
+  node.dataset.state = outOfQuota(participant, now) ? 'out' : (activity?.state ?? 'closed')
   node.setAttribute('aria-hidden', 'true')
   return node
 }
@@ -315,10 +341,23 @@ export class BoardView {
   #board = null
   /** Whether the human asked to see a session's terminal, which the dock keeps out until then. */
   #shows = null
+  /** The dialog that lists a crowded cell's cards, its title and its list. */
+  #stack
+  #stackTitle
+  #stackCards
+  /** The cell the stack dialog was opened on: its project, its row's handle and role, its column. */
+  #stacked = null
 
-  constructor(root, actions) {
+  constructor(root, stack, actions) {
     this.#root = root
+    this.#stack = stack
+    this.#stackTitle = stack.querySelector('#stack-title')
+    this.#stackCards = stack.querySelector('#stack-cards')
     this.#actions = actions
+    // A card chosen opens its task, as on the board, and the dialog goes.
+    this.#stackCards.addEventListener('click', (event) => {
+      if (event.target.closest('.card') !== null) stack.close()
+    })
   }
 
   /** Redraw from the core's state; `shows(participant)` says whose terminals the human asked to see. */
@@ -331,6 +370,8 @@ export class BoardView {
       this.#forYou(inbox, board, now),
       this.#kanban(board, models, now),
     ])
+    // An open stack dialog follows the board, as the cell it lists does.
+    if (this.#stack.open) this.#drawStack()
   }
 
   /** `participant`'s lane on the board drawn last, which a kept button acts on. */
@@ -512,7 +553,7 @@ export class BoardView {
     }
     head.append(headRow)
     const body = element('tbody')
-    for (const lane of boardRows(board.lanes)) {
+    for (const lane of boardRows(board)) {
       body.append(this.#row(lane, board, models.get(lane.participant.agent), now))
     }
     // A project with nobody on its staff looks like any other board, and every
@@ -556,36 +597,35 @@ export class BoardView {
     row.dataset.role = participant.role
     if (participant.member) row.dataset.session = participant.member
     row.append(this.#rowHead(lane, board, agent, now))
-    // A task waiting for a member sits in its requester's backlog.
-    const mine = [
-      ...lane.tasks,
-      ...board.open.filter((task) => task.requester === participant.handle),
-    ].sort((a, b) => b.number - a.number)
-    for (const [state] of COLUMNS) {
+    const mine = rowTasks(lane, board)
+    for (const [state, label] of COLUMNS) {
       const cell = element('td')
       cell.dataset.state = state
-      const list = element('ol', 'cards')
-      for (const task of mine) {
-        if (columnOf(task) !== state) continue
-        list.append(this.#card(task))
+      const held = mine.filter((task) => columnOf(task) === state)
+      if (held.length > CELL_HOLDS) {
+        cell.append(this.#stackTile(held.length, state, label, participant))
+      } else if (held.length > 0) {
+        const list = element('ol', 'cards')
+        list.append(...held.map((task) => this.#card(task)))
+        cell.append(list)
       }
-      if (list.childElementCount > 0) cell.append(list)
       row.append(cell)
     }
     return row
   }
 
   #rowHead(lane, board, agent, now) {
-    const { participant, activity } = lane
+    const { participant } = lane
     const head = element('th', 'row-head')
     head.setAttribute('scope', 'row')
     const title = element('div', 'row-title')
-    title.append(
-      lamp(outOfQuota(participant, now) ? { state: 'out' } : activity),
-      element('span', 'row-name', laneName(participant)),
-    )
-    head.append(title, element('span', 'row-meta', identity(participant, agent)))
-    const said = rowStatus(lane, board, now)
+    title.append(lamp(lane, now), element('span', 'row-name', laneName(participant)))
+    head.append(title)
+    // The lead's row only holds its tasks: what it is doing, what it runs on
+    // and Switch lead are on its card in the dock.
+    if (participant.role === 'chief') return head
+    head.append(element('span', 'row-meta', identity(participant, agent)))
+    const said = laneStatus(lane, board, now)
     if (said !== null) {
       const [state, text] = said
       const status = element('span', 'row-status', text)
@@ -598,12 +638,11 @@ export class BoardView {
 
   /**
    * Only a session's terminal is the human's to open and close: a member's
-   * row heads its sessions and has no terminal of its own, and the chief's
-   * opens and closes with the project. An open terminal stays out of the
-   * dock until the human shows it, and hides again; a closed one opens
-   * again on its own conversation, and its copy is on its last task's card.
-   * The session is deleted from here too. Each of these is an icon, named in
-   * its tip; a closed project's rows have none.
+   * row heads its sessions and has no terminal of its own. An open terminal
+   * stays out of the dock until the human shows it, and hides again; a
+   * closed one opens again on its own conversation, and its copy is on its
+   * last task's card. The session is deleted from here too. Each of these
+   * is an icon, named in its tip; a closed project's rows have none.
    */
   #rowTools(lane, board) {
     const { participant, pane } = lane
@@ -648,16 +687,6 @@ export class BoardView {
         ),
       )
     }
-    if (participant.role === 'chief' && acting) {
-      tools.append(
-        button(
-          'Switch lead',
-          'quiet-button',
-          this.#onLane(this.#actions.onSwitchLead, participant),
-          'Switch the lead to another agent',
-        ),
-      )
-    }
     if (session && acting) {
       tools.append(
         iconButton(
@@ -670,6 +699,58 @@ export class BoardView {
       )
     }
     return tools
+  }
+
+  /**
+   * A crowded cell, `count` cards of the column `state` on `participant`'s
+   * row: one tile, a stack and how many, named for what it holds. It opens
+   * them in the stack dialog.
+   */
+  #stackTile(count, state, label, participant) {
+    const tile = button(
+      '',
+      'stack',
+      () => this.#openStack(participant, state),
+      `${count} ${label.toLowerCase()} tasks of ${laneName(participant)}`,
+    )
+    // Across redraws its column tells it from the others, whatever its count.
+    tile.dataset.stack = state
+    tile.append(icon(ICONS.stack), element('span', 'stack-count', String(count)))
+    return tile
+  }
+
+  /** Opens the stack dialog on the cell of the column `state` on a participant's row. */
+  #openStack({ projectId, handle, role }, state) {
+    this.#stacked = { project: projectId, handle, role, state }
+    this.#drawStack()
+    this.#stack.showModal()
+  }
+
+  /**
+   * The stack dialog's cards: its cell's as the board drawn last has them,
+   * the newest first, each opening its task as on the board. A cell left
+   * with none (its tasks moved on, another project shown) closes it.
+   */
+  #drawStack() {
+    const { project, handle, role, state } = this.#stacked
+    const row =
+      this.#board.project.id === project
+        ? boardRows(this.#board).find(
+            ({ participant }) => participant.handle === handle && participant.role === role,
+          )
+        : undefined
+    const held =
+      row === undefined ? [] : rowTasks(row, this.#board).filter((task) => columnOf(task) === state)
+    if (held.length === 0) {
+      this.#stack.close()
+      return
+    }
+    const [, label] = COLUMNS.find(([column]) => column === state)
+    this.#stackTitle.textContent = `${label} tasks of ${laneName(row.participant)}`
+    redraw(
+      this.#stackCards,
+      held.map((task) => this.#card(task)),
+    )
   }
 
   #card(task) {
@@ -687,7 +768,8 @@ export class BoardView {
       element('span', 'card-route', route(task)),
       element('span', 'card-state', STATE_LABEL[task.state]),
     )
-    if (task.result) card.append(element('span', 'card-result', task.result))
+    // A result reads by its first line: its drawer has it whole.
+    if (task.result) card.append(element('span', 'card-result', task.result.trim().split('\n')[0]))
     item.append(card)
     return item
   }

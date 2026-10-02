@@ -120,7 +120,8 @@ async function act(work) {
   await refresh()
 }
 
-const board = new BoardView(boardRoot, {
+// A crowded cell's cards are listed in the stack dialog, the board's own.
+const board = new BoardView(boardRoot, $('#stack-dialog'), {
   onRead: (message) => act(() => core('message.read', { message: message.id })),
   // What waits for the human's approval goes on, goes back, or is declined with a word to its sender.
   onApprove: (message) =>
@@ -148,13 +149,16 @@ const board = new BoardView(boardRoot, {
       await core('session.open', { project: participant.projectId, handle: participant.handle })
       showTerminal(participant)
     }),
-  onCloseTerminal: (participant) => closeTerminal(participant),
+  onCloseTerminal: (participant) =>
+    act(async () => {
+      await core('session.close', { project: participant.projectId, handle: participant.handle })
+      terminals.forget(participant.projectId, participant.handle)
+    }),
   onEndSession: (participant) =>
     act(async () => {
       await core('session.end', { project: participant.projectId, handle: participant.handle })
       note(`@${participant.handle} is gone; its tasks stay on @${participant.member}'s lane.`)
     }),
-  onSwitchLead: (chief) => act(() => switchLead.open(chief)),
   onResume: (project) =>
     act(async () => {
       await core('project.resume', { project: project.id })
@@ -215,13 +219,6 @@ const drawer = new TaskDrawer($('#task-drawer'), {
 // The packaged smoke watches acks and arrivals here, on the real paths.
 let ackObserver = null
 let outputObserver = null
-/** Closing a window, from its board row or its card: its process ends and its card goes with it. */
-function closeTerminal(participant) {
-  return act(async () => {
-    await core('session.close', { project: participant.projectId, handle: participant.handle })
-    terminals.forget(participant.projectId, participant.handle)
-  })
-}
 
 /** A session's terminal the human asked to see: in the dock, unfolded, in front. */
 function showTerminal(participant) {
@@ -238,7 +235,8 @@ const terminals = new TerminalsView(stage, {
   report,
   createEmulator: tauri.test?.createEmulator,
   onChange: () => render(),
-  onClose: closeTerminal,
+  // The lead is switched from its card in the dock.
+  onSwitchLead: (chief) => act(() => switchLead.open(chief)),
 })
 
 // A fold changes the room the board and the windows have: both draw again.
@@ -391,7 +389,7 @@ function render() {
       shows: (participant) => terminals.shows(participant.projectId, participant.handle),
     })
   }
-  terminals.render(state.board, { focused: state.focus })
+  terminals.render(state.board, { focused: state.focus, agents: state.agents })
 }
 
 // Deleting a project is confirmed in a dialog that names it.

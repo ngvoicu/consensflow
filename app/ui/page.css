@@ -334,9 +334,9 @@ tr[data-session] .row-head { padding-left: 22px; border-left: 3px solid var(--li
 tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-transform: none; }
 .row-meta { display: block; margin-top: 6px; font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 .row-status { display: block; margin-top: 6px; font: 600 11px var(--mono); color: var(--muted); }
-.row-status[data-state="working"] { color: var(--seafoam); }
-.row-status[data-state="waiting"] { color: var(--amber); }
-.row-status[data-state="out"], .row-status[data-state="missing"] { color: var(--buoy); }
+:is(.row-status, .terminal-status)[data-state="working"] { color: var(--seafoam); }
+:is(.row-status, .terminal-status)[data-state="waiting"] { color: var(--amber); }
+:is(.row-status, .terminal-status):is([data-state="out"], [data-state="missing"]) { color: var(--buoy); }
 .row-tools { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 /* A button stays in its column: a label too long for it wraps. */
 .row-tools > button { max-width: 100%; white-space: normal; }
@@ -439,6 +439,29 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
   .card-title, .card-route, .card-result { padding-left: 6px; padding-right: 6px; }
   .card-title { padding-top: 4px; -webkit-line-clamp: 4; }
 }
+
+/* A crowded cell: one tile, a stack of cards and how many, the edges of two
+   more under it; its cards are listed in the stack dialog. */
+.stack {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: var(--strip);
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  color: var(--muted);
+  cursor: pointer;
+  box-shadow:
+    0 4px 0 -2px var(--strip), 0 4px 0 -1px var(--line-soft),
+    0 8px 0 -4px var(--strip), 0 8px 0 -3px var(--line-soft);
+}
+.stack:hover { background: var(--strip-hover); color: var(--foam); }
+.stack .icon { width: 18px; height: 18px; }
+.stack-count { font: 700 13px var(--mono); color: var(--foam); }
 
 /* A message waiting for the human: a strip with what they may do with it.
    The list is what a strip measures itself against, as a card's does. */
@@ -694,11 +717,21 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
 .terminal-name { font-weight: 700; letter-spacing: .08em; }
 .terminal-meta { color: var(--muted); }
 /* The head is one line: the harness takes only the room the name and a
-   session's Hide and Close leave, and pushes them to the end; on a narrow
-   card the name gives way too. Wrapped, a session's name ran out of the
-   head's 30px. */
+   session's Hide leave, and pushes Hide to the end; on a narrow card the
+   name gives way too. Wrapped, a session's name ran out of the head's 30px. */
 .terminal-name, .terminal-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .terminal-meta { flex: 1 1 0; }
+.terminal-head .icon-button { flex: none; width: 26px; height: 22px; border-radius: 5px; }
+/* At the card's right edge, a tip opens leftwards: the card would cut it off. */
+.terminal-head .icon-button[data-tip]:is(:hover, :focus-visible)::after { left: auto; right: 0; }
+/* The lead's head takes the lines it needs: its name and Switch lead, then
+   what it is doing and what it runs on, which wrap on a narrow card. */
+.terminal-card[data-role="chief"] { grid-template-rows: auto minmax(0, 1fr); }
+.terminal-card[data-role="chief"] .terminal-head { flex-wrap: wrap; row-gap: 3px; padding: 6px 10px; }
+.terminal-head > .quiet-button { margin-left: auto; padding: 2px 9px; }
+.terminal-about { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 2px 10px; min-width: 0; padding-left: 18px; }
+.terminal-about .terminal-meta { flex: 0 1 auto; }
+.terminal-status { font-weight: 600; color: var(--muted); }
 .terminal-host { min-height: 0; padding: 4px 2px 2px 6px; }
 /* Scrollbars that stay, not the overlay that hides between scrolls: a
    terminal's scrollback, and a board too narrow for its columns, which
@@ -731,7 +764,8 @@ dialog {
   overflow: auto;
 }
 dialog::backdrop { background: rgba(4, 12, 15, .6); }
-/* The dialogs: Delete (a project, or finished tasks), Settings, New project, Switch lead and the project staff. */
+/* The dialogs: Delete (a project, or finished tasks), Settings, New project,
+   Switch lead, a crowded cell's cards and the project staff. */
 .dialog-form { display: grid; gap: 16px; padding: 22px 26px 24px; }
 .dialog-form h2 { margin: 0; font-size: 20px; }
 .dialog-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
@@ -747,11 +781,11 @@ dialog::backdrop { background: rgba(4, 12, 15, .6); }
 .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
 /* What a delete keeps on the board, and why. */
 .dialog-kept { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; color: var(--amber); }
-.icon-button { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
+.icon-button { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
 .icon-button:hover { color: var(--foam); border-color: var(--foam); }
 .icon-button.danger-button { color: var(--buoy); border-color: rgba(255, 120, 104, .55); }
 .icon-button.danger-button:hover { color: var(--buoy); border-color: var(--buoy); background: rgba(255, 120, 104, .1); }
-.icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.icon { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 /* A tip names an icon button on hover and keyboard focus. */
 .icon-button[data-tip] { position: relative; }
 .icon-button[data-tip]:is(:hover, :focus-visible)::after {
@@ -774,6 +808,9 @@ dialog::backdrop { background: rgba(4, 12, 15, .6); }
 }
 .row-tools .icon-button { width: 30px; height: 28px; border-radius: 6px; }
 dialog.settings { width: min(560px, calc(100vw - 48px)); }
+/* The cards scroll under the title, and Close stays in reach. */
+#stack-dialog { width: min(640px, calc(100vw - 48px)); }
+#stack-cards { max-height: min(60vh, 560px); overflow: auto; padding: 3px; }
 .settings-menu { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .settings-menu li { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
 .settings-menu .quiet-button { width: 100%; }
