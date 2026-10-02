@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
  * The Windows UI smoke: the built app, on a real desktop, does what a human
- * does first. It opens the agents window on Agents and then on Harnesses, and
- * each shows its page; and no window of the app's own processes is a console.
- * Both once failed on Windows while every test passed: the agents window came
- * up white and hung (built from a synchronous command), and the daemon opened
- * a console window of its own.
+ * does first. It opens Agents and then Harnesses from Settings, and each
+ * dialog shows its screen, the daemon's page framed in it; and no window of
+ * the app's own processes is a console. Both once failed on Windows while
+ * every test passed: the agents screens came up white and hung, and the
+ * daemon opened a console window of its own.
  *
  *   node app/scripts/windows-smoke.mjs <path to ConsensFlow.exe>
  *
@@ -104,23 +104,20 @@ try {
   await main.locator('#settings-button').waitFor({ timeout: 30_000 })
   check(true, 'the main window shows the board')
 
-  for (const [button, heading] of [
-    ['Agents', 'Agents'],
-    ['Harnesses', 'Harnesses'],
-  ]) {
+  for (const screen of ['Agents', 'Harnesses']) {
     await main.locator('#settings-button').click()
-    await main.locator('[data-agents-page]', { hasText: new RegExp(`^${button}$`) }).click()
+    await main.locator('[data-agents-page]', { hasText: new RegExp(`^${screen}$`) }).click()
+    const dialog = main.getByRole('dialog', { name: screen })
     const shown = await until(
-      `${button} in the agents window`,
+      `${screen} in its dialog`,
       async () => {
-        const page = pages().find((candidate) => candidate.url().startsWith('http://localhost'))
-        if (!page) return null
-        const text = await page.locator('h1').first().innerText({ timeout: 1000 })
-        return text.trim().startsWith(heading) ? page : null
+        const text = await dialog.frameLocator('iframe').locator('h1').innerText({ timeout: 1000 })
+        return text.trim().startsWith(screen)
       },
       20_000,
-    ).catch(() => null)
-    check(shown !== null, `${button} opens in the agents window and shows its page`)
+    ).catch(() => false)
+    check(shown, `${screen} opens in its dialog and shows its page`)
+    await main.keyboard.press('Escape')
   }
 
   const classes = windowClasses(app.pid)

@@ -517,29 +517,44 @@ const switchLead = new SwitchLeadDialog($('#switch-lead-dialog'), {
   },
 })
 
-// The agents screens open in their own window at the daemon's address: the
-// board's page cannot frame them (WebKit blocks a plain-HTTP frame inside the
-// app's secure page). Their edits show here once this window is back in front.
+// The agents screens are the daemon's own pages, each framed in a dialog of
+// its own at the address and token the app hands the page. A key pressed in a
+// frame never reaches the dialog around it, so a screen hands Escape up.
+// Closing one gives the focus back to the Settings button (its dialog closed
+// as the screen opened) and reads the agents again: a model or a tier may
+// have changed on it.
+const settingsButton = $('#settings-button')
 const settingsDialog = $('#settings-dialog')
-$('#settings-button').addEventListener('click', () => settingsDialog.showModal())
+settingsButton.addEventListener('click', () => settingsDialog.showModal())
 for (const entry of settingsDialog.querySelectorAll('[data-agents-page]')) {
   const page = entry.dataset.agentsPage
+  const dialog = document.getElementById(entry.getAttribute('aria-controls'))
+  const frame = dialog.querySelector('iframe')
   entry.addEventListener('click', () =>
     act(async () => {
       settingsDialog.close()
-      const opened = await invoke('open_agents_window', { page })
-      if (opened?.ok !== true) {
-        throw new Error(opened?.error ?? 'The agents screens are not available.')
+      const screen = await invoke('agents_screen', { page })
+      if (screen?.ok !== true) {
+        throw new Error(screen?.error ?? 'The agents screens are not available.')
       }
+      // A screen opened before keeps what the human left on it, its filters
+      // and drafts, and is told the agents may have changed since.
+      if (frame.src === screen.url) {
+        frame.contentWindow.postMessage('consensflow:refresh-agents', new URL(screen.url).origin)
+      } else {
+        frame.src = screen.url
+      }
+      dialog.showModal()
     }),
   )
-}
-window.addEventListener('focus', () => {
-  void act(async () => {
-    await readAgents()
-    staff.render()
+  window.addEventListener('message', (event) => {
+    if (event.source === frame.contentWindow && event.data === 'consensflow:close') dialog.close()
   })
-})
+  dialog.addEventListener('close', () => {
+    settingsButton.focus()
+    void act(readAgents)
+  })
+}
 
 async function start() {
   if (typeof invoke !== 'function') {

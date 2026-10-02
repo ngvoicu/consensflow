@@ -530,19 +530,19 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   )
   assert.equal(board.data.delivered, true, 'the core never confirmed the delivery from the record')
 
-  const agentsWindow = await app.waitFor('agents-window')
+  // The agents screens, each in its dialog over the board, framed at the
+  // daemon's page with the UI token.
+  const { screens } = (await app.waitFor('agents-screens')).data
   assert.deepEqual(
-    [agentsWindow.data.first.ok, agentsWindow.data.first.label, agentsWindow.data.first.reused],
-    [true, 'agents', false],
-    JSON.stringify(agentsWindow.data.first),
+    screens.map((screen) => [screen.name, screen.open]),
+    [
+      ['Agents', true],
+      ['Harnesses', true],
+    ],
+    JSON.stringify(screens),
   )
-  assert.match(agentsWindow.data.first.url, /^http:\/\/localhost:\d+\/\?token=/)
-  assert.deepEqual(
-    [agentsWindow.data.again.ok, agentsWindow.data.again.reused],
-    [true, true],
-    'the second ask reuses the window',
-  )
-  assert.match(agentsWindow.data.again.url, /\/harnesses\?token=/)
+  assert.match(screens[0].src, /^http:\/\/localhost:\d+\/\?token=/)
+  assert.match(screens[1].src, /^http:\/\/localhost:\d+\/harnesses\?token=/)
 
   const pasted = await app.waitFor('large-paste')
   const expectedPaste = Buffer.from(`\x1b[200~${'漢字 résumé 🙂\r'.repeat(30_000)}\x1b[201~`)
