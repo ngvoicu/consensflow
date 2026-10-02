@@ -504,4 +504,102 @@ describe('the inbox queue: delivery, questions and answers', () => {
       )
     })
   })
+
+  it('lists what is on its way: to one participant, and into any window, oldest first', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      const first = ledger.createTask(project.id, {
+        from: 'chief',
+        to: 'zeus',
+        body: 'One',
+      }).message
+      const second = ledger.createTask(project.id, {
+        from: 'chief',
+        to: 'zeus',
+        body: 'Two',
+      }).message
+      const note = ledger.note(project.id, { from: 'human', to: 'chief', body: 'Hello' })
+      const states = (participant) => ledger.pending(participant).map((m) => [m.id, m.state])
+      assert.deepEqual(states(id('zeus')), [
+        [first.id, 'queued'],
+        [second.id, 'queued'],
+      ])
+      assert.deepEqual(ledger.inFlight(), [])
+      ledger.beginDelivery(first.id)
+      ledger.beginDelivery(note.id)
+      assert.deepEqual(
+        ledger.inFlight().map((m) => [m.id, m.recipient]),
+        [
+          [first.id, 'zeus'],
+          [note.id, 'chief'],
+        ],
+      )
+      assert.deepEqual(states(id('zeus')), [
+        [first.id, 'delivering'],
+        [second.id, 'queued'],
+      ])
+      ledger.confirmDelivery(first.id, { evidence: 'native-1' })
+      assert.deepEqual(
+        ledger.inFlight().map((m) => m.id),
+        [note.id],
+      )
+      assert.deepEqual(states(id('zeus')), [[second.id, 'queued']])
+    })
+  })
+
+  it('cancels a message still on its way, never one delivered, cancelled or unknown', async () => {
+    await withLedger((ledger) => {
+      const { project } = staff(ledger)
+      const { message } = ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'One' })
+      const delivered = deliver(
+        ledger,
+        ledger.note(project.id, { from: 'human', to: 'chief', body: 'Hi' }),
+      )
+      const cancelled = ledger.cancelMessage(message.id, 'no longer wanted')
+      assert.deepEqual([cancelled.state, cancelled.reason], ['cancelled', 'no longer wanted'])
+      for (const id of [message.id, delivered.id, 99]) {
+        assert.throws(() => ledger.cancelMessage(id, 'gone'), { code: 'not-pending' })
+      }
+      assert.throws(() => ledger.cancelMessage(message.id, ' '), { code: 'invalid-text' })
+    })
+  })
+
+  it('reads in the app only a message the human has, once', async () => {
+    await withLedger((ledger) => {
+      const { project } = staff(ledger)
+      const { message } = ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'One' })
+      assert.throws(() => ledger.markRead(99), { code: 'unknown-message' })
+      assert.throws(() => ledger.markRead(message.id), { code: 'not-for-the-human' })
+      const note = ledger.note(project.id, { from: 'chief', to: 'human', body: 'T-1 is done.' })
+      const read = ledger.markRead(note.id)
+      assert.equal(read.state, 'read')
+      assert.deepEqual(ledger.markRead(note.id), read, 'read already: as it was')
+    })
+  })
+
+  it('refuses a question with options that has no text, and an answer with more picks than a question takes', async () => {
+    await withLedger((ledger) => {
+      const { project, question } = asked(ledger)
+      assert.throws(
+        () =>
+          ledger.ask(project.id, {
+            from: 'zeus',
+            to: 'chief',
+            task: 1,
+            questions: [{ question: '  ', header: 'Colour', options: [] }],
+          }),
+        { code: 'bad-questions', message: 'questions: each question has its text' },
+      )
+      for (const choices of [
+        [['red', 'blue'], ['yes']],
+        [[], ['yes']],
+      ]) {
+        assert.throws(() => ledger.answer(question.id, { from: question.recipientId, choices }), {
+          code: 'bad-choices',
+          message: 'answer: Colour: one pick',
+        })
+      }
+      assert.equal(ledger.answerTo(question.id), null, 'it still waits for its answer')
+    })
+  })
 })

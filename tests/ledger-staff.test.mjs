@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { openLedger } from '../src/ledger/index.js'
+import { sessionName } from '../src/ledger/names.js'
 import { clock, deliver, staff, withDir, withLedger } from './ledger-fixtures.mjs'
 
 /** A project's staff: members who join and leave, and their sessions (src/ledger/staff.js). */
@@ -217,6 +218,24 @@ describe('the project staff', () => {
         [null, '@zeus left the staff; it takes no more tasks. Cancelled with it: T-1, T-2, T-3.'],
       ])
       assert.deepEqual(notes(ledger, id('human')), [])
+    })
+  })
+
+  it('refuses a member that is not an agent id, or is the human or the chief, and a quota mark without a time', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      for (const agent of ['human', 'chief', 'no such!', 42]) {
+        assert.throws(
+          () =>
+            ledger.addMember(project.id, { agent, harness: 'pi', role: 'worker', tier: 'light' }),
+          { code: 'invalid-agent' },
+        )
+      }
+      assert.throws(() => ledger.markOut(id('zeus'), { until: 'soon', reason: 'quota' }), {
+        code: 'invalid-time',
+      })
+      const out = ledger.markOut(id('zeus'), { until: '2026-09-20T00:00:00.000Z', reason: 'quota' })
+      assert.equal(out.outUntil, '2026-09-20T00:00:00.000Z')
     })
   })
 })
@@ -529,5 +548,12 @@ describe("sessions: a member's named windows", () => {
         ['diana'],
       )
     })
+  })
+
+  it('names a session with two plain words, drawn by the random it is given', () => {
+    const drawn = (at) => sessionName(() => at)
+    // A random that reaches 1 still picks the last word of each list.
+    assert.deepEqual([drawn(0), drawn(1)], ['amber-anchor', 'zesty-yarrow'])
+    assert.match(sessionName(), /^[a-z]+-[a-z]+$/)
   })
 })

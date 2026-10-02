@@ -507,6 +507,30 @@ describe('pause and resume', () => {
       }
     })
   })
+
+  it("knows whether the chief's tell reached the window since the task was last paused", async () => {
+    await withLedger((ledger) => {
+      const { project, session, sessionId } = running(ledger)
+      const task = ledger.task(project.id, 1)
+      const told = () => ledger.toldSincePaused(sessionId, task.id)
+      const tell = ledger.ask(project.id, {
+        from: 'chief',
+        to: session,
+        task: 1,
+        body: 'Use the new grammar',
+        urgent: true,
+      })
+      assert.equal(ledger.task(project.id, 1).state, 'paused')
+      assert.equal(told(), false, 'not yet in the window')
+      ledger.beginDelivery(tell.id)
+      assert.equal(told(), true, 'on its way in counts')
+      ledger.confirmDelivery(tell.id, { evidence: 'native' })
+      assert.equal(told(), true)
+      ledger.resumeTask(project.id, 1, { by: 'chief', body: 'Go on' })
+      ledger.pauseTask(project.id, 1, { by: 'chief' })
+      assert.equal(told(), false, 'a tell from before the latest pause does not count')
+    })
+  })
 })
 
 describe('a task held with its window while its member is out of quota', () => {

@@ -27,6 +27,53 @@ describe('conversations', () => {
       assert.equal(ledger.currentConversation(id('zeus')), null)
     })
   })
+
+  it('refuses to bind or copy a conversation it does not have, and ends one only once', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      assert.throws(() => ledger.bindConversation(99, 'native-1'), {
+        code: 'unknown-conversation',
+      })
+      assert.throws(() => ledger.copyTranscript(99, []), { code: 'unknown-conversation' })
+      assert.equal(ledger.endConversation(99), null)
+      const conversation = ledger.startConversation(id('zeus'), { harness: 'claude-code' })
+      const ended = ledger.endConversation(conversation.id)
+      assert.notEqual(ended.endedAt, null)
+      assert.deepEqual(ledger.endConversation(conversation.id), ended, 'ended already: as it was')
+      assert.equal(
+        ledger.events(project.id).filter((event) => event.kind === 'conversation.ended').length,
+        1,
+      )
+    })
+  })
+
+  it('follows a window switched to another conversation: a new one bound to it, its own earlier one back, never one another participant holds', async () => {
+    await withLedger((ledger) => {
+      const { id } = staff(ledger)
+      const first = ledger.startConversation(id('zeus'), { harness: 'claude-code' })
+      ledger.bindConversation(first.id, 'native-1')
+      const follow = (participant, nativeSession) =>
+        ledger.followConversation(participant, { harness: 'claude-code', nativeSession })
+
+      // /clear: a native session the ledger has not seen is a new conversation on it.
+      const cleared = follow(id('zeus'), 'native-2')
+      assert.deepEqual([cleared.nativeSession, cleared.endedAt], ['native-2', null])
+      assert.equal(ledger.currentConversation(id('zeus')).id, cleared.id)
+      // /resume of its own earlier one: that one goes on, the one in progress ends.
+      const resumed = follow(id('zeus'), 'native-1')
+      assert.deepEqual([resumed.id, resumed.endedAt], [first.id, null])
+      assert.equal(ledger.currentConversation(id('zeus')).id, first.id)
+      assert.deepEqual(follow(id('zeus'), 'native-1'), resumed, 'the one it is on: nothing moves')
+      // A native session another participant's conversation holds stays with it.
+      const other = follow(id('diana'), 'native-1')
+      assert.deepEqual([other.participantId, other.nativeSession], [id('diana'), null])
+      assert.equal(ledger.currentConversation(id('zeus')).id, first.id)
+      assert.throws(
+        () => ledger.followConversation(id('zeus'), { harness: 'kimi', nativeSession: 'x' }),
+        { code: 'invalid-harness' },
+      )
+    })
+  })
 })
 
 describe('switching the lead', () => {
@@ -167,6 +214,25 @@ describe('switching the lead', () => {
       )
       ledger.setProjectState(project.id, 'suspended')
       assert.equal(ledger.deleteProject(project.id).members, 2)
+    })
+  })
+
+  it('logs what the lead read of its history: which page, or what it searched for', async () => {
+    await withLedger((ledger) => {
+      const { project } = staff(ledger)
+      ledger.historyRead(project.id, { page: 2 })
+      ledger.historyRead(project.id, { page: 1, find: 'parser', tools: true })
+      assert.deepEqual(
+        ledger
+          .events(project.id)
+          .filter((event) => event.kind === 'lead.history.read')
+          .map((event) => event.data),
+        [
+          { page: 2, find: null, tools: false },
+          { page: 1, find: 'parser', tools: true },
+        ],
+      )
+      assert.throws(() => ledger.historyRead(99, { page: 1 }), { code: 'unknown-project' })
     })
   })
 })
@@ -392,6 +458,26 @@ describe('the transcript copy', () => {
       assert.deepEqual(ledger.transcript(project.id, 3), { items: [], total: 0 })
       assert.throws(() => ledger.transcript(project.id, 9), { code: 'unknown-task' })
       assert.equal(session > 0 && id('chief') > 0, true)
+    })
+  })
+
+  it('finds the first item the current conversation was given with a text: the proof a delivery arrived', async () => {
+    await withLedger((ledger) => {
+      const { session, conversation } = windowed(ledger)
+      const header = '[ConsensFlow m-7 ·'
+      ledger.copyTranscript(conversation.id, [
+        item('a1', 'assistant', `quoting ${header} note]`),
+        item('u1', 'user', `${header} note] Use JSON`),
+        item('u2', 'user', `${header} note] again`),
+      ])
+      assert.equal(ledger.copiedItemWith(session, header), 'u1', 'given to it, the first')
+      assert.equal(ledger.copiedItemWith(session, '[ConsensFlow m-8 ·'), null)
+      ledger.startConversation(session, { harness: 'claude-code' })
+      assert.equal(
+        ledger.copiedItemWith(session, header),
+        null,
+        'an ended conversation proves nothing',
+      )
     })
   })
 })

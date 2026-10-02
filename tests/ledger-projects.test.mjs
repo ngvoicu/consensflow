@@ -273,4 +273,21 @@ describe('projects and participants', () => {
       assert.equal(ledger.project(open.id).resumeOnStart, false)
     })
   })
+
+  it('opens or suspends a project by hand and nothing else, and forgets a resume once it was tried', async () => {
+    await withLedger((ledger) => {
+      const { project } = staff(ledger)
+      assert.throws(() => ledger.setProjectState(project.id, 'closed'), { code: 'invalid-state' })
+      ledger.suspendForRestart()
+      assert.equal(ledger.project(project.id).resumeOnStart, true)
+      ledger.forgetResume(project.id)
+      const after = ledger.project(project.id)
+      assert.deepEqual(
+        [after.state, after.resumeOnStart],
+        ['suspended', false],
+        'the mark goes; the project stays as it was',
+      )
+      assert.throws(() => ledger.forgetResume(99), { code: 'unknown-project' })
+    })
+  })
 })
