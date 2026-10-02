@@ -3,7 +3,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Mutex, MutexGuard};
+use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -37,6 +37,14 @@ const CORE_RESTART: Backoff = Backoff {
     most: Duration::from_secs(30),
 };
 const CORE_STOPPED: &str = "ConsensFlow's core stopped while the app was running";
+/// How long a daemon has to say it is ready (its handle line) before its
+/// start counts as failed. It opens its ledger first and migrates it, and
+/// each step of a migration rebuilds a table and checks every reference in
+/// the ledger under full sync: a limit too short would cut each start of a
+/// big ledger short, undone every time, and the app would never start. A
+/// daemon that hangs is still reported, and started again, within two
+/// minutes.
+const CORE_READY_TIMEOUT: Duration = Duration::from_secs(120);
 /// How long the human's login shell has to say its PATH.
 const LOGIN_PATH_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
@@ -398,9 +406,10 @@ impl InputQueue {
         if !self.accepting.load(Ordering::Acquire) {
             return Err(closed());
         }
-        let senders = self.senders.lock().map_err(|_| {
-            InputError::refused(LOCK_POISONED, "pane input queue lock is poisoned")
-        })?;
+        let senders = self
+            .senders
+            .lock()
+            .map_err(|_| InputError::refused(LOCK_POISONED, "pane input queue lock is poisoned"))?;
         if !self.accepting.load(Ordering::Acquire) {
             return Err(closed());
         }
@@ -628,6 +637,8 @@ struct Backoff {
 /// still run in the pane host.
 struct Core {
     state: Mutex<CoreState>,
+    /// Woken when the first start has its outcome, or the app stops.
+    settled: Condvar,
     report: CoreReport,
 }
 
@@ -636,6 +647,9 @@ struct CoreState {
     bridge: Option<Bridge>,
     roster: Option<RosterHandle>,
     status: CoreStatus,
+    /// The first start has its outcome. Until then the page is told nothing,
+    /// since a core that is starting is not down, and what it asks waits.
+    settled: bool,
     /// Starts so far, and the one whose bridge is in hand: only that bridge
     /// closing is the core stopping.
     starts: u64,
@@ -651,10 +665,12 @@ impl Core {
                 bridge: None,
                 roster: None,
                 status: CoreStatus::down("ConsensFlow's core has not started", false),
+                settled: false,
                 starts: 0,
                 current: 0,
                 stopping: false,
             }),
+            settled: Condvar::new(),
             report,
         })
     }
@@ -663,30 +679,34 @@ impl Core {
         self.state.lock().unwrap_or_else(|error| error.into_inner())
     }
 
-    /// Starts the daemon. A start that fails is tried again from a thread of
-    /// its own, waiting longer each time, while no pane is open and the app
-    /// is not stopping.
+    /// Starts the daemon from a thread of its own, so the app's window opens
+    /// meanwhile: a daemon may take a while to start (a migration on a big
+    /// ledger), and the first start used to run before the window existed.
     fn start(self: &Arc<Self>, starter: CoreStarter, panes: Arc<PaneTable>, backoff: Backoff) {
-        let Err(failure) = self.attempt(&starter) else {
-            return;
-        };
-        self.fail(&failure);
-        if !failure.retry {
-            return;
-        }
         let core = Arc::clone(self);
-        if thread::Builder::new()
+        if let Err(error) = thread::Builder::new()
             .name("consensflow-core-start".to_string())
-            .spawn(move || core.retry(&starter, &panes, backoff))
-            .is_err()
+            .spawn(move || core.run(&starter, &panes, backoff))
         {
-            self.tell(CoreStatus::down(&failure.cause, false));
+            self.fail(&CoreFailure {
+                cause: format!("ConsensFlow's core could not be started: {error}"),
+                retry: false,
+            });
         }
     }
 
-    fn retry(self: &Arc<Self>, starter: &CoreStarter, panes: &PaneTable, backoff: Backoff) {
+    /// Starts the daemon, and again after a start that failed, waiting longer
+    /// each time, while no pane is open and the app is not stopping.
+    fn run(self: &Arc<Self>, starter: &CoreStarter, panes: &PaneTable, backoff: Backoff) {
         let mut wait = backoff.first;
         loop {
+            let Err(failure) = self.attempt(starter) else {
+                return;
+            };
+            self.fail(&failure);
+            if !failure.retry {
+                return;
+            }
             thread::sleep(wait);
             wait = (wait * 2).min(backoff.most);
             let status = {
@@ -702,15 +722,6 @@ impl Core {
                     ..status
                 });
                 return;
-            }
-            match self.attempt(starter) {
-                Ok(()) => return,
-                Err(failure) => {
-                    self.fail(&failure);
-                    if !failure.retry {
-                        return;
-                    }
-                }
             }
         }
     }
@@ -737,7 +748,7 @@ impl Core {
         }
         // A daemon that ended before it was in hand was not the core's yet
         // when its bridge closed, so its end is read here.
-        state.status = if started.bridge.is_closed() {
+        let status = if started.bridge.is_closed() {
             CoreStatus::down(CORE_STOPPED, false)
         } else {
             CoreStatus::up()
@@ -746,7 +757,7 @@ impl Core {
         state.editor = Some(started.editor);
         state.bridge = Some(started.bridge);
         state.roster = Some(started.roster);
-        (self.report)(&state.status);
+        self.change(&mut state, status);
         Ok(())
     }
 
@@ -762,8 +773,7 @@ impl Core {
             return;
         }
         eprintln!("consensflow: {CORE_STOPPED}");
-        state.status = CoreStatus::down(CORE_STOPPED, false);
-        (self.report)(&state.status);
+        self.change(&mut state, CoreStatus::down(CORE_STOPPED, false));
     }
 
     /// A change, told to the page, unless the app is stopping.
@@ -772,21 +782,38 @@ impl Core {
         if state.stopping {
             return;
         }
+        self.change(&mut state, status);
+    }
+
+    /// Every change is told to the page. The first is the first start's
+    /// outcome, which what the page asked meanwhile is waiting for.
+    fn change(&self, state: &mut CoreState, status: CoreStatus) {
         state.status = status;
+        state.settled = true;
         (self.report)(&state.status);
+        self.settled.notify_all();
     }
 
     /// Where the core stands, told again: a page that has just loaded missed
-    /// what was told before it listened. Under the same lock as every change,
-    /// so the last the page hears is the current one.
+    /// what was told before it listened. Nothing while the first start is
+    /// under way, since a core that is starting is not down. Under the same
+    /// lock as every change, so the last the page hears is the current one.
     fn tell_again(&self) {
         let state = self.lock();
-        (self.report)(&state.status);
+        if state.settled {
+            (self.report)(&state.status);
+        }
     }
 
-    /// The bridge to ask while the core is up; why not otherwise.
+    /// The bridge to ask while the core is up; why not otherwise. Asked
+    /// while the first start is under way, it waits for the outcome: a page
+    /// loads meanwhile and reads the board, and a read that failed is not
+    /// made again when the core comes up.
     fn connection(&self) -> Result<Bridge, String> {
-        let state = self.lock();
+        let state = self
+            .settled
+            .wait_while(self.lock(), |state| !state.settled && !state.stopping)
+            .unwrap_or_else(|error| error.into_inner());
         match &state.bridge {
             Some(bridge) if state.status.available => Ok(bridge.clone()),
             _ => Err(state.status.cause.clone().unwrap_or_default()),
@@ -802,14 +829,16 @@ impl Core {
             .flatten()
     }
 
-    /// The app is stopping: no start is taken in, nothing more is told. The
-    /// first call has the daemon and its bridge handed over to be stopped.
+    /// The app is stopping: no start is taken in, nothing more is told, and
+    /// nothing waits for a first start. The first call has the daemon and its
+    /// bridge handed over to be stopped.
     fn stop(&self) -> Option<(Option<Child>, Option<Bridge>)> {
         let mut state = self.lock();
         if state.stopping {
             return None;
         }
         state.stopping = true;
+        self.settled.notify_all();
         Some((state.editor.take(), state.bridge.clone()))
     }
 
@@ -866,7 +895,7 @@ impl AppRuntime {
                 );
                 builder.on_error(|error| eprintln!("consensflow bridge: {error}"));
                 builder.on_close(closed);
-                connect_core(command, builder)
+                connect_core(command, builder, CORE_READY_TIMEOUT)
             })
         };
         core.start(starter, Arc::clone(&panes), CORE_RESTART);
@@ -1089,8 +1118,13 @@ fn core_command(app: &AppHandle) -> Result<Command, CoreFailure> {
 }
 
 /// Starts a daemon and connects to it: its output carries the handle line,
-/// then the bridge's frames; its input carries the app's.
-fn connect_core(mut command: Command, builder: BridgeBuilder) -> Result<StartedCore, CoreFailure> {
+/// then the bridge's frames; its input carries the app's. A daemon that has
+/// not said it is ready `within` its time is ended, and its start failed.
+fn connect_core(
+    mut command: Command,
+    builder: BridgeBuilder,
+    within: Duration,
+) -> Result<StartedCore, CoreFailure> {
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1112,18 +1146,44 @@ fn connect_core(mut command: Command, builder: BridgeBuilder) -> Result<StartedC
         let _ = child.wait();
         CoreFailure::transient(cause)
     };
-    let connected = match builder.connect(input, writer) {
-        Ok(connected) => connected,
-        Err(BridgeError::Eof) => {
+    // The handle line is read on a thread of its own, since the read has no
+    // limit: one behind a daemon that hung held the start for good.
+    let (handed, handle) = mpsc::channel();
+    if let Err(error) = thread::Builder::new()
+        .name("consensflow-core-handle".to_string())
+        .spawn(move || {
+            let _ = handed.send(builder.connect(input, writer));
+        })
+    {
+        return Err(failed(
+            &mut child,
+            format!("could not read the bundled ConsensFlow's handle: {error}"),
+        ));
+    }
+    let connected = match handle.recv_timeout(within) {
+        Ok(Ok(connected)) => connected,
+        Ok(Err(BridgeError::Eof)) => {
             return Err(failed(
                 &mut child,
                 "ConsensFlow's core stopped before it was ready".to_string(),
             ));
         }
-        Err(error) => {
+        Ok(Err(error)) => {
             return Err(failed(
                 &mut child,
                 format!("could not connect to the bundled ConsensFlow: {error}"),
+            ));
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            return Err(failed(
+                &mut child,
+                format!("ConsensFlow's core did not say it was ready within {within:?}"),
+            ));
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            return Err(failed(
+                &mut child,
+                "could not read the bundled ConsensFlow's handle".to_string(),
             ));
         }
     };
@@ -1778,9 +1838,10 @@ async fn task_operation<R: Runtime>(
     operation: &'static str,
     body: Value,
 ) -> Value {
-    let connection = app.state::<AppRuntime>().core.connection();
+    let core = Arc::clone(&app.state::<AppRuntime>().core);
+    // Off the async runtime: asked while the core is starting, it waits.
     run_blocking(operation, move || {
-        request_node(connection, operation.to_string(), body)
+        request_node(core.connection(), operation.to_string(), body)
     })
     .await
 }
@@ -1847,8 +1908,8 @@ pub async fn core_request<R: Runtime>(app: AppHandle<R>, operation: String, body
 /// next keystrokes were refused as a regression until the app restarted.
 ///
 /// And it is when a new page hears where the core stands: what was told
-/// before it listened (a first start fails before the window exists) is told
-/// again, so the page listens to `core-status` before it subscribes.
+/// before it listened (a first start that failed while the page loaded) is
+/// told again, so the page listens to `core-status` before it subscribes.
 #[tauri::command]
 pub async fn subscribe_output<R: Runtime>(
     app: AppHandle<R>,
@@ -1943,6 +2004,7 @@ mod tests {
             if bridge.is_some() {
                 state.status = CoreStatus::up();
             }
+            state.settled = true;
             state.editor = editor;
             state.bridge = bridge;
         }
@@ -1986,7 +2048,7 @@ mod tests {
             .arg(format!("{}{then}", if ready { handle } else { "" }));
         let mut builder = BridgeBuilder::new(1024);
         builder.on_close(closed);
-        connect_core(command, builder)
+        connect_core(command, builder, Duration::from_secs(5))
     }
 
     /// A daemon that stops before it is ready (its ledger still held by one
@@ -2032,6 +2094,159 @@ mod tests {
             heard.recv_timeout(Duration::from_millis(200)).is_err(),
             "an app that is quitting tells the page nothing"
         );
+    }
+
+    /// A daemon that never says it is ready (a migration that hangs) is
+    /// killed at the limit, and its start counts as failed: the page is told
+    /// and it is started again. The read of its handle line had no limit, and
+    /// held the start for good.
+    #[cfg(unix)]
+    #[test]
+    fn a_daemon_that_never_says_it_is_ready_is_killed_and_started_again() {
+        let home = tempfile::tempdir().expect("home");
+        let pid_file = home.path().join("hung.pid");
+        let starts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&starts);
+        let hung = pid_file.clone();
+        let starter: CoreStarter = Arc::new(move |closed| {
+            if counted.fetch_add(1, Ordering::SeqCst) > 0 {
+                return stand_in_core(true, "while read -r line; do :; done", closed);
+            }
+            let mut command = Command::new("/bin/sh");
+            command.arg("-c").arg(format!(
+                "echo $$ > '{}'; exec /bin/sleep 60",
+                hung.display()
+            ));
+            let mut builder = BridgeBuilder::new(1024);
+            builder.on_close(closed);
+            connect_core(command, builder, Duration::from_millis(300))
+        });
+        let (report, heard) = listener();
+        let core = Core::new(report);
+        let panes = Arc::new(PaneTable::new());
+        core.start(starter, Arc::clone(&panes), QUICK);
+
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(5)).expect("told"),
+            CoreStatus::down(
+                "ConsensFlow's core did not say it was ready within 300ms",
+                true
+            )
+        );
+        let hung_pid = std::fs::read_to_string(&pid_file)
+            .expect("the hung daemon's pid")
+            .trim()
+            .parse::<i32>()
+            .expect("a pid");
+        assert!(
+            !process_exists(hung_pid),
+            "the hung daemon was left running"
+        );
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(5)).expect("up"),
+            CoreStatus::up()
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 2);
+
+        let arbiter = Arc::new(InputArbiter::new(0));
+        AppRuntime {
+            inputs: Arc::new(InputQueue::new(Arc::clone(&panes), arbiter)),
+            panes,
+            core,
+            output: Arc::new(OutputHub::new()),
+        }
+        .shutdown();
+    }
+
+    /// The first start runs apart, so the app's window opens while the daemon
+    /// starts: a page that loads meanwhile is told nothing, since a core that
+    /// is starting is not down, and what it asks waits for the outcome. The
+    /// first start used to run before the window existed, for as long as the
+    /// daemon took.
+    #[cfg(unix)]
+    #[test]
+    fn the_first_start_runs_apart_and_what_a_page_asks_waits_for_it() {
+        let (release, released) = mpsc::channel::<()>();
+        let released = Mutex::new(released);
+        let starter: CoreStarter = Arc::new(move |closed| {
+            let _ = released.lock().expect("the release").recv();
+            stand_in_core(true, "while read -r line; do :; done", closed)
+        });
+        let (report, heard) = listener();
+        let core = Core::new(report);
+        let panes = Arc::new(PaneTable::new());
+        let (returned, start_returned) = mpsc::channel();
+        let starting = Arc::clone(&core);
+        let starting_panes = Arc::clone(&panes);
+        thread::spawn(move || {
+            starting.start(starter, starting_panes, QUICK);
+            let _ = returned.send(());
+        });
+        assert!(
+            start_returned.recv_timeout(Duration::from_secs(2)).is_ok(),
+            "the start held up the app until the daemon was ready"
+        );
+
+        core.tell_again();
+        assert!(
+            heard.recv_timeout(Duration::from_millis(100)).is_err(),
+            "a core that is starting was told as down"
+        );
+        let asking = Arc::clone(&core);
+        let (answered, answer) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = answered.send(asking.connection().is_ok());
+        });
+        assert!(
+            answer.recv_timeout(Duration::from_millis(200)).is_err(),
+            "a request did not wait for the start"
+        );
+
+        release.send(()).expect("let the start go on");
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(5)).expect("up"),
+            CoreStatus::up()
+        );
+        assert_eq!(answer.recv_timeout(Duration::from_secs(5)), Ok(true));
+
+        let arbiter = Arc::new(InputArbiter::new(0));
+        AppRuntime {
+            inputs: Arc::new(InputQueue::new(Arc::clone(&panes), arbiter)),
+            panes,
+            core,
+            output: Arc::new(OutputHub::new()),
+        }
+        .shutdown();
+    }
+
+    /// An app that stops while its first start is under way answers what a
+    /// page asked meanwhile at once.
+    #[test]
+    fn stopping_ends_a_wait_for_the_first_start() {
+        let (release, released) = mpsc::channel::<()>();
+        let released = Mutex::new(released);
+        let starter: CoreStarter = Arc::new(move |_closed| {
+            let _ = released.lock().expect("the release").recv();
+            Err(CoreFailure::transient("the app stopped".to_string()))
+        });
+        let (report, _heard) = listener();
+        let core = Core::new(report);
+        core.start(starter, Arc::new(PaneTable::new()), QUICK);
+        let asking = Arc::clone(&core);
+        let (answered, answer) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = answered.send(asking.connection().err());
+        });
+        assert!(answer.recv_timeout(Duration::from_millis(200)).is_err());
+
+        assert!(core.stop().is_some());
+        assert_eq!(
+            answer
+                .recv_timeout(Duration::from_secs(1))
+                .expect("answered"),
+            Some("ConsensFlow's core has not started".to_string())
+        );
+        drop(release);
     }
 
     /// A daemon that stops while the app runs is not started again (its
