@@ -1,7 +1,7 @@
-import { button, element, redraw } from '../dom.js'
+import { element, iconButton, redraw } from '../dom.js'
 import { EmulatorRegistry, paneKey } from '../term.js'
 import { TerminalLink } from '../terminal-link.js'
-import { lamp, laneName, laneOrder } from './board.js'
+import { ICONS, lamp, laneName, laneOrder } from './board.js'
 
 /** A session in `#showing`: its project's id and its handle. */
 const showingKey = (project, handle) => `${project}:${handle}`
@@ -12,7 +12,8 @@ const showingKey = (project, handle) => `${project}:${handle}`
  * sideways. The chief's terminal is in the dock while its window lives; a
  * session's (a worker's, an advisor's, a reviewer's or an image designer's
  * task) stays out of it until the human shows it from its lane, and leaves
- * when they hide it. Only live windows: one that ends leaves with its card,
+ * when they hide it, from its lane or its card; only its lane closes its
+ * window. Only live windows: one that ends leaves with its card,
  * and its lane says it is closed and opens it again on its conversation.
  * While a window lives, in the dock or not, its emulator takes all its
  * output and keeps its scrollback, its size and the human's half-typed
@@ -24,8 +25,6 @@ export class TerminalsView {
   #link
   #cards = new Map()
   #onChange
-  /** The human closing a live window from its card: the same as from its board row. */
-  #onClose
   /** The card last brought into view: a redraw scrolls only when it changes. */
   #shownKey = null
   /**
@@ -37,10 +36,9 @@ export class TerminalsView {
    */
   #showing = new Set()
 
-  constructor(stage, { invoke, report, createEmulator, onChange = () => {}, onClose = () => {} }) {
+  constructor(stage, { invoke, report, createEmulator, onChange = () => {} }) {
     this.#stage = stage
     this.#onChange = onChange
-    this.#onClose = onClose
     this.#registry = new EmulatorRegistry({
       ...(createEmulator ? { createEmulator } : {}),
       onData: (pane, data) => void this.#link.input(pane, data),
@@ -257,9 +255,9 @@ export class TerminalsView {
     if (lane !== null) {
       const name = laneName(lane.participant)
       const { handle } = lane.participant
-      // Only a session's terminal hides and its window closes by hand, as on
-      // its board row; the chief's stays with the project. Hide is the one
-      // that leaves the window at work.
+      // Only a session's terminal hides, as on its board row, and its window
+      // works on; the chief's stays with the project. Closing the window is
+      // its row's alone.
       const session = lane.participant.member !== null
       redraw(entry.head, [
         lamp(lane.activity),
@@ -267,17 +265,11 @@ export class TerminalsView {
         element('span', 'terminal-meta', lane.participant.harness ?? ''),
         ...(session
           ? [
-              button(
-                'Hide',
-                'quiet-button',
+              iconButton(
+                ICONS.hide,
+                'Hide terminal',
                 () => this.hide(project, handle),
                 `Hide ${name}'s terminal`,
-              ),
-              button(
-                'Close',
-                'quiet-button',
-                () => this.#onClose(lane.participant),
-                `Close ${name}'s terminal`,
               ),
             ]
           : []),

@@ -148,7 +148,11 @@ const board = new BoardView(boardRoot, {
       await core('session.open', { project: participant.projectId, handle: participant.handle })
       showTerminal(participant)
     }),
-  onCloseTerminal: (participant) => closeTerminal(participant),
+  onCloseTerminal: (participant) =>
+    act(async () => {
+      await core('session.close', { project: participant.projectId, handle: participant.handle })
+      terminals.forget(participant.projectId, participant.handle)
+    }),
   onEndSession: (participant) =>
     act(async () => {
       await core('session.end', { project: participant.projectId, handle: participant.handle })
@@ -207,13 +211,6 @@ const drawer = new TaskDrawer($('#task-drawer'), {
 // The packaged smoke watches acks and arrivals here, on the real paths.
 let ackObserver = null
 let outputObserver = null
-/** Closing a window, from its board row or its card: its process ends and its card goes with it. */
-function closeTerminal(participant) {
-  return act(async () => {
-    await core('session.close', { project: participant.projectId, handle: participant.handle })
-    terminals.forget(participant.projectId, participant.handle)
-  })
-}
 
 /** A session's terminal the human asked to see: in the dock, unfolded, in front. */
 function showTerminal(participant) {
@@ -230,7 +227,6 @@ const terminals = new TerminalsView(stage, {
   report,
   createEmulator: tauri.test?.createEmulator,
   onChange: () => render(),
-  onClose: closeTerminal,
 })
 
 // A fold changes the room the board and the windows have: both draw again.

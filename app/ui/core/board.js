@@ -28,8 +28,8 @@ const COLUMNS = [
   ['done', 'Done'],
   ['finished', 'Finished'],
 ]
-/** A session row's tools, each drawn as an icon: path data on a 24-unit grid. */
-const ICONS = {
+/** A session's tools, on its row and its card in the dock, each drawn as an icon: path data on a 24-unit grid. */
+export const ICONS = {
   show: ['M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z', 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z'],
   hide: [
     'M3 3l18 18',
