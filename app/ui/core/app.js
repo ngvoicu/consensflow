@@ -7,8 +7,9 @@ import { TerminalsView } from './terminals.js'
 
 /**
  * The page: the projects on the left, the chosen project's board in the
- * middle, and the live windows on the right in a strip that scrolls sideways,
- * the chief first, so the human reads the board and talks to any of them.
+ * middle, and on the right, in a strip that scrolls sideways, the chief's
+ * window and the sessions' the human asks to see, so the human reads the
+ * board and talks to any of them.
  * Everything it shows comes from the new core through the app's
  * `core_request`, and it redraws when the core says something changed. It
  * keeps nothing of its own but what is on screen.
@@ -135,14 +136,17 @@ const board = new BoardView(boardRoot, {
   // Each control acts on the project of the board it is on: not yet the one
   // the human just chose, while that one's board is on its way.
   onOpenTask: (number) => act(() => openTask(state.board.project.id, number)),
-  // Opening a session's closed terminal brings it back on its own
-  // conversation and shows it in the dock, the dock unfolded. Closing it ends
-  // its process and takes its card away with it.
+  // A session's terminal is in the dock only once the human asks to see it:
+  // showing it unfolds the dock and brings it to the front, hiding it takes
+  // its card out while its window works on. Opening a closed one brings it
+  // back on its own conversation, shown the same way. Closing it ends its
+  // process and takes its card away with it.
+  onShowTerminal: (participant) => showTerminal(participant),
+  onHideTerminal: (participant) => terminals.hide(participant.projectId, participant.handle),
   onOpenTerminal: (participant) =>
     act(async () => {
       await core('session.open', { project: participant.projectId, handle: participant.handle })
-      layout.unfold('dock')
-      state.focus = participant.handle
+      showTerminal(participant)
     }),
   onCloseTerminal: (participant) => closeTerminal(participant),
   onEndSession: (participant) =>
@@ -209,6 +213,13 @@ function closeTerminal(participant) {
     await core('session.close', { project: participant.projectId, handle: participant.handle })
     terminals.forget(participant.projectId, participant.handle)
   })
+}
+
+/** A session's terminal the human asked to see: in the dock, unfolded, in front. */
+function showTerminal(participant) {
+  layout.unfold('dock')
+  state.focus = participant.handle
+  terminals.show(participant.projectId, participant.handle)
 }
 
 const terminals = new TerminalsView(stage, {
@@ -365,7 +376,12 @@ function render() {
       ),
     )
   } else {
-    board.render({ board: state.board, inbox: state.inbox, agents: state.agents })
+    board.render({
+      board: state.board,
+      inbox: state.inbox,
+      agents: state.agents,
+      shows: (participant) => terminals.shows(participant.projectId, participant.handle),
+    })
   }
   terminals.render(state.board, { focused: state.focus })
 }

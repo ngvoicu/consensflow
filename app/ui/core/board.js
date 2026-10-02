@@ -269,15 +269,18 @@ export class BoardView {
   #actions
   /** The board drawn last: a row's button kept across redraws acts on its lane as it is now. */
   #board = null
+  /** Whether the human asked to see a session's terminal, which the dock keeps out until then. */
+  #shows = null
 
   constructor(root, actions) {
     this.#root = root
     this.#actions = actions
   }
 
-  /** Redraw from the core's state. */
-  render({ board, inbox, agents = [], now = Date.now() }) {
+  /** Redraw from the core's state; `shows(participant)` says whose terminals the human asked to see. */
+  render({ board, inbox, agents = [], shows, now = Date.now() }) {
     this.#board = board
+    this.#shows = shows
     const models = new Map(agents.map((agent) => [agent.name, agent]))
     redraw(this.#root, [
       ...(acts(board) ? [] : [this.#closed(board.project)]),
@@ -535,10 +538,11 @@ export class BoardView {
   /**
    * Only a session's terminal is the human's to open and close: a member's
    * row heads its sessions and has no terminal of its own, and the chief's
-   * opens and closes with the project. An open terminal is in the dock; a
-   * closed one opens again on its own conversation, and its copy is on its
-   * last task's card. The session is deleted from here too. A closed
-   * project's rows keep only the copy.
+   * opens and closes with the project. An open terminal stays out of the
+   * dock until the human shows it, and hides again; a closed one opens
+   * again on its own conversation, and its copy is on its last task's card.
+   * The session is deleted from here too. A closed project's rows keep only
+   * the copy.
    */
   #rowTools(lane, board) {
     const { participant, pane } = lane
@@ -546,6 +550,23 @@ export class BoardView {
     const session = participant.member !== null
     const acting = acts(board)
     const name = laneName(participant)
+    if (session && pane !== null && acting) {
+      tools.append(
+        this.#shows(participant)
+          ? button(
+              'Hide terminal',
+              'quiet-button',
+              this.#onLane(this.#actions.onHideTerminal, participant),
+              `Hide ${name}'s terminal`,
+            )
+          : button(
+              'Show terminal',
+              'quiet-button',
+              this.#onLane(this.#actions.onShowTerminal, participant),
+              `Show ${name}'s terminal`,
+            ),
+      )
+    }
     if (session && pane === null && acting) {
       tools.append(
         button(

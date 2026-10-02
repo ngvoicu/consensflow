@@ -424,7 +424,7 @@ test('shows an agent-written title as text, never as markup', async ({ page }) =
   await expect(page.locator('tr[data-handle="diana"] img')).toHaveCount(0)
 })
 
-test("gives a session's lane the human's hand on its window: open, close, delete", async ({
+test("gives a session's lane the human's hand on its window: show, open, close, delete", async ({
   page,
 }) => {
   const data = model()
@@ -447,6 +447,11 @@ test("gives a session's lane the human's hand on its window: open, close, delete
   )
   await open(page, data)
   const live = page.locator('tr[data-handle="zeus-amber-pine"]')
+  await expect(live.locator('.row-tools button')).toHaveText([
+    'Show terminal',
+    'Close terminal',
+    'Delete session',
+  ])
   await expect(
     live.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }),
   ).toBeVisible()
@@ -465,6 +470,9 @@ test("gives a session's lane the human's hand on its window: open, close, delete
   await expect(page.getByRole('region', { name: 'Terminals' })).toBeVisible()
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   const card = dock.locator('.terminal-card[data-handle="zeus-amber-pine"]')
+  // A live session's terminal is in the dock once the human shows it.
+  await expect(card).toHaveCount(0)
+  await live.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   await expect(card).toHaveCount(1)
   // The chief's window stays with the project: its card offers no Close.
   await expect(
@@ -585,6 +593,8 @@ test("draws a member's sessions as lanes under it, named, and counts its open wi
   await expect(page.locator('tr[data-handle="zeus"] .row-status')).toHaveText(
     '1 terminal open, one per task',
   )
+  // Its terminal, once shown, is named in the dock as on its lane.
+  await first.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   await expect(
     dock.locator('.terminal-card[data-handle="zeus-amber-pine"] .terminal-name'),
@@ -1163,6 +1173,7 @@ test('a redraw leaves the keyboard where the human put it in the dock', async ({
     pane: { id: 'p1-zeus-amber-pine', generation: 1 },
   })
   await open(page, data)
+  await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   const keyboard = dock.locator('.terminal-card[data-handle="zeus-amber-pine"] .stub-input')
   await keyboard.focus()
@@ -1227,6 +1238,7 @@ test('a redraw leaves the keyboard where it was, on the board, the projects and 
   expect(await focusedLabel(page)).toBe('T-4, Add the tests, Working, from @chief')
   // A session's Close, on its row and on its card in the dock, while its lamp changes.
   const row = page.locator('tr[data-handle="zeus-amber-pine"]')
+  await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   await row.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }).focus()
   await lampDrawn('zeus-amber-pine', 'idle')
   await expect(
@@ -1309,6 +1321,7 @@ test('the dock stays where the human scrolled it across redraws', async ({ page 
     pane: { id: 'p1-zeus-amber-pine', generation: 1 },
   })
   await open(page, data)
+  await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   const stage = page.getByRole('region', { name: 'Terminals' })
   await expect(stage.locator('.terminal-card')).toHaveCount(3)
   await stage.evaluate((node) => {
@@ -1828,8 +1841,9 @@ test("lists every member under the chief, with no staff groups, on the board and
   await expect(page.locator('tr[data-handle="athena"] .row-name')).toHaveText('@athena')
   await expect(page.locator('tr[data-handle="athena"] .row-meta')).toContainText('advisor')
 
-  // The dock on the right is a strip of every open terminal, the chief first,
-  // then the members; a row with its terminal open offers no Open terminal.
+  // The dock on the right is a strip of terminals, the chief first, then the
+  // members' own (a session's waits to be shown); a row with its terminal
+  // open offers no Open terminal.
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   const cards = () =>
     dock.locator('.terminal-card').evaluateAll((cards) => cards.map((c) => c.dataset.handle))
@@ -2084,8 +2098,9 @@ test('lays the windows out: the chief a whole column, the members two to a colum
   await open(page)
   const stage = page.getByRole('region', { name: 'Terminals' })
   const box = (handle) => stage.locator(`.terminal-card[data-handle="${handle}"]`).boundingBox()
-  const addMember = (id, name) =>
-    page.evaluate(
+  // A session of zeus at work, its terminal shown.
+  const addSession = async (id, name) => {
+    await page.evaluate(
       ({ id, name }) => {
         const zeus = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
         window.__model.boards[1].lanes.push({
@@ -2105,23 +2120,28 @@ test('lays the windows out: the chief a whole column, the members two to a colum
       },
       { id, name },
     )
+    await page.getByRole('button', { name: `Show @zeus · ${name}'s terminal` }).click()
+  }
   // One member: a column of its own, as tall as the chief's.
   await expect(stage.locator('.terminal-card')).toHaveCount(2)
   let [chief, zeus] = [await box('chief'), await box('zeus')]
   expect(zeus.x).toBeGreaterThan(chief.x)
   expect(Math.abs(zeus.height - chief.height)).toBeLessThan(2)
   // Two: one column, one above the other.
-  await addMember(40, 'amber-pine')
+  await addSession(40, 'amber-pine')
   await expect(stage.locator('.terminal-card')).toHaveCount(3)
   await expect.poll(async () => (await box('zeus')).height).toBeLessThan(chief.height / 2 + 1)
   zeus = await box('zeus')
   const second = await box('zeus-amber-pine')
   expect(second.x).toBe(zeus.x)
   expect(second.y).toBeGreaterThan(zeus.y)
-  // Three: the third starts a column of its own, whole.
-  await addMember(41, 'brisk-birch')
+  // Three: the third starts a column of its own, whole. Shown, it is
+  // scrolled into view: the columns are compared where they are now.
+  await addSession(41, 'brisk-birch')
   await expect(stage.locator('.terminal-card')).toHaveCount(4)
-  await expect.poll(async () => (await box('zeus-brisk-birch')).x).toBeGreaterThan(zeus.x)
+  await expect
+    .poll(async () => (await box('zeus-brisk-birch')).x - (await box('zeus')).x)
+    .toBeGreaterThan(0)
   chief = await box('chief')
   expect(Math.abs((await box('zeus-brisk-birch')).height - chief.height)).toBeLessThan(2)
 })
@@ -2306,7 +2326,7 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
     ])
 })
 
-test('shows every open terminal in the strip, offers no Open terminal for them, and feeds them their output', async ({
+test("docks the chief's terminal and a member's own, offers no Open terminal for them, and feeds them their output", async ({
   page,
 }) => {
   await open(page)
@@ -2334,9 +2354,8 @@ test('shows every open terminal in the strip, offers no Open terminal for them, 
   expect(subscriptions).toBe(1)
 })
 
-/** Both projects open, each with its chief's window live. */
-function twoOpen() {
-  const data = model()
+/** Both projects open, each with its chief's window live; harbour as `data` has it. */
+function twoOpen(data = model()) {
   data.projects[1].state = 'open'
   data.boards[2].project.state = 'open'
   data.boards[2].lanes.push({
@@ -2606,6 +2625,7 @@ test("takes a closed window's card out of the dock: its lane says so and opens i
     pane: { id: 'p1-zeus-amber-pine', generation: 9 },
   })
   await open(page, data)
+  await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   await expect(dock.locator('.terminal-card[data-handle="zeus-amber-pine"]')).toHaveCount(1)
   // Its task accepted, the window closes: a last frame left in the dock
@@ -2638,6 +2658,314 @@ test("takes a closed window's card out of the dock: its lane says so and opens i
   await expect(page.locator('tr[data-handle="chief"] .row-tools button')).toHaveText([
     'Switch lead',
   ])
+})
+
+/**
+ * harbour as the core has it while a worker is at work: zeus between tasks,
+ * and one session of it with a live window beside the chief's.
+ */
+function atWork() {
+  const data = model()
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  Object.assign(zeusLane, { tasks: [], activity: { state: 'closed' }, pane: null })
+  data.boards[1].lanes.push({
+    participant: session(20, zeusLane.participant, 'amber-pine'),
+    tasks: [task(21, 'Write the lexer', 'working', 'chief', 'zeus-amber-pine', 3)],
+    activity: { state: 'working' },
+    pane: { id: 'p1-zeus-amber-pine', generation: 9 },
+  })
+  return data
+}
+
+/** The handles of the terminals in the dock, in their order there. */
+const docked = (page) =>
+  page
+    .locator('#stage .terminal-card')
+    .evaluateAll((cards) => cards.map((card) => card.dataset.handle))
+
+/** The output of pane `id` the page acknowledged, by its sequence numbers. */
+const acked = (page, id) =>
+  page.evaluate(
+    (id) =>
+      window.__calls
+        .filter(([command, args]) => command === 'pane_ack' && args.id === id)
+        .map(([, args]) => args.seq),
+    id,
+  )
+
+test("keeps a session's terminal out of the dock until the human shows it, and the chief's in it", async ({
+  page,
+}) => {
+  const data = atWork()
+  const zeus = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus').participant
+  zeus.roles = ['worker', 'reviewer']
+  // A reviewer's window waits for the human: its row says so, and that is all.
+  data.boards[1].lanes.push({
+    participant: session(22, zeus, 'brisk-birch', 'reviewer'),
+    tasks: [
+      task(23, 'Review T-21', 'working', 'chief', 'zeus-brisk-birch', 2, {
+        pool: 'reviewer',
+        tier: 'standard',
+      }),
+    ],
+    activity: { state: 'waiting', reason: 'permission to run a command' },
+    pane: { id: 'p1-zeus-brisk-birch', generation: 2 },
+  })
+  // The worker's question, left unanswered, waits in For you with its task.
+  data.boards[1].overdue = [
+    {
+      id: 15,
+      kind: 'question',
+      state: 'delivered',
+      sender: 'zeus-amber-pine',
+      recipient: 'chief',
+      taskNumber: 21,
+      body: 'Which grammar?',
+      questions: null,
+      createdAt: at(12),
+    },
+  ]
+  data.tasks['1:21'] = {
+    ...task(21, 'Write the lexer', 'working', 'chief', 'zeus-amber-pine', 3),
+    messages: [],
+  }
+  await open(page, data)
+  await expect.poll(() => docked(page)).toEqual(['chief'])
+  const worker = page.locator('tr[data-handle="zeus-amber-pine"]')
+  await expect(worker.locator('.row-status')).toHaveText('Working')
+  await expect(worker.locator('.row-tools button')).toHaveText([
+    'Show terminal',
+    'Close terminal',
+    'Delete session',
+  ])
+  const reviewer = page.locator('tr[data-handle="zeus-brisk-birch"]')
+  await expect(reviewer.locator('.row-status')).toHaveText('Waiting: permission to run a command')
+  await expect(
+    reviewer.getByRole('button', { name: "Show @zeus · brisk-birch's terminal" }),
+  ).toBeVisible()
+  // The chief's terminal has nothing to show or hide, on its row or its card.
+  await expect(page.locator('tr[data-handle="chief"] .row-tools button')).toHaveText([
+    'Switch lead',
+  ])
+  await expect(page.locator('#stage .terminal-card[data-handle="chief"] button')).toHaveCount(0)
+  // Out of the dock, a session's window is fed all the same: what it prints
+  // is taken and acknowledged, so it never waits for a reader.
+  expect(await page.evaluate(() => window.__emulators.length)).toBe(3)
+  await page.evaluate(() =>
+    window.__output.onmessage({ id: 'p1-zeus-amber-pine', generation: 9, seq: 1, bytes: [104] }),
+  )
+  await expect.poll(() => acked(page, 'p1-zeus-amber-pine')).toEqual([1])
+  // Reading its task, from its card or from For you, is not asking to see its window.
+  await worker.locator('button.card[data-task="21"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-21' })
+  await expect(drawer).toBeVisible()
+  await drawer.getByRole('button', { name: 'Close the task' }).click()
+  await page
+    .getByRole('region', { name: 'For you' })
+    .locator('li[data-message="15"]')
+    .getByRole('button', { name: 'Open task' })
+    .click()
+  await expect(drawer).toBeVisible()
+  expect(await docked(page)).toEqual(['chief'])
+})
+
+test("shows a session's terminal in front, the dock unfolded, and hides it again from its row or its card", async ({
+  page,
+}) => {
+  await open(page, atWork())
+  const row = page.locator('tr[data-handle="zeus-amber-pine"]')
+  const card = page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
+  // Asked for with the dock folded away, it unfolds the dock.
+  await page.getByRole('button', { name: 'Hide terminals' }).click()
+  await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect(page.getByRole('region', { name: 'Terminals' })).toBeVisible()
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  await expect(card).toHaveAttribute('data-focused', 'true')
+  await expect(row.locator('.row-tools button')).toHaveText([
+    'Hide terminal',
+    'Close terminal',
+    'Delete session',
+  ])
+  // Hidden from its row: the card goes and the chief's is in front again.
+  await row.getByRole('button', { name: "Hide @zeus · amber-pine's terminal" }).click()
+  await expect.poll(() => docked(page)).toEqual(['chief'])
+  await expect(page.locator('#stage .terminal-card[data-handle="chief"]')).toHaveAttribute(
+    'data-focused',
+    'true',
+  )
+  await expect(
+    row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }),
+  ).toBeVisible()
+  // Shown again, and hidden from its own card, where Hide stands before the
+  // Close that would end its window.
+  await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect(card.locator('button')).toHaveText(['Hide', 'Close'])
+  await card.getByRole('button', { name: "Hide @zeus · amber-pine's terminal" }).click()
+  await expect.poll(() => docked(page)).toEqual(['chief'])
+  await expect(
+    row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }),
+  ).toBeVisible()
+  // None of it asks the core anything: the window works on, the same one throughout.
+  expect(await calls(page, 'session.open')).toEqual([])
+  expect(await calls(page, 'session.close')).toEqual([])
+  expect(await disposed(page)).toBe(0)
+})
+
+test("keeps a shown session's card head on one line, Hide and Close in it, at the default window and on a wider screen", async ({
+  page,
+}) => {
+  await open(page, atWork())
+  await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  const card = page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
+  await expect(card.locator('button')).toHaveText(['Hide', 'Close'])
+  // Every part of the head inside its 30px: a name wrapped onto three lines ran out of it.
+  const outside = () =>
+    card.evaluate((card) => {
+      const head = card.querySelector('.terminal-head').getBoundingClientRect()
+      return [...card.querySelectorAll('.terminal-head > *')]
+        .filter((part) => {
+          const box = part.getBoundingClientRect()
+          return (
+            box.top < head.top ||
+            box.bottom > head.bottom ||
+            box.left < head.left ||
+            box.right > head.right
+          )
+        })
+        .map((part) => part.className)
+    })
+  for (const width of [880, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect.poll(outside, { message: `the head at ${width}px` }).toEqual([])
+  }
+})
+
+test("keeps a hidden terminal's scrollback: its output goes on arriving, and showing it shows all of it, across project switches too", async ({
+  page,
+}) => {
+  await open(page, twoOpen(atWork()))
+  const row = page.locator('tr[data-handle="zeus-amber-pine"]')
+  const print = (seq, text) =>
+    page.evaluate(
+      ([seq, text]) =>
+        window.__output.onmessage({
+          id: 'p1-zeus-amber-pine',
+          generation: 9,
+          seq,
+          bytes: [...text].map((c) => c.charCodeAt(0)),
+        }),
+      [seq, text],
+    )
+  // The emulators made for the session's window: what each was written, and
+  // whether its card is on screen.
+  const lexer = () =>
+    page.evaluate(() =>
+      window.__emulators
+        .filter((e) => e.host.closest('.terminal-card')?.dataset.handle === 'zeus-amber-pine')
+        .map((e) => [String.fromCharCode(...e.written), e.host.isConnected, e.disposed]),
+    )
+  await print(1, 'parsing ')
+  await expect.poll(() => acked(page, 'p1-zeus-amber-pine')).toEqual([1])
+  expect(await lexer()).toEqual([['parsing ', false, false]])
+  await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect.poll(lexer).toEqual([['parsing ', true, false]])
+  // Hidden, it keeps taking what its window prints.
+  await row.getByRole('button', { name: "Hide @zeus · amber-pine's terminal" }).click()
+  await print(2, 'done')
+  await expect.poll(() => acked(page, 'p1-zeus-amber-pine')).toEqual([1, 2])
+  await expect.poll(lexer).toEqual([['parsing done', false, false]])
+  await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect.poll(lexer).toEqual([['parsing done', true, false]])
+  // Away to foundry and back: shown as it was, every line still there.
+  await chooseProject(page, 'foundry')
+  await expect.poll(() => docked(page)).toEqual(['chief'])
+  await chooseProject(page, 'harbour')
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  expect(await lexer()).toEqual([['parsing done', true, false]])
+  // Hidden, it stays hidden there and back.
+  await row.getByRole('button', { name: "Hide @zeus · amber-pine's terminal" }).click()
+  await chooseProject(page, 'foundry')
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await chooseProject(page, 'harbour')
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  await expect.poll(() => docked(page)).toEqual(['chief'])
+  expect(await lexer()).toEqual([['parsing done', false, false]])
+})
+
+test("takes a shown terminal out with its window; the session's next window waits to be shown, unless the human opened it", async ({
+  page,
+}) => {
+  await open(page, atWork())
+  const row = page.locator('tr[data-handle="zeus-amber-pine"]')
+  /** The session's window as the board has it: `generation`, or none. */
+  const windowOf = (generation) =>
+    changed(
+      page,
+      (generation) => {
+        const lane = window.__model.boards[1].lanes.find(
+          (l) => l.participant.handle === 'zeus-amber-pine',
+        )
+        lane.pane = generation === null ? null : { id: 'p1-zeus-amber-pine', generation }
+        lane.activity = { state: generation === null ? 'closed' : 'working' }
+      },
+      generation,
+    )
+  await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  // Its task done, the window ends: its card and emulator go with it.
+  await windowOf(null)
+  await expect.poll(() => docked(page)).toEqual(['chief'])
+  expect(await disposed(page)).toBe(1)
+  await expect(row.locator('.row-status')).toHaveText('Terminal closed')
+  // A follow-up opens a window of its own accord: it waits to be shown.
+  await windowOf(10)
+  await expect(
+    row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }),
+  ).toBeVisible()
+  expect(await docked(page)).toEqual(['chief'])
+  // That one ends too, and the human opens the terminal: the window that
+  // comes is shown, in front, as asked.
+  await windowOf(null)
+  await row.getByRole('button', { name: "Open @zeus · amber-pine's terminal" }).click()
+  await expect
+    .poll(() => calls(page, 'session.open'))
+    .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
+  await windowOf(11)
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  await expect(
+    page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]'),
+  ).toHaveAttribute('data-focused', 'true')
+  await expect(
+    row.getByRole('button', { name: "Hide @zeus · amber-pine's terminal" }),
+  ).toBeVisible()
+})
+
+test("forgets on a reload which terminals were shown: the dock starts again with the chief's", async ({
+  page,
+}) => {
+  await open(page, atWork())
+  await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  await page.reload()
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect.poll(() => docked(page)).toEqual(['chief'])
+  await expect(
+    page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }),
+  ).toBeVisible()
+})
+
+test("says how to see a session's terminal while the chief's window is down and the session works on", async ({
+  page,
+}) => {
+  const data = atWork()
+  const chief = data.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+  Object.assign(chief, { activity: { state: 'starting' }, pane: null })
+  await open(page, data)
+  await expect(page.locator('#stage .stage-empty')).toHaveText(
+    "Choose Show terminal on a session's row to see its terminal here.",
+  )
+  await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect.poll(() => docked(page)).toEqual(['zeus-amber-pine'])
 })
 
 test('resizes a terminal once, when a drag that narrows it holds still', async ({ page }) => {
@@ -2785,12 +3113,20 @@ test('keeps every button of a lane inside its column, however narrow the board',
   const data = model()
   const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
   Object.assign(zeusLane, { tasks: [], activity: { state: 'closed' }, pane: null })
-  data.boards[1].lanes.push({
-    participant: session(20, zeusLane.participant, 'lively-comet'),
-    tasks: [task(21, 'Write the lexer', 'accepted', 'chief', 'zeus-lively-comet', 3)],
-    activity: { state: 'closed' },
-    pane: null,
-  })
+  data.boards[1].lanes.push(
+    {
+      participant: session(20, zeusLane.participant, 'lively-comet'),
+      tasks: [task(21, 'Write the lexer', 'accepted', 'chief', 'zeus-lively-comet', 3)],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+    {
+      participant: session(22, zeusLane.participant, 'amber-pine'),
+      tasks: [task(23, 'Write the parser', 'working', 'chief', 'zeus-amber-pine', 2)],
+      activity: { state: 'working' },
+      pane: { id: 'p1-zeus-amber-pine', generation: 3 },
+    },
+  )
   await open(page, data)
   // The board at its narrowest, the windows given the rest.
   const grip = page.locator('#board-resize')
@@ -2803,18 +3139,33 @@ test('keeps every button of a lane inside its column, however narrow the board',
     'Transcript',
     'Delete session',
   ])
-  const outside = await page.locator('table[aria-label="Tasks"] tbody th').evaluateAll((heads) =>
-    heads.flatMap((head) => {
-      const column = head.getBoundingClientRect()
-      return [...head.querySelectorAll('button')]
-        .filter((button) => {
-          const box = button.getBoundingClientRect()
-          return box.left < column.left || box.right > column.right + 0.5
-        })
-        .map((button) => button.textContent)
-    }),
-  )
-  expect(outside).toEqual([])
+  const live = page.locator('tr[data-handle="zeus-amber-pine"]')
+  await expect(live.locator('.row-tools button')).toHaveText([
+    'Show terminal',
+    'Close terminal',
+    'Delete session',
+  ])
+  const outside = () =>
+    page.locator('table[aria-label="Tasks"] tbody th').evaluateAll((heads) =>
+      heads.flatMap((head) => {
+        const column = head.getBoundingClientRect()
+        return [...head.querySelectorAll('button')]
+          .filter((button) => {
+            const box = button.getBoundingClientRect()
+            return box.left < column.left || box.right > column.right + 0.5
+          })
+          .map((button) => button.textContent)
+      }),
+    )
+  expect(await outside()).toEqual([])
+  // Its terminal shown, the live lane offers to hide it, in the same room.
+  await live.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect(live.locator('.row-tools button')).toHaveText([
+    'Hide terminal',
+    'Close terminal',
+    'Delete session',
+  ])
+  expect(await outside()).toEqual([])
 })
 
 test("opens a closed session's transcript from its lane, and gives a member's heading row no buttons", async ({
