@@ -720,8 +720,7 @@ export class Dispatcher {
       chief.id,
       async () => {
         // Asked of the project as it is once the lead's step in progress is
-        // over: one deleted meanwhile forgot its lead, and is no project now.
-        if (this.#forgotten(runtime)) throw new Error(`no project ${projectId}`)
+        // over: one deleted meanwhile is no project now.
         requireOpen(this.#knownProject(projectId))
         if (runtime.pane !== null && !this.#isOut(chief) && (when === 'turn' || note)) {
           // A switch asked again replaces the one waiting, with a note not yet sent.
@@ -1675,15 +1674,15 @@ export class Dispatcher {
    * from whoever asked: a page operation answers once the ledger has its
    * change, and a launch that fails says so on the board. A window open by
    * then, or a project closed meanwhile, opens nothing; so does a participant
-   * forgotten meanwhile (it left, or its project was deleted), and no record
-   * is made for it again. Nobody waits for it, so a failure is written down.
+   * forgotten meanwhile (it left, or its project was deleted): it is in no
+   * project now, and its record, taken before the wait, is not made again.
+   * Nobody waits for it, so a failure is written down.
    */
   #openSoon(participantId) {
     const runtime = this.#runtimeOf(participantId)
     this.#exclusive(
       participantId,
       () => {
-        if (this.#forgotten(runtime)) return
         const project = this.#projectOf(participantId)
         if (runtime.pane !== null || project?.state !== 'open') return
         const participant = project.participants.find((p) => p.id === participantId)
