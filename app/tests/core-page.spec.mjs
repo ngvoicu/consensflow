@@ -2467,6 +2467,55 @@ test("gives a card's title room to read, at the default window and on a wider sc
   expect(await board.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0)
 })
 
+test("gives For you's strips room to read, at the default window and on wider screens", async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].project.gate = true
+  const gated = (id, kind, sender, recipient, taskNumber, body) => ({
+    id,
+    kind,
+    state: 'gated',
+    sender,
+    recipient,
+    taskNumber,
+    body,
+    questions: null,
+    choices: null,
+    createdAt: at(3),
+  })
+  data.boards[1].gated = [
+    gated(30, 'task', 'chief', 'zeus-amber-pine', 4, 'Add the tests\nCover every error path.'),
+    gated(31, 'result', 'zeus-amber-pine', 'chief', 2, 'Lexer done; 14 tests pass.'),
+  ]
+  await open(page, data)
+  // Each strip's text, and whether its buttons are all inside it.
+  const strips = () =>
+    page.locator('.foryou .strip').evaluateAll((nodes) =>
+      nodes.map((strip) => {
+        const edge = strip.getBoundingClientRect().right
+        return {
+          text: Math.round(strip.querySelector('.strip-title').getBoundingClientRect().width),
+          inside: [...strip.querySelectorAll('.strip-actions button')].every(
+            (button) => button.getBoundingClientRect().right <= edge,
+          ),
+        }
+      }),
+    )
+  for (const width of [880, 1440, 2200]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect
+      .poll(async () => Math.min(...(await strips()).map((strip) => strip.text)), {
+        message: `strip text at ${width}px`,
+      })
+      .toBeGreaterThanOrEqual(240)
+    expect(
+      (await strips()).every((strip) => strip.inside),
+      `buttons at ${width}px`,
+    ).toBe(true)
+  }
+})
+
 test('keeps every button of a lane inside its column, however narrow the board', async ({
   page,
 }) => {
