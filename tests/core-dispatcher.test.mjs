@@ -4,7 +4,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { unnamed } from '../src/adapters/shared.js'
-import { Dispatcher, deliveryText } from '../src/core/dispatcher.js'
+import { deliveryText } from '../src/core/delivery-text.js'
+import { Dispatcher } from '../src/core/dispatcher.js'
 import { openLedger } from '../src/ledger/index.js'
 
 /**
@@ -958,6 +959,34 @@ describe('the dispatcher', () => {
     })
   })
 
+  it('forgets the files a launch wrote when its window never opens: refused by the host, or its adapter failed', async () => {
+    const forgotten = []
+    await setup(
+      async (context) => {
+        const { project } = await withStaff(context)
+        context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+        context.host.refuse = true
+        await context.dispatcher.pass()
+        assert.equal(context.ledger.task(project.id, 1).state, 'failed')
+        assert.ok(
+          forgotten.includes(context.adapter.prepared.at(-1).launchId),
+          'the host refused the window',
+        )
+
+        let written = null
+        context.adapter.prepare = async (request) => {
+          written = request.launchId
+          throw new Error('the settings could not be written')
+        }
+        context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Lexer' })
+        await context.dispatcher.pass()
+        assert.equal(context.ledger.task(project.id, 2).state, 'failed')
+        assert.ok(forgotten.includes(written), 'the adapter failed after writing them')
+      },
+      { launchFiles: { forget: (launch) => forgotten.push(launch) } },
+    )
+  })
+
   it('waits on a message a harness queued itself, and re-sends only a paste the record never showed', async () => {
     await setup(async (context) => {
       const { project } = await withStaff(context)
@@ -1444,49 +1473,6 @@ describe('a restart while a message is on its way', () => {
   })
 })
 
-describe('the delivered text', () => {
-  it('names the message, the task and the sender, and tells the reader how to answer a question', () => {
-    const base = { id: 12, taskNumber: 3, sender: 'zeus', body: 'Which format?' }
-    assert.equal(
-      deliveryText({ ...base, kind: 'question' }),
-      '[ConsensFlow m-12 · T-3 · question from @zeus]\nWhich format?\n\nRun in your shell: cf answer m-12 "…"',
-    )
-    const options = [{ question: 'Which?', header: 'Format', options: [], multiple: false }]
-    assert.equal(
-      deliveryText({ ...base, kind: 'question', questions: options }),
-      '[ConsensFlow m-12 · T-3 · question from @zeus]\nWhich format?\n\nRun in your shell: cf answer m-12 "…" (a label or your own words)',
-    )
-    assert.equal(
-      deliveryText({ ...base, kind: 'question', questions: [...options, ...options] }),
-      '[ConsensFlow m-12 · T-3 · question from @zeus]\nWhich format?\n\nRun in your shell: cf answer m-12 "…" (a label or your own words; one line per question)',
-    )
-    assert.equal(
-      deliveryText({ ...base, kind: 'note', sender: null, taskNumber: null, body: 'hi' }),
-      '[ConsensFlow m-12 · note from ConsensFlow]\nhi',
-    )
-    assert.equal(
-      deliveryText({ ...base, kind: 'result', body: 'Parser done' }),
-      '[ConsensFlow m-12 · T-3 · result from @zeus]\nParser done\n\nDecide with: cf task accept T-3 · cf task reopen T-3 "…"',
-      'a result says what to do with it: it is not a request',
-    )
-  })
-
-  it('sends a long body as its opening and the command that reads the rest', () => {
-    const text = deliveryText({
-      id: 7,
-      taskNumber: 1,
-      sender: 'zeus',
-      kind: 'result',
-      body: 'x'.repeat(20_000),
-    })
-    assert.ok(text.length < 5_000)
-    assert.match(
-      text,
-      /\n… \(20000 characters; read all of it with: cf inbox read m-7\)\n\nDecide with: /,
-    )
-  })
-})
-
 /** A tiered staff: standard workers (zeus and diana, unless told), a light worker, and two standard reviewers. */
 async function withTiers(context, { workers = ['zeus', 'diana'] } = {}) {
   const member = (agent, role, tier) => ({ agent, harness: 'claude-code', role, tier })
@@ -1554,6 +1540,31 @@ describe('the dispatcher assigns open tasks', () => {
       open({ tier: 'light', body: 'Rename a file' })
       await context.dispatcher.pass()
       assert.match(task(5).assignee, /^hera-/)
+    })
+  })
+
+  it("reads the projects once a pass, and opens a task's new session in the pass that gave it out", async () => {
+    await setup(async (context) => {
+      const { open, task } = await withTiers(context)
+      await context.dispatcher.pass()
+      let reads = 0
+      const projects = context.ledger.projects.bind(context.ledger)
+      context.ledger.projects = () => {
+        reads += 1
+        return projects()
+      }
+      await context.dispatcher.pass()
+      assert.equal(reads, 1, 'a pass with nothing to give out')
+      open()
+      reads = 0
+      await context.dispatcher.pass()
+      assert.equal(reads, 1, 'a pass that gives a task out')
+      assert.equal(task(1).assignee, 'zeus-amber-pine')
+      assert.equal(
+        context.host.last('zeus').id,
+        'p1-zeus-amber-pine',
+        "its session's window opened",
+      )
     })
   })
 
@@ -1634,6 +1645,27 @@ describe('the dispatcher assigns open tasks', () => {
       await context.dispatcher.pass()
       assert.match(task(3).assignee, /^zeus-/, 'the earliest joined, once the hour has passed')
     })
+  })
+
+  it("tells the requester of a waiting task, though a deleted project's waiting task had its id", async () => {
+    await setup(
+      async (context) => {
+        const waits =
+          'T-1 waits for a free standard worker: @zeus has no agent any more (zeus is not among your agents: define it, or remove the member).'
+        const first = await withTiers(context, { workers: ['zeus'] })
+        const gone = first.open()
+        await context.dispatcher.pass()
+        assert.deepEqual(first.notes('chief'), [waits])
+        await context.dispatcher.closeProject(first.project.id)
+        await context.dispatcher.deleteProject(first.project.id)
+
+        const second = await withTiers(context, { workers: ['zeus'] })
+        assert.equal(second.open().id, gone.id, "the ledger gives the deleted task's id again")
+        await context.dispatcher.pass()
+        assert.deepEqual(second.notes('chief'), [waits])
+      },
+      { roster: (name) => (name === 'zeus' ? null : { id: name, model: 'm', profile: {} }) },
+    )
   })
 })
 
@@ -2245,6 +2277,197 @@ describe('one task per member session', () => {
       assert.equal(context.host.opened.length, opened)
     })
   })
+
+  it("tells the human why a session's window they opened did not start", async () => {
+    let gone = false
+    await setup(
+      async (context) => {
+        const { project, notes } = await finished(context)
+        context.host.refuse = true
+        await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
+        assert.deepEqual(notes('human'), [
+          '@zeus-amber-pine could not start: the window did not open: refused by the test.',
+        ])
+        gone = true
+        await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
+        assert.equal(
+          notes('human').at(-1),
+          '@zeus-amber-pine could not start: zeus is no longer among your agents.',
+        )
+      },
+      {
+        roster: (name) =>
+          name === 'zeus' && gone
+            ? null
+            : { id: name, model: MODELS[name], profile: { modelKey: MODELS[name] } },
+      },
+    )
+  })
+})
+
+describe('a participant that leaves', () => {
+  it('is forgotten: a member that comes back to the staff starts clean, not low on quota', async () => {
+    await setup(async (context) => {
+      const { project, open, task } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.quota('zeus', { state: 'low', usedPercent: 97 })
+      await context.dispatcher.pass()
+      await context.dispatcher.removeMember(project.id, 'zeus')
+      context.ledger.addMember(project.id, {
+        agent: 'zeus',
+        harness: 'claude-code',
+        role: 'worker',
+        tier: 'standard',
+      })
+      open({ body: 'Write the lexer' })
+      await context.dispatcher.pass()
+      assert.ok(task(2).assignee?.startsWith('zeus-'), 'zeus takes it: the low quota was before')
+    })
+  })
+
+  it('is forgotten with its project: a session the ledger gives its id after starts clean', async () => {
+    await setup(async (context) => {
+      const first = await withTiers(context, { workers: ['zeus'] })
+      first.open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const gone = first.id('zeus-amber-pine')
+      // Its window copied two items, the human pinned it open, and its agent was interrupted.
+      context.adapter.agent('zeus').items.push(item('assistant', 'Half', { complete: false }))
+      await context.dispatcher.openWindow(first.project.id, 'zeus-amber-pine')
+      context.ledger.pauseTask(first.project.id, 1, { by: 'chief' })
+      await context.dispatcher.pass()
+      await context.dispatcher.removeMember(first.project.id, 'zeus')
+      await context.dispatcher.pass()
+      await context.dispatcher.closeProject(first.project.id)
+      await context.dispatcher.deleteProject(first.project.id)
+
+      const second = await withTiers(context, { workers: ['zeus'] })
+      second.open()
+      await context.dispatcher.pass()
+      assert.equal(second.id(second.task(1).assignee), gone, 'the ledger gives its id again')
+      context.adapter.agent('zeus').items.push(item('assistant', 'Half', { complete: false }))
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        context.ledger.transcript(second.project.id, 1).items.map((copied) => copied.role),
+        ['user', 'assistant'],
+        'its copy starts with its brief',
+      )
+      const pane = context.host.last('zeus')
+      context.ledger.pauseTask(second.project.id, 1, { by: 'chief' })
+      await context.dispatcher.pass()
+      assert.equal(
+        context.host.requests.filter(
+          ([op, body]) => op === 'pane.input' && body.generation === pane.generation,
+        ).length,
+        1,
+        'its agent is interrupted',
+      )
+      context.ledger.cancelTask(second.project.id, 1, { by: 'chief' })
+      await context.dispatcher.pass()
+      assert.ok(
+        context.host.killed.some((killed) => killed.generation === pane.generation),
+        'its window closes with its work: nobody pinned it',
+      )
+    })
+  })
+
+  it('keeps the lead of a project created while a deleted one still closes its windows', async () => {
+    await setup(async (context) => {
+      const { project: old } = await withStaff(context)
+      await context.dispatcher.pass()
+      // The old lead takes a paste its harness holds: its window closes once that is over.
+      let release
+      const held = new Promise((resolve) => {
+        release = resolve
+      })
+      const deliver = context.adapter.deliver
+      context.adapter.deliver = async (request) => {
+        await held
+        return deliver(request)
+      }
+      context.ledger.note(old.id, { from: 'zeus', to: 'chief', body: 'Held' })
+      await context.dispatcher.pass()
+      const closing = context.dispatcher.closeProject(old.id)
+      const deleting = context.dispatcher.deleteProject(old.id)
+      const fresh = await context.dispatcher.openProject({
+        directory: '/work/api',
+        name: 'api',
+        harness: 'claude-code',
+      })
+      const lead = fresh.participants.find((participant) => participant.role === 'chief')
+      release()
+      await closing
+      await deleting
+      await flush()
+      const window = context.host.last('chief')
+      assert.deepEqual(
+        context.dispatcher.pane(lead.id),
+        { id: window.id, generation: window.generation },
+        'its lead is known',
+      )
+      assert.ok(
+        !context.host.killed.some((pane) => pane.generation === window.generation),
+        'and was never closed',
+      )
+    })
+  })
+})
+
+describe('a window that closes', () => {
+  /** How often a window was killed. */
+  const kills = (context, window) =>
+    context.host.killed.filter((pane) => pane.generation === window.generation).length
+
+  it('is killed once when its launch never showed its first message, though its exit comes late', async () => {
+    await setup(async (context) => {
+      context.host.holdExits = true
+      const { project } = await withStaff(context)
+      const prepare = context.adapter.prepare
+      context.adapter.prepare = async (request) => {
+        const plan = await prepare(request)
+        context.adapter.agent(request.participant.handle).items = []
+        return plan
+      }
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      context.clock.advance(121_000)
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.task(project.id, 1).state, 'failed')
+      assert.equal(kills(context, context.host.last('zeus')), 1)
+    })
+  })
+
+  it('is killed once when its project closes while it already goes with its work', async () => {
+    await setup(async (context) => {
+      context.host.holdExits = true
+      const { project, open, task } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.answer('zeus', 'Parser done')
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'done')
+      await context.dispatcher.closeProject(project.id)
+      assert.equal(kills(context, context.host.last('zeus')), 1)
+    })
+  })
+
+  it('is killed once when its member leaves the staff, though its exit comes late', async () => {
+    await setup(async (context) => {
+      context.host.holdExits = true
+      const { project } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      await context.dispatcher.removeMember(project.id, 'zeus')
+      await context.dispatcher.pass()
+      assert.equal(kills(context, context.host.last('zeus')), 1)
+    })
+  })
 })
 
 describe('the dispatcher traces what its windows do', () => {
@@ -2591,6 +2814,14 @@ describe('switching the lead to another harness', () => {
         context.adapter.prepared.at(-1).message,
         /You are the lead now\. The human switched this project's lead from Codex to you, Claude Code\./,
       )
+    })
+  })
+
+  it('switches no lead of a project it does not know, and says so', async () => {
+    await withCodex(async (context) => {
+      await assert.rejects(context.dispatcher.switchChief(42, { harness: 'codex' }), {
+        message: 'no project 42',
+      })
     })
   })
 
@@ -3039,6 +3270,46 @@ describe('a window that takes long', () => {
         2,
       )
     })
+  })
+})
+
+describe('work that throws before its first await', () => {
+  it('lets go of its participant: its next step runs, the failure is written down, and an operation waiting on it ends', async () => {
+    const written = []
+    await setup(
+      async (context) => {
+        const { project, open, task } = await withTiers(context, { workers: ['zeus'] })
+        open()
+        await context.dispatcher.pass()
+        await context.dispatcher.pass()
+        context.adapter.answer('zeus', 'Parser done')
+        await context.dispatcher.pass()
+        assert.equal(task(1).state, 'done', "the session's window closed with its task")
+        // One read of the ledger fails, in the work that opens the session's window.
+        const projects = context.ledger.projects.bind(context.ledger)
+        let fail = true
+        context.ledger.projects = () => {
+          if (!fail) return projects()
+          fail = false
+          throw new Error('the ledger could not be read')
+        }
+        await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
+        context.ledger.createTask(project.id, { from: 'chief', after: 1, body: 'Now the lexer' })
+        const launches = context.adapter.prepared.length
+        await context.dispatcher.pass()
+        assert.deepEqual(
+          context.adapter.prepared.slice(launches).map((request) => request.participant.handle),
+          ['zeus-amber-pine'],
+          'its next step ran',
+        )
+        assert.deepEqual(
+          written.map((cause) => cause.message),
+          ['the ledger could not be read'],
+        )
+        assert.equal((await context.dispatcher.closeProject(project.id)).state, 'suspended')
+      },
+      { log: { error: (_message, cause) => written.push(cause) } },
+    )
   })
 })
 
