@@ -2682,6 +2682,24 @@ const handoffsOf = (context, project) =>
   context.ledger
     .inbox(chiefOf(context, project).id)
     .filter((m) => m.body.startsWith('You are the lead now'))
+/**
+ * The human closes and deletes a project while something of it waits, and
+ * opens another, which the ledger gives the deleted one's ids. `gone` ends
+ * once the old windows have closed.
+ */
+async function replaceProject(context, old) {
+  const gone = Promise.all([
+    context.dispatcher.closeProject(old.id),
+    context.dispatcher.deleteProject(old.id),
+  ])
+  const fresh = await context.dispatcher.openProject({
+    directory: '/work/api',
+    name: 'api',
+    harness: 'claude-code',
+  })
+  assert.equal(fresh.id, old.id, 'the ledger gives its id again')
+  return { fresh, gone }
+}
 
 describe('switching the lead to another harness', () => {
   it('hands the lead over: the old window closes, the project stays open, the new one opens with the handoff, and what was queued follows it', async () => {
@@ -2992,6 +3010,170 @@ describe('switching the lead to another harness', () => {
       await after.pass()
       await after.pass()
       assert.equal(context.ledger.message(one.id).state, 'delivered', 'it follows the new lead')
+    })
+  })
+
+  it('switches nothing of a new project that took its id while the switch waited for the old lead', async () => {
+    await withCodex(async (context) => {
+      const { project: old } = await withStaff(context)
+      await context.dispatcher.pass()
+      // The old lead takes a paste its harness holds; the switch waits for it.
+      let release
+      const held = new Promise((resolve) => {
+        release = resolve
+      })
+      const deliver = context.adapter.deliver
+      context.adapter.deliver = async (request) => {
+        await held
+        return deliver(request)
+      }
+      context.ledger.note(old.id, { from: 'zeus', to: 'chief', body: 'Held' })
+      await context.dispatcher.pass()
+      // After the turn, as the page asks by default, and asking where things stand.
+      const switched = context.dispatcher
+        .switchChief(old.id, { harness: 'codex', when: 'turn', note: true })
+        .then(
+          () => 'switched',
+          (cause) => cause.message,
+        )
+      const { fresh, gone } = await replaceProject(context, old)
+      const lead = chiefOf(context, fresh)
+      const window = context.host.last('chief')
+      release()
+      await gone
+      await flush()
+      assert.deepEqual(
+        context.ledger.inbox(lead.id).map((m) => m.body),
+        [],
+        'the new lead is asked nothing',
+      )
+      assert.equal(context.dispatcher.pendingSwitch(lead.id), null, 'nothing waits to switch it')
+      assert.deepEqual(
+        [chiefOf(context, fresh).harness, context.codex.prepared.length],
+        ['claude-code', 0],
+        'the new lead is not switched',
+      )
+      assert.ok(
+        !context.host.killed.some((pane) => pane.generation === window.generation),
+        'and its window stays',
+      )
+      assert.equal(await switched, `no project ${old.id}`, 'the switch says its project is gone')
+    })
+  })
+
+  it("hands nothing of a new project that took its id to an old lead whose switch waited for its turn's end", async () => {
+    await withCodex(async (context) => {
+      const { project: old } = await withStaff(context)
+      await context.dispatcher.pass()
+      context.adapter.busy('chief')
+      await context.dispatcher.switchChief(old.id, { harness: 'codex', when: 'turn', note: true })
+      const asked = context.ledger
+        .inbox(chiefOf(context, old).id)
+        .find((m) => m.body.includes('Write down where things stand'))
+      assert.equal(asked.state, 'queued', 'the note waits for the turn to end')
+      // The turn ends, and the next look at the old window waits on its harness.
+      context.adapter.answer('chief', 'Done with that')
+      const launch = context.adapter.agent('chief').launchId
+      let release
+      const held = new Promise((resolve) => {
+        release = resolve
+      })
+      const observe = context.adapter.observe
+      context.adapter.observe = async (request) => {
+        if (request.launch.launchId === launch) await held
+        return observe(request)
+      }
+      const looking = context.dispatcher.pass()
+      const { fresh, gone } = await replaceProject(context, old)
+      const welcome = context.ledger.note(fresh.id, { to: 'chief', body: 'Welcome' })
+      assert.equal(welcome.id, asked.id, "the ledger gives the note's id again")
+      release()
+      await looking
+      await gone
+      await flush()
+      assert.equal(context.ledger.message(welcome.id).state, 'queued', 'it waits for the new lead')
+      assert.deepEqual(
+        [chiefOf(context, fresh).harness, context.codex.prepared.length],
+        ['claude-code', 0],
+        'the new lead is not switched',
+      )
+    })
+  })
+
+  it("copies nothing of the old lead's last look into a new project that took its id meanwhile", async () => {
+    await withCodex(async (context) => {
+      const { project: old } = await withStaff(context)
+      await context.dispatcher.pass()
+      // The human told the old lead something since the last look, which waits on its harness.
+      const told = 'The codeword is tern'
+      context.adapter.agent('chief').items.push(item('user', told))
+      const launch = context.adapter.agent('chief').launchId
+      let release
+      const held = new Promise((resolve) => {
+        release = resolve
+      })
+      const observe = context.adapter.observe
+      context.adapter.observe = async (request) => {
+        if (request.launch.launchId === launch) await held
+        return observe(request)
+      }
+      const switched = context.dispatcher.switchChief(old.id, { harness: 'codex' }).then(
+        () => 'switched',
+        (cause) => cause.message,
+      )
+      await flush()
+      const { fresh, gone } = await replaceProject(context, old)
+      release()
+      await gone
+      await flush()
+      const before = context.ledger.leadHistory(fresh.id).flatMap((c) => c.items)
+      assert.deepEqual(
+        [
+          context.ledger.copiedItemWith(chiefOf(context, fresh).id, told),
+          before.filter((copied) => copied.text === told).length,
+        ],
+        [null, 0],
+        "the new lead's conversations, now or before, have nothing of the old window",
+      )
+      assert.deepEqual(
+        [chiefOf(context, fresh).harness, context.codex.prepared.length],
+        ['claude-code', 0],
+        'the new lead is not switched',
+      )
+      assert.equal(await switched, `no project ${old.id}`, 'the switch says its project is gone')
+    })
+  })
+
+  it("switches nothing of a new project that took its id while the old lead's window closed", async () => {
+    await withCodex(async (context) => {
+      const { project: old } = await withStaff(context)
+      await context.dispatcher.pass()
+      // The old lead's window takes its time to close.
+      const window = context.host.last('chief')
+      let release
+      const held = new Promise((resolve) => {
+        release = resolve
+      })
+      const kill = context.host.kill
+      context.host.kill = async (pane) => {
+        if (pane.generation === window.generation) await held
+        return kill(pane)
+      }
+      const switched = context.dispatcher.switchChief(old.id, { harness: 'codex' }).then(
+        () => 'switched',
+        (cause) => cause.message,
+      )
+      await flush()
+      const { fresh, gone } = await replaceProject(context, old)
+      release()
+      await gone
+      await flush()
+      assert.deepEqual(
+        [chiefOf(context, fresh).harness, context.codex.prepared.length],
+        ['claude-code', 0],
+        'the new lead is not switched',
+      )
+      assert.equal(await switched, `no project ${old.id}`, 'the switch says its project is gone')
     })
   })
 })
