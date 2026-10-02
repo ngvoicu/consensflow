@@ -489,7 +489,7 @@ describe('the dispatcher', () => {
       assert.equal(escapes(), 1, 'its answer to the tell is not interrupted')
       // Answered, it ends its own turn: an Escape now would cut its last words.
       context.ledger.answer(told.id, {
-        from: context.ledger.task(project.id, 1).assignee,
+        from: told.recipientId,
         body: 'a.txt',
       })
       context.clock.advance(3_100)
@@ -911,7 +911,7 @@ describe('the dispatcher', () => {
 
       await context.dispatcher.pass()
       context.adapter.answer('chief', 'JSON, I will reply')
-      context.ledger.answer(question.id, { from: 'chief', body: 'JSON' })
+      context.ledger.answer(question.id, { from: question.recipientId, body: 'JSON' })
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.equal(context.ledger.task(project.id, 1).state, 'working')
@@ -970,7 +970,7 @@ describe('the dispatcher', () => {
           .join('\n')
         assert.match(chiefSaw, new RegExp(`question from @${session}\\]\\n${pool}: which audience`))
         context.adapter.answer('chief', 'Answered.')
-        context.ledger.answer(question.id, { from: 'chief', body: 'Managers first.' })
+        context.ledger.answer(question.id, { from: question.recipientId, body: 'Managers first.' })
         await context.dispatcher.pass()
         await context.dispatcher.pass()
         const memberSaw = context.adapter
@@ -1493,7 +1493,10 @@ describe('the dispatcher watches quota', () => {
       context.adapter.answer('zeus', 'asked')
       await context.dispatcher.pass()
       context.adapter.answer('chief', 'This one, replying')
-      const answer = context.ledger.answer(question.id, { from: 'chief', body: 'This one' })
+      const answer = context.ledger.answer(question.id, {
+        from: question.recipientId,
+        body: 'This one',
+      })
       await context.dispatcher.pass()
       assert.equal(context.ledger.message(answer.id).state, 'delivering')
       context.adapter.quota('zeus', { state: 'exhausted', at: context.clock.now().toISOString() })
@@ -1810,7 +1813,7 @@ describe('one task per member session', () => {
       context.ledger.suspendForRestart()
       const after = context.make()
       await after.resumeAfterRestart()
-      context.ledger.answer(question.id, { from: 'chief', body: 'ANSI' })
+      context.ledger.answer(question.id, { from: question.recipientId, body: 'ANSI' })
       await after.pass()
       assert.deepEqual(
         [task(1).state, task(1).assignee],

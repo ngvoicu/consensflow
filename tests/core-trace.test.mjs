@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { existsSync, statSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -47,6 +48,42 @@ describe('the event trace', () => {
         ],
       )
       eventTrace(path.join(dir, 'missing')).forget(1)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps one older file past its limit, and forgets a deleted project in both', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-trace-'))
+    try {
+      const trace = eventTrace(dir, { limit: 300 })
+      const file = path.join(dir, 'events.jsonl')
+      // Lines of some 80 bytes past a 300-byte limit: the file turns over
+      // every four, the one before it is kept, and no older one.
+      for (let task = 1; task <= 12; task += 1) {
+        trace({ kind: 'task.opened', project: (task % 2) + 1, data: { task } })
+      }
+      assert.ok(statSync(file).size < 400, 'the file stays near its limit')
+      assert.ok(existsSync(`${file}.1`), 'the full one was kept aside')
+      assert.ok(!existsSync(`${file}.2`), 'and only one')
+      const entries = async (name) =>
+        (await readFile(name, 'utf8'))
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line))
+      const tasks = async (name, project) =>
+        (await entries(name)).filter((e) => e.project === project).map((e) => e.data.task)
+      assert.deepEqual(await tasks(`${file}.1`, 1), [6, 8])
+      assert.deepEqual(await tasks(file, 1), [10, 12])
+      trace.forget(1)
+      assert.deepEqual(await tasks(`${file}.1`, 1), [], 'no trace in the older file either')
+      assert.deepEqual(await tasks(file, 1), [])
+      assert.deepEqual(await tasks(`${file}.1`, 2), [5, 7])
+      assert.deepEqual(await tasks(file, 2), [9, 11])
+      // A project with no line left costs no rewrite.
+      const before = statSync(file).ino
+      trace.forget(3)
+      assert.equal(statSync(file).ino, before)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

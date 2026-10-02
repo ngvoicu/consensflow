@@ -109,7 +109,7 @@ export function agentsUi(
           return json(200, { preferences: chosen })
         }
         if (request.method === 'POST' && path === '/api/harnesses/update') {
-          if (!['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin'].includes(body.id)) {
+          if (!['claude', 'codex', 'opencode', 'pi', 'devin'].includes(body.id)) {
             return json(400, { error: 'Unknown harness' })
           }
           return json(200, { result: await harnessAdmin.update(body.id) })
@@ -117,7 +117,7 @@ export function agentsUi(
         if (request.method === 'POST' && path === '/api/harnesses/check') {
           if (
             body.id !== undefined &&
-            !['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin'].includes(body.id)
+            !['claude', 'codex', 'opencode', 'pi', 'devin'].includes(body.id)
           ) {
             return json(400, { error: 'Unknown harness' })
           }
@@ -214,11 +214,11 @@ const PAGE = (token) => `<!DOCTYPE html>
   .eyebrow--tool { margin: 22px 0 4px; }
   .eyebrow--tool::after { display: none; }
 
-  /* An agent IS a command: the callsign names it, the line below is
-     exactly what lands in the skill and exactly what an harness will run. */
+  /* An agent's row: the callsign names it, what it runs beside it, its tier
+     and route under it. */
   .member { border-top: 1px solid var(--line); padding: 14px 0; display: grid; gap: 8px; }
-  /* Grid children default to min-width:auto, so a long command line would
-     stretch the row and push the controls off the page instead of scrolling. */
+  /* Grid children default to min-width:auto, so a long model or route would
+     stretch the row and push the controls off the page instead of wrapping. */
   .member > * { min-width: 0; }
   .member:last-of-type { border-bottom: 1px solid var(--line); }
   .member__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
@@ -226,15 +226,6 @@ const PAGE = (token) => `<!DOCTYPE html>
   .tag { font-family: var(--mono); font-size: 11px; color: var(--muted); }
   .tag--own { color: var(--accent-text); }
   .member__head .spacer { flex: 1; }
-  /* A long command scrolls rather than wrapping (it stays one readable line);
-     the fade is the only hint that there is more to the right. */
-    content: ""; position: absolute; inset: 1px 1px 1px auto; width: 44px; border-radius: 0 4px 4px 0;
-    background: linear-gradient(90deg, transparent, var(--panel)); pointer-events: none;
-  }
-    font-family: var(--mono); font-size: 11.5px; line-height: 1.6; color: var(--muted);
-    background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
-    padding: 9px 11px; margin: 0; overflow-x: auto; white-space: pre; scrollbar-width: thin;
-  }
 
   button {
     font: inherit; font-size: 13px; color: var(--foam); background: transparent;
@@ -333,11 +324,11 @@ const el = (tag, className, text) => {
   return node;
 };
 
-const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', kimi: 'Kimi', devin: 'Devin', image: 'Codex' };
+const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', devin: 'Devin', image: 'Codex' };
 const WORK_TIERS = ${JSON.stringify(WORK_TIERS)};
-const EFFORT_ORDER = ['ultra', 'max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'off', 'default', 'kimi-setting', 'not-applicable'];
-const effortValue = p => p.harness === 'image' ? 'not-applicable' : (p.effort || (p.harness === 'kimi' ? 'kimi-setting' : 'default'));
-const effortLabel = value => value === 'not-applicable' ? 'Not applicable' : value === 'kimi-setting' ? 'Kimi setting' : EFFORT_ORDER.includes(value) ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+const EFFORT_ORDER = ['ultra', 'max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'off', 'default', 'not-applicable'];
+const effortValue = p => p.harness === 'image' ? 'not-applicable' : (p.effort || 'default');
+const effortLabel = value => value === 'not-applicable' ? 'Not applicable' : EFFORT_ORDER.includes(value) ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 const rank = (values, value) => values.includes(value) ? values.indexOf(value) : values.length;
 const compareText = (a, b) => String(a).localeCompare(String(b));
 // Curated family/tier order. Provider paths affect routing and identity, not rank.

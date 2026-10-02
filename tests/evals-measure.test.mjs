@@ -85,7 +85,7 @@ describe('measuring a chief from the ledger', () => {
         urgent: true,
       })
       deliver(told)
-      deliver(ledger.answer(told.id, { from: session, body: 'site/notes.md' }))
+      deliver(ledger.answer(told.id, { from: told.recipientId, body: 'site/notes.md' }))
       const resumed = ledger.resumeTask(project.id, 1, { by: 'chief', body: 'Go on' })
       if (resumed.message !== null) deliver(resumed.message)
       ledger.recordResult(project.id, 1, { body: 'Written' })
@@ -235,7 +235,7 @@ describe('measuring a chief from the ledger', () => {
         task: 1,
       })
       deliver(asked)
-      deliver(ledger.answer(asked.id, { from: 'chief', body: 'Blue' }))
+      deliver(ledger.answer(asked.id, { from: asked.recipientId, body: 'Blue' }))
       deliver(ledger.recordResult(project.id, 1, { body: 'Written' }).message)
       ledger.recordResult(project.id, 2, { body: 'Translated' })
       ledger.acceptTask(project.id, 1, { by: 'chief' })

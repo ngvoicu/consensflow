@@ -110,6 +110,32 @@ describe('the agents screens on the new core', () => {
     )
   })
 
+  it('serves a stylesheet whose every rule keeps its selector, the base button rule among them', async () => {
+    const html = await (await api('/')).text()
+    const css = html.slice(html.indexOf('<style>') + '<style>'.length, html.indexOf('</style>'))
+    // The top-level selectors as a browser reads them: a `}` with no block
+    // open belongs to the next selector, so declarations left without one
+    // swallow the rule after them.
+    const selectors = []
+    let depth = 0
+    let selector = ''
+    for (const char of css.replace(/\/\*[\s\S]*?\*\//g, '')) {
+      if (depth > 0) depth += char === '{' ? 1 : char === '}' ? -1 : 0
+      else if (char !== '{') selector += char
+      else {
+        selectors.push(selector.trim())
+        selector = ''
+        depth = 1
+      }
+    }
+    assert.ok(selectors.includes('button'), 'the base button rule')
+    assert.deepEqual(
+      selectors.filter((text) => /[;}]/.test(text)),
+      [],
+      'no declarations without a selector',
+    )
+  })
+
   it('serves the harness diagnostics as their own page, and no library page any more', async () => {
     assert.equal(
       (await api('/library')).status,

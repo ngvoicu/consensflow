@@ -31,13 +31,9 @@ const digest = (token) => createHash('sha256').update(token).digest('hex')
 export class Credentials {
   #byDigest = new Map()
 
-  issue({ participant, project, generation }) {
+  issue({ participant, project }) {
     const token = randomBytes(32).toString('hex')
-    this.#byDigest.set(digest(token), {
-      participantId: participant.id,
-      projectId: project.id,
-      generation,
-    })
+    this.#byDigest.set(digest(token), { participantId: participant.id, projectId: project.id })
     return token
   }
 
@@ -106,7 +102,11 @@ export async function startApi({
       const tools = url.searchParams.get('tools') === '1'
       try {
         const shown = historyPage(ledger.leadHistory(project.id), {
-          message: (id) => ledger.message(id),
+          // A line may name any number: only this project's messages are read out.
+          message: (id) => {
+            const found = ledger.message(id)
+            return found?.projectId === project.id ? found : null
+          },
           page,
           find: search,
           tools,
@@ -241,8 +241,16 @@ export async function startApi({
     if (at === 'POST /api/notes') {
       const body = await readJson(request)
       const active = ledger.activeTask(participant.id, { queued: true })
-      // The chief's note goes to the human; a member's to whoever gave its task.
-      const to = active?.requester ?? (participant.role === 'chief' ? 'human' : 'chief')
+      // The chief's note goes to the human, whatever task it is on (its own
+      // step's requester is itself); a member's to whoever gave its task.
+      const to = participant.role === 'chief' ? 'human' : (active?.requester ?? 'chief')
+      if (body.to === 'human' && to !== 'human') {
+        throw new Refusal(
+          403,
+          'not-the-chief',
+          `only the chief notes the human; without --human, your note goes to @${to}`,
+        )
+      }
       const noted = ledger.note(project.id, {
         from: participant.handle,
         to,
@@ -279,8 +287,15 @@ export async function startApi({
     }
     if (at === 'POST /api/answers') {
       const body = await readJson(request)
-      const answer = ledger.answer(body.question, {
-        from: participant.handle,
+      // Message numbers run across every project, and every project's chief
+      // is @chief: a question is answered only in the caller's own project.
+      const id = body.question
+      const asked = Number.isInteger(id) && id > 0 ? ledger.message(id) : null
+      if (asked === null || asked.kind !== 'question' || asked.projectId !== project.id) {
+        throw new Refusal(404, 'unknown-message', `no question m-${id} in this project`)
+      }
+      const answer = ledger.answer(asked.id, {
+        from: participant.id,
         body: body.body,
         ...(body.choices === undefined ? {} : { choices: body.choices }),
       })
@@ -332,7 +347,8 @@ export async function startApi({
     if (action === 'tell') {
       // Stop the task and put this to its window: the agent is interrupted as
       // for any pause, reads the question once idle, and its answer comes
-      // back as a message; the chief resumes the task with its words.
+      // back as a message; the chief resumes the task with its words. An
+      // urgent question pauses its task itself, in the same step.
       if (task.assignee === null || !WINDOWED.has(task.state)) {
         throw new Refusal(
           409,
@@ -340,7 +356,6 @@ export async function startApi({
           `T-${number} has no window to tell: it is ${task.state}`,
         )
       }
-      if (task.state !== 'paused') ledger.pauseTask(project.id, number, { by: participant.handle })
       const told = ledger.ask(project.id, {
         from: participant.handle,
         to: task.assignee,

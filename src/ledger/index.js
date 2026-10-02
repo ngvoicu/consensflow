@@ -38,11 +38,12 @@ export { SCHEMA_VERSION }
  *   refused with `invalid-transition`.
  *
  *   open ──assigned──▶ queued ──delivered──▶ working ──question──▶ waiting ──answer delivered──▶ working
- *   queued, working, waiting ──released──▶ open
+ *   queued, working, waiting, paused ──released──▶ open
  *   open, queued, working, waiting ──pause──▶ paused ──resume──▶ open, queued
  *   working, waiting ──result──▶ done ──accept──▶ accepted
  *   done, failed ──reopen──▶ queued
- *   open, queued, working, waiting, paused ──cancel──▶ cancelled, ──fail──▶ failed
+ *   open, queued, working, waiting, paused ──cancel──▶ cancelled
+ *   open, queued, working, waiting ──fail──▶ failed
  *
  * - A review is a task like any other: the chief puts it on the board for a
  *   reviewer of a tier, and the reviewer's findings come back as its result.
@@ -51,8 +52,8 @@ export { SCHEMA_VERSION }
  * clock are arguments, and every refusal is a `LedgerError` with a stable code.
  */
 
-export const HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin', 'kimi', 'image']
-/** Where a project's chief runs: a harness with a terminal the human works in (Kimi is paused). */
+export const HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin', 'image']
+/** Where a project's chief runs: a harness with a terminal the human works in. */
 export const CHIEF_HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin']
 const MEMBER_ROLES = ['worker', 'advisor', 'reviewer', 'designer']
 /** Who hands out work and hears when the staff changes: the human and the chief. */
@@ -62,9 +63,9 @@ export const TIERS = ['critical', 'complex', 'standard', 'light']
 /** Who takes a task on the board: a worker, an advisor (advice), a reviewer, or an image designer (no tier). */
 const POOLS = ['worker', 'advisor', 'reviewer', 'designer']
 export const PURPOSES = ['critical-review', 'architecture', 'hard-problem', 'important-question']
-/** "standard worker", "image designer": who an open task waits for; `aPool` adds the article. */
 /** When a task's tier moved to one the staff holds, the tier that was asked. */
 const moved = (asked, tier) => (asked !== undefined && asked !== tier ? { asked } : {})
+/** "standard worker", "image designer": who an open task waits for; `aPool` adds the article. */
 const poolName = (pool, tier) => (pool === 'designer' ? 'image designer' : `${tier} ${pool}`)
 const aPool = (pool, tier) => `${pool === 'designer' ? 'an' : 'a'} ${poolName(pool, tier)}`
 const CRITICAL_RULE =
@@ -86,6 +87,12 @@ export const OVERDUE_MS = 10 * 60_000
 export const TRANSCRIPT_ITEM_MAX = 64_000
 /** How many items of a transcript the board reads at once, from the end. */
 export const TRANSCRIPT_PAGE = 300
+/**
+ * How much of a message the human's bay on the board carries: two screens
+ * of its strip. The page reads the board in one frame of at most 1 MiB, and
+ * a message may run to a million characters; its task's thread has it all.
+ */
+const BAY_EXCERPT = 2_000
 const TRANSCRIPT_ROLES = ['user', 'assistant', 'tool', 'custom']
 const MAX_QUESTIONS = 4
 const MAX_TITLE = 120
@@ -148,8 +155,9 @@ function migrate(db) {
   }
   if (version === SCHEMA_VERSION) return
   // A migration may rebuild a table others refer to; with foreign keys on,
-  // dropping it would cascade through them. Off for the migrations, then
-  // every reference checked, then on again.
+  // dropping it would cascade through them. Off for the migrations, every
+  // reference checked before each one commits, then on again: a start
+  // refused here leaves the version as it was, so the next start checks too.
   db.exec('PRAGMA foreign_keys = OFF')
   try {
     for (let from = version; from < SCHEMA_VERSION; from += 1) {
@@ -157,19 +165,19 @@ function migrate(db) {
       try {
         db.exec(MIGRATIONS[from])
         db.exec(`PRAGMA user_version = ${from + 1}`)
+        const broken = db.prepare('PRAGMA foreign_key_check').all()
+        if (broken.length > 0) {
+          throw new LedgerError(
+            'ledger-broken',
+            `the ledger's references do not hold after migration: ${JSON.stringify(broken[0])}`,
+            500,
+          )
+        }
         db.exec('COMMIT')
       } catch (cause) {
         db.exec('ROLLBACK')
         throw cause
       }
-    }
-    const broken = db.prepare('PRAGMA foreign_key_check').all()
-    if (broken.length > 0) {
-      throw new LedgerError(
-        'ledger-broken',
-        `the ledger's references do not hold after migration: ${JSON.stringify(broken[0])}`,
-        500,
-      )
     }
   } finally {
     db.exec('PRAGMA foreign_keys = ON')
@@ -189,6 +197,17 @@ function requireText(value, field, max) {
 function requireHarness(harness) {
   if (!HARNESSES.includes(harness)) {
     throw new LedgerError('invalid-harness', `unknown harness ${JSON.stringify(harness)}`)
+  }
+  return harness
+}
+
+/** A chief's harness: one of CHIEF_HARNESSES, when the project starts and at every Switch lead. */
+function requireChiefHarness(harness) {
+  if (!CHIEF_HARNESSES.includes(harness)) {
+    throw new LedgerError(
+      'invalid-harness',
+      `a chief runs on ${CHIEF_HARNESSES.join(', ')}, not ${JSON.stringify(harness)}`,
+    )
   }
   return harness
 }
@@ -257,14 +276,8 @@ const deliveryBody = (task) =>
     ? task.body
     : `Critical work: ${task.purpose}. ${CRITICAL_RULE}\n\n${task.body}`
 
-/** A result as its card shows it: the first line that says something, or null. */
-const firstLine = (body) =>
-  body === undefined
-    ? null
-    : (body
-        .split('\n')
-        .map((line) => line.trim())
-        .find(Boolean) ?? null)
+/** A result as its card shows it, the way a title reads; null before there is one. */
+const firstLine = (body) => (body === undefined ? null : titleOf(body))
 
 /** A card title: the first line that says something, shortened to fit. */
 function titleOf(body) {
@@ -379,6 +392,17 @@ const messageView = (row) => ({
   createdAt: row.created_at,
   deliveredAt: row.delivered_at,
 })
+
+/** A message as the bay shows it: a long one cut at BAY_EXCERPT, saying how long it was. */
+const bayView = (row) => {
+  const message = messageView(row)
+  return message.body.length <= BAY_EXCERPT
+    ? message
+    : {
+        ...message,
+        body: `${message.body.slice(0, BAY_EXCERPT)}\n… (${message.body.length} characters; cut here)`,
+      }
+}
 
 const badQuestions = (why) => new LedgerError('bad-questions', `questions: ${why}`, 400)
 const shortText = (value, field) => {
@@ -504,7 +528,7 @@ class Ledger {
   createProject({ directory, name, chief, staff = [], gate = false }) {
     requireText(directory, 'directory', 4096)
     requireText(name, 'name', 100)
-    requireHarness(chief?.harness)
+    requireChiefHarness(chief?.harness)
     requireGate(gate)
     const members = staff.map((member) => ({ ...member, roles: requireMember(member) }))
     return this.#write(() => {
@@ -790,13 +814,13 @@ class Ledger {
 
   /** The members of the newest project that has any: the staff a new project starts from. */
   lastStaff() {
+    const member = `role IN (${MEMBER_ROLES.map((role) => `'${role}'`).join(', ')})
+      AND left_at IS NULL AND member_id IS NULL`
     return this.#db
       .prepare(
         `SELECT agent, harness, role, roles FROM participant
-         WHERE project_id = (
-           SELECT MAX(project_id) FROM participant
-           WHERE role IN ('worker', 'advisor', 'reviewer') AND left_at IS NULL AND member_id IS NULL
-         ) AND role IN ('worker', 'advisor', 'reviewer') AND left_at IS NULL AND member_id IS NULL
+         WHERE project_id = (SELECT MAX(project_id) FROM participant WHERE ${member})
+           AND ${member}
          ORDER BY id`,
       )
       .all()
@@ -920,11 +944,12 @@ class Ledger {
       )
       .all(task.assignee_id)
     // A window's copy may hold more than this task (the chief's own, after
-    // its other work): the task's part starts where its brief arrived.
+    // its other work): the task's part starts where its first brief arrived,
+    // not a later one (a resume or a reopen sends another).
     const brief = this.#db
       .prepare(
         `SELECT id FROM message WHERE task_id = ? AND kind = 'task' AND recipient_id = ?
-         ORDER BY id DESC LIMIT 1`,
+         ORDER BY id LIMIT 1`,
       )
       .get(task.id, task.assignee_id)
     const start =
@@ -1022,12 +1047,7 @@ class Ledger {
    * lead was stopped in the middle of a turn, for the handoff to say.
    */
   switchChief(projectId, { harness, agent = null, cut = false }) {
-    if (!CHIEF_HARNESSES.includes(harness)) {
-      throw new LedgerError(
-        'invalid-harness',
-        `a chief runs on ${CHIEF_HARNESSES.join(', ')}, not ${JSON.stringify(harness)}`,
-      )
-    }
+    requireChiefHarness(harness)
     if (agent !== null && (typeof agent !== 'string' || !AGENT_ID.test(agent))) {
       throw new LedgerError('invalid-agent', `invalid agent ${JSON.stringify(agent)}`)
     }
@@ -1261,7 +1281,6 @@ class Ledger {
     )
   }
 
-  /** The active members an open task may go to, with what the daemon ranks them by. */
   /**
    * Whether a member has a task on its hands: one task per member session
    * ends when this is false. Paused work counts: its window stays for the
@@ -1277,6 +1296,7 @@ class Ledger {
     )
   }
 
+  /** The active members an open task may go to, with what the daemon ranks them by. */
   candidates(projectId, number) {
     const task = this.#taskRow(projectId, number)
     return this.members(projectId, task.pool)
@@ -1325,32 +1345,37 @@ class Ledger {
    * It starts from nothing and ends with its work (CORE-19).
    */
   #startSession(projectId, member, role) {
-    for (let attempt = 0; attempt < 16; attempt += 1) {
-      const handle = `${member.handle}-${this.#names()}`
-      const taken = this.#db
+    const free = (handle) =>
+      this.#db
         .prepare('SELECT 1 FROM participant WHERE project_id = ? AND handle = ?')
-        .get(projectId, handle)
-      if (taken !== undefined) continue
-      const { lastInsertRowid: id } = this.#db
-        .prepare(
-          `INSERT INTO participant (project_id, handle, role, roles, agent, harness, tier, member_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          projectId,
-          handle,
-          role,
-          member.roles,
-          member.agent,
-          member.harness,
-          member.tier,
-          member.id,
-          this.#at(),
-        )
-      this.#log(projectId, 'session.started', { handle, member: member.handle, role })
-      return this.#participantRow(id)
+        .get(projectId, handle) === undefined
+    let name = this.#names()
+    for (let attempt = 1; attempt < 16 && !free(`${member.handle}-${name}`); attempt += 1) {
+      name = this.#names()
     }
-    throw new LedgerError('no-session-name', `no free session name for @${member.handle}`, 409)
+    // A name is never used twice (an ended session keeps its row), so a
+    // member about a thousand sessions in draws only taken ones: the last
+    // name drawn then takes the first number free.
+    let handle = `${member.handle}-${name}`
+    for (let number = 2; !free(handle); number += 1) handle = `${member.handle}-${name}-${number}`
+    const { lastInsertRowid: id } = this.#db
+      .prepare(
+        `INSERT INTO participant (project_id, handle, role, roles, agent, harness, tier, member_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        projectId,
+        handle,
+        role,
+        member.roles,
+        member.agent,
+        member.harness,
+        member.tier,
+        member.id,
+        this.#at(),
+      )
+    this.#log(projectId, 'session.started', { handle, member: member.handle, role })
+    return this.#participantRow(id)
   }
 
   /** A session ends: it leaves the project and its conversation closes. */
@@ -1577,6 +1602,11 @@ class Ledger {
           403,
         )
       }
+      // The pause first, as one step with the tell: what it withdraws from
+      // the window is never the tell, and a tell refused below pauses nothing.
+      if (urgent && this.#taskRow(projectId, task).state !== 'paused') {
+        this.pauseTask(projectId, task, { by: from })
+      }
       const message = this.#send(projectId, {
         from,
         to,
@@ -1602,7 +1632,8 @@ class Ledger {
    * question with options is answered by choice (or by text, one line per
    * question): that answer is read at once and never delivered, because the
    * harness door that asked collects it and the tool call completes with it;
-   * the asker's task resumes here.
+   * the asker's task resumes here. `from` is the answerer's participant id:
+   * handles repeat across projects (every chief is `chief`), ids never do.
    */
   answer(questionId, { from, body, choices }) {
     return this.#write(() => {
@@ -1610,13 +1641,17 @@ class Ledger {
       if (question === null || question.kind !== 'question') {
         throw new LedgerError('not-a-question', `message ${questionId} is not a question`, 409)
       }
+      const answerer = this.#participantRow(from)
+      const asker = this.#db
+        .prepare('SELECT sender_id, task_id FROM message WHERE id = ?')
+        .get(questionId)
       // The one asked, or (a question with options) the asker itself: its
       // window may have answered first, and the board's copy takes that answer.
-      const fromWindow = question.questions !== null && from === question.sender
-      if (question.recipient !== from && !fromWindow) {
+      const fromWindow = question.questions !== null && answerer.id === asker.sender_id
+      if (answerer.id !== question.recipientId && !fromWindow) {
         throw new LedgerError(
           'not-your-question',
-          `the question was put to ${question.recipient}, not ${from}`,
+          `the question was put to ${question.recipient}, not ${answerer.handle}`,
           403,
         )
       }
@@ -1627,10 +1662,7 @@ class Ledger {
         question.questions === null ? null : requireChoices(question.questions, { choices, body })
       const text = picks === null ? body : renderChoices(question.questions, picks)
       requireText(text, 'body', MAX_BODY)
-      const answerer = this.#participantByHandle(question.projectId, from)
-      const asker = this.#db
-        .prepare('SELECT sender_id, task_id FROM message WHERE id = ?')
-        .get(questionId)
+      requireActive(answerer)
       requireActive(this.#participantRow(asker.sender_id))
       const id = this.#queue(question.projectId, {
         to: asker.sender_id,
@@ -1644,11 +1676,11 @@ class Ledger {
       this.#log(question.projectId, 'message.sent', {
         message: id,
         kind: 'answer',
-        from,
+        from: answerer.handle,
         to: question.sender,
       })
       // A question still gated is answered before the one asked saw it: it goes no further.
-      if (question.state === 'gated') this.#withdraw(questionId, `answered by @${from}`)
+      if (question.state === 'gated') this.#withdraw(questionId, `answered by @${answerer.handle}`)
       const answer = this.#message(id)
       if (answer.state === 'read') this.#resume(asker.task_id)
       return answer
@@ -2180,6 +2212,8 @@ class Ledger {
         .map((row) => [row.task_id, row.body]),
     )
     // Each task with the first line of its latest result: what its card shows.
+    // Its brief stays out: the drawer reads it with the task, and a long-lived
+    // board of briefs would outgrow the frame the page reads it in.
     // A task of a session that has ended sits on its member's lane.
     const rows = this.#db
       .prepare(`${TASK_SELECT} WHERE t.project_id = ? ORDER BY t.number`)
@@ -2192,7 +2226,10 @@ class Ledger {
           : row.assignee,
       ]),
     )
-    const tasks = rows.map((row) => ({ ...taskView(row), result: firstLine(results.get(row.id)) }))
+    const tasks = rows.map((row) => {
+      const { body: _brief, ...card } = taskView(row)
+      return { ...card, result: firstLine(results.get(row.id)) }
+    })
     return {
       project,
       // On the board for a member; one given by name waits in its own lane.
@@ -2211,22 +2248,32 @@ class Ledger {
     return this.#db
       .prepare(`${MESSAGE_SELECT} WHERE m.project_id = ? AND m.state = 'gated' ORDER BY m.id`)
       .all(projectId)
-      .map(messageView)
+      .map(bayView)
   }
 
-  /** Questions a coordinator has left unanswered for OVERDUE_MS: the human sees them too. */
+  /**
+   * Questions a coordinator has left unanswered for OVERDUE_MS: the human sees
+   * them too. Only one still on its way or in the chief's window counts, from
+   * an asker still on the staff, about no task or one still at work (working
+   * or waiting); an answer held for the human or declined is no answer yet,
+   * as for the task.
+   */
   #overdueQuestions(projectId) {
     const before = new Date(this.#now().getTime() - OVERDUE_MS).toISOString()
     return this.#db
       .prepare(
         `${MESSAGE_SELECT}
          WHERE m.project_id = ? AND m.kind = 'question' AND r.role = 'chief'
-           AND m.state != 'gated' AND m.created_at <= ?
-           AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = m.id AND a.kind = 'answer')
+           AND m.state IN ('queued', 'delivering', 'delivered') AND m.created_at <= ?
+           AND s.left_at IS NULL AND (m.task_id IS NULL OR t.state IN ('working', 'waiting'))
+           AND NOT EXISTS (
+             SELECT 1 FROM message a WHERE a.reply_to = m.id AND a.kind = 'answer'
+               AND a.state NOT IN ('gated', 'cancelled')
+           )
          ORDER BY m.id`,
       )
       .all(projectId, before)
-      .map(messageView)
+      .map(bayView)
   }
 
   /** A task and its whole thread, oldest first; null when there is no such task. */
@@ -2365,8 +2412,6 @@ class Ledger {
     return participantView(this.#participantRow(id))
   }
 
-  /** The active members of one pool and tier, in join order. */
-  /** The staff's members of one role and tier (any tier when null), whatever role they were saved with first. */
   /**
    * The tier a task for `pool` goes to: the one asked, when somebody holds it;
    * else the nearest one somebody does, the next one up before the next one
@@ -2384,6 +2429,7 @@ class Ledger {
     return near.find((other) => this.#members(projectId, pool, other).length > 0) ?? tier
   }
 
+  /** The staff's members of one role and tier (any tier when null), whatever role they were saved with first. */
   #members(projectId, pool, tier) {
     return this.#db
       .prepare(

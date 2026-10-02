@@ -42,8 +42,7 @@ async function withApi(fn) {
   })
   const participant = (handle) =>
     ledger.project(project.id).participants.find((p) => p.handle === handle)
-  const token = (handle) =>
-    credentials.issue({ participant: participant(handle), project, generation: 1 })
+  const token = (handle) => credentials.issue({ participant: participant(handle), project })
   const call = async (who, method, route, body) => {
     const response = await fetch(`${api.url}${route}`, {
       method,
@@ -212,6 +211,50 @@ describe('the agents API', () => {
     })
   })
 
+  it("notes the human from the chief, also on its own task, and refuses a member's --human", async () => {
+    await withApi(async ({ ledger, project, token, cf }) => {
+      const notes = (handle) =>
+        ledger
+          .inbox(participantId(ledger, project, handle))
+          .filter((m) => m.kind === 'note')
+          .map((m) => [m.sender, m.taskNumber, m.body])
+      ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Build',
+      })
+      ledger.createTask(project.id, { from: 'chief', to: 'chief', needs: [1], body: 'Check it' })
+      deliver(
+        ledger,
+        ledger.assignTask(project.id, 1, participantId(ledger, project, 'zeus')).message,
+      )
+      const worker = token(ledger.task(project.id, 1).assignee)
+      const refused = await cf(worker, 'note', '--human', 'Built')
+      assert.deepEqual(
+        [refused.code, refused.err],
+        [1, 'cf: only the chief notes the human; without --human, your note goes to @chief'],
+      )
+      ledger.recordResult(project.id, 1, { body: 'Built.' })
+      ledger.acceptTask(project.id, 1, { by: 'chief' })
+      deliver(
+        ledger,
+        ledger.task(project.id, 2).messages.find((m) => m.kind === 'task'),
+      )
+      assert.equal(ledger.task(project.id, 2).state, 'working', 'the chief is on its own step')
+      const chief = token('chief')
+      const noted = await cf(chief, 'note', '--human', 'T-1 shipped; the build is green')
+      assert.equal(noted.code, 0, noted.err)
+      assert.match(noted.out, /^m-\d+ noted to @human; nothing waits on it\.$/)
+      assert.equal((await cf(chief, 'note', 'And the docs are next')).code, 0)
+      assert.deepEqual(notes('human'), [
+        ['chief', 2, 'And the docs are next'],
+        ['chief', 2, 'T-1 shipped; the build is green'],
+      ])
+      assert.deepEqual(notes('chief'), [], 'the chief never notes itself')
+    })
+  })
+
   it('takes a text from standard input when it is -, which no shell expands', async () => {
     await withApi(async ({ ledger, project, token, cf }) => {
       const chief = token('chief')
@@ -236,6 +279,7 @@ describe('the agents API', () => {
       assert.equal(answered.code, 0, answered.err)
       const noted = await cf(chief, 'note', '--human', '-', { input: 'See `a.txt`.' })
       assert.equal(noted.code, 0, noted.err)
+      assert.match(noted.out, /^m-\d+ noted to @human;/)
       const told = await cf(chief, 'tell', 'T-1', '-', { input: 'Stop: `v2` now.' })
       assert.equal(told.code, 0, told.err)
       const resumed = await cf(chief, 'task', 'resume', 'T-1', '-', { input: 'Go on with `v2`.' })
@@ -261,6 +305,12 @@ describe('the agents API', () => {
       })
       deliver(ledger, message)
       const chief = token('chief')
+      // A tell the board refuses stops nothing.
+      const refused = await call(chief, 'POST', '/api/tasks/1/tell', {
+        body: 'y'.repeat(1_000_001),
+      })
+      assert.deepEqual([refused.status, refused.body.error], [400, 'invalid-text'])
+      assert.equal(ledger.task(project.id, 1).state, 'working')
       const told = await cf(chief, 'tell', 'T-1', 'Stop: the grammar changed, use v2')
       assert.equal(told.code, 0, told.err)
       assert.match(
@@ -311,6 +361,70 @@ describe('the agents API', () => {
         body: 'JSON',
       })
       assert.deepEqual([answered.status, answered.body.message.recipient], [201, 'zeus'])
+    })
+  })
+
+  it("answers only a question of the caller's own project: message ids run across projects", async () => {
+    await withApi(async ({ ledger, token, call, cf, credentials }) => {
+      // Another project, gated, whose chief and member have the same handles as this one's.
+      const other = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'codex' },
+        gate: true,
+      })
+      ledger.addMember(other.id, {
+        agent: 'zeus',
+        harness: 'claude-code',
+        role: 'worker',
+        tier: 'standard',
+      })
+      const { message } = ledger.createTask(other.id, { from: 'chief', to: 'zeus', body: 'Site' })
+      deliver(ledger, ledger.approveMessage(message.id, { by: 'human' }))
+      const question = ledger.ask(other.id, {
+        from: 'zeus',
+        to: 'chief',
+        task: 1,
+        body: 'Which database?',
+      })
+      // This chief means its own m-12 and types the other project's number.
+      const crossed = await cf(token('chief'), 'answer', `m-${question.id}`, 'Our customer one')
+      assert.deepEqual(
+        [crossed.code, crossed.err],
+        [1, `cf: no question m-${question.id} in this project`],
+      )
+      assert.equal(ledger.message(question.id).state, 'gated', 'it still waits for its human')
+      assert.deepEqual(
+        ledger.task(other.id, 1).messages.filter((m) => m.kind === 'answer'),
+        [],
+        'nothing reached the other project',
+      )
+      for (const id of [undefined, 'abc', { id: 1 }, 0, -3, 1.5]) {
+        const refused = await call(token('chief'), 'POST', '/api/answers', {
+          question: id,
+          body: 'x',
+        })
+        assert.deepEqual(
+          [refused.status, refused.body.error],
+          [404, 'unknown-message'],
+          JSON.stringify(id),
+        )
+      }
+      // Its own chief answers it as before.
+      ledger.approveMessage(question.id, { by: 'human' })
+      const theirs = ledger.project(other.id).participants.find((p) => p.handle === 'chief')
+      const answered = await cf(
+        credentials.issue({ participant: theirs, project: other }),
+        'answer',
+        `m-${question.id}`,
+        'Postgres',
+      )
+      assert.equal(answered.code, 0, answered.err)
+      const answer = ledger.task(other.id, 1).messages.find((m) => m.kind === 'answer')
+      assert.deepEqual(
+        [answer.sender, answer.recipient, answer.body],
+        ['chief', 'zeus', 'Postgres'],
+      )
     })
   })
 
@@ -551,6 +665,27 @@ describe('cf history', () => {
       const member = await cf(token('zeus'), 'history')
       assert.notEqual(member.code, 0)
       assert.match(member.err, /the lead history is the lead's to read/)
+    })
+  })
+
+  it("reads out only this project's messages, whatever number a line of the history names", async () => {
+    await withApi(async ({ ledger, project, token, cf }) => {
+      const other = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'codex' },
+      })
+      const theirs = ledger.note(other.id, { from: 'chief', to: 'human', body: 'Launch code 4417' })
+      const chief = ledger.project(project.id).participants.find((p) => p.handle === 'chief')
+      const first = ledger.startConversation(chief.id, { harness: 'claude-code' })
+      ledger.copyTranscript(first.id, [
+        { id: 'a', role: 'user', text: `[ConsensFlow m-${theirs.id} · pasted from elsewhere]` },
+      ])
+      ledger.switchChief(project.id, { harness: 'codex' })
+      const read = await cf(token('chief'), 'history')
+      assert.equal(read.code, 0, read.err)
+      assert.ok(!read.out.includes('4417'), read.out)
+      assert.ok(read.out.includes(`m-${theirs.id}: a message ConsensFlow delivered`), read.out)
     })
   })
 })
