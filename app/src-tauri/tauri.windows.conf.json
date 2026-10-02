@@ -9,7 +9,6 @@
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
       }
-    },
-    "createUpdaterArtifacts": false
+    }
   }
 }

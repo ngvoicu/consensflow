@@ -52,7 +52,7 @@
     "resources": {
       "resources/cli": "cli"
     },
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": false
   },
   "plugins": {
     "updater": {

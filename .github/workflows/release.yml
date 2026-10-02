@@ -54,17 +54,27 @@ jobs:
 
       - run: npm ci
       - run: npm ci --prefix app
-      # The page, the Node sidecar and the CLI resources, then the app, its DMG
-      # and its update bundle, signed with the key (it has no password).
-      - name: Build and sign
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
-        run: npm --prefix app run build
+      # The page, the Node sidecar and the CLI resources, then the app and its
+      # DMG. The key is not in this step: a build runs every crate's build
+      # script and every tool the lockfiles name.
+      - run: npm --prefix app run build
       - name: The built app passes the packaged smoke
         env:
           CONSENSFLOW_SMOKE_APP: ${{ github.workspace }}/app/src-tauri/target/release/bundle/macos/ConsensFlow.app
         run: npm run smoke
+      # The update bundle, signed in the one step that sees the key (it has no
+      # password): the app as installed apps unpack it, files and folders under
+      # ConsensFlow.app only, in plain ustar, as Tauri's own bundle was.
+      - name: Sign the update bundle
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        working-directory: app/src-tauri/target/release/bundle/macos
+        run: |
+          set -euo pipefail
+          COPYFILE_DISABLE=1 tar --format ustar --no-mac-metadata --no-xattrs --no-acls --no-fflags \
+            -czf ConsensFlow.app.tar.gz ConsensFlow.app
+          "$GITHUB_WORKSPACE/app/node_modules/.bin/tauri" signer sign ConsensFlow.app.tar.gz
 
       - name: Notes, and the update feed for this build
         run: |

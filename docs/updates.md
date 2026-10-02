@@ -26,8 +26,11 @@ people download:
    A tag without a message gets the commit subjects since the previous release.
 
 The workflow refuses a tag that does not name the source version. The Mac job
-builds and signs the app, runs the packaged smoke on the built bundle and
-writes `latest.json` with `app/scripts/prepare-update.mjs`. Once the Mac and
+builds the app with no key in reach, runs the packaged smoke on the built
+bundle, then in a step of its own packs the update bundle (the app as
+installed apps unpack it: files and folders under `ConsensFlow.app`, plain
+ustar) and signs it with the key, and writes `latest.json` with
+`app/scripts/prepare-update.mjs`. Once the Mac and
 Windows builds pass, it creates the GitHub release (a prerelease for an
 `-alpha` version) with every file, and only then replaces `latest.json` on the
 rolling feed installed apps read: `update-alpha` for every version, and
@@ -45,8 +48,9 @@ signing key, so a hand run from another branch stops at its first job.
 The update signing key lives at `~/.tauri/consensflow-updater.key` on the
 maintainer's Mac, and a copy is the `TAURI_SIGNING_PRIVATE_KEY` secret of the
 repository's `release` environment. That environment admits only `v*` tags and
-`main`; only the release workflow's Mac job uses it, and no third-party action
-runs in that job. The key has no password. Keep it out of the repository and
+`main`; only the release workflow's Mac job uses it, and within it only the
+step that signs the update bundle, after the build; no third-party action runs
+in that job. The key has no password. Keep it out of the repository and
 out of `~/.consensflow` and `~/.config/consensflow`. A leaked key means a new
 one: its public key goes into `tauri.conf.json`, and installed apps trust it
 only after one manual DMG install.
