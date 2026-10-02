@@ -40,7 +40,8 @@ import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.j
  *   deleted project) is forgotten at once, quota marks and all, so one that
  *   comes back or takes its id starts clean; its window closes once its step
  *   in progress ends, and that exit fails nothing: a member's open tasks
- *   were cancelled when it left.
+ *   were cancelled when it left. An Open or a Switch lead that waited on it
+ *   then does nothing, to it or to one that took its id.
  * - A task for a tier of member starts open: each pass gives it to a free
  *   member of that pool and tier that is not out of quota, on the harness
  *   whose members of the tier have taken the fewest tasks, then the one with
@@ -665,6 +666,9 @@ export class Dispatcher {
    */
   async #awaitSwitch(project, chief, runtime, observed, idle) {
     if (!idle) return
+    // A project deleted during the look forgot its lead, and the switch with
+    // it: the note's id may be a new project's message by now.
+    if (this.#forgotten(runtime)) return
     const { note } = runtime.pendingSwitch
     const asked = note === null ? null : this.#ledger.message(note)
     if (asked?.state === 'queued') {
@@ -687,7 +691,8 @@ export class Dispatcher {
    * default, and the window's first message hands it the lead (`#handoff`).
    * `when: 'turn'` lets a lead at work finish its turn; `note` first asks it
    * to write down where things stand, and switches once it has answered. A
-   * lead with no window, or out of quota, switches at once.
+   * lead with no window, or out of quota, switches at once. A project deleted
+   * while the switch waits is gone for it, whatever has its id by then.
    */
   async switchChief(projectId, { harness, agent = null, when = 'now', note = false }) {
     this.requireAdapter(harness)
@@ -696,12 +701,15 @@ export class Dispatcher {
     }
     const project = this.#knownProject(projectId)
     const chief = project.participants.find((participant) => participant.role === 'chief')
+    const runtime = this.#runtimeOf(chief.id)
     await this.#exclusive(
       chief.id,
       async () => {
-        // Asked of the project as it is once the lead's step in progress is over.
+        // Asked of the project as it is once the lead's step in progress is
+        // over. One deleted meanwhile forgot its lead, and the ledger may
+        // have given its ids to a new project, which is not switched.
+        if (this.#forgotten(runtime)) throw new Error(`no project ${projectId}`)
         requireOpen(this.#knownProject(projectId))
-        const runtime = this.#runtimeOf(chief.id)
         if (runtime.pane !== null && !this.#isOut(chief) && (when === 'turn' || note)) {
           // A switch asked again replaces the one waiting, with a note not yet sent.
           const replaced = runtime.pendingSwitch?.note ?? null
@@ -722,6 +730,8 @@ export class Dispatcher {
           return
         }
         await this.#performSwitch(project, chief, runtime, { harness, agent })
+        // One deleted while the old window was looked at or closed stopped the switch there.
+        if (this.#forgotten(runtime)) throw new Error(`no project ${projectId}`)
       },
       { wait: true },
     )
@@ -733,7 +743,9 @@ export class Dispatcher {
    * window (its words become history; a delivery whose header shows there
    * arrived), what it was still receiving goes back to the queue with its
    * attempt, the window closes without suspending the project, the ledger
-   * moves the chief, and the new window opens with the handoff.
+   * moves the chief, and the new window opens with the handoff. A project
+   * deleted on the way (its lead forgotten) stops it there: its ids may be a
+   * new project's by then, and its old window closes with the record.
    */
   async #performSwitch(project, chief, runtime, { harness, agent }) {
     const asked = runtime.pendingSwitch?.note ?? null
@@ -742,6 +754,7 @@ export class Dispatcher {
     const { pane } = runtime
     if (pane !== null) {
       const observed = await this.#observe(chief, runtime).catch(() => null)
+      if (this.#forgotten(runtime)) return
       if (observed !== null) {
         this.#copyTranscript(chief, runtime, observed)
         if (runtime.delivering !== null) this.#confirmArrival(runtime, observed)
@@ -752,6 +765,7 @@ export class Dispatcher {
       if (delivering !== null) this.#giveBack(delivering, 'the lead was switched before it arrived')
       await this.#closeOwn(runtime, pane)
     }
+    if (this.#forgotten(runtime)) return
     // A handoff still on its way is an earlier switch's: this one writes its
     // own. The note asking the old lead where things stand was for it alone,
     // however the switch came (now, or the lead out of quota).
@@ -1614,14 +1628,17 @@ export class Dispatcher {
    * Opens a participant's window once its step in progress is over, apart
    * from whoever asked: a page operation answers once the ledger has its
    * change, and a launch that fails says so on the board. A window open by
-   * then, or a project closed meanwhile, opens nothing. Nobody waits for it,
-   * so a failure is written down.
+   * then, or a project closed meanwhile, opens nothing; so does a participant
+   * forgotten meanwhile (it left, or its project was deleted), whose id may
+   * be another's by then, and no record is made for it again. Nobody waits
+   * for it, so a failure is written down.
    */
   #openSoon(participantId) {
+    const runtime = this.#runtimeOf(participantId)
     this.#exclusive(
       participantId,
       () => {
-        const runtime = this.#runtimeOf(participantId)
+        if (this.#forgotten(runtime)) return
         const project = this.#projectOf(participantId)
         if (runtime.pane !== null || project?.state !== 'open') return
         const participant = project.participants.find((p) => p.id === participantId)
@@ -1663,6 +1680,15 @@ export class Dispatcher {
       this.#runtime.set(participantId, runtime)
     }
     return runtime
+  }
+
+  /**
+   * Whether a record was forgotten (`#forget`) since work took it: its
+   * participant left, or its project was deleted, and the ledger may have
+   * given its id to another since. That work does nothing more by the id.
+   */
+  #forgotten(runtime) {
+    return this.#runtime.get(runtime.id) !== runtime
   }
 
   #setActivity(runtime, activity) {
