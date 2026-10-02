@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { describe, it } from 'node:test'
 import { admission } from '../src/adapters/shared.js'
 import { Bridge } from '../src/bridge.js'
+import { send as sendCodex } from '../src/channels/codex.js'
 import { send as sendDevin } from '../src/channels/devin.js'
+import { send as sendOpenCode } from '../src/channels/opencode.js'
 import { send as sendPi } from '../src/channels/pi.js'
 import { writePaste } from '../src/channels/pty.js'
 
@@ -54,7 +57,7 @@ function paneHost(
   return daemon
 }
 
-/** The host's answer to a paste it refused before writing a byte of it. */
+/** The pane host's answer to a paste it refused before writing a byte of it. */
 const PASTE_REFUSED = {
   ok: false,
   admitted: false,
@@ -71,7 +74,10 @@ const PASTE_UNCERTAIN = {
 }
 const never = () => new Promise(() => {})
 
-/** The rows of a paste into a window (Claude Code, Devin), whose handover point is its first byte. */
+/**
+ * The rows of a paste into a window (Claude Code, Devin), whose handover
+ * point is its first byte.
+ */
 function pasted(send, refused = {}) {
   return {
     refused: {
@@ -96,6 +102,82 @@ function pasted(send, refused = {}) {
       'the pane host writes the paste': (t) => send(t, {}),
     },
   }
+}
+
+/**
+ * A harness's own server for a message (Codex's broker, OpenCode's plugin):
+ * it reads the POST, then answers as told, or drops the connection.
+ */
+async function harnessServer(t, { answer = { ok: true, admitted: true }, drop = false }) {
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request);
+    if (drop) return request.socket.destroy()
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify(answer))
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  t.after(async () => {
+    server.closeAllConnections()
+    await new Promise((resolve) => server.close(resolve))
+  })
+  return { endpoint: `http://127.0.0.1:${server.address().port}`, token: 't'.repeat(32) }
+}
+
+/** The rows of a message posted to a harness's own server, whose handover point is the POST. */
+function posted(send, server) {
+  return {
+    refused: {
+      'the pane host refuses its claim': (t) =>
+        send(t, { claim: { ok: false, error: 'the pane is gone' } }),
+      [`${server} refuses it`]: (t) =>
+        send(t, {
+          answer: { ok: false, admitted: false, bytesWritten: 0, error: 'native-session-changed' },
+        }),
+    },
+    uncertain: {
+      [`${server} drops the connection after the POST`]: (t) => send(t, { drop: true }),
+    },
+    accepted: {
+      [`${server} takes it`]: (t) => send(t, {}),
+    },
+  }
+}
+
+async function sendThroughCodex(t, { claim, ...server }) {
+  return sendCodex(
+    {
+      session: '01a0817b-e6b0-7f32-8e11-370dc000cbc0',
+      pane: 'p1-diana',
+      generation: 3,
+      deadlineMs: 3_000,
+      bridge: paneHost(t, { claim }),
+      launch: {
+        kind: 'codex-queue',
+        launchId: 'launch-codex',
+        sessionBridge: await harnessServer(t, server),
+      },
+    },
+    'the cache key is per conversation',
+  )
+}
+
+async function sendThroughOpenCode(t, { claim, ...server }) {
+  return sendOpenCode(
+    {
+      session: 'ses_contract1',
+      pane: 'p1-hera',
+      generation: 3,
+      bridge: paneHost(t, { claim }),
+      launch: {
+        channel: {
+          kind: 'opencode-server',
+          launchId: 'launch-opencode',
+          sessionBridge: await harnessServer(t, server),
+        },
+      },
+    },
+    'the cache key is per conversation',
+  )
 }
 
 const DEVIN_SESSION = 'b7c2a0f4-5d1e-4a8b-9c3f-1e2d3c4b5a69'
@@ -196,6 +278,8 @@ const CHANNELS = {
     'Devin shows another conversation': (t) =>
       sendThroughDevin(t, {}, { shows: '0e9d8c7b-6a5f-4e3d-8c2b-1a0f9e8d7c6b' }),
   }),
+  'Codex, through its broker': posted(sendThroughCodex, 'the broker'),
+  'OpenCode, through its plugin': posted(sendThroughOpenCode, 'the plugin'),
   'Pi, through its extension inbox': {
     refused: {
       'the pane host refuses its claim': (t) =>
