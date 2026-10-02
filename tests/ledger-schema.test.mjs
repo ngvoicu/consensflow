@@ -5,10 +5,70 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, it } from 'node:test'
 import { openLedger, SCHEMA_VERSION } from '../src/ledger/index.js'
-import { MIGRATIONS } from '../src/ledger/schema.js'
-import { clock, names, staff, withDir } from './ledger-fixtures.mjs'
+import { MIGRATIONS, migrate } from '../src/ledger/schema.js'
+import { busyProject, clock, names, staff, withDir } from './ledger-fixtures.mjs'
 
 /** The ledger's schema and its migrations (src/ledger/schema.js). */
+
+/** Every table, in the order the schema makes them. */
+const TABLES = [
+  'project',
+  'participant',
+  'conversation',
+  'task',
+  'task_need',
+  'message',
+  'transcript',
+  'event',
+]
+/** The tables whose ids leave the ledger, by name. */
+const WITH_IDS = ['conversation', 'event', 'message', 'participant', 'project', 'task']
+
+const highest = (rows) => Math.max(...rows.map((row) => row.id))
+
+/** What a ledger file holds, read without the ledger: its version, its schema and every row. */
+function contents(file) {
+  const db = new DatabaseSync(file, { readOnly: true })
+  const all = (sql) =>
+    db
+      .prepare(sql)
+      .all()
+      .map((row) => ({ ...row }))
+  try {
+    return {
+      version: db.prepare('PRAGMA user_version').get().user_version,
+      schema: all('SELECT type, name, sql FROM sqlite_master ORDER BY name'),
+      rows: Object.fromEntries(
+        TABLES.map((table) => [table, all(`SELECT * FROM ${table} ORDER BY rowid`)]),
+      ),
+    }
+  } finally {
+    db.close()
+  }
+}
+
+/**
+ * A ledger as a schema-5 build left it: made by the first five migrations,
+ * in WAL mode like every ledger, holding the rows the ledger's own
+ * operations write for two busy projects, ids and all.
+ */
+function schema5Ledger(dir) {
+  const source = path.join(dir, 'source.db')
+  const ledger = openLedger(source, { now: clock(), names: names() })
+  busyProject(ledger, '/work/app')
+  busyProject(ledger, '/work/site')
+  ledger.close()
+  const file = path.join(dir, 'consensflow.db')
+  const db = new DatabaseSync(file)
+  db.exec('PRAGMA journal_mode = WAL')
+  migrate(db, MIGRATIONS.slice(0, 5))
+  db.exec('PRAGMA foreign_keys = OFF')
+  db.prepare('ATTACH DATABASE ? AS source').run(source)
+  for (const table of TABLES) db.exec(`INSERT INTO main.${table} SELECT * FROM source.${table}`)
+  db.exec('DETACH DATABASE source')
+  db.close()
+  return file
+}
 
 describe('the schema', () => {
   it('turns a ledger written before the Chief of Staff into one that says chief, ids kept', async () => {
@@ -117,6 +177,117 @@ describe('the schema', () => {
       )
       assert.equal(raw.prepare('PRAGMA foreign_key_check').all().length, 0, 'nothing dangles')
       raw.close()
+    })
+  })
+})
+
+describe('schema 6: no id is given twice', () => {
+  it('makes the schema 5 had, with AUTOINCREMENT on every table whose ids leave the ledger', async () => {
+    await withDir(async (dir) => {
+      const [before, after] = [5, 6].map((version) => {
+        const file = path.join(dir, `v${version}.db`)
+        const db = new DatabaseSync(file)
+        migrate(db, MIGRATIONS.slice(0, version))
+        db.close()
+        return contents(file).schema
+      })
+      assert.deepEqual(
+        after.filter((row) => row.sql?.includes(' AUTOINCREMENT')).map((row) => row.name),
+        WITH_IDS,
+      )
+      assert.deepEqual(
+        after
+          .filter((row) => row.name !== 'sqlite_sequence')
+          .map((row) => ({ ...row, sql: row.sql?.replace(' AUTOINCREMENT', '') ?? null })),
+        before,
+        'nothing else differs',
+      )
+      assert.deepEqual(
+        after.find((row) => row.name === 'sqlite_sequence'),
+        { type: 'table', name: 'sqlite_sequence', sql: 'CREATE TABLE sqlite_sequence(name,seq)' },
+      )
+    })
+  })
+
+  it('migrates a schema-5 ledger with every row, id and reference as it was, then gives none of its ids again', async () => {
+    await withDir(async (dir) => {
+      const file = schema5Ledger(dir)
+      const before = contents(file)
+      const fresh = path.join(dir, 'fresh.db')
+      openLedger(fresh).close()
+
+      openLedger(file).close()
+      const after = contents(file)
+      assert.equal(after.version, SCHEMA_VERSION)
+      assert.deepEqual(after.rows, before.rows, 'every row, with its id and references')
+      assert.deepEqual(after.schema, contents(fresh).schema, "the schema is a fresh ledger's")
+      const raw = new DatabaseSync(file, { readOnly: true })
+      assert.deepEqual(raw.prepare('PRAGMA foreign_key_check').all(), [], 'nothing dangles')
+      assert.deepEqual(
+        raw
+          .prepare('SELECT name, seq FROM sqlite_sequence ORDER BY name')
+          .all()
+          .map((row) => ({ ...row })),
+        WITH_IDS.map((name) => ({ name, seq: highest(before.rows[name]) })),
+        'each table goes on past its highest id',
+      )
+      raw.close()
+
+      const ledger = openLedger(file, { now: clock(), names: names() })
+      try {
+        assert.equal(ledger.integrity(), 'ok')
+        // The project with the highest ids goes, and the next one gets none of them.
+        const top = ledger.projects().at(-1).id
+        ledger.setProjectState(top, 'suspended')
+        ledger.deleteProject(top)
+        const next = busyProject(ledger, '/work/api')
+        for (const [table, ids] of Object.entries(next)) {
+          assert.deepEqual(
+            ids.filter((id) => id <= highest(before.rows[table])),
+            [],
+            `every new ${table} id is past the highest the ledger held`,
+          )
+        }
+      } finally {
+        ledger.close()
+      }
+    })
+  })
+
+  it('leaves a schema-5 ledger as it was when its migration fails partway, start after start', async () => {
+    await withDir(async (dir) => {
+      const file = schema5Ledger(dir)
+      // A message its rebuilt table refuses: the four tables before it are rebuilt when it fails.
+      const db = new DatabaseSync(file)
+      db.exec('PRAGMA ignore_check_constraints = ON')
+      db.exec("UPDATE message SET state = 'held' WHERE id = 1")
+      db.close()
+      const before = contents(file)
+      for (const start of ['first', 'next']) {
+        assert.throws(
+          () => openLedger(file),
+          /CHECK constraint failed: message_state_check/,
+          `the ${start} start`,
+        )
+      }
+      assert.deepEqual(contents(file), before, 'its version, its schema and every row')
+    })
+  })
+
+  it('is refused by a build that knows only schema 5, as a newer ledger always was', async () => {
+    await withDir(async (dir) => {
+      const file = path.join(dir, 'consensflow.db')
+      const ledger = openLedger(file, { now: clock(), names: names() })
+      busyProject(ledger, '/work/app')
+      ledger.close()
+      const before = contents(file)
+      const db = new DatabaseSync(file)
+      assert.throws(() => migrate(db, MIGRATIONS.slice(0, 5)), {
+        code: 'ledger-newer',
+        message: `this home was written by a newer ConsensFlow (schema ${SCHEMA_VERSION}; this build knows 5)`,
+      })
+      db.close()
+      assert.deepEqual(contents(file), before, 'and left as it was')
     })
   })
 })

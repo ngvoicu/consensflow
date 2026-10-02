@@ -30,6 +30,9 @@ export { RESUME_WORDS } from './tasks.js'
  * - Every operation is one transaction: it validates, writes and logs, or it
  *   throws and writes nothing. A process killed mid-write leaves the last
  *   committed state.
+ * - No id is given twice: a deleted project's ids (its own, its
+ *   participants', conversations', tasks', messages' and events') go with
+ *   it, and whatever still holds one finds nothing by it.
  * - A recipient has at most one message in delivery. Its queue is delivered
  *   oldest first. A worker, advisor or reviewer does one task at a time: a
  *   task message waits while it has another in progress (answers and notes do
