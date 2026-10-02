@@ -1990,7 +1990,11 @@ mod tests {
             let second = thread::spawn(move || {
                 let _ = second_sender.send(second_bridge.request("second", json!(null), Some(20)));
             });
-            let on_time = second_receiver.recv_timeout(Duration::from_millis(150));
+            // Its own 20 ms deadline answers long before this; a deadline that
+            // started only after the write would wait here until the gate
+            // opens, and the gate opens only after this. A busy runner once
+            // took longer than 150 ms just to schedule the threads.
+            let on_time = second_receiver.recv_timeout(Duration::from_secs(2));
             let finished_on_time = on_time.is_ok();
 
             gate.release();

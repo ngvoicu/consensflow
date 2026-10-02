@@ -602,7 +602,7 @@ mod tests {
             match inputs.enqueue_page(key.clone(), sequence, typed(), true) {
                 Ok(_) => admitted += 1,
                 Err(error) if error == "the pane's input queue is full" => {
-                    std::thread::sleep(Duration::from_millis(1));
+                    std::thread::sleep(std::time::Duration::from_millis(1));
                 }
                 Err(error) => panic!("refused: {error}"),
             }
