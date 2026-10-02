@@ -1109,6 +1109,15 @@ export class Dispatcher {
       if (participant.agent !== null && agent === null) {
         if (participant.role === 'chief') this.#leadWithoutAgent(project, participant, delivering)
         else this.#withoutAgent(project, participant, delivering)
+        // A session's window the human opened, with nothing to deliver, says why it did not come.
+        if (participant.role !== 'chief' && delivering === null) {
+          this.#launchFailed(
+            project,
+            participant,
+            null,
+            `${participant.agent} is no longer among your agents`,
+          )
+        }
         return
       }
       plan = await adapter.prepare({
@@ -1225,14 +1234,22 @@ export class Dispatcher {
 
   /**
    * A launch that did not come up. A member's first message fails with it,
-   * so its task fails and the requester hears why. The lead's goes back to
-   * its queue with its attempt, and the lead is tried again, ever more
-   * slowly while it keeps failing. The human hears why once, until the lead
-   * starts or they ask for it again.
+   * so its task fails and the requester hears why; a window the human opened
+   * with nothing to deliver tells them why it did not come. The lead's first
+   * message goes back to its queue with its attempt, and the lead is tried
+   * again, ever more slowly while it keeps failing. The human hears why
+   * once, until the lead starts or they ask for it again.
    */
   #launchFailed(project, participant, delivering, reason) {
     if (participant.role !== 'chief') {
       if (delivering !== null) this.#settleFailure(delivering, reason, { retry: false })
+      else {
+        this.#ledger.note(project.id, {
+          to: 'human',
+          body: `@${participant.handle} could not start: ${reason}.`,
+        })
+        this.#changed()
+      }
       return
     }
     if (delivering !== null) this.#giveBack(delivering, reason)

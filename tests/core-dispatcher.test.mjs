@@ -2251,6 +2251,32 @@ describe('one task per member session', () => {
       assert.equal(context.host.opened.length, opened)
     })
   })
+
+  it("tells the human why a session's window they opened did not start", async () => {
+    let gone = false
+    await setup(
+      async (context) => {
+        const { project, notes } = await finished(context)
+        context.host.refuse = true
+        await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
+        assert.deepEqual(notes('human'), [
+          '@zeus-amber-pine could not start: the window did not open: refused by the test.',
+        ])
+        gone = true
+        await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
+        assert.equal(
+          notes('human').at(-1),
+          '@zeus-amber-pine could not start: zeus is no longer among your agents.',
+        )
+      },
+      {
+        roster: (name) =>
+          name === 'zeus' && gone
+            ? null
+            : { id: name, model: MODELS[name], profile: { modelKey: MODELS[name] } },
+      },
+    )
+  })
 })
 
 describe('a participant that leaves', () => {
