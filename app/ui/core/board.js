@@ -15,8 +15,8 @@ import { button, element, redraw } from '../dom.js'
  */
 
 const ACTIVE = ['working', 'waiting', 'queued', 'paused', 'open']
-/** The harnesses a lead runs on, as the human knows them. */
-const HARNESS_NAMES = {
+/** The harnesses a lead runs on, as the human knows them, in the order they are offered. */
+export const HARNESS_NAMES = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
   opencode: 'OpenCode',
