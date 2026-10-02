@@ -40,8 +40,9 @@ import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.j
  *   deleted project) is forgotten at once, quota marks and all, so one that
  *   comes back or takes its id starts clean; its window closes once its step
  *   in progress ends, and that exit fails nothing: a member's open tasks
- *   were cancelled when it left. An Open or a Switch lead that waited on it
- *   then does nothing, to it or to one that took its id.
+ *   were cancelled when it left. Work on it that was waiting meanwhile (a
+ *   step, a launch, a delivery, an Open, a Switch lead, a removal) does
+ *   nothing more by its ids, to it or to one that took them.
  * - A task for a tier of member starts open: each pass gives it to a free
  *   member of that pool and tier that is not out of quota, on the harness
  *   whose members of the tier have taken the fewest tasks, then the one with
@@ -338,15 +339,16 @@ export class Dispatcher {
     const deleted = this.#ledger.deleteProject(projectId)
     // The ledger gives the next rows it writes the ids this project's had:
     // what is remembered of its tasks and participants goes now, before
-    // anything can take one of their ids.
+    // anything can take one of their ids, and so do its own lines in the
+    // trace (a project created while its windows close keeps its own).
     for (const [task, noted] of this.#waitingNoted) {
       if (noted === deleted.id) this.#waitingNoted.delete(task)
     }
-    await this.#forget((project?.participants ?? []).map((participant) => participant.id))
-    // A deleted project leaves no trace but the line that says it was:
-    // its own lines go, and the record of it names no project id, so a
-    // later project with the same id never takes it along.
     this.#trace.forget?.(projectId)
+    await this.#forget((project?.participants ?? []).map((participant) => participant.id))
+    // A deleted project leaves no trace but the line that says it was, and
+    // that names no project id, so a later project with the same id never
+    // takes it along.
     this.#trace({
       at: new Date(this.#now()).toISOString(),
       kind: 'project.deleted',
@@ -406,9 +408,14 @@ export class Dispatcher {
       ?.participants.find((participant) => participant.handle === handle)
     // Not in the staff: the ledger refuses it and says why.
     if (member === undefined) return this.#ledger.removeMember(projectId, handle)
+    const runtime = this.#runtimeOf(member.id)
     const { removed, left } = await this.#exclusive(
       member.id,
       () => {
+        // One forgotten meanwhile has left already, by another removal or with
+        // its project, whose ids may be another's by now: refused as the
+        // ledger refuses a member that left.
+        if (this.#forgotten(runtime)) throw new Error(`@${handle} left the staff`)
         const sessions = this.#ledger
           .project(projectId)
           .participants.filter((participant) => participant.memberId === member.id)
@@ -571,11 +578,17 @@ export class Dispatcher {
 
   async #stepOpen(project, participant, runtime) {
     if (runtime.retiring) return
+    // A participant forgotten while the step waits (it left, or its project
+    // was deleted) is done with: nothing the look found is written, and
+    // nothing more is done by its ids, which may be another's by now. Its
+    // window closes with the record (`#closeLeaving`).
     let observed
     try {
       observed = await this.#observe(participant, runtime)
     } catch (cause) {
-      this.#setActivity(runtime, { state: 'unknown', reason: cause.message })
+      if (!this.#forgotten(runtime)) {
+        this.#setActivity(runtime, { state: 'unknown', reason: cause.message })
+      }
       return
     }
     // Quota belongs to the member: a session that runs out takes its member out.
@@ -588,6 +601,7 @@ export class Dispatcher {
     const unnamed = observed.unnamed === true
     if (!unnamed) runtime.named = true
     const drawing = (observed.items.length === 0 || unnamed) && !(await this.#drawn(runtime))
+    if (this.#forgotten(runtime)) return
     const starting = drawing || (unnamed && !runtime.named)
     // An out member's window says so, and nothing else, until the reset.
     if (!this.#isOut(owner)) {
@@ -635,6 +649,7 @@ export class Dispatcher {
     if (runtime.retiring) return
     if (participant.role !== 'chief') {
       await this.#interruptIfPaused(participant, runtime)
+      if (this.#forgotten(runtime)) return
       this.#collect(project, participant, observed)
       // The window may have gone during this step (a launch that timed out).
       if (
@@ -666,9 +681,6 @@ export class Dispatcher {
    */
   async #awaitSwitch(project, chief, runtime, observed, idle) {
     if (!idle) return
-    // A project deleted during the look forgot its lead, and the switch with
-    // it: the note's id may be a new project's message by now.
-    if (this.#forgotten(runtime)) return
     const { note } = runtime.pendingSwitch
     const asked = note === null ? null : this.#ledger.message(note)
     if (asked?.state === 'queued') {
@@ -1035,12 +1047,17 @@ export class Dispatcher {
   }
 
   async #deliver(runtime, message) {
+    // A participant forgotten while its delivery waits (it left, or its
+    // project was deleted) is handed nothing, and what its harness did with
+    // the message settles nothing: the message's id may be another
+    // project's by now.
     if (runtime.adapter.ready !== undefined) {
       const ready = await runtime.adapter.ready({
         launch: runtime.launch,
         pane: runtime.pane,
         host: this.#host,
       })
+      if (this.#forgotten(runtime)) return
       if (ready !== true) {
         // Said once per message, so a wait is in the trace, not a mystery.
         if (runtime.held !== message.id) {
@@ -1069,6 +1086,7 @@ export class Dispatcher {
       // throws never handed it over, and its error must show.
       outcome = { admitted: false, reason: `the delivery failed: ${cause.message}` }
     }
+    if (this.#forgotten(runtime)) return
     const delivering = {
       messageId: message.id,
       marker: markerOf(message.id),
@@ -1136,6 +1154,7 @@ export class Dispatcher {
         // A session's window the human opened, with nothing to deliver, says why it did not come.
         if (participant.role !== 'chief' && delivering === null) {
           this.#launchFailed(
+            runtime,
             project,
             participant,
             null,
@@ -1158,7 +1177,21 @@ export class Dispatcher {
     } catch (cause) {
       // An adapter may fail after writing the launch's files; no window will read them.
       this.#launchFiles.forget(launchId)
-      this.#launchFailed(project, participant, delivering, `the launch failed: ${cause.message}`)
+      this.#launchFailed(
+        runtime,
+        project,
+        participant,
+        delivering,
+        `the launch failed: ${cause.message}`,
+      )
+      return
+    }
+    // A participant forgotten while its launch waits (it left, or its project
+    // was deleted) gets nothing more under its ids, which may be another's
+    // by now: no window opens for it, and one already open goes with the
+    // record (`#closeLeaving`).
+    if (this.#forgotten(runtime)) {
+      this.#launchFiles.forget(launchId)
       return
     }
     const token = this.#credentials.issue({ participant, project })
@@ -1181,6 +1214,7 @@ export class Dispatcher {
       this.#credentials.revoke(token)
       this.#launchFiles.forget(launchId)
       this.#launchFailed(
+        runtime,
         project,
         participant,
         delivering,
@@ -1191,6 +1225,12 @@ export class Dispatcher {
     // The window's own process, when the pane host knows it: an adapter may
     // find the harness's own status by it from its first look.
     if (opened.pid !== undefined) plan.launch.pid = opened.pid
+    if (this.#forgotten(runtime)) {
+      Object.assign(runtime, { pane, launchId, token })
+      // One that exited before its open was answered has gone already.
+      if (exited) await this.paneExited(pane)
+      return
+    }
 
     const resumed = resume !== null && plan.nativeSession === resume
     let conversationId = conversation?.id
@@ -1226,6 +1266,7 @@ export class Dispatcher {
       if (participant.role === 'chief') await this.#closeOwn(runtime, pane)
       else this.#host.kill(pane).catch(() => {})
       this.#launchFailed(
+        runtime,
         project,
         participant,
         delivering,
@@ -1233,6 +1274,7 @@ export class Dispatcher {
       )
       return
     }
+    if (this.#forgotten(runtime)) return
     runtime.relaunch = null
     if (started.nativeSession && started.nativeSession !== plan.nativeSession) {
       this.#ledger.bindConversation(conversationId, started.nativeSession)
@@ -1262,9 +1304,12 @@ export class Dispatcher {
    * with nothing to deliver tells them why it did not come. The lead's first
    * message goes back to its queue with its attempt, and the lead is tried
    * again, ever more slowly while it keeps failing. The human hears why
-   * once, until the lead starts or they ask for it again.
+   * once, until the lead starts or they ask for it again. A participant
+   * forgotten while it launched hears nothing and settles nothing: its
+   * project may be gone, and its ids another's.
    */
-  #launchFailed(project, participant, delivering, reason) {
+  #launchFailed(runtime, project, participant, delivering, reason) {
+    if (this.#forgotten(runtime)) return
     if (participant.role !== 'chief') {
       if (delivering !== null) this.#settleFailure(delivering, reason, { retry: false })
       else {
@@ -1277,7 +1322,6 @@ export class Dispatcher {
       return
     }
     if (delivering !== null) this.#giveBack(delivering, reason)
-    const runtime = this.#runtimeOf(participant.id)
     const failures = (runtime.relaunch?.failures ?? 0) + 1
     runtime.relaunch = {
       failures,
