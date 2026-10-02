@@ -1943,6 +1943,27 @@ describe('a member out of quota mid-task', () => {
       assert.deepEqual([task(1).state, task(1).heldUntil], ['paused', resetsAt])
     })
   })
+
+  it('closes the window of a held task that is cancelled, though its member is still out', async () => {
+    await setup(async (context) => {
+      const { project, open, task } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const resetsAt = new Date(context.clock.now().getTime() + 3 * 3_600_000).toISOString()
+      context.adapter.quota('zeus', { state: 'exhausted', resetsAt })
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).state, context.host.killed], ['paused', []], 'held with its window')
+      const pane = context.host.last('zeus')
+      context.ledger.cancelTask(project.id, 1, { by: 'human' })
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        context.host.killed,
+        [{ id: pane.id, generation: pane.generation }],
+        'it waits for no reset now',
+      )
+    })
+  })
 })
 
 describe('a member with several roles', () => {

@@ -647,9 +647,11 @@ export class Dispatcher {
         state: 'out',
         reason: `out of quota until ${owner.outUntil}`,
       })
-      // A held task's agent stops, as any paused task's; the window waits for the reset.
+      // A held task's agent stops, as any paused task's; the window waits for
+      // the reset, unless its task is gone meanwhile (cancelled, taken back).
       if (participant.role !== 'chief') {
         await this.#interruptIfStopped(participant, runtime, observed)
+        if (!this.#forgotten(runtime)) await this.#closeIfFree(runtime)
       }
       return
     }
@@ -660,16 +662,7 @@ export class Dispatcher {
       await this.#interruptIfStopped(participant, runtime, observed)
       if (this.#forgotten(runtime)) return
       this.#collect(project, participant, observed)
-      // The window may have gone during this step (a launch that timed out).
-      if (
-        runtime.pane !== null &&
-        runtime.delivering === null &&
-        !runtime.pinned &&
-        !this.#ledger.holdsWork(participant.id)
-      ) {
-        await this.#retire(runtime)
-        return
-      }
+      if (await this.#closeIfFree(runtime)) return
     }
     const idle = runtime.delivering === null && observed.settled && !observed.waiting && !drawing
     if (runtime.pendingSwitch !== null) {
@@ -982,6 +975,24 @@ export class Dispatcher {
     runtime.retiring = true
     await this.#host.kill(runtime.pane).catch(() => {})
     this.#changed()
+  }
+
+  /**
+   * A member's window closes once it holds no task, unless the human opened
+   * it or a message is still on its way in. Says whether it closed; one gone
+   * already during the step (a launch that timed out) has nothing to close.
+   */
+  async #closeIfFree(runtime) {
+    if (
+      runtime.pane === null ||
+      runtime.delivering !== null ||
+      runtime.pinned ||
+      this.#ledger.holdsWork(runtime.id)
+    ) {
+      return false
+    }
+    await this.#retire(runtime)
+    return true
   }
 
   /**
@@ -1586,13 +1597,7 @@ export class Dispatcher {
         })
       }
     }
-    if (
-      participant.role !== 'chief' &&
-      !runtime.pinned &&
-      !this.#ledger.holdsWork(participant.id)
-    ) {
-      await this.#retire(runtime)
-    }
+    if (participant.role !== 'chief') await this.#closeIfFree(runtime)
     this.#changed()
   }
 
