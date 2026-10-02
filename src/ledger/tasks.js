@@ -660,6 +660,21 @@ export function activeTask(store, participantId, { queued = false } = {}) {
   return row === undefined ? null : task(store, row.project_id, row.number)
 }
 
+/**
+ * The task of the newest message for a participant, whatever its state now,
+ * or null; a message the human still holds at the gate does not count. For
+ * a member's window: the task it is on, or was on until it was cancelled.
+ */
+export function lastTask(store, participantId) {
+  const row = store.db
+    .prepare(
+      `SELECT t.project_id, t.number FROM message m JOIN task t ON t.id = m.task_id
+       WHERE m.recipient_id = ? AND m.state != 'gated' ORDER BY m.id DESC LIMIT 1`,
+    )
+    .get(participantId)
+  return row === undefined ? null : task(store, row.project_id, row.number)
+}
+
 function taskRowById(store, id) {
   return store.db.prepare('SELECT * FROM task WHERE id = ?').get(id)
 }

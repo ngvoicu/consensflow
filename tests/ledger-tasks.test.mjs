@@ -242,6 +242,25 @@ describe('a cancelled task', () => {
       assert.equal(ledger.nextDelivery(brief.recipientId), null, 'nothing of it is tried again')
     })
   })
+
+  it('is still the task its window was last given a message about, until another comes', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      assert.equal(ledger.lastTask(id('zeus')), null, 'nothing given yet')
+      open(ledger, project, 'Parser')
+      const { message } = ledger.assignTask(project.id, 1, id('zeus'))
+      deliver(ledger, message)
+      ledger.cancelTask(project.id, 1, { by: 'human' })
+      const last = () => ledger.lastTask(message.recipientId)
+      assert.deepEqual([last().number, last().state], [1, 'cancelled'])
+      // A follow-up for the same session, once the human lets it go.
+      ledger.setGate(project.id, true)
+      const after = ledger.createTask(project.id, { from: 'chief', after: 1, body: 'The lexer' })
+      assert.equal(last().number, 1, 'not while it waits for the human')
+      ledger.approveMessage(after.message.id, { by: 'human' })
+      assert.deepEqual([last().number, last().state], [2, 'queued'])
+    })
+  })
 })
 
 describe('a plan on the board: needs', () => {

@@ -336,6 +336,9 @@ class Ledger {
   activeTask(participantId, options = {}) {
     return tasks.activeTask(this.#store, participantId, options)
   }
+  lastTask(participantId) {
+    return tasks.lastTask(this.#store, participantId)
+  }
   inbox(participantId, options = {}) {
     return messages.inbox(this.#store, participantId, options)
   }

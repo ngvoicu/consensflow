@@ -2690,6 +2690,83 @@ describe('a message withdrawn on its way into a window', () => {
 })
 
 describe('a cancelled task', () => {
+  it('stops its window: an agent at work on it is interrupted, the window closes, and the session stays', async () => {
+    await setup(async (context) => {
+      const { project, id, open, task } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'working')
+      const session = task(1).assignee
+      const native = context.ledger.currentConversation(id(session)).nativeSession
+      const pane = context.host.last('zeus')
+      const steps = []
+      const { request, kill } = context.host
+      context.host.request = async (op, body) => {
+        if (op === 'pane.input') steps.push(['keys', body.generation, body.bytes])
+        return request(op, body)
+      }
+      context.host.kill = async (killed) => {
+        steps.push(['kill', killed.generation])
+        return kill(killed)
+      }
+      // One still on the board, and one given out whose window has not opened: they just cancel.
+      open({ body: 'Write the lexer' })
+      open({ body: 'Write the docs' })
+      context.ledger.assignTask(project.id, 3, id('zeus'))
+      for (const number of [2, 3, 1]) context.ledger.cancelTask(project.id, number, { by: 'human' })
+      const opened = context.host.opened.length
+      await context.dispatcher.pass()
+      assert.deepEqual(steps, [
+        ['keys', pane.generation, [27]],
+        ['kill', pane.generation],
+      ])
+      assert.equal(context.host.opened.length, opened, 'no window opens for the other two')
+      const kept = context.ledger.project(project.id).participants.find((p) => p.handle === session)
+      assert.equal(kept.leftAt, null, 'the session stays on the board')
+      await context.dispatcher.openWindow(project.id, session)
+      const reopened = context.adapter.prepared.at(-1)
+      assert.deepEqual(
+        [reopened.participant.handle, reopened.resume, reopened.message],
+        [session, native, null],
+        'and opens again on its own conversation',
+      )
+    })
+  })
+
+  it('interrupts a window the human opened, which stays, and lets a turn the human began there since go on', async () => {
+    await setup(async (context) => {
+      const { project, id, open, task } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const session = task(1).assignee
+      await context.dispatcher.openWindow(project.id, session)
+      const escapes = () => context.host.requests.filter(([op]) => op === 'pane.input').length
+      context.ledger.cancelTask(project.id, 1, { by: 'human' })
+      await context.dispatcher.pass()
+      assert.equal(escapes(), 1, 'interrupted')
+      assert.deepEqual(context.host.killed, [], 'the human opened it: it stays open')
+      // A harness that ignores the key while it thinks is pressed again, a few seconds on.
+      context.clock.advance(3_100)
+      await context.dispatcher.pass()
+      assert.equal(escapes(), 2)
+      // The agent stops; the human asks it something in the window, and it works on that.
+      context.adapter.answer('zeus', 'Stopped.')
+      await context.dispatcher.pass()
+      const zeus = context.adapter.agent('zeus')
+      zeus.items.push(item('user', 'What did you change so far?'))
+      zeus.settled = false
+      for (let look = 0; look < 2; look += 1) {
+        context.clock.advance(3_100)
+        await context.dispatcher.pass()
+      }
+      assert.equal(escapes(), 2, "the human's own turn is not interrupted")
+      assert.equal(context.dispatcher.activity(id(session)).state, 'working')
+      assert.equal(task(1).state, 'cancelled', 'and nothing it wrote became a result')
+    })
+  })
+
   it('closes its window at once though words were on their way in, and never opens one for it again', async () => {
     await setup(async (context) => {
       const { project, open, notes } = await withTiers(context, { workers: ['zeus'] })
