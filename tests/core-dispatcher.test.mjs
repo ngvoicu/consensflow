@@ -3048,6 +3048,46 @@ describe('a window that takes long', () => {
   })
 })
 
+describe('work that throws before its first await', () => {
+  it('lets go of its participant: its next step runs, the failure is written down, and an operation waiting on it ends', async () => {
+    const written = []
+    await setup(
+      async (context) => {
+        const { project, open, task } = await withTiers(context, { workers: ['zeus'] })
+        open()
+        await context.dispatcher.pass()
+        await context.dispatcher.pass()
+        context.adapter.answer('zeus', 'Parser done')
+        await context.dispatcher.pass()
+        assert.equal(task(1).state, 'done', "the session's window closed with its task")
+        // One read of the ledger fails, in the work that opens the session's window.
+        const projects = context.ledger.projects.bind(context.ledger)
+        let fail = true
+        context.ledger.projects = () => {
+          if (!fail) return projects()
+          fail = false
+          throw new Error('the ledger could not be read')
+        }
+        await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
+        context.ledger.createTask(project.id, { from: 'chief', after: 1, body: 'Now the lexer' })
+        const launches = context.adapter.prepared.length
+        await context.dispatcher.pass()
+        assert.deepEqual(
+          context.adapter.prepared.slice(launches).map((request) => request.participant.handle),
+          ['zeus-amber-pine'],
+          'its next step ran',
+        )
+        assert.deepEqual(
+          written.map((cause) => cause.message),
+          ['the ledger could not be read'],
+        )
+        assert.equal((await context.dispatcher.closeProject(project.id)).state, 'suspended')
+      },
+      { log: { error: (_message, cause) => written.push(cause) } },
+    )
+  })
+})
+
 describe('a window the human switches to another conversation', () => {
   it('follows it: the conversation it shows becomes the session’s, and deliveries go and count there', async () => {
     await setup(async (context) => {

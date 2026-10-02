@@ -92,6 +92,13 @@ const UNKNOWN_RESET_MS = 60 * 60_000
 const RELAUNCH_MS = 5_000
 const RELAUNCH_MAX_MS = 5 * 60_000
 
+/**
+ * Starts `work` inside an async function, so one that throws before its
+ * first await rejects as one that throws after it does: whoever holds a
+ * participant for it lets go either way.
+ */
+const begin = async (work) => work()
+
 export class Dispatcher {
   #ledger
   #host
@@ -1512,7 +1519,7 @@ export class Dispatcher {
     }
     runtime.running = (async () => {
       try {
-        return await work()
+        return await begin(work)
       } finally {
         runtime.running = null
       }
@@ -1525,26 +1532,32 @@ export class Dispatcher {
    * thread, a paste waiting for Pi's acknowledgement). Started from a step,
    * it goes on apart from the pass and still holds its participant, so the
    * pass and every other window move on. Nobody waits for it, so a failure
-   * is written down here, as a failed pass is.
+   * is written down (`#writeDown`).
    */
   #act(runtime, work) {
     runtime.acting = (async () => {
       try {
-        await work()
+        await begin(work)
       } catch (cause) {
-        console.error('consensflow dispatcher:', cause)
-        this.#log?.error('a launch or a delivery failed', cause)
+        this.#writeDown(cause)
       } finally {
         runtime.acting = null
       }
     })()
   }
 
+  /** What failed apart from any pass or request is written down, as a failed pass is. */
+  #writeDown(cause) {
+    console.error('consensflow dispatcher:', cause)
+    this.#log?.error('a launch or a delivery failed', cause)
+  }
+
   /**
    * Opens a participant's window once its step in progress is over, apart
    * from whoever asked: a page operation answers once the ledger has its
    * change, and a launch that fails says so on the board. A window open by
-   * then, or a project closed meanwhile, opens nothing.
+   * then, or a project closed meanwhile, opens nothing. Nobody waits for it,
+   * so a failure is written down.
    */
   #openSoon(participantId) {
     this.#exclusive(
@@ -1557,7 +1570,7 @@ export class Dispatcher {
         this.#act(runtime, () => this.#launch(project, participant, null))
       },
       { wait: true },
-    )
+    ).catch((cause) => this.#writeDown(cause))
   }
 
   /** The dispatcher's record of a participant's window, made the first time it is asked for. */
