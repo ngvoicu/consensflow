@@ -8,16 +8,23 @@ use tauri::{
 pub mod arbiter;
 pub mod bridge;
 pub mod commands;
+mod daemon;
+mod daemon_command;
+mod input_queue;
 #[cfg(windows)]
 mod job_object;
+mod output_hub;
+mod pane_handlers;
 #[cfg(target_os = "macos")]
 mod process_tree;
 pub mod pty;
+pub mod runtime;
 #[cfg(target_os = "macos")]
 mod update_install;
 pub mod updates;
+mod validation;
 
-use commands::AppRuntime;
+use runtime::AppRuntime;
 
 /// The packaged smoke's only door into the shipping app.
 ///

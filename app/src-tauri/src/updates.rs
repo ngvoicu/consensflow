@@ -1,4 +1,4 @@
-use crate::commands::AppRuntime;
+use crate::runtime::AppRuntime;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -44,7 +44,7 @@ impl Channel {
 fn current_snapshot<R: Runtime>(app: &AppHandle<R>) -> UpdateSnapshot {
     let mut snapshot = app.state::<UpdateManager>().snapshot();
     snapshot.blockers = match app.try_state::<AppRuntime>() {
-        Some(runtime) => match runtime.pane_table().update_blockers() {
+        Some(runtime) => match runtime.panes.update_blockers() {
             Ok(panes) => panes
                 .iter()
                 .map(|p| serde_json::json!({"id":p.id,"generation":p.generation}))
@@ -237,7 +237,7 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Value {
             let target = tauri_plugin_updater::extract_path_from_executable(&executable)
                 .map_err(|e| e.to_string())?;
             let manager = worker.state::<UpdateManager>();
-            let panes = worker.state::<AppRuntime>().pane_table();
+            let panes = std::sync::Arc::clone(&worker.state::<AppRuntime>().panes);
             let permit = manager.install(&panes, |bytes, version| {
                 publish(&worker);
                 let directory = manager.preferences.parent().ok_or("Invalid preferences path")?.join("updates");

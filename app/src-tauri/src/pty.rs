@@ -619,15 +619,6 @@ impl PaneTable {
         Ok(())
     }
 
-    pub fn write_paste(
-        &self,
-        key: &PaneKey,
-        body: &[u8],
-        enter_delay_ms: u64,
-    ) -> Result<(), PaneError> {
-        write_paste_via(self, key, body, enter_delay_ms)
-    }
-
     pub fn resize(&self, key: &PaneKey, rows: u16, cols: u16) -> Result<(), PaneError> {
         let mut panes = self.lock_panes()?;
         let pane = panes
@@ -921,6 +912,19 @@ pub(crate) fn serial_pty_test() -> SerialPtyTest {
         std::process::abort();
     });
     SerialPtyTest { _lock: lock, done }
+}
+
+/// Whether a pid is still there — signal 0 delivers nothing and only asks.
+#[cfg(all(test, unix))]
+pub(crate) fn process_exists(pid: i32) -> bool {
+    unsafe extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+
+    // SAFETY: signal 0 does not deliver a signal; it only checks whether
+    // the process exists and is signalable by this process.
+    let result = unsafe { kill(pid, 0) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(1)
 }
 
 impl Drop for PaneTable {
@@ -1217,7 +1221,9 @@ mod tests {
     use portable_pty::PtySize;
 
     #[cfg(unix)]
-    use super::{serial_pty_test, OpenedPane, PaneEnvironment, PaneKey};
+    use super::{
+        process_exists, serial_pty_test, write_paste_via, OpenedPane, PaneEnvironment, PaneKey,
+    };
     use super::{PaneError, PaneTable};
 
     fn terminal_size(rows: u16, cols: u16) -> PtySize {
@@ -1392,18 +1398,6 @@ mod tests {
             .recv_timeout(Duration::from_secs(3))
             .expect("PTY reader did not reach EOF")
             .expect("read PTY output")
-    }
-
-    #[cfg(unix)]
-    fn process_exists(pid: i32) -> bool {
-        unsafe extern "C" {
-            fn kill(pid: i32, signal: i32) -> i32;
-        }
-
-        // SAFETY: signal 0 does not deliver a signal; it only checks whether
-        // the process exists and is signalable by this process.
-        let result = unsafe { kill(pid, 0) };
-        result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(1)
     }
 
     #[cfg(unix)]
@@ -1939,7 +1933,7 @@ mod tests {
     #[cfg(unix)]
 
     #[test]
-    fn pane_table_write_paste_writes_brackets_then_delayed_enter() {
+    fn a_paste_through_the_table_writes_brackets_then_delayed_enter() {
         let _pty_guard = serial_pty_test();
         let table = PaneTable::new();
         let OpenedPane { key, mut reader } = open_shell(
@@ -1951,9 +1945,7 @@ mod tests {
         assert_eq!(&ready, b"ready");
 
         let started = Instant::now();
-        table
-            .write_paste(&key, b"body", 25)
-            .expect("write paste through PaneTable");
+        write_paste_via(&table, &key, b"body", 25).expect("write paste through PaneTable");
 
         assert!(started.elapsed() >= Duration::from_millis(25));
         assert_eq!(
