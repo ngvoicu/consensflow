@@ -22,6 +22,8 @@ import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.j
  *   one that never shows in time (admitted or uncertain), is tried again, up
  *   to `maxAttempts`; a launch whose first message never shows is ended and its
  *   task failed. Adapters say when a window can take input at all (`ready`).
+ *   A message withdrawn on its way (its task cancelled, or taken back from
+ *   the window) is waited for no longer, and never handed over again.
  * - A worker's turn that ends after its task's latest message finishes the
  *   task with the answer written after that message. A task waiting on a
  *   question is left alone. The chief finishes its own tasks explicitly,
@@ -32,6 +34,9 @@ import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.j
  *   human deletes it. A fresh window whose first message is not the brief (an
  *   answer, a follow-up) gets the brief in front of it. The chief keeps its
  *   window and conversation.
+ * - A task cancelled under its window stops it: an agent still at work on
+ *   it is interrupted, as a paused task's is, and the window closes as any
+ *   that holds no task, unless the human opened it.
  * - A member window lost mid-task (a restart, a crash, a closed window)
  *   pauses the task, and the requester is told how to resume it. A chief
  *   window that closes by itself closes its project, as the human's Close
@@ -642,27 +647,22 @@ export class Dispatcher {
         state: 'out',
         reason: `out of quota until ${owner.outUntil}`,
       })
-      // A held task's agent stops, as any paused task's; the window waits for the reset.
-      if (participant.role !== 'chief') await this.#interruptIfPaused(participant, runtime)
+      // A held task's agent stops, as any paused task's; the window waits for
+      // the reset, unless its task is gone meanwhile (cancelled, taken back).
+      if (participant.role !== 'chief') {
+        await this.#interruptIfStopped(participant, runtime, observed)
+        if (!this.#forgotten(runtime)) await this.#closeIfFree(runtime)
+      }
       return
     }
     if (runtime.delivering !== null) await this.#watchArrival(runtime, observed)
     // A window that began to close in this step (a launch that timed out) is not acted on.
     if (runtime.retiring) return
     if (participant.role !== 'chief') {
-      await this.#interruptIfPaused(participant, runtime)
+      await this.#interruptIfStopped(participant, runtime, observed)
       if (this.#forgotten(runtime)) return
       this.#collect(project, participant, observed)
-      // The window may have gone during this step (a launch that timed out).
-      if (
-        runtime.pane !== null &&
-        runtime.delivering === null &&
-        !runtime.pinned &&
-        !this.#ledger.holdsWork(participant.id)
-      ) {
-        await this.#retire(runtime)
-        return
-      }
+      if (await this.#closeIfFree(runtime)) return
     }
     const idle = runtime.delivering === null && observed.settled && !observed.waiting && !drawing
     if (runtime.pendingSwitch !== null) {
@@ -911,19 +911,43 @@ export class Dispatcher {
   }
 
   /**
-   * A paused task's window stays open, but the agent stops: the Escape key
-   * interrupts the turn (twice in a row where the harness asks for it), and
-   * again a few seconds later while the window still reads as working, since
-   * a harness may ignore the key while it thinks. Whatever the agent still
-   * writes is not collected, since the task is not working.
+   * A window whose task stopped stops too. A paused task's window stays
+   * open, but its agent is interrupted. An agent still at work on a turn
+   * about a task cancelled under its window is interrupted as well; the
+   * window then closes, as any that holds no work, unless the human opened
+   * it. A turn the human began since in a window they opened is theirs, and
+   * goes on. Whatever the agent still writes is not collected, since the
+   * task is not working.
    */
-  async #interruptIfPaused(participant, runtime) {
+  async #interruptIfStopped(participant, runtime, observed) {
     const paused = this.#ledger.pausedTask(participant.id)
-    if (paused === null) return
-    // The chief's tell reached the window during this pause: the agent answers
-    // it and ends its own turn, uninterrupted; the chief resumes the task.
-    if (this.#ledger.toldSincePaused(participant.id, paused.id)) return
-    const done = runtime.interrupted?.task === paused.id ? runtime.interrupted : null
+    if (paused !== null) {
+      // The chief's tell reached the window during this pause: the agent answers
+      // it and ends its own turn, uninterrupted; the chief resumes the task.
+      if (!this.#ledger.toldSincePaused(participant.id, paused.id)) {
+        await this.#interrupt(runtime, paused.id)
+      }
+      return
+    }
+    if (runtime.activity.state !== 'working') return
+    const cancelled = this.#ledger.lastTask(participant.id)
+    if (cancelled?.state !== 'cancelled') return
+    const turn = observed.items.findLast((item) => item.role === 'user')
+    const about = cancelled.messages.some(
+      (message) =>
+        message.recipientId === participant.id && turn?.text.includes(markerOf(message.id)),
+    )
+    if (about) await this.#interrupt(runtime, cancelled.id)
+  }
+
+  /**
+   * The Escape key interrupts the turn on `taskId` (twice in a row where the
+   * harness asks for it), and again a few seconds later while the window
+   * still reads as working, since a harness may ignore the key while it
+   * thinks: three rounds at most.
+   */
+  async #interrupt(runtime, taskId) {
+    const done = runtime.interrupted?.task === taskId ? runtime.interrupted : null
     if (
       done !== null &&
       (runtime.activity.state !== 'working' ||
@@ -932,7 +956,7 @@ export class Dispatcher {
     ) {
       return
     }
-    runtime.interrupted = { task: paused.id, rounds: (done?.rounds ?? 0) + 1, at: this.#now() }
+    runtime.interrupted = { task: taskId, rounds: (done?.rounds ?? 0) + 1, at: this.#now() }
     const presses = runtime.adapter.interrupt?.presses ?? 1
     for (let press = 0; press < presses; press += 1) {
       if (press > 0) await new Promise((resolve) => setTimeout(resolve, DOUBLE_PRESS_MS))
@@ -951,6 +975,24 @@ export class Dispatcher {
     runtime.retiring = true
     await this.#host.kill(runtime.pane).catch(() => {})
     this.#changed()
+  }
+
+  /**
+   * A member's window closes once it holds no task, unless the human opened
+   * it or a message is still on its way in. Says whether it closed; one gone
+   * already during the step (a launch that timed out) has nothing to close.
+   */
+  async #closeIfFree(runtime) {
+    if (
+      runtime.pane === null ||
+      runtime.delivering !== null ||
+      runtime.pinned ||
+      this.#ledger.holdsWork(runtime.id)
+    ) {
+      return false
+    }
+    await this.#retire(runtime)
+    return true
   }
 
   /**
@@ -974,10 +1016,16 @@ export class Dispatcher {
   /**
    * Whether the message on its way shows in the window's record; it is
    * confirmed if so. Only what the window was given counts: a tool's output
-   * that prints a header (cf inbox read, a log) proves nothing arrived.
+   * that prints a header (cf inbox read, a log) proves nothing arrived. One
+   * withdrawn on its way (its task cancelled, or taken back from the window)
+   * is waited for no longer, and stays withdrawn whether it shows or not.
    */
   #confirmArrival(runtime, observed) {
     const { delivering } = runtime
+    if (this.#ledger.message(delivering.messageId)?.state !== 'delivering') {
+      runtime.delivering = null
+      return true
+    }
     const arrived = observed.items.find(
       (item) => item.role === 'user' && item.text.includes(delivering.marker),
     )
@@ -1059,6 +1107,9 @@ export class Dispatcher {
         host: this.#host,
       })
       if (this.#forgotten(runtime)) return
+      // Withdrawn while the window got ready (its task cancelled or paused
+      // meanwhile): it is handed nothing, and nothing fails.
+      if (this.#ledger.message(message.id)?.state !== 'queued') return
       if (ready !== true) {
         // Said once per message, so a wait is in the trace, not a mystery.
         if (runtime.held !== message.id) {
@@ -1546,13 +1597,7 @@ export class Dispatcher {
         })
       }
     }
-    if (
-      participant.role !== 'chief' &&
-      !runtime.pinned &&
-      !this.#ledger.holdsWork(participant.id)
-    ) {
-      await this.#retire(runtime)
-    }
+    if (participant.role !== 'chief') await this.#closeIfFree(runtime)
     this.#changed()
   }
 

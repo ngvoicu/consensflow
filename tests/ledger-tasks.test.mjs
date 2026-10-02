@@ -170,6 +170,99 @@ describe('tasks and their state machine', () => {
   })
 })
 
+describe('a cancelled task', () => {
+  const open = (ledger, project, body) =>
+    ledger.createTask(project.id, { from: 'chief', pool: 'worker', tier: 'standard', body })
+
+  it('tells whoever asked for it, in the same step, unless it cancelled the task itself', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      ledger.setGate(project.id, true)
+      const notes = () =>
+        ledger
+          .inbox(id('chief'))
+          .filter((m) => m.kind === 'note')
+          .map((m) => [m.sender, m.taskNumber, m.state, m.body])
+      // Still on the board, or given out but not yet in a window: nobody began on it.
+      open(ledger, project, 'Write the parser\nwith tests')
+      ledger.cancelTask(project.id, 1, { by: 'human' })
+      open(ledger, project, 'Write the lexer')
+      ledger.assignTask(project.id, 2, id('zeus'))
+      ledger.cancelTask(project.id, 2, { by: 'human' })
+      assert.deepEqual(notes().reverse(), [
+        [null, 1, 'queued', '@human cancelled T-1 (Write the parser).'],
+        [null, 2, 'queued', '@human cancelled T-2 (Write the lexer).'],
+      ])
+      // In a member's window, or on its way in: that window is named.
+      for (const [number, body, delivered] of [
+        [3, 'Write the docs', true],
+        [4, 'Write the CLI', false],
+      ]) {
+        open(ledger, project, body)
+        const { message } = ledger.assignTask(project.id, number, id('diana'))
+        ledger.approveMessage(message.id, { by: 'human' })
+        if (delivered) deliver(ledger, message)
+        else ledger.beginDelivery(message.id)
+        ledger.cancelTask(project.id, number, { by: 'human' })
+        assert.deepEqual(notes()[0], [
+          null,
+          number,
+          'queued',
+          `@human cancelled T-${number} (${body}): @${message.recipient}'s window was stopped.`,
+        ])
+      }
+      // The chief's own work stops no window of a member.
+      const own = ledger.createTask(project.id, { from: 'chief', to: 'chief', body: 'Plan it' })
+      deliver(ledger, own.message)
+      ledger.cancelTask(project.id, 5, { by: 'human' })
+      assert.equal(notes()[0][3], '@human cancelled T-5 (Plan it).')
+      // The chief cancels what it asked for: it knows. A refused cancel tells nobody.
+      open(ledger, project, 'Write the tests')
+      ledger.cancelTask(project.id, 6, { by: 'chief' })
+      assert.throws(() => ledger.cancelTask(project.id, 6, { by: 'human' }), {
+        code: 'invalid-transition',
+      })
+      assert.equal(notes().length, 5)
+    })
+  })
+
+  it('withdraws whatever of it is still on its way, a delivery in progress too', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      open(ledger, project, 'Parser')
+      const { message } = ledger.assignTask(project.id, 1, id('zeus'))
+      ledger.beginDelivery(message.id)
+      ledger.cancelTask(project.id, 1, { by: 'chief' })
+      const brief = ledger.message(message.id)
+      assert.deepEqual([brief.state, brief.reason], ['cancelled', 'cancelled by @chief'])
+      assert.deepEqual(ledger.inFlight(), [], 'a restart finds nothing of it to settle')
+      assert.throws(() => ledger.retryDelivery(message.id, 'its window closed'), {
+        code: 'invalid-transition',
+      })
+      assert.equal(ledger.nextDelivery(brief.recipientId), null, 'nothing of it is tried again')
+    })
+  })
+
+  it('is still the task its window was last given a message about, until another comes', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      assert.equal(ledger.lastTask(id('zeus')), null, 'nothing given yet')
+      open(ledger, project, 'Parser')
+      const { message } = ledger.assignTask(project.id, 1, id('zeus'))
+      deliver(ledger, message)
+      ledger.cancelTask(project.id, 1, { by: 'human' })
+      const last = () => ledger.lastTask(message.recipientId)
+      assert.deepEqual([last().number, last().state], [1, 'cancelled'])
+      // A follow-up for the same session, once the human lets it go.
+      ledger.setGate(project.id, true)
+      const after = ledger.createTask(project.id, { from: 'chief', after: 1, body: 'The lexer' })
+      assert.equal(last().number, 1, 'not while it waits for the human')
+      ledger.approveMessage(after.message.id, { by: 'human' })
+      assert.deepEqual([last().number, last().state], [2, 'queued'])
+    })
+  })
+})
+
 describe('a plan on the board: needs', () => {
   /** A chief and two standard workers, with T-1 open for a worker. */
   function planned(ledger) {

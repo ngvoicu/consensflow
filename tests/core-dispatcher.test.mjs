@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { unnamed } from '../src/adapters/shared.js'
-import { deliveryText } from '../src/core/delivery-text.js'
+import { deliveryText, markerOf } from '../src/core/delivery-text.js'
 import { Dispatcher } from '../src/core/dispatcher.js'
 import { openLedger } from '../src/ledger/index.js'
 
@@ -1943,6 +1943,27 @@ describe('a member out of quota mid-task', () => {
       assert.deepEqual([task(1).state, task(1).heldUntil], ['paused', resetsAt])
     })
   })
+
+  it('closes the window of a held task that is cancelled, though its member is still out', async () => {
+    await setup(async (context) => {
+      const { project, open, task } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const resetsAt = new Date(context.clock.now().getTime() + 3 * 3_600_000).toISOString()
+      context.adapter.quota('zeus', { state: 'exhausted', resetsAt })
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).state, context.host.killed], ['paused', []], 'held with its window')
+      const pane = context.host.last('zeus')
+      context.ledger.cancelTask(project.id, 1, { by: 'human' })
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        context.host.killed,
+        [{ id: pane.id, generation: pane.generation }],
+        'it waits for no reset now',
+      )
+    })
+  })
 })
 
 describe('a member with several roles', () => {
@@ -2618,6 +2639,187 @@ describe('a window that is not ready for a paste', () => {
       },
       { trace: (entry) => entries.push(entry) },
     )
+  })
+})
+
+describe('a message withdrawn on its way into a window', () => {
+  /** T-1 waits on its window's question; its answer goes to that window next. */
+  async function asked(context) {
+    const fixture = await withTiers(context)
+    fixture.open()
+    await context.dispatcher.pass()
+    await context.dispatcher.pass()
+    const question = context.ledger.ask(fixture.project.id, {
+      from: fixture.task(1).assignee,
+      to: 'chief',
+      task: 1,
+      body: 'Which grammar?',
+    })
+    context.adapter.answer('zeus', 'I asked.')
+    await context.dispatcher.pass()
+    const answer = context.ledger.answer(question.id, {
+      from: fixture.id('chief'),
+      body: 'The small one',
+    })
+    return { ...fixture, answer }
+  }
+
+  it('is not confirmed when it shows after all, and its window goes with its work', async () => {
+    await setup(async (context) => {
+      const { project, task, answer } = await asked(context)
+      const zeus = context.adapter.agent('zeus')
+      zeus.arrive = false
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(answer.id).state, 'delivering', 'handed over')
+      const pane = context.host.last('zeus')
+      // The human takes the task back: the answer on its way is withdrawn,
+      // and the window's harness shows it anyway.
+      context.ledger.releaseTask(project.id, 1, { because: 'by @human' })
+      zeus.items.push(item('user', deliveryText(context.ledger.message(answer.id))))
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(answer.id).state, 'cancelled', 'it stays withdrawn')
+      assert.ok(
+        context.host.killed.some((killed) => killed.generation === pane.generation),
+        'the window went with its work',
+      )
+      assert.match(task(1).assignee, /^diana-/, 'and the task went on elsewhere')
+    })
+  })
+
+  it('is handed nothing when it was withdrawn while its window got ready, and fails nothing', async () => {
+    await setup(async (context) => {
+      const { project, answer } = await asked(context)
+      let ready
+      const readying = new Promise((resolve) => {
+        ready = resolve
+      })
+      context.adapter.ready = async () => {
+        await readying
+        return true
+      }
+      await context.dispatcher.pass()
+      context.ledger.cancelTask(project.id, 1, { by: 'chief' })
+      ready()
+      await flush()
+      assert.equal(context.ledger.message(answer.id).state, 'cancelled')
+      assert.ok(
+        !context.adapter.agent('zeus').items.some((i) => i.text.includes(markerOf(answer.id))),
+        'nothing pasted',
+      )
+    })
+  })
+})
+
+describe('a cancelled task', () => {
+  it('stops its window: an agent at work on it is interrupted, the window closes, and the session stays', async () => {
+    await setup(async (context) => {
+      const { project, id, open, task } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'working')
+      const session = task(1).assignee
+      const native = context.ledger.currentConversation(id(session)).nativeSession
+      const pane = context.host.last('zeus')
+      const steps = []
+      const { request, kill } = context.host
+      context.host.request = async (op, body) => {
+        if (op === 'pane.input') steps.push(['keys', body.generation, body.bytes])
+        return request(op, body)
+      }
+      context.host.kill = async (killed) => {
+        steps.push(['kill', killed.generation])
+        return kill(killed)
+      }
+      // One still on the board, and one given out whose window has not opened: they just cancel.
+      open({ body: 'Write the lexer' })
+      open({ body: 'Write the docs' })
+      context.ledger.assignTask(project.id, 3, id('zeus'))
+      for (const number of [2, 3, 1]) context.ledger.cancelTask(project.id, number, { by: 'human' })
+      const opened = context.host.opened.length
+      await context.dispatcher.pass()
+      assert.deepEqual(steps, [
+        ['keys', pane.generation, [27]],
+        ['kill', pane.generation],
+      ])
+      assert.equal(context.host.opened.length, opened, 'no window opens for the other two')
+      const kept = context.ledger.project(project.id).participants.find((p) => p.handle === session)
+      assert.equal(kept.leftAt, null, 'the session stays on the board')
+      await context.dispatcher.openWindow(project.id, session)
+      const reopened = context.adapter.prepared.at(-1)
+      assert.deepEqual(
+        [reopened.participant.handle, reopened.resume, reopened.message],
+        [session, native, null],
+        'and opens again on its own conversation',
+      )
+    })
+  })
+
+  it('interrupts a window the human opened, which stays, and lets a turn the human began there since go on', async () => {
+    await setup(async (context) => {
+      const { project, id, open, task } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const session = task(1).assignee
+      await context.dispatcher.openWindow(project.id, session)
+      const escapes = () => context.host.requests.filter(([op]) => op === 'pane.input').length
+      context.ledger.cancelTask(project.id, 1, { by: 'human' })
+      await context.dispatcher.pass()
+      assert.equal(escapes(), 1, 'interrupted')
+      assert.deepEqual(context.host.killed, [], 'the human opened it: it stays open')
+      // A harness that ignores the key while it thinks is pressed again, a few seconds on.
+      context.clock.advance(3_100)
+      await context.dispatcher.pass()
+      assert.equal(escapes(), 2)
+      // The agent stops; the human asks it something in the window, and it works on that.
+      context.adapter.answer('zeus', 'Stopped.')
+      await context.dispatcher.pass()
+      const zeus = context.adapter.agent('zeus')
+      zeus.items.push(item('user', 'What did you change so far?'))
+      zeus.settled = false
+      for (let look = 0; look < 2; look += 1) {
+        context.clock.advance(3_100)
+        await context.dispatcher.pass()
+      }
+      assert.equal(escapes(), 2, "the human's own turn is not interrupted")
+      assert.equal(context.dispatcher.activity(id(session)).state, 'working')
+      assert.equal(task(1).state, 'cancelled', 'and nothing it wrote became a result')
+    })
+  })
+
+  it('closes its window at once though words were on their way in, and never opens one for it again', async () => {
+    await setup(async (context) => {
+      const { project, open, notes } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.ledger.pauseTask(project.id, 1, { by: 'chief' })
+      await context.dispatcher.pass()
+      context.adapter.answer('zeus', 'Stopped.')
+      await context.dispatcher.pass()
+      // Resumed into its window, which has not shown the words yet.
+      const { message } = context.ledger.resumeTask(project.id, 1, { by: 'chief', body: 'Go on' })
+      context.adapter.agent('zeus').arrive = false
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(message.id).state, 'delivering')
+      const pane = context.host.last('zeus')
+      context.ledger.cancelTask(project.id, 1, { by: 'human' })
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        context.host.killed.at(-1),
+        { id: pane.id, generation: pane.generation },
+        'closed on the next look, not once the words were given up on',
+      )
+      const opened = context.host.opened.length
+      for (let look = 0; look < 3; look += 1) {
+        context.clock.advance(31_000)
+        await context.dispatcher.pass()
+      }
+      assert.equal(context.host.opened.length, opened, 'no window opens for it again')
+      assert.equal(context.ledger.message(message.id).state, 'cancelled')
+      assert.deepEqual(notes('human'), [], 'and nothing failed for the human to hear of')
+    })
   })
 })
 

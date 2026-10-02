@@ -230,6 +230,7 @@ export async function startApi({
       }
       const body = await readJson(request)
       const active = ledger.activeTask(participant.id, { queued: true })
+      if (active === null) refuseCancelled(participant)
       const asked = ledger.ask(project.id, {
         from: participant.handle,
         to: 'chief',
@@ -243,6 +244,7 @@ export async function startApi({
     if (at === 'POST /api/notes') {
       const body = await readJson(request)
       const active = ledger.activeTask(participant.id, { queued: true })
+      if (active === null && participant.role !== 'chief') refuseCancelled(participant)
       // The chief's note goes to the human, whatever task it is on (its own
       // step's requester is itself); a member's to whoever gave its task.
       const to = participant.role === 'chief' ? 'human' : (active?.requester ?? 'chief')
@@ -381,6 +383,23 @@ export async function startApi({
               : ledger.reopenTask(project.id, number, { by, body: body.body }).task
     changed()
     return ok({ task: summary(moved) })
+  }
+
+  /**
+   * A member's window with no task in progress, whose task was cancelled
+   * under it: whatever it still sends about that task goes nowhere, and it
+   * is told why. Its result is refused by the ledger, as any result for a
+   * task that is not working.
+   */
+  function refuseCancelled(participant) {
+    const last = ledger.lastTask(participant.id)
+    if (last?.state === 'cancelled') {
+      throw new Refusal(
+        409,
+        'task-cancelled',
+        `T-${last.number} is cancelled: nothing more of it goes to @${last.requester}`,
+      )
+    }
   }
 
   function callerOf(request) {

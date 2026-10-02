@@ -60,6 +60,9 @@ export { RESUME_WORDS } from './tasks.js'
  *   open, queued, working, waiting, paused ──cancel──▶ cancelled
  *   open, queued, working, waiting ──fail──▶ failed
  *
+ * - Nothing of a cancelled task is delivered or tried again: what of it is
+ *   still on its way, a delivery into a window included, is withdrawn. Its
+ *   requester hears of the cancel in the same step, unless it made it.
  * - A review is a task like any other: the chief puts it on the board for a
  *   reviewer of a tier, and the reviewer's findings come back as its result.
  *
@@ -332,6 +335,9 @@ class Ledger {
   }
   activeTask(participantId, options = {}) {
     return tasks.activeTask(this.#store, participantId, options)
+  }
+  lastTask(participantId) {
+    return tasks.lastTask(this.#store, participantId)
   }
   inbox(participantId, options = {}) {
     return messages.inbox(this.#store, participantId, options)

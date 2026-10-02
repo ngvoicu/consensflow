@@ -3,6 +3,7 @@ import {
   COORDINATOR_ROLES,
   LedgerError,
   MAX_BODY,
+  MEMBER_ROLES,
   POOLS,
   PURPOSES,
   requireActive,
@@ -378,9 +379,10 @@ export function acceptTask(store, projectId, number, { by }) {
 
 /**
  * The chief (or the human) stops a worker's task without ending it: its
- * window closes on the daemon's next look, whatever was on its way to it is
- * withdrawn, and the task keeps its member, its conversation and its place
- * until it is resumed or cancelled. The chief's own work is not paused.
+ * agent is interrupted on the daemon's next look and its window stays for
+ * the resumption, whatever was on its way to it is withdrawn, and the task
+ * keeps its member, its conversation and its place until it is resumed or
+ * cancelled. The chief's own work is not paused.
  */
 export function pauseTask(store, projectId, number, { by, because } = {}) {
   if (because !== undefined) requireText(because, 'because', 1000)
@@ -402,8 +404,8 @@ export function pauseTask(store, projectId, number, { by, because } = {}) {
 
 /**
  * The daemon holds a task with its window while its member is out of
- * quota: paused, with the time it goes on by itself. The window closes as
- * any paused task's does and comes back on its conversation at the reset.
+ * quota: paused, with the time it goes on by itself. Its agent stops as any
+ * paused task's does, and its window waits to go on at the reset.
  */
 export function holdTask(store, projectId, number, { until, because }) {
   requireText(because, 'because', 1000)
@@ -558,15 +560,57 @@ export function reopenTask(store, projectId, number, { by, body }) {
   })
 }
 
+/**
+ * A task is called off, and whoever asked for it hears so in the same step,
+ * unless it cancelled the task itself: what was cancelled, and the window
+ * that was stopped when a member's had begun on it (the daemon stops that
+ * window on its next look).
+ */
 export function cancelTask(store, projectId, number, { by }) {
   return store.write(() => {
-    store.participantByHandle(projectId, by)
-    const task = store.taskRow(projectId, number)
-    requireTaskState(task, ['open', 'queued', ...ACTIVE_TASK_STATES, 'paused'], 'cancel')
-    dropQueued(store, task.id)
-    store.moveTask(task, 'cancelled', { by })
+    const { task, window } = callOff(store, projectId, number, by)
+    const requester = store.participantRow(task.requester_id)
+    if (requester.handle !== by) {
+      send(store, projectId, {
+        to: requester.handle,
+        task: number,
+        kind: 'note',
+        body: `@${by} cancelled T-${number} (${task.title})${window === null ? '' : `: @${window.handle}'s window was stopped`}.`,
+      })
+    }
     return taskById(store, task.id)
   })
+}
+
+/**
+ * The cancel itself, for an operation that tells the requester in its own
+ * words (the human's decline of a brief). Whatever of the task is still on
+ * its way, a delivery into a window included, is withdrawn, so nothing of
+ * it is delivered or tried again. Says which member's window had begun on
+ * it, if one had: its brief or the words that resume it went in.
+ */
+export function callOff(store, projectId, number, by) {
+  store.participantByHandle(projectId, by)
+  const task = store.taskRow(projectId, number)
+  requireTaskState(task, ['open', 'queued', ...ACTIVE_TASK_STATES, 'paused'], 'cancel')
+  const assignee = task.assignee_id === null ? null : store.participantRow(task.assignee_id)
+  const began =
+    assignee !== null &&
+    MEMBER_ROLES.includes(assignee.role) &&
+    store.db
+      .prepare(
+        `SELECT 1 FROM message WHERE task_id = ? AND recipient_id = ? AND kind = 'task'
+           AND state IN ('delivering', 'delivered')`,
+      )
+      .get(task.id, assignee.id) !== undefined
+  store.db
+    .prepare(
+      `UPDATE message SET state = 'cancelled', reason = ?
+       WHERE task_id = ? AND state IN ('queued', 'delivering', 'gated')`,
+    )
+    .run(`cancelled by @${by}`, task.id)
+  store.moveTask(task, 'cancelled', { by })
+  return { task, window: began ? assignee : null }
 }
 
 /** The daemon gives up on a task: its pane died, or its launch never came up. */
@@ -612,6 +656,21 @@ export function activeTask(store, participantId, { queued = false } = {}) {
       `SELECT project_id, number FROM task
        WHERE assignee_id = ? AND state IN (${queued ? "'queued', " : ''}'working', 'waiting')
        ORDER BY id LIMIT 1`,
+    )
+    .get(participantId)
+  return row === undefined ? null : task(store, row.project_id, row.number)
+}
+
+/**
+ * The task of the newest message for a participant, whatever its state now,
+ * or null; a message the human still holds at the gate does not count. For
+ * a member's window: the task it is on, or was on until it was cancelled.
+ */
+export function lastTask(store, participantId) {
+  const row = store.db
+    .prepare(
+      `SELECT t.project_id, t.number FROM message m JOIN task t ON t.id = m.task_id
+       WHERE m.recipient_id = ? AND m.state != 'gated' ORDER BY m.id DESC LIMIT 1`,
     )
     .get(participantId)
   return row === undefined ? null : task(store, row.project_id, row.number)

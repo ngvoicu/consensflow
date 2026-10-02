@@ -364,6 +364,49 @@ describe('the agents API', () => {
     })
   })
 
+  it('takes nothing more from a window whose task was cancelled, and tells it why', async () => {
+    await withApi(async ({ ledger, project, token, call, cf }) => {
+      deliver(
+        ledger,
+        ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' }).message,
+      )
+      const told = ledger.ask(project.id, {
+        from: 'chief',
+        to: 'zeus',
+        task: 1,
+        body: 'Where are you?',
+        urgent: true,
+      })
+      deliver(ledger, told)
+      ledger.cancelTask(project.id, 1, { by: 'human' })
+      const lead = () => ledger.inbox(participantId(ledger, project, 'chief')).map((m) => m.id)
+      const before = lead()
+      const zeus = token('zeus')
+      const refusals = []
+      for (const [route, body] of [
+        ['/api/questions', { body: 'Which format?' }],
+        ['/api/notes', { body: 'Half of it is done.' }],
+        ['/api/answers', { question: told.id, body: 'Halfway' }],
+        ['/api/tasks/1/done', { body: 'Done.' }],
+      ]) {
+        const refused = await call(zeus, 'POST', route, body)
+        refusals.push([route, refused.status, refused.body.error])
+      }
+      assert.deepEqual(refusals, [
+        ['/api/questions', 409, 'task-cancelled'],
+        ['/api/notes', 409, 'task-cancelled'],
+        ['/api/answers', 409, 'task-cancelled'],
+        ['/api/tasks/1/done', 409, 'invalid-transition'],
+      ])
+      const asked = await cf(zeus, 'ask', 'Which format?')
+      assert.deepEqual(
+        [asked.code, asked.err],
+        [1, 'cf: T-1 is cancelled: nothing more of it goes to @chief'],
+      )
+      assert.deepEqual(lead(), before, 'nothing reached the lead')
+    })
+  })
+
   it("answers only a question of the caller's own project: message ids run across projects", async () => {
     await withApi(async ({ ledger, token, call, cf, credentials }) => {
       // Another project, gated, whose chief and member have the same handles as this one's.
