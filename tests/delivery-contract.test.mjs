@@ -182,8 +182,8 @@ async function sendThroughOpenCode(t, { claim, ...server }) {
 
 const DEVIN_SESSION = 'b7c2a0f4-5d1e-4a8b-9c3f-1e2d3c4b5a69'
 
-/** Devin's own wire log, naming the conversation its window shows. */
-async function sendThroughDevin(t, host, { shows = DEVIN_SESSION } = {}) {
+/** Devin's own wire log, naming the conversation its window shows, when Devin wrote one. */
+async function sendThroughDevin(t, host, { shows = DEVIN_SESSION, logged = true } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'cf-contract-devin-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const wire = join(root, 'wire.jsonl')
@@ -191,7 +191,7 @@ async function sendThroughDevin(t, host, { shows = DEVIN_SESSION } = {}) {
     sessionId: shows,
     update: { sessionUpdate: 'config_option_update', configOptions: [{ id: 'mode' }] },
   }
-  await writeFile(wire, `${JSON.stringify(selected)}\n`)
+  if (logged) await writeFile(wire, `${JSON.stringify(selected)}\n`)
   return sendDevin(
     {
       channel: { wire },
@@ -277,6 +277,8 @@ const CHANNELS = {
   'Devin, pasted into its window': pasted((t, host) => sendThroughDevin(t, host), {
     'Devin shows another conversation': (t) =>
       sendThroughDevin(t, {}, { shows: '0e9d8c7b-6a5f-4e3d-8c2b-1a0f9e8d7c6b' }),
+    'Devin has no wire log to say which conversation it shows': (t) =>
+      sendThroughDevin(t, {}, { logged: false }),
   }),
   'Codex, through its broker': posted(sendThroughCodex, 'the broker'),
   'OpenCode, through its plugin': posted(sendThroughOpenCode, 'the plugin'),
