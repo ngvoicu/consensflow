@@ -2102,6 +2102,22 @@ test('opens Harnesses from Settings in a dialog where a check runs against the d
   }
 })
 
+test('Escape pressed inside a screen closes its dialog, as it closes every other dialog', async ({
+  page,
+}) => {
+  const daemon = await agentsScreens()
+  try {
+    await open(page, { ...model(), screens: daemon.screens })
+    const agents = await openScreen(page, 'Agents')
+    await agents.frameLocator('iframe').getByRole('searchbox').fill('gefjon')
+    await page.keyboard.press('Escape')
+    await expect(agents).toBeHidden()
+    await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused()
+  } finally {
+    await daemon.close()
+  }
+})
+
 test('a screen opened again keeps what the human left on it, and lists the agents saved meanwhile', async ({
   page,
 }) => {

@@ -1,5 +1,8 @@
-/** Standalone harness diagnostics, served by the authenticated app editor. */
-export const harnessPage = (token) => `<!DOCTYPE html>
+/**
+ * Standalone harness diagnostics, served by the authenticated app editor;
+ * `framed` is what every screen carries for the app's frame.
+ */
+export const harnessPage = (token, framed) => `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -27,6 +30,7 @@ export const harnessPage = (token) => `<!DOCTYPE html>
   .host button { margin: 10px 12px 0 0; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 </style>
+${framed}
 </head>
 <body>
 <main>
