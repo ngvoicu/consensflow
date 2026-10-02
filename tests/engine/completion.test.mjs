@@ -13,6 +13,7 @@ import { DatabaseSync } from 'node:sqlite'
 import test, { after } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import * as completion from '../../hosts/lib/completion.js'
+import { devinFolders } from '../../src/harnesses.js'
 
 /** Every temporary root a test here makes, removed when the file's tests end. */
 const roots = []
@@ -1629,15 +1630,20 @@ test('quota/opencode: a 429 on the message is exhaustion; a completed turn after
 
 // ------------------------------------------------------------------- devin
 
-/** A Devin store with a user message and an assistant reply, and a wire log of `events`, in a temporary home. */
-async function stageDevin(stored, events) {
+/**
+ * A Devin store with a user message and an assistant reply, and a wire log
+ * of `events`, in a temporary home; `windows` puts it where Devin keeps it
+ * on Windows.
+ */
+async function stageDevin(stored, events, { windows = false } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-completion-devin-'))
   const env = {
     HOME: root,
     XDG_DATA_HOME: path.join(root, 'data'),
     CONSENSFLOW_HOME: path.join(root, 'home'),
+    ...(windows ? { OS: 'Windows_NT', APPDATA: path.join(root, 'AppData', 'Roaming') } : {}),
   }
-  const store = path.join(env.XDG_DATA_HOME, 'devin', 'cli')
+  const store = path.join(devinFolders(env).data, 'cli')
   await fs.mkdir(store, { recursive: true })
   const db = new DatabaseSync(path.join(store, 'sessions.db'))
   db.exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
@@ -1681,9 +1687,33 @@ const devinChunk = (text, request = 'request-1', stream = 'stream-1') => ({
   },
 })
 
+test('completion/devin: on Windows its sessions are read from %APPDATA%\\devin, where Devin keeps them', async () => {
+  const { root, env } = await stageDevin(
+    'Done.',
+    [
+      devinChunk('Done.'),
+      { sessionId: 'calm-river', turnClientMessageId: 'request-1', cause: 'complete' },
+    ],
+    { windows: true },
+  )
+  try {
+    const result = await completion.answers('devin', 'calm-river', env)
+    assert.deepEqual(
+      result.items.map((item) => [item.role, item.text]),
+      [
+        ['user', 'Review T-1'],
+        ['assistant', 'Done.'],
+      ],
+    )
+    assert.equal(result.settlement.state, 'settled')
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 test('completion/devin: a question dialog still open is asking, until its answer comes back', async () => {
   const { root, env } = await stageDevin('Voi întreba:', [])
-  const file = path.join(env.XDG_DATA_HOME, 'devin', 'cli', 'sessions.db')
+  const file = path.join(devinFolders(env).data, 'cli', 'sessions.db')
   const edit = (fn) => {
     const db = new DatabaseSync(file)
     try {

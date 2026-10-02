@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import {
+  devinFolders,
   harnessPath,
   missingHarnesses,
   offerable,
@@ -122,6 +123,34 @@ describe('runnable', () => {
 })
 
 /** Where a harness CLI is found on Windows, where npm writes three files for each. */
+describe("Devin's folders", () => {
+  it('are the XDG places off Windows, ~/.config and ~/.local/share unless set', {
+    skip: process.platform === 'win32' && 'this platform is Windows',
+  }, () => {
+    assert.deepEqual(devinFolders({ HOME: '/home/a' }), {
+      config: join('/home/a', '.config', 'devin'),
+      data: join('/home/a', '.local', 'share', 'devin'),
+    })
+    assert.deepEqual(
+      devinFolders({ HOME: '/home/a', XDG_CONFIG_HOME: '/xdg/config', XDG_DATA_HOME: '/xdg/data' }),
+      { config: join('/xdg/config', 'devin'), data: join('/xdg/data', 'devin') },
+    )
+  })
+
+  it('are %APPDATA%\\devin on Windows, config and sessions alike', () => {
+    const roaming = join('/Users/a', 'AppData', 'Roaming')
+    assert.deepEqual(devinFolders({ OS: 'Windows_NT', HOME: '/Users/a', APPDATA: roaming }), {
+      config: join(roaming, 'devin'),
+      data: join(roaming, 'devin'),
+    })
+    // XDG variables some shells set are not where Devin looks on Windows.
+    assert.deepEqual(
+      devinFolders({ OS: 'Windows_NT', USERPROFILE: '/Users/a', XDG_DATA_HOME: '/xdg/data' }),
+      { config: join(roaming, 'devin'), data: join(roaming, 'devin') },
+    )
+  })
+})
+
 describe('finding a harness on Windows', () => {
   const PATHEXT = '.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.CPL'
 

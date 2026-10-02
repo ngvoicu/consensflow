@@ -70,6 +70,27 @@ export function piSessionDir(env) {
   return piPath(env.PI_CODING_AGENT_SESSION_DIR || join(piAgentDir(env), 'sessions'), env)
 }
 
+/** Windows, by the environment's own word or the platform this runs on. */
+function onWindows(env) {
+  return (env.OS ?? '').toLowerCase().includes('windows') || process.platform === 'win32'
+}
+
+/**
+ * Devin's own folders: `config` holds its config.json, `data` its cli/
+ * sessions.db. On Windows both are %APPDATA%\devin (Devin's docs); elsewhere
+ * the XDG places, ~/.config/devin and ~/.local/share/devin unless set.
+ */
+export function devinFolders(env) {
+  if (onWindows(env)) {
+    const roaming = join(env.APPDATA ?? join(home(env), 'AppData', 'Roaming'), 'devin')
+    return { config: roaming, data: roaming }
+  }
+  return {
+    config: join(env.XDG_CONFIG_HOME ?? join(home(env), '.config'), 'devin'),
+    data: join(env.XDG_DATA_HOME ?? join(home(env), '.local', 'share'), 'devin'),
+  }
+}
+
 /** The kinds of file a window can start on Windows: a program, or a script cmd.exe runs. */
 const STARTABLE = new Set(['.com', '.exe', '.bat', '.cmd'])
 
@@ -83,7 +104,7 @@ const STARTABLE = new Set(['.com', '.exe', '.bat', '.cmd'])
  * file is there" is the whole check.
  */
 function candidateNames(command, env) {
-  if ((env.OS ?? '').toLowerCase().includes('windows') || process.platform === 'win32') {
+  if (onWindows(env)) {
     return (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
       .split(';')
       .map((ext) => ext.toLowerCase())

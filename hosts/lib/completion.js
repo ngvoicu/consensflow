@@ -9,7 +9,7 @@
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { piSessionDir } from '../../src/harnesses.js'
+import { devinFolders, piSessionDir } from '../../src/harnesses.js'
 import { codexQuota, exhaustedQuota } from './quota.js'
 
 export async function answers(kind, sessionId, env, options = {}) {
@@ -1793,12 +1793,7 @@ const DEVIN_WORK = new Set([
 
 async function devinAnswers(sessionId, env) {
   const { DatabaseSync } = await import('node:sqlite')
-  const file = path.join(
-    env.XDG_DATA_HOME ?? path.join(home(env), '.local', 'share'),
-    'devin',
-    'cli',
-    'sessions.db',
-  )
+  const file = path.join(devinFolders(env).data, 'cli', 'sessions.db')
   const db = new DatabaseSync(file, { readOnly: true })
   const result = resultBase()
   try {

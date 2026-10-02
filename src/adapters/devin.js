@@ -20,7 +20,7 @@ import {
 
 /**
  * Devin, for the new core. Each launch runs on a config of our own (the
- * owner's, plus hooks that log every turn and carry the role instructions),
+ * owner's, plus a hook that gives a session its role instructions),
  * in full-permission mode, with the first message in a prompt file. Devin
  * names its session itself; its own wire log for this launch says which one
  * the window opened, and which one it shows after a /new or /resume, so the

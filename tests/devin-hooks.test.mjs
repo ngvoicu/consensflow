@@ -7,6 +7,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { runHook, selectedSession } from '../hosts/devin-hooks.mjs'
 import { prepareDevinIntegration } from '../src/devin-install.js'
+import { devinFolders } from '../src/harnesses.js'
 import { roleConfiguration } from '../src/role-skills.js'
 import { tempEnv } from './helpers.mjs'
 
@@ -176,7 +177,7 @@ test("Devin's hook never stops Devin: no role text, no wire log, or input that i
 test('private installation preserves native defaults and hooks, and does not edit project/global files', async (t) => {
   const f = tempEnv()
   t.after(f.cleanup)
-  const native = path.join(f.env.XDG_CONFIG_HOME, 'devin', 'config.json')
+  const native = path.join(devinFolders(f.env).config, 'config.json')
   await fs.mkdir(path.dirname(native), { recursive: true })
   const original =
     '{ // native JSONC\n "theme_mode": "dark", "hooks": {"Stop": [{"hooks": [{"type":"command","command":"user-hook"}]}]}, "agent":{"model":"native-default"}, }'
@@ -219,6 +220,22 @@ test('private installation preserves native defaults and hooks, and does not edi
   assert.deepEqual(role.args, [])
 })
 
+test("on Windows the owner's own Devin config is read from %APPDATA%\\devin", async (t) => {
+  const f = tempEnv()
+  t.after(f.cleanup)
+  const env = { ...f.env, OS: 'Windows_NT', APPDATA: path.join(f.root, 'AppData', 'Roaming') }
+  const native = path.join(env.APPDATA, 'devin', 'config.json')
+  await fs.mkdir(path.dirname(native), { recursive: true })
+  await fs.writeFile(native, '{ "theme_mode": "dark", "agent": { "model": "native-default" } }')
+  const configuration = await prepareDevinIntegration(env, {
+    launchId: 'launch-a',
+    node: process.execPath,
+  })
+  const copy = JSON.parse(await fs.readFile(configuration.args[1], 'utf8'))
+  assert.equal(copy.theme_mode, 'dark')
+  assert.equal(copy.agent.model, 'native-default')
+})
+
 test('invalid launch identity or malformed native configuration fails without replacing native files', async (t) => {
   const f = tempEnv()
   t.after(f.cleanup)
@@ -226,7 +243,7 @@ test('invalid launch identity or malformed native configuration fails without re
     prepareDevinIntegration(f.env, { launchId: '../escape', node: process.execPath }),
     /launch/,
   )
-  const native = path.join(f.env.XDG_CONFIG_HOME, 'devin', 'config.json')
+  const native = path.join(devinFolders(f.env).config, 'config.json')
   await fs.mkdir(path.dirname(native), { recursive: true })
   await fs.writeFile(native, '{ invalid')
   await assert.rejects(
