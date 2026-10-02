@@ -706,7 +706,7 @@ test('built Agents catalog serves complete saved profiles and current browsing c
       assert.deepEqual([stored.effort, stored.model, Object.hasOwn(stored, 'profile')], ['low', 'gpt-6-astra', false])
       const mine = data.agents.find(a => a.name === 'my-maia')
       assert.deepEqual([mine.effort, mine.custom, mine.profile.workTier], ['low', true, 'light'])
-      assert.equal(data.agents.length, 120)
+      assert.equal(data.agents.length, 119)
       const html = await (await fetch(server.url, { headers })).text()
       for (const text of ['aria-label="Agents"', 'Model and reasoning', 'My own agents', 'model-summary', 'model-group', 'value="model-reasoning" selected', 'Work tier', 'tier-pill', 'Important work only · No coding']) assert.ok(html.includes(text), text)
       for (const text of ['id="catalog-section"', 'Agent library', 'Your agents', 'PM candidate', 'name="tags"', 'category-pill', 'Chief of Staff candidate', 'name="category"', 'Name in use', 'offer__actions', 'Saved only', 'Sort by', 'benchmark', 'Artificial Analysis', 'AA ']) assert.ok(!html.includes(text), 'gone: ' + text)
