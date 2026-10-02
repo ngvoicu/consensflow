@@ -180,6 +180,11 @@ describe('agents defined by hand are stored in full, v1-shaped', () => {
 
   it('edits and removes a custom agent in place', () => {
     addAgent({ name: 'freya-2', harness: 'codex', model: 'gpt-5.6-terra', effort: 'xhigh' }, t.env)
+    // An edit that would leave it without a model is refused, and saves nothing.
+    const before = readFileSync(rosterPath(t.env), 'utf8')
+    for (const model of ['', 42])
+      assert.throws(() => editAgent('freya-2', { model }, t.env), /an agent needs a model/)
+    assert.equal(readFileSync(rosterPath(t.env), 'utf8'), before)
     editAgent('freya-2', { model: 'gpt-6-astra', effort: 'low' }, t.env)
     const stored = raw(t.env).agents.find((p) => p.id === 'freya-2')
     assert.deepEqual([stored.model, stored.effort, stored.kind], ['gpt-6-astra', 'low', 'codex'])
