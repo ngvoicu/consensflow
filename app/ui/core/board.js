@@ -88,6 +88,14 @@ function age(iso, now = Date.now()) {
   return `${Math.round(hours / 24)}d`
 }
 
+/**
+ * A member of the staff, as the ledger counts one: the lane of an agent of
+ * its own, neither one of its sessions nor the lead, which runs on a saved
+ * agent too once the lead is switched to one.
+ */
+export const isMember = (participant) =>
+  participant.agent !== null && participant.member === null && participant.role !== 'chief'
+
 /** The role a member's task is for: its pool's. */
 const roleOf = (task, roles) => task.pool ?? roles[0]
 
@@ -100,9 +108,7 @@ const roleOf = (task, roles) => task.pool ?? roles[0]
 function boardRows(lanes) {
   const ordered = laneOrder(lanes).filter((lane) => lane.participant.role !== 'human')
   const members = new Set(
-    ordered
-      .filter((lane) => lane.participant.agent !== null && lane.participant.member === null)
-      .map((lane) => lane.participant.handle),
+    ordered.filter((lane) => isMember(lane.participant)).map((lane) => lane.participant.handle),
   )
   const rows = []
   for (const lane of ordered) {
@@ -192,9 +198,7 @@ function route(task) {
 
 /** A member between tasks: its work runs in sessions, so it has no window of its own. */
 const resting = (participant, activity) =>
-  ['worker', 'advisor', 'reviewer'].includes(participant.role) &&
-  participant.member === null &&
-  (activity?.state ?? 'closed') === 'closed'
+  isMember(participant) && (activity?.state ?? 'closed') === 'closed'
 
 /** A session's row says whose window it is; the member's row says what it is. */
 const identity = (participant, agent) =>
@@ -466,7 +470,7 @@ export class BoardView {
     }
     // A project with nobody on its staff looks like any other board, and every
     // task the chief hands out is refused: say it where the members would be.
-    if (!board.lanes.some((lane) => lane.participant.agent !== null)) {
+    if (!board.lanes.some((lane) => isMember(lane.participant))) {
       const row = element('tr', 'board-empty')
       const cell = element(
         'td',

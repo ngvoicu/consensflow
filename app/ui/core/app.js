@@ -1,6 +1,6 @@
 import { button, element, redraw } from '../dom.js'
 import { initializeUpdates } from '../updates.js'
-import { BoardView, HARNESS_NAMES, TaskDrawer } from './board.js'
+import { BoardView, HARNESS_NAMES, isMember, TaskDrawer } from './board.js'
 import { Layout } from './layout.js'
 import { TerminalsView } from './terminals.js'
 
@@ -786,9 +786,7 @@ let removing = null
 function renderStaff() {
   const lanes = state.board?.lanes ?? []
   // The members only: a member's sessions are lanes too, named after it.
-  const members = lanes
-    .filter((lane) => lane.participant.agent !== null && lane.participant.member === null)
-    .map((lane) => lane.participant)
+  const members = lanes.map((lane) => lane.participant).filter(isMember)
   const rows = members
     .flatMap((member) =>
       memberRows(member).map((entry) => ({ ...entry, tier: member.tier, name: member.handle })),
@@ -813,7 +811,7 @@ function renderStaff() {
 /** A member as the board shown has it now, which a Remove kept across redraws acts on. */
 const memberNow = (member) =>
   state.board?.lanes.find(
-    (lane) => lane.participant.handle === member.handle && lane.participant.member === null,
+    (lane) => lane.participant.handle === member.handle && isMember(lane.participant),
   )?.participant ?? member
 
 /**
@@ -907,7 +905,10 @@ staffForm.addEventListener('submit', (event) => {
   const agent = staffForm.elements.agent.value
   if (!agent) return
   const { project, lanes } = state.board
-  const member = lanes.find((lane) => lane.participant.agent === agent)
+  // Already on the staff: the lead's agent, after a Switch lead, is not.
+  const member = lanes
+    .map((lane) => lane.participant)
+    .find((participant) => isMember(participant) && participant.agent === agent)
   void act(async () => {
     if (member === undefined) {
       await core('member.add', { project: project.id, agent, roles: [role] })
@@ -917,7 +918,7 @@ staffForm.addEventListener('submit', (event) => {
     await core('member.roles', {
       project: project.id,
       agent,
-      roles: [...member.participant.roles, role],
+      roles: [...member.roles, role],
     })
     note(`@${agent} is ${ROLE_LABEL[role]} now too.`)
   })

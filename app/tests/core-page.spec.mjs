@@ -810,6 +810,32 @@ test('says so on the board when the project has no members yet', async ({ page }
   await expect(table.locator('tr.board-empty')).toHaveCount(0)
 })
 
+test('takes a lead switched to a saved agent for no member: the board says it has none, and that agent joins the staff', async ({
+  page,
+}) => {
+  const data = model()
+  const board = data.boards[1]
+  board.lanes = board.lanes.filter((lane) => ['human', 'chief'].includes(lane.participant.role))
+  board.open = []
+  // Switch lead to a saved agent: the chief runs on hera now.
+  Object.assign(board.lanes[1].participant, { agent: 'hera', harness: 'codex' })
+  await open(page, data)
+  await expect(page.locator('tr.board-empty')).toHaveText(
+    'No members yet: add the agents this project may use under Staff.',
+  )
+  await page.getByRole('button', { name: 'Staff' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await expect(dialog.locator('tbody tr')).toHaveText([
+    'Nobody yet: add the agents this project may use.',
+  ])
+  await dialog.getByLabel('Agent').selectOption('hera')
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([{ project: 1, agent: 'hera', roles: ['worker'] }])
+  expect(await calls(page, 'member.roles')).toEqual([])
+})
+
 test("keeps only what is new in a task's thread: questions, answers, follow-ups and an earlier result", async ({
   page,
 }) => {
@@ -1701,6 +1727,36 @@ test('shows a member between tasks as free, its window gone until the next task'
   const row = page.locator('tr[data-handle="diana"]')
   await expect(row.locator('.row-status')).toHaveText('Free: a terminal opens with its next task')
   await expect(row.getByTestId('lamp')).toHaveAttribute('data-state', 'closed')
+})
+
+test('shows an image designer between tasks as free, as any member, and counts its open terminals', async ({
+  page,
+}) => {
+  const data = model()
+  // An image designer has no tier; its tasks run in sessions like any member's.
+  const iris = participant(8, 'iris', 'designer', { agent: 'iris', harness: 'codex', tier: null })
+  data.boards[1].lanes.push({
+    participant: iris,
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  const row = page.locator('tr[data-handle="iris"]')
+  await expect(row.locator('.row-status')).toHaveText('Free: a terminal opens with its next task')
+  await changed(
+    page,
+    (iris) => {
+      window.__model.boards[1].lanes.push({
+        participant: { ...iris, id: 9, handle: 'iris-amber-pine', memberId: 8, member: 'iris' },
+        tasks: [],
+        activity: { state: 'working' },
+        pane: { id: 'p1-iris-amber-pine', generation: 1 },
+      })
+    },
+    iris,
+  )
+  await expect(row.locator('.row-status')).toHaveText('1 terminal open, one per task')
 })
 
 test('closes an open project from the list', async ({ page }) => {
