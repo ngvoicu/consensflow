@@ -13,7 +13,7 @@ import { fakeNodeExecutable } from './helpers.mjs'
  * supervisor (its app-server, a broker that knows the thread and its queue,
  * and the TUI attached to both), in full-permission mode, with the first
  * message as its last argument. The broker names the thread and queues every
- * later message; a Codex without the native queue gets them pasted.
+ * later message; a Codex without the native queue is refused.
  */
 const SUPERVISOR = fileURLToPath(new URL('../hosts/codex-session.mjs', import.meta.url))
 
@@ -26,15 +26,17 @@ async function withHome(fn, { queue = true } = {}) {
     CONSENSFLOW_NODE: process.execPath,
   }
   await mkdir(env.PATH, { recursive: true })
-  // A Codex that answers the three things a launch asks of it: whether it has
-  // the native queue, its effective instructions over the app-server, and the
-  // MCP servers a member's window switches off (none here).
+  // A Codex that answers the four things a launch asks of it: its version,
+  // whether it has the native queue, its effective instructions over the
+  // app-server, and the MCP servers a member's window switches off (none here).
   const executable = fakeNodeExecutable(
     path.join(env.PATH, 'codex'),
     `#!${process.execPath}
 import { createInterface } from 'node:readline'
 if (process.argv[2] === 'mcp' && process.argv[3] === 'list') {
   console.log('[]')
+} else if (process.argv[2] === '--version') {
+  console.log('codex-cli 0.150.0')
 } else if (process.argv[2] === 'queue') {
   ${queue ? "console.log('Usage: codex queue --thread <id> --message <text>')" : 'process.exit(2)'}
 } else if (process.argv[2] === 'app-server') {
@@ -130,6 +132,10 @@ describe('the Codex adapter', () => {
         'allow_login_shell=false',
         'resume',
         thread,
+        '--model',
+        'gpt-5.6-luna',
+        '-c',
+        'model_reasoning_effort="low"',
         '--dangerously-bypass-approvals-and-sandbox',
       ])
     })
@@ -142,7 +148,7 @@ describe('the Codex adapter', () => {
       const adapter = codexAdapter({
         env,
         discoverEveryMs: 5,
-        currentSession: async () => (++asked < 3 ? null : thread),
+        sessionState: async () => ({ sessionId: ++asked < 3 ? null : thread, available: true }),
       })
       const { launch } = await adapter.prepare(request())
       assert.deepEqual(await adapter.started({ launch }), { nativeSession: thread })
@@ -189,11 +195,59 @@ describe('the Codex adapter', () => {
 
   it('holds a message while its broker cannot take one: a window starting, resuming or reconnecting', async () => {
     await withHome(async ({ env }) => {
+      const thread = '0f8fad5b-d9cb-469f-a165-70867728950e'
       let available = false
-      const adapter = codexAdapter({ env, sessionAvailable: async () => available })
-      const { launch } = await adapter.prepare(request())
+      const adapter = codexAdapter({
+        env,
+        sessionState: async () => ({ sessionId: thread, available }),
+      })
+      const { launch } = await adapter.prepare(request({ resume: thread, message: null }))
       assert.match(await adapter.ready({ launch }), /cannot take a message yet/)
       available = true
+      assert.equal(await adapter.ready({ launch }), true)
+    })
+  })
+
+  it('follows the window to the thread a /new or /resume left it on, holding while it shows none', async () => {
+    await withHome(async ({ env }) => {
+      const first = '0f8fad5b-d9cb-469f-a165-70867728950e'
+      const next = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
+      let shown = { sessionId: first, available: true }
+      const read = []
+      const adapter = codexAdapter({
+        env,
+        sessionState: async () => shown,
+        answers: async (_kind, thread) => {
+          read.push(thread)
+          return {
+            items: [{ id: `${thread}-1`, role: 'user', text: 'hello' }],
+            inFlight: false,
+            settlement: { state: 'settled' },
+          }
+        },
+      })
+      const launch = { nativeSession: first, channel: { kind: 'codex-queue' } }
+      assert.equal((await adapter.observe({ launch })).settled, true)
+      assert.equal(await adapter.ready({ launch }), true)
+
+      // /new: while Codex starts the new thread, the broker names none...
+      shown = { sessionId: null, available: false }
+      const switching = await adapter.observe({ launch })
+      assert.match(switching.waiting?.reason ?? '', /cannot take a message yet/)
+      assert.equal(await adapter.ready({ launch }), switching.waiting.reason)
+      // ...then names it.
+      shown = { sessionId: next, available: true }
+      const observed = await adapter.observe({ launch })
+      assert.deepEqual(observed.switched, { nativeSession: next })
+      assert.equal(observed.settled, false)
+      assert.equal(await adapter.ready({ launch }), 'the window shows another conversation')
+
+      // The dispatcher follows the window: the new thread's record is read.
+      launch.nativeSession = next
+      const followed = await adapter.observe({ launch })
+      assert.equal(followed.switched, undefined)
+      assert.equal(followed.settled, true)
+      assert.equal(read.at(-1), next)
       assert.equal(await adapter.ready({ launch }), true)
     })
   })
@@ -232,33 +286,27 @@ describe('the Codex adapter', () => {
         assert.deepEqual(claims, [['pane.claim', { pane: 's1-diana', generation: 2 }]])
         assert.equal(posted[0].url, '/deliver')
         assert.deepEqual([posted[0].body.sessionId, posted[0].body.text], [thread, 'hi'])
+        // Codex's app-server refuses half a character as the pane host does.
+        await adapter.deliver({
+          launch,
+          pane,
+          host,
+          text: 'half \ud83d of it, \u001b[31mred\u001b[0m and 50%\r60%',
+        })
+        assert.equal(posted[1].body.text, 'half  of it, ␛[31mred␛[0m and 50%␍60%')
       } finally {
         await new Promise((resolve) => broker.close(resolve))
       }
     })
   })
 
-  it('pastes into a Codex without the native queue', async () => {
+  it('refuses to open a Codex without the native queue, naming its version', async () => {
     await withHome(
-      async ({ env, executable }) => {
-        const adapter = codexAdapter({ env })
-        const thread = '0f8fad5b-d9cb-469f-a165-70867728950e'
-        const plan = await adapter.prepare(request({ resume: thread, message: null }))
-        assert.equal(plan.argv[0], executable, 'no supervisor without the queue')
-        const requests = []
-        const host = {
-          async request(op, body) {
-            requests.push([op, body])
-            return { ok: true }
-          },
-        }
-        const pane = { id: 's1-diana', generation: 2 }
-        assert.deepEqual(await adapter.deliver({ launch: plan.launch, pane, host, text: 'hi' }), {
-          admitted: true,
-        })
-        assert.deepEqual(requests, [
-          ['pane.write_paste', { id: 's1-diana', generation: 2, body: 'hi' }],
-        ])
+      async ({ env }) => {
+        await assert.rejects(
+          codexAdapter({ env }).prepare(request()),
+          /Codex 0\.150\.0 has no native queue, which ConsensFlow needs to reach its window: update Codex/,
+        )
       },
       { queue: false },
     )
@@ -269,6 +317,7 @@ describe('the Codex adapter', () => {
       const quota = { state: 'low', usedPercent: 96, resetsAt: '2026-09-26T08:29:53.000Z' }
       const adapter = codexAdapter({
         env,
+        sessionState: async () => ({ sessionId: 'thread-1', available: true }),
         answers: async () => ({
           items: [],
           inFlight: false,
@@ -276,12 +325,11 @@ describe('the Codex adapter', () => {
           quota,
         }),
       })
-      const observed = await adapter.observe({
-        launch: { nativeSession: 'thread-1', channel: null },
-      })
+      const channel = { kind: 'codex-queue' }
+      const observed = await adapter.observe({ launch: { nativeSession: 'thread-1', channel } })
       assert.deepEqual([observed.settled, observed.quota], [true, quota])
       assert.equal(
-        (await adapter.observe({ launch: { nativeSession: null, channel: null } })).quota,
+        (await adapter.observe({ launch: { nativeSession: null, channel } })).quota,
         null,
       )
     })

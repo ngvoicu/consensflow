@@ -104,6 +104,24 @@ function readAckResult(ack) {
 }
 
 /**
+ * The conversation ConsensFlow's extension says the window shows (it writes
+ * it whenever it starts on one), or null before it has said.
+ */
+export async function shownSession(channel) {
+  try {
+    const shown = JSON.parse(
+      await readFile(join(channel.settled, `${channel.launchId}.shown.json`), 'utf8'),
+    )
+    return shown?.launchId === channel.launchId && typeof shown.sessionId === 'string'
+      ? shown.sessionId
+      : null
+  } catch (cause) {
+    if (cause?.code === 'ENOENT' || cause instanceof SyntaxError) return null
+    throw cause
+  }
+}
+
+/**
  * Send one raw worker followup as exact text, without a result envelope.
  * The inbox record is strictly bounded `{id, type, launchId, session, text,
  * expiresAt}` with a unique `m-<hex>` id, the launch's immutable launchId,

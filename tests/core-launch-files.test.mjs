@@ -17,7 +17,7 @@ describe('the files a launch leaves in the home', () => {
       for (const folder of [
         `integrations/claude/${A}`,
         `integrations/pi/${A}`,
-        `receivers/${A}`,
+        `integrations/opencode/${A}`,
         `integrations/claude/${B}`,
         'integrations/claude/not-a-launch',
         'extensions/pi',
@@ -27,8 +27,8 @@ describe('the files a launch leaves in the home', () => {
       }
       forgetLaunch(home, A)
       assert.deepEqual(
-        [`integrations/claude/${A}`, `integrations/pi/${A}`, `receivers/${A}`].map((f) =>
-          existsSync(path.join(home, f)),
+        [`integrations/claude/${A}`, `integrations/pi/${A}`, `integrations/opencode/${A}`].map(
+          (f) => existsSync(path.join(home, f)),
         ),
         [false, false, false],
       )

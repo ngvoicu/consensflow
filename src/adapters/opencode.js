@@ -10,7 +10,15 @@ import {
 import { launchConfiguration } from '../channels.js'
 import { prepareOpenCodeExtension } from '../opencode-install.js'
 import { roleConfiguration } from '../role-skills.js'
-import { admission, dialogWaiting, executableFor, recordState } from './shared.js'
+import {
+  admission,
+  dialogWaiting,
+  executableFor,
+  recordState,
+  SHOWS_ANOTHER,
+  switchedTo,
+  windowText,
+} from './shared.js'
 
 /**
  * OpenCode, for the new core. A fresh conversation is created on a throwaway
@@ -22,7 +30,9 @@ import { admission, dialogWaiting, executableFor, recordState } from './shared.j
  *
  * An empty conversation says nothing about the window: until the plugin
  * reports that the TUI shows this conversation, OpenCode is still loading (or
- * the human is looking at another one) and nothing is sent.
+ * the human is on its home screen or session list) and nothing is sent. When
+ * the human opens another conversation in it (/new, or one from the list),
+ * the window is followed there.
  *
  * The window's live status, which the plugin reports with the conversation
  * it shows, has the last word where the store cannot: a refused request
@@ -30,6 +40,9 @@ import { admission, dialogWaiting, executableFor, recordState } from './shared.j
  * resets), and an answer a lost window never finished stays unfinished there
  * for good once the conversation is reopened, though OpenCode is idle.
  */
+const STARTING = 'the OpenCode window is starting: its plugin does not answer yet'
+const HOLD = 'the OpenCode window shows no conversation: its home screen or session list is open'
+
 export function openCodeAdapter({
   env,
   createSession = createOpenCodeSession,
@@ -52,6 +65,7 @@ export function openCodeAdapter({
       const roleSetup = await roleConfiguration('opencode', {
         role,
         env,
+        launch: launchId,
         cwd: directory,
         executable,
         content: instructions,
@@ -71,10 +85,11 @@ export function openCodeAdapter({
           env: childEnv({ ...env, ...roleSetup.env }),
           configuration,
         }))
+      const identity = { kind: 'opencode', model: agent?.model }
       const runner =
         resume === null
-          ? interactiveStart({ kind: 'opencode', model: agent?.model }, nativeSession, null)
-          : interactiveResume({ kind: 'opencode' }, resume, null)
+          ? interactiveStart(identity, nativeSession, null)
+          : interactiveResume(identity, resume, null)
       return {
         argv: [executable, ...configuration.args, ...runner.args],
         env: { ...configuration.env, ...roleSetup.env },
@@ -84,7 +99,7 @@ export function openCodeAdapter({
           nativeSession,
           channel: configuration.channel,
           directory,
-          firstMessage: message,
+          firstMessage: windowText(message),
           resumed: resume !== null,
           model: agent?.model,
           effort: agent?.effort,
@@ -105,7 +120,10 @@ export function openCodeAdapter({
     },
 
     async ready({ launch }) {
-      return (await shown(launch))?.sessionId === launch.nativeSession
+      const window = await shown(launch)
+      if (window === undefined) return STARTING
+      if (window.sessionId === null) return HOLD
+      return window.sessionId === launch.nativeSession ? true : SHOWS_ANOTHER
     },
 
     async deliver({ launch, pane, host, text }) {
@@ -117,7 +135,7 @@ export function openCodeAdapter({
           pane: pane.id,
           generation: pane.generation,
         },
-        text,
+        windowText(text),
       )
       return admission(sent, 'OpenCode refused it', { queued: true })
     },
@@ -133,12 +151,14 @@ export function openCodeAdapter({
       const idle = showing && window.status?.type === 'idle'
       // A session waiting to retry a request is at work, whatever its record says.
       const retrying = showing && window.status?.type === 'retry'
-      return {
+      const observed = {
         ...state,
         quota: retry ?? state.quota,
         settled: showing && !retrying && (state.settled || idle),
         waiting: dialogWaiting(record),
       }
+      if (window?.sessionId === null) return { ...observed, waiting: { reason: HOLD } }
+      return window === undefined || showing ? observed : switchedTo(observed, window.sessionId)
     },
 
     transcript({ launch }) {

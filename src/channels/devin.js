@@ -1,6 +1,7 @@
-import { selectedSession } from '../../hosts/devin-receiver.mjs'
+import { selectedSession } from '../../hosts/devin-hooks.mjs'
+import { writePaste } from './pty.js'
 
-/** Explicit user tasks only. Results enter through native hooks. */
+/** A message pasted into Devin's window, only while it shows the conversation it is for. */
 export async function send(target, text) {
   const { channel, session, bridge, pane, generation } = target
   let current
@@ -21,5 +22,5 @@ export async function send(target, text) {
       bytesWritten: 0,
       error: 'Devin is displaying another conversation',
     }
-  return bridge.request('pane.write_paste', { id: pane, generation, body: text })
+  return writePaste(bridge, { id: pane, generation }, text)
 }

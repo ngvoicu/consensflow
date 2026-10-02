@@ -1,7 +1,8 @@
-import { spawnSync } from 'node:child_process'
-import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs'
+import { execFile, spawnSync } from 'node:child_process'
+import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, dirname, join, resolve, sep } from 'node:path'
+import { promisify } from 'node:util'
 
 /** Discover CLI executables on PATH and native user install paths.
  * Finder-launched apps may lack the interactive shell's tool directories.
@@ -33,11 +34,6 @@ const HARNESSES = [
     id: 'pi',
     command: 'pi',
     locations: [HOMED(['.pi', 'bin']), HOMED(['.local', 'bin'])],
-  },
-  {
-    id: 'kimi',
-    command: 'kimi',
-    locations: [HOMED(['.kimi-code', 'bin']), HOMED(['.local', 'bin'])],
   },
 ]
 
@@ -74,17 +70,25 @@ export function piSessionDir(env) {
   return piPath(env.PI_CODING_AGENT_SESSION_DIR || join(piAgentDir(env), 'sessions'), env)
 }
 
+/** The kinds of file a window can start on Windows: a program, or a script cmd.exe runs. */
+const STARTABLE = new Set(['.com', '.exe', '.bat', '.cmd'])
+
 /**
  * What an executable is called, per platform.
  *
- * On Windows a CLI on PATH is `claude.cmd` or `claude.exe` — never the bare
- * name — and there is no executable bit to test, so PATHEXT decides and
- * "the file is there" is the whole check.
+ * On Windows a CLI on PATH is `claude.cmd` or `claude.exe`, never the bare
+ * name: npm writes an extensionless sh script beside each `.cmd` shim, which
+ * no Windows program can start. There is no executable bit to test either, so
+ * PATHEXT decides, in its order, among the kinds a window can start, and "the
+ * file is there" is the whole check.
  */
 function candidateNames(command, env) {
   if ((env.OS ?? '').toLowerCase().includes('windows') || process.platform === 'win32') {
-    const exts = (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
-    return [command, ...exts.map((ext) => `${command}${ext.toLowerCase()}`)]
+    return (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+      .split(';')
+      .map((ext) => ext.toLowerCase())
+      .filter((ext) => STARTABLE.has(ext))
+      .map((ext) => `${command}${ext}`)
   }
   return [command]
 }
@@ -238,6 +242,43 @@ export function paneArgv(argv, env = process.env) {
   return [target.program, target.script, ...args]
 }
 
+const execute = promisify(execFile)
+const probes = new Map()
+
+/**
+ * What a CLI answers to `args` (`--version`, `queue --help`): its output and
+ * exit code. It is asked once per executable as it is on disk: an update
+ * gives the file another identity, so an updated CLI is asked again and an
+ * unchanged one never twice. One that does not answer in time (a busy
+ * machine took seconds to answer `--help`) or cannot start is not remembered.
+ */
+export function probeExecutable(executable, args, env, { timeoutMs = 30_000 } = {}) {
+  const file = realpathSync(executable)
+  const { dev, ino, size, mtimeMs, ctimeMs } = statSync(file)
+  const key = JSON.stringify([file, dev, ino, size, mtimeMs, ctimeMs, args])
+  let probe = probes.get(key)
+  if (probe === undefined) {
+    const run = runnable(executable, args, env)
+    probe = execute(run.file, run.args, {
+      ...run.options,
+      env,
+      timeout: timeoutMs,
+      maxBuffer: 128 * 1024,
+      encoding: 'utf8',
+      windowsHide: true,
+    }).then(
+      ({ stdout }) => ({ stdout, code: 0 }),
+      (error) => {
+        if (typeof error.code !== 'number') throw error
+        return { stdout: error.stdout ?? '', code: error.code }
+      },
+    )
+    probes.set(key, probe)
+    probe.catch(() => probes.delete(key))
+  }
+  return probe
+}
+
 /**
  * Ends a child started through `runnable`, and everything it started. On
  * Windows the child may be the cmd.exe wrapper of a `.cmd`, and killing it
@@ -270,11 +311,13 @@ export function missingHarnesses(env) {
 /**
  * Agents as the pickers offer them: one whose harness is not installed here is
  * hidden, so only the Harnesses page shows that harness, where it is installed.
- * An image agent (@pygmalion) runs through Codex, so it goes with Codex.
+ * An image agent (@pygmalion) runs through Codex, so it goes with Codex. One
+ * saved for a harness this build does not run (Kimi, dropped) is hidden too:
+ * no window could open for it.
  */
 export function offerable(agents, missing) {
   return agents.map((agent) =>
-    missing.includes(agent.harness === 'image' ? 'codex' : agent.harness)
+    agent.unsupported || missing.includes(agent.harness === 'image' ? 'codex' : agent.harness)
       ? { ...agent, hidden: true, notInstalled: true }
       : agent,
   )

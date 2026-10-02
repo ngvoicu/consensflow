@@ -11,12 +11,19 @@ import {
 import { dirname, join } from 'node:path'
 import { configRoot } from './roster.js'
 
-/** Publish a verified immutable bundle; never replace code a live pane may have loaded. */
+/**
+ * Publish a verified immutable bundle; never replace code a live pane may
+ * have loaded. A generated file (OpenCode's tui.json) names the folder the
+ * bundle is published in, so it is hashed as it reads with the parent folder
+ * in that place: a build that writes it differently is a new bundle, never
+ * one that differs from what is installed and refuses every launch.
+ */
 export function preparePrivateIntegration(env, kind, names, generated = () => []) {
   const files = names.map((name) => [name, readFileSync(new URL(`../${name}`, import.meta.url))])
-  const hash = createHash('sha256')
-  for (const [name, bytes] of files) hash.update(name).update('\0').update(bytes).update('\0')
   const root = join(configRoot(env), 'extensions', kind)
+  const hash = createHash('sha256')
+  for (const [name, bytes] of [...files, ...generated(root)])
+    hash.update(name).update('\0').update(bytes).update('\0')
   const destination = join(root, hash.digest('hex'))
   files.push(...generated(destination))
   let temporary

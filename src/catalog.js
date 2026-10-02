@@ -1,4 +1,4 @@
-import { AGENT_PRESETS, agentProfile, KIMI_EFFORTS } from '../hosts/lib/presets.js'
+import { AGENT_PRESETS, agentProfile } from '../hosts/lib/presets.js'
 
 export { agentProfile } from '../hosts/lib/presets.js'
 
@@ -7,8 +7,8 @@ export { agentProfile } from '../hosts/lib/presets.js'
  *
  * Typing a model identifier and guessing an effort level is the friction
  * between installing this and using it, so every harness ships a curated
- * list: pick a name, get a working agent. `cf agent add zeus`
- * needs no flags; the UI offers the same lists as one-click adds.
+ * list: every agent in it is in the roster already, exactly as the catalog
+ * has it, and moves with it when a release moves an entry (2026-09-23).
  *
  * **One list, derived.** These are the payload's own presets — the very
  * records that run an agent — reshaped into the manager's vocabulary
@@ -20,8 +20,7 @@ export { agentProfile } from '../hosts/lib/presets.js'
  * 3.7 Flash to the harness. A name must mean one model, so the harness's
  * list won: it is the superset, and it is what actually launches the run.
  *
- * Pi Claude presets use OpenRouter API, as selected by the user. Saved rows
- * retain their provider/model until explicitly synced with the catalog.
+ * Pi Claude presets use OpenRouter API, as selected by the user.
  */
 
 /** Effort levels each CLI accepts, quoted from its own help output. */
@@ -34,8 +33,6 @@ export const EFFORTS = {
   pi: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
   // opencode --help: "provider-specific reasoning effort, e.g., high, max, minimal"
   opencode: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
-  // K3 uses the supported per-process KIMI_MODEL_THINKING_EFFORT control.
-  kimi: KIMI_EFFORTS,
   // Devin writes the level into its model id (claude-opus-5-5-max): an agent
   // names the family and one of these, and the launch joins them.
   devin: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -52,7 +49,6 @@ const KIND_TO_HARNESS = {
   codex: 'codex',
   pi: 'pi',
   opencode: 'opencode',
-  kimi: 'kimi',
   devin: 'devin',
   image: 'image',
 }
@@ -68,8 +64,8 @@ function entryFor(preset) {
     description: preset.label ?? preset.description,
     detail: preset.description,
     profile: agentProfile({ harness: KIND_TO_HARNESS[preset.kind], model: preset.model, effort }),
-    // Provenance: what a roster row records so a later catalog change can be
-    // offered as an update instead of silently diverging.
+    // Provenance, as a row an older build saved names its entry: the roster
+    // reads such a copy as the catalog's own agent.
     preset: preset.preset,
   }
 }

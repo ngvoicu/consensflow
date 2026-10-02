@@ -1,15 +1,12 @@
-import { execFile } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join } from 'node:path'
-import { promisify } from 'node:util'
-import { runnable } from './harnesses.js'
+import { probeExecutable } from './harnesses.js'
 import { preparePrivateIntegration } from './private-integration.js'
 import { configRoot } from './roster.js'
 
-const FILES = ['hosts/devin-receiver.mjs', 'hosts/lib/receiver.js', 'package.json']
+const FILES = ['hosts/devin-hooks.mjs']
 const quote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`
-const execute = promisify(execFile)
 
 export const DEVIN_MINIMUM_VERSION = '3000.10.21'
 /** How long Devin lets the question hook wait for the board's answer. */
@@ -64,13 +61,8 @@ export async function prepareDevinIntegration(
   if (typeof node !== 'string' || !isAbsolute(node))
     throw new Error('Devin requires an absolute runtime')
   if (executable) {
-    const run = runnable(executable, ['--version'], env)
-    const { stdout } = await execute(run.file, run.args, {
-      ...run.options,
-      env,
-      timeout: 3000,
-      maxBuffer: 8192,
-    })
+    // Asked once per executable as it is on disk, not at every launch.
+    const { stdout } = await probeExecutable(executable, ['--version'], env)
     if (!supportedDevinVersion(stdout))
       throw new Error(
         `Devin ${DEVIN_MINIMUM_VERSION} or newer is required for complete worker replies. Update Devin before opening this pane.`,

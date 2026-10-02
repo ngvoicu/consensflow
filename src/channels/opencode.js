@@ -4,14 +4,11 @@ import { runnable, terminate } from '../harnesses.js'
 import { claim, paneOf } from './pty.js'
 
 /**
- * The P5 prompt_async endpoint admits a request but may stay silent forever.
- * Every request therefore gets this module-owned `DEFAULT_DEADLINE_MS` of
- * 3_000 ms when its target does not supply one; a POST deadline is mapped to
- * `uncertain` by `src/channels.js`, while a pre-POST epoch-claim failure is
- * known to have sent zero bytes. When the watcher stamps
- * `record.expiresAt`, that absolute instant is authoritative for this native
- * request and is never recomputed from the channel timeout. A JSON
- * `admitted:null` response remains uncertain rather than becoming false.
+ * A message goes to the window through ConsensFlow's plugin inside the TUI,
+ * which posts it to the conversation the TUI shows. Every request gets this
+ * module-owned `DEFAULT_DEADLINE_MS` of 3_000 ms when its target does not
+ * supply one; a failed pane claim before the request is known to have sent
+ * zero bytes, and anything after the request started is uncertain.
  */
 export const DEFAULT_DEADLINE_MS = 3_000
 
@@ -21,36 +18,6 @@ function launchConfig(target) {
     throw new Error('opencode-server delivery needs the chief launch configuration')
   }
   return launch
-}
-
-function endpointSpec(target, launch) {
-  return launch.endpoint ?? launch.channel?.endpoint ?? target.channel?.endpoint ?? target.endpoint
-}
-
-function endpointUrl(endpoint) {
-  const value = typeof endpoint === 'string' ? endpoint : endpoint?.url
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new Error('opencode-server delivery needs the discovered server endpoint')
-  }
-  return new URL(value)
-}
-
-function authHeader(target, launch, endpoint) {
-  const auth =
-    launch.auth ??
-    target.auth ??
-    (typeof endpoint === 'object' ? endpoint.auth : undefined) ??
-    (launch.channel?.password === undefined && target.channel?.password === undefined
-      ? undefined
-      : {
-          username: 'opencode',
-          password: launch.channel?.password ?? target.channel?.password,
-        })
-  if (auth === undefined) return undefined
-  if (typeof auth?.username !== 'string' || typeof auth?.password !== 'string') {
-    throw new Error('opencode-server delivery needs username and password together')
-  }
-  return `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString('base64')}`
 }
 
 function validateCaller(target) {
@@ -134,102 +101,10 @@ async function sendCurrent(target, text, config) {
   }
 }
 
-/**
- * POST one admitted user turn to the P5-discovered OpenCode TUI server after
- * pane.claim admits it: the pane is current and no paste is going in. Any
- * failed claim is retryable: the HTTP request has not started yet.
- */
-async function sendText(target, text) {
+export async function send(target, text) {
   if (typeof text !== 'string') throw new Error('opencode-server delivery needs text')
   const launch = launchConfig(target)
-  const config = launch.channel ?? launch
-  // Every ConsensFlow-owned launch carries an identity; legacy launches without
-  // the TUI bridge must wait for restart rather than post to a historical UUID.
-  if (config.launchId) return await sendCurrent(target, text, config)
-  const endpointSpecValue = endpointSpec(target, launch)
-  const endpoint = endpointUrl(endpointSpecValue)
-  const session = target.session ?? launch.session
-  if (typeof session !== 'string' || session.length === 0) {
-    throw new Error('opencode-server delivery needs the native session id')
-  }
-  const url = new URL(
-    `session/${encodeURIComponent(session)}/prompt_async`,
-    endpoint.href.endsWith('/') ? endpoint.href : `${endpoint.href}/`,
-  )
-  const headers = { 'content-type': 'application/json' }
-  const authorization = authHeader(target, launch, endpointSpecValue)
-  if (authorization !== undefined) headers.authorization = authorization
-  validateCaller(target)
-  const request = {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ parts: [{ type: 'text', text }] }),
-  }
-  const targetDeadlineMs = target?.deadlineMs ?? DEFAULT_DEADLINE_MS
-
-  let response
-  let responseText
-  try {
-    const expiresAt = Date.now() + targetDeadlineMs
-    if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
-      return { ok: false, admitted: false, error: 'expired', bytesWritten: 0 }
-    }
-    const claimed = await claim(target)
-    if (claimed?.ok !== true) {
-      return zeroByteClaimRefusal(claimed)
-    }
-    if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
-      return { ok: false, admitted: false, error: 'expired', bytesWritten: 0 }
-    }
-    const deadlineMs = Number.isFinite(expiresAt)
-      ? Math.min(DEFAULT_DEADLINE_MS, targetDeadlineMs, expiresAt - Date.now())
-      : Math.min(DEFAULT_DEADLINE_MS, targetDeadlineMs)
-    response = await fetch(url, {
-      ...request,
-      signal: AbortSignal.timeout(deadlineMs),
-    })
-    responseText = await response.text()
-  } catch (cause) {
-    if (cause?.name === 'TimeoutError' || cause?.name === 'AbortError') {
-      return { ok: false, error: 'deadline', cause: 'deadline' }
-    }
-    return { ok: false, error: 'transport', cause: cause?.message ?? String(cause) }
-  }
-
-  if (!response.ok) {
-    return {
-      ok: false,
-      admitted: false,
-      status: response.status,
-      error: responseText || `http-${response.status}`,
-    }
-  }
-  let details
-  if (responseText.length > 0) {
-    try {
-      details = JSON.parse(responseText)
-    } catch {
-      return { ok: false, admitted: false, status: response.status, error: 'invalid-admission' }
-    }
-  }
-  if (details?.admitted === null) {
-    return {
-      ok: false,
-      admitted: null,
-      error: 'uncertain',
-      cause: 'admission-unknown',
-      status: response.status,
-    }
-  }
-  return {
-    ok: true,
-    admitted: details?.admitted === undefined ? true : details.admitted === true,
-    status: response.status,
-  }
-}
-
-export async function send(target, text) {
-  return await sendText(target, text)
+  return await sendCurrent(target, text, launch.channel ?? launch)
 }
 
 /**

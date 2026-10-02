@@ -3,23 +3,28 @@ import { setTimeout as wait } from 'node:timers/promises'
 import { promisify } from 'node:util'
 import { cachedAnswers } from '../../hosts/lib/completion.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
-import {
-  sessionAvailable as brokerAvailable,
-  currentSession as brokerSession,
-  send as sendCodex,
-} from '../channels/codex.js'
+import { sessionState as brokerState, send as sendCodex } from '../channels/codex.js'
 import { launchConfiguration, withNativeBridge } from '../channels.js'
 import { runnable } from '../harnesses.js'
 import { roleConfiguration } from '../role-skills.js'
-import { admission, executableFor, recordState } from './shared.js'
+import {
+  admission,
+  executableFor,
+  recordState,
+  SHOWS_ANOTHER,
+  switchedTo,
+  windowText,
+} from './shared.js'
 
 /**
- * Codex, for the new core. Where Codex has its native queue, it runs under
- * ConsensFlow's supervisor (`hosts/codex-session.mjs`): an app-server, a broker
- * that knows the thread the TUI shows and queues messages on it, and the TUI
- * attached to both. The first message is Codex's last argument; the broker
- * names the thread once Codex starts it. A Codex without the queue runs bare
- * and gets its messages pasted, behind whatever its input box holds.
+ * Codex, for the new core. Codex runs under ConsensFlow's supervisor
+ * (`hosts/codex-session.mjs`): an app-server, a broker that knows the thread
+ * the TUI shows and queues messages on it, and the TUI attached to both. The
+ * first message is Codex's last argument; the broker names the thread once
+ * Codex starts it, and again whenever the human starts or resumes another
+ * one in the window (/new, /resume), so the window is followed to it. A
+ * Codex too old for the native queue is refused: nothing could reach its
+ * window.
  */
 const QUESTION_TOOL = [
   '--enable',
@@ -37,6 +42,14 @@ const QUESTION_TOOL = [
  * the PATH the daemon gave the window. Both probed on Codex 0.156.1.
  */
 const WINDOW = ['-c', 'check_for_update_on_startup=false', '-c', 'allow_login_shell=false']
+
+/**
+ * Why a message waits while the broker names no thread or cannot take one: a
+ * refusal there would spend the message's attempts in seconds (an answer to a
+ * Codex worker was lost that way), so it is held.
+ */
+const HOLD =
+  'the Codex window cannot take a message yet: starting, switching conversations or reconnecting'
 
 /** The MCP servers Codex would start, as `codex mcp list --json` names them. */
 async function codexMcpServers(executable, env) {
@@ -81,8 +94,7 @@ export function codexAdapter({
   env,
   harness = 'codex',
   send = sendCodex,
-  currentSession = brokerSession,
-  sessionAvailable = brokerAvailable,
+  sessionState = brokerState,
   mcpServers = codexMcpServers,
   answers = cachedAnswers(),
   discoverEveryMs = 250,
@@ -102,20 +114,18 @@ export function codexAdapter({
       const roleSetup = await roleConfiguration('codex', {
         role,
         env,
+        launch: launchId,
         cwd: directory,
         executable,
         content: instructions,
       })
       // The chief works with the human and keeps the human's connectors.
       const isolation = role === 'chief' ? [] : mcpIsolation(await mcpServers(executable, env))
+      const identity = { kind: harness, model: agent?.model, effort: agent?.effort }
       const runner =
         resume === null
-          ? interactiveStart(
-              { kind: harness, model: agent?.model, effort: agent?.effort },
-              null,
-              message,
-            )
-          : interactiveResume({ kind: harness }, resume, message)
+          ? interactiveStart(identity, null, windowText(message))
+          : interactiveResume(identity, resume, windowText(message))
       // Codex's question tool (request_user_input) is behind a feature still
       // marked under development; the broker answers a member's from the board.
       // The chief has none: it asks the human in plain words in its window.
@@ -138,10 +148,10 @@ export function codexAdapter({
     },
 
     async started({ launch }) {
-      if (launch.nativeSession !== null || launch.channel === null) return {}
+      if (launch.nativeSession !== null) return {}
       const deadline = Date.now() + discoverForMs
       while (Date.now() < deadline) {
-        const thread = await currentSession(launch.channel).catch(() => undefined)
+        const thread = (await sessionState(launch.channel))?.sessionId
         if (typeof thread === 'string') {
           launch.nativeSession = thread
           return { nativeSession: thread }
@@ -151,22 +161,13 @@ export function codexAdapter({
       throw new Error('the Codex broker never named the thread it opened')
     },
 
-    async ready({ launch, pane, host }) {
-      // Held, not failed: a refusal here would spend the message's attempts
-      // in seconds (an answer to a Codex worker was lost that way).
-      if (launch.channel !== null)
-        return (await sessionAvailable(launch.channel))
-          ? true
-          : 'the Codex window cannot take a message yet: starting, resuming or reconnecting'
-      const snapshot = await host.request('pane.snapshot', pane)
-      return snapshot?.ok === true && !snapshot.pasteInFlight
+    async ready({ launch }) {
+      const shown = await sessionState(launch.channel)
+      if (shown?.available !== true) return HOLD
+      return shown.sessionId === launch.nativeSession ? true : SHOWS_ANOTHER
     },
 
     async deliver({ launch, pane, host, text }) {
-      if (launch.channel === null) {
-        const written = await host.request('pane.write_paste', { ...pane, body: text })
-        return admission(written, 'the window refused the paste')
-      }
       const sent = await send(
         {
           launch: launch.channel,
@@ -175,7 +176,7 @@ export function codexAdapter({
           pane: pane.id,
           generation: pane.generation,
         },
-        text,
+        windowText(text),
       )
       return admission(sent, 'the Codex broker refused it', { queued: true })
     },
@@ -184,8 +185,15 @@ export function codexAdapter({
       if (launch.nativeSession === null) {
         return { items: [], settled: false, waiting: null, failed: false, quota: null }
       }
-      const record = await answers('codex', launch.nativeSession, env)
-      return { ...recordState(record), waiting: null }
+      const [record, shown] = await Promise.all([
+        answers('codex', launch.nativeSession, env),
+        sessionState(launch.channel),
+      ])
+      const observed = { ...recordState(record), waiting: null }
+      if (typeof shown?.sessionId !== 'string') return { ...observed, waiting: { reason: HOLD } }
+      return shown.sessionId === launch.nativeSession
+        ? observed
+        : switchedTo(observed, shown.sessionId)
     },
 
     transcript({ launch }) {

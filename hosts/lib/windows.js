@@ -1,5 +1,3 @@
-import { validateKimiEffort } from './presets.js'
-
 /**
  * How each harness's own window opens on a conversation ConsensFlow starts or
  * resumes: the command, its arguments, the environment it needs and the keys
@@ -14,8 +12,6 @@ const STRIPPED_CONTROL_ENV = new Set([
   'CONSENSFLOW_PANE_ID',
   'CONSENSFLOW_LEAD_ID',
   'CONSENSFLOW_LAUNCH',
-  'CF_RESULT_RECEIVER',
-  'CF_RESULT_SIGNAL',
 ])
 
 // Every window carries this marker so ConsensFlow tooling running inside it
@@ -40,7 +36,6 @@ const YOLO = {
   opencode: ['--auto'],
   pi: ['--approve'],
   devin: ['--permission-mode', 'dangerous', '--respect-workspace-trust', 'false'],
-  kimi: ['--auto'],
 }
 
 /** The environment a window runs with: the base plus what it declares, minus what it must not see. */
@@ -60,145 +55,113 @@ export function childEnv(base, { env: envOverrides, dropEnv } = {}) {
 }
 
 /**
- * The harness's OWN interactive command for a conversation we started: the
- * session a run leaves behind is the one each TUI can open, whole history
- * included. That is `codex resume`, not `codex exec resume`. `seed` is an
- * optional first message where the TUI accepts one; OpenCode tasks go through
- * its native API after the window starts, because its `--session` launch
- * ignores `--prompt`. Null when the harness cannot resume, or there is no id.
+ * The harness's OWN interactive window on a conversation: one we start, or
+ * one it already keeps (the session a run leaves behind is the one each TUI
+ * can open, whole history included: `codex resume`, not `codex exec
+ * resume`). Both open on the agent's model and effort with the same flags: a
+ * resumed window without them ran on the harness's own default (Codex on
+ * whatever ~/.codex/config.toml names). `seed` is the first message where
+ * the TUI takes one; OpenCode's go through its native API after the window
+ * starts, because its `--session` launch ignores `--prompt`. Null when the
+ * harness needs an id and has none, or for a kind with no window of its own.
  */
-export function interactiveResume(agent, sessionId, seed) {
-  if (!sessionId) return null
-  const withSeed = (args) => (seed ? [...args, seed] : args)
+function interactiveWindow(agent, sessionId, seed, resume) {
+  const seeded = (args) => (seed ? [...args, seed] : args)
   switch (agent.kind) {
-    case 'devin':
+    case 'claude-code':
+      if (!sessionId) return null
       return {
-        command: 'devin',
-        args: ['--resume', sessionId, ...YOLO.devin],
-        ...(seed ? { prompt: seed } : {}),
+        command: 'claude',
+        args: seeded([
+          resume ? '--resume' : '--session-id',
+          sessionId,
+          ...modelAndEffort(agent),
+          ...YOLO.claude,
+        ]),
+        env: { ...CHILD_ENV },
+        dropEnv: interactiveGuards('claude-code'),
+      }
+    case 'pi':
+      // `--session-id` creates the session the first time and resumes it after.
+      if (!sessionId) return null
+      return {
+        command: 'pi',
+        args: seeded(['--session-id', sessionId, ...modelAndEffort(agent), ...YOLO.pi]),
         env: { ...CHILD_ENV },
         dropEnv: [],
       }
     case 'codex':
     case 'image':
+      // `codex [PROMPT]` opens the real window seeded with that prompt; it
+      // announces no id, so the broker names the thread once Codex starts it.
       return {
         command: 'codex',
-        args: withSeed(['resume', sessionId, ...YOLO.codex]),
+        args: seeded([
+          ...(resume ? ['resume', sessionId] : []),
+          ...modelAndEffort(agent),
+          ...YOLO.codex,
+        ]),
         env: { ...CHILD_ENV },
         dropEnv: interactiveGuards('codex'),
       }
-    case 'claude-code': {
-      const args = ['--resume', sessionId]
-      if (agent.model) args.push('--model', agent.model)
-      args.push(...YOLO.claude)
+    case 'devin':
       return {
-        command: 'claude',
-        args: withSeed(args),
+        command: 'devin',
+        args: [...(resume ? ['--resume', sessionId] : []), ...modelAndEffort(agent), ...YOLO.devin],
+        ...(seed ? { prompt: seed } : {}),
         env: { ...CHILD_ENV },
-        dropEnv: interactiveGuards('claude-code'),
-      }
-    }
-    case 'pi': {
-      const args = ['--session-id', sessionId]
-      if (agent.model) args.push('--model', agent.model)
-      args.push(...YOLO.pi)
-      return { command: 'pi', args: withSeed(args), env: { ...CHILD_ENV }, dropEnv: [] }
-    }
-    case 'opencode': {
-      const args = ['--session', sessionId, ...YOLO.opencode]
-      return { command: 'opencode', args, env: { ...CHILD_ENV }, dropEnv: [] }
-    }
-    case 'kimi': {
-      validateKimiEffort(agent)
-      // `-S <id>` without `-p` IS the interactive window on that session. No
-      // flag seeds its first message, so a follow-up sent this way arrives
-      // as a pane the user types into.
-      return {
-        command: 'kimi',
-        args: ['-S', sessionId, ...YOLO.kimi],
-        env: {
-          ...CHILD_ENV,
-          ...(agent.effort ? { KIMI_MODEL_THINKING_EFFORT: agent.effort } : {}),
-        },
         dropEnv: [],
       }
-    }
+    case 'opencode':
+      // OpenCode keeps the model and its variant with the session, and they
+      // are read back for a resumed one: only a new session is given them.
+      return {
+        command: 'opencode',
+        args: [
+          ...(sessionId ? ['--session', sessionId] : []),
+          ...(resume ? [] : modelAndEffort(agent)),
+          ...YOLO.opencode,
+        ],
+        env: { ...CHILD_ENV },
+        dropEnv: [],
+      }
     default:
       return null
   }
 }
 
 /**
- * The harness's OWN window on a conversation that does not exist yet. Claude
- * and Pi take the id from us (`--session-id`, minted by the caller); OpenCode
- * opens the empty session its native API created; Codex opens on a positional
- * seed and its own metadata identifies the thread afterwards. Kimi cannot
- * seed a window and an image agent has none: null.
+ * The flags that put a window on its agent's model and effort. An image agent
+ * is Codex on its own default model: its image tool draws, whatever reasoning
+ * model answers.
  */
-export function interactiveStart(agent, sessionId, seed) {
-  switch (agent.kind) {
-    case 'devin':
-      return {
-        command: 'devin',
-        args: [
-          // Devin writes the level into the id (claude-opus-5-5-max): an agent
-          // names the family and its effort, joined here.
-          ...(agent.model && agent.model !== 'default'
-            ? ['--model', agent.effort ? `${agent.model}-${agent.effort}` : agent.model]
-            : []),
-          ...YOLO.devin,
-        ],
-        ...(seed ? { prompt: seed } : {}),
-        env: { ...CHILD_ENV },
-        dropEnv: [],
-      }
-    case 'claude-code': {
-      if (!sessionId) return null
-      const args = ['--session-id', sessionId]
-      if (agent.model) args.push('--model', agent.model)
-      if (agent.effort) args.push('--effort', agent.effort)
-      args.push(...YOLO.claude)
-      if (seed) args.push(seed)
-      return {
-        command: 'claude',
-        args,
-        env: { ...CHILD_ENV },
-        dropEnv: interactiveGuards('claude-code'),
-      }
-    }
-    case 'pi': {
-      if (!sessionId) return null
-      const args = ['--session-id', sessionId]
-      if (agent.model) args.push('--model', agent.model)
-      if (agent.thinking) args.push('--thinking', agent.thinking)
-      args.push(...YOLO.pi)
-      if (seed) args.push(seed)
-      return { command: 'pi', args, env: { ...CHILD_ENV }, dropEnv: [] }
-    }
-    case 'opencode': {
-      const args = []
-      if (sessionId) args.push('--session', sessionId)
-      if (agent.model) args.push('--model', agent.model)
-      args.push(...YOLO.opencode)
-      if (seed && !sessionId) args.push('--prompt', seed)
-      return { command: 'opencode', args, env: { ...CHILD_ENV }, dropEnv: [] }
-    }
+function modelAndEffort({ kind, model, effort, thinking }) {
+  switch (kind) {
+    case 'claude-code':
+      return [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])]
     case 'codex':
-    case 'image': {
-      // `codex [PROMPT]` opens the real window seeded with that prompt; it
-      // announces no id, so the caller finds the thread in Codex's own store.
-      // An image agent is Codex too, on its own default model: its image
-      // tool draws, whatever reasoning model answers.
-      const args = []
-      if (agent.kind === 'codex' && agent.model) args.push('--model', agent.model)
-      if (agent.kind === 'codex' && agent.effort) {
-        args.push('-c', `model_reasoning_effort="${agent.effort}"`)
-      }
-      args.push(...YOLO.codex)
-      if (seed) args.push(seed)
-      return { command: 'codex', args, env: { ...CHILD_ENV }, dropEnv: interactiveGuards('codex') }
-    }
+      return [
+        ...(model ? ['--model', model] : []),
+        ...(effort ? ['-c', `model_reasoning_effort="${effort}"`] : []),
+      ]
+    case 'pi':
+      return [...(model ? ['--model', model] : []), ...(thinking ? ['--thinking', thinking] : [])]
+    case 'devin':
+      // Devin writes the level into the id (claude-opus-5-5-max): an agent
+      // names the family and its effort, joined here. `default` is Devin's
+      // own setting.
+      return model && model !== 'default' ? ['--model', effort ? `${model}-${effort}` : model] : []
+    case 'opencode':
+      return model ? ['--model', model] : []
     default:
-      return null
+      return []
   }
 }
+
+/** A window on a conversation that does not exist yet (Claude and Pi take the id from us). */
+export const interactiveStart = (agent, sessionId, seed) =>
+  interactiveWindow(agent, sessionId, seed, false)
+
+/** A window on a conversation the harness already keeps, by the id it recorded. */
+export const interactiveResume = (agent, sessionId, seed) =>
+  sessionId ? interactiveWindow(agent, sessionId, seed, true) : null

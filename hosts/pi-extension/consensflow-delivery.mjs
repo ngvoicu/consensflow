@@ -1,7 +1,6 @@
 import { watch } from 'node:fs'
 import { access, mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createReceiver } from '../lib/receiver.js'
 
 const MESSAGE_ID = /^m-[a-f0-9]{32}$/
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/
@@ -85,6 +84,10 @@ function frontierOf(ctx) {
  * `settled/<launchId>.json` is app-owned evidence with `{launchId, sessionId,
  * frontier: {id}, settledAt}`. It is written at `agent_settled` or when an idle
  * TUI restores a completed assistant leaf, and removed at new work.
+ * `settled/<launchId>.shown.json` says `{launchId, sessionId}`: the
+ * conversation the window shows, written whenever this extension starts on
+ * one (Pi starts it anew at every /new, /resume or /fork), so ConsensFlow
+ * follows the window there.
  * A delivery record carries its own absolute `expiresAt`;
  * this extension never derives a second timeout from launch configuration.
  * Before a send, false means zero-byte refusal. After a send, absent
@@ -100,7 +103,6 @@ export function createDeliveryExtension(
     settled,
     expired,
     launchId,
-    receiver,
     logger = console,
     // How the inbox is watched, and how often it is read anyway: on macOS a
     // watch event can be lost under load, and a message nobody reads never
@@ -120,7 +122,6 @@ export function createDeliveryExtension(
   // must never reach the model again; a new process is a new launch, whose
   // inbox refuses the old launch's records anyway.
   const settledIds = new Set()
-  let resultReceiver
 
   const logError = (...args) => logger?.error?.(...args)
   const evidenceFile =
@@ -130,6 +131,7 @@ export function createDeliveryExtension(
   // A turn on: Pi saves nothing until an answer is complete, so a first
   // request that hangs would leave ConsensFlow nothing to read but this.
   const workingFile = evidenceFile === null ? null : join(settled, `${launchId}.working.json`)
+  const shownFile = evidenceFile === null ? null : join(settled, `${launchId}.shown.json`)
 
   const uniquePath = async (directory, file) => {
     await mkdir(directory, { recursive: true })
@@ -170,6 +172,19 @@ export function createDeliveryExtension(
       await rename(`${workingFile}.tmp`, workingFile)
     } catch (cause) {
       logError(`could not record a working turn: ${cause?.message ?? String(cause)}`)
+    }
+  }
+
+  const writeShown = async () => {
+    if (shownFile === null) return
+    const sessionId = sessionIdOf(context)
+    if (sessionId === null) return
+    try {
+      await mkdir(settled, { recursive: true })
+      await writeFile(`${shownFile}.tmp`, `${JSON.stringify({ launchId, sessionId })}\n`, 'utf8')
+      await rename(`${shownFile}.tmp`, shownFile)
+    } catch (cause) {
+      logError(`could not record the conversation shown: ${cause?.message ?? String(cause)}`)
     }
   }
 
@@ -359,35 +374,7 @@ export function createDeliveryExtension(
     context = ctx
     watcher?.close()
     clearInterval(poller)
-    if (receiver && !resultReceiver) {
-      resultReceiver = createReceiver({
-        ...receiver,
-        session: () =>
-          context?.mode === 'tui' && context.hasUI === true ? sessionIdOf(context) : null,
-        ready: () => nativeTuiState(context, sessionIdOf(context)).ready,
-        insert: (claim) => {
-          if (!nativeTuiState(context, claim.receiver.session).ready)
-            return {
-              admitted: false,
-              bytesWritten: 0,
-              reason: 'native session or readiness changed',
-            }
-          pi.sendMessage(
-            {
-              customType: 'consensflow-worker-result',
-              content: claim.text,
-              display: true,
-              details: { resultId: claim.result, claimId: claim.id },
-            },
-            { triggerTurn: true, deliverAs: 'followUp' },
-          )
-          return { admitted: true }
-        },
-        onError: (error) => logError(`result receiver: ${error.message}`),
-      })
-      resultReceiver.start()
-      await resultReceiver.poll()
-    }
+    await writeShown()
     await invalidateSettlement()
     const leaf = ctx.sessionManager?.getLeafEntry?.()
     if (
@@ -426,16 +413,9 @@ export function createDeliveryExtension(
     }
     pending.clear()
     context = undefined
-    await resultReceiver?.stop().catch((error) => logError(`result receiver: ${error.message}`))
-    resultReceiver = undefined
   })
 
-  return {
-    consume,
-    get receiver() {
-      return resultReceiver
-    },
-  }
+  return { consume }
 }
 
 // This is the only environment-reading entry point. The launch producer
@@ -448,8 +428,5 @@ export default function consensflowDelivery(pi) {
     settled: process.env.CF_DELIVERY_SETTLED,
     expired: process.env.CF_DELIVERY_EXPIRED,
     launchId: process.env.CF_DELIVERY_LAUNCH_ID,
-    receiver: process.env.CF_RESULT_RECEIVER
-      ? { config: process.env.CF_RESULT_RECEIVER }
-      : undefined,
   })
 }

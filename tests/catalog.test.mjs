@@ -7,7 +7,7 @@ describe('every tool ships a list of ready-made agents', () => {
   it('covers every harness, each with a real list (image has one)', () => {
     assert.deepEqual(Object.keys(CATALOG).sort(), [...HARNESSES].sort())
     for (const [harness, entries] of Object.entries(CATALOG)) {
-      const least = ['image', 'kimi', 'devin'].includes(harness) ? 1 : 3
+      const least = ['image', 'devin'].includes(harness) ? 1 : 3
       assert.ok(entries.length >= least, `${harness} needs a real list`)
     }
   })
@@ -227,21 +227,10 @@ describe('every tool ships a list of ready-made agents', () => {
   })
 })
 
-it('Kimi is K3-only and names its supported effort instead of hiding it', () => {
-  assert.deepEqual(
-    CATALOG.kimi.map((entry) => entry.name),
-    ['ilmarinen'],
-  )
-  const entry = catalogEntry('ilmarinen')
-  assert.equal(entry.model, 'moonshot-ai/kimi-k3')
-  assert.equal(entry.effort, 'max')
-  assert.deepEqual(EFFORTS.kimi, ['low', 'high', 'max'])
-  for (const name of ['seppo', 'ahti']) assert.equal(catalogEntry(name), undefined)
-  assert.ok(
-    Object.values(CATALOG)
-      .flat()
-      .every((entry) => !/kimi-k2\.7/.test(entry.model)),
-  )
+it('ships nothing for Kimi Code, which ConsensFlow does not run', () => {
+  assert.equal(CATALOG.kimi, undefined)
+  assert.equal(EFFORTS.kimi, undefined)
+  assert.equal(catalogEntry('ilmarinen'), undefined)
 })
 
 describe('catalog presentation follows actual model and effort', () => {
@@ -292,7 +281,7 @@ it('ships all compatible low/medium choices with stable identities and Pi OpenRo
       assert.equal(entry.effort, effort)
     }
   }
-  assert.equal(Object.values(CATALOG).flat().length, 119)
+  assert.equal(Object.values(CATALOG).flat().length, 118)
   for (const name of ['orpheus', 'linus', 'erato', 'kronos', 'atlas']) {
     assert.match(catalogEntry(name).model, /^openrouter\/anthropic\//)
     assert.equal(catalogEntry(name).profile.routeLabel, 'OpenRouter · API')
@@ -356,7 +345,7 @@ it('assigns four work tiers by model and effort across routes, without agent-nam
     ['taygete', 'complex'],
     ['vidar', 'complex'],
     ['clio', 'complex'],
-    ['ilmarinen', 'complex'],
+    ['endymion', 'complex'],
     ['apollo', 'complex'],
     ['kronos', 'complex'],
     // Sol and Sonnet at max are complex work (Gabriel, 2026-09-30).

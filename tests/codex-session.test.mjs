@@ -96,71 +96,6 @@ async function fixture(t, options = {}) {
   return { broker, requests, pending, sockets, wait, connect, read, deliver, respond }
 }
 
-it('Codex receiver pulls full bodies into the selected main, holds busy, and fences a concurrent new', async (t) => {
-  let registered,
-    next = 0,
-    switchOnClaim = null
-  const bodies = [],
-    operations = []
-  const f = await fixture(t, {
-    receiver: {
-      request: async (op, body) => {
-        operations.push(op)
-        if (op === 'state') return registered ?? null
-        if (op === 'register') {
-          registered = { session: body.session, lease: `lease-${++next}` }
-          return registered
-        }
-        if (op === 'claim') {
-          if (switchOnClaim) await switchOnClaim()
-          return bodies.length
-            ? { id: `c-${next}`, result: 'd-1', receiver: { ...registered }, text: bodies.shift() }
-            : null
-        }
-        return {}
-      },
-    },
-  })
-  assert.ok(f.broker.receiver)
-  const tui = await f.connect()
-  const select = async (id, session) => {
-    tui.send(
-      JSON.stringify({
-        id,
-        method: 'thread/resume',
-        params: { threadId: session, runtimeWorkspaceRoots: [] },
-      }),
-    )
-    await f.respond('thread/resume', {
-      thread: { id: session, status: { type: 'idle' }, turns: [] },
-    })
-    for (let attempt = 0; (await f.read()).sessionId !== session; attempt++) {
-      assert.ok(attempt < 100)
-      await new Promise((resolve) => setTimeout(resolve, 5))
-    }
-  }
-  await select('first', A)
-  bodies.push('complete\n'.repeat(1000))
-  const pulling = f.broker.receiver.poll()
-  const native = await f.respond('turn/start', { turn: { id: 'turn-one' } })
-  await pulling
-  assert.equal(native.params.threadId, A)
-  assert.deepEqual(native.params.toolOutput, {
-    name: 'consensflow_inbox',
-    namespace: null,
-    output: 'complete\n'.repeat(1000),
-  })
-  assert.deepEqual(native.params.input, [])
-  bodies.push('held while busy')
-  await f.broker.receiver.poll()
-  assert.equal(bodies.length, 1)
-  await select('second', B)
-  switchOnClaim = () => select('resume', A)
-  await f.broker.receiver.poll()
-  assert.equal(f.requests.filter((r) => r.method === 'turn/start').length, 1)
-  assert.equal(operations.at(-1), 'release')
-})
-
 it('follows successful main new/resume while ignoring title threads, child focus and picker connections', async (t) => {
   const f = await fixture(t)
   const tui = await f.connect()
@@ -430,7 +365,7 @@ it('keeps native TUI arguments while explicitly forwarding backend model, effort
   })
 })
 
-it('launches the bundled supervisor for owned panes without changing legacy Codex invocations', async () => {
+it('launches the bundled supervisor with the Codex invocation it supervises', async () => {
   const { withNativeBridge } = await import('../src/channels.js')
   const invocation = {
     command: '/native/codex',
@@ -451,7 +386,6 @@ it('launches the bundled supervisor for owned panes without changing legacy Code
   assert.deepEqual(wrapped.args.slice(1), ['/native/codex', 'resume', A])
   assert.deepEqual(wrapped.env, invocation.env)
   assert.deepEqual(wrapped.dropEnv, invocation.dropEnv)
-  assert.deepEqual(withNativeBridge(invocation, { channel: null }, process.execPath), invocation)
 })
 
 it('keeps native Codex sockets private and inside ConsensFlow home', {

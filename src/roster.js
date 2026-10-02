@@ -5,16 +5,13 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import {
-  AGENT_PRESETS,
-  agentProfile,
-  validateKimiEffort,
-  validateWorkTier,
-} from '../hosts/lib/presets.js'
+import { AGENT_PRESETS, agentProfile, validateWorkTier } from '../hosts/lib/presets.js'
 
 /**
  * The roster: every catalog agent, exactly as the catalog has it, and the
@@ -33,7 +30,7 @@ import {
 // agent. There is no CLI behind it — image generation is reached through the Codex
 // login — but the roster, the catalog and `cf run` treat it like any other, so
 // @pygmalion works wherever the rest do.
-export const HARNESSES = ['claude', 'codex', 'pi', 'opencode', 'kimi', 'devin', 'image']
+export const HARNESSES = ['claude', 'codex', 'pi', 'opencode', 'devin', 'image']
 
 const NAME_PATTERN = /^[a-z][a-z0-9-]*$/
 const KIND_TO_HARNESS = {
@@ -41,7 +38,6 @@ const KIND_TO_HARNESS = {
   codex: 'codex',
   pi: 'pi',
   opencode: 'opencode',
-  kimi: 'kimi',
   devin: 'devin',
   image: 'image',
 }
@@ -59,7 +55,6 @@ const HARNESS_TO_KIND = {
   codex: 'codex',
   pi: 'pi',
   opencode: 'opencode',
-  kimi: 'kimi',
   devin: 'devin',
   image: 'image',
 }
@@ -138,16 +133,38 @@ function legacyRosterPath(env) {
   return join(rosterHome(env), 'participants.json')
 }
 
+/**
+ * The file as the human left it, or undefined when there is none. Only a
+ * missing file is an empty roster: one that cannot be read or parsed (a hand
+ * edit's trailing comma) is said to whoever reads it, and nothing is saved
+ * over it, since the next write would have erased every agent in it.
+ */
 function readRoster(env) {
   for (const path of [rosterPath(env), legacyRosterPath(env)]) {
+    let text
     try {
-      return JSON.parse(readFileSync(path, 'utf8'))
-    } catch {
-      // Missing or unreadable: try the next spelling.
+      text = readFileSync(path, 'utf8')
+    } catch (error) {
+      if (error.code === 'ENOENT') continue
+      throw unreadable(path, `cannot be read (${error.code ?? error.message})`)
     }
+    let parsed
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      throw unreadable(path, 'is not valid JSON')
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
+      throw unreadable(path, 'is not an agents file')
+    return parsed
   }
   return undefined
 }
+
+const unreadable = (path, why) =>
+  new Error(
+    `Your agents file ${path} ${why}: fix it or move it away. ConsensFlow left it as it is.`,
+  )
 
 function loadDocument(env) {
   const parsed = readRoster(env)
@@ -166,11 +183,19 @@ function loadDocument(env) {
 /** Display data older builds wrote into the file; recomputed on read now, never stored again. */
 const STALE_FIELDS = ['skillsPolicy', 'skillPaths', 'skills', 'skillPath', 'profile']
 
+/** Written whole or not at all: a write cut short (a crash, a full disk) leaves the previous file. */
 function saveDocument(document, env) {
   for (const row of document.agents) for (const field of STALE_FIELDS) delete row[field]
   const path = rosterPath(env)
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`)
+  const temporary = `${path}.${process.pid}.tmp`
+  try {
+    writeFileSync(temporary, `${JSON.stringify(document, null, 2)}\n`)
+    renameSync(temporary, path)
+  } catch (error) {
+    rmSync(temporary, { force: true })
+    throw error
+  }
 }
 
 const CATALOG_BY_PRESET = new Map(AGENT_PRESETS.map((preset) => [preset.preset, preset]))
@@ -323,7 +348,6 @@ function validateAdd(input) {
 /** An agent defined by hand: the catalog's agents are there already. */
 export function addAgent(input, env) {
   validateAdd(input)
-  validateKimiEffort(input)
   validateWorkTier(input.workTier)
   const document = loadDocument(env)
   if (document.agents.some((row) => row.id === input.name)) {
@@ -368,7 +392,6 @@ function applyPatch(row, patch) {
     // Never leave a stale value in the key this kind does not read.
     delete row[key === 'thinking' ? 'effort' : 'thinking']
   }
-  validateKimiEffort(row)
 }
 
 function refuseEffortEdit(name, kind) {

@@ -282,6 +282,25 @@ describe('the page protocol of the new core', () => {
     })
   })
 
+  it('loads the board while the agents file cannot be read, marking no agent as gone', async () => {
+    await withPage(async ({ operations, env }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+      })
+      addAgent({ name: 'mine', harness: 'codex', model: 'gpt-6-astra', effort: 'low' }, env)
+      await operations['member.add']({ project: project.id, agent: 'mine' })
+      removeAgent('mine', env)
+      // A hand edit the roster cannot parse: the agent is unknown, not gone.
+      await writeFile(path.join(env.CONSENSFLOW_HOME, 'agents.json'), '{ "agents": [,] }')
+      const { board } = await operations['board.get']({ project: project.id })
+      assert.deepEqual(
+        board.lanes.filter((lane) => lane.agentMissing).map((lane) => lane.participant.handle),
+        [],
+      )
+    })
+  })
+
   it('takes a member off the staff through the dispatcher, which closes its window', async () => {
     await withPage(async ({ ledger, operations, removed, kicks }) => {
       const { project } = await operations['project.open']({

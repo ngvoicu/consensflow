@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { createDeliveryExtension } from '../hosts/pi-extension/consensflow-delivery.mjs'
-import { send } from '../src/channels.js'
+import { send } from '../src/channels/pi.js'
 
 function fakePi() {
   const handlers = new Map()
@@ -441,6 +441,26 @@ describe('consensflow Pi extension', () => {
     })
   }
 
+  it('says which conversation the window shows, at start and after a /new or /resume', async () => {
+    const s = await setup(null)
+    try {
+      assert.deepEqual(await waitFor(join(s.settled, 'launch-pi-test.shown.json')), {
+        launchId: 'launch-pi-test',
+        sessionId: 'native-pi-session',
+      })
+      // Pi opens the other conversation in a new runtime of the extension.
+      await s.pi.handlers.get('session_shutdown')({ reason: 'new' })
+      s.ctx.sessionManager.getSessionId = () => 'new-pi-session'
+      await s.pi.handlers.get('session_start')({ reason: 'new' }, s.ctx)
+      assert.deepEqual(
+        JSON.parse(await readFile(join(s.settled, 'launch-pi-test.shown.json'), 'utf8')),
+        { launchId: 'launch-pi-test', sessionId: 'new-pi-session' },
+      )
+    } finally {
+      await s.close()
+    }
+  })
+
   it('writes settlement evidence tied to the launch, session and leaf, then invalidates it on new work', async () => {
     const s = await setup({
       ...envelopeRecord,
@@ -482,7 +502,6 @@ it('a Pi session switch at admission reports a retryable zero-byte refusal', asy
   const s = await setup(null)
   try {
     const result = await send(
-      'pi-extension',
       {
         session: 'native-pi-session',
         pane: 'chief-pane',

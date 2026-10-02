@@ -8,7 +8,7 @@ import { openLedger } from '../../src/ledger/index.js'
 import { addAgent, listAgents } from '../../src/roster.js'
 import { tempEnv } from '../../tests/helpers.mjs'
 
-const INSTALLED = ['claude', 'codex', 'pi', 'opencode', 'kimi', 'devin']
+const INSTALLED = ['claude', 'codex', 'pi', 'opencode', 'devin']
 
 /**
  * The agents screens the way the daemon serves them: Agents, one list of the
@@ -94,7 +94,7 @@ for (const [harness, label] of [
         page.getByText('Role skills included in ConsensFlow', { exact: false }),
       ).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'Update skills', exact: true })).toHaveCount(0)
-      await expect(page.locator('.host')).toHaveCount(6)
+      await expect(page.locator('.host')).toHaveCount(5)
       await expect(page.locator('.host').filter({ hasText: 'claude' })).toContainText(
         'Not installed',
       )
@@ -120,9 +120,9 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
   page.on('request', (request) => requests.push(new URL(request.url()).pathname))
   try {
     await page.goto(`${server.url}/?token=${server.token}`)
-    await expect(page.locator('#agents-count')).toHaveText('119 of 119 shown')
+    await expect(page.locator('#agents-count')).toHaveText('118 of 118 shown')
     await expect(page.locator('#lede')).toHaveText(
-      '119 agents, the catalog’s and your own; a project’s staff is picked from them.',
+      '118 agents, the catalog’s and your own; a project’s staff is picked from them.',
     )
     await expect(page.locator('#agents .offer')).toHaveCount(0)
     await expect(page.locator('#agents').getByRole('button', { name: /^Add/ })).toHaveCount(0)
@@ -157,7 +157,7 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
     expect(listAgents(t.env).find((a) => a.name === 'custom').workTier).toBe('complex')
     await expect(form.getByLabel('Work tier')).toHaveValue('auto')
     await expect(page.locator('#lede')).toContainText('1 is yours')
-    await expect(page.locator('#agents-count')).toHaveText('120 of 120 shown')
+    await expect(page.locator('#agents-count')).toHaveText('119 of 119 shown')
     // A catalog name is not yours to define again.
     await form.locator('[name="name"]').fill('gefjon')
     await form.locator('[name="harness"]').selectOption('claude')
@@ -272,7 +272,7 @@ test('Harnesses reports a failed initial check and allows retry', async ({ page 
     await expect(page.getByRole('status')).toContainText('Harness check failed')
     fail = false
     await page.getByRole('button', { name: 'Check all harnesses' }).click()
-    await expect(page.locator('.host')).toHaveCount(6)
+    await expect(page.locator('.host')).toHaveCount(5)
     await expect(page.getByRole('status')).toBeEmpty()
   } finally {
     await server.close()
@@ -287,17 +287,15 @@ test('Harnesses says how each one was installed and updates it from a button', a
     id: 'codex',
     path: '/opt/homebrew/Caskroom/codex/0.1/bin/codex',
     installed: true,
-    chief: true,
     checkedAt: Date.now(),
     version: { state: 'checked', value: version },
     distribution: 'Homebrew',
     update,
   })
-  const others = ['claude', 'opencode', 'pi', 'kimi', 'devin'].map((id) => ({
+  const others = ['claude', 'opencode', 'pi', 'devin'].map((id) => ({
     id,
     path: null,
     installed: false,
-    chief: id !== 'kimi',
     checkedAt: Date.now(),
     version: { state: 'not-installed' },
     update: { state: 'not-checked' },
@@ -338,7 +336,7 @@ test('Harnesses says how each one was installed and updates it from a button', a
     await expect(codex).toContainText('Version 0.2.0, up to date')
     await expect(codex.getByRole('button', { name: /^Update to/ })).toHaveCount(0)
     expect(asked).toEqual({ id: 'codex' })
-    await expect(page.locator('.host').nth(5)).not.toContainText('next prompt')
+    await expect(page.locator('.host').nth(4)).not.toContainText('next prompt')
   } finally {
     await server.close()
     t.cleanup()
@@ -389,54 +387,6 @@ async function refreshAgents(page) {
     page.evaluate(() => window.postMessage('consensflow:refresh-agents', location.origin)),
   ])
 }
-
-test('Kimi K3 effort follows the catalog until edited, and edits are validated', async ({
-  page,
-}) => {
-  const fixture = await catalogPage(
-    page,
-    [
-      { name: 'low-kimi', harness: 'kimi', model: 'moonshot-ai/kimi-k3', effort: 'low' },
-      { name: 'high-kimi', harness: 'kimi', model: 'moonshot-ai/kimi-k3', effort: 'high' },
-    ],
-    null,
-  )
-  const { second } = fixture
-  try {
-    await page.getByRole('searchbox').fill('Kimi')
-    // The catalog's Kimi agent sits with the other K3 max entries.
-    await expect(member(page, 'ilmarinen').locator('..').getByRole('heading')).toHaveText(
-      'Kimi K3 · Max · 3',
-    )
-    await expect(page.locator('#agents')).not.toContainText(/K2\.7|seppo|ahti/)
-    await fixture.saved(second)
-    await second.getByRole('searchbox').fill('Kimi')
-    await expect(second.locator('#agents').getByRole('heading')).toHaveText([
-      'Kimi K3 · High · 1',
-      'Kimi K3 · Low · 1',
-    ])
-    expect(listAgents(fixture.t.env).find((a) => a.name === 'ilmarinen').effort).toBe('max')
-    await expect(member(page, 'ilmarinen').getByRole('button')).toHaveCount(0)
-    const mine = member(second, 'low-kimi')
-    await mine.getByRole('button', { name: 'Edit', exact: true }).click()
-    await mine.locator('input[name=effort]').fill('high')
-    await mine.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(mine.locator('form')).toHaveCount(0)
-    expect(listAgents(fixture.t.env).find((a) => a.name === 'low-kimi').effort).toBe('high')
-    await mine.getByRole('button', { name: 'Edit', exact: true }).click()
-    await mine.locator('input[name=effort]').fill('medium')
-    await mine.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(second.getByRole('status')).toContainText('low, high or max')
-    expect(listAgents(fixture.t.env).find((a) => a.name === 'low-kimi').effort).toBe('high')
-    await mine.locator('input[name=effort]').fill('')
-    await mine.getByRole('button', { name: 'Save', exact: true }).click()
-    expect(listAgents(fixture.t.env).find((a) => a.name === 'low-kimi').effort).toBeUndefined()
-    await second.locator('#add [name=harness]').selectOption('kimi')
-    await expect(second.locator('#effort-options option')).toHaveText(['low', 'high', 'max'])
-  } finally {
-    await fixture.close()
-  }
-})
 
 test('all browsing modes keep descending effort order, saved agents among the catalog entries of their model', async ({
   page,
@@ -669,7 +619,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     { name: 'quick-one', harness: 'pi', model: 'openai-codex/gpt-6-astra', effort: 'low' },
     { name: 'custom', harness: 'claude', model: '<custom-model>', effort: 'unusual' },
     { name: 'draw', harness: 'image', model: 'gpt-image-2' },
-    { name: 'default-one', harness: 'kimi', model: 'moonshot-ai/kimi-k3' },
+    { name: 'default-one', harness: 'claude', model: 'claude-opus-5-5' },
     { name: 'off-one', harness: 'codex', model: 'gpt-6-astra', effort: 'off' },
     { name: 'minimal-one', harness: 'codex', model: 'gpt-6-astra', effort: 'minimal' },
   ])
@@ -689,13 +639,13 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
         'Work tier',
       ])
       await expect(screen.getByRole('heading', { level: 3 })).toHaveCount(0)
-      await expect(screen.locator('#agents-count')).toHaveText('127 of 127 shown')
+      await expect(screen.locator('#agents-count')).toHaveText('126 of 126 shown')
     }
     await fixture.saved(own)
     await expect(own.locator('#agents-count')).toHaveText('8 of 8 shown')
     await search.fill('Astra')
     await expect(own.locator('#agents-count')).toHaveText('5 of 8 shown')
-    await expect(page.locator('#agents-count')).toHaveText('127 of 127 shown')
+    await expect(page.locator('#agents-count')).toHaveText('126 of 126 shown')
     await expect(own.locator('.callsign')).toHaveCount(5)
     await group.selectOption('model-reasoning')
     await expect(own.getByRole('heading', { level: 3 })).toHaveCount(4)
@@ -704,7 +654,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     ).toBeVisible()
     await page.getByRole('searchbox').fill('Astra')
     await page.getByLabel('Group by').selectOption('model-reasoning')
-    await expect(page.locator('#agents-count')).toHaveText('25 of 127 shown')
+    await expect(page.locator('#agents-count')).toHaveText('25 of 126 shown')
     await expect(page.getByRole('heading', { level: 3 })).toHaveText([
       'GPT-6 Astra · Max · 4',
       'GPT-6 Astra · Xhigh · 6',
@@ -734,7 +684,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     await expect(own.locator('.callsign')).toHaveCount(5)
     await search.fill('OpenRouter')
     await expect(own.locator('#agents')).toContainText('No agents match')
-    await expect(page.locator('#agents-count')).toHaveText('25 of 127 shown')
+    await expect(page.locator('#agents-count')).toHaveText('25 of 126 shown')
     await own.getByRole('button', { name: 'Clear filters' }).click()
     await expect(search).toHaveValue('')
     await expect(group).toHaveValue('model-reasoning')
@@ -745,10 +695,9 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     await expect(page.getByLabel('Group by')).toHaveValue('model-reasoning')
     await group.selectOption('harness')
     await expect(own.getByRole('heading', { level: 3 })).toHaveText([
-      'Claude Code · 1',
+      'Claude Code · 2',
       'Codex · 4',
       'Pi · 2',
-      'Kimi · 1',
     ])
     await page.getByLabel('Group by').selectOption('harness')
     await expect(page.getByRole('heading', { level: 3 })).toHaveText([
@@ -768,13 +717,13 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
       'GPT-6 Astra · Minimal · 1',
       'GPT-6 Astra · Low · 1',
       'GPT-6 Astra · Xhigh · 2',
-      'Kimi K3 · Kimi setting · 1',
+      'Claude Opus 5.5 · Default · 1',
       'Codex Images · Not applicable · 1',
       '<custom-model> · unusual · 1',
     ]) {
       await expect(own.getByRole('heading', { name, exact: true })).toBeVisible()
     }
-    await expect(page.locator('#agents-count')).toHaveText('127 of 127 shown')
+    await expect(page.locator('#agents-count')).toHaveText('126 of 126 shown')
     await expect(member(page, 'astraeus')).toBeVisible()
     // No description of a model anywhere: its tier and scores say it all.
     await expect(page.locator('#agents')).not.toContainText('Good for')

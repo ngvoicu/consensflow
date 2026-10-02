@@ -1,36 +1,10 @@
-import { execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { createServer } from 'node:net'
-import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
-import { send as sendClaude } from './channels/claude-peer.js'
-import { send as sendCodex } from './channels/codex.js'
-import { send as sendDevin } from './channels/devin.js'
-import { DEFAULT_DEADLINE_MS, send as sendOpenCode } from './channels/opencode.js'
-import { send as sendPi } from './channels/pi.js'
-import { prepareClaudeSettings } from './claude-install.js'
-import { prepareDevinIntegration } from './devin-install.js'
-import { runnable } from './harnesses.js'
+import { DEFAULT_DEADLINE_MS } from './channels/opencode.js'
+import { probeExecutable } from './harnesses.js'
 import { configRoot } from './roster.js'
-
-const PROBES = Object.freeze({
-  'claude-code': Object.freeze({
-    channel: 'claude-peer',
-    probe: 'P17-ClaudePeer',
-    date: '2026-09-09',
-  }),
-  codex: Object.freeze({ channel: 'codex-queue', probe: 'P14-Codex', date: '2026-09-08' }),
-  opencode: Object.freeze({ channel: 'opencode-server', probe: 'P5', date: '2026-09-07' }),
-  pi: Object.freeze({ channel: 'pi-extension', probe: 'P6', date: '2026-09-07' }),
-  devin: Object.freeze({ channel: 'devin-tui', probe: 'Devin-native-TUI', date: '2026-09-12' }),
-})
-
-export function enabledChannels(kind) {
-  const channel = PROBES[kind]?.channel
-  return channel ? [channel] : []
-}
 
 function requireLaunchInput(input) {
   if (input === null || typeof input !== 'object') {
@@ -60,59 +34,35 @@ async function freeLoopbackPort() {
   return port
 }
 
-const runHelp = promisify(execFile)
-
-// Feature detection uses the resolved executable, never a second CLI from PATH.
-// A timeout here silently downgrades delivery to pasting, so it is generous:
-// a busy machine took more than 2 s to answer `--help`.
-async function hasNativeQueue(kind, executable) {
-  if (typeof executable !== 'string' || !isAbsolute(executable)) return false
-  if (kind === 'claude-code') return process.platform === 'darwin'
-  try {
-    const run = runnable(executable, ['queue', '--help'])
-    const { stdout } = await runHelp(run.file, run.args, {
-      ...run.options,
-      timeout: 10_000,
-      maxBuffer: 128 * 1024,
-      encoding: 'utf8',
-      env: { ...process.env, OPENAI_API_KEY: undefined, ANTHROPIC_API_KEY: undefined },
-    })
-    if (kind === 'codex') return /--thread\b/.test(stdout) && /--message\b/.test(stdout)
-    return false
-  } catch {
-    return false
-  }
+/**
+ * A Codex window runs under ConsensFlow's supervisor, which needs the native
+ * queue (and the app-server and remote TUI that came with it): a Codex
+ * without it cannot be reached in its window, so it is refused by its
+ * version. Detection asks the resolved executable, never a second CLI from
+ * PATH.
+ */
+async function requireNativeQueue(executable, env) {
+  if (typeof executable !== 'string' || !isAbsolute(executable))
+    throw new Error('a Codex launch needs the absolute path of its CLI')
+  const help = await probeExecutable(executable, ['queue', '--help'], env).catch((cause) => {
+    throw new Error(
+      `could not ask Codex whether it has its native queue: ${cause.killed ? 'it did not answer in time' : cause.message}`,
+    )
+  })
+  if (/--thread\b/.test(help.stdout) && /--message\b/.test(help.stdout)) return
+  const version = await probeExecutable(executable, ['--version'], env).then(
+    ({ stdout }) => stdout.match(/\d+\.\d+\.\d+\S*/)?.[0] ?? null,
+    () => null,
+  )
+  throw new Error(
+    `${version === null ? 'This Codex' : `Codex ${version}`} has no native queue, which ConsensFlow needs to reach its window: update Codex.`,
+  )
 }
 
 export async function launchConfiguration(kind, input) {
   const { launchId, workspace } = requireLaunchInput(input)
-  if (kind === 'devin')
-    return prepareDevinIntegration(input.env, {
-      launchId,
-      node: input.node,
-      executable: input.executable,
-    })
-  if (kind === 'claude-code') {
-    // Claude registers its own peer inbox. The app writes one settings file per
-    // launch: a Stop hook on every turn, plus a coordinator's receiver hooks.
-    if (!input.env || typeof input.env !== 'object')
-      throw new Error('Claude launch configuration needs the ConsensFlow environment')
-    const env = input.env
-    const args = await prepareClaudeSettings(env, launchId, input.hooks)
-    if (!(await hasNativeQueue(kind, input.executable))) return { args, env: {}, channel: null }
-    return {
-      args,
-      env: {},
-      channel: {
-        kind: 'claude-peer',
-        launchId,
-        configDir: resolve(env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? homedir(), '.claude')),
-        ackTimeoutMs: 3000,
-      },
-    }
-  }
   if (kind === 'codex') {
-    if (!(await hasNativeQueue(kind, input.executable))) return { args: [], env: {}, channel: null }
+    await requireNativeQueue(input.executable, input.env)
     const port = await freeLoopbackPort()
     const token = randomBytes(24).toString('base64url')
     return {
@@ -174,8 +124,6 @@ export async function launchConfiguration(kind, input) {
     const quarantine = join(root, 'quarantine')
     const settled = join(root, 'settled')
     const expired = join(root, 'expired')
-    const ackTimeoutMs = 30_000
-    const extensionAckTimeoutMs = Math.floor(ackTimeoutMs * 0.8)
     const extensionPath =
       input.extensionPath ??
       join(
@@ -194,8 +142,6 @@ export async function launchConfiguration(kind, input) {
         CF_DELIVERY_SETTLED: settled,
         CF_DELIVERY_EXPIRED: expired,
         CF_DELIVERY_LAUNCH_ID: launchId,
-        CF_DELIVERY_ACK_TIMEOUT_MS: String(ackTimeoutMs),
-        CF_DELIVERY_EXTENSION_ACK_TIMEOUT_MS: String(extensionAckTimeoutMs),
       },
       channel: {
         kind: 'pi-extension',
@@ -205,31 +151,15 @@ export async function launchConfiguration(kind, input) {
         quarantine,
         settled,
         expired,
-        ackTimeoutMs,
-        extensionAckTimeoutMs,
+        ackTimeoutMs: 30_000,
       },
     }
   }
   throw new Error(`no launch configuration for harness: ${kind}`)
 }
 
-/** A worker follow-up uses the same launch-owned native ingress as a reply. */
-export async function send(channel, target, text) {
-  const sender = {
-    'claude-peer': sendClaude,
-    'codex-queue': sendCodex,
-    'devin-tui': sendDevin,
-    'opencode-server': sendOpenCode,
-    'pi-extension': sendPi,
-  }[channel]
-  if (!sender) return { ok: false, admitted: false, bytesWritten: 0, error: 'channel-disabled' }
-  return await sender(target, text)
-}
-
-/** Native argument construction stays in the window builders; only owned Codex panes need a supervisor. */
+/** Native argument construction stays in the window builders; Codex opens under its supervisor. */
 export function withNativeBridge(invocation, configuration, node) {
-  if (configuration?.channel?.kind !== 'codex-queue' || !configuration.channel.sessionBridge)
-    return invocation
   return {
     ...invocation,
     command: node,

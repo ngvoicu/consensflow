@@ -3,11 +3,7 @@ import { join } from 'node:path'
 import { harnessPath } from './harnesses.js'
 import { preparePrivateIntegration } from './private-integration.js'
 
-const FILES = [
-  'hosts/pi-extension/consensflow-delivery.mjs',
-  'hosts/lib/receiver.js',
-  'package.json',
-]
+const FILES = ['hosts/pi-extension/consensflow-delivery.mjs']
 
 export function preparePiExtension(env) {
   if (!harnessPath('pi', env)) return { state: 'not-installed', path: null }

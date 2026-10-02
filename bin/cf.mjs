@@ -136,10 +136,7 @@ function agentVerb(rest) {
       effort: { type: 'string' },
       'work-tier': { type: 'string' },
       description: { type: 'string' },
-      from: { type: 'string' },
-      presets: { type: 'string' },
       json: { type: 'boolean', default: false },
-      'dry-run': { type: 'boolean', default: false },
     },
   })
   const name = positionals[0]

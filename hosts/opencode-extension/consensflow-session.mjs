@@ -1,6 +1,5 @@
 import { createServer } from 'node:http'
 import { answerFromWindow, askTheBoard, boardClient, refusalReason } from '../lib/question-door.js'
-import { createReceiver } from '../lib/receiver.js'
 
 export const id = 'consensflow-session'
 const SESSION = /^ses_[A-Za-z0-9]+$/
@@ -26,35 +25,6 @@ export async function tui(api, options) {
       ? route.params.sessionID
       : null
   }
-  const receiverOptions =
-    options?.receiver ??
-    (process.env.CF_RESULT_RECEIVER ? { config: process.env.CF_RESULT_RECEIVER } : null)
-  const nativeReady = () =>
-    api.state.ready &&
-    currentSession() &&
-    (api.state.session.status(currentSession())?.type ?? 'idle') === 'idle' &&
-    api.mode.current() === 'base'
-  const receiver = receiverOptions
-    ? createReceiver({
-        ...receiverOptions,
-        session: currentSession,
-        ready: nativeReady,
-        insert: async (claim) => {
-          if (currentSession() !== claim.receiver.session || !nativeReady())
-            return refused('native-session-changed')
-          const result = await api.client.session.promptAsync(
-            {
-              sessionID: claim.receiver.session,
-              parts: [{ type: 'text', text: claim.text }],
-            },
-            { signal: AbortSignal.timeout(5000) },
-          )
-          if (result.error || result.response?.status !== 204)
-            throw new Error('native admission unknown')
-          return { admitted: true }
-        },
-      })
-    : null
   // The question tool's door in a member's window: the questions go to the
   // board as this window's participant, the board's answer comes back through
   // the API as the question's reply, and a reply given in the window first
@@ -181,15 +151,12 @@ export async function tui(api, options) {
     server.once('error', reject)
     server.listen(port, '127.0.0.1', resolve)
   })
-  receiver?.start()
   api.lifecycle.onDispose(async () => {
-    await receiver?.stop().catch(() => {})
     await new Promise((resolve) => {
       server.close(resolve)
       server.closeAllConnections()
     })
   })
-  return { receiver }
 }
 
 export default { id, tui }

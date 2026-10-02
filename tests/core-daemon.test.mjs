@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -135,18 +135,13 @@ describe('the daemon and its log', () => {
     })
   }
 
-  it('starts though its agents file cannot be used, and says why in its log', {
-    skip: process.getuid?.() === 0 && 'root writes a read-only file all the same',
-  }, async () => {
+  it('starts though its agents file cannot be used, and says why in its log', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'cf-daemon-'))
     const file = path.join(home, 'agents.json')
+    // A hand edit's trailing comma: the roster refuses the file and saves nothing over it.
+    const broken = '{"schemaVersion": 1, "agents": [{"id": "mine", "kind": "codex"},]}\n'
     try {
-      // A field older builds wrote, which the start tidies away by rewriting the file it cannot write.
-      await writeFile(
-        file,
-        `${JSON.stringify({ schemaVersion: 1, agents: [{ id: 'mine', kind: 'codex', model: 'gpt-6-astra', profile: {} }] })}\n`,
-      )
-      await chmod(file, 0o444)
+      await writeFile(file, broken)
       const child = spawn(process.execPath, [EDITOR], {
         env: {
           ...process.env,
@@ -170,10 +165,10 @@ describe('the daemon and its log', () => {
       assert.equal(await exited, 0, errors)
       assert.match(
         await readFile(path.join(home, 'daemon.log'), 'utf8'),
-        /\n\S+ error the agents file could not be used\n {4}Error: /,
+        /\n\S+ error the agents file could not be used\n {4}Error: Your agents file .* is not valid JSON/,
       )
+      assert.equal(await readFile(file, 'utf8'), broken, 'the file is left as the human wrote it')
     } finally {
-      await chmod(file, 0o644).catch(() => {})
       await rm(home, { recursive: true, force: true })
     }
   })

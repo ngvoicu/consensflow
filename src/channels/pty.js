@@ -10,6 +10,23 @@ export function paneOf(target) {
 }
 
 /**
+ * Pastes a body into the pane, as the human would type it. A request the
+ * bridge had sent before it ended may have been written: uncertain, never a
+ * refusal.
+ */
+export async function writePaste(bridge, pane, body) {
+  try {
+    return await bridge.request('pane.write_paste', {
+      id: pane.id,
+      generation: pane.generation,
+      body,
+    })
+  } catch (cause) {
+    return { ok: false, admitted: null, error: cause?.error ?? 'transport', cause: cause?.message }
+  }
+}
+
+/**
  * Admit a native send as Rust admits a paste: the pane is current, its input
  * works and no paste is going in. No I/O; what the human typed holds nothing.
  */

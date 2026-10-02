@@ -181,6 +181,13 @@ describe('the OpenCode adapter', () => {
           { ...posted[0].body, expiresAt: typeof posted[0].body.expiresAt },
           { launchId: 'launch-1', sessionId: 'ses_abc123', text: 'hi', expiresAt: 'number' },
         )
+        await adapter.deliver({
+          launch,
+          pane,
+          host,
+          text: 'half \ud83d of it, \u001b[31mred\u001b[0m and 50%\r60%',
+        })
+        assert.equal(posted[1].body.text, 'half  of it, ␛[31mred␛[0m and 50%␍60%')
         answer = { ok: false, admitted: false, bytesWritten: 0, error: 'native-session-changed' }
         assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hi' }), {
           admitted: false,
@@ -192,23 +199,44 @@ describe('the OpenCode adapter', () => {
     })
   })
 
-  it('is ready for a message only once its plugin shows the conversation', async () => {
+  it('is ready for a message once its plugin shows the conversation, and follows the window to another', async () => {
     await withHome(async ({ env }) => {
       let shown
+      const read = []
       const adapter = openCodeAdapter({
         env,
         sessionState: async () =>
           shown === undefined ? undefined : { sessionId: shown, status: null },
-        answers: async () => ({ items: [], inFlight: false, settlement: { state: 'unknown' } }),
+        answers: async (_kind, session) => {
+          read.push(session)
+          return { items: [], inFlight: false, settlement: { state: 'unknown' } }
+        },
       })
       const launch = { nativeSession: 'ses_abc123', channel: { kind: 'opencode-server' } }
-      assert.equal(await adapter.ready({ launch }), false, 'the TUI has not loaded its plugin yet')
+      assert.match(await adapter.ready({ launch }), /plugin does not answer yet/)
       assert.equal((await adapter.observe({ launch })).settled, false)
-      shown = 'ses_other'
-      assert.equal(await adapter.ready({ launch }), false, 'the human is looking at another one')
+      // Its home screen or session list: no conversation shown, a message waits.
+      shown = null
+      const home = await adapter.observe({ launch })
+      assert.match(home.waiting?.reason ?? '', /shows no conversation/)
+      assert.equal(await adapter.ready({ launch }), home.waiting.reason)
       shown = 'ses_abc123'
       assert.equal(await adapter.ready({ launch }), true)
       assert.equal((await adapter.observe({ launch })).settled, true)
+
+      // The human opens another conversation in the window (/new, or from the list).
+      shown = 'ses_other'
+      const observed = await adapter.observe({ launch })
+      assert.deepEqual(observed.switched, { nativeSession: 'ses_other' })
+      assert.equal(observed.settled, false)
+      assert.equal(await adapter.ready({ launch }), 'the window shows another conversation')
+
+      // The dispatcher follows the window: the new conversation's record is read.
+      launch.nativeSession = 'ses_other'
+      const followed = await adapter.observe({ launch })
+      assert.equal(followed.switched, undefined)
+      assert.equal(followed.settled, true)
+      assert.equal(read.at(-1), 'ses_other')
     })
   })
 

@@ -108,11 +108,6 @@ async function stageJsonl(kind, sessionId, fixture, options = {}) {
     await fs.mkdir(dir, { recursive: true })
     file = path.join(dir, `2026-09-06T00-00-00-000Z_${sessionId}.jsonl`)
     env = { HOME: root }
-  } else if (kind === 'kimi') {
-    const dir = path.join(root, 'sessions', 'wd_fixture', sessionId, 'agents', 'main')
-    await fs.mkdir(dir, { recursive: true })
-    file = path.join(dir, 'wire.jsonl')
-    env = { KIMI_CODE_HOME: root }
   } else {
     throw new Error(`no JSONL staging for ${kind}`)
   }
@@ -655,6 +650,25 @@ test('completion/cached: an unchanged transcript returns the previous result; a 
   }
 })
 
+test('completion/cached: a conversation nobody reads any more is forgotten', async () => {
+  // A daemon runs for weeks; a closed window's conversation is never read again.
+  const session = '1b09fb15-feb1-4595-9f47-5eb9ff768191'
+  const { env, root } = await stageJsonl('claude-code', session, 'claude-code/queued-turn.jsonl', {
+    take: 2,
+  })
+  try {
+    let now = 0
+    const read = completion.cachedAnswers({ idleMs: 1000, now: () => now })
+    const first = await read('claude-code', session, env)
+    assert.equal(await read('claude-code', session, env), first, 'read again soon: kept')
+    now = 5000
+    await read('claude-code', '7d1f4e63-0b4c-4f7a-9a8e-2b3c4d5e6f70', env)
+    assert.notEqual(await read('claude-code', session, env), first, 'forgotten, then read anew')
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 test('completion/claude-code: the captured interrupt cancels; compaction keeps prior answers', async () => {
   const session = '1b09fb15-feb1-4595-9f47-5eb9ff768191'
   const interruptedStage = await stageJsonl('claude-code', session, 'claude-code/interrupted.jsonl')
@@ -896,8 +910,6 @@ test('completion/pi: every retry prefix stays unready until success plus the rea
   assert.equal(settled.settlement.boundary, 'session.quiet_window')
 })
 
-// ------------------------------------------------------------------ kimi
-
 test('completion/pi: historical finals remain readable during the next turn, with open tools excluded', async () => {
   for (const openTool of [false, true]) {
     const staged = await stageJsonl('pi', 'hazy-ridge', 'pi/tool-loop.jsonl', {
@@ -921,194 +933,6 @@ test('completion/pi: historical finals remain readable during the next turn, wit
       await fs.rm(staged.root, { recursive: true, force: true })
     }
   }
-})
-
-test('completion/kimi: a new turn preserves earlier completed results, never unfinished tools', async () => {
-  const session = 'session_11c123b3-dd33-4f21-8862-beabdc50cd18'
-  for (const openTool of [false, true]) {
-    const staged = await stageJsonl('kimi', session, 'kimi/tool-result.jsonl', {
-      mutate: (rows) => [
-        ...rows.filter((row) => !openTool || row.event?.type !== 'tool.result'),
-        { type: 'prompt.accepted', promptId: 'next-prompt' },
-        { type: 'context.append_loop_event', event: { type: 'step.begin', turnId: 'next-turn' } },
-      ],
-    })
-    try {
-      const result = await answers('kimi', session, staged.env)
-      assert.equal(result.inFlight, true)
-      assert.equal(
-        result.items.find((item) => item.id === 'e7b213db-15f9-49f4-bd2a-bffee2d1791d').settled,
-        !openTool,
-      )
-      assert.equal(
-        result.items.find((item) => item.id === 'd26c913f-c98b-4262-8340-06a147aa7937').settled,
-        false,
-      )
-    } finally {
-      await fs.rm(staged.root, { recursive: true, force: true })
-    }
-  }
-})
-
-test('completion/kimi: parentUuid/toolCallId closes the originating turn and emits tool output', async () => {
-  const session = 'session_11c123b3-dd33-4f21-8862-beabdc50cd18'
-  const afterResultStage = await stageJsonl('kimi', session, 'kimi/tool-result.jsonl', { take: 8 })
-  const afterResult = await answers('kimi', session, afterResultStage.env)
-  shape(afterResult)
-  assert.deepEqual(afterResult.settlement.evidence.openTools, [])
-  assert.equal(afterResult.inFlight, true, 'a tool result does not end the turn')
-
-  const { env } = await stageJsonl('kimi', session, 'kimi/tool-result.jsonl')
-  const result = await answers('kimi', session, env)
-  shape(result)
-  const tool = result.items.find((item) => item.role === 'tool')
-  assert.equal(tool.id, '8a2310db-75a0-4e59-bbde-274f2845eede')
-  assert.match(tool.text, /public https:\/\/github.com\/ngvoicu\/consensflow/)
-  const assistants = result.items.filter((item) => item.role === 'assistant')
-  assert.equal(assistants[0].id, 'd26c913f-c98b-4262-8340-06a147aa7937')
-  assert.equal(assistants.at(-1).id, 'e7b213db-15f9-49f4-bd2a-bffee2d1791d')
-  assert.equal(assistants.at(-1).complete, true)
-  assert.equal(assistants.at(-1).settled, true)
-  assert.equal(result.inFlight, false)
-  assert.equal(result.version, '1.5')
-  assert.equal(result.settlement.state, 'settled')
-  assert.equal(result.settlement.provenance, 'native')
-  assert.equal(result.settlement.boundary, 'turn.ended')
-  assert.equal(result.settlement.state, 'settled')
-})
-
-test('completion/kimi: history extraction preserves the latest turn queued-admission guard', async () => {
-  const session = 'session_11c123b3-dd33-4f21-8862-beabdc50cd18'
-  const staged = await stageJsonl('kimi', session, 'kimi/tool-result.jsonl', {
-    mutate: (rows) => [
-      ...rows.slice(0, -1),
-      { type: 'prompt.accepted', promptId: 'queued-during-turn' },
-      rows.at(-1),
-    ],
-  })
-  try {
-    const result = await answers('kimi', session, staged.env)
-    assert.equal(result.settlement.state, 'in-flight')
-    assert.equal(result.items.at(-1).complete, true)
-    assert.equal(result.items.at(-1).settled, false)
-  } finally {
-    await fs.rm(staged.root, { recursive: true, force: true })
-  }
-})
-
-test('completion/kimi: prompt.accepted invalidates a prior turn and supplies the following prompt id', async () => {
-  const session = 'session_11c123b3-dd33-4f21-8862-beabdc50cd18'
-  const admittedStage = await stageJsonl('kimi', session, 'kimi/admitted-prompt.jsonl', {
-    take: 6,
-  })
-  const admitted = await answers('kimi', session, admittedStage.env)
-  shape(admitted)
-  assert.equal(admitted.settlement.state, 'in-flight')
-  assert.deepEqual(admitted.settlement.evidence.queuedTurns, ['msg_01M0TAMK4JC65YQKSQCQ5F0A1Q'])
-  assertNotReady(admitted)
-
-  const promptStage = await stageJsonl('kimi', session, 'kimi/admitted-prompt.jsonl')
-  const prompt = await answers('kimi', session, promptStage.env)
-  shape(prompt)
-  assert.equal(prompt.settlement.state, 'in-flight')
-  assert.deepEqual(prompt.settlement.evidence.queuedTurns, [])
-  assert.equal(prompt.items.at(-1).id, 'msg_01M0TAMK4JC65YQKSQCQ5F0A1Q')
-  assertNotReady(prompt)
-})
-
-test('completion/kimi: content-part identity supports growth and repeated equal text', async () => {
-  const session = 'session_11c123b3-dd33-4f21-8862-beabdc50cd18'
-  const { env } = await stageJsonl('kimi', session, 'kimi/tool-result.jsonl', {
-    mutate(records) {
-      const firstPartIndex = records.findIndex(
-        (record) => record.event?.type === 'content.part' && record.event?.part?.type === 'text',
-      )
-      const first = records[firstPartIndex]
-      first.event.part.text = 'A'
-      const grown = structuredClone(first)
-      grown.event.part.text = 'AB'
-      const repeated = structuredClone(grown)
-      repeated.event.uuid = 'distinct-equal-content-part'
-      records.splice(firstPartIndex + 1, 0, grown, repeated)
-      return records
-    },
-  })
-  const result = await answers('kimi', session, env)
-  shape(result)
-  assert.equal(
-    result.items.find((item) => item.id === 'd26c913f-c98b-4262-8340-06a147aa7937').text,
-    'ABAB',
-  )
-})
-
-test('completion/kimi: context message id survives an earlier-prompt rewrite', async () => {
-  const session = 'session_11c123b3-dd33-4f21-8862-beabdc50cd18'
-  const baseStage = await stageJsonl('kimi', session, 'kimi/tool-result.jsonl')
-  const base = await answers('kimi', session, baseStage.env)
-  const original = base.items.find((item) => item.role === 'user')
-
-  const earlier = {
-    type: 'turn.prompt',
-    agentId: 'main',
-    input: [{ type: 'text', text: 'Earlier prompt' }],
-    origin: { kind: 'user' },
-    time: 1787000000000,
-  }
-  const earlierMessage = {
-    type: 'context.append_message',
-    agentId: 'main',
-    message: {
-      role: 'user',
-      content: [{ type: 'text', text: 'Earlier prompt' }],
-      toolCalls: [],
-      origin: { kind: 'user' },
-      id: 'msg_earlier_native_prompt',
-    },
-    time: 1787000000001,
-  }
-  const rewrittenStage = await stageJsonl('kimi', session, 'kimi/tool-result.jsonl', {
-    prepend: [earlier, earlierMessage],
-  })
-  const rewritten = await answers('kimi', session, rewrittenStage.env)
-  shape(rewritten)
-  assert.equal(original.id, 'msg_01M0TA752ZAJKC8PRMYSJE95WY')
-  assert.ok(rewritten.items.some((item) => item.id === original.id))
-})
-
-test('completion/kimi: an older superseded tool cannot poison a later native settlement', async () => {
-  const session = 'session_11c123b3-dd33-4f21-8862-beabdc50cd18'
-  const { env } = await stageJsonl('kimi', session, 'kimi/superseded-tool.jsonl')
-  const result = await answers('kimi', session, env)
-  shape(result)
-
-  assert.equal(result.inFlight, false)
-  assert.equal(result.settlement.state, 'settled')
-  assert.equal(result.settlement.boundary, 'turn.ended')
-  assert.deepEqual(result.settlement.evidence.openTools, [])
-})
-
-test('completion/kimi: native provider failure settles incomplete and is never cancellation', async () => {
-  const session = 'session_11c123b3-dd33-4f21-8862-beabdc50cd18'
-  const { env } = await stageJsonl('kimi', session, 'kimi/provider-429.jsonl')
-  const result = await answers('kimi', session, env)
-  shape(result)
-
-  assert.equal(result.cancelled, false)
-  assert.equal(result.failed, true)
-  assert.match(result.failure, /429|overloaded/i)
-  assert.equal(result.inFlight, false)
-  assert.equal(result.settlement.state, 'settled')
-  assert.equal(result.settlement.provenance, 'native')
-  assert.equal(result.settlement.evidence.complete, false)
-  assert.equal(result.settlement.boundary, 'turn.ended')
-})
-
-test('completion/kimi: real protocol 1.4 without turn.ended is unsupported, not forever busy', async () => {
-  const session = 'session_159aa36f-e114-4bef-a9d2-144efdb84c10'
-  const { env } = await stageJsonl('kimi', session, 'kimi/protocol-1.4-no-turn-ended.jsonl')
-  const result = await answers('kimi', session, env)
-  assert.equal(result.unknown, true)
-  assert.match(result.reason, /unsupported version 1\.4/i)
 })
 
 // --------------------------------------------------------------- opencode
@@ -1347,41 +1171,6 @@ test('completion: every positive fixture keeps exact native identity across repe
       ids: ['5a83763c', '51cb4790', '8b4c70fe', '465fb416'],
     },
     {
-      kind: 'kimi',
-      session: 'session_11c123b3-dd33-4f21-8862-beabdc50cd18',
-      env: (
-        await stageJsonl(
-          'kimi',
-          'session_11c123b3-dd33-4f21-8862-beabdc50cd18',
-          'kimi/tool-result.jsonl',
-        )
-      ).env,
-      ids: [
-        'msg_01M0TA752ZAJKC8PRMYSJE95WY',
-        '8a2310db-75a0-4e59-bbde-274f2845eede',
-        'd26c913f-c98b-4262-8340-06a147aa7937',
-        'e7b213db-15f9-49f4-bd2a-bffee2d1791d',
-      ],
-    },
-    {
-      kind: 'kimi',
-      session: 'session_11c123b3-dd33-4f21-8862-beabdc50cd18',
-      env: (
-        await stageJsonl(
-          'kimi',
-          'session_11c123b3-dd33-4f21-8862-beabdc50cd18',
-          'kimi/superseded-tool.jsonl',
-        )
-      ).env,
-      ids: [
-        'msg_01M0T5V7XT3MA4EW8X1VS9GR0X',
-        'msg_01M0TA752ZAJKC8PRMYSJE95WY',
-        '8a2310db-75a0-4e59-bbde-274f2845eede',
-        'd26c913f-c98b-4262-8340-06a147aa7937',
-        'e7b213db-15f9-49f4-bd2a-bffee2d1791d',
-      ],
-    },
-    {
       kind: 'opencode',
       session: 'ses_f87e22f72ffewC2qJ2dAyyfPe1',
       env: await stageOpencode('opencode/tool-result.json'),
@@ -1445,23 +1234,6 @@ test('completion: every adapter returns a 60,000-character native text leaf whol
   })
   const pi = await answers('pi', 'hazy-ridge', piStage.env)
   assert.equal(pi.items.at(-1).text, longText)
-
-  const kimiSession = 'session_11c123b3-dd33-4f21-8862-beabdc50cd18'
-  const kimiStage = await stageJsonl('kimi', kimiSession, 'kimi/tool-result.jsonl', {
-    mutate(records) {
-      records.find(
-        (record) =>
-          record.event?.stepUuid === 'e7b213db-15f9-49f4-bd2a-bffee2d1791d' &&
-          record.event?.part?.type === 'text',
-      ).event.part.text = longText
-      return records
-    },
-  })
-  const kimi = await answers('kimi', kimiSession, kimiStage.env)
-  assert.equal(
-    kimi.items.find((item) => item.id === 'e7b213db-15f9-49f4-bd2a-bffee2d1791d').text,
-    longText,
-  )
 
   const opencodeSession = 'ses_f87e22f72ffewC2qJ2dAyyfPe1'
   const opencodeEnv = await stageOpencode('opencode/tool-result.json', {
@@ -1615,7 +1387,7 @@ test('completion: readable corrupted storage and absent storage fail closed', as
   assert.match(corrupt.reason, /malformed JSONL/)
 
   const empty = await tempRoot('cf-completion-empty-')
-  for (const kind of ['codex', 'claude-code', 'pi', 'kimi', 'opencode']) {
+  for (const kind of ['codex', 'claude-code', 'pi', 'opencode']) {
     const result = await answers(kind, 'no-such-session', { HOME: empty, XDG_DATA_HOME: empty })
     assert.deepEqual(Object.keys(result).sort(), ['reason', 'unknown'])
   }
@@ -1645,23 +1417,6 @@ test('completion: fixtures retain the decisive native source fields', async () =
     /429|rate limit/i,
   )
   assert.equal(pi.at(-1).message.stopReason, 'stop')
-
-  const admitted = (await fs.readFile(path.join(FIX, 'kimi/admitted-prompt.jsonl'), 'utf8'))
-    .trim()
-    .split('\n')
-    .map(JSON.parse)
-  assert.equal(admitted.at(-3).type, 'prompt.accepted')
-  assert.equal(admitted.at(-3).promptId, 'msg_01M0TAMK4JC65YQKSQCQ5F0A1Q')
-  assert.equal(admitted.at(-1).message.id, 'msg_01M0TAMK4JC65YQKSQCQ5F0A1Q')
-
-  const kimi = (await fs.readFile(path.join(FIX, 'kimi/tool-result.jsonl'), 'utf8'))
-    .trim()
-    .split('\n')
-    .map(JSON.parse)
-    .find((record) => record.event?.type === 'tool.result')
-  assert.ok(kimi.event.parentUuid)
-  assert.ok(kimi.event.toolCallId)
-  assert.equal(kimi.event.turnId, undefined)
 
   const opencode = JSON.parse(
     await fs.readFile(path.join(FIX, 'opencode/completion-window.json'), 'utf8'),

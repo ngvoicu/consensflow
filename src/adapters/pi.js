@@ -1,11 +1,18 @@
 import { randomBytes } from 'node:crypto'
 import { cachedAnswers } from '../../hosts/lib/completion.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
-import { send as sendPi } from '../channels/pi.js'
+import { send as sendPi, shownSession } from '../channels/pi.js'
 import { launchConfiguration } from '../channels.js'
 import { preparePiExtension } from '../pi-install.js'
 import { roleConfiguration } from '../role-skills.js'
-import { admission, executableFor, recordState } from './shared.js'
+import {
+  admission,
+  executableFor,
+  recordState,
+  SHOWS_ANOTHER,
+  switchedTo,
+  windowText,
+} from './shared.js'
 
 /**
  * Pi, for the new core. Pi takes the session name we give it (`--session-id`
@@ -13,8 +20,12 @@ import { admission, executableFor, recordState } from './shared.js'
  * its last argument. ConsensFlow's extension runs inside Pi: a message is a
  * file in its inbox, which it hands to Pi only when Pi is idle and the human's
  * editor is empty, and acknowledges only once Pi shows it as a user message.
- * The same extension marks each settled turn, which Pi's own log cannot.
+ * The same extension marks each settled turn, which Pi's own log cannot, and
+ * says which conversation the window shows, so a /new or /resume in it is
+ * followed.
  */
+const HOLD = 'Pi has not said yet which conversation its window shows'
+
 export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
   return {
     harness: 'pi',
@@ -43,6 +54,7 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
       const roleSetup = await roleConfiguration('pi', {
         role,
         env,
+        launch: launchId,
         cwd: directory,
         executable,
         content: instructions,
@@ -53,8 +65,8 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
       const identity = { kind: 'pi', model: agent?.model, thinking: agent?.thinking }
       const runner =
         resume === null
-          ? interactiveStart(identity, nativeSession, message)
-          : interactiveResume(identity, resume, message)
+          ? interactiveStart(identity, nativeSession, windowText(message))
+          : interactiveResume(identity, resume, windowText(message))
       return {
         argv: [executable, ...configuration.args, ...roleSetup.args, ...runner.args],
         env: { ...configuration.env, ...roleSetup.env },
@@ -68,6 +80,12 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
       return {}
     },
 
+    async ready({ launch }) {
+      const shown = await shownSession(launch.channel)
+      if (shown === null) return HOLD
+      return shown === launch.nativeSession ? true : SHOWS_ANOTHER
+    },
+
     async deliver({ launch, pane, host, text }) {
       const sent = await send(
         {
@@ -77,16 +95,21 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
           pane: pane.id,
           generation: pane.generation,
         },
-        text,
+        windowText(text),
       )
       return admission(sent, 'Pi refused it', { queued: true })
     },
 
     async observe({ launch }) {
-      const record = await answers('pi', launch.nativeSession, env, {
-        piSettlement: { directory: launch.channel.settled, launchId: launch.channel.launchId },
-      })
-      return { ...recordState(record), waiting: null }
+      const [record, shown] = await Promise.all([
+        answers('pi', launch.nativeSession, env, {
+          piSettlement: { directory: launch.channel.settled, launchId: launch.channel.launchId },
+        }),
+        shownSession(launch.channel),
+      ])
+      const observed = { ...recordState(record), waiting: null }
+      if (shown === null) return { ...observed, waiting: { reason: HOLD } }
+      return shown === launch.nativeSession ? observed : switchedTo(observed, shown)
     },
 
     transcript({ launch }) {

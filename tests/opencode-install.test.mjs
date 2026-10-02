@@ -34,6 +34,24 @@ test('OpenCode preparation is private, immutable, importable and installed with 
   assert.equal(readFileSync(extension.path, 'utf8'), 'drifted')
 })
 
+test('a generated file is part of what an integration is: a change to it is a new install', async (t) => {
+  const f = detected(t)
+  const { preparePrivateIntegration } = await import('../src/private-integration.js')
+  const names = ['hosts/opencode-extension/consensflow-session.mjs']
+  const generate = (text) => (destination) => [
+    ['tui.json', Buffer.from(JSON.stringify({ text, plugin: destination }))],
+  ]
+  const first = preparePrivateIntegration(f.env, 'opencode', names, generate('one'))
+  assert.equal(preparePrivateIntegration(f.env, 'opencode', names, generate('one')), first)
+  // A later build that writes tui.json differently, its sources unchanged.
+  const second = preparePrivateIntegration(f.env, 'opencode', names, generate('two'))
+  assert.notEqual(second, first)
+  assert.deepEqual(JSON.parse(readFileSync(join(second, 'tui.json'), 'utf8')), {
+    text: 'two',
+    plugin: second,
+  })
+})
+
 test('Harnesses prepares OpenCode and reports preparation failures for retry', async (t) => {
   const f = detected(t)
   const admin = new HarnessAdmin(f.env, { latest: async () => '1.18.30' })

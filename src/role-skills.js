@@ -1,35 +1,43 @@
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { runnable, terminate } from './harnesses.js'
 import { configRoot } from './roster.js'
+
+/** The folder a launch's own files live in, per harness (`src/core/launch-files.js`). */
+const LAUNCH_FOLDERS = { 'claude-code': 'claude', devin: 'devin', pi: 'pi', opencode: 'opencode' }
 
 /**
  * Role documents live outside all native global/project discovery directories.
  * The core passes each window's role text as `content`; this writes it where
  * the harness loads it and returns the launch arguments that make it load.
+ * Each launch writes its own, beside the rest of its files, and they go with
+ * it: a chief's text names its project's staff, and a shared file let a chief
+ * read another project's when two of them opened together. Codex is given
+ * the text itself.
  */
 export async function roleConfiguration(
   kind,
-  { role, env, executable, cwd, content: given, readInstructions = codexInstructions },
+  { role, env, launch, executable, cwd, content, readInstructions = codexInstructions },
 ) {
-  if (typeof given !== 'string' || given.length === 0) {
+  if (typeof content !== 'string' || content.length === 0) {
     throw new Error(`the ${role} window needs its role text`)
   }
-  const name = `consensflow-${role}`
-  const root = join(configRoot(env), 'roles', role)
-  const skills = join(root, '.claude', 'skills')
-  const directory = join(skills, name)
-  const file = join(directory, 'SKILL.md')
-  const content = given
-  const previous = await readFile(file, 'utf8').catch((error) => {
-    if (error.code !== 'ENOENT') throw error
-    return null
-  })
-  if (previous !== content) {
-    await mkdir(directory, { recursive: true, mode: 0o700 })
-    await writeFile(file, content, { mode: 0o600 })
+  if (kind === 'codex') {
+    const existing = await readInstructions(executable, cwd, env)
+    const instructions = `${existing}\n\nYour ConsensFlow role is ${role}. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\n${content}`
+    return { args: ['-c', `developer_instructions=${JSON.stringify(instructions)}`], env: {} }
   }
+  const folder = LAUNCH_FOLDERS[kind]
+  if (folder === undefined) throw new Error(`No ${role} role is available for ${kind}`)
+  // The channel's filename-safe rule, minus the names that leave the folder.
+  if (!/^(?!\.{1,2}$)[A-Za-z0-9._-]{1,200}$/.test(launch ?? ''))
+    throw new Error('invalid role launch')
+  const root = join(configRoot(env), 'integrations', folder, launch, 'role')
+  const skills = join(root, '.claude', 'skills')
+  const file = join(skills, `consensflow-${role}`, 'SKILL.md')
+  await mkdir(dirname(file), { recursive: true, mode: 0o700 })
+  await writeFile(file, content, { mode: 0o600 })
   if (kind === 'devin') return { args: [], env: { CF_DEVIN_ROLE_FILE: file } }
   if (kind === 'claude-code') {
     // Resumed conversations otherwise retain the system prompt from their first turn.
@@ -63,12 +71,6 @@ export async function roleConfiguration(
     configuration.instructions = [...new Set([...instructions, file])]
     return { args: [], env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(configuration) } }
   }
-  if (kind === 'codex') {
-    const existing = await readInstructions(executable, cwd, env)
-    const instructions = `${existing}\n\nYour ConsensFlow role is ${role}. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\n${content}`
-    return { args: ['-c', `developer_instructions=${JSON.stringify(instructions)}`], env: {} }
-  }
-  throw new Error(`No ${role} role is available for ${kind}`)
 }
 
 /** Ask the native resolver to preserve profile/project layering; never read versions. */

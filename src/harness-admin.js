@@ -14,7 +14,6 @@ const SOURCES = {
   codex: 'https://registry.npmjs.org/@openai/codex/latest',
   opencode: 'https://registry.npmjs.org/opencode-ai/latest',
   pi: 'https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest',
-  kimi: 'https://pypi.org/pypi/kimi-cli/json',
   devin: 'https://static.devin.ai/cli/current/manifest.json',
 }
 
@@ -23,7 +22,6 @@ const NAME = {
   codex: 'Codex',
   opencode: 'OpenCode',
   pi: 'Pi',
-  kimi: 'Kimi',
   devin: 'Devin',
 }
 const NPM_PACKAGES = {
@@ -89,7 +87,7 @@ export function releaseSource(id, executable, env) {
     }
   }
   const npm = path?.match(/^(.*)\/lib\/node_modules\//)
-  const source = { url: SOURCES[id], format: id === 'kimi' ? 'pypi' : 'npm' }
+  const source = { url: SOURCES[id], format: 'npm' }
   if (npm && NPM_PACKAGES[id]) {
     return {
       ...source,
@@ -137,9 +135,7 @@ async function latestRelease(_id, source) {
       ? text.trim()
       : source.format === 'formula'
         ? data.versions?.stable
-        : source.format === 'pypi'
-          ? data.info?.version
-          : data.version
+        : data.version
   if (typeof value !== 'string' || !versionOf(value))
     throw new Error('Release version is unavailable')
   return value
@@ -237,7 +233,6 @@ export class HarnessAdmin {
       id,
       path,
       installed: Boolean(path),
-      chief: id !== 'kimi',
       checkedAt: Date.now(),
       version: { state: 'not-installed' },
       update: { state: 'not-checked' },

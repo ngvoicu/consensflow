@@ -38,9 +38,9 @@ describe('harness executable discovery', () => {
   })
 
   it('detection returns executable identities without unused global skill destinations', () => {
-    for (const name of ['claude', 'codex', 'opencode', 'pi', 'kimi', 'devin']) stubCli(t.env, name)
+    for (const name of ['claude', 'codex', 'opencode', 'pi', 'devin']) stubCli(t.env, name)
     const harnesses = detectHarnesses(t.env)
-    assert.equal(harnesses.length, 6)
+    assert.equal(harnesses.length, 5)
     for (const harness of harnesses)
       assert.deepEqual(Object.keys(harness).sort(), ['command', 'id'])
   })
@@ -88,7 +88,7 @@ it('app preparation owns its launcher and integrations, not role documents or gl
     addAgent({ name: 'mine', harness: 'claude', model: 'example' }, t.env)
     for (let i = 0; i < 2; i++) installation.prepareApp(t.env)
     assert.ok(existsSync(join(t.env.CONSENSFLOW_BIN_DIR, `cf${CMD}`)))
-    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'roles')), false)
+    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'integrations')), false)
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'skills-manifest.json')), false)
     for (const file of globals) assert.equal(readFileSync(file, 'utf8'), 'global canary')
   } finally {

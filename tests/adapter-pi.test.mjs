@@ -60,8 +60,10 @@ describe('the Pi adapter', () => {
       )
       const skill = path.join(
         env.CONSENSFLOW_HOME,
-        'roles',
-        'worker',
+        'integrations',
+        'pi',
+        'launch-1',
+        'role',
         '.claude',
         'skills',
         'consensflow-worker',
@@ -103,6 +105,8 @@ describe('the Pi adapter', () => {
         'cf-1-zeus-0000abcd',
         '--model',
         'openrouter/meta/muse-spark-1.3',
+        '--thinking',
+        'high',
         '--approve',
       ])
     })
@@ -119,8 +123,9 @@ describe('the Pi adapter', () => {
           return { ok: true }
         },
       }
-      // The extension's part: take the record from the inbox, acknowledge it.
+      // The extension's part: take each record from the inbox, acknowledge it.
       const { inbox, ack } = launch.channel
+      const texts = []
       let busy = false
       const extension = setInterval(async () => {
         if (busy) return
@@ -129,13 +134,13 @@ describe('the Pi adapter', () => {
           const names = await readdir(inbox).catch(() => [])
           for (const name of names.filter((n) => n.endsWith('.json'))) {
             const record = JSON.parse(await readFile(path.join(inbox, name), 'utf8'))
+            texts.push(record.text)
             await mkdir(ack, { recursive: true })
             await writeFile(
               path.join(ack, `${record.id}.json`),
               JSON.stringify({ id: record.id, admitted: true, mode: 'tui' }),
             )
             await rm(path.join(inbox, name), { force: true })
-            clearInterval(extension)
           }
         } finally {
           busy = false
@@ -148,9 +153,64 @@ describe('the Pi adapter', () => {
           queued: true,
         })
         assert.deepEqual(claims, [['pane.claim', { pane: 's1-zeus', generation: 2 }]])
+        // Pi hands the text to its model's API, which refuses half a character too.
+        await adapter.deliver({
+          launch,
+          pane,
+          host,
+          text: 'half \ud83d of it, \u001b[31mred\u001b[0m and 50%\r60%',
+        })
+        assert.deepEqual(texts, ['hi', 'half  of it, ␛[31mred␛[0m and 50%␍60%'])
       } finally {
         clearInterval(extension)
       }
+    })
+  })
+
+  it('follows the window to the conversation a /new or /resume left it on, holding until it names one', async () => {
+    await withHome(async ({ env }) => {
+      const read = []
+      const adapter = piAdapter({
+        env,
+        answers: async (_kind, session) => {
+          read.push(session)
+          return {
+            items: [{ id: `${session}-1`, role: 'user', text: 'hello' }],
+            inFlight: false,
+            settlement: { state: 'settled' },
+          }
+        },
+      })
+      const { launch } = await adapter.prepare(request())
+      const shows = async (sessionId) => {
+        await mkdir(launch.channel.settled, { recursive: true })
+        await writeFile(
+          path.join(launch.channel.settled, 'launch-1.shown.json'),
+          JSON.stringify({ launchId: 'launch-1', sessionId }),
+        )
+      }
+      // Until its extension starts, Pi has not said which conversation it shows.
+      const unnamed = await adapter.observe({ launch })
+      assert.match(unnamed.waiting?.reason ?? '', /Pi has not said/)
+      assert.equal(await adapter.ready({ launch }), unnamed.waiting.reason)
+      await shows(launch.nativeSession)
+      assert.equal((await adapter.observe({ launch })).settled, true)
+      assert.equal(await adapter.ready({ launch }), true)
+
+      // /new: the extension says the window shows another conversation.
+      const fresh = '0199a6f0-4cc1-7d3e-9f7a-3c5b2e1d0a98'
+      await shows(fresh)
+      const observed = await adapter.observe({ launch })
+      assert.deepEqual(observed.switched, { nativeSession: fresh })
+      assert.equal(observed.settled, false)
+      assert.equal(await adapter.ready({ launch }), 'the window shows another conversation')
+
+      // The dispatcher follows the window: the new conversation's record is read.
+      launch.nativeSession = fresh
+      const followed = await adapter.observe({ launch })
+      assert.equal(followed.switched, undefined)
+      assert.equal(read.at(-1), fresh)
+      assert.equal(await adapter.ready({ launch }), true)
     })
   })
 

@@ -4,27 +4,30 @@ import { homedir } from 'node:os'
 import path from 'node:path'
 import { cachedAnswers, hasTranscript } from '../../hosts/lib/completion.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
-import { send as sendPeer } from '../channels/claude-peer.js'
+import { writePaste } from '../channels/pty.js'
 import { prepareClaudeSettings } from '../claude-install.js'
 import { roleConfiguration } from '../role-skills.js'
-import { executableFor } from './shared.js'
+import { admission, executableFor, SHOWS_ANOTHER, switchedTo, windowText } from './shared.js'
 
 /**
  * Claude Code, for the new core (see `src/core/dispatcher.js` for the adapter
  * contract). Each launch gets its own settings file under the home: full
- * permission without the one-time dialog, messages from other sessions
- * accepted, and a Stop hook on every turn so every finished turn is recorded.
+ * permission without the one-time dialog, and a Stop hook on every turn so
+ * every finished turn is recorded.
  *
  * - The session id is ours: minted for a fresh window, resumed for a known one.
  * - A message is pasted into a live window as if the human typed it, whatever
  *   its input box holds: text the human left unsent goes in with it (the
- *   owner's choice, 2026-10-01). Claude's own peer inbox (`peer: true`, macOS
- *   only, the Rust host checks the peer belongs to this pane) bypasses the
+ *   owner's choice, 2026-10-01). Claude's own peer inbox would bypass the
  *   input box, but Claude wraps each such message as a teammate's request
  *   from another Claude session, a hundred tokens of caution per delivery
- *   that misnames the human's own answers; since 2026-09-22 it is off.
+ *   that misnames the human's own answers, so it is not used (2026-09-22).
  * - Claude's own `sessions/<pid>.json` says busy, idle or waiting (and why);
  *   the transcript holds the conversation and says whether the turn settled.
+ * - The window's Claude process is the one whose file first named the
+ *   launch's conversation. A /clear or /resume in the window changes the
+ *   conversation that file names, never the process, so the window is
+ *   followed to it.
  */
 /**
  * A member runs in full-permission mode and reads what others wrote, so it
@@ -35,26 +38,28 @@ import { executableFor } from './shared.js'
  */
 const MEMBER_ISOLATION = ['--strict-mcp-config', '--no-chrome']
 
-export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers() }) {
+export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
   const configDir = path.resolve(
     env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? homedir(), '.claude'),
   )
+  /** Claude's status of the window's process, known once its file names the launch's session. */
+  const windowStatus = async (launch) => {
+    const statuses = await claudeStatuses(configDir)
+    launch.pid ??= [...statuses].find(([, live]) => live.sessionId === launch.nativeSession)?.[0]
+    return launch.pid === undefined ? undefined : statuses.get(launch.pid)
+  }
   return {
     harness: 'claude-code',
 
     async prepare({ launchId, role, directory, resume, message, agent, instructions }) {
       const executable = executableFor('claude-code', env)
-      const settings = await prepareClaudeSettings(
-        env,
-        launchId,
-        {},
-        {
-          boardQuestions: role !== 'chief',
-        },
-      )
+      const settings = await prepareClaudeSettings(env, launchId, {
+        boardQuestions: role !== 'chief',
+      })
       const roleSetup = await roleConfiguration('claude-code', {
         role,
         env,
+        launch: launchId,
         cwd: directory,
         executable,
         content: instructions,
@@ -67,8 +72,8 @@ export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers()
       const nativeSession = resume ?? randomUUID()
       const resumable = resume !== null && (await hasTranscript('claude-code', resume, env))
       const runner = resumable
-        ? interactiveResume(identity, resume, message)
-        : interactiveStart(identity, nativeSession, message)
+        ? interactiveResume(identity, resume, windowText(message))
+        : interactiveStart(identity, nativeSession, windowText(message))
       return {
         argv: [
           executable,
@@ -80,15 +85,7 @@ export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers()
         env: { ...roleSetup.env },
         dropEnv: runner.dropEnv,
         nativeSession,
-        launch: {
-          nativeSession,
-          channel: {
-            kind: 'claude-peer',
-            launchId,
-            configDir,
-            ackTimeoutMs: 3000,
-          },
-        },
+        launch: { nativeSession },
       }
     },
 
@@ -96,9 +93,10 @@ export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers()
       return {}
     },
 
-    /** A paste waits only for the window to be readable and another paste to be in. */
-    async ready({ pane, host }) {
-      if (peer) return true
+    /** A paste waits for the window to be readable, on its conversation, with no paste going in. */
+    async ready({ launch, pane, host }) {
+      const live = await windowStatus(launch)
+      if (live !== undefined && live.sessionId !== launch.nativeSession) return SHOWS_ANOTHER
       const snapshot = await host.request('pane.snapshot', pane)
       if (snapshot?.ok !== true)
         return `the window cannot be read: ${snapshot?.error ?? 'no answer'}`
@@ -106,38 +104,16 @@ export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers()
       return true
     },
 
-    async deliver({ launch, pane, host, text }) {
-      if (peer) {
-        const sent = await sendPeer(
-          {
-            session: launch.nativeSession,
-            pane: pane.id,
-            generation: pane.generation,
-            launch: launch.channel,
-            bridge: host,
-          },
-          text,
-        )
-        if (sent?.ok === true) return { admitted: true, queued: true }
-        if (sent?.admitted === null) return { admitted: null, reason: sent.cause ?? sent.error }
-        // An inbox Claude has not registered yet (or never will, on an older
-        // build) is not a reason to drop the message: the terminal still works.
-        if (sent?.error !== 'native-session-unavailable') {
-          return { admitted: false, reason: sent?.cause ?? sent?.error ?? 'the peer refused it' }
-        }
-      }
-      const written = await host.request('pane.write_paste', { ...pane, body: text })
-      return written?.ok === true
-        ? { admitted: true }
-        : { admitted: false, reason: written?.error ?? 'the window refused the paste' }
+    async deliver({ pane, host, text }) {
+      const written = await writePaste(host, pane, windowText(text))
+      return admission(written, 'the window refused the paste')
     },
 
     async observe({ launch }) {
-      const [record, statuses] = await Promise.all([
+      const [record, live] = await Promise.all([
         answers('claude-code', launch.nativeSession, env),
-        claudeStatuses(env),
+        windowStatus(launch),
       ])
-      const live = statuses.get(launch.nativeSession)
       const items = Array.isArray(record.items) ? record.items : []
       const transcriptSettled = record.settlement?.state === 'settled'
       // Claude's own status is the word on whether the window is at its
@@ -146,13 +122,16 @@ export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers()
       // opened, so a paste on its word alone lands before the prompt is up.
       const settled =
         live !== undefined && live.state === 'idle' && (transcriptSettled || items.length === 0)
-      return {
+      const observed = {
         items,
         settled,
         waiting: live?.state === 'waiting' ? { reason: live.reason ?? null } : null,
         failed: record.failed === true,
         quota: record.quota ?? null,
       }
+      return live !== undefined && live.sessionId !== launch.nativeSession
+        ? switchedTo(observed, live.sessionId)
+        : observed
     },
 
     transcript({ launch }) {
@@ -162,16 +141,13 @@ export function claudeCodeAdapter({ env, peer = false, answers = cachedAnswers()
 }
 
 /**
- * Claude Code's own live status for each running session, from the
- * `sessions/<pid>.json` files it keeps (the same files peer delivery reads):
- * busy, idle, or waiting with the reason (a permission prompt, input needed, a
+ * Claude Code's own live status for each running process, from the
+ * `sessions/<pid>.json` files it keeps: the conversation it shows, and busy,
+ * idle, or waiting with the reason (a permission prompt, input needed, a
  * dialog). A file whose process is gone is ignored.
  */
-async function claudeStatuses(env) {
-  const directory = path.join(
-    env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? homedir(), '.claude'),
-    'sessions',
-  )
+async function claudeStatuses(configDir) {
+  const directory = path.join(configDir, 'sessions')
   const statuses = new Map()
   const names = await fs.readdir(directory).catch(() => [])
   for (const name of names) {
@@ -184,7 +160,8 @@ async function claudeStatuses(env) {
       continue
     const state = { busy: 'working', waiting: 'waiting', idle: 'idle', shell: 'idle' }[row.status]
     if (!state) continue
-    statuses.set(row.sessionId, {
+    statuses.set(row.pid, {
+      sessionId: row.sessionId,
       state,
       ...(state === 'waiting' && typeof row.waitingFor === 'string'
         ? { reason: row.waitingFor }

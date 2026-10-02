@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { devinAdapter } from '../src/adapters/devin.js'
-import { fakeExecutable } from './helpers.mjs'
+import { fakeExecutable, fakeNodeExecutable } from './helpers.mjs'
 
 /**
  * The Devin adapter (TEST-BDC-05, IMPL-BDC-07): Devin runs on a config of our
@@ -52,11 +52,11 @@ const request = (overrides = {}) => ({
 })
 const integration = (env) => path.join(env.CONSENSFLOW_HOME, 'integrations', 'devin', 'launch-1')
 
+const selection = (sessionId) =>
+  `${JSON.stringify({ sessionId, update: { sessionUpdate: 'config_option_update', configOptions: [{ id: 'mode' }] } })}\n`
+
 async function selects(env, sessionId) {
-  await writeFile(
-    path.join(integration(env), 'wire.jsonl'),
-    `${JSON.stringify({ sessionId, update: { sessionUpdate: 'config_option_update', configOptions: [{ id: 'mode' }] } })}\n`,
-  )
+  await writeFile(path.join(integration(env), 'wire.jsonl'), selection(sessionId))
 }
 
 describe('the Devin adapter', () => {
@@ -108,6 +108,31 @@ describe('the Devin adapter', () => {
     })
   })
 
+  it('asks Devin its version once, not at every launch, and refuses one too old', async () => {
+    await withHome(async ({ env }) => {
+      const runs = path.join(env.PATH, 'version-runs')
+      const devin = (version) =>
+        fakeNodeExecutable(
+          path.join(env.PATH, 'devin'),
+          `#!${process.execPath}
+import { appendFileSync } from 'node:fs'
+appendFileSync(${JSON.stringify(runs)}, 'x')
+console.log('devin ${version}')
+`,
+        )
+      devin('3000.11.3 (9c803229faa4)')
+      const adapter = devinAdapter({ env })
+      await adapter.prepare(request({ launchId: 'launch-1' }))
+      await adapter.prepare(request({ launchId: 'launch-2' }))
+      assert.equal(await readFile(runs, 'utf8'), 'x', 'one question for an unchanged Devin')
+      devin('3000.9.1 (00000000)')
+      await assert.rejects(
+        adapter.prepare(request({ launchId: 'launch-3' })),
+        /3000\.10\.21 or newer/,
+      )
+    })
+  })
+
   it("launches a catalog agent on Devin's own id: the family with its level", async () => {
     await withHome(async ({ env }) => {
       const plan = await devinAdapter({ env }).prepare(
@@ -127,6 +152,8 @@ describe('the Devin adapter', () => {
       assert.deepEqual(plan.argv.slice(3), [
         '--resume',
         'mild-coin',
+        '--model',
+        'swe-1-6-slow',
         '--permission-mode',
         'dangerous',
         '--respect-workspace-trust',
@@ -173,9 +200,64 @@ describe('the Devin adapter', () => {
         'pane.write_paste',
         { id: 's1-zeus', generation: 2, body: 'hi' },
       ])
+      await adapter.deliver({
+        launch,
+        pane,
+        host,
+        text: 'half \ud83d of it, \u001b[31mred\u001b[0m and 50%\r60%',
+      })
+      assert.equal(requests.at(-1)[1].body, 'half  of it, ␛[31mred␛[0m and 50%␍60%')
       assert.equal(await adapter.ready({ launch, pane, host }), true)
       pasteInFlight = true
       assert.equal(await adapter.ready({ launch, pane, host }), false)
+    })
+  })
+
+  it('follows the window to the conversation a /new or /resume left it on, holding until it names one', async () => {
+    await withHome(async ({ env }) => {
+      const read = []
+      const adapter = devinAdapter({
+        env,
+        answers: async (_kind, session) => {
+          read.push(session)
+          return {
+            items: [{ id: `${session}-1`, role: 'user', text: 'hello' }],
+            inFlight: false,
+            settlement: { state: 'settled' },
+          }
+        },
+      })
+      const { launch } = await adapter.prepare(request({ resume: 'mild-coin', message: null }))
+      const host = {
+        async request(op) {
+          return op === 'pane.snapshot' ? { ok: true, pasteInFlight: false } : { ok: true }
+        },
+      }
+      const pane = { id: 's1-zeus', generation: 2 }
+      // Devin has not said yet which conversation the window shows: a message waits.
+      const unnamed = await adapter.observe({ launch })
+      assert.match(unnamed.waiting?.reason ?? '', /Devin has not said/)
+      assert.equal(await adapter.ready({ launch, pane, host }), unnamed.waiting.reason)
+      await selects(env, 'mild-coin')
+      assert.equal((await adapter.observe({ launch })).settled, true)
+      assert.equal(await adapter.ready({ launch, pane, host }), true)
+
+      // /new: Devin's own log now names another conversation.
+      await appendFile(path.join(integration(env), 'wire.jsonl'), selection('fresh-leaf'))
+      const observed = await adapter.observe({ launch })
+      assert.deepEqual(observed.switched, { nativeSession: 'fresh-leaf' })
+      assert.equal(observed.settled, false)
+      assert.equal(
+        await adapter.ready({ launch, pane, host }),
+        'the window shows another conversation',
+      )
+
+      // The dispatcher follows the window: the new conversation's record is read.
+      launch.nativeSession = 'fresh-leaf'
+      const followed = await adapter.observe({ launch })
+      assert.equal(followed.switched, undefined)
+      assert.equal(read.at(-1), 'fresh-leaf')
+      assert.equal(await adapter.ready({ launch, pane, host }), true)
     })
   })
 

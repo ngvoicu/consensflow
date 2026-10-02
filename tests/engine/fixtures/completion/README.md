@@ -11,8 +11,8 @@ Redaction changes leaf values only:
   or `O` characters while preserving the asserted length;
 - the cross-harness 60,000-character guard changes only that text leaf to
   repeated `L` in each staged temporary copy; the fixture on disk is unchanged;
-- the version-rejection test mutates only the version leaf in its staged
-  temporary copy.
+- the version-metadata tests mutate only version leaves in their staged
+  temporary copies.
 
 The OpenCode JSON files are transport envelopes for complete rows. The
 `session`, `message`, `part`, and `event` arrays retain every column;
@@ -166,40 +166,6 @@ quiet-window boundary and never labels Pi settlement native.
 
 No Pi user-cancellation marker was captured, so there is no synthetic
 cancellation fixture and provider errors are not reclassified as cancellation.
-
-## Kimi — `wire.jsonl`, protocol `1.5`
-
-- `tool-result.jsonl` — source
-  `/Users/gabrielvoicu/.kimi-code/sessions/wd_consensflow-site_ed8b7a271238/session_11c123b3-dd33-4f21-8862-beabdc50cd18/agents/main/wire.jsonl`;
-  physical lines 1, 747–748, 750, 755–759, 861, and 866–868. The real result has
-  `parentUuid` and `toolCallId`, no `turnId`; the case ends with native
-  `turn.ended {reason:completed}`.
-- `superseded-tool.jsonl` — the same source, physical lines 1, 320–321, 323, 329,
-  747–748, 750, 755–759, 861, and 866–868. It retains the unmatched
-  `Bash_47` from turn 1, the later native prompt, and turn 5's completed native
-  boundary; only prompt, command, and final-answer leaves are redacted.
-- `provider-429.jsonl` — the same source, physical lines 1, 5–6, 315, 317,
-  and 318. It preserves `turn.ended {reason:failed}`, the provider rate-limit
-  code/name/message, and its final error step; only the prompt leaf is
-  redacted.
-- `protocol-1.4-no-turn-ended.jsonl` — source
-  `/Users/gabrielvoicu/.kimi-code/sessions/wd_btb_3cabe80dc1f7/session_159aa36f-e114-4bef-a9d2-144efdb84c10/agents/main/wire.jsonl`;
-  physical lines 1, 191, and 1586/1588–1590. The final step says
-  `finishReason:end_turn`, but protocol 1.4 has no `turn.ended`; it is an
-  unsupported-version fixture, never an in-flight fixture.
-- `admitted-prompt.jsonl` — the protocol-1.5 source above, complete physical
-  lines 1 and 866–872. The prefix through real line 870 ends on
-  `prompt.accepted` after a settled turn; line 871 is the following
-  `turn.prompt` that consumes that admission, and line 872 supplies the same
-  native `message.id` in `context.append_message`.
-
-Real protocol-1.5 `turn.prompt` records in this source have neither UUID nor
-`promptId`; their immediately following user-origin `context.append_message`
-records carry the native message IDs. A preceding `prompt.accepted` exposes
-that same ID one record earlier. The adapter reconciles those records instead
-of minting positional or text-derived IDs. Assistant IDs are native
-`step.begin/step.end.uuid`; tool-result IDs are the native call `parentUuid`.
-No Kimi cancellation reason was captured, so none is inferred.
 
 ## OpenCode — `opencode.db`, versions `1.18.27` and `1.18.29`
 

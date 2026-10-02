@@ -3,17 +3,15 @@ import { join } from 'node:path'
 
 /**
  * What a window leaves in the home under its launch id: the settings and
- * integration files written for it (`integrations/<harness>/<launch>`) and
- * its receiver's signal (`receivers/<launch>`). A launch id lives as long as
- * its window; nothing else reads these folders, so they go when it does.
+ * integration files written for it (`integrations/<harness>/<launch>`). A
+ * launch id lives as long as its window; nothing else reads these folders,
+ * so they go when it does.
  */
-const HARNESSES = ['claude', 'pi', 'devin']
+const HARNESSES = ['claude', 'pi', 'devin', 'opencode']
 const LAUNCH_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
-const folders = (home, launch) => [
-  ...HARNESSES.map((harness) => join(home, 'integrations', harness, launch)),
-  join(home, 'receivers', launch),
-]
+const folders = (home, launch) =>
+  HARNESSES.map((harness) => join(home, 'integrations', harness, launch))
 
 /** A window closed: its files go. An id that is not a launch id names nothing. */
 export function forgetLaunch(home, launch) {
@@ -23,10 +21,7 @@ export function forgetLaunch(home, launch) {
 
 /** At start, when no window is open: every launch's files go. */
 export function sweepLaunches(home) {
-  const parents = [
-    ...HARNESSES.map((harness) => join(home, 'integrations', harness)),
-    join(home, 'receivers'),
-  ]
+  const parents = HARNESSES.map((harness) => join(home, 'integrations', harness))
   let swept = 0
   for (const parent of parents) {
     let names = []
