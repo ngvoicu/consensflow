@@ -8,6 +8,7 @@ import { describe, it } from 'node:test'
 import {
   OVERDUE_MS,
   openLedger,
+  PAGE_BYTES,
   RESUME_WORDS,
   SCHEMA_VERSION,
   TRANSCRIPT_ITEM_MAX,
@@ -1779,6 +1780,50 @@ describe('views', () => {
     })
   })
 
+  it("reads the human's unread notes in a frame however long they run: the newest that fit, one too long cut, and how many", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      const human = id('human')
+      // Neither a note already read nor the result of a task the human gave is For you's.
+      deliver(
+        ledger,
+        ledger.createTask(project.id, { from: 'human', to: 'chief', body: 'Ship it' }).message,
+      )
+      ledger.recordResult(project.id, 1, { body: 'Shipped' })
+      ledger.markRead(ledger.note(project.id, { from: 'chief', to: 'human', body: 'Seen.' }).id)
+      // More than the page's 1 MiB frame of notes, the newest longer than half of it alone.
+      const report = 'A finding, with the evidence for it. '.repeat(8_000)
+      const older = [1, 2, 3, 4].map((n) =>
+        ledger.note(project.id, { from: 'chief', to: 'human', body: `${n}. ${report}` }),
+      )
+      const long = 'A log line the chief pasted whole. '.repeat(25_000)
+      const newest = ledger.note(project.id, { from: 'chief', to: 'human', body: long })
+      assert.ok(Buffer.byteLength(JSON.stringify(ledger.inbox(human))) > 1024 * 1024)
+
+      const read = ledger.latestMessages(human, { unread: true })
+      const bytes = Buffer.byteLength(JSON.stringify(read.messages))
+      assert.ok(bytes <= PAGE_BYTES, `the notes take ${bytes} bytes`)
+      assert.deepEqual([read.total, read.shown], [5, 2])
+      assert.deepEqual(
+        read.messages.map((m) => [m.id, m.kind, m.state]),
+        [
+          [newest.id, 'note', 'queued'],
+          [older[3].id, 'note', 'queued'],
+        ],
+      )
+      assert.equal(
+        read.messages[0].body,
+        `${long.slice(0, TRANSCRIPT_ITEM_MAX)}\n… (${long.length} characters; cut here)`,
+      )
+      assert.equal(read.messages[1].body, older[3].body, 'one that fits is whole')
+      assert.equal(ledger.message(newest.id).body, long, 'the whole stays with the message')
+      // Without `unread`, every message the human has, read or not, the same way.
+      const everything = ledger.latestMessages(human)
+      assert.deepEqual([everything.total, everything.shown], [7, 2])
+      assert.ok(Buffer.byteLength(JSON.stringify(everything.messages)) <= PAGE_BYTES)
+    })
+  })
+
   it('shows a task with its whole thread, oldest first', async () => {
     await withLedger((ledger) => {
       const { project } = staff(ledger)
@@ -3354,6 +3399,50 @@ describe('the transcript copy', () => {
       })
       assert.throws(() => ledger.copyTranscript(conversation.id, 'items'), {
         code: 'invalid-items',
+      })
+    })
+  })
+
+  it('reads the last of a long copy in a frame: the newest items that fit, one too long cut, and how many', async () => {
+    await withLedger((ledger) => {
+      const { project, conversation } = windowed(ledger)
+      // More than the page's 1 MiB frame: twenty tool outputs at the most the
+      // copy keeps of one, then the agent's words, longer than half of it alone.
+      const output = 'PASS src/parser.test.js '.repeat(3_000)
+      const words = 'The parser is done, and here is why. '.repeat(16_000)
+      ledger.copyTranscript(conversation.id, [
+        item('u1', 'user', '[ConsensFlow m-1 · T-1 · task from @chief]\nParser'),
+        ...Array.from({ length: 20 }, (_, n) => item(`t${n + 1}`, 'tool', output)),
+        item('a1', 'assistant', words),
+      ])
+      const whole = ledger.transcript(project.id, 1)
+      assert.ok(Buffer.byteLength(JSON.stringify(whole)) > 1024 * 1024)
+
+      const read = ledger.latestTranscript(project.id, 1)
+      const bytes = Buffer.byteLength(JSON.stringify(read.items))
+      assert.ok(bytes <= PAGE_BYTES, `the items take ${bytes} bytes`)
+      assert.deepEqual([read.total, read.shown], [22, 8])
+      assert.deepEqual(
+        read.items.map((i) => i.id),
+        ['t14', 't15', 't16', 't17', 't18', 't19', 't20', 'a1'],
+      )
+      assert.equal(
+        read.items.at(-1).text,
+        `${words.slice(0, TRANSCRIPT_ITEM_MAX)}\n… (${words.length} characters; cut here)`,
+      )
+      // A tool's output was cut once, when it was copied.
+      assert.equal(read.items[0].text, whole.items[14].text)
+      assert.match(read.items[0].text, /^PASS[^…]*… \(72000 characters; cut here\)$/)
+      assert.equal(whole.items.at(-1).text, words, 'the copy keeps the words whole')
+      assert.deepEqual(ledger.latestTranscript(project.id, 1, { limit: 2 }), {
+        items: read.items.slice(-2),
+        total: 22,
+        shown: 2,
+      })
+      assert.deepEqual(ledger.latestTranscript(project.id, 1, { limit: 0 }), {
+        items: [],
+        total: 22,
+        shown: 0,
       })
     })
   })

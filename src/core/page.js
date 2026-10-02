@@ -118,10 +118,12 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       }
     },
 
-    'inbox.get': async ({ project, participant = 'human' }) => {
+    // As much as one frame carries, newest first, and how many there are;
+    // `unread` is what For you lists: the human's notes not yet read.
+    'inbox.get': async ({ project, participant = 'human', unread = false }) => {
       const owner = ledger.project(project)?.participants.find((p) => p.handle === participant)
       if (owner === undefined) throw new Error(`${participant} is not in project ${project}`)
-      return { messages: ledger.inbox(owner.id) }
+      return ledger.latestMessages(owner.id, { unread: unread === true })
     },
 
     'task.get': async ({ project, task }) => {
@@ -131,7 +133,7 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
     },
 
     'task.transcript': async ({ project, task, limit }) =>
-      ledger.transcript(project, task, limit === undefined ? {} : { limit }),
+      ledger.latestTranscript(project, task, limit === undefined ? {} : { limit }),
 
     'project.gate': change(async ({ project, gate }) => ({
       project: ledger.setGate(project, gate),

@@ -647,6 +647,41 @@ describe('the page protocol of the new core', () => {
     })
   })
 
+  it("reads the human's notes and what a window wrote in one bridge frame, however long they run", async () => {
+    await withPage(async ({ ledger, operations }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        harness: 'pi',
+      })
+      await operations['member.add']({ project: project.id, agent: 'artemis' })
+      const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
+      ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'worker',
+        tier: artemis.tier,
+        body: 'Lexer',
+      })
+      const { message } = ledger.assignTask(project.id, 1, artemis.id)
+      const conversation = ledger.startConversation(message.recipientId, { harness: 'claude-code' })
+      const said = 'The lexer is done, and here is why. '.repeat(20_000)
+      ledger.copyTranscript(
+        conversation.id,
+        [1, 2, 3, 4].map((n) => ({ id: `a${n}`, role: 'assistant', text: said, complete: true })),
+      )
+      for (const n of [1, 2, 3, 4]) {
+        ledger.note(project.id, { from: 'chief', to: 'human', body: `${n}. ${said}` })
+      }
+      // What the Rust host's bridge carries: one frame of at most 1 MiB.
+      const frame = (reply) => Buffer.byteLength(JSON.stringify({ ok: true, ...reply }))
+      const notes = await operations['inbox.get']({ project: project.id, unread: true })
+      assert.ok(frame(notes) < 1024 * 1024, `the notes take ${frame(notes)} bytes`)
+      assert.deepEqual([notes.total, notes.shown], [4, notes.messages.length])
+      const written = await operations['task.transcript']({ project: project.id, task: 1 })
+      assert.ok(frame(written) < 1024 * 1024, `what the window wrote takes ${frame(written)} bytes`)
+      assert.deepEqual([written.total, written.shown], [4, written.items.length])
+    })
+  })
+
   it("shows the human's notes and marks them read; the human answers nothing on the page", async () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
@@ -659,7 +694,11 @@ describe('the page protocol of the new core', () => {
         messages.map((m) => [m.id, m.kind, m.state]),
         [[note.id, 'note', 'queued']],
       )
+      const unread = () => operations['inbox.get']({ project: project.id, unread: true })
+      assert.deepEqual((await unread()).messages, messages, 'For you lists it')
       assert.equal((await operations['message.read']({ message: note.id })).message.state, 'read')
+      const { messages: none, total, shown } = await unread()
+      assert.deepEqual([none, total, shown], [[], 0, 0], 'and lists it no more')
       assert.equal(operations['message.answer'], undefined, 'the chief asks in its terminal')
     })
   })

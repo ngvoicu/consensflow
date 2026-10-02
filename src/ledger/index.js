@@ -85,8 +85,15 @@ export const OVERDUE_MS = 10 * 60_000
  * ConsensFlow's): a lead switched in reads them in `cf history`.
  */
 export const TRANSCRIPT_ITEM_MAX = 64_000
-/** How many items of a transcript the board reads at once, from the end. */
-export const TRANSCRIPT_PAGE = 300
+/**
+ * How much of a list the page reads at once (the human's notes, what a
+ * window wrote), as JSON: half the 1 MiB frame the Rust host's bridge carries
+ * each answer in. An item too long for it on its own is cut at
+ * TRANSCRIPT_ITEM_MAX characters; at six bytes a character (a control
+ * character, escaped) that is 384 KB, so the newest item always fits, and a
+ * refresh that reads the notes stays well clear of the frame.
+ */
+export const PAGE_BYTES = 512 * 1024
 /**
  * How much of a message the human's bay on the board carries: two screens
  * of its strip. The page reads the board in one frame of at most 1 MiB, and
@@ -393,15 +400,38 @@ const messageView = (row) => ({
   deliveredAt: row.delivered_at,
 })
 
+/** `text` cut at `max` characters, saying how long it was; shorter, as it is. */
+const cut = (text, max) =>
+  text.length <= max ? text : `${text.slice(0, max)}\n… (${text.length} characters; cut here)`
+
 /** A message as the bay shows it: a long one cut at BAY_EXCERPT, saying how long it was. */
 const bayView = (row) => {
   const message = messageView(row)
-  return message.body.length <= BAY_EXCERPT
-    ? message
-    : {
-        ...message,
-        body: `${message.body.slice(0, BAY_EXCERPT)}\n… (${message.body.length} characters; cut here)`,
-      }
+  return { ...message, body: cut(message.body, BAY_EXCERPT) }
+}
+
+/**
+ * The newest of `items` (newest first) that fit in PAGE_BYTES as a JSON
+ * list, in that order: what the page reads of a list in one frame. One too
+ * long to fit on its own has its text (`field`) cut at TRANSCRIPT_ITEM_MAX
+ * characters and goes on; the first that does not fit ends the list.
+ */
+function newestThatFit(items, field) {
+  const fit = []
+  // A list of n items takes n + 1 bytes of its own: two brackets, n - 1 commas.
+  let used = 1
+  for (const item of items) {
+    let view = item
+    let bytes = Buffer.byteLength(JSON.stringify(view)) + 1
+    if (1 + bytes > PAGE_BYTES) {
+      view = { ...item, [field]: cut(item[field], TRANSCRIPT_ITEM_MAX) }
+      bytes = Buffer.byteLength(JSON.stringify(view)) + 1
+    }
+    if (used + bytes > PAGE_BYTES) break
+    used += bytes
+    fit.push(view)
+  }
+  return fit
 }
 
 const badQuestions = (why) => new LedgerError('bad-questions', `questions: ${why}`, 400)
@@ -916,9 +946,7 @@ class Ledger {
           item.id,
           from + index,
           role,
-          role === 'tool' && text.length > TRANSCRIPT_ITEM_MAX
-            ? `${text.slice(0, TRANSCRIPT_ITEM_MAX)}\n… (${text.length} characters; cut here)`
-            : text,
+          role === 'tool' ? cut(text, TRANSCRIPT_ITEM_MAX) : text,
           item.complete === false ? 0 : 1,
           typeof item.at === 'string' && !Number.isNaN(Date.parse(item.at)) ? item.at : null,
           at,
@@ -930,10 +958,12 @@ class Ledger {
   }
 
   /**
-   * What the window that has a task wrote, for the board: the copied items
-   * of its assignee's conversations in order, the last `limit` of them.
+   * What the window that has a task wrote: the copied items of its
+   * assignee's conversations in order, whole, the last `limit` of them (all
+   * of them when no limit is given). `cf task get --transcript` reads it
+   * over the local API; the page reads `latestTranscript`.
    */
-  transcript(projectId, number, { limit = TRANSCRIPT_PAGE } = {}) {
+  transcript(projectId, number, { limit = Number.POSITIVE_INFINITY } = {}) {
     const task = this.#taskRow(projectId, number)
     if (task.assignee_id === null) return { items: [], total: 0 }
     const copied = this.#db
@@ -968,6 +998,21 @@ class Ledger {
         at: row.at,
       })),
     }
+  }
+
+  /**
+   * What the window that has a task wrote, as the page reads it in one frame:
+   * the last items that fit (`newestThatFit`), no more than `limit` of them,
+   * in order, with how many there are (`total`) and how many came (`shown`).
+   */
+  latestTranscript(projectId, number, { limit } = {}) {
+    const { items, total } = this.transcript(
+      projectId,
+      number,
+      limit === undefined ? {} : { limit },
+    )
+    const fit = newestThatFit(items.reverse(), 'text').reverse()
+    return { items: fit, total, shown: fit.length }
   }
 
   /**
@@ -2401,7 +2446,11 @@ class Ledger {
     return row === undefined ? null : this.task(row.project_id, row.number)
   }
 
-  /** A participant's messages, newest first: what reached it or is on its way, never what still waits for the human. */
+  /**
+   * A participant's messages, newest first, whole: what reached it or is on
+   * its way, never what still waits for the human. `cf inbox` lists them
+   * over the local API; the page reads `latestMessages`.
+   */
   inbox(participantId, { limit = 100 } = {}) {
     return this.#db
       .prepare(
@@ -2409,6 +2458,24 @@ class Ledger {
       )
       .all(participantId, limit)
       .map(messageView)
+  }
+
+  /**
+   * A participant's messages as the page reads them in one frame, newest
+   * first: those that fit (`newestThatFit`), never what still waits for the
+   * human, with how many there are (`total`) and how many came (`shown`).
+   * `unread` keeps to the notes still queued: what For you lists for the human.
+   */
+  latestMessages(participantId, { unread = false } = {}) {
+    const which = unread ? `m.kind = 'note' AND m.state = 'queued'` : `m.state != 'gated'`
+    const { total } = this.#db
+      .prepare(`SELECT COUNT(*) AS total FROM message m WHERE m.recipient_id = ? AND ${which}`)
+      .get(participantId)
+    const rows = this.#db
+      .prepare(`${MESSAGE_SELECT} WHERE m.recipient_id = ? AND ${which} ORDER BY m.id DESC`)
+      .iterate(participantId)
+    const fit = newestThatFit(rows.map(messageView), 'body')
+    return { messages: fit, total, shown: fit.length }
   }
 
   events(projectId, { after = 0, limit = 500 } = {}) {
