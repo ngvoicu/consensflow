@@ -771,14 +771,26 @@ const alive = (pid) => {
  */
 async function supervised(t, args, extraEnv = {}, executable = fakeCodex) {
   const root = await mkdtemp(join(tmpdir(), 'cf-cx-'))
-  t.after(() => rm(root, { recursive: true, force: true }))
+  let child = null
+  let exited = null
+  // A test that ends early closes the window as the app would: the
+  // supervisor ends Codex's processes, then their files go.
+  t.after(async () => {
+    if (child !== null && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM')
+      const stuck = setTimeout(() => child.kill('SIGKILL'), 5_000)
+      await exited
+      clearTimeout(stuck)
+    }
+    await rm(root, { recursive: true, force: true })
+  })
   const codex = executable(root)
   const port = await freePort()
   const log = join(root, 'codex.jsonl')
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(([name]) => !name.startsWith('CONSENSFLOW_')),
   )
-  const child = spawn(process.execPath, [SUPERVISOR, codex, ...args], {
+  child = spawn(process.execPath, [SUPERVISOR, codex, ...args], {
     env: {
       ...inherited,
       CONSENSFLOW_HOME: root,
@@ -791,13 +803,10 @@ async function supervised(t, args, extraEnv = {}, executable = fakeCodex) {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
+  exited = once(child, 'exit')
   let stderr = ''
   child.stderr.on('data', (chunk) => {
     stderr += chunk
-  })
-  const exited = once(child, 'exit')
-  t.after(() => {
-    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
   })
   const runs = async () =>
     (await readFile(log, 'utf8').catch(() => ''))
