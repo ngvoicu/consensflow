@@ -106,25 +106,35 @@ projects.
   live sessions under it. A task moves from the backlog through queued and
   working to done; you open any card to read its brief, its result, its thread
   and what its window wrote, and to pause it, reassign it (back to the board
-  for another member of its tier) or cancel it. The chief's window is docked beside the board; a strip holds every
-  live window.
-- **New project.** A folder, the chief's harness, the staff (the last project's
-  ticked already) and whether human approval is required.
+  for another member of its tier) or cancel it. The chief's terminal is
+  docked beside the board while its window lives. A session's terminal stays
+  out of the dock until you choose Show terminal on its row; Hide terminal
+  (or Hide on its card) puts it away while its window works on, and it keeps
+  all it wrote.
+- **New project.** A folder, the saved agent the lead runs on (its harness,
+  model and effort come with it), the staff (the last project's ticked
+  already) and whether human approval is required.
 - **Switch lead.** On the chief's row: the lead goes on in a new window on
-  another harness, on its default model or on any saved agent's. A lead at
-  work finishes its turn first, or is cut off if you say so; it can first be
-  asked to write down where things stand. Its first message hands it the lead:
-  what waits on the board, your last words, and `cf history`, which pages
-  through what you and the leads before it said. The staff keeps working, and
-  what was on its way to the lead goes to the new one.
+  another saved agent, with its harness, model and effort. A lead always runs
+  on a saved agent, never on a harness's own default model; a lead that was
+  started on its harness's default before keeps running on it until you
+  switch it. A lead at work finishes its turn first, or is cut off if you say
+  so; it can first be asked to write down where things stand. Its first
+  message hands it the lead: what waits on the board, your last words, and
+  `cf history`, which pages through what you and the leads before it said.
+  The staff keeps working, and what was on its way to the lead goes to the
+  new one.
 - **Staff.** Which agents this project may use, each with its roles and what
   it runs (model, harness, effort, tier), plus the approval setting. The
   rows read by role, then by work tier with the most critical first; the
-  pick list offers every agent by work tier the same way. The daemon
-  assigns work only within the staff. A member whose agent is gone (a
-  release dropped the catalog entry, or you removed one of your own) runs
-  on no default: its row says so, it gets no work, and what it held goes
-  back to the board; define the agent again or remove the member.
+  pick list offers every agent that fits the role by work tier the same way.
+  Only an image agent is an image designer, and an image agent takes no
+  other role; a member that held a role it does not fit before keeps it, at
+  work, until you remove it. The daemon assigns work only within the staff.
+  A member whose agent is gone (a release dropped the catalog entry, or you
+  removed one of your own) runs on no default: its row says so, it gets no
+  work, and what it held goes back to the board; define the agent again or
+  remove the member.
 - **Agents** (Settings). One roster: every catalog agent and every agent
   you define, as one list by model. Each model's card says its work tier
   once; each agent's row says its harness, effort, tier and route. A

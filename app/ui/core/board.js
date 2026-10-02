@@ -15,14 +15,6 @@ import { button, element, redraw } from '../dom.js'
  */
 
 const ACTIVE = ['working', 'waiting', 'queued', 'paused', 'open']
-/** The harnesses a lead runs on, as the human knows them, in the order they are offered. */
-export const HARNESS_NAMES = {
-  'claude-code': 'Claude Code',
-  codex: 'Codex',
-  opencode: 'OpenCode',
-  pi: 'Pi',
-  devin: 'Devin',
-}
 /** What the chief (or the human) may stop: a task on the board or in a window. */
 const PAUSABLE = ['open', 'queued', 'working', 'waiting']
 /** What the human may give back to the board for another member of its tier. */
@@ -91,7 +83,7 @@ function age(iso, now = Date.now()) {
 /**
  * A member of the staff, as the ledger counts one: the lane of an agent of
  * its own, neither one of its sessions nor the lead, which runs on a saved
- * agent too once the lead is switched to one.
+ * agent too.
  */
 export const isMember = (participant) =>
   participant.agent !== null && participant.member === null && participant.role !== 'chief'
@@ -163,7 +155,7 @@ export const laneName = (participant) =>
 /** "1 note", "3 notes": how many of something. */
 const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`
 
-/** A member's row: how many of its sessions' terminals (of the row's role) are open now. */
+/** A member's row: how many of its sessions' terminals (of the row's role) are open now; null for none. */
 function sessionsNote(lane, board) {
   const open = board.lanes.filter(
     (other) =>
@@ -171,9 +163,7 @@ function sessionsNote(lane, board) {
       other.participant.role === lane.participant.role &&
       other.pane !== null,
   ).length
-  return open === 0
-    ? 'Free: a terminal opens with its next task'
-    : `${plural(open, 'terminal')} open, one per task`
+  return open === 0 ? null : `${plural(open, 'terminal')} open, one per task`
 }
 
 /** "T-3, T-4": task numbers in a sentence. */
@@ -200,15 +190,25 @@ function route(task) {
 const resting = (participant, activity) =>
   isMember(participant) && (activity?.state ?? 'closed') === 'closed'
 
-/** A session's row says whose window it is; the member's row says what it is. */
+/**
+ * A session's row says whose window it is; the member's row says what it
+ * is. Each says what its agent runs: its model, and its effort when it has
+ * one, as the staff dialog does.
+ */
 const identity = (participant, agent) =>
   (participant.member
-    ? [`${participant.role} session of @${participant.member}`, participant.harness, agent?.model]
+    ? [
+        `${participant.role} session of @${participant.member}`,
+        participant.harness,
+        agent?.model,
+        agent?.effort,
+      ]
     : [
         participant.role === 'chief' ? null : participant.roles.join('+'),
         participant.tier,
         participant.harness,
         agent?.model,
+        agent?.effort,
       ]
   )
     .filter(Boolean)
@@ -217,7 +217,8 @@ const identity = (participant, agent) =>
 /**
  * What a row says its participant is doing, and the state that colours it:
  * an agent gone, a lead being switched or a member out of quota say so
- * before anything its window does.
+ * before anything its window does. A member with no terminal open says
+ * nothing (null): its row has no status line.
  */
 function rowStatus(lane, board, now) {
   const { participant, activity } = lane
@@ -232,18 +233,17 @@ function rowStatus(lane, board, now) {
     ]
   }
   if (lane.switching) {
-    const { agent, harness } = lane.switching
-    return [
-      'switching',
-      `Switching the lead to ${agent ?? HARNESS_NAMES[harness] ?? harness} after this turn`,
-    ]
+    return ['switching', `Switching the lead to ${lane.switching.agent} after this turn`]
   }
   if (outOfQuota(participant, now)) {
     return ['out', `Out of quota until ${clock(participant.outUntil)}`]
   }
   const state = activity?.state ?? 'closed'
   if (state === 'waiting' && activity.reason) return [state, `Waiting: ${activity.reason}`]
-  if (resting(participant, activity)) return [state, sessionsNote(lane, board)]
+  if (resting(participant, activity)) {
+    const note = sessionsNote(lane, board)
+    return note === null ? null : [state, note]
+  }
   if (participant.member !== null && state === 'closed') return [state, 'Terminal closed']
   return [state, ACTIVITY_LABEL[state] ?? 'No window']
 }
@@ -523,15 +523,15 @@ export class BoardView {
       lamp(outOfQuota(participant, now) ? { state: 'out' } : activity),
       element('span', 'row-name', laneName(participant)),
     )
-    const [state, text] = rowStatus(lane, board, now)
-    const status = element('span', 'row-status', text)
-    status.dataset.state = state
-    head.append(
-      title,
-      element('span', 'row-meta', identity(participant, agent)),
-      status,
-      this.#rowTools(lane, board),
-    )
+    head.append(title, element('span', 'row-meta', identity(participant, agent)))
+    const said = rowStatus(lane, board, now)
+    if (said !== null) {
+      const [state, text] = said
+      const status = element('span', 'row-status', text)
+      status.dataset.state = state
+      head.append(status)
+    }
+    head.append(this.#rowTools(lane, board))
     return head
   }
 
@@ -603,7 +603,7 @@ export class BoardView {
           'Switch lead',
           'quiet-button',
           this.#onLane(this.#actions.onSwitchLead, participant),
-          'Switch the lead to another harness or model',
+          'Switch the lead to another agent',
         ),
       )
     }

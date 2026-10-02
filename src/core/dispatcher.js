@@ -87,6 +87,19 @@ export function requireOpen(project) {
   if (project.state !== 'open') throw new Error(`${project.name} is closed: resume it first`)
 }
 
+/**
+ * A lead runs on one of the human's saved agents, never on a harness's own
+ * default model: asked for without one, the core says what to pick.
+ */
+export function requireLeadAgent(agent) {
+  if (typeof agent !== 'string' || agent.length === 0) {
+    throw new Error(
+      'pick one of your saved agents for the lead: its harness, model and effort come with it',
+    )
+  }
+  return agent
+}
+
 /** A note from ConsensFlow that hands the lead to a new window (`handoff.js`). */
 const isHandoff = (message) =>
   message.kind === 'note' && message.sender === null && message.body.startsWith(HANDOFF_TITLE)
@@ -195,22 +208,32 @@ export class Dispatcher {
   }
 
   /**
-   * A new project: the ledger records it with its staff, and its chief
-   * window opens after the answer (see `#openSoon`).
+   * The lead asked for: one of the human's saved agents, on its harness,
+   * whose windows ConsensFlow opens.
    */
-  async openProject({ directory, name, harness, staff = [], gate }) {
-    for (const runs of [harness, ...staff.map((member) => member.harness)]) {
-      this.requireAdapter(runs)
-    }
+  #requireLead({ harness, agent }) {
+    requireLeadAgent(agent)
+    this.requireAdapter(harness)
+    if (this.#roster(agent) === null) throw new Error(`${agent} is not among your agents`)
+  }
+
+  /**
+   * A new project: the ledger records it with its chief, on the saved agent
+   * `chief` names, and its staff, and its chief window opens after the
+   * answer (see `#openSoon`).
+   */
+  async openProject({ directory, name, chief = {}, staff = [], gate }) {
+    this.#requireLead(chief)
+    for (const member of staff) this.requireAdapter(member.harness)
     const project = this.#ledger.createProject({
       directory,
       name,
-      chief: { harness },
+      chief: { harness: chief.harness, agent: chief.agent },
       staff,
       ...(gate === undefined ? {} : { gate }),
     })
-    const chief = project.participants.find((participant) => participant.handle === 'chief')
-    this.#openSoon(chief.id)
+    const lead = project.participants.find((participant) => participant.handle === 'chief')
+    this.#openSoon(lead.id)
     return this.#ledger.project(project.id)
   }
 
@@ -700,19 +723,16 @@ export class Dispatcher {
   }
 
   /**
-   * The human's Switch lead: the chief goes on in a fresh window on
-   * `harness`, on the saved `agent` (model and effort) or the harness's own
-   * default, and the window's first message hands it the lead (`#handoff`).
+   * The human's Switch lead: the chief goes on in a fresh window on the
+   * saved `agent` (its model and effort) on `harness`, and the window's
+   * first message hands it the lead (`#handoff`).
    * `when: 'turn'` lets a lead at work finish its turn; `note` first asks it
    * to write down where things stand, and switches once it has answered. A
    * lead with no window, or out of quota, switches at once. A project deleted
    * while the switch waits is gone for it, and nothing of it is switched.
    */
-  async switchChief(projectId, { harness, agent = null, when = 'now', note = false }) {
-    this.requireAdapter(harness)
-    if (agent !== null && this.#roster(agent) === null) {
-      throw new Error(`${agent} is not among your agents`)
-    }
+  async switchChief(projectId, { harness, agent, when = 'now', note = false }) {
+    this.#requireLead({ harness, agent })
     const project = this.#knownProject(projectId)
     const chief = project.participants.find((participant) => participant.role === 'chief')
     const runtime = this.#runtimeOf(chief.id)
@@ -734,7 +754,7 @@ export class Dispatcher {
             note: note
               ? this.#ledger.note(projectId, {
                   to: 'chief',
-                  body: `The human is moving this project's lead to ${harness}${agent === null ? '' : ` (${agent})`} once you answer. Write down where things stand, for the lead after you: what you and the human decided, what you promised, what you were about to do, and what is unresolved. Do not start anything new.`,
+                  body: `The human is moving this project's lead to ${harness} (${agent}) once you answer. Write down where things stand, for the lead after you: what you and the human decided, what you promised, what you were about to do, and what is unresolved. Do not start anything new.`,
                 }).id
               : null,
           }

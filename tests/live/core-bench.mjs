@@ -78,8 +78,7 @@ const workers =
     : named.filter((_arg, index) => index !== reviewerAt && index !== reviewerAt + 1)
 const wanted = workers.length ? workers : ['opencode', 'pi', 'devin']
 if (!AGENTS[REVIEWER]) throw new Error(`unsupported bench reviewer: ${REVIEWER}`)
-const LEAD_KIND = { claude: 'claude-code', opencode: 'opencode' }[CHIEF]
-if (!LEAD_KIND) throw new Error(`unsupported bench chief: ${CHIEF}`)
+if (!['claude', 'opencode'].includes(CHIEF)) throw new Error(`unsupported bench chief: ${CHIEF}`)
 
 // A clean environment: never this shell's Claude session identity.
 const ENV = {
@@ -145,6 +144,8 @@ const writeRoster = (home) =>
         agents: [
           ...wanted.map((name) => AGENTS[name]),
           { ...AGENTS[REVIEWER], id: 'bench-reviewer' },
+          // The lead runs on a saved agent: its harness's cheap model.
+          { ...AGENTS[CHIEF], id: 'bench-lead' },
         ],
       },
       null,
@@ -159,7 +160,7 @@ try {
   // The baseline measures delivery alone; a review is its own scenario below.
   const opened = await app.requestNode('project.open', {
     directory: WORKSPACE,
-    harness: LEAD_KIND,
+    agent: 'bench-lead',
   })
   if (opened.ok !== true) throw new Error(`project.open: ${JSON.stringify(opened)}`)
   const project = opened.project.id

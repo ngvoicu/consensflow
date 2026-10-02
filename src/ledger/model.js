@@ -20,7 +20,7 @@ export const ACTIVE_TASK_STATES = ['working', 'waiting']
 export const HELD_TASK_STATES = ['queued', 'working', 'waiting']
 export const MAX_BODY = 1_000_000
 export const MAX_TITLE = 120
-export const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 
 export class LedgerError extends Error {
   constructor(code, message, status = 400) {
@@ -106,13 +106,38 @@ export function requireRoles(roles) {
   return [...new Set(roles)]
 }
 
+/**
+ * A saved agent's id, as the roster names it: what a lead runs on, and what
+ * a member is. A member's id is its handle too, so it is never one of the
+ * handles in `taken`.
+ */
+export function requireAgentId(agent, taken = []) {
+  if (typeof agent !== 'string' || !AGENT_ID.test(agent) || taken.includes(agent)) {
+    throw new LedgerError('invalid-agent', `not an agent id: ${JSON.stringify(agent)}`)
+  }
+  return agent
+}
+
+/** Whether a role fits an agent's harness: an image designer is an image agent, and an image agent is nothing else. */
+export const fitsRole = (harness, role) => (role === 'designer') === (harness === 'image')
+
+/** Refuses roles that do not fit `agent`, on `harness` (see `fitsRole`), saying which way. */
+export function requireFittingRoles(agent, harness, roles) {
+  if (roles.every((role) => fitsRole(harness, role))) return
+  throw new LedgerError(
+    'invalid-role',
+    harness === 'image'
+      ? `${agent} is an image agent, which can only be an image designer`
+      : `only an image agent can be an image designer, and ${agent} is not one`,
+  )
+}
+
 /** Validates a member and returns its roles, normalized. */
 export function requireMember({ agent, harness, role, roles, tier }) {
   const set = requireRoles(roles ?? (role === undefined ? [] : [role]))
-  if (typeof agent !== 'string' || !AGENT_ID.test(agent) || COORDINATOR_HANDLES.includes(agent)) {
-    throw new LedgerError('invalid-agent', `not an agent id: ${JSON.stringify(agent)}`)
-  }
+  requireAgentId(agent, COORDINATOR_HANDLES)
   requireHarness(harness)
+  requireFittingRoles(agent, harness, set)
   requireTier(tier)
   return set
 }

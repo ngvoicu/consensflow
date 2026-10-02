@@ -85,8 +85,8 @@
     <form class="dialog-form">
       <h2 id="new-project-title">New project</h2>
       <label>Project folder<input name="directory" readonly></label>
-      <label>The chief runs in
-        <select name="harness"></select>
+      <label>The lead runs on
+        <select name="lead" required></select>
       </label>
       <fieldset class="staff-pick">
         <legend>The staff</legend>
@@ -115,9 +115,9 @@
   <dialog id="switch-lead-dialog" aria-labelledby="switch-lead-title">
     <form class="dialog-form">
       <h2 id="switch-lead-title">Switch the lead</h2>
-      <p class="dialog-help">The lead goes on in a new window on the harness and model you pick. Its first message hands it the lead: what you and the leads before it said, and what waits on the board. The staff keeps working.</p>
+      <p class="dialog-help">The lead goes on in a new window on the saved agent you pick, with its harness, model and effort. Its first message hands it the lead: what you and the leads before it said, and what waits on the board. The staff keeps working.</p>
       <label>The lead runs on
-        <select name="lead"></select>
+        <select name="lead" required></select>
       </label>
       <fieldset>
         <legend>If the lead is in the middle of a turn</legend>
@@ -135,7 +135,7 @@
   <dialog id="staff-dialog" aria-labelledby="staff-title">
     <form class="dialog-form">
       <h2 id="staff-title">Project staff</h2>
-      <p class="dialog-help">The chief names the tier a task needs and ConsensFlow picks a free member of that tier: a worker does the work, an advisor advises the chief, a reviewer reviews finished work when the chief asks, an image designer draws. A member may hold more than one role: one row here per role.</p>
+      <p class="dialog-help">The chief names the tier a task needs and ConsensFlow picks a free member of that tier: a worker does the work, an advisor advises the chief, a reviewer reviews finished work when the chief asks. An image designer draws: only an image agent is one, and an image agent takes no other role. A member may hold more than one role: one row here per role.</p>
       <table class="staff" aria-label="On the staff">
         <thead>
           <tr><th>Member</th><th>Role</th><th></th></tr>

@@ -693,7 +693,7 @@ describe('cf history', () => {
         { id: 'b', role: 'assistant', text: 'Noted' },
         { id: 'c', role: 'tool', text: 'ok 3 passed' },
       ])
-      ledger.switchChief(project.id, { harness: 'codex' })
+      ledger.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       const lead = token('chief')
       const read = await cf(lead, 'history')
       assert.equal(read.code, 0, read.err)
@@ -724,7 +724,7 @@ describe('cf history', () => {
       ledger.copyTranscript(first.id, [
         { id: 'a', role: 'user', text: `[ConsensFlow m-${theirs.id} · pasted from elsewhere]` },
       ])
-      ledger.switchChief(project.id, { harness: 'codex' })
+      ledger.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       const read = await cf(token('chief'), 'history')
       assert.equal(read.code, 0, read.err)
       assert.ok(!read.out.includes('4417'), read.out)

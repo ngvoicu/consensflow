@@ -11,7 +11,7 @@ import { Store } from './store.js'
 import * as tasks from './tasks.js'
 
 export { TRANSCRIPT_ITEM_MAX } from './conversations.js'
-export { CHIEF_HARNESSES, HARNESSES, LedgerError, TIERS } from './model.js'
+export { CHIEF_HARNESSES, fitsRole, HARNESSES, LedgerError, TIERS } from './model.js'
 export { OVERDUE_MS, PAGE_BYTES } from './page-reads.js'
 export { SCHEMA_VERSION } from './schema.js'
 export { RESUME_WORDS } from './tasks.js'
@@ -49,6 +49,11 @@ export { RESUME_WORDS } from './tasks.js'
  *   questions too, and it is refused as a recipient (`member-left`) until it
  *   rejoins. The coordinators whose windows already run are told when the
  *   staff changes; a window that has not started reads the staff at launch.
+ * - An image designer is an image agent, and an image agent is nothing
+ *   else: a member joins, and gains a role, only in roles its agent fits
+ *   (`invalid-role`). A role it held from before stays until it is dropped.
+ * - A lead is switched only to a saved agent, never to a harness's own
+ *   default (`invalid-agent`).
  * - Task states move only along the state machine below; anything else is
  *   refused with `invalid-transition`.
  *

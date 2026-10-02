@@ -118,10 +118,11 @@ export async function runSelftest({
       ],
     })
 
-    // A project on the smoke's folder, its chief and one worker on the fake `claude`.
+    // A project on the smoke's folder, its chief and one worker on terpsichore,
+    // a catalog agent of Claude Code, which is the fake `claude` here.
     const opened = await core('project.open', {
       directory: config.dir,
-      harness: 'claude-code',
+      agent: 'terpsichore',
       staff: [{ agent: 'terpsichore', roles: ['worker'] }],
     })
     await report('project', opened)

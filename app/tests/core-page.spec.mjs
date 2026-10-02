@@ -35,12 +35,13 @@ const participant = (id, handle, role, extra = {}) => ({
   ...extra,
 })
 
-/** A session of a member: its own participant, named after the member. */
+/** A session of a member: its own participant, named after the member, on the member's agent. */
 const session = (id, member, name, role = 'worker', extra = {}) =>
   participant(id, `${member.handle}-${name}`, role, {
     memberId: member.id,
     member: member.handle,
     session: name,
+    agent: member.agent,
     harness: member.harness,
     tier: member.tier,
     ...extra,
@@ -114,6 +115,13 @@ function model() {
         effort: 'xhigh',
         profile: { workTier: 'complex' },
         hidden: true,
+      },
+      // The image agent: an image designer, and nothing else.
+      {
+        name: 'pygmalion',
+        harness: 'image',
+        model: 'codex-image',
+        profile: { workTier: 'light' },
       },
     ],
     boards: {
@@ -378,6 +386,20 @@ const calls = (page, operation) =>
         .map(([, args]) => args.body),
     operation,
   )
+
+/** What a lead pick list offers: each harness group's agents, and whether each is disabled. */
+const leadGroups = (select) =>
+  select
+    .locator('optgroup')
+    .evaluateAll((all) =>
+      all.map((group) => [
+        group.label,
+        [...group.querySelectorAll('option')].map((option) => [
+          option.textContent.split(' · ')[0],
+          option.disabled,
+        ]),
+      ]),
+    )
 
 test('draws the kanban: a row per participant, a column per state, and cards that stay when done', async ({
   page,
@@ -669,8 +691,43 @@ test("shows a task waiting for a member in its requester's backlog, with the tie
   )
   await expect(card.locator('.card-route')).toHaveText('for a standard worker')
   await expect(page.locator('tr[data-handle="zeus"] .row-meta')).toHaveText(
-    'worker · standard · claude-code · claude-sonnet-5',
+    'worker · standard · claude-code · claude-sonnet-5 · high',
   )
+})
+
+test("says on each row the effort its agent runs at, after its model: a member's, a session's and the lead's", async ({
+  page,
+}) => {
+  const data = model()
+  const { lanes } = data.boards[1]
+  Object.assign(lanes.find((lane) => lane.participant.handle === 'chief').participant, {
+    agent: 'hera',
+    harness: 'codex',
+  })
+  const zeus = lanes.find((lane) => lane.participant.handle === 'zeus').participant
+  lanes.push(
+    {
+      participant: session(20, zeus, 'amber-pine'),
+      tasks: [],
+      activity: { state: 'working' },
+      pane: { id: 'p1-zeus-amber-pine', generation: 1 },
+    },
+    {
+      participant: participant(7, 'athena', 'advisor', { harness: 'opencode', tier: 'light' }),
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+  )
+  await open(page, data)
+  const meta = (handle) => page.locator(`tr[data-handle="${handle}"] .row-meta`)
+  await expect(meta('chief')).toHaveText('codex · gpt-6-astra · max')
+  await expect(meta('zeus')).toHaveText('worker · standard · claude-code · claude-sonnet-5 · high')
+  await expect(meta('zeus-amber-pine')).toHaveText(
+    'worker session of @zeus · claude-code · claude-sonnet-5 · high',
+  )
+  // An agent with no effort shows none.
+  await expect(meta('athena')).toHaveText('advisor · light · opencode · muse-spark')
 })
 
 test('shows what a task on the board waits for, on its card and in its drawer', async ({
@@ -1424,7 +1481,7 @@ test('every key the human types reaches the pane in order, flagged as nothing', 
     )
 })
 
-test('shows the staff as one row per member and role, and adds any saved agent in any role', async ({
+test('shows the staff as one row per member and role, and adds a saved agent in a role it fits', async ({
   page,
 }) => {
   const data = model()
@@ -1469,7 +1526,7 @@ test('shows the staff as one row per member and role, and adds any saved agent i
     'athena · muse-spark · opencode',
   ])
   await expect(dialog.getByLabel('Agent').locator('optgroup')).toHaveCount(2)
-  // An advisor: every agent, since any agent may take any role.
+  // An advisor: every agent but the image agent, which only draws.
   await dialog.getByLabel('Role').selectOption('advisor')
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
     'hera · gpt-6-astra · codex · max',
@@ -1503,11 +1560,68 @@ test('shows the staff as one row per member and role, and adds any saved agent i
     .poll(() => calls(page, 'member.roles'))
     .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'reviewer'] }])
   await expect(page.locator('#status')).toHaveText('@zeus is Reviewer now too.')
-  // The image designer too: nothing on the card decides who may draw.
+  // An image designer is an image agent, and an image agent is nothing else.
   await dialog.getByLabel('Role').selectOption('designer')
-  await expect(dialog.getByLabel('Agent').locator('option')).toHaveCount(4)
+  await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
+    'pygmalion · codex-image · codex',
+  ])
   await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeEnabled()
   await expect(dialog.locator('#staff-hint')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([
+      { project: 1, agent: 'athena', roles: ['advisor'] },
+      { project: 1, agent: 'pygmalion', roles: ['designer'] },
+    ])
+})
+
+test('says why no image designer is on offer: Codex, which image agents run through, is not here, or each is one already', async ({
+  page,
+}) => {
+  const data = model()
+  // Codex is not installed here: the image agent goes with it.
+  Object.assign(
+    data.agents.find((agent) => agent.name === 'pygmalion'),
+    { hidden: true, notInstalled: true },
+  )
+  await open(page, data)
+  await page.getByRole('button', { name: 'Staff' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  const hint = dialog.locator('#staff-hint')
+  await dialog.getByLabel('Role').selectOption('designer')
+  await expect(hint).toHaveText(
+    'No image agent is on offer here: image agents run through Codex; install it from Agents, Harnesses.',
+  )
+  await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeDisabled()
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  // Codex is back, and pygmalion draws for harbour already.
+  await page.evaluate(() => {
+    const pygmalion = window.__model.agents.find((agent) => agent.name === 'pygmalion')
+    delete pygmalion.hidden
+    delete pygmalion.notInstalled
+    window.__model.boards[1].lanes.push({
+      participant: {
+        ...window.__model.boards[1].lanes[2].participant,
+        id: 12,
+        handle: 'pygmalion',
+        role: 'designer',
+        roles: ['designer'],
+        agent: 'pygmalion',
+        harness: 'image',
+        tier: 'light',
+      },
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    })
+    window.__listeners.get('state-changed')()
+  })
+  await expect(page.locator('tr[data-handle="pygmalion"]')).toHaveCount(1)
+  await page.getByRole('button', { name: 'Staff' }).click()
+  await dialog.getByLabel('Role').selectOption('designer')
+  await expect(hint).toHaveText('Every image agent is on the staff as Image designer already.')
+  await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeDisabled()
 })
 
 test("drops one role from a member's row, and asks before its last", async ({ page }) => {
@@ -1634,13 +1748,34 @@ test('starts a project with human approval required, and posts the checkbox with
   const gate = dialog.getByLabel('Human approval required', { exact: false })
   await expect(gate).not.toBeChecked()
   await gate.check()
+  await dialog.getByLabel('The lead runs on').selectOption('zeus')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
-    .toEqual([{ directory: '/work/fresh', harness: 'claude-code', gate: true, staff: [] }])
+    .toEqual([{ directory: '/work/fresh', agent: 'zeus', gate: true, staff: [] }])
 })
 
-test('offers a new project only the harnesses installed here, and no agent on another', async ({
+test('starts no project until its lead is picked: a lead runs on a saved agent, never on a default', async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const lead = dialog.getByLabel('The lead runs on')
+  await expect(lead).toHaveValue('')
+  await expect(lead.locator('option').first()).toHaveText('Pick an agent')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect(dialog).toBeVisible()
+  expect(await calls(page, 'project.open')).toEqual([])
+  await lead.selectOption('hera')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([{ directory: '/work/fresh', agent: 'hera', gate: false, staff: [] }])
+  await expect(dialog).toBeHidden()
+})
+
+test("offers a new project's lead only the agents on a harness installed here, harness by harness", async ({
   page,
 }) => {
   const data = model()
@@ -1657,10 +1792,16 @@ test('offers a new project only the harnesses installed here, and no agent on an
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
-  await expect(dialog.getByLabel('The chief runs in').locator('option')).toHaveText([
-    'Codex',
-    'OpenCode',
-    'Pi',
+  // Claude Code and Devin are not installed here, and Pi's one agent is hidden.
+  expect(await leadGroups(dialog.getByLabel('The lead runs on'))).toEqual([
+    [
+      'Codex',
+      [
+        ['diana', false],
+        ['hera', false],
+      ],
+    ],
+    ['OpenCode', [['athena', false]]],
   ])
   await expect(dialog.locator('tr[data-agent="ares"]')).toHaveCount(0)
   await expect(dialog.locator('option', { hasText: 'ares' })).toHaveCount(0)
@@ -1890,7 +2031,7 @@ test('opens the agents screens in their own window, and refreshes the agents whe
   expect(await page.getByRole('dialog').count()).toBe(0)
 })
 
-test('shows a member between tasks as free, its window gone until the next task', async ({
+test('shows a member between tasks with no status line, its window gone until the next task', async ({
   page,
 }) => {
   const data = model()
@@ -1898,16 +2039,17 @@ test('shows a member between tasks as free, its window gone until the next task'
   diana.participant.outUntil = null
   await open(page, data)
   const row = page.locator('tr[data-handle="diana"]')
-  await expect(row.locator('.row-status')).toHaveText('Free: a terminal opens with its next task')
+  await expect(row.locator('.row-meta')).toBeVisible()
+  await expect(row.locator('.row-status')).toHaveCount(0)
   await expect(row.getByTestId('lamp')).toHaveAttribute('data-state', 'closed')
 })
 
-test('shows an image designer between tasks as free, as any member, and counts its open terminals', async ({
+test('shows an image designer between tasks as any member: no status line until a terminal of it opens, then the count', async ({
   page,
 }) => {
   const data = model()
   // An image designer has no tier; its tasks run in sessions like any member's.
-  const iris = participant(8, 'iris', 'designer', { agent: 'iris', harness: 'codex', tier: null })
+  const iris = participant(8, 'iris', 'designer', { agent: 'iris', harness: 'image', tier: null })
   data.boards[1].lanes.push({
     participant: iris,
     tasks: [],
@@ -1916,7 +2058,7 @@ test('shows an image designer between tasks as free, as any member, and counts i
   })
   await open(page, data)
   const row = page.locator('tr[data-handle="iris"]')
-  await expect(row.locator('.row-status')).toHaveText('Free: a terminal opens with its next task')
+  await expect(row.locator('.row-status')).toHaveCount(0)
   await changed(
     page,
     (iris) => {
@@ -2031,7 +2173,7 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
     /^Open .*'s terminal$/,
     /^Close .*'s terminal$/,
     /^Delete .*'s session$/,
-    'Switch the lead to another harness or model',
+    'Switch the lead to another agent',
   ]) {
     await expect(board.getByRole('button', { name })).toHaveCount(0)
   }
@@ -2275,7 +2417,7 @@ test('folds the panels for this page when the browser keeps no storage', async (
   await expect(board).toBeVisible()
 })
 
-test('starts a project in a chosen folder with the chosen chief, the staff ticked from the last one', async ({
+test('starts a project in a chosen folder with the chosen lead, the staff ticked from the last one', async ({
   page,
 }) => {
   const data = model()
@@ -2297,7 +2439,7 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
     /zeus.*Reviewer/,
   ])
   await expect(dialog.getByLabel('Second review of')).toHaveCount(0)
-  await dialog.getByLabel('The chief runs in').selectOption('opencode')
+  await dialog.getByLabel('The lead runs on').selectOption('athena')
   await dialog.locator('[name="pickRole"]').selectOption('advisor')
   await expect(dialog.locator('[name="pickAgent"]').locator('option')).toHaveText([
     'hera · gpt-6-astra · codex · max',
@@ -2307,20 +2449,27 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
   ])
   await dialog.locator('[name="pickAgent"]').selectOption('athena')
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  // The image designer: the image agent alone.
+  await dialog.locator('[name="pickRole"]').selectOption('designer')
+  await expect(dialog.locator('[name="pickAgent"]').locator('option')).toHaveText([
+    'pygmalion · codex-image · codex',
+  ])
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
   await dialog.getByRole('button', { name: 'Remove Worker diana' }).click()
-  await expect(table.locator('tbody tr')).toHaveCount(4)
+  await expect(table.locator('tbody tr')).toHaveCount(5)
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
     .toEqual([
       {
         directory: '/work/fresh',
-        harness: 'opencode',
+        agent: 'athena',
         gate: false,
         staff: [
           { agent: 'zeus', roles: ['worker', 'reviewer'] },
           { agent: 'hera', roles: ['worker'] },
           { agent: 'athena', roles: ['advisor'] },
+          { agent: 'pygmalion', roles: ['designer'] },
         ],
       },
     ])
@@ -2493,10 +2642,9 @@ test('starts a project while the board shown is on its way, and its windows go o
     }, 100)
   })
   await page.getByRole('button', { name: 'New project' }).click()
-  await page
-    .getByRole('dialog', { name: 'New project' })
-    .getByRole('button', { name: 'Start project' })
-    .click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByLabel('The lead runs on').selectOption('zeus')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect(page.locator('#project-title')).toHaveText('new')
   await page.evaluate(() => {
     window.__delay = {}
@@ -3188,54 +3336,35 @@ test("opens a closed session's transcript from its lane, and gives a member's he
     .toBe(true)
 })
 
-test('switches the lead from its row: an installed harness on its default, or a saved agent, after its turn or now', async ({
+test('switches the lead from its row to a saved agent on a harness installed here, after its turn or now', async ({
   page,
 }) => {
   const data = model()
   data.missing = ['devin']
+  // The lead runs on zeus: what it runs on now is no switch.
+  data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').participant.agent =
+    'zeus'
   await open(page, data)
-  await page.getByRole('button', { name: 'Switch the lead to another harness or model' }).click()
+  await page.getByRole('button', { name: 'Switch the lead to another agent' }).click()
   const dialog = page.getByRole('dialog', { name: 'Switch the lead' })
   await expect(dialog).toBeVisible()
   const select = dialog.getByLabel('The lead runs on')
-  const groups = await select
-    .locator('optgroup')
-    .evaluateAll((all) =>
-      all.map((group) => [
-        group.label,
-        [...group.querySelectorAll('option')].map((option) => [
-          option.textContent.split(' · ')[0],
-          option.disabled,
-        ]),
-      ]),
-    )
-  // Devin is not installed here, and a hidden agent is never on offer.
-  expect(groups).toEqual([
-    [
-      'Claude Code',
-      [
-        ['Claude Code, on its own default model', true],
-        ['zeus', false],
-      ],
-    ],
+  // An agent is picked, never a default: nothing is chosen yet.
+  await expect(select).toHaveValue('')
+  await expect(select.locator('option').first()).toHaveText('Pick an agent')
+  // Devin is not installed here, and a hidden agent (Pi's one) is never on offer.
+  expect(await leadGroups(select)).toEqual([
+    ['Claude Code', [['zeus', true]]],
     [
       'Codex',
       [
-        ['Codex, on its own default model', false],
         ['diana', false],
         ['hera', false],
       ],
     ],
-    [
-      'OpenCode',
-      [
-        ['OpenCode, on its own default model', false],
-        ['athena', false],
-      ],
-    ],
-    ['Pi', [['Pi, on its own default model', false]]],
+    ['OpenCode', [['athena', false]]],
   ])
-  await select.selectOption('agent:hera')
+  await select.selectOption('hera')
   await dialog.getByLabel('Switch now, cutting its turn off').check()
   await dialog.getByLabel('First ask the lead to write down where things stand').check()
   await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
@@ -3250,15 +3379,17 @@ test('opens Switch lead letting the lead finish its turn, whatever was picked la
 }) => {
   await open(page)
   const switchLead = page.getByRole('button', {
-    name: 'Switch the lead to another harness or model',
+    name: 'Switch the lead to another agent',
   })
   const dialog = page.getByRole('dialog', { name: 'Switch the lead' })
   await switchLead.click()
+  await dialog.getByLabel('The lead runs on').selectOption('diana')
   await dialog.getByLabel('Switch now, cutting its turn off').check()
   await dialog.getByLabel('First ask the lead to write down where things stand').check()
   await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
   await expect(dialog).toBeHidden()
   await switchLead.click()
+  await expect(dialog.getByLabel('The lead runs on')).toHaveValue('')
   await expect(dialog.getByLabel('Let it finish its turn, then switch')).toBeChecked()
   await expect(
     dialog.getByLabel('First ask the lead to write down where things stand'),
@@ -3269,12 +3400,31 @@ test("the lead's row says when a switch waits for its turn", async ({ page }) =>
   const data = model()
   data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').switching = {
     harness: 'codex',
-    agent: null,
+    agent: 'hera',
   }
   await open(page, data)
   await expect(page.locator('.row-status[data-state="switching"]')).toHaveText(
-    'Switching the lead to Codex after this turn',
+    'Switching the lead to hera after this turn',
   )
+})
+
+test("offers a lead still on its harness's own default every saved agent, and moves it to one", async ({
+  page,
+}) => {
+  // A project opened before leads were agents: its lead names none.
+  await open(page)
+  await page.getByRole('button', { name: 'Switch the lead to another agent' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Switch the lead' })
+  const select = dialog.getByLabel('The lead runs on')
+  const disabled = (await leadGroups(select)).flatMap(([, options]) =>
+    options.filter(([, off]) => off),
+  )
+  expect(disabled).toEqual([])
+  await select.selectOption('zeus')
+  await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'chief.switch'))
+    .toEqual([{ project: 1, agent: 'zeus', when: 'turn', note: false }])
 })
 
 test('refuses Switch lead when no harness is installed here, and says where to get one', async ({
@@ -3283,7 +3433,7 @@ test('refuses Switch lead when no harness is installed here, and says where to g
   const data = model()
   data.missing = ['claude', 'codex', 'opencode', 'pi', 'devin']
   await open(page, data)
-  await page.getByRole('button', { name: 'Switch the lead to another harness or model' }).click()
+  await page.getByRole('button', { name: 'Switch the lead to another agent' }).click()
   await expect(page.locator('#status')).toHaveText(
     'No harness is installed here: install one from Agents, Harnesses.',
   )
@@ -3371,7 +3521,7 @@ test('switches the lead only of the project it was asked for', async ({ page }) 
   await page.evaluate(() => {
     window.__delay['agents.list'] = 300
   })
-  await page.getByRole('button', { name: 'Switch the lead to another harness or model' }).click()
+  await page.getByRole('button', { name: 'Switch the lead to another agent' }).click()
   await chooseProject(page, 'foundry')
   await expect(page.locator('#project-title')).toHaveText('foundry')
   await page.waitForTimeout(500)
@@ -3380,13 +3530,13 @@ test('switches the lead only of the project it was asked for', async ({ page }) 
   await page.evaluate(() => {
     window.__delay = {}
   })
-  await page.getByRole('button', { name: 'Switch the lead to another harness or model' }).click()
+  await page.getByRole('button', { name: 'Switch the lead to another agent' }).click()
   const dialog = page.getByRole('dialog', { name: 'Switch the lead' })
-  await dialog.getByLabel('The lead runs on').selectOption('harness:codex')
+  await dialog.getByLabel('The lead runs on').selectOption('diana')
   await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
   await expect
     .poll(() => calls(page, 'chief.switch'))
-    .toEqual([{ project: 2, harness: 'codex', when: 'turn', note: false }])
+    .toEqual([{ project: 2, agent: 'diana', when: 'turn', note: false }])
 })
 
 test('says the daemon is down while it is, why, and what comes next, and reads everything again once it is back', async ({

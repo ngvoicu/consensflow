@@ -27,7 +27,7 @@ test('a chief hands a task to a worker through the board and the result lands in
   try {
     const opened = await app.requestNode('project.open', {
       directory: app.workspace,
-      harness: 'claude-code',
+      agent: 'lead',
     })
     assert.equal(opened.ok, true, JSON.stringify(opened))
     const project = opened.project.id
@@ -92,7 +92,7 @@ test('a chief with unsent text in its terminal still gets its result, behind tha
   try {
     const opened = await app.requestNode('project.open', {
       directory: app.workspace,
-      harness: 'claude-code',
+      agent: 'lead',
     })
     const project = opened.project.id
     const { member } = await app.requestNode('member.add', { project, agent: 'worker' })
@@ -142,7 +142,7 @@ test('one member runs two tasks at once, each in a session and window of its own
   try {
     const opened = await app.requestNode('project.open', {
       directory: app.workspace,
-      harness: 'claude-code',
+      agent: 'lead',
     })
     assert.equal(opened.ok, true, JSON.stringify(opened))
     const project = opened.project.id
@@ -182,12 +182,14 @@ test('switching the lead opens a fresh window that is handed the lead and reads 
   try {
     const opened = await app.requestNode('project.open', {
       directory: app.workspace,
-      harness: 'claude-code',
+      agent: 'lead',
     })
     const project = opened.project.id
     const leads = () => app.openFrames.filter((frame) => frame.id === `p${project}-chief`)
     const sessionOf = (frame) => frame.argv[frame.argv.indexOf('--session-id') + 1]
     const first = await app.openFrame(`p${project}-chief`)
+    const modelOf = (frame) => frame.argv[frame.argv.indexOf('--model') + 1]
+    assert.equal(modelOf(first), 'fake-lead', "the first lead runs on its agent's model")
     await app.waitFor(async () => {
       const { board } = await app.requestNode('board.get', { project })
       return board.lanes.find((l) => l.participant.handle === 'chief').activity.state === 'idle'
@@ -206,7 +208,7 @@ test('switching the lead opens a fresh window that is handed the lead and reads 
     await app.waitFor(() => leads().length === 2)
     const second = leads()[1]
     assert.notEqual(sessionOf(second), sessionOf(first), 'every switch starts fresh')
-    assert.equal(second.argv[second.argv.indexOf('--model') + 1], 'fake', "the agent's model")
+    assert.equal(modelOf(second), 'fake', "the agent's model")
     await app.waitFor(
       () => app.transcript(sessionOf(second)).includes('You are the lead now'),
       30_000,

@@ -128,6 +128,7 @@ function fakeAdapter(harness = 'claude-code') {
 
 /** The saved model of each fake agent, as the roster gives it at launch. */
 const MODELS = {
+  apollo: 'claude-opus-5',
   zeus: 'claude-opus-5',
   diana: 'gpt-5.6-luna',
   hera: 'muse-spark',
@@ -277,7 +278,7 @@ async function withStaff(context, workers = ['zeus']) {
   const project = await context.dispatcher.openProject({
     directory: '/work/app',
     name: 'app',
-    harness: 'claude-code',
+    chief: { harness: 'claude-code', agent: 'apollo' },
     staff: workers.map((agent) => ({
       agent,
       harness: 'claude-code',
@@ -310,6 +311,41 @@ describe('the dispatcher', () => {
       await context.dispatcher.pass()
       assert.equal(context.dispatcher.activity(id('chief')).state, 'idle')
     })
+  })
+
+  it('opens a project whose lead runs on its saved agent, and none whose lead names no agent or one not among the agents', async () => {
+    await setup(
+      async (context) => {
+        await assert.rejects(
+          context.dispatcher.openProject({
+            directory: '/work/app',
+            name: 'app',
+            chief: { harness: 'claude-code' },
+          }),
+          {
+            message:
+              'pick one of your saved agents for the lead: its harness, model and effort come with it',
+          },
+        )
+        await assert.rejects(
+          context.dispatcher.openProject({
+            directory: '/work/app',
+            name: 'app',
+            chief: { harness: 'claude-code', agent: 'nobody' },
+          }),
+          /nobody is not among your agents/,
+        )
+        assert.deepEqual(context.ledger.projects(), [], 'nothing was opened')
+        const { project } = await withStaff(context)
+        const lead = project.participants.find((p) => p.handle === 'chief')
+        assert.deepEqual([lead.harness, lead.agent], ['claude-code', 'apollo'])
+        assert.equal(context.adapter.prepared[0].agent.model, 'claude-opus-5', "its agent's model")
+      },
+      {
+        roster: (name) =>
+          name === 'nobody' ? null : { id: name, model: MODELS[name], profile: {} },
+      },
+    )
   })
 
   it('launches a worker with its task as the first message and records its answer as the result', async () => {
@@ -1100,7 +1136,7 @@ describe('the dispatcher', () => {
       const project = await context.dispatcher.openProject({
         directory: '/work/app',
         name: 'app',
-        harness: 'claude-code',
+        chief: { harness: 'claude-code', agent: 'apollo' },
         staff: [
           { agent: 'athena', harness: 'claude-code', role: 'advisor', tier: 'standard' },
           { agent: 'calliope', harness: 'claude-code', role: 'reviewer', tier: 'standard' },
@@ -1197,7 +1233,7 @@ describe('the dispatcher', () => {
       const project = await context.dispatcher.openProject({
         directory: '/work/app',
         name: 'app',
-        harness: 'claude-code',
+        chief: { harness: 'claude-code', agent: 'apollo' },
         staff: [{ agent: 'zeus', harness: 'claude-code', role: 'worker', tier: 'standard' }],
       })
       assert.deepEqual(
@@ -1479,7 +1515,7 @@ async function withTiers(context, { workers = ['zeus', 'diana'] } = {}) {
   const project = await context.dispatcher.openProject({
     directory: '/work/app',
     name: 'app',
-    harness: 'claude-code',
+    chief: { harness: 'claude-code', agent: 'apollo' },
     staff: [
       ...workers.map((agent) => member(agent, 'worker', 'standard')),
       member('hera', 'worker', 'light'),
@@ -1574,7 +1610,7 @@ describe('the dispatcher assigns open tasks', () => {
       const project = await context.dispatcher.openProject({
         directory: '/work/app',
         name: 'app',
-        harness: 'claude-code',
+        chief: { harness: 'claude-code', agent: 'apollo' },
         staff: [
           member('zeus', 'claude-code'),
           member('diana', 'claude-code'),
@@ -1972,7 +2008,7 @@ describe('a member with several roles', () => {
       const project = await context.dispatcher.openProject({
         directory: '/work/app',
         name: 'app',
-        harness: 'claude-code',
+        chief: { harness: 'claude-code', agent: 'apollo' },
         staff: [
           { agent: 'zeus', harness: 'claude-code', role: 'worker', tier: 'standard' },
           {
@@ -2424,7 +2460,7 @@ describe('a participant that leaves', () => {
       const fresh = await context.dispatcher.openProject({
         directory: '/work/api',
         name: 'api',
-        harness: 'claude-code',
+        chief: { harness: 'claude-code', agent: 'apollo' },
       })
       const lead = fresh.participants.find((participant) => participant.role === 'chief')
       release()
@@ -2906,7 +2942,7 @@ async function replaceProject(context, old, workers = []) {
   const fresh = await context.dispatcher.openProject({
     directory: '/work/api',
     name: 'api',
-    harness: 'claude-code',
+    chief: { harness: 'claude-code', agent: 'apollo' },
     staff: workers.map((agent) => ({
       agent,
       harness: 'claude-code',
@@ -2918,7 +2954,7 @@ async function replaceProject(context, old, workers = []) {
   return { fresh, gone }
 }
 
-describe('switching the lead to another harness', () => {
+describe('switching the lead to another agent', () => {
   it('hands the lead over: the old window closes, the project stays open, the new one opens with the handoff, and what was queued follows it', async () => {
     await withCodex(async (context) => {
       const { codex } = context
@@ -2948,7 +2984,7 @@ describe('switching the lead to another harness', () => {
       )
       assert.match(
         prepared.message,
-        /^\[ConsensFlow m-\d+ · note from ConsensFlow\]\nYou are the lead now\. The human switched this project's lead from Claude Code to you, Codex \(astraeus\)\./,
+        /^\[ConsensFlow m-\d+ · note from ConsensFlow\]\nYou are the lead now\. The human switched this project's lead from Claude Code \(apollo\) to you, Codex \(astraeus\)\./,
       )
       assert.match(prepared.message, /cut off in the middle of a turn/)
       assert.match(prepared.message, /The human's last message to the lead: "The codeword is tern"/)
@@ -2975,7 +3011,7 @@ describe('switching the lead to another harness', () => {
       const landed = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'One' })
       await context.dispatcher.pass()
       assert.equal(context.ledger.message(landed.id).state, 'delivering', 'not yet confirmed')
-      await context.dispatcher.switchChief(project.id, { harness: 'codex' })
+      await context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       assert.equal(
         context.ledger.message(landed.id).state,
         'delivered',
@@ -2989,7 +3025,7 @@ describe('switching the lead to another harness', () => {
       const lost = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'Two' })
       await context.dispatcher.pass()
       assert.equal(context.ledger.message(lost.id).state, 'delivering')
-      await context.dispatcher.switchChief(project.id, { harness: 'claude-code' })
+      await context.dispatcher.switchChief(project.id, { harness: 'claude-code', agent: 'apollo' })
       assert.deepEqual(
         [context.ledger.message(lost.id).state, context.ledger.message(lost.id).attempts],
         ['queued', 0],
@@ -3004,7 +3040,11 @@ describe('switching the lead to another harness', () => {
       await context.dispatcher.pass()
       context.adapter.busy('chief')
       const ready = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'Ready' })
-      await context.dispatcher.switchChief(project.id, { harness: 'codex', when: 'turn' })
+      await context.dispatcher.switchChief(project.id, {
+        harness: 'codex',
+        agent: 'astraeus',
+        when: 'turn',
+      })
       assert.equal(chiefOf(context, project).harness, 'claude-code', 'not while it works')
       assert.deepEqual(context.host.killed, [])
 
@@ -3024,12 +3064,16 @@ describe('switching the lead to another harness', () => {
     await withCodex(async (context) => {
       const { project } = await withStaff(context)
       await context.dispatcher.pass()
-      await context.dispatcher.switchChief(project.id, { harness: 'codex', note: true })
+      await context.dispatcher.switchChief(project.id, {
+        harness: 'codex',
+        agent: 'astraeus',
+        note: true,
+      })
       await context.dispatcher.pass()
       const asked = context.adapter.agent('chief').items.at(-1).text
       assert.match(
         asked,
-        /moving this project's lead to codex once you answer\. Write down where things stand/,
+        /moving this project's lead to codex \(astraeus\) once you answer\. Write down where things stand/,
       )
       await context.dispatcher.pass()
       assert.equal(chiefOf(context, project).harness, 'claude-code', 'it has not answered yet')
@@ -3058,19 +3102,21 @@ describe('switching the lead to another harness', () => {
       // Asked twice while the lead works: the second ask replaces the first.
       await context.dispatcher.switchChief(project.id, {
         harness: 'codex',
+        agent: 'astraeus',
         when: 'turn',
         note: true,
       })
       const first = asking(0)
       await context.dispatcher.switchChief(project.id, {
         harness: 'codex',
+        agent: 'astraeus',
         when: 'turn',
         note: true,
       })
       assert.equal(context.ledger.message(first.id).state, 'cancelled', 'replaced, never sent')
       await context.dispatcher.pass()
       // The human does not wait for the answer: Switch lead, now.
-      await context.dispatcher.switchChief(project.id, { harness: 'codex' })
+      await context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       assert.equal(chiefOf(context, project).harness, 'codex')
       assert.equal(context.ledger.message(asking(0).id).state, 'cancelled')
       await context.dispatcher.pass()
@@ -3091,7 +3137,11 @@ describe('switching the lead to another harness', () => {
       context.ledger.markOut(id('chief'), { until: '2026-09-20T12:00:00.000Z', reason: 'quota' })
       await context.dispatcher.pass()
       assert.equal(context.dispatcher.activity(id('chief')).state, 'out')
-      await context.dispatcher.switchChief(project.id, { harness: 'codex', when: 'turn' })
+      await context.dispatcher.switchChief(project.id, {
+        harness: 'codex',
+        agent: 'astraeus',
+        when: 'turn',
+      })
       assert.equal(chiefOf(context, project).harness, 'codex', 'an out lead has no turn to finish')
       assert.equal(chiefOf(context, project).outUntil, null)
       await context.dispatcher.pass()
@@ -3105,13 +3155,13 @@ describe('switching the lead to another harness', () => {
       await context.dispatcher.pass()
       context.adapter.answer('chief', 'Hello')
       await context.dispatcher.pass()
-      await context.dispatcher.switchChief(project.id, { harness: 'codex' })
+      await context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       // The new window has not shown its handoff yet when the human switches again.
       context.codex.agent('chief').items = []
       const first = context.ledger
         .inbox(id('chief'))
         .find((m) => m.body.startsWith('You are the lead now'))
-      await context.dispatcher.switchChief(project.id, { harness: 'claude-code' })
+      await context.dispatcher.switchChief(project.id, { harness: 'claude-code', agent: 'apollo' })
       assert.equal(
         context.ledger.message(first.id).state,
         'cancelled',
@@ -3121,23 +3171,72 @@ describe('switching the lead to another harness', () => {
         .inbox(id('chief'))
         .filter((m) => m.body.startsWith('You are the lead now') && m.state !== 'cancelled')
       assert.equal(handoffs.length, 1)
-      assert.match(handoffs[0].body, /from Codex to you, Claude Code\./)
+      assert.match(handoffs[0].body, /from Codex \(astraeus\) to you, Claude Code \(apollo\)\./)
 
       // Closed before any look saw the new lead show it: the handoff waits for Resume.
       await context.dispatcher.closeProject(project.id)
       await context.dispatcher.resumeProject(project.id)
       assert.match(
         context.adapter.prepared.at(-1).message,
-        /You are the lead now\. The human switched this project's lead from Codex to you, Claude Code\./,
+        /You are the lead now\. The human switched this project's lead from Codex \(astraeus\) to you, Claude Code \(apollo\)\./,
       )
     })
   })
 
   it('switches no lead of a project it does not know, and says so', async () => {
     await withCodex(async (context) => {
-      await assert.rejects(context.dispatcher.switchChief(42, { harness: 'codex' }), {
-        message: 'no project 42',
+      await assert.rejects(
+        context.dispatcher.switchChief(42, { harness: 'codex', agent: 'astraeus' }),
+        {
+          message: 'no project 42',
+        },
+      )
+    })
+  })
+
+  it("switches no lead to a harness's own default model: it names a saved agent", async () => {
+    await withCodex(async (context) => {
+      const { project, id } = await withStaff(context)
+      await context.dispatcher.pass()
+      context.adapter.busy('chief')
+      for (const when of ['now', 'turn']) {
+        await assert.rejects(
+          context.dispatcher.switchChief(project.id, { harness: 'codex', when }),
+          /pick one of your saved agents for the lead/,
+        )
+      }
+      assert.deepEqual(
+        [chiefOf(context, project).harness, chiefOf(context, project).agent],
+        ['claude-code', 'apollo'],
+      )
+      assert.equal(context.dispatcher.pendingSwitch(id('chief')), null, 'nothing waits to switch')
+      assert.deepEqual([context.host.killed, context.codex.prepared], [[], []])
+    })
+  })
+
+  it("keeps a lead on its harness's own default model as it is, until Switch lead moves it to an agent", async () => {
+    await withCodex(async (context) => {
+      // Opened before a lead was always a saved agent: its record names none.
+      const project = context.ledger.createProject({
+        directory: '/work/app',
+        name: 'app',
+        chief: { harness: 'claude-code' },
       })
+      await context.dispatcher.resumeProject(project.id)
+      assert.equal(context.adapter.prepared.at(-1).agent, null, "on its harness's own default")
+      await context.dispatcher.pass()
+      context.adapter.agent('chief').items.push(item('user', 'The codeword is tern'))
+      context.adapter.answer('chief', 'Noted: tern')
+      await context.dispatcher.pass()
+      await context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
+      assert.deepEqual(
+        [chiefOf(context, project).harness, chiefOf(context, project).agent],
+        ['codex', 'astraeus'],
+      )
+      assert.match(
+        context.codex.prepared.at(-1).message,
+        /The human switched this project's lead from Claude Code to you, Codex \(astraeus\)\./,
+      )
     })
   })
 
@@ -3146,7 +3245,7 @@ describe('switching the lead to another harness', () => {
       const { project } = await withStaff(context)
       await context.dispatcher.closeProject(project.id)
       await assert.rejects(
-        context.dispatcher.switchChief(project.id, { harness: 'codex' }),
+        context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' }),
         /app is closed: resume it first/,
       )
       assert.equal(chiefOf(context, project).harness, 'claude-code')
@@ -3195,7 +3294,7 @@ describe('switching the lead to another harness', () => {
       await context.dispatcher.pass()
       context.adapter.answer('chief', 'Hello')
       await context.dispatcher.pass()
-      await context.dispatcher.switchChief(project.id, { harness: 'codex' })
+      await context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       context.codex.agent('chief').items = []
       context.clock.advance(10 * 120_000)
       await context.dispatcher.pass()
@@ -3219,7 +3318,7 @@ describe('switching the lead to another harness', () => {
       const after = context.make()
       await after.resumeAfterRestart()
 
-      await after.switchChief(project.id, { harness: 'codex' })
+      await after.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       assert.equal(chiefOf(context, project).harness, 'codex')
       assert.match(context.codex.prepared.at(-1).message, /You are the lead now\./)
       await after.pass()
@@ -3248,7 +3347,7 @@ describe('switching the lead to another harness', () => {
       await context.dispatcher.pass()
       // After the turn, as the page asks by default, and asking where things stand.
       const switched = context.dispatcher
-        .switchChief(old.id, { harness: 'codex', when: 'turn', note: true })
+        .switchChief(old.id, { harness: 'codex', agent: 'astraeus', when: 'turn', note: true })
         .then(
           () => 'switched',
           (cause) => cause.message,
@@ -3283,7 +3382,12 @@ describe('switching the lead to another harness', () => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
       context.adapter.busy('chief')
-      await context.dispatcher.switchChief(old.id, { harness: 'codex', when: 'turn', note: true })
+      await context.dispatcher.switchChief(old.id, {
+        harness: 'codex',
+        agent: 'astraeus',
+        when: 'turn',
+        note: true,
+      })
       const asked = context.ledger
         .inbox(chiefOf(context, old).id)
         .find((m) => m.body.includes('Write down where things stand'))
@@ -3338,10 +3442,12 @@ describe('switching the lead to another harness', () => {
         if (request.launch.launchId === launch) await held
         return observe(request)
       }
-      const switched = context.dispatcher.switchChief(old.id, { harness: 'codex' }).then(
-        () => 'switched',
-        (cause) => cause.message,
-      )
+      const switched = context.dispatcher
+        .switchChief(old.id, { harness: 'codex', agent: 'astraeus' })
+        .then(
+          () => 'switched',
+          (cause) => cause.message,
+        )
       await flush()
       const { fresh, gone } = await replaceProject(context, old)
       release()
@@ -3384,10 +3490,12 @@ describe('switching the lead to another harness', () => {
         if (pane.generation === window.generation) await held
         return kill(pane)
       }
-      const switched = context.dispatcher.switchChief(old.id, { harness: 'codex' }).then(
-        () => 'switched',
-        (cause) => cause.message,
-      )
+      const switched = context.dispatcher
+        .switchChief(old.id, { harness: 'codex', agent: 'astraeus' })
+        .then(
+          () => 'switched',
+          (cause) => cause.message,
+        )
       await flush()
       const { fresh, gone } = await replaceProject(context, old)
       release()
@@ -3408,7 +3516,11 @@ describe('switching the lead to another harness', () => {
       await context.dispatcher.pass()
       // The lead is at work, so the switch waits for the end of its turn.
       context.adapter.busy('chief')
-      await context.dispatcher.switchChief(old.id, { harness: 'codex', when: 'turn' })
+      await context.dispatcher.switchChief(old.id, {
+        harness: 'codex',
+        agent: 'astraeus',
+        when: 'turn',
+      })
       // The turn ends, and the step that switches the lead closes its old
       // window, which takes its time.
       context.adapter.answer('chief', 'Done with that')
@@ -3884,7 +3996,7 @@ describe('a lead whose window does not come up', () => {
   it('gives the new lead its handoff again when its first window closes before showing it', async () => {
     await withCodex(async (context) => {
       const { project } = await spoken(context)
-      await context.dispatcher.switchChief(project.id, { harness: 'codex' })
+      await context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       context.codex.agent('chief').items = []
       const [handoff] = handoffsOf(context, project)
       // The window crashes, or the human closes the project, before the handoff shows.
@@ -3922,7 +4034,7 @@ describe('a lead whose window does not come up', () => {
       context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
       await context.dispatcher.pass()
       const killed = context.host.killed.length
-      await context.dispatcher.switchChief(project.id, { harness: 'codex' })
+      await context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       assert.equal(context.ledger.project(project.id).state, 'open', 'the staff keeps working')
       assert.equal(context.host.killed.length, killed + 2, 'the old lead, then the new window')
       assert.equal(context.dispatcher.pane(id('chief')), null)
@@ -3953,7 +4065,7 @@ describe('a lead whose window does not come up', () => {
         tries += 1
         throw new Error('codex is broken')
       }
-      await context.dispatcher.switchChief(project.id, { harness: 'codex' })
+      await context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       const ready = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'Ready' })
       for (let n = 0; n < 10; n += 1) await context.dispatcher.pass()
       assert.equal(tries, 1, 'no pass tries again at once')
@@ -4001,7 +4113,7 @@ describe('a lead whose window does not come up', () => {
         }
         return opened
       }
-      await context.dispatcher.switchChief(project.id, { harness: 'codex' })
+      await context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       assert.equal(context.dispatcher.pane(id('chief')), null)
       assert.equal(
         context.ledger.project(project.id).state,
@@ -4084,7 +4196,7 @@ describe('a window that takes long', () => {
       const quick = await context.dispatcher.openProject({
         directory: '/work/api',
         name: 'api',
-        harness: 'claude-code',
+        chief: { harness: 'claude-code', agent: 'apollo' },
       })
       await context.dispatcher.pass()
       const slowLaunch = context.adapter.prepared[0].launchId
@@ -4127,7 +4239,7 @@ describe('a window that takes long', () => {
         context.dispatcher.openProject({
           directory: '/work/app',
           name: 'app',
-          harness: 'claude-code',
+          chief: { harness: 'claude-code', agent: 'apollo' },
           staff: [{ agent: 'zeus', harness: 'claude-code', role: 'worker', tier: 'standard' }],
         }),
       )
@@ -4141,7 +4253,9 @@ describe('a window that takes long', () => {
       await context.dispatcher.pass()
 
       opened = holdOpens(host)
-      await answered(context.dispatcher.switchChief(project.id, { harness: 'codex' }))
+      await answered(
+        context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' }),
+      )
       assert.equal(chiefOf(context, project).harness, 'codex')
       assert.equal(context.dispatcher.pane(chief), null, 'the new lead is still opening')
       await opened()
@@ -4445,14 +4559,18 @@ describe('a harness ConsensFlow has no adapter for', () => {
   it('opens no project, member or lead on it', async () => {
     await setup(async (context) => {
       await assert.rejects(
-        context.dispatcher.openProject({ directory: '/work/app', name: 'app', harness: 'pi' }),
+        context.dispatcher.openProject({
+          directory: '/work/app',
+          name: 'app',
+          chief: { harness: 'pi', agent: 'leto' },
+        }),
         /ConsensFlow cannot open pi windows/,
       )
       await assert.rejects(
         context.dispatcher.openProject({
           directory: '/work/app',
           name: 'app',
-          harness: 'claude-code',
+          chief: { harness: 'claude-code', agent: 'apollo' },
           staff: [{ agent: 'hera', harness: 'pi', role: 'worker', tier: 'standard' }],
         }),
         /ConsensFlow cannot open pi windows/,
@@ -4460,7 +4578,7 @@ describe('a harness ConsensFlow has no adapter for', () => {
       assert.deepEqual(context.ledger.projects(), [])
       const { project } = await withStaff(context)
       await assert.rejects(
-        context.dispatcher.switchChief(project.id, { harness: 'pi' }),
+        context.dispatcher.switchChief(project.id, { harness: 'pi', agent: 'leto' }),
         /ConsensFlow cannot open pi windows/,
       )
     })

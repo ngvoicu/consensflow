@@ -48,7 +48,7 @@ test('the daemon stays up, delivers every task and logs nothing wrong while seve
       join(app.env.CONSENSFLOW_HOME, 'agents.json'),
       `${JSON.stringify({
         schemaVersion: 1,
-        agents: workers.map((id) => ({ id, kind: 'claude-code', model: 'fake' })),
+        agents: ['lead', ...workers].map((id) => ({ id, kind: 'claude-code', model: 'fake' })),
       })}\n`,
     )
     const projects = []
@@ -57,7 +57,7 @@ test('the daemon stays up, delivers every task and logs nothing wrong while seve
       mkdirSync(directory, { recursive: true })
       const opened = await app.requestNode('project.open', {
         directory,
-        harness: 'claude-code',
+        agent: 'lead',
         staff: workers.map((agent) => ({ agent, roles: ['worker'] })),
       })
       assert.equal(opened.ok, true, JSON.stringify(opened))
