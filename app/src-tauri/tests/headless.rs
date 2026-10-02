@@ -1091,7 +1091,12 @@ fn product_bridge_contract_preserves_app_identity_and_opens_it_once() {
     });
     let opened = helper.request("pane.open", body.clone(), &mut events);
     assert_eq!(opened["ok"], true, "production open rejected: {opened}");
-    assert_eq!(opened, json!({"ok":true,"id":"product-pane","generation":7}));
+    let pid = opened["pid"].as_u64().filter(|pid| *pid > 0);
+    assert!(pid.is_some(), "the window's process id: {opened}");
+    assert_eq!(
+        opened,
+        json!({"ok":true,"id":"product-pane","generation":7,"pid":pid})
+    );
     assert_eq!(
         helper.request("pane.open", body, &mut events),
         json!({"ok":false,"error":"pane product-pane generation 7 is already open"})
@@ -1107,6 +1112,39 @@ fn product_bridge_contract_preserves_app_identity_and_opens_it_once() {
             .as_array()
             .map(Vec::len),
         Some(1)
+    );
+    helper.close_input_and_wait();
+}
+
+/// The answer to `pane.open` names the window's process, so the daemon can
+/// find what the harness writes about itself from the window's first moment.
+#[test]
+fn a_pane_open_answers_the_process_id_of_the_windows_program() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body("printf 'PID:%s:' \"$$\"; exec /bin/sleep 30", 1024),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let printed = output_until(&helper, &mut events, &pane_id, generation, b":");
+    let pid = String::from_utf8_lossy(&printed)
+        .trim_start_matches("PID:")
+        .trim_end_matches(':')
+        .parse::<u64>()
+        .expect("the pane's pid");
+    assert_eq!(opened["pid"], pid, "{opened}");
+    assert_eq!(
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events,
+        ),
+        json!({"ok":true})
     );
     helper.close_input_and_wait();
 }

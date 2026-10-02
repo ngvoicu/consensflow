@@ -1256,6 +1256,12 @@ fn register_pane_handlers(
             }
         };
         let key = streamed.key.clone();
+        // The window's process, so the daemon can find what the harness
+        // writes about itself from the window's first moment.
+        let mut opened = json!({"ok":true,"id":key.id,"generation":key.generation});
+        if let Some(pid) = streamed.pid {
+            opened["pid"] = json!(pid);
+        }
         stream_to_page(
             streamed,
             bridge,
@@ -1264,7 +1270,7 @@ fn register_pane_handlers(
             Arc::clone(&open_inputs),
             Arc::clone(&open_output),
         );
-        Ok(json!({"ok":true,"id":key.id,"generation":key.generation}))
+        Ok(opened)
     });
 
     // Keys typed into a pane and an emulator's replies (a page-less peer
