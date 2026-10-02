@@ -1828,7 +1828,9 @@ mod tests {
     use std::time::Duration;
 
     /// A runtime around what a test stands up: its panes and input queue, and
-    /// a daemon and its bridge when the test has them.
+    /// a daemon and its bridge when the test has them. The tests that stand
+    /// one up run real shells, so they are Unix's.
+    #[cfg(unix)]
     fn runtime(
         panes: Arc<PaneTable>,
         inputs: Arc<InputQueue>,
