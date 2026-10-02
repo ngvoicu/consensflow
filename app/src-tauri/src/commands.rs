@@ -1,6 +1,6 @@
 //! What the board page may ask of the app: the core's operations it forwards,
 //! its panes' input, size and acknowledgements, its output subscription, and
-//! the agents window.
+//! the address of the agents screens.
 
 use std::sync::Arc;
 
@@ -292,47 +292,20 @@ pub async fn subscribe_output<R: Runtime>(
     json!({"ok":true})
 }
 
-/// The agents screens (the agents, the harnesses) in their own
-/// window at the daemon's address. The board's page cannot frame them: it
-/// is served over the app's secure scheme and WebKit blocks a plain-HTTP
-/// frame inside it as mixed content. A second window loads the address as a
-/// top-level page, which is allowed. One window, reused: a later call turns
-/// it to the asked page and brings it forward.
-// Async on purpose: on Windows a window built from a synchronous command
-// deadlocks with the main thread (a white window that neither loads nor closes).
+/// The address of one agents screen (the agents, the harnesses): the
+/// daemon's page with the UI token, which the board's page frames in a
+/// dialog of its own.
 #[tauri::command]
-pub async fn open_agents_window<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
+pub fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
     let Some(roster) = app.state::<AppRuntime>().core.roster() else {
         return json!({"ok":false,"error":"the agents screens are not available: the daemon is not up"});
     };
-    let url = match agents_url(&roster, &page) {
-        Ok(url) => url,
-        Err(error) => return json!({"ok":false,"error":error}),
-    };
-    if let Some(window) = app.get_webview_window(AGENTS_WINDOW) {
-        if let Err(error) = window.navigate(url.clone()) {
-            return json!({"ok":false,"error":format!("the agents window could not turn to {page:?}: {error}")});
-        }
-        let _ = window.set_focus();
-        return json!({"ok":true,"label":AGENTS_WINDOW,"url":url.as_str(),"reused":true});
-    }
-    match tauri::WebviewWindowBuilder::new(
-        &app,
-        AGENTS_WINDOW,
-        tauri::WebviewUrl::External(url.clone()),
-    )
-    .title("ConsensFlow agents")
-    .inner_size(1120.0, 820.0)
-    .build()
-    {
-        Ok(_) => json!({"ok":true,"label":AGENTS_WINDOW,"url":url.as_str(),"reused":false}),
-        Err(error) => {
-            json!({"ok":false,"error":format!("the agents window could not open: {error}")})
-        }
+    match agents_url(&roster, &page) {
+        Ok(url) => json!({"ok":true,"url":url.as_str()}),
+        Err(error) => json!({"ok":false,"error":error}),
     }
 }
 
-pub(crate) const AGENTS_WINDOW: &str = "agents";
 const AGENTS_PAGES: &[&str] = &["", "harnesses"];
 
 /// The daemon's page for one agents screen, carrying the UI token.
@@ -430,10 +403,6 @@ mod tests {
         assert_eq!(
             agents_url(&roster, "").unwrap().as_str(),
             "http://localhost:43123/?token=secret"
-        );
-        assert_eq!(
-            agents_url(&roster, "harnesses").unwrap().as_str(),
-            "http://localhost:43123/harnesses?token=secret"
         );
         assert_eq!(
             agents_url(&roster, "harnesses").unwrap().as_str(),

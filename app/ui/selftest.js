@@ -264,11 +264,30 @@ export async function runSelftest({
     }
     await report('board', { result: result.id, hex: delivered, delivered: true })
 
-    // The agents screens: their own window at the daemon's address, reused
-    // on the second ask. The daemon's pages themselves are proven elsewhere.
-    const agentsWindow = await invoke('open_agents_window', { page: '' })
-    const again = await invoke('open_agents_window', { page: 'harnesses' })
-    await report('agents-window', { first: agentsWindow, again })
+    // The agents screens, opened from Settings as a human opens them: each
+    // in its dialog over the board, framed at the daemon's address with the
+    // UI token, the frame loaded. The frame is the daemon's page, which this
+    // page cannot read; the pages themselves are proven elsewhere.
+    const screens = []
+    for (const entry of document.querySelectorAll('#settings-dialog [data-agents-page]')) {
+      const dialog = document.getElementById(entry.getAttribute('aria-controls'))
+      const frame = dialog.querySelector('iframe')
+      let loaded = false
+      frame.addEventListener(
+        'load',
+        () => {
+          loaded = true
+        },
+        { once: true },
+      )
+      document.querySelector('#settings-button').click()
+      entry.click()
+      await until(`${entry.textContent} opened`, () => dialog.open)
+      await until(`${entry.textContent} loaded`, () => loaded)
+      screens.push({ name: entry.textContent, open: dialog.open, src: frame.src })
+      dialog.querySelector('form[method="dialog"] button').click()
+    }
+    await report('agents-screens', { screens })
 
     // Exercise a large Unicode paste through WebKit, IPC and the real PTY.
     await sendInput(pane, 'BIGPASTE\r')

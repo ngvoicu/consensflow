@@ -530,19 +530,19 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   )
   assert.equal(board.data.delivered, true, 'the core never confirmed the delivery from the record')
 
-  const agentsWindow = await app.waitFor('agents-window')
+  // The agents screens, each in its dialog over the board, framed at the
+  // daemon's page with the UI token.
+  const { screens } = (await app.waitFor('agents-screens')).data
   assert.deepEqual(
-    [agentsWindow.data.first.ok, agentsWindow.data.first.label, agentsWindow.data.first.reused],
-    [true, 'agents', false],
-    JSON.stringify(agentsWindow.data.first),
+    screens.map((screen) => [screen.name, screen.open]),
+    [
+      ['Agents', true],
+      ['Harnesses', true],
+    ],
+    JSON.stringify(screens),
   )
-  assert.match(agentsWindow.data.first.url, /^http:\/\/localhost:\d+\/\?token=/)
-  assert.deepEqual(
-    [agentsWindow.data.again.ok, agentsWindow.data.again.reused],
-    [true, true],
-    'the second ask reuses the window',
-  )
-  assert.match(agentsWindow.data.again.url, /\/harnesses\?token=/)
+  assert.match(screens[0].src, /^http:\/\/localhost:\d+\/\?token=/)
+  assert.match(screens[1].src, /^http:\/\/localhost:\d+\/harnesses\?token=/)
 
   const pasted = await app.waitFor('large-paste')
   const expectedPaste = Buffer.from(`\x1b[200~${'漢字 résumé 🙂\r'.repeat(30_000)}\x1b[201~`)
@@ -689,10 +689,10 @@ test('built Agents catalog serves complete saved profiles and current browsing c
     import { Credentials, startApi } from ${JSON.stringify(join(cli, 'src/core/api.js'))}
     import { openLedger } from ${JSON.stringify(join(cli, 'src/ledger/index.js'))}
     import { addAgent, listAgents, rosterPath } from ${JSON.stringify(join(cli, 'src/roster.js'))}
-    assert.equal(Object.values(CATALOG).flat().length, 118, 'packaged preset count')
+    assert.equal(Object.values(CATALOG).flat().length, 119, 'packaged preset count')
     assert.equal(catalogEntry('pygmalion').model, 'codex-image')
     // Every catalog agent is in the roster, as the catalog has it; the file keeps only your own.
-    assert.equal(listAgents(process.env).length, 118)
+    assert.equal(listAgents(process.env).length, 119)
     addAgent({ name: 'my-maia', harness: 'codex', model: 'gpt-6-astra', effort: 'low' }, process.env)
     // The agents pages the way the daemon serves them: behind its API, opened with the UI token.
     mkdirSync(process.env.CONSENSFLOW_HOME, { recursive: true })
@@ -706,14 +706,14 @@ test('built Agents catalog serves complete saved profiles and current browsing c
       assert.deepEqual([stored.effort, stored.model, Object.hasOwn(stored, 'profile')], ['low', 'gpt-6-astra', false])
       const mine = data.agents.find(a => a.name === 'my-maia')
       assert.deepEqual([mine.effort, mine.custom, mine.profile.workTier], ['low', true, 'light'])
-      assert.equal(data.agents.length, 119)
+      assert.equal(data.agents.length, 120)
       const html = await (await fetch(server.url, { headers })).text()
       for (const text of ['aria-label="Agents"', 'Model and reasoning', 'My own agents', 'model-summary', 'model-group', 'value="model-reasoning" selected', 'Work tier', 'tier-pill', 'Important work only · No coding']) assert.ok(html.includes(text), text)
       for (const text of ['id="catalog-section"', 'Agent library', 'Your agents', 'PM candidate', 'name="tags"', 'category-pill', 'Chief of Staff candidate', 'name="category"', 'Name in use', 'offer__actions', 'Saved only', 'Sort by', 'benchmark', 'Artificial Analysis', 'AA ']) assert.ok(!html.includes(text), 'gone: ' + text)
       assert.equal((await fetch(server.url + '/api/agents/maia', { method: 'DELETE', headers })).status, 400)
       assert.equal((await fetch(server.url + '/api/agents/my-maia', { method: 'DELETE', headers })).status, 204)
       const after = await (await fetch(server.url + '/api/agents', { headers })).json()
-      assert.equal(after.agents.length, 118)
+      assert.equal(after.agents.length, 119)
       assert.equal(Object.hasOwn(after, 'catalog'), false)
       console.log('packaged catalog and saved profiles verified')
     } finally {

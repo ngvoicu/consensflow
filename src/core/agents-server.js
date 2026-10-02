@@ -84,7 +84,8 @@ export function agentsUi(
       }
       try {
         if (request.method === 'GET' && path === '/') return html(PAGE(token))
-        if (request.method === 'GET' && path === '/harnesses') return html(harnessPage(token))
+        if (request.method === 'GET' && path === '/harnesses')
+          return html(harnessPage(token, FRAMED))
         if (request.method === 'GET' && path === '/api/agents') {
           const missing = missingHarnesses(env)
           return json(200, {
@@ -144,6 +145,26 @@ export function agentsUi(
     },
   }
 }
+
+/**
+ * What every screen is in the app, which frames it in a dialog of its own:
+ * its heading is the dialog's title, so the brand line above it goes, and a
+ * key pressed in a frame never reaches the dialog around it, so Escape is
+ * handed up to close it, as it closes every other dialog there. In the head,
+ * so the screen is drawn framed from the start.
+ */
+const FRAMED = `<style>
+  :root[data-framed] body { padding-top: 22px; }
+  :root[data-framed] .mark { display: none; }
+</style>
+<script>
+if (window.parent !== window) {
+  document.documentElement.dataset.framed = '';
+  addEventListener('keydown', event => {
+    if (event.key === 'Escape') window.parent.postMessage('consensflow:close', '*');
+  });
+}
+</script>`
 
 const BROWSING_CONTROLS = `
   <div class="filters">
@@ -285,6 +306,7 @@ const PAGE = (token) => `<!DOCTYPE html>
     .filters label { flex: 1 1 45%; min-width: 0; }
         }
 </style>
+${FRAMED}
 </head>
 <body>
 <main>

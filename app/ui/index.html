@@ -82,14 +82,25 @@
   <dialog id="settings-dialog" class="settings" aria-labelledby="settings-title">
     <form class="dialog-form" method="dialog">
       <h2 id="settings-title">Settings</h2>
-      <p class="dialog-help">Agents and harnesses open in their own window.</p>
       <menu class="settings-menu">
-        <li><button class="quiet-button" type="button" data-agents-page="">Agents</button><span>The catalog and the agents you saved from it: model, effort, tier and tags.</span></li>
-        <li><button class="quiet-button" type="button" data-agents-page="harnesses">Harnesses</button><span>Which coding tools are installed and logged in.</span></li>
+        <li><button class="quiet-button" type="button" data-agents-page="" aria-controls="agents-dialog">Agents</button><span>The catalog and the agents you saved from it: model, effort, tier and tags.</span></li>
+        <li><button class="quiet-button" type="button" data-agents-page="harnesses" aria-controls="harnesses-dialog">Harnesses</button><span>Which coding tools are installed and logged in.</span></li>
       </menu>
       <div class="dialog-actions">
         <button class="quiet-button" type="submit">Close</button>
       </div>
+    </form>
+  </dialog>
+  <dialog id="agents-dialog" class="screen" aria-label="Agents">
+    <iframe title="Agents" sandbox="allow-forms allow-same-origin allow-scripts" referrerpolicy="no-referrer"></iframe>
+    <form class="dialog-actions" method="dialog">
+      <button class="quiet-button" type="submit" autofocus>Close</button>
+    </form>
+  </dialog>
+  <dialog id="harnesses-dialog" class="screen" aria-label="Harnesses">
+    <iframe title="Harnesses" sandbox="allow-forms allow-same-origin allow-scripts" referrerpolicy="no-referrer"></iframe>
+    <form class="dialog-actions" method="dialog">
+      <button class="quiet-button" type="submit" autofocus>Close</button>
     </form>
   </dialog>
   <dialog id="new-project-dialog" aria-labelledby="new-project-title">

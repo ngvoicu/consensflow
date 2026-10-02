@@ -1,5 +1,9 @@
+import { mkdirSync } from 'node:fs'
 import { expect, test } from '@playwright/test'
 
+import { addAgent } from '../../src/roster.js'
+import { tempEnv } from '../../tests/helpers.mjs'
+import { agentsServer } from './agents-server.mjs'
 import { serveUi } from './serve-ui.mjs'
 
 /**
@@ -334,6 +338,13 @@ async function open(page, data = model()) {
       if (command === 'subscribe_output') {
         window.__output = args.onOutput
         return { ok: true }
+      }
+      // An agents screen's address, as Rust hands it: the daemon's page with
+      // the UI token, or why there is none.
+      if (command === 'agents_screen') {
+        return data.screens
+          ? { ok: true, url: `${data.screens.url}/${args.page}?token=${data.screens.token}` }
+          : { ok: false, error: 'the agents screens are not available: the daemon is not up' }
       }
       if (command === 'pane_input_enqueue' || command === 'pane_reply_enqueue')
         return { ok: true, ticket: 't' }
@@ -2660,33 +2671,137 @@ test("lists every member under the chief, with no staff groups, on the board and
   )
 })
 
-test('opens the agents screens in their own window, and refreshes the agents when this one is back in front', async ({
+/**
+ * The agents screens behind Settings, served as the daemon serves them, for
+ * a page that is handed their address; `env` is the daemon's, where its
+ * agents are kept.
+ */
+async function agentsScreens(options) {
+  const t = tempEnv()
+  // A harness's version is asked in the human's home.
+  mkdirSync(t.env.HOME, { recursive: true })
+  const server = await agentsServer(t.env, options)
+  return {
+    env: t.env,
+    screens: { url: server.url, token: server.token },
+    close: async () => {
+      await server.close()
+      t.cleanup()
+    },
+  }
+}
+
+/** Settings, then one of its screens: the dialog it opens in. */
+async function openScreen(page, name) {
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name }).click()
+  return page.getByRole('dialog', { name })
+}
+
+const agentsRead = (page) =>
+  page.evaluate(() => window.__calls.filter(([, args]) => args?.operation === 'agents.list').length)
+
+test('opens Agents from Settings in a dialog over the board, the daemon’s agents in it; Close goes back to Settings and reads the agents again', async ({
   page,
 }) => {
+  const daemon = await agentsScreens()
+  try {
+    await open(page, { ...model(), screens: daemon.screens })
+    const agents = await openScreen(page, 'Agents')
+    await expect(agents).toBeVisible()
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toBeHidden()
+    await expect(agents.getByRole('button', { name: 'Close' })).toBeFocused()
+    const screen = agents.frameLocator('iframe')
+    await expect(screen.locator('#agents-count')).toHaveText(/^(\d+) of \1 shown$/)
+    await expect(screen.locator('#agents .member .callsign', { hasText: /^gefjon$/ })).toBeVisible()
+    const read = await agentsRead(page)
+    await agents.getByRole('button', { name: 'Close' }).click()
+    await expect(agents).toBeHidden()
+    await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused()
+    // What the screen changed (a model, a tier) is on the board's agents too.
+    await expect.poll(() => agentsRead(page)).toBe(read + 1)
+    expect(await page.getByRole('dialog').count()).toBe(0)
+  } finally {
+    await daemon.close()
+  }
+})
+
+test('opens Harnesses from Settings in a dialog where a check runs against the daemon; Escape goes back to Settings', async ({
+  page,
+}) => {
+  let checks = 0
+  const daemon = await agentsScreens({
+    harnessLatest: async () => {
+      checks += 1
+      return '1.2.4'
+    },
+  })
+  try {
+    await open(page, { ...model(), screens: daemon.screens })
+    const harnesses = await openScreen(page, 'Harnesses')
+    await expect(harnesses).toBeVisible()
+    const screen = harnesses.frameLocator('iframe')
+    await expect(screen.locator('.host')).toHaveCount(5)
+    await expect(
+      screen.locator('.host').filter({ has: screen.locator('strong', { hasText: /^pi$/ }) }),
+    ).toContainText('Version 1.2.3, 1.2.4 is out')
+    const before = checks
+    await screen.getByRole('button', { name: 'Check all harnesses' }).click()
+    await expect.poll(() => checks).toBeGreaterThan(before)
+    await expect(screen.locator('#check-note')).toHaveText('')
+    await harnesses.getByRole('button', { name: 'Close' }).focus()
+    await page.keyboard.press('Escape')
+    await expect(harnesses).toBeHidden()
+    await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused()
+  } finally {
+    await daemon.close()
+  }
+})
+
+test('Escape pressed inside a screen closes its dialog, as it closes every other dialog', async ({
+  page,
+}) => {
+  const daemon = await agentsScreens()
+  try {
+    await open(page, { ...model(), screens: daemon.screens })
+    const agents = await openScreen(page, 'Agents')
+    await agents.frameLocator('iframe').getByRole('searchbox').fill('gefjon')
+    await page.keyboard.press('Escape')
+    await expect(agents).toBeHidden()
+    await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused()
+  } finally {
+    await daemon.close()
+  }
+})
+
+test('a screen opened again keeps what the human left on it, and lists the agents saved meanwhile', async ({
+  page,
+}) => {
+  const daemon = await agentsScreens()
+  try {
+    await open(page, { ...model(), screens: daemon.screens })
+    let agents = await openScreen(page, 'Agents')
+    let screen = agents.frameLocator('iframe')
+    await screen.getByLabel('Show', { exact: true }).selectOption('mine')
+    await expect(screen.locator('#agents')).toHaveText('No agents match these filters.')
+    await agents.getByRole('button', { name: 'Close' }).click()
+    // Saved elsewhere while the screen was closed: `cf agent add`, say.
+    addAgent({ name: 'newbie', harness: 'codex', model: 'gpt-6-astra' }, daemon.env)
+    agents = await openScreen(page, 'Agents')
+    screen = agents.frameLocator('iframe')
+    await expect(screen.locator('#agents .member .callsign')).toHaveText(['newbie'])
+    await expect(screen.getByLabel('Show', { exact: true })).toHaveValue('mine')
+  } finally {
+    await daemon.close()
+  }
+})
+
+test('a screen that cannot open says why, and no dialog opens', async ({ page }) => {
   await open(page)
-  const opened = () =>
-    page.evaluate(() =>
-      window.__calls.filter(([c]) => c === 'open_agents_window').map(([, args]) => args.page),
-    )
-  const settings = page.getByRole('dialog', { name: 'Settings' })
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await settings.getByRole('button', { name: 'Agents' }).click()
-  await expect.poll(opened).toEqual([''])
-  await expect(settings).toBeHidden()
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await settings.getByRole('button', { name: 'Harnesses' }).click()
-  await expect.poll(opened).toEqual(['', 'harnesses'])
-  const listed = await page.evaluate(
-    () => window.__calls.filter(([, args]) => args?.operation === 'agents.list').length,
+  await openScreen(page, 'Agents')
+  await expect(page.locator('#status')).toHaveText(
+    'the agents screens are not available: the daemon is not up',
   )
-  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () => window.__calls.filter(([, args]) => args?.operation === 'agents.list').length,
-      ),
-    )
-    .toBe(listed + 1)
   expect(await page.getByRole('dialog').count()).toBe(0)
 })
 
