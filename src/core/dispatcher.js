@@ -619,7 +619,9 @@ export class Dispatcher {
       if (participant.role !== 'chief') await this.#interruptIfPaused(participant, runtime)
       return
     }
-    if (runtime.delivering !== null) this.#watchArrival(runtime, observed)
+    if (runtime.delivering !== null) await this.#watchArrival(runtime, observed)
+    // A window that began to close in this step (a launch that timed out) is not acted on.
+    if (runtime.retiring) return
     if (participant.role !== 'chief') {
       await this.#interruptIfPaused(participant, runtime)
       this.#collect(project, participant, observed)
@@ -949,7 +951,7 @@ export class Dispatcher {
     return true
   }
 
-  #watchArrival(runtime, observed) {
+  async #watchArrival(runtime, observed) {
     if (this.#confirmArrival(runtime, observed)) return
     const { delivering } = runtime
     const waited = this.#now() - delivering.since
@@ -958,8 +960,9 @@ export class Dispatcher {
       // first message (the handoff), it is never closed for that.
       if (delivering.chief || waited <= this.#launchTimeoutMs) return
       runtime.delivering = null
-      this.#host.kill(runtime.pane).catch(() => {})
+      const closing = this.#retire(runtime)
       this.#settleFailure(delivering, 'the window never showed its first message', { retry: false })
+      await closing
       return
     }
     if (delivering.queued || waited <= this.#arrivalTimeoutMs) return
@@ -1253,12 +1256,12 @@ export class Dispatcher {
    * lead that could not take its first message): the exit settles what the
    * window was doing, as any exit does, but a lead's does not close its
    * project. It is the dispatcher's whether its event came already or comes
-   * later.
+   * later. A window already going with its work had its kill.
    */
   async #closeOwn(runtime, pane) {
     runtime.ownExit = true
     try {
-      await this.#host.kill(pane).catch(() => {})
+      if (!runtime.retiring) await this.#host.kill(pane).catch(() => {})
       if (runtime.pane?.id === pane.id && runtime.pane.generation === pane.generation) {
         await this.paneExited(pane)
       }

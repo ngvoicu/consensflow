@@ -2364,6 +2364,60 @@ describe('a participant that leaves', () => {
   })
 })
 
+describe('a window that closes', () => {
+  /** How often a window was killed. */
+  const kills = (context, window) =>
+    context.host.killed.filter((pane) => pane.generation === window.generation).length
+
+  it('is killed once when its launch never showed its first message, though its exit comes late', async () => {
+    await setup(async (context) => {
+      context.host.holdExits = true
+      const { project } = await withStaff(context)
+      const prepare = context.adapter.prepare
+      context.adapter.prepare = async (request) => {
+        const plan = await prepare(request)
+        context.adapter.agent(request.participant.handle).items = []
+        return plan
+      }
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      context.clock.advance(121_000)
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.task(project.id, 1).state, 'failed')
+      assert.equal(kills(context, context.host.last('zeus')), 1)
+    })
+  })
+
+  it('is killed once when its project closes while it already goes with its work', async () => {
+    await setup(async (context) => {
+      context.host.holdExits = true
+      const { project, open, task } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.answer('zeus', 'Parser done')
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'done')
+      await context.dispatcher.closeProject(project.id)
+      assert.equal(kills(context, context.host.last('zeus')), 1)
+    })
+  })
+
+  it('is killed once when its member leaves the staff, though its exit comes late', async () => {
+    await setup(async (context) => {
+      context.host.holdExits = true
+      const { project } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      await context.dispatcher.removeMember(project.id, 'zeus')
+      await context.dispatcher.pass()
+      assert.equal(kills(context, context.host.last('zeus')), 1)
+    })
+  })
+})
+
 describe('the dispatcher traces what its windows do', () => {
   it("tells a trace each change of a window's activity, by participant", async () => {
     const entries = []
