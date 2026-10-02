@@ -135,6 +135,30 @@ describe('human approval required: the gate', () => {
     })
   })
 
+  it("leaves a result the human still holds out of the chief's hands: it cannot accept or reopen it", async () => {
+    await withLedger((ledger) => {
+      const { project, id } = gated(ledger)
+      const task = working(ledger, project, id)
+      const held = ledger.recordResult(project.id, task.number, { body: 'Done' }).message
+      for (const decide of [
+        () => ledger.acceptTask(project.id, task.number, { by: 'chief' }),
+        () => ledger.reopenTask(project.id, task.number, { by: 'chief', body: 'Again' }),
+      ]) {
+        assert.throws(decide, {
+          code: 'result-gated',
+          message: new RegExp(`T-${task.number}'s result waits for the human's approval`),
+        })
+      }
+      assert.deepEqual(
+        [ledger.task(project.id, task.number).state, ledger.message(held.id).state],
+        ['done', 'gated'],
+        'nothing moved: the human still decides',
+      )
+      ledger.approveMessage(held.id, { by: 'human' })
+      assert.equal(ledger.acceptTask(project.id, task.number, { by: 'chief' }).state, 'accepted')
+    })
+  })
+
   it('holds a result for the human, who passes it on, sends it back or accepts it, never declines it', async () => {
     await withLedger((ledger) => {
       const { project, id } = gated(ledger)

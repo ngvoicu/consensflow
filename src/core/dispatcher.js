@@ -327,6 +327,36 @@ export class Dispatcher {
     return this.#ledger.project(projectId)
   }
 
+  /**
+   * The human gives a task in a window to another member of its tier. Its
+   * window is stopped first, even one the human opened, and the task leaves
+   * it only then: no two windows ever work on one task.
+   */
+  async reassignTask(projectId, number) {
+    this.#ledger.checkRelease(projectId, number)
+    const { assignee } = this.#ledger.task(projectId, number)
+    const holder = this.#knownProject(projectId).participants.find(
+      (participant) => participant.handle === assignee,
+    )
+    const release = () => {
+      const released = this.#ledger.releaseTask(projectId, number, { because: 'by @human' })
+      this.#changed()
+      return released
+    }
+    // Paused before anyone took it: there is no window to stop.
+    if (holder === undefined) return release()
+    return this.#exclusive(
+      holder.id,
+      async () => {
+        const runtime = this.#runtimeOf(holder.id)
+        runtime.pinned = false
+        if (runtime.pane !== null) await this.#retire(runtime)
+        return release()
+      },
+      { wait: true },
+    )
+  }
+
   /** The human closes a session's window; work in it pauses, as any lost window's does. */
   async closeWindow(projectId, handle) {
     const { participant } = this.#sessionOf(projectId, handle)

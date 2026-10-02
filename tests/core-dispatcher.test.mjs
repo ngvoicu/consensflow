@@ -1685,6 +1685,36 @@ describe('the dispatcher assigns open tasks', () => {
     })
   })
 
+  it('stops the window of a task the human reassigns before the task leaves it, even one the human opened', async () => {
+    await setup(async (context) => {
+      const { open, task } = await withTiers(context)
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const session = task(1).assignee
+      await context.dispatcher.openWindow(1, session)
+      const old = context.host.last('zeus')
+      await context.dispatcher.reassignTask(1, 1)
+      // Stopped before anyone else could take the task: no two windows work on one task.
+      assert.deepEqual(context.host.killed, [{ id: old.id, generation: old.generation }])
+      assert.deepEqual([task(1).state, task(1).assignee], ['open', null])
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.match(task(1).assignee, /^diana-/)
+    })
+  })
+
+  it('stops no window for a task that may not go back to the board', async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'By name' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      await assert.rejects(context.dispatcher.reassignTask(project.id, 1), /given by name/)
+      assert.deepEqual(context.host.killed, [])
+    })
+  })
+
   it('tells the requester once when nobody of the tier is free, and assigns when one frees up', async () => {
     await setup(async (context) => {
       const { open, task, notes } = await withTiers(context)

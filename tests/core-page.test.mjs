@@ -47,6 +47,9 @@ async function withPage(fn) {
       removed.push([project, handle])
       return ledger.removeMember(project, handle)
     },
+    async reassignTask(project, number) {
+      return ledger.releaseTask(project, number, { because: 'by @human' })
+    },
     windows: [],
     async openWindow(project, handle) {
       dispatcher.windows.push(['open', handle])

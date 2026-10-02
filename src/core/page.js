@@ -154,11 +154,8 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       task: ledger.pauseTask(project, task, { by: 'human' }),
     })),
 
-    // Back to the board for another member of its tier; the old window closes
-    // on the daemon's next look, unless the human opened it.
-    'task.reassign': change(async ({ project, task }) =>
-      ledger.releaseTask(project, task, { because: 'by @human' }),
-    ),
+    // Back to the board for another member of its tier, once its window is stopped.
+    'task.reassign': change(async ({ project, task }) => dispatcher.reassignTask(project, task)),
 
     // The human resumes without writing to the agent: the words are always these.
     'task.resume': change(async ({ project, task }) =>

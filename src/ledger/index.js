@@ -244,6 +244,9 @@ class Ledger {
   releaseTask(projectId, number, request) {
     return tasks.releaseTask(this.#store, projectId, number, request)
   }
+  checkRelease(projectId, number) {
+    tasks.checkRelease(this.#store, projectId, number)
+  }
   note(projectId, request) {
     return messages.note(this.#store, projectId, request)
   }

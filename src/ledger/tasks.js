@@ -280,14 +280,7 @@ export function releaseTask(store, projectId, number, { because }) {
   requireText(because, 'because', 1000)
   return store.write(() => {
     const task = store.taskRow(projectId, number)
-    requireTaskState(task, ['queued', ...ACTIVE_TASK_STATES, 'paused'], 'release')
-    if (task.pool === null) {
-      throw new LedgerError(
-        'invalid-transition',
-        `cannot release T-${number}: it was given by name, not by tier`,
-        409,
-      )
-    }
+    requireReleasable(task)
     // A task paused before anyone took it has nobody to take it from.
     const member = task.assignee_id === null ? null : store.participantRow(task.assignee_id)
     if (member !== null) {
@@ -358,6 +351,7 @@ export function acceptTask(store, projectId, number, { by }) {
     store.participantByHandle(projectId, by)
     const task = store.taskRow(projectId, number)
     requireTaskState(task, ['done'], 'accept')
+    requireResultReceived(store, task, by)
     withdrawGated(store, task.id, `accepted by @${by}`)
     // What is still on its way to the member (an answer that came after its
     // result, say) has no window left to take it.
@@ -541,6 +535,7 @@ export function reopenTask(store, projectId, number, { by, body }) {
     const author = store.participantByHandle(projectId, by)
     const task = store.taskRow(projectId, number)
     requireTaskState(task, ['done', 'failed'], 'reopen')
+    requireResultReceived(store, task, by)
     const assignee = store.participantRow(task.assignee_id)
     if (assignee.member_id !== null && assignee.left_at !== null) {
       throw new LedgerError(
@@ -736,6 +731,41 @@ function requireTaskState(task, states, action) {
     throw new LedgerError(
       'invalid-transition',
       `cannot ${action} T-${task.number}: it is ${task.state}`,
+      409,
+    )
+  }
+}
+
+/** Whether task T-`number` may go back to the board for its tier, without moving it; says why not. */
+export function checkRelease(store, projectId, number) {
+  requireReleasable(store.taskRow(projectId, number))
+}
+
+/** A task in a window, or waiting for one, given by its tier: only such a task goes back to the board. */
+function requireReleasable(task) {
+  requireTaskState(task, ['queued', ...ACTIVE_TASK_STATES, 'paused'], 'release')
+  if (task.pool === null) {
+    throw new LedgerError(
+      'invalid-transition',
+      `cannot release T-${task.number}: it was given by name, not by tier`,
+      409,
+    )
+  }
+}
+
+/**
+ * A result still waiting for the human's approval has not reached the chief:
+ * deciding it is the human's alone, who may accept it or send it back.
+ */
+function requireResultReceived(store, task, by) {
+  if (by === 'human') return
+  const held = store.db
+    .prepare(`SELECT 1 FROM message WHERE task_id = ? AND kind = 'result' AND state = 'gated'`)
+    .get(task.id)
+  if (held !== undefined) {
+    throw new LedgerError(
+      'result-gated',
+      `T-${task.number}'s result waits for the human's approval: it reaches you once they pass it on`,
       409,
     )
   }
