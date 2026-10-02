@@ -64,6 +64,18 @@ const task = (number, title, state, requester, assignee, minutesAgo = 3, extra =
   updatedAt: at(minutesAgo),
   ...extra,
 })
+/** A message of a task's thread as the core reads it: delivered, sent `minutesAgo`. */
+const message = (id, kind, sender, recipient, body, minutesAgo = 1, extra = {}) => ({
+  id,
+  kind,
+  sender,
+  recipient,
+  state: 'delivered',
+  reason: null,
+  body,
+  createdAt: at(minutesAgo),
+  ...extra,
+})
 
 function model() {
   return {
@@ -217,24 +229,8 @@ function model() {
       '1:2': {
         ...task(2, 'Write the parser', 'done', 'chief', 'zeus', 2),
         messages: [
-          {
-            id: 20,
-            kind: 'task',
-            sender: 'chief',
-            recipient: 'zeus',
-            state: 'delivered',
-            reason: null,
-            body: 'Write the parser',
-          },
-          {
-            id: 21,
-            kind: 'result',
-            sender: 'zeus',
-            recipient: 'chief',
-            state: 'delivered',
-            reason: null,
-            body: 'Parser done, 14 tests.',
-          },
+          message(20, 'task', 'chief', 'zeus', 'Write the parser', 3),
+          message(21, 'result', 'zeus', 'chief', 'Parser done, 14 tests.', 2),
         ],
       },
       '1:3': {
@@ -792,22 +788,234 @@ test('a task held while its member is out of quota says when it goes on', async 
   )
 })
 
-test("opens a card's drawer with the result apart from the brief, and leaves accepting and reviews to the chief", async ({
+test("opens a card's drawer on its task's story, and leaves accepting and reviews to the chief", async ({
   page,
 }) => {
   await open(page)
   await page.locator('button.card[data-task="2"]').click()
   const drawer = page.getByRole('complementary', { name: 'Task T-2' })
-  await expect(drawer.locator('.drawer-brief')).toHaveText('Write the parser')
-  await expect(drawer.getByRole('heading', { name: 'Result' })).toBeVisible()
-  await expect(drawer.locator('.drawer-result')).toHaveText('Parser done, 14 tests.')
+  const steps = drawer.getByRole('list', { name: "T-2's story" }).locator('.step')
+  await expect(steps.locator('.step-label')).toHaveText(['Request 1', 'Result 1'])
+  await expect(steps.last().locator('.step-body')).toHaveText('Parser done, 14 tests.')
   // Accepting and asking for a review are the chief's, from its terminal.
   await expect(drawer.getByRole('button', { name: 'Accept' })).toHaveCount(0)
   await expect(drawer.getByRole('button', { name: /review/i })).toHaveCount(0)
   // Nothing here writes to the agent: that is done in its terminal.
   await expect(drawer.getByRole('textbox')).toHaveCount(0)
-  // Each part is a panel of its own, headed by what it is.
-  await expect(drawer.locator('.drawer-section-head')).toHaveText(['Brief', 'Result'])
+  // The story is one panel: no brief, result or thread apart from it.
+  await expect(drawer.locator('.drawer-section-head')).toHaveText(['Story'])
+})
+
+/**
+ * Harbour with T-15, which went brief, question, answer, result, follow-up
+ * and result: the brief two days ago, the rest today, the last just now.
+ */
+function storyModel() {
+  const data = model()
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  lane.tasks.push(task(15, 'Write the lexer', 'done', 'chief', 'zeus', 0))
+  data.tasks['1:15'] = {
+    ...lane.tasks.at(-1),
+    messages: [
+      message(50, 'task', 'chief', 'zeus', 'Write the lexer', 2 * 24 * 60),
+      message(
+        51,
+        'question',
+        'zeus',
+        'chief',
+        '\nWhich grammar: the old one or the new one?\nThe old one is in lexer.old.',
+        30,
+      ),
+      message(52, 'answer', 'chief', 'zeus', 'The new one.', 25),
+      message(53, 'result', 'zeus', 'chief', '**Lexer done**, 22 tests.', 20),
+      message(54, 'task', 'chief', 'zeus', 'Reopened: cover the errors too.', 10),
+      message(55, 'result', 'zeus', 'chief', 'Errors covered, 31 tests.', 0),
+    ],
+  }
+  return data
+}
+
+/** Which steps of a story are open, in order. */
+const opened = (steps) => steps.evaluateAll((all) => all.map((step) => step.open))
+
+test("tells a task's story in the order it happened, each request and the result it brought numbered by round", async ({
+  page,
+}) => {
+  await open(page, storyModel())
+  await page.locator('button.card[data-task="15"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-15' })
+  const steps = drawer.getByRole('list', { name: "T-15's story" }).locator('.step')
+  await expect(steps.locator('.step-label')).toHaveText([
+    'Request 1',
+    'Question',
+    'Answer',
+    'Result 1',
+    'Request 2',
+    'Result 2',
+  ])
+  const [asks, tells] = ['@chief → @zeus', '@zeus → @chief']
+  await expect(steps.locator('.step-route')).toHaveText([asks, tells, asks, tells, asks, tells])
+  // Each step's marker takes the colour of its kind.
+  expect(await steps.evaluateAll((all) => all.map((step) => step.dataset.kind))).toEqual([
+    'task',
+    'question',
+    'answer',
+    'result',
+    'task',
+    'result',
+  ])
+  // When each was sent: the time today, the date with it before; all of it on hover.
+  await expect(steps.nth(5).locator('time')).toHaveText(/^\d\d:\d\d$/)
+  const first = steps.nth(0).locator('time')
+  await expect(first).toHaveText(/^[A-Z][a-z]{2} \d{1,2} \d\d:\d\d$/)
+  await expect(first).toHaveAttribute(
+    'title',
+    /^[A-Z][a-z]+day, [A-Z][a-z]+ \d{1,2}, \d{4} at \d\d:\d\d:\d\d$/,
+  )
+})
+
+test('opens only the newest step of a story, and folds each of the others to its first line', async ({
+  page,
+}) => {
+  await open(page, storyModel())
+  await page.locator('button.card[data-task="15"]').click()
+  const steps = page.getByRole('list', { name: "T-15's story" }).locator('.step')
+  expect(await opened(steps)).toEqual([false, false, false, false, false, true])
+  // A folded step reads the first line of its body that says something,
+  // its marks gone; the open one reads whole.
+  const question = steps.nth(1)
+  await expect(question.locator('.step-preview')).toHaveText(
+    'Which grammar: the old one or the new one?',
+  )
+  await expect(question.locator('.step-preview')).toBeVisible()
+  await expect(question.locator('.step-body')).toBeHidden()
+  await expect(steps.nth(3).locator('.step-preview')).toHaveText('Lexer done, 22 tests.')
+  const newest = steps.nth(5)
+  await expect(newest.locator('.step-preview')).toBeHidden()
+  await expect(newest.locator('.step-body')).toHaveText('Errors covered, 31 tests.')
+  // A line too long for the drawer ends in an ellipsis: one line, cut by CSS.
+  expect(
+    await question
+      .locator('.step-preview')
+      .evaluate((node) => [getComputedStyle(node).whiteSpace, getComputedStyle(node).textOverflow]),
+  ).toEqual(['nowrap', 'ellipsis'])
+})
+
+test('keeps each step of a story open or shut as the human left it when the task is drawn again', async ({
+  page,
+}) => {
+  const data = storyModel()
+  // The follow-up is still on its way; the next read finds it delivered.
+  data.tasks['1:15'].messages[4].state = 'queued'
+  await open(page, data)
+  await page.locator('button.card[data-task="15"]').click()
+  const steps = page.getByRole('list', { name: "T-15's story" }).locator('.step')
+  await steps.nth(1).locator('summary').click()
+  await steps.nth(5).locator('summary').click()
+  expect(await opened(steps)).toEqual([false, true, false, false, false, false])
+  const follow = steps.nth(4)
+  await expect(follow.locator('.step-state')).toHaveText('queued')
+  await follow.evaluate((step) => {
+    step.kept = true
+  })
+  await changed(page, () => {
+    window.__model.tasks['1:15'].messages[4].state = 'delivered'
+  })
+  await expect(follow.locator('.step-state')).toHaveCount(0)
+  await expect.poll(() => opened(steps)).toEqual([false, true, false, false, false, false])
+  // The step that changed was drawn again where it is.
+  expect(await follow.evaluate((step) => step.kept)).toBe(true)
+  // A redraw that changes nothing of the task leaves its story as it is.
+  await changed(page, setLamp, ['zeus', 'working'])
+  expect(await opened(steps)).toEqual([false, true, false, false, false, false])
+})
+
+test('opens the newest step when a new message arrives, and leaves the others as the human left them', async ({
+  page,
+}) => {
+  await open(page, storyModel())
+  await page.locator('button.card[data-task="15"]').click()
+  const steps = page.getByRole('list', { name: "T-15's story" }).locator('.step')
+  await steps.nth(1).locator('summary').click()
+  await steps.nth(5).locator('summary').click()
+  await changed(page, () => {
+    window.__model.tasks['1:15'].messages.push({
+      id: 57,
+      kind: 'task',
+      sender: 'chief',
+      recipient: 'zeus',
+      state: 'delivered',
+      reason: null,
+      body: 'One more: the docs.',
+      createdAt: new Date().toISOString(),
+    })
+  })
+  await expect(steps.locator('.step-label').last()).toHaveText('Request 3')
+  await expect.poll(() => opened(steps)).toEqual([false, true, false, false, false, false, true])
+})
+
+test("starts the story of a task not yet given, or of the chief's own, with its body as Request 1", async ({
+  page,
+}) => {
+  const data = model()
+  const board = data.boards[1]
+  board.open.push(
+    task(7, 'Draw the logo', 'open', 'chief', null, 1, { pool: 'designer', tier: null }),
+  )
+  data.tasks['1:6'] = { ...board.open[0], messages: [] }
+  data.tasks['1:7'] = { ...board.open[1], messages: [] }
+  const chief = board.lanes.find((l) => l.participant.handle === 'chief')
+  data.tasks['1:1'] = { ...chief.tasks[0], messages: [] }
+  await open(page, data)
+  const storyOf = async (number) => {
+    await page.locator(`button.card[data-task="${number}"]`).click()
+    return page
+      .getByRole('complementary', { name: `Task T-${number}` })
+      .getByRole('list', { name: `T-${number}'s story` })
+      .locator('.step')
+  }
+  const docs = await storyOf(6)
+  await expect(docs.locator('.step-label')).toHaveText(['Request 1'])
+  await expect(docs.locator('.step-route')).toHaveText(['@chief → a standard worker'])
+  await expect(docs.locator('.step-body')).toHaveText('Write the docs')
+  expect(await opened(docs)).toEqual([true])
+  // It was never sent, so it has no time to say.
+  await expect(docs.locator('time')).toHaveCount(0)
+  const logo = await storyOf(7)
+  await expect(logo.locator('.step-route')).toHaveText(['@chief → an image designer'])
+  const own = await storyOf(1)
+  await expect(own.locator('.step-label')).toHaveText(['Request 1'])
+  await expect(own.locator('.step-route')).toHaveText(['@human → @chief'])
+})
+
+test('says in its step how a message is on its way, and nothing once it reached its window', async ({
+  page,
+}) => {
+  const data = storyModel()
+  const [brief, , answer, result, follow, last] = data.tasks['1:15'].messages
+  brief.state = 'delivering'
+  // An answer picked from options is read at once by the window that asked.
+  answer.state = 'read'
+  Object.assign(result, {
+    state: 'failed',
+    reason: 'its window closed while it was handed over',
+  })
+  follow.state = 'gated'
+  Object.assign(last, { state: 'queued', reason: 'the harness ran out of quota' })
+  await open(page, data)
+  await page.locator('button.card[data-task="15"]').click()
+  const steps = page.getByRole('list', { name: "T-15's story" }).locator('.step')
+  const said = await steps.evaluateAll((all) =>
+    all.map((step) => step.querySelector('.step-state')?.textContent ?? null),
+  )
+  expect(said).toEqual([
+    'delivering',
+    null,
+    null,
+    'not delivered: its window closed while it was handed over',
+    'needs your approval',
+    'queued: the harness ran out of quota',
+  ])
 })
 
 test('pauses a task from its drawer, shows it paused in the queue, and resumes it', async ({
@@ -945,7 +1153,7 @@ test('takes a lead switched to a saved agent for no member: the board says it ha
   expect(await calls(page, 'member.roles')).toEqual([])
 })
 
-test("keeps only what is new in a task's thread: questions, answers, follow-ups and an earlier result", async ({
+test("leaves notes and withdrawn messages out of a task's story, and tells a brief sent again as a request of its own", async ({
   page,
 }) => {
   const data = model()
@@ -953,93 +1161,111 @@ test("keeps only what is new in a task's thread: questions, answers, follow-ups 
   const brief = 'Tell a joke'
   const body = `${brief}\n\nReassigned from @gefjon-jolly-tundra (ran out of quota after starting); check the working tree for partial changes.`
   lane.tasks.push(task(14, 'Tell a joke', 'done', 'chief', 'zeus', 0, { body }))
-  const message = (id, kind, sender, recipient, text, state = 'delivered') => ({
-    id,
-    kind,
-    sender,
-    recipient,
-    state,
-    reason: null,
-    body: text,
-  })
   data.tasks['1:14'] = {
     ...lane.tasks.find((t) => t.number === 14),
     messages: [
-      message(40, 'task', 'chief', 'gefjon-jolly-tundra', brief),
+      message(40, 'task', 'chief', 'gefjon-jolly-tundra', brief, 20),
       message(
         41,
         'note',
         null,
         'chief',
         'T-14 was taken back from @gefjon-jolly-tundra (ran out of quota after starting) and waits for another light worker.',
+        15,
       ),
-      message(42, 'task', 'chief', 'zeus', body),
-      message(43, 'question', 'zeus', 'chief', 'About cats or code?'),
-      message(44, 'answer', 'chief', 'zeus', 'Code.'),
-      message(45, 'result', 'zeus', 'chief', 'Why do programmers mix up Halloween and Christmas?'),
-      message(46, 'task', 'chief', 'zeus', 'Reopened: shorter, please.'),
-      message(47, 'task', 'chief', 'zeus', 'Also no puns.', 'cancelled'),
-      message(48, 'result', 'zeus', 'chief', 'Oct 31 == Dec 25.'),
+      message(42, 'task', 'chief', 'zeus', body, 14),
+      message(43, 'question', 'zeus', 'chief', 'About cats or code?', 12),
+      message(44, 'answer', 'chief', 'zeus', 'Code.', 11),
+      message(
+        45,
+        'result',
+        'zeus',
+        'chief',
+        'Why do programmers mix up Halloween and Christmas?',
+        8,
+      ),
+      message(46, 'task', 'chief', 'zeus', 'Reopened: shorter, please.', 6),
+      message(47, 'task', 'chief', 'zeus', 'Also no puns.', 5, { state: 'cancelled' }),
+      message(48, 'result', 'zeus', 'chief', 'Oct 31 == Dec 25.', 1),
     ],
   }
   await open(page, data)
   await page.locator('button.card[data-task="14"]').click()
   const drawer = page.getByRole('complementary', { name: 'Task T-14' })
-  await expect(drawer.locator('.drawer-result')).toHaveText('Oct 31 == Dec 25.')
-  await expect(drawer.locator('.thread-body')).toHaveText([
+  const steps = drawer.getByRole('list', { name: "T-14's story" }).locator('.step')
+  // The brief went to @gefjon-jolly-tundra, then again to @zeus once it ran out of quota.
+  await expect(steps.locator('.step-label')).toHaveText([
+    'Request 1',
+    'Request 2',
+    'Question',
+    'Answer',
+    'Result 2',
+    'Request 3',
+    'Result 3',
+  ])
+  await expect(steps.locator('.step-route').first()).toHaveText('@chief → @gefjon-jolly-tundra')
+  await expect(steps.locator('.step-preview')).toHaveText([
+    'Tell a joke',
+    'Tell a joke',
     'About cats or code?',
     'Code.',
     'Why do programmers mix up Halloween and Christmas?',
     'Reopened: shorter, please.',
+    'Oct 31 == Dec 25.',
   ])
+  await expect(steps.last().locator('.step-body')).toHaveText('Oct 31 == Dec 25.')
   await expect(drawer.locator('.drawer-meta')).toContainText('updated just now')
   await expect(drawer.locator('.drawer-meta')).not.toContainText('just now ago')
 })
 
-test('says under a body cut to fit the page where it reads whole, and how many earlier messages it left out', async ({
+test('says under a body cut to fit the page where it reads whole, and right after Request 1 how many earlier messages it left out', async ({
   page,
 }) => {
   const data = model()
   const cut = (start, length) => `${start}\n… (${length} characters; cut here)`
-  const message = (id, kind, sender, recipient, body, extra = {}) => ({
-    id,
-    kind,
-    sender,
-    recipient,
-    state: 'delivered',
-    reason: null,
-    body,
-    ...extra,
-  })
-  // As the core reads a task too long for one frame: what it cut is marked.
+  // As the core reads a task too long for one frame: every request stays,
+  // cut to its line at least, the earliest of the rest are left out, and
+  // what it cut is marked.
   data.tasks['1:2'] = {
     ...data.tasks['1:2'],
     body: cut('Write the parser', 900_000),
     bodyCut: true,
     messagesLeftOut: 3,
     messages: [
-      message(20, 'task', 'chief', 'zeus', '… (900000 characters; cut here)', { bodyCut: true }),
-      message(25, 'question', 'zeus', 'chief', cut('Which grammar?', 700_000), { bodyCut: true }),
-      message(26, 'answer', 'chief', 'zeus', 'The recursive one.'),
-      message(27, 'result', 'zeus', 'chief', cut('Parser done', 800_000), { bodyCut: true }),
+      message(20, 'task', 'chief', 'zeus', '… (900000 characters; cut here)', 9, { bodyCut: true }),
+      message(25, 'question', 'zeus', 'chief', cut('Which grammar?', 700_000), 5, {
+        bodyCut: true,
+      }),
+      message(26, 'answer', 'chief', 'zeus', 'The recursive one.', 4),
+      message(27, 'result', 'zeus', 'chief', cut('Parser done', 800_000), 3, { bodyCut: true }),
     ],
   }
   await open(page, data)
   await page.locator('button.card[data-task="2"]').click()
   const drawer = page.getByRole('complementary', { name: 'Task T-2' })
-  const whole = 'Cut to fit here: cf task get T-2 shows it whole.'
-  await expect(drawer.locator('[data-section="brief"] .drawer-cut')).toHaveText(whole)
-  await expect(drawer.locator('[data-section="result"] .drawer-cut')).toHaveText(whole)
-  const thread = drawer.locator('[data-section="thread"]')
-  await expect(thread.locator('.thread-more')).toHaveText(
+  const story = drawer.getByRole('list', { name: "T-2's story" })
+  // Every request is kept, so each one and its result still has its number.
+  await expect(story.locator('.step-label')).toHaveText([
+    'Request 1',
+    'Question',
+    'Answer',
+    'Result 1',
+  ])
+  await expect(story.locator('> li').nth(1)).toHaveText(
     '3 earlier messages not shown: cf task get T-2 shows the whole thread.',
   )
-  await expect(thread.locator('.thread-body')).toHaveText([
-    cut('Which grammar?', 700_000),
-    'The recursive one.',
-  ])
-  await expect(thread.locator('.thread-item').nth(0).locator('.drawer-cut')).toHaveText(whole)
-  await expect(thread.locator('.thread-item').nth(1).locator('.drawer-cut')).toHaveCount(0)
+  const steps = story.locator('.step')
+  const whole = 'Cut to fit here: cf task get T-2 shows it whole.'
+  for (const step of [0, 1, 3]) {
+    await expect(steps.nth(step).locator('.drawer-cut')).toHaveText(whole)
+  }
+  await expect(steps.nth(2).locator('.drawer-cut')).toHaveCount(0)
+  await expect(steps.last().locator('.drawer-cut')).toBeVisible()
+  await steps.nth(1).locator('summary').click()
+  await expect(steps.nth(1).locator('.step-body')).toHaveText(cut('Which grammar?', 700_000), {
+    useInnerText: true,
+  })
+  await expect(steps.nth(1).locator('.drawer-cut')).toBeVisible()
 })
 
 test("shows what a task's window wrote, from ConsensFlow's own copy, under the thread", async ({
@@ -1065,7 +1291,7 @@ test("shows what a task's window wrote, from ConsensFlow's own copy, under the t
   await open(page, data)
   await page.locator('button.card[data-task="2"]').click()
   const drawer = page.getByRole('complementary', { name: 'Task T-2' })
-  // Folded until asked: the brief and the result come first.
+  // Folded until asked: the task's story comes first.
   const fold = drawer.locator('details[data-section="transcript"]')
   await expect(fold).not.toHaveAttribute('open', '')
   await fold.locator('summary').click()
@@ -1147,6 +1373,7 @@ test('redraws a drawer whose task changed, its fold still open and read again', 
       state: 'delivered',
       reason: null,
       body: 'Reopened: cover the errors too.',
+      createdAt: new Date().toISOString(),
     })
     parser.state = 'working'
     const transcript = window.__model.transcripts['1:2']
@@ -1159,7 +1386,10 @@ test('redraws a drawer whose task changed, its fold still open and read again', 
     })
     transcript.total = 3
   })
-  await expect(drawer.locator('.thread-body')).toHaveText(['Reopened: cover the errors too.'])
+  const steps = drawer.getByRole('list', { name: "T-2's story" }).locator('.step')
+  await expect(steps.locator('.step-label')).toHaveText(['Request 1', 'Result 1', 'Request 2'])
+  await expect(steps.last().locator('.step-body')).toHaveText('Reopened: cover the errors too.')
+  await expect(steps.last().locator('.step-body')).toBeVisible()
   await expect(fold).toHaveAttribute('open', '')
   await expect(fold.locator('summary')).toHaveText('What the agent did3 items')
   await expect(drawer.locator('.transcript-item')).toHaveCount(3)
@@ -2138,17 +2368,7 @@ function closedFoundry() {
   ]
   data.tasks['2:3'] = {
     ...lexer,
-    messages: [
-      {
-        id: 32,
-        kind: 'result',
-        sender: 'zeus-amber-pine',
-        recipient: 'chief',
-        state: 'delivered',
-        reason: null,
-        body: 'Lexer done.',
-      },
-    ],
+    messages: [message(32, 'result', 'zeus-amber-pine', 'chief', 'Lexer done.', 1)],
   }
   return data
 }
@@ -2197,7 +2417,7 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
   // What it says is all there to read: a card opens its task, with nothing to do on it.
   await page.locator('button.card[data-task="3"]').click()
   const drawer = page.getByRole('complementary', { name: 'Task T-3' })
-  await expect(drawer.locator('.drawer-result')).toHaveText('Lexer done.')
+  await expect(drawer.locator('.step[data-kind="result"] .step-body')).toHaveText('Lexer done.')
   await expect(drawer.getByRole('button')).toHaveText(['Close'])
   await drawer.getByRole('button', { name: 'Close the task' }).click()
   await banner.getByRole('button', { name: 'Resume project' }).click()

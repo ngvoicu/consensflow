@@ -508,7 +508,7 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
   .strip-actions { flex-wrap: wrap; padding-left: 12px; }
 }
 
-/* One task and its thread. */
+/* One task and its story. */
 .drawer {
   position: absolute;
   inset: 0 0 0 auto;
@@ -568,33 +568,48 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
   color: var(--muted);
 }
 .drawer-count { margin-left: auto; font-weight: 400; letter-spacing: .04em; text-transform: none; }
-.drawer-brief, .drawer-result { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .drawer-cut { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
-.drawer-section[data-section="result"] {
-  border-color: var(--seafoam-dim);
-  border-left-color: var(--seafoam);
-  background: rgba(99, 199, 178, .06);
-}
-.drawer-section[data-section="result"] .drawer-section-head { color: var(--seafoam); }
-.drawer-section[data-section="transcript"] { background: var(--ink); border-left-color: var(--line); }
+.drawer-section[data-section="story"], .drawer-section[data-section="transcript"] { background: var(--ink); border-left-color: var(--line); }
 details.drawer-section > summary { cursor: pointer; list-style: none; }
 details.drawer-section > summary::-webkit-details-marker { display: none; }
 details.drawer-section > summary::before { content: '▾'; letter-spacing: 0; }
 details.drawer-section:not([open]) > summary { margin-bottom: 0; }
 details.drawer-section:not([open]) > summary::before { content: '▸'; }
 details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoam); outline-offset: 4px; border-radius: 2px; }
-.thread { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-.thread-item { border-left: 2px solid var(--slate); padding: 2px 0 2px 10px; }
-.thread-item[data-kind="result"] { border-color: var(--seafoam); }
-.thread-item[data-kind="question"] { border-color: var(--amber); }
-.thread-head {
-  margin: 0 0 4px;
-  font: 700 10px var(--mono);
-  letter-spacing: .1em;
-  text-transform: uppercase;
-  color: var(--muted);
+/* A task's story: its steps on a line that joins their markers, each marker
+   in the colour of its kind. A folded step is its line and the first line
+   of its body; open, it reads whole. */
+.story { position: relative; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.story::before { content: ''; position: absolute; left: 4px; top: 8px; bottom: 0; width: 2px; background: var(--line-soft); }
+.story > li { position: relative; padding-left: 20px; }
+.step { --marker: var(--slate); }
+.step[data-kind="task"] { --marker: var(--foam); }
+.step[data-kind="question"] { --marker: var(--amber); }
+.step[data-kind="answer"] { --marker: var(--seafoam-dim); }
+.step[data-kind="result"] { --marker: var(--seafoam); }
+.step > summary { cursor: pointer; list-style: none; }
+.step > summary::-webkit-details-marker { display: none; }
+.step > summary::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--marker);
+  box-shadow: 0 0 0 3px var(--ink);
 }
-.thread-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.step-head { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; row-gap: 2px; font: 11px var(--mono); color: var(--muted); }
+.step-label { color: var(--foam); font-weight: 700; }
+.step > summary:hover .step-label { color: var(--seafoam); }
+.step-route { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step-state { color: var(--amber); }
+.step-state[data-state="failed"] { color: var(--buoy); }
+.step-time { white-space: nowrap; }
+.step-preview { flex-basis: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--ui); color: var(--muted); }
+.step[open] .step-preview { display: none; }
+.step-body { margin: 6px 0 0; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .transcript { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .transcript-item { border-left: 3px solid var(--line); padding: 2px 0 2px 12px; }
 .transcript-item[data-role="assistant"] { border-color: var(--seafoam-dim); }
@@ -608,7 +623,8 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
   max-height: 320px;
   overflow: auto;
 }
-.transcript-more, .thread-more { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
+.transcript-more, .story-more { font-size: 12px; color: var(--muted); }
+.transcript-more { margin: 0 0 8px; }
 .drawer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 
 /* The live windows. */
