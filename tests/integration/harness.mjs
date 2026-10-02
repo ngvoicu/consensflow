@@ -442,14 +442,14 @@ export async function startIntegration({
       await Promise.all([exited(ui), exited(rust)])
       const pidsFile = join(root, 'pids.jsonl')
       if (existsSync(pidsFile)) {
+        // The bridge kills each pane's process as it shuts down, and a killed
+        // process leaves the process table a moment later (once it is reaped):
+        // one still there after a few seconds was left behind.
         for (const line of readFileSync(pidsFile, 'utf8').split('\n').filter(Boolean)) {
           const pid = Number(line)
-          try {
-            process.kill(pid, 0)
-          } catch {
-            continue
-          }
-          throw new Error(`fake harness process remains after bridge shutdown: ${pid}`)
+          await waitFor(() => !pidAlive(pid), 3000).catch(() => {
+            throw new Error(`fake harness process remains after bridge shutdown: ${pid}`)
+          })
         }
       }
       if (!preserveRoot) rmSync(root, { recursive: true, force: true })
