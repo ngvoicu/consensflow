@@ -305,7 +305,16 @@ async function open(page, data = model()) {
         data.boards[project].project.gate = gate
         return answer({ project: data.boards[project].project })
       },
-      'inbox.get': ({ project }) => answer({ messages: data.inbox[project] ?? [] }),
+      // The newest messages one frame holds (all of them, unless a test says
+      // how many fit) and how many there are; asked for what For you lists,
+      // only the notes not yet read.
+      'inbox.get': ({ project, unread }) => {
+        const all = (data.inbox[project] ?? []).filter(
+          (message) => !unread || (message.state === 'queued' && message.kind === 'note'),
+        )
+        const messages = all.slice(0, data.inboxFit ?? all.length)
+        return answer({ messages, total: all.length, shown: messages.length })
+      },
       'task.get': ({ project, task }) => {
         const found = data.tasks[`${project}:${task}`]
         return found === undefined
@@ -314,10 +323,11 @@ async function open(page, data = model()) {
       },
       'task.resume': ({ project, task }) =>
         answer({ task: { ...data.tasks[`${project}:${task}`], state: 'queued' } }),
-      // The last `limit` items, as the core gives them.
+      // The last `limit` items, as the core gives them, and how many came.
       'task.transcript': ({ project, task, limit = Number.POSITIVE_INFINITY }) => {
         const { items, total } = data.transcripts?.[`${project}:${task}`] ?? { items: [], total: 0 }
-        return answer({ items: items.slice(Math.max(0, items.length - limit)), total })
+        const last = items.slice(Math.max(0, items.length - limit))
+        return answer({ items: last, total, shown: last.length })
       },
       'project.open': ({ directory }) => answer({ project: { id: 3, name: 'new', directory } }),
     }
@@ -883,6 +893,52 @@ test("keeps only what is new in a task's thread: questions, answers, follow-ups 
   await expect(drawer.locator('.drawer-meta')).not.toContainText('just now ago')
 })
 
+test('says under a body cut to fit the page where it reads whole, and how many earlier messages it left out', async ({
+  page,
+}) => {
+  const data = model()
+  const cut = (start, length) => `${start}\n… (${length} characters; cut here)`
+  const message = (id, kind, sender, recipient, body, extra = {}) => ({
+    id,
+    kind,
+    sender,
+    recipient,
+    state: 'delivered',
+    reason: null,
+    body,
+    ...extra,
+  })
+  // As the core reads a task too long for one frame: what it cut is marked.
+  data.tasks['1:2'] = {
+    ...data.tasks['1:2'],
+    body: cut('Write the parser', 900_000),
+    bodyCut: true,
+    messagesLeftOut: 3,
+    messages: [
+      message(20, 'task', 'chief', 'zeus', '… (900000 characters; cut here)', { bodyCut: true }),
+      message(25, 'question', 'zeus', 'chief', cut('Which grammar?', 700_000), { bodyCut: true }),
+      message(26, 'answer', 'chief', 'zeus', 'The recursive one.'),
+      message(27, 'result', 'zeus', 'chief', cut('Parser done', 800_000), { bodyCut: true }),
+    ],
+  }
+  await open(page, data)
+  await page.locator('button.card[data-task="2"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-2' })
+  const whole = 'Cut to fit here: cf task get T-2 shows it whole.'
+  await expect(drawer.locator('[data-section="brief"] .drawer-cut')).toHaveText(whole)
+  await expect(drawer.locator('[data-section="result"] .drawer-cut')).toHaveText(whole)
+  const thread = drawer.locator('[data-section="thread"]')
+  await expect(thread.locator('.thread-more')).toHaveText(
+    '3 earlier messages not shown: cf task get T-2 shows the whole thread.',
+  )
+  await expect(thread.locator('.thread-body')).toHaveText([
+    cut('Which grammar?', 700_000),
+    'The recursive one.',
+  ])
+  await expect(thread.locator('.thread-item').nth(0).locator('.drawer-cut')).toHaveText(whole)
+  await expect(thread.locator('.thread-item').nth(1).locator('.drawer-cut')).toHaveCount(0)
+})
+
 test("shows what a task's window wrote, from ConsensFlow's own copy, under the thread", async ({
   page,
 }) => {
@@ -1240,6 +1296,40 @@ test('a note from an agent reads in its own list, marked read when seen', async 
   await expect(note).toContainText('Note from @chief')
   await note.getByRole('button', { name: 'Mark m-16 read' }).click()
   await expect.poll(() => calls(page, 'message.read')).toEqual([{ message: 16 }])
+})
+
+test('says how many earlier notes one frame did not hold, and counts them all', async ({
+  page,
+}) => {
+  const data = model()
+  const note = (id, body, minutesAgo) => ({
+    id,
+    kind: 'note',
+    state: 'queued',
+    sender: 'chief',
+    recipient: 'human',
+    taskNumber: null,
+    body,
+    questions: null,
+    createdAt: at(minutesAgo),
+  })
+  // Newest first, as the core reads them: only the two newest fit in its answer.
+  data.inbox[1].unshift(note(18, 'The lexer is in.', 1), note(17, 'The parser is in.', 2))
+  data.inboxFit = 2
+  await open(page, data)
+  const bay = page.getByRole('region', { name: 'For you' })
+  await expect(bay.locator('.foryou-status')).toHaveText('3 notes')
+  await expect(page.getByRole('button', { name: 'Inbox (3)' })).toBeVisible()
+  const notes = bay.getByRole('list', { name: 'Notes for you' })
+  await expect(notes.locator('.strip-message')).toHaveCount(2)
+  await expect(notes.locator('.strips-more')).toHaveText(
+    '1 earlier note not shown: mark these read to see it.',
+  )
+  expect(await calls(page, 'inbox.get')).toContainEqual({
+    project: 1,
+    participant: 'human',
+    unread: true,
+  })
 })
 
 // Every key goes to the pane as typed, in order, and none of it holds a paste:
@@ -2421,6 +2511,55 @@ test("gives a card's title room to read, at the default window and on a wider sc
   // At 1440 the board, beside the windows, still has every column without scrolling.
   const board = page.getByRole('region', { name: 'Board' })
   expect(await board.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0)
+})
+
+test("gives For you's strips room to read, at the default window and on wider screens", async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].project.gate = true
+  const gated = (id, kind, sender, recipient, taskNumber, body) => ({
+    id,
+    kind,
+    state: 'gated',
+    sender,
+    recipient,
+    taskNumber,
+    body,
+    questions: null,
+    choices: null,
+    createdAt: at(3),
+  })
+  data.boards[1].gated = [
+    gated(30, 'task', 'chief', 'zeus-amber-pine', 4, 'Add the tests\nCover every error path.'),
+    gated(31, 'result', 'zeus-amber-pine', 'chief', 2, 'Lexer done; 14 tests pass.'),
+  ]
+  await open(page, data)
+  // Each strip's text, and whether its buttons are all inside it.
+  const strips = () =>
+    page.locator('.foryou .strip').evaluateAll((nodes) =>
+      nodes.map((strip) => {
+        const edge = strip.getBoundingClientRect().right
+        return {
+          text: Math.round(strip.querySelector('.strip-title').getBoundingClientRect().width),
+          inside: [...strip.querySelectorAll('.strip-actions button')].every(
+            (button) => button.getBoundingClientRect().right <= edge,
+          ),
+        }
+      }),
+    )
+  for (const width of [880, 1440, 2200]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect
+      .poll(async () => Math.min(...(await strips()).map((strip) => strip.text)), {
+        message: `strip text at ${width}px`,
+      })
+      .toBeGreaterThanOrEqual(240)
+    expect(
+      (await strips()).every((strip) => strip.inside),
+      `buttons at ${width}px`,
+    ).toBe(true)
+  }
 })
 
 test('keeps every button of a lane inside its column, however narrow the board', async ({

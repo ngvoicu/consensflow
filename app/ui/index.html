@@ -295,7 +295,7 @@
     }
     .foryou-status { margin-left: auto; font: 600 11px var(--mono); color: var(--amber); }
     .foryou-sub { margin: 10px 0 4px; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
-    .bay-empty { color: var(--muted); font-size: 12px; padding: 2px 2px 0; list-style: none; }
+    .bay-empty, .strips-more { color: var(--muted); font-size: 12px; padding: 2px 2px 0; list-style: none; }
 
     /* The kanban: a row per participant, a column per state. A board too
        narrow for its columns scrolls sideways rather than crush them: the
@@ -445,8 +445,9 @@
       .card-title { padding-top: 4px; -webkit-line-clamp: 4; }
     }
 
-    /* A message waiting for the human: a strip with what they may do with it. */
-    .strips { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+    /* A message waiting for the human: a strip with what they may do with it.
+       The list is what a strip measures itself against, as a card's does. */
+    .strips { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; container-type: inline-size; }
     .strip {
       --state: var(--slate);
       --state-ink: var(--foam);
@@ -502,6 +503,20 @@
     .strip[data-overdue="true"] .strip-route { color: var(--amber); }
     .strip[data-gated="true"] .strip-route { color: var(--seafoam); }
     .strip[data-gated="true"] { border-left: 3px solid var(--seafoam-dim); }
+    /* A list too narrow for the text beside who sent it (For you at the
+       default window): the number, who and when head the strip, and the text
+       has its whole width under them. */
+    @container (max-width: 600px) {
+      .strip-line {
+        grid-template-columns: 58px minmax(0, 1fr) auto;
+        grid-template-areas: "number route age" "title title title";
+      }
+      .strip-number { grid-area: number; }
+      .strip-line > .strip-route { grid-area: route; padding-bottom: 8px; }
+      .strip-age { grid-area: age; }
+      .strip-line > .strip-title { grid-area: title; border-left: 0; border-top: 1px solid var(--line-soft); padding-top: 8px; }
+      .strip-actions { flex-wrap: wrap; padding-left: 12px; }
+    }
 
     /* One task and its thread. */
     .drawer {
@@ -564,6 +579,7 @@
     }
     .drawer-count { margin-left: auto; font-weight: 400; letter-spacing: .04em; text-transform: none; }
     .drawer-brief, .drawer-result { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .drawer-cut { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
     .drawer-section[data-section="result"] {
       border-color: var(--seafoam-dim);
       border-left-color: var(--seafoam);
@@ -602,7 +618,7 @@
       max-height: 320px;
       overflow: auto;
     }
-    .transcript-more { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
+    .transcript-more, .thread-more { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
     .drawer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 
     /* The live windows. */
@@ -718,9 +734,6 @@
       }
       .command-bar { flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
       .sidebar { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; }
-      .strip-route, .strip-age, .strip-line > .strip-route { display: none !important; }
-      .strip-line { grid-template-columns: 58px minmax(0, 1fr) 60px; }
-      .strip-actions { padding-left: 12px; }
       .board { padding: 12px 12px 48px; }
     }
     @media (prefers-reduced-motion: reduce) {

@@ -133,7 +133,7 @@ async function installTauriShim(page, { snapshot = updateSnapshot(), state = cor
           if (operation === 'board.get') {
             return copy({ ok: true, board: initialState.boards[body.project] })
           }
-          if (operation === 'inbox.get') return { ok: true, messages: [] }
+          if (operation === 'inbox.get') return { ok: true, messages: [], total: 0, shown: 0 }
           if (operation === 'agents.list') return { ok: true, agents: [] }
           return { ok: true }
         }
