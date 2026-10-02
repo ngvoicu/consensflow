@@ -11,7 +11,7 @@ import { Store } from './store.js'
 import * as tasks from './tasks.js'
 
 export { TRANSCRIPT_ITEM_MAX } from './conversations.js'
-export { CHIEF_HARNESSES, HARNESSES, LedgerError, TIERS } from './model.js'
+export { CHIEF_HARNESSES, fitsRole, HARNESSES, LedgerError, TIERS } from './model.js'
 export { OVERDUE_MS, PAGE_BYTES } from './page-reads.js'
 export { SCHEMA_VERSION } from './schema.js'
 export { RESUME_WORDS } from './tasks.js'

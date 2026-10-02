@@ -115,6 +115,13 @@ function model() {
         profile: { workTier: 'complex' },
         hidden: true,
       },
+      // The image agent: an image designer, and nothing else.
+      {
+        name: 'pygmalion',
+        harness: 'image',
+        model: 'codex-image',
+        profile: { workTier: 'light' },
+      },
     ],
     boards: {
       1: {
@@ -1438,7 +1445,7 @@ test('every key the human types reaches the pane in order, flagged as nothing', 
     )
 })
 
-test('shows the staff as one row per member and role, and adds any saved agent in any role', async ({
+test('shows the staff as one row per member and role, and adds a saved agent in a role it fits', async ({
   page,
 }) => {
   const data = model()
@@ -1483,7 +1490,7 @@ test('shows the staff as one row per member and role, and adds any saved agent i
     'athena · muse-spark · opencode',
   ])
   await expect(dialog.getByLabel('Agent').locator('optgroup')).toHaveCount(2)
-  // An advisor: every agent, since any agent may take any role.
+  // An advisor: every agent but the image agent, which only draws.
   await dialog.getByLabel('Role').selectOption('advisor')
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
     'hera · gpt-6-astra · codex · max',
@@ -1517,11 +1524,68 @@ test('shows the staff as one row per member and role, and adds any saved agent i
     .poll(() => calls(page, 'member.roles'))
     .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'reviewer'] }])
   await expect(page.locator('#status')).toHaveText('@zeus is Reviewer now too.')
-  // The image designer too: nothing on the card decides who may draw.
+  // An image designer is an image agent, and an image agent is nothing else.
   await dialog.getByLabel('Role').selectOption('designer')
-  await expect(dialog.getByLabel('Agent').locator('option')).toHaveCount(4)
+  await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
+    'pygmalion · codex-image · codex',
+  ])
   await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeEnabled()
   await expect(dialog.locator('#staff-hint')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([
+      { project: 1, agent: 'athena', roles: ['advisor'] },
+      { project: 1, agent: 'pygmalion', roles: ['designer'] },
+    ])
+})
+
+test('says why no image designer is on offer: Codex, which image agents run through, is not here, or each is one already', async ({
+  page,
+}) => {
+  const data = model()
+  // Codex is not installed here: the image agent goes with it.
+  Object.assign(
+    data.agents.find((agent) => agent.name === 'pygmalion'),
+    { hidden: true, notInstalled: true },
+  )
+  await open(page, data)
+  await page.getByRole('button', { name: 'Staff' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  const hint = dialog.locator('#staff-hint')
+  await dialog.getByLabel('Role').selectOption('designer')
+  await expect(hint).toHaveText(
+    'No image agent is on offer here: image agents run through Codex; install it from Agents, Harnesses.',
+  )
+  await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeDisabled()
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  // Codex is back, and pygmalion draws for harbour already.
+  await page.evaluate(() => {
+    const pygmalion = window.__model.agents.find((agent) => agent.name === 'pygmalion')
+    delete pygmalion.hidden
+    delete pygmalion.notInstalled
+    window.__model.boards[1].lanes.push({
+      participant: {
+        ...window.__model.boards[1].lanes[2].participant,
+        id: 12,
+        handle: 'pygmalion',
+        role: 'designer',
+        roles: ['designer'],
+        agent: 'pygmalion',
+        harness: 'image',
+        tier: 'light',
+      },
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    })
+    window.__listeners.get('state-changed')()
+  })
+  await expect(page.locator('tr[data-handle="pygmalion"]')).toHaveCount(1)
+  await page.getByRole('button', { name: 'Staff' }).click()
+  await dialog.getByLabel('Role').selectOption('designer')
+  await expect(hint).toHaveText('Every image agent is on the staff as Image designer already.')
+  await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeDisabled()
 })
 
 test("drops one role from a member's row, and asks before its last", async ({ page }) => {
@@ -2348,8 +2412,14 @@ test('starts a project in a chosen folder with the chosen lead, the staff ticked
   ])
   await dialog.locator('[name="pickAgent"]').selectOption('athena')
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  // The image designer: the image agent alone.
+  await dialog.locator('[name="pickRole"]').selectOption('designer')
+  await expect(dialog.locator('[name="pickAgent"]').locator('option')).toHaveText([
+    'pygmalion · codex-image · codex',
+  ])
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
   await dialog.getByRole('button', { name: 'Remove Worker diana' }).click()
-  await expect(table.locator('tbody tr')).toHaveCount(4)
+  await expect(table.locator('tbody tr')).toHaveCount(5)
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
@@ -2362,6 +2432,7 @@ test('starts a project in a chosen folder with the chosen lead, the staff ticked
           { agent: 'zeus', roles: ['worker', 'reviewer'] },
           { agent: 'hera', roles: ['worker'] },
           { agent: 'athena', roles: ['advisor'] },
+          { agent: 'pygmalion', roles: ['designer'] },
         ],
       },
     ])

@@ -48,10 +48,24 @@ const runsLabel = (agent, tier = agent.profile?.workTier) =>
     .filter(Boolean)
     .join(' · ')
 
+/** Whether an agent may take a role: an image designer is an image agent, and an image agent is nothing else. */
+const fits = (agent, role) => (role === 'designer') === (agent.harness === 'image')
+
+/** Why a role's pick list is empty: no agent saved, no image agent here, or each that fits holds it. */
+function emptyHint(role, saved, fitting) {
+  if (saved.length === 0) return 'No saved agents yet: add one under Settings, Agents.'
+  if (role === 'designer') {
+    return fitting.length === 0
+      ? 'No image agent is on offer here: image agents run through Codex; install it from Agents, Harnesses.'
+      : 'Every image agent is on the staff as Image designer already.'
+  }
+  return `Every saved agent is on the staff as ${ROLE_LABEL[role]} already.`
+}
+
 /**
  * The two selects that add a member: a role first, then the saved agents
- * that do not hold it yet; any agent may take any role. `savedAgents()` is
- * read at each fill, so a role picked offers the agents saved by then. The
+ * that fit it (see `fits`) and do not hold it yet. `savedAgents()` is read
+ * at each fill, so a role picked offers the agents saved by then. The
  * chosen agent survives a redraw when it is still on offer, and a role
  * picked refills the agents from the staff drawn last.
  */
@@ -66,7 +80,8 @@ function rolePicker(savedAgents, roleSelect, agentSelect, hint, holding, onRefil
   const refill = () => {
     const role = roleSelect.value
     const chosen = agentSelect.value
-    const choices = savedAgents().filter((agent) => !agent.hidden && !holding(agent.name, role))
+    const fitting = savedAgents().filter((agent) => !agent.hidden && fits(agent, role))
+    const choices = fitting.filter((agent) => !holding(agent.name, role))
     // Every agent, the catalog's and the human's own, by the work it is for:
     // the most critical tier first, then harness by harness, by name.
     const groups = new Map()
@@ -100,12 +115,7 @@ function rolePicker(savedAgents, roleSelect, agentSelect, hint, holding, onRefil
     if (choices.some((agent) => agent.name === chosen)) agentSelect.value = chosen
     agentSelect.disabled = choices.length === 0
     // An empty list says why, so the answer is in the dialog, not in a guess.
-    hint.textContent =
-      choices.length === 0
-        ? savedAgents().length === 0
-          ? 'No saved agents yet: add one under Settings, Agents.'
-          : `Every saved agent is on the staff as ${ROLE_LABEL[role]} already.`
-        : ''
+    hint.textContent = choices.length === 0 ? emptyHint(role, savedAgents(), fitting) : ''
     hint.hidden = choices.length > 0
     onRefill()
   }

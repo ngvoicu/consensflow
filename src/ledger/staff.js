@@ -3,6 +3,7 @@ import {
   HELD_TASK_STATES,
   LedgerError,
   MEMBER_ROLES,
+  requireFittingRoles,
   requireMember,
   requireRoles,
   requireText,
@@ -83,7 +84,11 @@ export function refreshMemberTiers(store, tierOf) {
   })
 }
 
-/** A member's roles change in place. */
+/**
+ * A member's roles change in place. A role it gains must fit its agent; one
+ * it holds already stays though it does not (a member from before an image
+ * designer had to be an image agent), until the human drops it.
+ */
 export function setRoles(store, projectId, handle, roles) {
   roles = requireRoles(roles)
   return store.write(() => {
@@ -96,6 +101,12 @@ export function setRoles(store, projectId, handle, roles) {
         409,
       )
     }
+    const held = JSON.parse(member.roles)
+    requireFittingRoles(
+      member.agent,
+      member.harness,
+      roles.filter((role) => !held.includes(role)),
+    )
     store.db
       .prepare('UPDATE participant SET role = ?, roles = ? WHERE id = ?')
       .run(roles[0], JSON.stringify(roles), member.id)

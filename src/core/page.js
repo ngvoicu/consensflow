@@ -1,6 +1,6 @@
 import { basename } from 'node:path'
 import { missingHarnesses, offerable } from '../harnesses.js'
-import { RESUME_WORDS } from '../ledger/index.js'
+import { fitsRole, RESUME_WORDS } from '../ledger/index.js'
 import { agentRow, harnessForKind, listAgents } from '../roster.js'
 import { requireLeadAgent, requireOpen } from './dispatcher.js'
 
@@ -198,11 +198,20 @@ function lead(agent, env) {
   return { harness, agent }
 }
 
-/** The last project's staff for a new one: the members still saved, as the roster has them now. */
+/**
+ * The last project's staff for a new one: the members still saved, as the
+ * roster has them now, in the roles their agents fit. A role one held from
+ * before an image designer had to be an image agent stays behind, and so
+ * does a member left with none.
+ */
 function lastStaffNow(ledger, env) {
   const agents = listAgents(env)
   return ledger
     .lastStaff()
     .filter(({ agent }) => agents.some((candidate) => candidate.name === agent))
-    .map(({ agent, roles }) => ({ roles, ...membership(agent, env, agents) }))
+    .map(({ agent, roles }) => {
+      const member = membership(agent, env, agents)
+      return { ...member, roles: roles.filter((role) => fitsRole(member.harness, role)) }
+    })
+    .filter(({ roles }) => roles.length > 0)
 }

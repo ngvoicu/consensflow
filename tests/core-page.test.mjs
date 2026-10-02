@@ -295,6 +295,74 @@ describe('the page protocol of the new core', () => {
     })
   })
 
+  it('adds no member to a role its agent does not fit, and gives none such a role: only an image agent draws', async () => {
+    await withPage(async ({ ledger, operations }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        agent: 'leto',
+      })
+      await assert.rejects(
+        operations['member.add']({ project: project.id, agent: 'zeus', roles: ['designer'] }),
+        { message: 'only an image agent can be an image designer, and zeus is not one' },
+      )
+      await assert.rejects(
+        operations['member.add']({ project: project.id, agent: 'pygmalion', roles: ['worker'] }),
+        { message: 'pygmalion is an image agent, which can only be an image designer' },
+      )
+      await operations['member.add']({
+        project: project.id,
+        agent: 'pygmalion',
+        roles: ['designer'],
+      })
+      await operations['member.add']({ project: project.id, agent: 'zeus' })
+      await assert.rejects(
+        operations['member.roles']({
+          project: project.id,
+          agent: 'zeus',
+          roles: ['worker', 'designer'],
+        }),
+        /zeus is not one/,
+      )
+      assert.deepEqual(
+        ledger
+          .project(project.id)
+          .participants.slice(2)
+          .map((p) => [p.handle, p.roles]),
+        [
+          ['pygmalion', ['designer']],
+          ['zeus', ['worker']],
+        ],
+      )
+    })
+  })
+
+  it('starts a new project from the last staff in the roles its agents fit, and no other', async () => {
+    await withPage(async ({ dispatcher, env, opened }) => {
+      addAgent({ name: 'iris', harness: 'image', model: 'codex-image' }, env)
+      // The last staff, from before an image designer had to be an image agent.
+      const lastStaff = () => [
+        { agent: 'zeus', roles: ['worker', 'designer'] },
+        { agent: 'iris', roles: ['designer', 'reviewer'] },
+        { agent: 'diana', roles: ['designer'] },
+      ]
+      const operations = pageOperations({ ledger: { lastStaff }, dispatcher, env, kick: () => {} })
+      const fitting = [
+        ['zeus', ['worker']],
+        ['iris', ['designer']],
+      ]
+      const { staff } = await operations['staff.last']({})
+      assert.deepEqual(
+        staff.map(({ agent, roles }) => [agent, roles]),
+        fitting,
+      )
+      await operations['project.open']({ directory: '/work/app', agent: 'leto' })
+      assert.deepEqual(
+        opened[0].staff.map(({ agent, roles }) => [agent, roles]),
+        fitting,
+      )
+    })
+  })
+
   it('marks a member whose agent is gone on the board, and nobody else', async () => {
     await withPage(async ({ operations, env }) => {
       const { project } = await operations['project.open']({

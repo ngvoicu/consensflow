@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { describe, it } from 'node:test'
 import { openLedger } from '../src/ledger/index.js'
 import { sessionName } from '../src/ledger/names.js'
@@ -236,6 +237,123 @@ describe('the project staff', () => {
       })
       const out = ledger.markOut(id('zeus'), { until: '2026-09-20T00:00:00.000Z', reason: 'quota' })
       assert.equal(out.outUntil, '2026-09-20T00:00:00.000Z')
+    })
+  })
+
+  it('makes an image designer of an image agent alone, and an image agent nothing else', async () => {
+    await withLedger((ledger) => {
+      const { project } = staff(ledger)
+      const notImage = {
+        code: 'invalid-role',
+        message: 'only an image agent can be an image designer, and hera is not one',
+      }
+      const image = {
+        code: 'invalid-role',
+        message: 'pygmalion is an image agent, which can only be an image designer',
+      }
+      assert.throws(
+        () =>
+          ledger.addMember(project.id, {
+            agent: 'hera',
+            harness: 'claude-code',
+            roles: ['worker', 'designer'],
+            tier: 'standard',
+          }),
+        notImage,
+      )
+      assert.throws(
+        () =>
+          ledger.addMember(project.id, {
+            agent: 'pygmalion',
+            harness: 'image',
+            roles: ['designer', 'reviewer'],
+            tier: 'light',
+          }),
+        image,
+      )
+      // Nor does a new project's staff hold one.
+      assert.throws(
+        () =>
+          ledger.createProject({
+            directory: '/work/site',
+            name: 'site',
+            chief: { harness: 'pi', agent: 'leto' },
+            staff: [{ agent: 'hera', harness: 'pi', role: 'designer', tier: 'standard' }],
+          }),
+        notImage,
+      )
+      const pygmalion = ledger.addMember(project.id, {
+        agent: 'pygmalion',
+        harness: 'image',
+        role: 'designer',
+        tier: 'light',
+      })
+      assert.deepEqual(pygmalion.roles, ['designer'])
+      // A member's roles change only to roles that fit its agent.
+      assert.throws(() => ledger.setRoles(project.id, 'pygmalion', ['designer', 'worker']), image)
+      assert.throws(() => ledger.setRoles(project.id, 'zeus', ['worker', 'designer']), {
+        code: 'invalid-role',
+      })
+      assert.deepEqual(
+        ledger
+          .project(project.id)
+          .participants.filter((p) => ['zeus', 'pygmalion'].includes(p.handle))
+          .map((p) => [p.handle, p.roles]),
+        [
+          ['zeus', ['worker']],
+          ['pygmalion', ['designer']],
+        ],
+      )
+      assert.equal(ledger.projects().length, 1)
+    })
+  })
+
+  it('keeps a role a member held before roles had to fit its agent: it works on, and goes when dropped', async () => {
+    await withDir(async (dir) => {
+      const file = path.join(dir, 'consensflow.db')
+      let ledger = openLedger(file, { now: clock() })
+      const { project } = staff(ledger)
+      ledger.addMember(project.id, {
+        agent: 'pygmalion',
+        harness: 'image',
+        role: 'designer',
+        tier: 'light',
+      })
+      ledger.close()
+      // As an older ledger has them: zeus (Claude Code) draws, pygmalion works.
+      const raw = new DatabaseSync(file)
+      const roles = raw.prepare('UPDATE participant SET role = ?, roles = ? WHERE handle = ?')
+      roles.run('worker', JSON.stringify(['worker', 'designer']), 'zeus')
+      roles.run('worker', JSON.stringify(['worker']), 'pygmalion')
+      raw.close()
+      ledger = openLedger(file, { now: clock() })
+      try {
+        assert.deepEqual(
+          ledger.members(project.id, 'designer').map((m) => m.handle),
+          ['zeus'],
+          'it still takes image tasks',
+        )
+        // A role that fits is added beside the one held; the one held may go.
+        ledger.setRoles(project.id, 'zeus', ['worker', 'designer', 'reviewer'])
+        ledger.setRoles(project.id, 'zeus', ['reviewer'])
+        ledger.setRoles(project.id, 'pygmalion', ['worker', 'designer'])
+        ledger.setRoles(project.id, 'pygmalion', ['designer'])
+        assert.throws(() => ledger.setRoles(project.id, 'zeus', ['reviewer', 'designer']), {
+          code: 'invalid-role',
+        })
+        assert.deepEqual(
+          ledger
+            .project(project.id)
+            .participants.filter((p) => ['zeus', 'pygmalion'].includes(p.handle))
+            .map((p) => [p.handle, p.roles]),
+          [
+            ['zeus', ['reviewer']],
+            ['pygmalion', ['designer']],
+          ],
+        )
+      } finally {
+        ledger.close()
+      }
     })
   })
 })
