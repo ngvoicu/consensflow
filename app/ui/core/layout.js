@@ -6,16 +6,25 @@
  */
 
 const $ = (selector) => document.querySelector(selector)
-const foldKey = (name) => `cf.layout.${name}`
+const storageKey = (name) => `cf.layout.${name}`
 /** The board and the windows share one space: folding one brings the other back. */
 const OPPOSITE = { board: 'dock', dock: 'board' }
-const BOARD_WIDTH_KEY = foldKey('board-width')
 
-function readFold(name) {
+/** What this browser kept under `name`, or null: nothing kept, or no storage. */
+function kept(name) {
   try {
-    return localStorage.getItem(foldKey(name)) === 'hidden' ? 'hidden' : 'shown'
+    return localStorage.getItem(storageKey(name))
   } catch {
-    return 'shown'
+    return null
+  }
+}
+
+/** Keeps `value` under `name` in this browser; with no storage it holds for this page alone. */
+function keep(name, value) {
+  try {
+    localStorage.setItem(storageKey(name), value)
+  } catch {
+    // No storage: the layout is the page's own until it is reloaded.
   }
 }
 
@@ -28,46 +37,44 @@ export class Layout {
     ['dock', this.#main, 'data-dock', $('#toggle-dock'), 'terminals'],
     ['board', this.#main, 'data-board', $('#toggle-board'), 'board'],
   ]
+  /** The panels folded now: this browser's to start with, then the page's, kept as they change. */
+  #hidden = new Set(this.#folds.map(([name]) => name).filter((name) => kept(name) === 'hidden'))
 
   /** Draws the layout this browser kept; `onFold` runs once a fold has changed the room. */
   constructor({ onFold }) {
     for (const [name, , , toggle] of this.#folds) {
       toggle.addEventListener('click', () => {
-        const next = readFold(name) === 'hidden' ? 'shown' : 'hidden'
-        try {
-          localStorage.setItem(foldKey(name), next)
-          if (next === 'hidden' && OPPOSITE[name])
-            localStorage.setItem(foldKey(OPPOSITE[name]), 'shown')
-        } catch {
-          // No storage: the fold still applies for this page.
+        if (this.#hidden.has(name)) {
+          this.#show(name)
+        } else {
+          this.#hidden.add(name)
+          keep(name, 'hidden')
+          if (OPPOSITE[name]) this.#show(OPPOSITE[name])
         }
         this.#applyFolds()
         onFold()
       })
     }
     this.#applyFolds()
-    try {
-      const saved = Number(localStorage.getItem(BOARD_WIDTH_KEY))
-      if (saved > 0) this.#setBoardWidth(saved)
-    } catch {
-      // No storage: the board keeps its default share.
-    }
+    const saved = Number(kept('board-width'))
+    if (saved > 0) this.#setBoardWidth(saved)
     this.#takeDivider()
   }
 
   /** A panel the page needs to show comes back unfolded. */
   unfold(name) {
-    try {
-      localStorage.setItem(foldKey(name), 'shown')
-    } catch {
-      // No storage: shown for this page.
-    }
+    this.#show(name)
     this.#applyFolds()
+  }
+
+  #show(name) {
+    this.#hidden.delete(name)
+    keep(name, 'shown')
   }
 
   #applyFolds() {
     for (const [name, host, attribute, toggle, noun] of this.#folds) {
-      const hidden = readFold(name) === 'hidden'
+      const hidden = this.#hidden.has(name)
       host.setAttribute(attribute, hidden ? 'hidden' : 'shown')
       toggle.setAttribute('aria-pressed', String(!hidden))
       toggle.setAttribute('aria-label', `${hidden ? 'Show' : 'Hide'} ${noun}`)
@@ -82,12 +89,7 @@ export class Layout {
     this.#divider.setAttribute('aria-valuenow', String(width))
     this.#divider.setAttribute('aria-valuemin', '280')
     this.#divider.setAttribute('aria-valuemax', String(Math.max(280, Math.round(room - 318))))
-    if (!save) return
-    try {
-      localStorage.setItem(BOARD_WIDTH_KEY, String(width))
-    } catch {
-      // No storage: the width holds for this page.
-    }
+    if (save) keep('board-width', String(width))
   }
 
   /** The divider, dragged or moved with the arrow keys, sets the board's width. */

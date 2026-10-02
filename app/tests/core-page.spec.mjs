@@ -2039,6 +2039,39 @@ test('folds the projects sidebar and the terminal dock away, and remembers it in
   await expect(page.getByRole('region', { name: 'Terminals' })).toBeVisible()
 })
 
+test('folds the panels for this page when the browser keeps no storage', async ({ page }) => {
+  // A browser that refuses storage (its data blocked, say) throws at every touch.
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('The operation is insecure.', 'SecurityError')
+      },
+    })
+  })
+  await open(page)
+  const projects = page.getByTestId('projects')
+  const board = page.getByRole('region', { name: 'Board' })
+  const stage = page.getByRole('region', { name: 'Terminals' })
+  await page.getByRole('button', { name: 'Hide projects' }).click()
+  await expect(projects).toBeHidden()
+  await page.getByRole('button', { name: 'Show projects' }).click()
+  await expect(projects).toBeVisible()
+  // Folding the board, then the windows, brings the board back.
+  await page.getByRole('button', { name: 'Hide board' }).click()
+  await expect(board).toBeHidden()
+  await page.getByRole('button', { name: 'Hide terminals' }).click()
+  await expect(board).toBeVisible()
+  await expect(stage).toBeHidden()
+  await page.getByRole('button', { name: 'Show terminals' }).click()
+  await expect(stage).toBeVisible()
+  // Inbox unfolds the board for the notes.
+  await page.getByRole('button', { name: 'Hide board' }).click()
+  await expect(board).toBeHidden()
+  await page.getByRole('button', { name: 'Inbox (1)' }).click()
+  await expect(board).toBeVisible()
+})
+
 test('starts a project in a chosen folder with the chosen chief, the staff ticked from the last one', async ({
   page,
 }) => {
