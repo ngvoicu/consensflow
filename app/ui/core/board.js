@@ -350,18 +350,17 @@ export class BoardView {
     const strips = element('ol', 'strips')
     strips.setAttribute('aria-label', 'Waiting for you')
     for (const message of waiting) strips.append(this.#messageStrip(message, board, now))
-    if (waiting.length === 0) {
+    // A gated project says what will wait here; otherwise the head's "Nothing waiting" says it all.
+    if (waiting.length === 0 && board.project?.gate) {
       strips.append(
         element(
           'li',
           'bay-empty',
-          board.project?.gate
-            ? 'Every task, result, question and answer between your agents waits here for your approval.'
-            : 'Nothing waits for you on the board: the chief asks in its terminal.',
+          'Every task, result, question and answer between your agents waits here for your approval.',
         ),
       )
     }
-    section.append(strips)
+    if (strips.childElementCount > 0) section.append(strips)
     if (unread > 0) {
       const list = element('ol', 'strips')
       list.setAttribute('aria-label', 'Notes for you')
@@ -574,16 +573,6 @@ export class BoardView {
           'quiet-button',
           this.#onLane(this.#actions.onOpenTerminal, participant),
           `Open ${name}'s terminal`,
-        ),
-      )
-    }
-    if (session && pane === null && lane.tasks.length > 0) {
-      tools.append(
-        button(
-          'Transcript',
-          'quiet-button',
-          () => this.#actions.onOpenTask(this.#lane(participant).tasks.at(-1).number),
-          `What ${name}'s terminal wrote`,
         ),
       )
     }

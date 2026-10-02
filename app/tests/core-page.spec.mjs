@@ -642,9 +642,8 @@ test('asks the human nothing in For you: the chief asks in its terminal', async 
   await expect(bay.locator('.foryou-status')).toHaveText('1 note')
   await expect(bay.locator('.strip-message[data-message="12"]')).toHaveCount(0)
   await expect(bay.getByRole('textbox')).toHaveCount(0)
-  await expect(bay.locator('.bay-empty')).toHaveText(
-    'Nothing waits for you on the board: the chief asks in its terminal.',
-  )
+  await expect(bay.locator('.bay-empty')).toHaveCount(0)
+  await expect(bay.getByRole('list', { name: 'Waiting for you' })).toHaveCount(0)
 })
 
 test('shows a question the chief left unanswered in For you as a notice, with nothing to write', async ({
@@ -2179,7 +2178,7 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
   }
   await banner.getByRole('button', { name: 'Resume project' }).focus()
   const reached = []
-  for (let press = 0; press < 4; press += 1) {
+  for (let press = 0; press < 3; press += 1) {
     await page.keyboard.press('Tab')
     reached.push(
       await page.evaluate(
@@ -2188,12 +2187,7 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
       ),
     )
   }
-  expect(reached).toEqual([
-    'Open task',
-    'Open task',
-    "What @zeus · amber-pine's terminal wrote",
-    'T-3, Write the lexer, Done, from @chief',
-  ])
+  expect(reached).toEqual(['Open task', 'Open task', 'T-3, Write the lexer, Done, from @chief'])
   // What it says is all there to read: a card opens its task, with nothing to do on it.
   await page.locator('button.card[data-task="3"]').click()
   const drawer = page.getByRole('complementary', { name: 'Task T-3' })
@@ -2795,9 +2789,6 @@ test("takes a closed window's card out of the dock: its lane says so and opens i
   const row = page.locator('tr[data-handle="zeus-amber-pine"]')
   await expect(row.locator('.row-status')).toHaveText('Terminal closed')
   await expect(row.getByTestId('lamp')).toHaveAttribute('data-state', 'closed')
-  await expect(
-    row.getByRole('button', { name: "What @zeus · amber-pine's terminal wrote" }),
-  ).toBeEnabled()
   await row.getByRole('button', { name: "Open @zeus · amber-pine's terminal" }).click()
   await expect
     .poll(() => calls(page, 'session.open'))
@@ -3282,11 +3273,7 @@ test('keeps every button of a lane inside its column, however narrow the board',
   for (let press = 0; press < 30; press += 1) await grip.press('ArrowLeft')
   await expect(grip).toHaveAttribute('aria-valuenow', '280')
   const row = page.locator('tr[data-handle="zeus-lively-comet"]')
-  await expect(row.locator('.row-tools button')).toHaveText([
-    'Open terminal',
-    'Transcript',
-    'Delete session',
-  ])
+  await expect(row.locator('.row-tools button')).toHaveText(['Open terminal', 'Delete session'])
   const live = page.locator('tr[data-handle="zeus-amber-pine"]')
   await expect(live.locator('.row-tools button')).toHaveText([
     'Show terminal',
@@ -3316,7 +3303,7 @@ test('keeps every button of a lane inside its column, however narrow the board',
   expect(await outside()).toEqual([])
 })
 
-test("opens a closed session's transcript from its lane, and gives a member's heading row no buttons", async ({
+test("gives a member's heading row no buttons, and a closed session's row no Transcript: its card opens the task", async ({
   page,
 }) => {
   const data = model()
@@ -3329,11 +3316,12 @@ test("opens a closed session's transcript from its lane, and gives a member's he
   })
   await open(page, data)
   await expect(page.locator('tr[data-handle="diana"] .row-tools button')).toHaveCount(0)
-  await page.getByRole('button', { name: "What @diana · amber-pine's terminal wrote" }).click()
+  await expect(page.locator('tr[data-handle="diana-amber-pine"] .row-tools button')).toHaveText([
+    'Open terminal',
+    'Delete session',
+  ])
+  await page.locator('tr[data-handle="diana-amber-pine"] button.card[data-task="3"]').click()
   await expect(page.getByRole('complementary', { name: 'Task T-3' })).toBeVisible()
-  await expect
-    .poll(async () => (await calls(page, 'task.transcript')).some((call) => call.task === 3))
-    .toBe(true)
 })
 
 test('switches the lead from its row to a saved agent on a harness installed here, after its turn or now', async ({
