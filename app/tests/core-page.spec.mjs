@@ -1076,7 +1076,7 @@ test('offers no delete on a closed project until it is resumed: its finished tas
     window.__model.boards[2].project.state = 'open'
     window.__listeners.get('state-changed')()
   })
-  await expect(heading.getByRole('button')).toHaveText(['Delete finished'])
+  await expect(heading.getByRole('button')).toHaveAccessibleName('Delete finished')
   await page.locator('button.card[data-task="4"]').click()
   await expect(drawer.getByRole('button')).toHaveText(['Close', 'Delete task'])
 })

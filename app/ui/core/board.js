@@ -535,8 +535,12 @@ export class BoardView {
   #deleteFinished(board) {
     if (!acts(board) || finishedTasks(board).deletable.length === 0) return []
     return [
-      button('Delete finished', 'danger-button', () =>
-        this.#actions.onDeleteFinished(this.#board.project, finishedTasks(this.#board)),
+      iconButton(
+        ICONS.remove,
+        'Delete finished tasks',
+        () => this.#actions.onDeleteFinished(this.#board.project, finishedTasks(this.#board)),
+        'Delete finished',
+        'danger-button',
       ),
     ]
   }
