@@ -314,6 +314,14 @@ button:disabled { opacity: .45; cursor: default; }
    column's width as given, and a width mixing % and px as none at all. */
 .kanban .kanban-staff { width: 176px; }
 .kanban th[data-state="finished"] { color: var(--muted); }
+/* Delete finished sits under the heading it acts on, in the board's own type. */
+.kanban thead .danger-button {
+  display: block;
+  margin-top: 6px;
+  padding: 3px 8px;
+  font: 600 11px/1.2 var(--ui);
+  white-space: normal;
+}
 .kanban tbody td, .kanban tbody th {
   vertical-align: top;
   padding: 8px;
@@ -692,7 +700,7 @@ dialog {
   overflow: auto;
 }
 dialog::backdrop { background: rgba(4, 12, 15, .6); }
-/* The dialogs: Delete, Settings, New project, Switch lead and the project staff. */
+/* The dialogs: Delete (a project, or finished tasks), Settings, New project, Switch lead and the project staff. */
 .dialog-form { display: grid; gap: 16px; padding: 22px 26px 24px; }
 .dialog-form h2 { margin: 0; font-size: 20px; }
 .dialog-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
@@ -706,6 +714,8 @@ dialog::backdrop { background: rgba(4, 12, 15, .6); }
   color: var(--foam);
 }
 .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+/* What a delete keeps on the board, and why. */
+.dialog-kept { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; color: var(--amber); }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
 .icon-button:hover { color: var(--foam); border-color: var(--foam); }
 dialog.settings { width: min(560px, calc(100vw - 48px)); }

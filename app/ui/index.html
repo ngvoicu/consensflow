@@ -68,6 +68,17 @@
       </div>
     </form>
   </dialog>
+  <dialog id="delete-tasks-dialog" class="settings" aria-labelledby="delete-tasks-title">
+    <form class="dialog-form" method="dialog">
+      <h2 id="delete-tasks-title">Delete these tasks?</h2>
+      <p class="dialog-help">A deleted task leaves the board and cf task list for good. The ledger keeps it: the lead can still read it, its brief, result and thread, with cf task get. This cannot be undone.</p>
+      <ul class="dialog-kept" id="delete-tasks-kept" aria-label="Kept on the board" hidden></ul>
+      <div class="dialog-actions">
+        <button class="quiet-button" type="submit" value="keep">Keep</button>
+        <button class="danger-button" type="button" id="delete-tasks-confirm">Delete for good</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="settings-dialog" class="settings" aria-labelledby="settings-title">
     <form class="dialog-form" method="dialog">
       <h2 id="settings-title">Settings</h2>
