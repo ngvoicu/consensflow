@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -44,6 +45,11 @@ const INPUT_QUEUE_CAPACITY: usize = 1024;
 const MAX_PENDING_INPUT_BYTES_PER_PANE: usize = 4 * 1024 * 1024;
 const MAX_PENDING_INPUT_TICKETS: usize = 4096;
 const INPUT_QUEUE_FULL: &str = "pane-input-queue-full";
+/// The host is stopping, and takes no more input.
+const INPUT_CLOSED: &str = "input-closed";
+/// A request, or a body, no window can take.
+const INVALID_BODY: &str = "invalid-body";
+const LOCK_POISONED: &str = "lock-poisoned";
 const INPUT_SEQUENCE_GAP: &str = "pane-input-sequence-gap";
 const INPUT_SEQUENCE_REGRESSION: &str = "pane-input-sequence-regression";
 const MAX_TERMINAL_DIMENSION: u16 = 4096;
@@ -127,7 +133,72 @@ impl InputWork {
     }
 }
 
-type InputResponse = Result<(), String>;
+/// Why a pane's input did not go in. Refused: nothing of it was written, so
+/// it may be sent again. Uncertain: the write itself failed partway, and some
+/// of it may have reached the window.
+#[derive(Debug)]
+enum InputError {
+    Refused { code: &'static str, cause: String },
+    Uncertain(String),
+}
+
+impl InputError {
+    fn refused(code: &'static str, cause: impl Into<String>) -> Self {
+        Self::Refused {
+            code,
+            cause: cause.into(),
+        }
+    }
+
+    fn queue_full() -> Self {
+        Self::refused(INPUT_QUEUE_FULL, "the pane's input queue is full")
+    }
+
+    /// A paste's answer: whether anything reached the window decides whether
+    /// the daemon may paste again or must ask the harness what it got.
+    fn paste_answer(&self) -> Value {
+        match self {
+            Self::Refused { code, cause } => json!({
+                "ok":false,
+                "admitted":false,
+                "bytesWritten":0,
+                "error":code,
+                "cause":cause,
+            }),
+            Self::Uncertain(cause) => json!({
+                "ok":false,
+                "admitted":null,
+                "error":"uncertain",
+                "cause":cause,
+            }),
+        }
+    }
+}
+
+/// The cause, which is all the page and the other operations answer.
+impl fmt::Display for InputError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused { cause, .. } | Self::Uncertain(cause) => formatter.write_str(cause),
+        }
+    }
+}
+
+impl From<ArbiterError> for InputError {
+    fn from(error: ArbiterError) -> Self {
+        let code = match &error {
+            ArbiterError::Pane(_) => return Self::Uncertain(error.to_string()),
+            ArbiterError::Stale => "stale-pane",
+            ArbiterError::Busy => "paste-in-flight",
+            ArbiterError::InputFailed => "input-failed",
+            ArbiterError::InvalidBody(_) => INVALID_BODY,
+            ArbiterError::LockPoisoned => LOCK_POISONED,
+        };
+        Self::refused(code, error.to_string())
+    }
+}
+
+type InputResponse = Result<(), InputError>;
 
 struct InputJob {
     work: InputWork,
@@ -216,7 +287,7 @@ impl InputQueue {
             .next_ticket
             .checked_add(1)
             .ok_or_else(|| "pane-input-ticket-overflow".to_string())?;
-        let receiver = self.submit(key, work)?;
+        let receiver = self.submit(key, work).map_err(|error| error.to_string())?;
         let ticket = format!("pane-input-{}", page.next_ticket);
         page.next_ticket = next_ticket;
         page.completions
@@ -246,7 +317,7 @@ impl InputQueue {
         &self,
         key: PaneKey,
         bytes: Vec<u8>,
-    ) -> Result<oneshot::Receiver<InputResponse>, String> {
+    ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
         self.submit(key, InputWork::Write(bytes))
     }
 
@@ -254,14 +325,14 @@ impl InputQueue {
         &self,
         key: PaneKey,
         body: Vec<u8>,
-    ) -> Result<oneshot::Receiver<InputResponse>, String> {
+    ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
         self.submit(key, InputWork::Paste(body))
     }
 
     /// Admit a native-channel send: the pane is current and its input works,
     /// and no paste is going in, since the pane's worker runs one job at a
     /// time.
-    fn claim(&self, key: PaneKey) -> Result<oneshot::Receiver<InputResponse>, String> {
+    fn claim(&self, key: PaneKey) -> Result<oneshot::Receiver<InputResponse>, InputError> {
         self.submit(key, InputWork::Claim)
     }
 
@@ -322,22 +393,20 @@ impl InputQueue {
         &self,
         key: PaneKey,
         work: InputWork,
-    ) -> Result<oneshot::Receiver<InputResponse>, String> {
+    ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
+        let closed = || InputError::refused(INPUT_CLOSED, "pane input admission is closed");
         if !self.accepting.load(Ordering::Acquire) {
-            return Err("pane input admission is closed".to_string());
+            return Err(closed());
         }
-        let senders = self
-            .senders
-            .lock()
-            .map_err(|_| "pane input queue lock is poisoned".to_string())?;
+        let senders = self.senders.lock().map_err(|_| {
+            InputError::refused(LOCK_POISONED, "pane input queue lock is poisoned")
+        })?;
         if !self.accepting.load(Ordering::Acquire) {
-            return Err("pane input admission is closed".to_string());
+            return Err(closed());
         }
         // A pane the table does not hold has no queue: it was never opened,
         // or it is gone.
-        let route = senders
-            .get(&key)
-            .ok_or_else(|| ArbiterError::Stale.to_string())?;
+        let route = senders.get(&key).ok_or(ArbiterError::Stale)?;
         let reserved_bytes = work.byte_count();
         route
             .pending_bytes
@@ -346,7 +415,7 @@ impl InputQueue {
                     .checked_add(reserved_bytes)
                     .filter(|next| *next <= MAX_PENDING_INPUT_BYTES_PER_PANE)
             })
-            .map_err(|_| INPUT_QUEUE_FULL.to_string())?;
+            .map_err(|_| InputError::queue_full())?;
         let (response, receiver) = oneshot::channel();
         let job = InputJob {
             work,
@@ -359,12 +428,15 @@ impl InputQueue {
             Err(mpsc::TrySendError::Full(job)) => {
                 job.pending_bytes
                     .fetch_sub(job.reserved_bytes, Ordering::AcqRel);
-                Err(INPUT_QUEUE_FULL.to_string())
+                Err(InputError::queue_full())
             }
             Err(mpsc::TrySendError::Disconnected(job)) => {
                 job.pending_bytes
                     .fetch_sub(job.reserved_bytes, Ordering::AcqRel);
-                Err(format!("pane input queue for {} is closed", key.id))
+                Err(InputError::refused(
+                    INPUT_CLOSED,
+                    format!("pane input queue for {} is closed", key.id),
+                ))
             }
         }
     }
@@ -401,7 +473,7 @@ fn input_worker(
             InputWork::Paste(body) => arbiter.write_paste(&panes, &key, &body),
             InputWork::Claim => arbiter.claim(&key),
         }
-        .map_err(|error| error.to_string());
+        .map_err(InputError::from);
         job.pending_bytes
             .fetch_sub(job.reserved_bytes, Ordering::AcqRel);
         let _ = job.response.send(result);
@@ -409,9 +481,11 @@ fn input_worker(
 }
 
 async fn wait_for_input(receiver: oneshot::Receiver<InputResponse>) -> InputResponse {
+    // The worker answers every job it takes: one left unanswered went down
+    // with the worker, perhaps in the middle of its write.
     receiver
         .await
-        .map_err(|_| "pane input queue ended before answering".to_string())?
+        .map_err(|_| InputError::Uncertain("pane input queue ended before answering".to_string()))?
 }
 
 fn wait_for_input_blocking(receiver: oneshot::Receiver<InputResponse>) -> InputResponse {
@@ -1281,24 +1355,35 @@ fn register_pane_handlers(
             let request: BytesRequest = parse_body(body)?;
             validate_input(&request.bytes)?;
             let key = pane_key(&request.id, request.generation)?;
-            wait_for_input_blocking(input_queue.write(key, request.bytes)?)?;
+            input_queue
+                .write(key, request.bytes)
+                .and_then(wait_for_input_blocking)
+                .map_err(|error| error.to_string())?;
             Ok(json!({"ok":true}))
         });
     }
 
+    // Every way a paste fails is an answer that says whether anything of it
+    // reached the window, a request it could not read included.
     let paste_queue = Arc::clone(&inputs);
     builder.on("pane.write_paste", move |_bridge, body| {
-        let request: PasteRequest = parse_body(body)?;
-        let key = pane_key(&request.id, request.generation)?;
-        wait_for_input_blocking(paste_queue.paste(key, request.body.into_bytes())?)?;
-        Ok(json!({"ok":true}))
+        let pasted = paste_request(body).and_then(|(key, body)| {
+            wait_for_input_blocking(paste_queue.paste(key, body.into_bytes())?)
+        });
+        Ok(match pasted {
+            Ok(()) => json!({"ok":true}),
+            Err(error) => error.paste_answer(),
+        })
     });
 
     let claim_queue = Arc::clone(&inputs);
     builder.on("pane.claim", move |_bridge, body| {
         let request: ClaimRequest = parse_body(body)?;
         let key = pane_key(&request.pane, request.generation)?;
-        wait_for_input_blocking(claim_queue.claim(key)?)?;
+        claim_queue
+            .claim(key)
+            .and_then(wait_for_input_blocking)
+            .map_err(|error| error.to_string())?;
         Ok(json!({"ok":true}))
     });
 
@@ -1458,7 +1543,16 @@ pub fn run_headless() -> Result<(), String> {
 struct EmptyBody {}
 
 fn parse_body<T: DeserializeOwned>(body: Value) -> Result<T, String> {
-    serde_json::from_value(body).map_err(|error| format!("invalid-body: {error}"))
+    serde_json::from_value(body).map_err(|error| format!("{INVALID_BODY}: {error}"))
+}
+
+/// A paste's pane and body. A request that does not name them was refused
+/// before anything was written.
+fn paste_request(body: Value) -> Result<(PaneKey, String), InputError> {
+    let refused = |cause| InputError::refused(INVALID_BODY, cause);
+    let request: PasteRequest = parse_body(body).map_err(refused)?;
+    let key = pane_key(&request.id, request.generation).map_err(refused)?;
+    Ok((key, request.body))
 }
 
 /// Everything a `pane.open` asks for, checked before anything is spawned; the
@@ -1561,7 +1655,7 @@ async fn input_result(result: Result<PageInputCompletion, String>) -> Value {
     };
     match wait_for_input(completion.receiver).await {
         Ok(()) => json!({"ok":true}),
-        Err(error) => json!({"ok":false,"error":error}),
+        Err(error) => json!({"ok":false,"error":error.to_string()}),
     }
 }
 
@@ -2837,7 +2931,7 @@ mod tests {
         assert!(
             blocked_outcomes
                 .iter()
-                .any(|value| value["error"] == "pane-input-queue-full"),
+                .any(|value| value["error"] == "the pane's input queue is full"),
             "a production-sized blocked burst must hit the bounded pane queue"
         );
     }
@@ -3480,6 +3574,130 @@ mod tests {
         connected.bridge.wait_closed().expect("bridge closes");
     }
 
+    /// A paste says whether anything of it reached the window. Refused before
+    /// a byte was written, it was not sent and may be sent again; cut short
+    /// in its write, it is uncertain. Both used to answer a bare error, which
+    /// the daemon read as not sent.
+    #[cfg(unix)]
+    #[test]
+    fn a_paste_answers_whether_anything_reached_the_window() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        let _pty_guard = crate::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(0));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let output = Arc::new(OutputHub::new());
+        let (printed, seen) = mpsc::channel();
+        output.register_sink(Arc::new(move |message: PaneOutputMessage| {
+            printed.send(message.bytes).is_ok()
+        }));
+        let mut builder = BridgeBuilder::new(MAX_FRAME_BYTES);
+        register_pane_handlers(
+            &mut builder,
+            Arc::clone(&panes),
+            arbiter,
+            output,
+            Arc::clone(&inputs),
+        );
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
+        let mut number = 0;
+        let mut send = |op: &str, body: Value| -> String {
+            number += 1;
+            let id = format!("n-paste-{number}");
+            let mut frame =
+                serde_json::to_vec(&json!({"v":1,"id":id,"kind":"req","op":op,"body":body}))
+                    .expect("serialize request");
+            frame.push(b'\n');
+            node_stream.write_all(&frame).expect("write request");
+            id
+        };
+        // Answers are kept by request, whatever order they come in.
+        let mut answers = HashMap::new();
+        let mut answer = |id: &str| -> Value {
+            while !answers.contains_key(id) {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read a frame");
+                let frame: Value = serde_json::from_str(line.trim()).expect("frame JSON");
+                if frame["kind"] == "res" {
+                    let answered = frame["id"].as_str().expect("response id").to_string();
+                    answers.insert(answered, frame["body"].clone());
+                }
+            }
+            answers.remove(id).expect("the answer")
+        };
+
+        // A window that reads nothing: a large paste fills its terminal and
+        // waits, once the terminal is raw.
+        let opened = send(
+            "pane.open",
+            json!({"id":"pasted-pane","generation":1,"cwd":"/tmp",
+                   "argv":["/bin/sh","-c","/bin/stty raw -echo; printf ready; exec /bin/sleep 1000"],
+                   "env":{},"size":{"rows":24,"cols":80},"backlogBytes":4096}),
+        );
+        assert_eq!(answer(&opened)["ok"], true);
+        let mut terminal = Vec::new();
+        while !terminal.ends_with(b"ready") {
+            terminal.extend(
+                seen.recv_timeout(Duration::from_secs(5))
+                    .expect("the window says it is ready"),
+            );
+        }
+
+        let stale = send(
+            "pane.write_paste",
+            json!({"id":"pasted-pane","generation":2,"body":"late"}),
+        );
+        assert_eq!(
+            answer(&stale),
+            json!({"ok":false,"admitted":false,"bytesWritten":0,
+                   "error":"stale-pane","cause":"stale pane generation"})
+        );
+        let unreadable = send(
+            "pane.write_paste",
+            json!({"id":"pasted-pane","generation":1}),
+        );
+        let unreadable = answer(&unreadable);
+        assert_eq!(
+            (
+                &unreadable["admitted"],
+                &unreadable["bytesWritten"],
+                &unreadable["error"]
+            ),
+            (&json!(false), &json!(0), &json!("invalid-body")),
+            "{unreadable}"
+        );
+
+        let paste = send(
+            "pane.write_paste",
+            json!({"id":"pasted-pane","generation":1,"body":"x".repeat(512 * 1024)}),
+        );
+        thread::sleep(Duration::from_millis(150));
+        let kill = send("pane.kill", json!({"id":"pasted-pane","generation":1}));
+        assert_eq!(answer(&kill), json!({"ok":true}));
+        let cut = answer(&paste);
+        assert_eq!(
+            (&cut["ok"], &cut["admitted"], &cut["error"]),
+            (&json!(false), &Value::Null, &json!("uncertain")),
+            "{cut}"
+        );
+        assert!(cut["cause"].is_string(), "{cut}");
+        assert!(cut.get("bytesWritten").is_none(), "{cut}");
+
+        inputs.close_and_drain();
+        drop(reader);
+        drop(node_stream);
+        connected.bridge.wait_closed().expect("bridge closes");
+    }
+
     /// Input for a pane the table never held is refused, and starts no
     /// worker: every key used to get a thread and a queue of its own.
     #[test]
@@ -3487,7 +3705,10 @@ mod tests {
         let panes = Arc::new(PaneTable::new());
         let inputs = InputQueue::new(Arc::clone(&panes), Arc::new(InputArbiter::new(0)));
         let refused = inputs.write(PaneKey::new("never-opened", 1), b"x".to_vec());
-        assert_eq!(refused.err().as_deref(), Some("stale pane generation"));
+        assert!(matches!(
+            refused,
+            Err(InputError::Refused { code: "stale-pane", ref cause }) if cause == "stale pane generation"
+        ));
         assert!(inputs.senders.lock().unwrap().is_empty());
         assert!(inputs.workers.lock().unwrap().is_empty());
     }

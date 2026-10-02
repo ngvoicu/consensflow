@@ -893,6 +893,101 @@ fn stdin_eof_kills_a_pane_before_draining_its_blocked_paste_handler() {
     assert!(pids.iter().all(|pid| !process_exists(*pid)));
 }
 
+/// A paste says whether anything of it reached the window: one refused before
+/// a byte was written was not sent, and the daemon may send it again; one
+/// whose write failed partway is uncertain, and the daemon asks the harness.
+#[test]
+fn a_paste_answers_whether_anything_reached_the_window() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    // A window that reads nothing: a large paste fills its terminal and waits.
+    let opened = helper.request(
+        "pane.open",
+        open_body(
+            "/bin/stty raw -echo; printf ready; exec /bin/sleep 1000",
+            4096,
+        ),
+        &mut events,
+    );
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let _ = output_until(&helper, &mut events, &pane_id, generation, b"ready");
+
+    fn refused(error: &str, cause: &str) -> Value {
+        json!({"ok":false,"admitted":false,"bytesWritten":0,"error":error,"cause":cause})
+    }
+    assert_eq!(
+        helper.request(
+            "pane.write_paste",
+            json!({"id":pane_id,"generation":generation + 1,"body":"late"}),
+            &mut events,
+        ),
+        refused("stale-pane", "stale pane generation")
+    );
+    assert_eq!(
+        helper.request(
+            "pane.write_paste",
+            json!({"id":pane_id,"generation":generation,"body":"\u{7}"}),
+            &mut events,
+        ),
+        refused(
+            "invalid-body",
+            "invalid paste body: control byte 0x07 is not allowed"
+        )
+    );
+    let unnamed = helper.request(
+        "pane.write_paste",
+        json!({"generation":generation,"body":"no pane"}),
+        &mut events,
+    );
+    assert_eq!(
+        (
+            &unnamed["admitted"],
+            &unnamed["bytesWritten"],
+            &unnamed["error"]
+        ),
+        (&json!(false), &json!(0), &json!("invalid-body")),
+        "{unnamed}"
+    );
+    assert!(unnamed["cause"].is_string(), "{unnamed}");
+
+    // The window is closed while a paste is going into it: some of the paste
+    // reached its terminal.
+    let paste = helper.send_request(
+        "pane.write_paste",
+        json!({"id":pane_id,"generation":generation,"body":"x".repeat(512 * 1024)}),
+    );
+    assert!(
+        matches!(
+            helper.receive_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ),
+        "the paste did not wait on the window that reads nothing"
+    );
+    let kill = helper.send_request("pane.kill", json!({"id":pane_id,"generation":generation}));
+    let mut answers = std::collections::HashMap::new();
+    while answers.len() < 2 {
+        let frame = helper.receive();
+        if frame["kind"] == "res" {
+            answers.insert(
+                frame["id"].as_str().unwrap_or_default().to_string(),
+                frame["body"].clone(),
+            );
+        }
+    }
+    assert_eq!(answers[&kill], json!({"ok":true}));
+    let cut = &answers[&paste];
+    assert_eq!(
+        (&cut["ok"], &cut["admitted"], &cut["error"]),
+        (&json!(false), &Value::Null, &json!("uncertain")),
+        "{cut}"
+    );
+    assert!(cut["cause"].is_string(), "{cut}");
+    assert!(cut.get("bytesWritten").is_none(), "{cut}");
+    helper.close_input_and_wait();
+}
+
 #[test]
 fn helper_is_inert_when_stdin_is_not_a_pipe() {
     let output = Command::new(env!("CARGO_BIN_EXE_consensflow-bridge"))

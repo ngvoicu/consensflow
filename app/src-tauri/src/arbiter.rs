@@ -31,12 +31,16 @@ impl fmt::Display for SanitizeError {
 
 impl std::error::Error for SanitizeError {}
 
+/// Why the arbiter did not take a pane's input. Every one but `Pane` is a
+/// refusal before anything was written.
 #[derive(Debug)]
 pub enum ArbiterError {
     Stale,
     Busy,
     InputFailed,
     InvalidBody(SanitizeError),
+    /// The write itself failed, once begun: some of the input may have
+    /// reached the pane.
     Pane(PaneError),
     LockPoisoned,
 }
@@ -317,7 +321,11 @@ impl InputArbiter {
             state.paste_in_flight = true;
         }
         let written = write_paste_via(writer, pane, &body, self.enter_delay_ms);
-        lock_state(&state)?.paste_in_flight = false;
+        // A paste is answered as it went: a lock poisoned meanwhile fails the
+        // pane's next admission, never what this paste already wrote.
+        if let Ok(mut state) = lock_state(&state) {
+            state.paste_in_flight = false;
+        }
         written.map_err(|error| fail_input(&state, pane, error))
     }
 
@@ -878,6 +886,52 @@ mod tests {
             .snapshot(&old_key)
             .expect("old generation remains active");
         assert!(!snapshot.paste_in_flight);
+    }
+
+    /// A paste that went in is answered as it went, whatever became of the
+    /// pane's lock meanwhile: a lock error after the write read as a refusal,
+    /// and a refused paste is one the daemon sends again.
+    #[test]
+    fn a_paste_that_went_in_is_answered_as_it_went() {
+        let key = PaneKey::new("poisoned", 1);
+        let first_write = Arc::new(Barrier::new(2));
+        let release_first_write = Arc::new(Barrier::new(2));
+        let writer = Arc::new(GatedRecordingWriter {
+            attempts: AtomicUsize::new(0),
+            records: Mutex::new(Vec::new()),
+            first_write: Arc::clone(&first_write),
+            release_first_write: Arc::clone(&release_first_write),
+        });
+        let arbiter = Arc::new(InputArbiter::new(0));
+        arbiter.register(&key).expect("register pane");
+        let cell = arbiter
+            .lock_panes()
+            .expect("pane map lock")
+            .get(&key.id)
+            .cloned()
+            .expect("the pane's state");
+
+        let paste_arbiter = Arc::clone(&arbiter);
+        let paste_writer = Arc::clone(&writer);
+        let paste_key = key.clone();
+        let paste = thread::spawn(move || {
+            paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, b"body")
+        });
+        first_write.wait();
+        let poisoned = thread::spawn(move || {
+            let _held = cell.lock();
+            panic!("the pane's lock is poisoned while the paste goes in");
+        })
+        .join();
+        assert!(poisoned.is_err());
+        release_first_write.wait();
+
+        let answered = paste.join().expect("paste thread");
+        assert!(answered.is_ok(), "{answered:?}");
+        assert_eq!(
+            *writer.records.lock().expect("gated records"),
+            vec![b"\x1b[200~body\x1b[201~".to_vec(), b"\r".to_vec()]
+        );
     }
 
     #[test]
