@@ -1,4 +1,4 @@
-import { button, element, iconButton, redraw } from '../dom.js'
+import { button, element, icon, iconButton, redraw } from '../dom.js'
 
 /**
  * The board: a kanban of the project's tasks. One row per participant, one
@@ -28,7 +28,10 @@ const COLUMNS = [
   ['done', 'Done'],
   ['finished', 'Finished'],
 ]
-/** A session's tools, on its row and its card in the dock, each drawn as an icon: path data on a 24-unit grid. */
+/**
+ * A session's tools, on its row and its card in the dock, and a crowded
+ * cell's stack, each drawn as an icon: path data on a 24-unit grid.
+ */
 export const ICONS = {
   show: ['M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z', 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z'],
   hide: [
@@ -44,7 +47,14 @@ export const ICONS = {
   ],
   close: ['M12 3v9', 'M18.4 6.6a9 9 0 1 1-12.8 0'],
   remove: ['M4 7h16', 'M9 7V4h6v3', 'M6 7l1 13h10l1-13', 'M10 11v6', 'M14 11v6'],
+  stack: [
+    'M4 11h16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Z',
+    'M5 7.5h14',
+    'M7 4h10',
+  ],
 }
+/** How many cards a cell shows: more are one tile, a stack and how many, whose cards open in a dialog. */
+const CELL_HOLDS = 3
 const columnOf = (task) =>
   ['accepted', 'failed', 'cancelled'].includes(task.state)
     ? 'finished'
@@ -305,10 +315,23 @@ export class BoardView {
   #board = null
   /** Whether the human asked to see a session's terminal, which the dock keeps out until then. */
   #shows = null
+  /** The dialog that lists a crowded cell's cards, its title and its list. */
+  #stack
+  #stackTitle
+  #stackCards
+  /** The cell the stack dialog was opened on: its project, its row's handle and role, its column. */
+  #stacked = null
 
-  constructor(root, actions) {
+  constructor(root, stack, actions) {
     this.#root = root
+    this.#stack = stack
+    this.#stackTitle = stack.querySelector('#stack-title')
+    this.#stackCards = stack.querySelector('#stack-cards')
     this.#actions = actions
+    // A card chosen opens its task, as on the board, and the dialog goes.
+    this.#stackCards.addEventListener('click', (event) => {
+      if (event.target.closest('.card') !== null) stack.close()
+    })
   }
 
   /** Redraw from the core's state; `shows(participant)` says whose terminals the human asked to see. */
@@ -321,6 +344,8 @@ export class BoardView {
       this.#forYou(inbox, board, now),
       this.#kanban(board, models, now),
     ])
+    // An open stack dialog follows the board, as the cell it lists does.
+    if (this.#stack.open) this.#drawStack()
   }
 
   /** `participant`'s lane on the board drawn last, which a kept button acts on. */
@@ -529,15 +554,17 @@ export class BoardView {
     if (participant.member) row.dataset.session = participant.member
     row.append(this.#rowHead(lane, board, agent, now))
     const mine = rowTasks(lane, board)
-    for (const [state] of COLUMNS) {
+    for (const [state, label] of COLUMNS) {
       const cell = element('td')
       cell.dataset.state = state
-      const list = element('ol', 'cards')
-      for (const task of mine) {
-        if (columnOf(task) !== state) continue
-        list.append(this.#card(task))
+      const held = mine.filter((task) => columnOf(task) === state)
+      if (held.length > CELL_HOLDS) {
+        cell.append(this.#stackTile(held.length, state, label, participant))
+      } else if (held.length > 0) {
+        const list = element('ol', 'cards')
+        list.append(...held.map((task) => this.#card(task)))
+        cell.append(list)
       }
-      if (list.childElementCount > 0) cell.append(list)
       row.append(cell)
     }
     return row
@@ -630,6 +657,58 @@ export class BoardView {
     return tools
   }
 
+  /**
+   * A crowded cell, `count` cards of the column `state` on `participant`'s
+   * row: one tile, a stack and how many, named for what it holds. It opens
+   * them in the stack dialog.
+   */
+  #stackTile(count, state, label, participant) {
+    const tile = button(
+      '',
+      'stack',
+      () => this.#openStack(participant, state),
+      `${count} ${label.toLowerCase()} tasks of ${laneName(participant)}`,
+    )
+    // Across redraws its column tells it from the others, whatever its count.
+    tile.dataset.stack = state
+    tile.append(icon(ICONS.stack), element('span', 'stack-count', String(count)))
+    return tile
+  }
+
+  /** Opens the stack dialog on the cell of the column `state` on a participant's row. */
+  #openStack({ projectId, handle, role }, state) {
+    this.#stacked = { project: projectId, handle, role, state }
+    this.#drawStack()
+    this.#stack.showModal()
+  }
+
+  /**
+   * The stack dialog's cards: its cell's as the board drawn last has them,
+   * the newest first, each opening its task as on the board. A cell left
+   * with none (its tasks moved on, another project shown) closes it.
+   */
+  #drawStack() {
+    const { project, handle, role, state } = this.#stacked
+    const row =
+      this.#board.project.id === project
+        ? boardRows(this.#board).find(
+            ({ participant }) => participant.handle === handle && participant.role === role,
+          )
+        : undefined
+    const held =
+      row === undefined ? [] : rowTasks(row, this.#board).filter((task) => columnOf(task) === state)
+    if (held.length === 0) {
+      this.#stack.close()
+      return
+    }
+    const [, label] = COLUMNS.find(([column]) => column === state)
+    this.#stackTitle.textContent = `${label} tasks of ${laneName(row.participant)}`
+    redraw(
+      this.#stackCards,
+      held.map((task) => this.#card(task)),
+    )
+  }
+
   #card(task) {
     const item = element('li', 'card-item')
     const card = button('', 'card', () => this.#actions.onOpenTask(task.number))
@@ -645,7 +724,8 @@ export class BoardView {
       element('span', 'card-route', route(task)),
       element('span', 'card-state', STATE_LABEL[task.state]),
     )
-    if (task.result) card.append(element('span', 'card-result', task.result))
+    // A result reads by its first line: its drawer has it whole.
+    if (task.result) card.append(element('span', 'card-result', task.result.trim().split('\n')[0]))
     item.append(card)
     return item
   }

@@ -3321,6 +3321,100 @@ test("gives a card's title room to read, at the default window and on a wider sc
   expect(await board.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0)
 })
 
+/**
+ * harbour with a session of zeus whose Finished cell holds `count` accepted
+ * tasks, T-31 up, each with a result of two lines.
+ */
+function crowded(count) {
+  const data = model()
+  const zeus = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
+  const finished = Array.from({ length: count }, (_, at) =>
+    task(31 + at, `Old task ${31 + at}`, 'accepted', 'chief', 'zeus-amber-pine', 60 - at, {
+      result: `Result ${31 + at}\nIts details.`,
+    }),
+  )
+  data.boards[1].lanes.push({
+    participant: session(20, zeus.participant, 'amber-pine'),
+    tasks: finished,
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  for (const done of finished) data.tasks[`1:${done.number}`] = { ...done, messages: [] }
+  return data
+}
+
+test('stacks a cell of four cards or more into one tile: a stack, and how many', async ({
+  page,
+}) => {
+  await open(page, crowded(3))
+  const cell = page.locator('tr[data-handle="zeus-amber-pine"] td[data-state="finished"]')
+  await expect(cell.locator('button.card')).toHaveCount(3)
+  /** Task `number`, finished on the session's row. */
+  const finish = (number) =>
+    changed(
+      page,
+      (number) => {
+        const lane = window.__model.boards[1].lanes.find(
+          (l) => l.participant.handle === 'zeus-amber-pine',
+        )
+        lane.tasks.push({ ...lane.tasks[0], id: number, number, title: `Old task ${number}` })
+      },
+      number,
+    )
+  await finish(34)
+  await expect(cell.locator('button.card')).toHaveCount(0)
+  const tile = cell.getByRole('button', { name: '4 finished tasks of @zeus · amber-pine' })
+  await expect(tile).toHaveText('4')
+  await expect(tile.locator('svg')).toHaveCount(1)
+  // Every other cell draws its cards as before.
+  await expect(
+    page.locator('tr[data-handle="zeus"] td[data-state="finished"] button.card[data-task="5"]'),
+  ).toHaveCount(1)
+  // The tile keeps the keyboard while its count changes.
+  await tile.focus()
+  await finish(35)
+  await expect(
+    cell.getByRole('button', { name: '5 finished tasks of @zeus · amber-pine' }),
+  ).toBeFocused()
+})
+
+test("lists a stack's tasks in a dialog, the newest first, and opens the one chosen in the drawer", async ({
+  page,
+}) => {
+  await open(page, crowded(5))
+  const tile = page.getByRole('button', { name: '5 finished tasks of @zeus · amber-pine' })
+  await tile.click()
+  const dialog = page.getByRole('dialog', { name: 'Finished tasks of @zeus · amber-pine' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('.card-number')).toHaveText(['T-35', 'T-34', 'T-33', 'T-32', 'T-31'])
+  const card = dialog.locator('button.card[data-task="33"]')
+  await expect(card.locator('.card-title')).toHaveText('Old task 33')
+  await expect(card.locator('.card-route')).toHaveText('from @chief')
+  // A result reads by its first line.
+  await expect(card.locator('.card-result')).toHaveText('Result 33')
+  // The keyboard is on the newest; Esc closes the dialog and gives it back to the tile.
+  await expect(dialog.locator('button.card[data-task="35"]')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  await expect(tile).toBeFocused()
+  await tile.click()
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  // Open, it follows the board: a task gone from the cell leaves the list.
+  await tile.click()
+  await changed(page, () => {
+    const lane = window.__model.boards[1].lanes.find(
+      (l) => l.participant.handle === 'zeus-amber-pine',
+    )
+    lane.tasks = lane.tasks.filter((t) => t.number !== 35)
+  })
+  await expect(dialog.locator('.card-number')).toHaveText(['T-34', 'T-33', 'T-32', 'T-31'])
+  // Choosing a task closes the dialog and opens the task, as its card on the board does.
+  await card.click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByRole('complementary', { name: 'Task T-33' })).toBeVisible()
+})
+
 test("gives For you's strips room to read, at the default window and on wider screens", async ({
   page,
 }) => {

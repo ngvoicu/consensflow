@@ -120,7 +120,8 @@ async function act(work) {
   await refresh()
 }
 
-const board = new BoardView(boardRoot, {
+// A crowded cell's cards are listed in the stack dialog, the board's own.
+const board = new BoardView(boardRoot, $('#stack-dialog'), {
   onRead: (message) => act(() => core('message.read', { message: message.id })),
   // What waits for the human's approval goes on, goes back, or is declined with a word to its sender.
   onApprove: (message) =>

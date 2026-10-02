@@ -435,6 +435,29 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
   .card-title { padding-top: 4px; -webkit-line-clamp: 4; }
 }
 
+/* A crowded cell: one tile, a stack of cards and how many, the edges of two
+   more under it; its cards are listed in the stack dialog. */
+.stack {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: var(--strip);
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  color: var(--muted);
+  cursor: pointer;
+  box-shadow:
+    0 4px 0 -2px var(--strip), 0 4px 0 -1px var(--line-soft),
+    0 8px 0 -4px var(--strip), 0 8px 0 -3px var(--line-soft);
+}
+.stack:hover { background: var(--strip-hover); color: var(--foam); }
+.stack .icon { width: 18px; height: 18px; }
+.stack-count { font: 700 13px var(--mono); color: var(--foam); }
+
 /* A message waiting for the human: a strip with what they may do with it.
    The list is what a strip measures itself against, as a card's does. */
 .strips { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; container-type: inline-size; }
@@ -702,7 +725,8 @@ dialog {
   overflow: auto;
 }
 dialog::backdrop { background: rgba(4, 12, 15, .6); }
-/* The dialogs: Delete, Settings, New project, Switch lead and the project staff. */
+/* The dialogs: Delete, Settings, New project, Switch lead, a crowded cell's
+   cards and the project staff. */
 .dialog-form { display: grid; gap: 16px; padding: 22px 26px 24px; }
 .dialog-form h2 { margin: 0; font-size: 20px; }
 .dialog-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
@@ -741,6 +765,9 @@ dialog::backdrop { background: rgba(4, 12, 15, .6); }
 }
 .row-tools .icon-button { width: 30px; height: 28px; border-radius: 6px; }
 dialog.settings { width: min(560px, calc(100vw - 48px)); }
+/* The cards scroll under the title, and Close stays in reach. */
+#stack-dialog { width: min(640px, calc(100vw - 48px)); }
+#stack-cards { max-height: min(60vh, 560px); overflow: auto; padding: 3px; }
 .settings-menu { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .settings-menu li { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
 .settings-menu .quiet-button { width: 100%; }
