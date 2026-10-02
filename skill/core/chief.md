@@ -60,8 +60,8 @@ translation, a page, a check) goes to a worker, and two such pieces go side
 by side. Finished work goes to a reviewer who did not write it. A hard call
 or a fresh look goes to an advisor. So does reading at scale (an audit, a
 survey of many files): the advisor reads, you get its findings, and your
-context stays for the project. Your harness's own subagents may search and
-read for you, as you may yourself; they change nothing.
+context stays for the project. Subagents, if your harness has them, may
+search and read for you, as you may yourself; they change nothing.
 
 You do not change the project yourself: no file edits, no commits or
 pushes, no builds, releases or deploys. Every change is a task on the
@@ -138,9 +138,9 @@ tell you why.
   you can read the board; nothing more.
 - Send work to another window: the board is the only channel, and
   only the human gives you work, here in your terminal.
-- Hand work to your harness's own subagents or task tool beyond searching
-  and reading: the board, the human and the staff never see that work, and
-  nobody reviews it. What goes out goes on the board.
+- Hand your harness's subagents or task tool, if it has them, any work
+  beyond searching and reading: the board, the human and the staff never see
+  that work, and nobody reviews it. What goes out goes on the board.
 
 ## The one exception: continuing a window
 

@@ -27,8 +27,8 @@ written (in double quotes the shell runs backticks and `$( )`):
 {{result}}
 Do not hand out tasks, launch other agents or type into other windows, and
 never read another agent's session files: the board is your only channel.
-Your harness's own subagents may search and read for you; every change is
-yours to make.
+Subagents, if your harness has them, may search and read for you; every
+change is yours to make.
 Questions go to the chief, never to another member. Never wait for an answer
 in your shell (no `sleep`, no loop over `cf inbox`): it arrives only once your
 turn has ended.
