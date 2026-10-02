@@ -2253,6 +2253,117 @@ describe('one task per member session', () => {
   })
 })
 
+describe('a participant that leaves', () => {
+  it('is forgotten: a member that comes back to the staff starts clean, not low on quota', async () => {
+    await setup(async (context) => {
+      const { project, open, task } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.quota('zeus', { state: 'low', usedPercent: 97 })
+      await context.dispatcher.pass()
+      await context.dispatcher.removeMember(project.id, 'zeus')
+      context.ledger.addMember(project.id, {
+        agent: 'zeus',
+        harness: 'claude-code',
+        role: 'worker',
+        tier: 'standard',
+      })
+      open({ body: 'Write the lexer' })
+      await context.dispatcher.pass()
+      assert.ok(task(2).assignee?.startsWith('zeus-'), 'zeus takes it: the low quota was before')
+    })
+  })
+
+  it('is forgotten with its project: a session the ledger gives its id after starts clean', async () => {
+    await setup(async (context) => {
+      const first = await withTiers(context, { workers: ['zeus'] })
+      first.open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const gone = first.id('zeus-amber-pine')
+      // Its window copied two items, the human pinned it open, and its agent was interrupted.
+      context.adapter.agent('zeus').items.push(item('assistant', 'Half', { complete: false }))
+      await context.dispatcher.openWindow(first.project.id, 'zeus-amber-pine')
+      context.ledger.pauseTask(first.project.id, 1, { by: 'chief' })
+      await context.dispatcher.pass()
+      await context.dispatcher.removeMember(first.project.id, 'zeus')
+      await context.dispatcher.pass()
+      await context.dispatcher.closeProject(first.project.id)
+      await context.dispatcher.deleteProject(first.project.id)
+
+      const second = await withTiers(context, { workers: ['zeus'] })
+      second.open()
+      await context.dispatcher.pass()
+      assert.equal(second.id(second.task(1).assignee), gone, 'the ledger gives its id again')
+      context.adapter.agent('zeus').items.push(item('assistant', 'Half', { complete: false }))
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        context.ledger.transcript(second.project.id, 1).items.map((copied) => copied.role),
+        ['user', 'assistant'],
+        'its copy starts with its brief',
+      )
+      const pane = context.host.last('zeus')
+      context.ledger.pauseTask(second.project.id, 1, { by: 'chief' })
+      await context.dispatcher.pass()
+      assert.equal(
+        context.host.requests.filter(
+          ([op, body]) => op === 'pane.input' && body.generation === pane.generation,
+        ).length,
+        1,
+        'its agent is interrupted',
+      )
+      context.ledger.cancelTask(second.project.id, 1, { by: 'chief' })
+      await context.dispatcher.pass()
+      assert.ok(
+        context.host.killed.some((killed) => killed.generation === pane.generation),
+        'its window closes with its work: nobody pinned it',
+      )
+    })
+  })
+
+  it('keeps the lead of a project created while a deleted one still closes its windows', async () => {
+    await setup(async (context) => {
+      const { project: old } = await withStaff(context)
+      await context.dispatcher.pass()
+      // The old lead takes a paste its harness holds: its window closes once that is over.
+      let release
+      const held = new Promise((resolve) => {
+        release = resolve
+      })
+      const deliver = context.adapter.deliver
+      context.adapter.deliver = async (request) => {
+        await held
+        return deliver(request)
+      }
+      context.ledger.note(old.id, { from: 'zeus', to: 'chief', body: 'Held' })
+      await context.dispatcher.pass()
+      const closing = context.dispatcher.closeProject(old.id)
+      const deleting = context.dispatcher.deleteProject(old.id)
+      const fresh = await context.dispatcher.openProject({
+        directory: '/work/api',
+        name: 'api',
+        harness: 'claude-code',
+      })
+      const lead = fresh.participants.find((participant) => participant.role === 'chief')
+      release()
+      await closing
+      await deleting
+      await flush()
+      const window = context.host.last('chief')
+      assert.deepEqual(
+        context.dispatcher.pane(lead.id),
+        { id: window.id, generation: window.generation },
+        'its lead is known',
+      )
+      assert.ok(
+        !context.host.killed.some((pane) => pane.generation === window.generation),
+        'and was never closed',
+      )
+    })
+  })
+})
+
 describe('the dispatcher traces what its windows do', () => {
   it("tells a trace each change of a window's activity, by participant", async () => {
     const entries = []

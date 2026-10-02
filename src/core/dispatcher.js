@@ -35,9 +35,12 @@ import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.j
  * - A member window lost mid-task (a restart, a crash, a closed window)
  *   pauses the task, and the requester is told how to resume it. A chief
  *   window that closes by itself closes its project, as the human's Close
- *   does: every window of it goes. A member who leaves
- *   the staff has its window closed once its step in progress ends, and that
- *   exit fails nothing: its open tasks were cancelled when it left.
+ *   does: every window of it goes. A participant that leaves (a member off
+ *   the staff with its sessions, a session the human ends, every one of a
+ *   deleted project) is forgotten at once, quota marks and all, so one that
+ *   comes back or takes its id starts clean; its window closes once its step
+ *   in progress ends, and that exit fails nothing: a member's open tasks
+ *   were cancelled when it left.
  * - A task for a tier of member starts open: each pass gives it to a free
  *   member of that pool and tier that is not out of quota, on the harness
  *   whose members of the tier have taken the fewest tasks, then the one with
@@ -117,6 +120,8 @@ export class Dispatcher {
   /** The daemon's log, for a launch or a delivery that failed apart from any pass. */
   #log
   #runtime = new Map()
+  /** The records of participants forgotten while their window was still open, until it exits. */
+  #leaving = new Set()
   #listeners = new Set()
   /** The open tasks whose requester heard that they wait for a free member, each with its project. */
   #waitingNoted = new Map()
@@ -231,21 +236,50 @@ export class Dispatcher {
    * over, so a window still opening is closed too. Each takes its place at
    * once, so a Resume that follows opens the lead after its window went;
    * and each exit is the dispatcher's own, so a lead's never closes a
-   * project resumed meanwhile.
+   * project resumed meanwhile. What closes is the window of the record
+   * waited on: one forgotten meanwhile has left its id to whoever the
+   * ledger gives it next.
    */
   async #closeWindows(participants) {
     await Promise.all(
-      participants.map((participant) =>
-        this.#exclusive(
+      participants.map((participant) => {
+        const runtime = this.#runtimeOf(participant.id)
+        return this.#exclusive(
           participant.id,
           async () => {
-            const runtime = this.#runtimeOf(participant.id)
             if (runtime.pane !== null) await this.#closeOwn(runtime, runtime.pane)
           },
           { wait: true },
-        ),
-      ),
+        )
+      }),
     )
+  }
+
+  /**
+   * Participants that left (a session ended, a member removed, a project
+   * deleted) are forgotten at once, quota marks and all: nothing of them
+   * stays for one that comes back, or that the ledger gives one of their
+   * ids. A window one still has closes once its step in progress is over.
+   */
+  async #forget(participantIds) {
+    const leaving = []
+    for (const id of participantIds) {
+      const runtime = this.#runtime.get(id)
+      if (runtime === undefined) continue
+      this.#runtime.delete(id)
+      this.#leaving.add(runtime)
+      leaving.push(runtime)
+    }
+    await Promise.all(leaving.map((runtime) => this.#closeLeaving(runtime)))
+  }
+
+  /** A forgotten participant's window closes, and its exit is known by the window alone (`paneExited`). */
+  async #closeLeaving(runtime) {
+    while (runtime.running !== null || runtime.acting !== null) {
+      await (runtime.running ?? runtime.acting).catch(() => {})
+    }
+    if (runtime.pane === null) this.#leaving.delete(runtime)
+    else await this.#retire(runtime)
   }
 
   // --- the human's hand on a session's window ------------------------------------------
@@ -273,13 +307,11 @@ export class Dispatcher {
     return this.#ledger.project(projectId)
   }
 
-  /** The human ends a session for good: the ledger folds it, and its window goes. */
+  /** The human ends a session for good: the ledger folds it, and it is forgotten with its window. */
   async endSession(projectId, handle) {
     const { participant } = this.#sessionOf(projectId, handle)
     const project = this.#ledger.endSession(projectId, handle, { by: 'human' })
-    const runtime = this.#runtimeOf(participant.id)
-    runtime.pinned = false
-    if (runtime.pane !== null) await this.#retire(runtime)
+    await this.#forget([participant.id])
     this.#changed()
     return project
   }
@@ -292,26 +324,20 @@ export class Dispatcher {
   }
 
   /**
-   * A closed project goes for good; the ledger refuses an open one. A window
-   * of it whose exit has not come yet is closed before it is forgotten, so
-   * nothing of the project keeps running.
+   * A closed project goes for good; the ledger refuses an open one. Its
+   * participants are forgotten, and a window of it whose exit has not come
+   * yet is closed, so nothing of the project keeps running.
    */
   async deleteProject(projectId) {
     const project = this.#ledger.project(projectId)
     const deleted = this.#ledger.deleteProject(projectId)
     // The ledger gives the next rows it writes the ids this project's had:
-    // what is remembered of its tasks goes now, before another task has its id.
+    // what is remembered of its tasks and participants goes now, before
+    // anything can take one of their ids.
     for (const [task, noted] of this.#waitingNoted) {
       if (noted === deleted.id) this.#waitingNoted.delete(task)
     }
-    const participants = project?.participants ?? []
-    await this.#closeWindows(participants)
-    for (const participant of participants) {
-      const runtime = this.#runtime.get(participant.id)
-      if (runtime?.token) this.#credentials.revoke(runtime.token)
-      this.#launchFiles.forget(runtime?.launchId)
-      this.#runtime.delete(participant.id)
-    }
+    await this.#forget((project?.participants ?? []).map((participant) => participant.id))
     // A deleted project leaves no trace but the line that says it was:
     // its own lines go, and the record of it names no project id, so a
     // later project with the same id never takes it along.
@@ -364,8 +390,9 @@ export class Dispatcher {
   }
 
   /**
-   * The human takes a member off the staff. It waits for the member's step in
-   * progress, so a window that is still opening is closed too, not left behind.
+   * The human takes a member off the staff once its step in progress is
+   * over. Its sessions leave with it; all are forgotten, and a window still
+   * opening is closed too, not left behind.
    */
   async removeMember(projectId, handle) {
     const member = this.#ledger
@@ -373,17 +400,22 @@ export class Dispatcher {
       ?.participants.find((participant) => participant.handle === handle)
     // Not in the staff: the ledger refuses it and says why.
     if (member === undefined) return this.#ledger.removeMember(projectId, handle)
-    return this.#exclusive(
+    const { removed, left } = await this.#exclusive(
       member.id,
-      async () => {
-        const removed = this.#ledger.removeMember(projectId, handle)
-        const { pane } = this.#runtimeOf(member.id)
-        if (pane !== null) await this.#host.kill(pane).catch(() => {})
-        this.#changed()
-        return removed
+      () => {
+        const sessions = this.#ledger
+          .project(projectId)
+          .participants.filter((participant) => participant.memberId === member.id)
+        return {
+          removed: this.#ledger.removeMember(projectId, handle),
+          left: [member, ...sessions].map((participant) => participant.id),
+        }
       },
       { wait: true },
     )
+    await this.#forget(left)
+    this.#changed()
+    return removed
   }
 
   /**
@@ -405,28 +437,15 @@ export class Dispatcher {
       }
     }
     await Promise.all(steps)
-    await this.#closeLeftWindows()
-  }
-
-  /** A window whose participant has left (a session ended, a member removed) closes. */
-  async #closeLeftWindows() {
-    const live = new Set(
-      this.#ledger.projects().flatMap((project) => project.participants.map((p) => p.id)),
-    )
-    for (const [participantId, runtime] of this.#runtime) {
-      if (runtime.pane === null || runtime.retiring || live.has(participantId)) continue
-      await this.#retire(runtime)
-    }
   }
 
   /** A window ended: `pane.exit` from the pane host. */
   async paneExited({ id, generation }) {
     const ended = (pane) => pane?.id === id && pane.generation === generation
-    const entry = [...this.#runtime].find(
-      ([, runtime]) => ended(runtime.pane) || ended(runtime.opening?.pane),
+    const runtime = [...this.#runtime.values(), ...this.#leaving].find(
+      (candidate) => ended(candidate.pane) || ended(candidate.opening?.pane),
     )
-    if (entry === undefined) return
-    const [participantId, runtime] = entry
+    if (runtime === undefined) return
     // Still opening: its launch takes the exit once it has the window.
     if (!ended(runtime.pane)) {
       runtime.opening.exited = true
@@ -445,6 +464,9 @@ export class Dispatcher {
       retiring: false,
       activity: { state: 'closed' },
     })
+    // A participant that left is forgotten already: its window's exit settles nothing more.
+    if (this.#leaving.delete(runtime)) return
+    const participantId = runtime.id
     const project = this.#projectOf(participantId)
     if (project === null) return
     const participant = project.participants.find((p) => p.id === participantId)
@@ -882,9 +904,11 @@ export class Dispatcher {
   /**
    * A session's window closes with its task; its conversation stays until the
    * session ends (the ledger ends both together), so a follow-up given with
-   * `--after` comes back on the same conversation.
+   * `--after` comes back on the same conversation. A window already closing
+   * had its kill.
    */
   async #retire(runtime) {
+    if (runtime.retiring) return
     runtime.retiring = true
     await this.#host.kill(runtime.pane).catch(() => {})
     this.#changed()
