@@ -1244,6 +1244,58 @@ fn a_pane_open_answers_the_process_id_of_the_windows_program() {
     helper.close_input_and_wait();
 }
 
+/// A window whose program exits while something it started still holds its
+/// terminal (a dev server deaf to the hangup) ends all the same, and what it
+/// left running ends with it. The program is its terminal's controlling
+/// process, and macOS revokes the terminal when it exits, so the output ends
+/// and `pane.exit` follows; Linux keeps the terminal open for the child, and
+/// would need an exit watcher as ConPTY does.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_terminal() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body(
+            "trap '' HUP; /bin/sleep 1000 & printf 'CHILD %s END' \"$!\"; exit 0",
+            1024,
+        ),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let printed = output_until(&helper, &mut events, &pane_id, generation, b" END");
+    let child = String::from_utf8_lossy(&printed)
+        .trim_start_matches("CHILD ")
+        .trim_end_matches(" END")
+        .parse::<i32>()
+        .expect("the background child's pid");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !events
+        .iter()
+        .any(|event| event["op"] == "pane.exit" && event["body"]["id"] == pane_id.as_str())
+    {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match helper.receive_timeout(left) {
+            Ok(frame) => events.push(frame),
+            Err(_) => panic!("no pane.exit while the background child holds the terminal"),
+        }
+    }
+    let gone = Instant::now() + Duration::from_secs(2);
+    while process_exists(child) && Instant::now() < gone {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        !process_exists(child),
+        "what the window left running survived it"
+    );
+    helper.close_input_and_wait();
+}
+
 #[test]
 fn product_bridge_contract_forwards_a_natural_pane_exit() {
     let _pty_guard = serial_headless_test();
