@@ -3178,6 +3178,174 @@ describe('switching the lead to another harness', () => {
   })
 })
 
+describe('work in flight when its participant is forgotten', () => {
+  /**
+   * Holds each call of `object[name]` that `which` picks until the test lets
+   * it go, then makes it, or `instead` in its place.
+   */
+  function hold(object, name, which, instead = null) {
+    const call = object[name]
+    let release
+    const held = new Promise((resolve) => {
+      release = resolve
+    })
+    object[name] = async (...args) => {
+      if (!which(...args)) return call(...args)
+      await held
+      return (instead ?? call)(...args)
+    }
+    return release
+  }
+  /** A look at the window of this launch. */
+  const looksAt =
+    (launchId) =>
+    ({ launch }) =>
+      launch.launchId === launchId
+
+  it("leaves no low quota mark on a member taken off the staff while its session's window was looked at", async () => {
+    await setup(async (context) => {
+      const { project, open, task, notes } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'working')
+      // The next look at the session's window waits on its harness, and finds it low on quota.
+      context.adapter.quota('zeus', { state: 'low', usedPercent: 97 })
+      const release = hold(
+        context.adapter,
+        'observe',
+        looksAt(context.adapter.agent('zeus').launchId),
+      )
+      const looking = context.dispatcher.pass()
+      // Meanwhile the human takes zeus off the staff, and adds it back.
+      const removing = context.dispatcher.removeMember(project.id, 'zeus')
+      await flush()
+      context.ledger.addMember(project.id, {
+        agent: 'zeus',
+        harness: 'claude-code',
+        role: 'worker',
+        tier: 'standard',
+      })
+      release()
+      await looking
+      await removing
+      open({ body: 'Write the lexer' })
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        notes('chief').filter((note) => note.startsWith('T-2 waits')),
+        [],
+        'nothing holds zeus back',
+      )
+      assert.ok(task(2).assignee?.startsWith('zeus-'), 'zeus takes it: the low quota was before')
+    })
+  })
+
+  it("copies nothing into, and delivers nothing of, a new project that took its ids while the old lead's window was looked at", async () => {
+    await setup(async (context) => {
+      const { project: old } = await withStaff(context)
+      await context.dispatcher.pass()
+      // The human told the old lead something since the last look, which waits on its harness.
+      const told = 'The codeword is tern'
+      context.adapter.agent('chief').items.push(item('user', told))
+      const release = hold(
+        context.adapter,
+        'observe',
+        looksAt(context.adapter.agent('chief').launchId),
+      )
+      const looking = context.dispatcher.pass()
+      const { fresh, gone } = await replaceProject(context, old)
+      const welcome = context.ledger.note(fresh.id, { to: 'chief', body: 'Welcome' })
+      release()
+      await looking
+      await gone
+      await flush()
+      assert.equal(
+        context.ledger.copiedItemWith(chiefOf(context, fresh).id, told),
+        null,
+        "the new lead's conversation has nothing of the old window",
+      )
+      assert.equal(
+        context.ledger.message(welcome.id).state,
+        'queued',
+        'its message waits for its own window',
+      )
+    })
+  })
+
+  it("says nothing of a new project that took its ids when the old window's look fails", async () => {
+    const entries = []
+    await setup(
+      async (context) => {
+        const { project: old } = await withStaff(context)
+        await context.dispatcher.pass()
+        const release = hold(
+          context.adapter,
+          'observe',
+          looksAt(context.adapter.agent('chief').launchId),
+          () => {
+            throw new Error('the record could not be read')
+          },
+        )
+        const looking = context.dispatcher.pass()
+        const { gone } = await replaceProject(context, old)
+        release()
+        await looking
+        await gone
+        assert.deepEqual(
+          entries.filter((entry) => entry.kind === 'window.activity' && entry.state === 'unknown'),
+          [],
+          "no line says the new lead's window could not be read",
+        )
+      },
+      { trace: (entry) => entries.push(entry) },
+    )
+  })
+
+  it("delivers nothing of a new project that took its ids while a paused task's agent was interrupted", async () => {
+    await setup(async (context) => {
+      const first = await withTiers(context, { workers: ['zeus'] })
+      first.open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(first.task(1).state, 'working')
+      const session = first.id('zeus-amber-pine')
+      // The chief pauses the task; the Escape that stops its agent waits on the pane host.
+      context.ledger.pauseTask(first.project.id, 1, { by: 'chief' })
+      context.adapter.agent('zeus').settled = true
+      const window = context.host.last('zeus')
+      const release = hold(
+        context.host,
+        'request',
+        (op, body) => op === 'pane.input' && body.generation === window.generation,
+      )
+      const stepping = context.dispatcher.pass()
+      await flush()
+      // Meanwhile the project is closed and deleted, and a member of a new one takes the session's id.
+      const closing = context.dispatcher.closeProject(first.project.id)
+      const deleting = context.dispatcher.deleteProject(first.project.id)
+      const second = await withTiers(context, { workers: ['zeus'] })
+      const diana = context.ledger.addMember(second.project.id, {
+        agent: 'diana',
+        harness: 'claude-code',
+        role: 'worker',
+        tier: 'standard',
+      })
+      assert.equal(diana.id, session, "the ledger gives the session's id to a new member")
+      context.ledger.createTask(second.project.id, { from: 'chief', to: 'diana', body: 'Docs' })
+      release()
+      await stepping
+      await closing
+      await deleting
+      await flush()
+      assert.deepEqual(
+        context.ledger.inbox(diana.id).map((message) => message.state),
+        ['queued'],
+        'its brief waits for its own window',
+      )
+    })
+  })
+})
+
 describe('a lead whose window does not come up', () => {
   /** A project whose Claude lead has said something, so a switch has a history to hand over. */
   async function spoken(context) {

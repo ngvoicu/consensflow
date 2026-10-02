@@ -571,11 +571,17 @@ export class Dispatcher {
 
   async #stepOpen(project, participant, runtime) {
     if (runtime.retiring) return
+    // A participant forgotten while the step waits (it left, or its project
+    // was deleted) is done with: nothing the look found is written, and
+    // nothing more is done by its ids, which may be another's by now. Its
+    // window closes with the record (`#closeLeaving`).
     let observed
     try {
       observed = await this.#observe(participant, runtime)
     } catch (cause) {
-      this.#setActivity(runtime, { state: 'unknown', reason: cause.message })
+      if (!this.#forgotten(runtime)) {
+        this.#setActivity(runtime, { state: 'unknown', reason: cause.message })
+      }
       return
     }
     // Quota belongs to the member: a session that runs out takes its member out.
@@ -588,6 +594,7 @@ export class Dispatcher {
     const unnamed = observed.unnamed === true
     if (!unnamed) runtime.named = true
     const drawing = (observed.items.length === 0 || unnamed) && !(await this.#drawn(runtime))
+    if (this.#forgotten(runtime)) return
     const starting = drawing || (unnamed && !runtime.named)
     // An out member's window says so, and nothing else, until the reset.
     if (!this.#isOut(owner)) {
@@ -635,6 +642,7 @@ export class Dispatcher {
     if (runtime.retiring) return
     if (participant.role !== 'chief') {
       await this.#interruptIfPaused(participant, runtime)
+      if (this.#forgotten(runtime)) return
       this.#collect(project, participant, observed)
       // The window may have gone during this step (a launch that timed out).
       if (
@@ -666,9 +674,6 @@ export class Dispatcher {
    */
   async #awaitSwitch(project, chief, runtime, observed, idle) {
     if (!idle) return
-    // A project deleted during the look forgot its lead, and the switch with
-    // it: the note's id may be a new project's message by now.
-    if (this.#forgotten(runtime)) return
     const { note } = runtime.pendingSwitch
     const asked = note === null ? null : this.#ledger.message(note)
     if (asked?.state === 'queued') {
