@@ -1,19 +1,19 @@
 import { createReadStream } from 'node:fs'
-import { appendFile, readFile, stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 
 const silent = () => ({ code: 0 })
-const events = new Set(['SessionStart', 'UserPromptSubmit', 'Stop', 'SessionEnd'])
 
 /**
- * Devin's hooks for one launch: each turn event of the conversation the window
- * shows is logged for the adapter, and a session starts with its role text.
- * A subagent's events, or another conversation's, change nothing.
+ * Devin's hook for one launch: a session of the conversation the window shows
+ * starts with its role text. A subagent's session, another conversation's, or
+ * any other event, gets nothing.
  */
 export async function runHook(event, { selectedSession, instructions = '' }) {
   const name = event.hook_event_name
   if (
-    !events.has(name) ||
+    name !== 'SessionStart' ||
+    !instructions ||
     event.agent_id ||
     event.parent_session_id ||
     typeof event.session_id !== 'string' ||
@@ -21,7 +21,6 @@ export async function runHook(event, { selectedSession, instructions = '' }) {
     (await selectedSession()) !== event.session_id
   )
     return silent()
-  if (name !== 'SessionStart' || !instructions) return silent()
   return {
     code: 0,
     stdout: { hookSpecificOutput: { hookEventName: name, additionalContext: instructions } },
@@ -73,20 +72,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       chunks.push(chunk)
     }
     const event = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-    const current = () => selectedSession(process.env.CHISEL_PURE_ACP_WIRE_LOG)
-    if (
-      (await current()) === event.session_id &&
-      events.has(event.hook_event_name) &&
-      !event.agent_id &&
-      !event.parent_session_id
-    )
-      await appendFile(
-        process.env.CF_DEVIN_EVENTS,
-        `${JSON.stringify({ ...event, at: Date.now() })}\n`,
-        { mode: 0o600 },
-      )
     const result = await runHook(event, {
-      selectedSession: current,
+      selectedSession: () => selectedSession(process.env.CHISEL_PURE_ACP_WIRE_LOG),
       instructions: process.env.CF_DEVIN_ROLE_FILE
         ? await readFile(process.env.CF_DEVIN_ROLE_FILE, 'utf8')
         : '',

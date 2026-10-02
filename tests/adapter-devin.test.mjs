@@ -80,15 +80,8 @@ describe('the Devin adapter', () => {
       ])
       assert.equal(await readFile(path.join(root, 'prompt.txt'), 'utf8'), request().message)
       assert.equal(plan.env.CHISEL_PURE_ACP_WIRE_LOG, path.join(root, 'wire.jsonl'))
-      assert.equal(plan.env.CF_DEVIN_EVENTS, path.join(root, 'hooks.jsonl'))
       const config = JSON.parse(await readFile(path.join(root, 'config.json'), 'utf8'))
-      assert.deepEqual(Object.keys(config.hooks).sort(), [
-        'PreToolUse',
-        'SessionEnd',
-        'SessionStart',
-        'Stop',
-        'UserPromptSubmit',
-      ])
+      assert.deepEqual(Object.keys(config.hooks).sort(), ['PreToolUse', 'SessionStart'])
       assert.equal(config.hooks.PreToolUse[0].matcher, 'ask_user_question')
       assert.equal(config.auto_update, false)
     })

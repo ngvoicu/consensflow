@@ -74,14 +74,13 @@ export async function prepareDevinIntegration(
   await mkdir(root, { recursive: true, mode: 0o700 })
   const command = `${quote(node)} ${quote(join(destination, FILES[0]))}`
   configuration.hooks ??= {}
-  for (const name of ['SessionStart', 'UserPromptSubmit', 'Stop', 'SessionEnd']) {
-    const previous = configuration.hooks[name] ?? []
-    if (!Array.isArray(previous)) throw new Error('Invalid native Devin hook configuration')
-    configuration.hooks[name] = [
-      ...previous,
-      { matcher: '', hooks: [{ type: 'command', command, timeout: 5 }] },
-    ]
-  }
+  // A session the window shows starts with its role text.
+  const starts = configuration.hooks.SessionStart ?? []
+  if (!Array.isArray(starts)) throw new Error('Invalid native Devin hook configuration')
+  configuration.hooks.SessionStart = [
+    ...starts,
+    { matcher: '', hooks: [{ type: 'command', command, timeout: 5 }] },
+  ]
   // A member's question tool, answered from the board: the hook holds the call
   // while the question waits for its answer (`cf hook devin`). The chief's
   // shows Devin's own dialog, where the human answers it.
@@ -103,17 +102,15 @@ export async function prepareDevinIntegration(
   await writeFile(file, JSON.stringify(configuration), { mode: 0o600, flag: 'wx' })
   return {
     args: ['--config', file],
-    env: {
-      CHISEL_PURE_ACP_WIRE_LOG: join(root, 'wire.jsonl'),
-      CF_DEVIN_EVENTS: join(root, 'hooks.jsonl'),
-    },
+    env: { CHISEL_PURE_ACP_WIRE_LOG: join(root, 'wire.jsonl') },
     channel: { kind: 'devin-tui', launchId, wire: join(root, 'wire.jsonl') },
   }
 }
 
 export async function prepareDevinPrompt(invocation, configuration) {
   if (invocation.prompt === undefined) return invocation
-  const file = join(dirname(configuration.env.CF_DEVIN_EVENTS), 'prompt.txt')
+  // In the launch's own folder, beside its wire log.
+  const file = join(dirname(configuration.channel.wire), 'prompt.txt')
   await writeFile(file, invocation.prompt, { mode: 0o600, flag: 'wx' })
   const { prompt: _prompt, ...native } = invocation
   return { ...native, args: [...native.args, '--prompt-file', file] }
