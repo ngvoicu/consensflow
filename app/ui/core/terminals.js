@@ -3,13 +3,20 @@ import { EmulatorRegistry, paneKey } from '../term.js'
 import { TerminalLink } from '../terminal-link.js'
 import { lamp, laneName, laneOrder } from './board.js'
 
+/** A session in `#showing`: its project's id and its handle. */
+const showingKey = (project, handle) => `${project}:${handle}`
+
 /**
- * The live windows beside the board: a horizontal strip of one terminal per
- * participant that has a pane, the chief first, then the members,
- * scrolling sideways. Only live windows: one that ends leaves with its card,
+ * The live windows beside the board: a horizontal strip of terminals, the
+ * chief's first, then the sessions' the human asked to see, scrolling
+ * sideways. The chief's terminal is in the dock while its window lives; a
+ * session's (a worker's, an advisor's, a reviewer's or an image designer's
+ * task) stays out of it until the human shows it from its lane, and leaves
+ * when they hide it. Only live windows: one that ends leaves with its card,
  * and its lane says it is closed and opens it again on its conversation.
- * While a window lives, its emulator keeps its scrollback, its size and the
- * human's half-typed input, across project switches too.
+ * While a window lives, in the dock or not, its emulator takes all its
+ * output and keeps its scrollback, its size and the human's half-typed
+ * input, across project switches too.
  */
 export class TerminalsView {
   #stage
@@ -21,6 +28,14 @@ export class TerminalsView {
   #onClose
   /** The card last brought into view: a redraw scrolls only when it changes. */
   #shownKey = null
+  /**
+   * The sessions whose terminals the human asked to see, by `showingKey`.
+   * One stays in the dock while its window lives; the session's next window
+   * waits to be shown again. The page keeps it, not the browser: a showing
+   * belongs to one window's life, so a reload starts with the chief's
+   * terminal alone, and Show terminal brings a session's back.
+   */
+  #showing = new Set()
 
   constructor(stage, { invoke, report, createEmulator, onChange = () => {}, onClose = () => {} }) {
     this.#stage = stage
@@ -101,9 +116,10 @@ export class TerminalsView {
 
   /**
    * Keep a terminal for every lane of the project `board` is for that has a
-   * live one (a closed project has none), in lane order, and bring `focused`
-   * into view. Another project's terminals stay alive, off screen, with their
-   * scrollback: switching projects loses nothing.
+   * live one (a closed project has none), in lane order; dock those the
+   * human may see now, and bring `focused` into view if it is one of them.
+   * The rest stay alive, off screen, with their scrollback: a session's not
+   * shown, and another project's. Switching projects loses nothing.
    */
   render(board, { focused }) {
     const project = board?.project.id ?? null
@@ -113,11 +129,20 @@ export class TerminalsView {
       if (lane.pane === null || this.#link.retired(paneKey(lane.pane))) continue
       this.#card(lane.pane, lane, order, project)
     }
-    const cards = [...this.#cards.values()]
-      .filter((entry) => entry.project === project)
-      .sort((a, b) => a.order - b.order)
+    const live = [...this.#cards.values()].filter((entry) => entry.project === project)
+    const cards = live.filter((entry) => this.#docked(entry)).sort((a, b) => a.order - b.order)
     if (cards.length === 0) {
-      this.#stage.replaceChildren(element('p', 'stage-empty', 'No terminal is open yet.'))
+      // Sessions at work while the chief's window is down (a switch of lead,
+      // a launch that failed): their terminals are there to be shown.
+      this.#stage.replaceChildren(
+        element(
+          'p',
+          'stage-empty',
+          live.length === 0
+            ? 'No terminal is open yet.'
+            : "Choose Show terminal on a session's row to see its terminal here.",
+        ),
+      )
       return
     }
     // Re-inserting a card blurs whatever has the keyboard inside it: the
@@ -162,9 +187,42 @@ export class TerminalsView {
     this.#onChange()
   }
 
-  /** A window over for good: its card and emulator go, and its pane never gets them again. */
+  /** Whether the human asked to see a session's terminal: its lane offers to hide it. */
+  shows(project, handle) {
+    return this.#showing.has(showingKey(project, handle))
+  }
+
+  /**
+   * The human asks to see a session's terminal: its card comes into the
+   * dock with everything its window wrote since it opened. One asked for
+   * before its window is up (Open terminal) comes in when it is.
+   */
+  show(project, handle) {
+    this.#showing.add(showingKey(project, handle))
+    this.#onChange()
+  }
+
+  /** The human hides a session's terminal: its card leaves the dock, and its window works on. */
+  hide(project, handle) {
+    this.#showing.delete(showingKey(project, handle))
+    this.#onChange()
+  }
+
+  /** Whether a card is in the dock: a session's once the human shows it, any other while it lives. */
+  #docked(entry) {
+    return !entry.session || this.#showing.has(showingKey(entry.project, entry.handle))
+  }
+
+  /**
+   * A window over for good: its card and emulator go, and its pane never
+   * gets them again. Its session's next window waits to be shown.
+   */
   #retire(key) {
-    this.#cards.get(key)?.card.remove()
+    const entry = this.#cards.get(key)
+    if (entry !== undefined) {
+      entry.card.remove()
+      this.#showing.delete(showingKey(entry.project, entry.handle))
+    }
     this.#cards.delete(key)
     this.#link.retire(key)
   }
@@ -190,6 +248,7 @@ export class TerminalsView {
         host,
         handle: null,
         project: null,
+        session: false,
         order: Number.MAX_SAFE_INTEGER,
       }
       this.#cards.set(key, entry)
@@ -197,8 +256,10 @@ export class TerminalsView {
     }
     if (lane !== null) {
       const name = laneName(lane.participant)
-      // Only a session's window closes by hand, as on its board row; the
-      // chief's stays with the project.
+      const { handle } = lane.participant
+      // Only a session's terminal hides and its window closes by hand, as on
+      // its board row; the chief's stays with the project. Hide is the one
+      // that leaves the window at work.
       const session = lane.participant.member !== null
       redraw(entry.head, [
         lamp(lane.activity),
@@ -207,8 +268,14 @@ export class TerminalsView {
         ...(session
           ? [
               button(
+                'Hide',
+                'quiet-button',
+                () => this.hide(project, handle),
+                `Hide ${name}'s terminal`,
+              ),
+              button(
                 'Close',
-                'quiet-button terminal-stop',
+                'quiet-button',
                 () => this.#onClose(lane.participant),
                 `Close ${name}'s terminal`,
               ),
@@ -216,9 +283,10 @@ export class TerminalsView {
           : []),
       ])
       entry.card.setAttribute('aria-label', `${name}'s terminal`)
-      entry.card.dataset.handle = lane.participant.handle
-      entry.handle = lane.participant.handle
+      entry.card.dataset.handle = handle
+      entry.handle = handle
       entry.project = project
+      entry.session = session
       entry.order = order
     }
   }

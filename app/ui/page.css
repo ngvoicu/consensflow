@@ -654,7 +654,12 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
 }
 .terminal-name { font-weight: 700; letter-spacing: .08em; }
 .terminal-meta { color: var(--muted); }
-.terminal-stop { margin-left: auto; }
+/* The head is one line: the harness takes only the room the name and a
+   session's Hide and Close leave, and pushes them to the end; on a narrow
+   card the name gives way too. Wrapped, a session's name ran out of the
+   head's 30px. */
+.terminal-name, .terminal-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-meta { flex: 1 1 0; }
 .terminal-host { min-height: 0; padding: 4px 2px 2px 6px; }
 /* Scrollbars that stay, not the overlay that hides between scrolls: a
    terminal's scrollback, and a board too narrow for its columns, which
