@@ -323,6 +323,13 @@ export class Dispatcher {
     return { project, participant }
   }
 
+  /** A project the ledger has; one it does not is refused in the ledger's words. */
+  #knownProject(projectId) {
+    const project = this.#ledger.project(projectId)
+    if (project === null) throw new Error(`no project ${projectId}`)
+    return project
+  }
+
   /**
    * A closed project goes for good; the ledger refuses an open one. Its
    * participants are forgotten, and a window of it whose exit has not come
@@ -359,7 +366,8 @@ export class Dispatcher {
   async resumeAfterRestart() {
     this.#settleInFlight()
     const outcomes = []
-    for (const project of this.#ledger.projects().filter((s) => s.resumeOnStart)) {
+    const due = this.#ledger.projects().filter((project) => project.resumeOnStart)
+    for (const project of due) {
       try {
         await this.resumeProject(project.id)
         outcomes.push({ project: project.id, resumed: true })
@@ -421,16 +429,21 @@ export class Dispatcher {
   /**
    * One pass over every participant: each looks at its window, and a launch
    * or a delivery it starts goes on apart from the pass (`#act`), so a slow
-   * one holds up no one else.
+   * one holds up no one else. The pass reads the projects once; one whose
+   * open tasks it gives out is read again, so the sessions it started for
+   * them open their windows in this pass.
    */
   async pass() {
     this.#resumeHeld()
-    for (const project of this.#ledger.projects()) {
-      if (project.state !== 'open') continue
-      this.#assignOpenTasks(project)
-    }
+    const projects = this.#ledger
+      .projects()
+      .map((project) =>
+        project.state === 'open' && this.#assignOpenTasks(project)
+          ? this.#ledger.project(project.id)
+          : project,
+      )
     const steps = []
-    for (const project of this.#ledger.projects()) {
+    for (const project of projects) {
       for (const participant of project.participants) {
         if (participant.role === 'human') continue
         steps.push(this.#exclusive(participant.id, () => this.#step(project, participant)))
@@ -684,13 +697,13 @@ export class Dispatcher {
     if (agent !== null && this.#roster(agent) === null) {
       throw new Error(`${agent} is not among your agents`)
     }
-    const project = this.#ledger.project(projectId)
+    const project = this.#knownProject(projectId)
     const chief = project.participants.find((participant) => participant.role === 'chief')
     await this.#exclusive(
       chief.id,
       async () => {
         // Asked of the project as it is once the lead's step in progress is over.
-        requireOpen(this.#ledger.project(projectId))
+        requireOpen(this.#knownProject(projectId))
         const runtime = this.#runtimeOf(chief.id)
         if (runtime.pane !== null && !this.#isOut(chief) && (when === 'turn' || note)) {
           // A switch asked again replaces the one waiting, with a note not yet sent.
@@ -1292,9 +1305,11 @@ export class Dispatcher {
   /**
    * Each open task goes to the best free member of its tier; the requester
    * hears once when none is. A task that needs others waits for them to be
-   * accepted, in silence: its card says what it waits for.
+   * accepted, in silence: its card says what it waits for. Says whether it
+   * gave any task out.
    */
   #assignOpenTasks(project) {
+    let assigned = false
     for (const task of this.#ledger.board(project.id).open) {
       if (task.blockedBy.length > 0 || task.assignee !== null) continue
       const candidates = this.#ledger.candidates(project.id, task.number)
@@ -1303,6 +1318,7 @@ export class Dispatcher {
         this.#ledger.assignTask(project.id, task.number, this.#rank(free, candidates)[0].id)
         this.#waitingNoted.delete(task.id)
         this.#changed()
+        assigned = true
       } else if (!this.#waitingNoted.has(task.id)) {
         this.#waitingNoted.set(task.id, project.id)
         const why = candidates
@@ -1316,6 +1332,7 @@ export class Dispatcher {
         this.#changed()
       }
     }
+    return assigned
   }
 
   /** The member a session belongs to; a member or the chief is its own. */

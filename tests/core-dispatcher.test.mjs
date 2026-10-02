@@ -1542,6 +1542,31 @@ describe('the dispatcher assigns open tasks', () => {
     })
   })
 
+  it("reads the projects once a pass, and opens a task's new session in the pass that gave it out", async () => {
+    await setup(async (context) => {
+      const { open, task } = await withTiers(context)
+      await context.dispatcher.pass()
+      let reads = 0
+      const projects = context.ledger.projects.bind(context.ledger)
+      context.ledger.projects = () => {
+        reads += 1
+        return projects()
+      }
+      await context.dispatcher.pass()
+      assert.equal(reads, 1, 'a pass with nothing to give out')
+      open()
+      reads = 0
+      await context.dispatcher.pass()
+      assert.equal(reads, 1, 'a pass that gives a task out')
+      assert.equal(task(1).assignee, 'zeus-amber-pine')
+      assert.equal(
+        context.host.last('zeus').id,
+        'p1-zeus-amber-pine',
+        "its session's window opened",
+      )
+    })
+  })
+
   it('shares the work of one tier across harnesses: the harness with the fewest tasks first', async () => {
     await setup(async (context) => {
       const member = (agent, harness) => ({ agent, harness, role: 'worker', tier: 'standard' })
@@ -2788,6 +2813,14 @@ describe('switching the lead to another harness', () => {
         context.adapter.prepared.at(-1).message,
         /You are the lead now\. The human switched this project's lead from Codex to you, Claude Code\./,
       )
+    })
+  })
+
+  it('switches no lead of a project it does not know, and says so', async () => {
+    await withCodex(async (context) => {
+      await assert.rejects(context.dispatcher.switchChief(42, { harness: 'codex' }), {
+        message: 'no project 42',
+      })
     })
   })
 
