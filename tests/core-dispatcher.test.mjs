@@ -3344,6 +3344,131 @@ describe('work in flight when its participant is forgotten', () => {
       )
     })
   })
+
+  it('opens no window for a lead whose project was deleted while its launch was prepared', async () => {
+    await setup(async (context) => {
+      const release = hold(
+        context.adapter,
+        'prepare',
+        (request) => request.directory === '/work/app',
+      )
+      const { project: old } = await withStaff(context)
+      const { fresh, gone } = await replaceProject(context, old)
+      const own = context.ledger.currentConversation(chiefOf(context, fresh).id)
+      release()
+      await gone
+      await flush()
+      assert.deepEqual(
+        context.host.opened.filter((body) => body.cwd === '/work/app'),
+        [],
+        'nothing opens for the deleted project',
+      )
+      assert.equal(
+        context.ledger.currentConversation(chiefOf(context, fresh).id).id,
+        own.id,
+        'the new lead keeps its conversation',
+      )
+    })
+  })
+
+  it('tells a new project that took its ids nothing of a launch that failed for the deleted one', async () => {
+    await setup(async (context) => {
+      const release = hold(
+        context.adapter,
+        'prepare',
+        (request) => request.directory === '/work/app',
+        () => {
+          throw new Error('the harness would not start')
+        },
+      )
+      const { project: old } = await withStaff(context)
+      const { fresh, gone } = await replaceProject(context, old)
+      release()
+      await gone
+      await flush()
+      const human = context.ledger
+        .project(fresh.id)
+        .participants.find((participant) => participant.role === 'human')
+      assert.deepEqual(
+        context.ledger.inbox(human.id).map((message) => message.body),
+        [],
+        "the new project's human hears nothing of it",
+      )
+    })
+  })
+
+  it("starts no conversation for a new project that took its ids while the old lead's window opened, and that window closes", async () => {
+    await setup(async (context) => {
+      const release = hold(context.host, 'open', (body) => body.cwd === '/work/app')
+      const { project: old } = await withStaff(context)
+      const { fresh, gone } = await replaceProject(context, old)
+      const own = context.ledger.currentConversation(chiefOf(context, fresh).id)
+      release()
+      await gone
+      await flush()
+      assert.equal(
+        context.ledger.currentConversation(chiefOf(context, fresh).id).id,
+        own.id,
+        'the new lead keeps its conversation',
+      )
+      const window = context.host.opened.find((body) => body.cwd === '/work/app')
+      assert.ok(
+        context.host.killed.some((pane) => pane.generation === window.generation),
+        'the old window closes',
+      )
+    })
+  })
+
+  it("kills no window of a deleted project's lead that exited before its open was answered", async () => {
+    await setup(async (context) => {
+      const open = context.host.open
+      const release = hold(
+        context.host,
+        'open',
+        (body) => body.cwd === '/work/app',
+        async (body) => {
+          const opened = await open(body)
+          // The host sends the exit first, in the same read as its answer to the open.
+          await context.host.exit('chief')
+          return opened
+        },
+      )
+      const { project: old } = await withStaff(context)
+      const { gone } = await replaceProject(context, old)
+      release()
+      await gone
+      await flush()
+      const window = context.host.opened.find((body) => body.cwd === '/work/app')
+      assert.ok(
+        !context.host.killed.some((pane) => pane.generation === window.generation),
+        'it had gone already',
+      )
+    })
+  })
+
+  it("binds no conversation of a new project that took its ids to the thread the old lead's window named", async () => {
+    await setup(async (context) => {
+      // The old lead's window takes long to come up, then names its thread.
+      let calls = 0
+      const release = hold(
+        context.adapter,
+        'started',
+        () => ++calls === 1,
+        () => ({ nativeSession: 'native-named' }),
+      )
+      const { project: old } = await withStaff(context)
+      const { fresh, gone } = await replaceProject(context, old)
+      const own = context.ledger.currentConversation(chiefOf(context, fresh).id)
+      release()
+      await gone
+      await flush()
+      assert.equal(
+        context.ledger.currentConversation(chiefOf(context, fresh).id).nativeSession,
+        own.nativeSession,
+        "the new lead's conversation keeps its own thread",
+      )
+    })
+  })
 })
 
 describe('a lead whose window does not come up', () => {

@@ -1141,6 +1141,7 @@ export class Dispatcher {
         // A session's window the human opened, with nothing to deliver, says why it did not come.
         if (participant.role !== 'chief' && delivering === null) {
           this.#launchFailed(
+            runtime,
             project,
             participant,
             null,
@@ -1163,7 +1164,21 @@ export class Dispatcher {
     } catch (cause) {
       // An adapter may fail after writing the launch's files; no window will read them.
       this.#launchFiles.forget(launchId)
-      this.#launchFailed(project, participant, delivering, `the launch failed: ${cause.message}`)
+      this.#launchFailed(
+        runtime,
+        project,
+        participant,
+        delivering,
+        `the launch failed: ${cause.message}`,
+      )
+      return
+    }
+    // A participant forgotten while its launch waits (it left, or its project
+    // was deleted) gets nothing more under its ids, which may be another's
+    // by now: no window opens for it, and one already open goes with the
+    // record (`#closeLeaving`).
+    if (this.#forgotten(runtime)) {
+      this.#launchFiles.forget(launchId)
       return
     }
     const token = this.#credentials.issue({ participant, project })
@@ -1186,6 +1201,7 @@ export class Dispatcher {
       this.#credentials.revoke(token)
       this.#launchFiles.forget(launchId)
       this.#launchFailed(
+        runtime,
         project,
         participant,
         delivering,
@@ -1196,6 +1212,12 @@ export class Dispatcher {
     // The window's own process, when the pane host knows it: an adapter may
     // find the harness's own status by it from its first look.
     if (opened.pid !== undefined) plan.launch.pid = opened.pid
+    if (this.#forgotten(runtime)) {
+      Object.assign(runtime, { pane, launchId, token })
+      // One that exited before its open was answered has gone already.
+      if (exited) await this.paneExited(pane)
+      return
+    }
 
     const resumed = resume !== null && plan.nativeSession === resume
     let conversationId = conversation?.id
@@ -1231,6 +1253,7 @@ export class Dispatcher {
       if (participant.role === 'chief') await this.#closeOwn(runtime, pane)
       else this.#host.kill(pane).catch(() => {})
       this.#launchFailed(
+        runtime,
         project,
         participant,
         delivering,
@@ -1238,6 +1261,7 @@ export class Dispatcher {
       )
       return
     }
+    if (this.#forgotten(runtime)) return
     runtime.relaunch = null
     if (started.nativeSession && started.nativeSession !== plan.nativeSession) {
       this.#ledger.bindConversation(conversationId, started.nativeSession)
@@ -1267,9 +1291,12 @@ export class Dispatcher {
    * with nothing to deliver tells them why it did not come. The lead's first
    * message goes back to its queue with its attempt, and the lead is tried
    * again, ever more slowly while it keeps failing. The human hears why
-   * once, until the lead starts or they ask for it again.
+   * once, until the lead starts or they ask for it again. A participant
+   * forgotten while it launched hears nothing and settles nothing: its
+   * project may be gone, and its ids another's.
    */
-  #launchFailed(project, participant, delivering, reason) {
+  #launchFailed(runtime, project, participant, delivering, reason) {
+    if (this.#forgotten(runtime)) return
     if (participant.role !== 'chief') {
       if (delivering !== null) this.#settleFailure(delivering, reason, { retry: false })
       else {
@@ -1282,7 +1309,6 @@ export class Dispatcher {
       return
     }
     if (delivering !== null) this.#giveBack(delivering, reason)
-    const runtime = this.#runtimeOf(participant.id)
     const failures = (runtime.relaunch?.failures ?? 0) + 1
     runtime.relaunch = {
       failures,
