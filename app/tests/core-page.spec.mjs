@@ -284,6 +284,12 @@ async function open(page, data = model()) {
     window.__calls = []
     window.__model = data
     window.__listeners = new Map()
+    // How long an operation takes to answer, in ms, set by a test while it runs:
+    // the real core answers when it can, and a page that assumes at once races.
+    window.__delay = {}
+    // Why the daemon is down, while a test has it down: the app answers every
+    // core request with this, as Rust does with no bridge to the daemon.
+    window.__down = null
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
@@ -300,11 +306,19 @@ async function open(page, data = model()) {
         return answer({ project: data.boards[project].project })
       },
       'inbox.get': ({ project }) => answer({ messages: data.inbox[project] ?? [] }),
-      'task.get': ({ project, task }) => answer({ task: data.tasks[`${project}:${task}`] }),
+      'task.get': ({ project, task }) => {
+        const found = data.tasks[`${project}:${task}`]
+        return found === undefined
+          ? { ok: false, error: `no task T-${task} in this project` }
+          : answer({ task: found })
+      },
       'task.resume': ({ project, task }) =>
         answer({ task: { ...data.tasks[`${project}:${task}`], state: 'queued' } }),
-      'task.transcript': ({ project, task }) =>
-        answer(data.transcripts?.[`${project}:${task}`] ?? { items: [], total: 0 }),
+      // The last `limit` items, as the core gives them.
+      'task.transcript': ({ project, task, limit = Number.POSITIVE_INFINITY }) => {
+        const { items, total } = data.transcripts?.[`${project}:${task}`] ?? { items: [], total: 0 }
+        return answer({ items: items.slice(Math.max(0, items.length - limit)), total })
+      },
       'project.open': ({ directory }) => answer({ project: { id: 3, name: 'new', directory } }),
     }
     const invoke = async (command, args = {}) => {
@@ -314,9 +328,18 @@ async function open(page, data = model()) {
       ])
       if (command === 'core_request') {
         const handle = operations[args.operation]
+        const ms = window.__delay[args.operation] ?? 0
+        if (ms > 0) await new Promise((wake) => setTimeout(wake, ms))
+        if (window.__down !== null) {
+          return {
+            ok: false,
+            error: 'not-available-yet',
+            operation: args.operation,
+            detail: window.__down,
+          }
+        }
         return handle ? handle(args.body) : { ok: true }
       }
-      if (command === 'roster_handle') return { url: 'http://127.0.0.1:1/', token: 'ui-token' }
       if (command === 'subscribe_output') {
         window.__output = args.onOutput
         return { ok: true }
@@ -335,6 +358,7 @@ async function open(page, data = model()) {
       core: { invoke, Channel },
       event: {
         listen: async (name, handler) => {
+          window.__calls.push(['listen', { name }])
           window.__listeners.set(name, handler)
           return () => window.__listeners.delete(name)
         },
@@ -352,14 +376,17 @@ async function open(page, data = model()) {
               const emulator = {
                 host,
                 written: [],
+                // Retired by the page: its window is over for good.
+                disposed: false,
                 write: async (bytes) => emulator.written.push(...bytes),
                 onData: (callback) => {
                   emulator.type = callback
                   return { dispose() {} }
                 },
-                resize() {},
                 fit() {},
-                dispose() {},
+                dispose() {
+                  emulator.disposed = true
+                },
               }
               emulators.push(emulator)
               return emulator
@@ -896,6 +923,90 @@ test("shows what a task's window wrote, from ConsensFlow's own copy, under the t
   await expect(items.nth(2)).toHaveAttribute('data-role', 'assistant')
 })
 
+/** T-2 with a long answer in what its window wrote. */
+function longTranscript() {
+  const data = model()
+  data.transcripts = {
+    '1:2': {
+      total: 2,
+      items: [
+        { id: 'u1', role: 'user', text: 'Write the parser', complete: true, at: null },
+        { id: 'a1', role: 'assistant', text: 'line\n'.repeat(200), complete: true, at: null },
+      ],
+    },
+  }
+  return data
+}
+
+test('reads what a window wrote when its fold opens, and keeps the fold and its scroll across redraws', async ({
+  page,
+}) => {
+  await open(page, longTranscript())
+  await page.locator('button.card[data-task="2"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-2' })
+  const fold = drawer.locator('details[data-section="transcript"]')
+  await expect(fold.locator('summary')).toHaveText('What the agent did2 items')
+  // Opening the drawer reads how much the window wrote, not what.
+  expect(await calls(page, 'task.transcript')).toEqual([{ project: 1, task: 2, limit: 0 }])
+  await fold.locator('summary').click()
+  const answer = drawer.locator('.transcript-body').nth(1)
+  await expect(answer).toHaveText(/^line/)
+  expect(await calls(page, 'task.transcript')).toEqual([
+    { project: 1, task: 2, limit: 0 },
+    { project: 1, task: 2 },
+  ])
+  await answer.evaluate((node) => {
+    node.scrollTop = 600
+  })
+  // Redraws that change nothing of the task leave the drawer as it is, and
+  // read the task again but nothing more of its window.
+  const reads = (await calls(page, 'task.get')).length
+  for (const lamp of ['working', 'idle']) await changed(page, setLamp, ['zeus', lamp])
+  await expect.poll(async () => (await calls(page, 'task.get')).length).toBe(reads + 2)
+  await expect(fold).toHaveAttribute('open', '')
+  expect(await answer.evaluate((node) => node.scrollTop)).toBe(600)
+  expect(await calls(page, 'task.transcript')).toHaveLength(2)
+})
+
+test('redraws a drawer whose task changed, its fold still open and read again', async ({
+  page,
+}) => {
+  await open(page, longTranscript())
+  await page.locator('button.card[data-task="2"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-2' })
+  const fold = drawer.locator('details[data-section="transcript"]')
+  await fold.locator('summary').click()
+  await expect(drawer.locator('.transcript-item')).toHaveCount(2)
+  // The chief sends T-2 back with a word, and the window writes on.
+  await changed(page, () => {
+    const parser = window.__model.tasks['1:2']
+    parser.messages.push({
+      id: 22,
+      kind: 'task',
+      sender: 'chief',
+      recipient: 'zeus',
+      state: 'delivered',
+      reason: null,
+      body: 'Reopened: cover the errors too.',
+    })
+    parser.state = 'working'
+    const transcript = window.__model.transcripts['1:2']
+    transcript.items.push({
+      id: 'a2',
+      role: 'assistant',
+      text: 'Covering the errors.',
+      complete: false,
+      at: null,
+    })
+    transcript.total = 3
+  })
+  await expect(drawer.locator('.thread-body')).toHaveText(['Reopened: cover the errors too.'])
+  await expect(fold).toHaveAttribute('open', '')
+  await expect(fold.locator('summary')).toHaveText('What the agent did3 items')
+  await expect(drawer.locator('.transcript-item')).toHaveCount(3)
+  await expect(drawer.locator('.transcript-body').nth(2)).toHaveText('Covering the errors.')
+})
+
 test('a member whose agent is gone says so on the board and in the staff, with Remove at hand', async ({
   page,
 }) => {
@@ -952,6 +1063,133 @@ test('a redraw leaves the keyboard where the human put it in the dock', async ({
   await page.evaluate(() => window.__listeners.get('state-changed')())
   await page.waitForTimeout(150)
   await expect(keyboard).toBeFocused()
+})
+
+/** `change(argument)` made in the model, the state change it brings, and the redraw done. */
+async function changed(page, change = () => {}, argument = null) {
+  const reads = () =>
+    page.evaluate(() => window.__calls.filter(([, args]) => args?.operation === 'board.get').length)
+  const before = await reads()
+  await page.evaluate(change, argument)
+  await page.evaluate(() => window.__listeners.get('state-changed')())
+  await expect.poll(reads).toBeGreaterThan(before)
+  await page.waitForTimeout(50)
+}
+
+/** A participant's lamp in harbour's model: `[handle, state]`. */
+const setLamp = ([handle, state]) => {
+  window.__model.boards[1].lanes.find((l) => l.participant.handle === handle).activity = {
+    state,
+  }
+}
+
+const focusedLabel = (page) =>
+  page.evaluate(
+    () => document.activeElement.getAttribute('aria-label') ?? document.activeElement.textContent,
+  )
+
+test('a redraw leaves the keyboard where it was, on the board, the projects and the staff', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].lanes.push({
+    participant: session(20, participant(3, 'zeus', 'worker'), 'amber-pine'),
+    tasks: [],
+    activity: { state: 'working' },
+    pane: { id: 'p1-zeus-amber-pine', generation: 1 },
+  })
+  await open(page, data)
+  // A lamp changed, and drawn: the redraw has happened.
+  const lampDrawn = async (handle, state) => {
+    await changed(page, setLamp, [handle, state])
+    await expect(page.locator(`tr[data-handle="${handle}"]`).getByTestId('lamp')).toHaveAttribute(
+      'data-state',
+      state,
+    )
+  }
+  // A card, while another row's lamp changes.
+  await page.locator('button.card[data-task="4"]').focus()
+  await lampDrawn('chief', 'idle')
+  expect(await focusedLabel(page)).toBe('T-4, Add the tests, Queued, from @chief')
+  // The card itself moving to another column keeps the keyboard with it.
+  await changed(page, () => {
+    const zeus = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+    zeus.tasks.find((t) => t.number === 4).state = 'working'
+  })
+  await expect(page.locator('td[data-state="working"] button.card[data-task="4"]')).toHaveCount(1)
+  expect(await focusedLabel(page)).toBe('T-4, Add the tests, Working, from @chief')
+  // A session's Close, on its row and on its card in the dock, while its lamp changes.
+  const row = page.locator('tr[data-handle="zeus-amber-pine"]')
+  await row.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }).focus()
+  await lampDrawn('zeus-amber-pine', 'idle')
+  await expect(
+    row.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }),
+  ).toBeFocused()
+  const card = page.locator('.terminal-card[data-handle="zeus-amber-pine"]')
+  await card.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }).focus()
+  await lampDrawn('zeus-amber-pine', 'working')
+  await expect(card.getByTestId('lamp')).toHaveAttribute('data-state', 'working')
+  await expect(
+    card.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }),
+  ).toBeFocused()
+  // A project's Close.
+  await page.getByRole('button', { name: 'Close harbour' }).focus()
+  await lampDrawn('chief', 'working')
+  expect(await focusedLabel(page)).toBe('Close harbour')
+  // A member's Remove in the staff dialog.
+  await page.getByRole('button', { name: 'Staff' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await dialog.getByRole('button', { name: 'Remove Worker @diana' }).focus()
+  await lampDrawn('chief', 'idle')
+  expect(await focusedLabel(page)).toBe('Remove Worker @diana')
+})
+
+test('a click whose press and release straddle a redraw still lands', async ({ page }) => {
+  await open(page)
+  const card = await page.locator('button.card[data-task="2"]').boundingBox()
+  await page.mouse.move(card.x + 20, card.y + 10)
+  await page.mouse.down()
+  // zeus's own row changes under the press: its lamp and its status.
+  await changed(page, setLamp, ['zeus', 'working'])
+  await expect(page.locator('tr[data-handle="zeus"]').getByTestId('lamp')).toHaveAttribute(
+    'data-state',
+    'working',
+  )
+  await page.mouse.up()
+  await expect(page.getByRole('complementary', { name: 'Task T-2' })).toBeVisible()
+})
+
+test('a button kept across redraws acts on what the board shows now', async ({ page }) => {
+  const data = model()
+  data.projects[1] = { ...data.projects[1], state: 'open' }
+  data.boards[2].project.state = 'open'
+  await open(page, data)
+  // A role added to zeus leaves its Worker row drawn the same: removing the
+  // worker role now takes that role only, and asks nothing.
+  await page.getByRole('button', { name: 'Staff' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await dialog.getByLabel('Role').selectOption('reviewer')
+  await dialog.getByLabel('Agent').selectOption('zeus')
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect(dialog.locator('tr[data-handle="zeus"]')).toHaveCount(2)
+  await dialog.getByRole('button', { name: 'Remove Worker @zeus' }).click()
+  await expect
+    .poll(() => calls(page, 'member.roles'))
+    .toEqual([
+      { project: 1, agent: 'zeus', roles: ['worker', 'reviewer'] },
+      { project: 1, agent: 'zeus', roles: ['reviewer'] },
+    ])
+  await expect(dialog.getByText('Remove @zeus? Its open tasks are cancelled.')).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  // A project deleted and another of the same name in its place: the
+  // project list's item for it chooses the new one.
+  await changed(page, () => {
+    const { projects, boards } = window.__model
+    projects[1] = { ...projects[1], id: 4 }
+    boards[4] = { ...boards[2], project: { ...boards[2].project, id: 4 } }
+  })
+  await chooseProject(page, 'foundry')
+  await expect.poll(() => calls(page, 'board.get')).toContainEqual({ project: 4 })
 })
 
 test('the dock stays where the human scrolled it across redraws', async ({ page }) => {
@@ -1147,6 +1385,35 @@ test('takes a member off the staff once the human confirms', async ({ page }) =>
   await dialog.getByRole('button', { name: 'Remove Worker @zeus' }).click()
   await dialog.getByRole('button', { name: 'Remove @zeus', exact: true }).click()
   await expect.poll(() => calls(page, 'member.remove')).toEqual([{ project: 1, agent: 'zeus' }])
+})
+
+test("offers, after a role is picked, the agents the staff shown does not hold it with: this project's, as it is now", async ({
+  page,
+}) => {
+  await open(page, twoOpen())
+  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  const offered = () =>
+    dialog
+      .getByLabel('Agent')
+      .locator('option')
+      .evaluateAll((options) => options.map((option) => option.value))
+  // harbour's staff seen first, then a reviewer role added there.
+  await page.getByRole('button', { name: 'Staff' }).click()
+  await dialog.getByLabel('Role').selectOption('reviewer')
+  await dialog.getByLabel('Agent').selectOption('zeus')
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect(dialog.locator('tr[data-handle="zeus"]')).toHaveCount(2)
+  await dialog.getByLabel('Role').selectOption('advisor')
+  await dialog.getByLabel('Role').selectOption('reviewer')
+  expect(await offered()).not.toContain('zeus')
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  // foundry has nobody on its staff: every agent may work there.
+  await chooseProject(page, 'foundry')
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await page.getByRole('button', { name: 'Staff' }).click()
+  await dialog.getByLabel('Role').selectOption('advisor')
+  await dialog.getByLabel('Role').selectOption('worker')
+  expect(await offered()).toEqual(['hera', 'zeus', 'diana', 'athena'])
 })
 
 test('keeps a pending removal and the chosen agent when the core redraws the staff', async ({
@@ -1385,25 +1652,128 @@ test('closes an open project from the list', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Close foundry' })).toHaveCount(0)
 })
 
-test('shows a closed project read-only: dimmed, no actions, no windows, and a Resume banner', async ({
+/**
+ * foundry, closed, with something everywhere a control would be: its chief,
+ * a member and a session of it with a finished task, a message that waited
+ * for approval and a note.
+ */
+function closedFoundry() {
+  const data = model()
+  const board = data.boards[2]
+  board.project.gate = true
+  const member = { ...participant(12, 'zeus', 'worker'), projectId: 2 }
+  const lexer = task(3, 'Write the lexer', 'done', 'chief', 'zeus-amber-pine', 30, {
+    projectId: 2,
+    result: 'Lexer done.',
+  })
+  board.lanes.push(
+    {
+      participant: { ...participant(10, 'chief', 'chief'), projectId: 2 },
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+    { participant: member, tasks: [], activity: { state: 'closed' }, pane: null },
+    {
+      participant: { ...session(13, member, 'amber-pine'), projectId: 2 },
+      tasks: [lexer],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+  )
+  board.gated = [
+    {
+      id: 30,
+      kind: 'task',
+      state: 'gated',
+      sender: 'chief',
+      recipient: 'zeus-amber-pine',
+      taskNumber: 3,
+      body: 'Add the tests',
+      questions: null,
+      choices: null,
+      createdAt: at(2),
+    },
+  ]
+  data.inbox[2] = [
+    {
+      id: 31,
+      kind: 'note',
+      state: 'queued',
+      sender: null,
+      recipient: 'human',
+      taskNumber: 3,
+      body: 'T-3 is done.',
+      createdAt: at(1),
+    },
+  ]
+  data.tasks['2:3'] = {
+    ...lexer,
+    messages: [
+      {
+        id: 32,
+        kind: 'result',
+        sender: 'zeus-amber-pine',
+        recipient: 'chief',
+        state: 'delivered',
+        reason: null,
+        body: 'Lexer done.',
+      },
+    ],
+  }
+  return data
+}
+
+test('shows a closed project read-only: it reads, nothing on it acts, and a banner resumes it', async ({
   page,
 }) => {
-  await open(page)
-  await page.locator('.project-select', { hasText: 'foundry' }).click()
+  await open(page, closedFoundry())
+  await chooseProject(page, 'foundry')
   const main = page.locator('main.main')
   await expect(main).toHaveAttribute('data-suspended', 'true')
   const banner = page.getByRole('status').filter({ hasText: 'foundry is closed.' })
   await expect(banner).toContainText('nothing is delivered until you resume it')
   await expect(page.getByRole('button', { name: 'Staff' })).toBeDisabled()
-  await expect(page.locator('table[aria-label="Tasks"]')).toHaveCSS('pointer-events', 'none')
-  await expect(page.getByRole('complementary', { name: 'Terminal dock' })).toHaveCSS(
-    'pointer-events',
-    'none',
-  )
   await expect(page.locator('.terminal-card')).toHaveCount(0)
+  // Nothing on the board acts: no button for it to be reached by, with the keyboard either.
+  const board = page.getByRole('region', { name: 'Board' })
+  for (const name of [
+    /^Approve/,
+    /^Decline/,
+    /^Mark .* read$/,
+    /^Open .*'s terminal$/,
+    /^Close .*'s terminal$/,
+    /^Delete .*'s session$/,
+    'Switch the lead to another harness or model',
+  ]) {
+    await expect(board.getByRole('button', { name })).toHaveCount(0)
+  }
+  await banner.getByRole('button', { name: 'Resume project' }).focus()
+  const reached = []
+  for (let press = 0; press < 4; press += 1) {
+    await page.keyboard.press('Tab')
+    reached.push(
+      await page.evaluate(
+        () =>
+          document.activeElement.getAttribute('aria-label') ?? document.activeElement.textContent,
+      ),
+    )
+  }
+  expect(reached).toEqual([
+    'Open task',
+    'Open task',
+    "What @zeus · amber-pine's terminal wrote",
+    'T-3, Write the lexer, Done, from @chief',
+  ])
+  // What it says is all there to read: a card opens its task, with nothing to do on it.
+  await page.locator('button.card[data-task="3"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-3' })
+  await expect(drawer.locator('.drawer-result')).toHaveText('Lexer done.')
+  await expect(drawer.getByRole('button')).toHaveText(['Close'])
+  await drawer.getByRole('button', { name: 'Close the task' }).click()
   await banner.getByRole('button', { name: 'Resume project' }).click()
   await expect.poll(() => calls(page, 'project.resume')).toEqual([{ project: 2 }])
-  await page.locator('.project-select', { hasText: 'harbour' }).click()
+  await chooseProject(page, 'harbour')
   await expect(main).toHaveAttribute('data-suspended', 'false')
   await expect(page.getByRole('button', { name: 'Staff' })).toBeEnabled()
 })
@@ -1658,9 +2028,8 @@ test('shows every open terminal in the strip, offers no Open terminal for them, 
   expect(subscriptions).toBe(1)
 })
 
-test("keeps each project's terminals, scrollback and all, when the human switches projects", async ({
-  page,
-}) => {
+/** Both projects open, each with its chief's window live. */
+function twoOpen() {
   const data = model()
   data.projects[1].state = 'open'
   data.boards[2].project.state = 'open'
@@ -1670,7 +2039,46 @@ test("keeps each project's terminals, scrollback and all, when the human switche
     activity: { state: 'idle' },
     pane: { id: 'p2-chief', generation: 1 },
   })
-  await open(page, data)
+  return data
+}
+
+const chooseProject = (page, name) => page.locator('.project-select', { hasText: name }).click()
+
+/**
+ * Whether a window is still served: output for it is acknowledged, and keys
+ * typed into its card in the dock (found by `handle`) reach its pane.
+ */
+async function served(page, pane, handle) {
+  const count = (command) =>
+    page.evaluate(
+      ([command, id]) =>
+        window.__calls.filter(([c, args]) => c === command && args.id === id).length,
+      [command, pane.id],
+    )
+  const [acks, keys] = [await count('pane_ack'), await count('pane_input_enqueue')]
+  await page.evaluate(
+    ({ id, generation }) =>
+      window.__output.onmessage({ id, generation, seq: Date.now(), bytes: [104, 105] }),
+    pane,
+  )
+  const typed = await page.evaluate((handle) => {
+    const card = document.querySelector(`#stage .terminal-card[data-handle="${handle}"]`)
+    const emulator = window.__emulators.find((e) => card?.contains(e.host) && !e.disposed)
+    emulator?.type('x')
+    return emulator !== undefined
+  }, handle)
+  await expect.poll(() => count('pane_ack')).toBeGreaterThan(acks)
+  expect(typed, `a live emulator in ${handle}'s card`).toBe(true)
+  await expect.poll(() => count('pane_input_enqueue')).toBeGreaterThan(keys)
+}
+
+const disposed = (page) =>
+  page.evaluate(() => window.__emulators.filter((emulator) => emulator.disposed).length)
+
+test("keeps each project's terminals, scrollback and all, when the human switches projects", async ({
+  page,
+}) => {
+  await open(page, twoOpen())
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   await expect(dock.locator('.terminal-card')).toHaveCount(2)
   const emulators = () => page.evaluate(() => window.__emulators.length)
@@ -1687,6 +2095,196 @@ test("keeps each project's terminals, scrollback and all, when the human switche
   expect(
     await page.evaluate(() => window.__emulators.some((emulator) => emulator.written.length > 0)),
   ).toBe(true)
+})
+
+test('draws a board only under its own project: one that comes late ends no live window', async ({
+  page,
+}) => {
+  await open(page, twoOpen())
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  // Each project shown once, so each has its cards.
+  await chooseProject(page, 'foundry')
+  await expect(dock.locator('.terminal-card')).toHaveCount(1)
+  await chooseProject(page, 'harbour')
+  await expect(dock.locator('.terminal-card')).toHaveCount(2)
+  // A redraw of harbour waits on its board (a busy core), and the human
+  // chooses foundry meanwhile.
+  await page.evaluate(() => {
+    window.__delay['board.get'] = 300
+  })
+  const boards = (await calls(page, 'board.get')).length
+  await page.evaluate(() => window.__listeners.get('state-changed')())
+  await expect.poll(async () => (await calls(page, 'board.get')).length).toBeGreaterThan(boards)
+  await chooseProject(page, 'foundry')
+  await page.evaluate(() => {
+    window.__delay['board.get'] = 0
+  })
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await expect(dock.locator('.terminal-card')).toHaveCount(1)
+  await page.waitForTimeout(400)
+  expect(await disposed(page), 'no live window was retired').toBe(0)
+  await served(page, { id: 'p2-chief', generation: 1 }, 'chief')
+  await chooseProject(page, 'harbour')
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  await expect(dock.locator('.terminal-card')).toHaveCount(2)
+  await served(page, { id: 'p1-chief', generation: 5 }, 'chief')
+  await served(page, { id: 'p1-zeus', generation: 7 }, 'zeus')
+  expect(await disposed(page)).toBe(0)
+})
+
+test('starts a project while the board shown is on its way, and its windows go on', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[3] = {
+    project: { id: 3, name: 'new', directory: '/work/fresh', state: 'open' },
+    open: [],
+    lanes: [
+      {
+        participant: { ...participant(30, 'chief', 'chief'), projectId: 3 },
+        tasks: [],
+        activity: { state: 'starting' },
+        pane: { id: 'p3-chief', generation: 1 },
+      },
+    ],
+  }
+  await open(page, data)
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  await expect(dock.locator('.terminal-card')).toHaveCount(2)
+  // The project takes a moment to open; a change it causes meanwhile brings
+  // a redraw of harbour, whose board answers slowly.
+  await page.evaluate(() => {
+    window.__delay['project.open'] = 300
+    window.__delay['board.get'] = 250
+    setTimeout(() => {
+      window.__model.projects.push({
+        id: 3,
+        name: 'new',
+        directory: '/work/fresh',
+        state: 'open',
+        resumeOnStart: false,
+      })
+      window.__listeners.get('state-changed')()
+    }, 100)
+  })
+  await page.getByRole('button', { name: 'New project' }).click()
+  await page
+    .getByRole('dialog', { name: 'New project' })
+    .getByRole('button', { name: 'Start project' })
+    .click()
+  await expect(page.locator('#project-title')).toHaveText('new')
+  await page.evaluate(() => {
+    window.__delay = {}
+  })
+  await page.waitForTimeout(400)
+  expect(await disposed(page), 'no live window was retired').toBe(0)
+  await chooseProject(page, 'harbour')
+  await expect(dock.locator('.terminal-card')).toHaveCount(2)
+  await served(page, { id: 'p1-chief', generation: 5 }, 'chief')
+  await served(page, { id: 'p1-zeus', generation: 7 }, 'zeus')
+})
+
+/** Fires a state change and waits for the redraw it brings to have read `project`'s board. */
+async function redrawn(page, project) {
+  const reads = () =>
+    page.evaluate(
+      (project) =>
+        window.__calls.filter(
+          ([command, args]) =>
+            command === 'core_request' &&
+            args.operation === 'board.get' &&
+            args.body.project === project,
+        ).length,
+      project,
+    )
+  const before = await reads()
+  await page.evaluate(() => window.__listeners.get('state-changed')())
+  await expect.poll(reads).toBeGreaterThan(before)
+}
+
+test("lets a window of a project not shown go when that project's own board says it ended", async ({
+  page,
+}) => {
+  const data = twoOpen()
+  const foundry = data.boards[2]
+  const member = { ...participant(11, 'zeus', 'worker'), projectId: 2 }
+  foundry.lanes.push(
+    { participant: member, tasks: [], activity: { state: 'closed' }, pane: null },
+    {
+      participant: { ...session(12, member, 'amber-pine'), projectId: 2 },
+      tasks: [],
+      activity: { state: 'working' },
+      pane: { id: 'p2-zeus-amber-pine', generation: 3 },
+    },
+  )
+  await open(page, data)
+  // Nothing of foundry's in the dock yet: only the board shown is read.
+  await redrawn(page, 1)
+  expect(await calls(page, 'board.get')).not.toContainEqual({ project: 2 })
+  // foundry's session prints while harbour is shown: its window gets an
+  // emulator, off screen, and foundry's board is read to say whose it is.
+  const emulators = await page.evaluate(() => window.__emulators.length)
+  await page.evaluate(() =>
+    window.__output.onmessage({ id: 'p2-zeus-amber-pine', generation: 3, seq: 1, bytes: [104] }),
+  )
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBe(emulators + 1)
+  await redrawn(page, 2)
+  expect(await disposed(page)).toBe(0)
+  // The task done, the window closes; the human is still on harbour.
+  await page.evaluate(() => {
+    const lane = window.__model.boards[2].lanes.find(
+      (l) => l.participant.handle === 'zeus-amber-pine',
+    )
+    lane.pane = null
+    lane.activity = { state: 'closed' }
+  })
+  await redrawn(page, 2)
+  await expect.poll(() => disposed(page)).toBe(1)
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  await served(page, { id: 'p1-chief', generation: 5 }, 'chief')
+})
+
+test('takes the windows of a project closed or deleted while not shown out of the dock', async ({
+  page,
+}) => {
+  await open(page, twoOpen())
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  // foundry shown once: its chief's window has its card, kept off screen.
+  await chooseProject(page, 'foundry')
+  await expect(dock.locator('.terminal-card')).toHaveCount(1)
+  await chooseProject(page, 'harbour')
+  await expect(dock.locator('.terminal-card')).toHaveCount(2)
+  // foundry is closed (from another of the human's windows, say): its windows go.
+  await page.evaluate(() => {
+    const { projects, boards } = window.__model
+    projects[1].state = 'suspended'
+    boards[2].project.state = 'suspended'
+    for (const lane of boards[2].lanes) lane.pane = null
+    window.__listeners.get('state-changed')()
+  })
+  await expect.poll(() => disposed(page)).toBe(1)
+  // Resumed, its chief has a new window; then the project is deleted.
+  await page.evaluate(() => {
+    const { projects, boards } = window.__model
+    projects[1].state = 'open'
+    boards[2].project.state = 'open'
+    boards[2].lanes.find((lane) => lane.participant.handle === 'chief').pane = {
+      id: 'p2-chief',
+      generation: 2,
+    }
+  })
+  await page.evaluate(() =>
+    window.__output.onmessage({ id: 'p2-chief', generation: 2, seq: 1, bytes: [104] }),
+  )
+  await redrawn(page, 2)
+  expect(await disposed(page)).toBe(1)
+  await page.evaluate(() => {
+    window.__model.projects.splice(1, 1)
+    window.__listeners.get('state-changed')()
+  })
+  await expect.poll(() => disposed(page)).toBe(2)
+  await expect(dock.locator('.terminal-card')).toHaveCount(2)
+  await served(page, { id: 'p1-chief', generation: 5 }, 'chief')
 })
 
 test("takes a closed window's card out of the dock: its lane says so and opens it again", async ({
@@ -1768,6 +2366,61 @@ test('resizes a terminal once, when a drag that narrows it holds still', async (
   const after = await sizes()
   expect(after, 'one resize for the whole drag, and none after it').toHaveLength(2)
   expect(after[1]).toBeLessThan(first)
+})
+
+test('resizes a terminal while the board redraws faster than a size settles', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 800 })
+  await open(page, { ...model(), realTerminals: true })
+  const sizes = () =>
+    page.evaluate(() =>
+      window.__calls
+        .filter(([command, args]) => command === 'pane_resize' && args.id === 'p1-chief')
+        .map(([, args]) => args.cols),
+    )
+  await expect.poll(async () => (await sizes()).length).toBe(1)
+  // A busy board: a state change every 100 ms, as fast as the core sends them,
+  // each redraw asking every terminal to fit.
+  await page.evaluate(() => {
+    window.__busy = setInterval(() => window.__listeners.get('state-changed')(), 100)
+  })
+  const grip = await page.locator('#board-resize').boundingBox()
+  const x = grip.x + grip.width / 2
+  const y = grip.y + 60
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x + 160, y, { steps: 4 })
+  await page.mouse.up()
+  await expect.poll(async () => (await sizes()).length, { timeout: 2_000 }).toBe(2)
+  const [first, narrowed] = await sizes()
+  expect(narrowed).toBeLessThan(first)
+  await page.evaluate(() => clearInterval(window.__busy))
+})
+
+test("gives a card's title room to read, at the default window and on a wider screen", async ({
+  page,
+}) => {
+  const data = model()
+  const zeus = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
+  data.boards[1].lanes.push({
+    participant: session(20, zeus.participant, 'amber-pine'),
+    tasks: [task(21, 'Write the lexer', 'working', 'chief', 'zeus-amber-pine', 3)],
+    activity: { state: 'working' },
+    pane: { id: 'p1-zeus-amber-pine', generation: 9 },
+  })
+  await open(page, data)
+  const titles = () =>
+    page
+      .locator('button.card .card-title')
+      .evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().width)))
+  for (const width of [880, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect
+      .poll(async () => Math.min(...(await titles())), { message: `titles at ${width}px` })
+      .toBeGreaterThanOrEqual(60)
+  }
+  // At 1440 the board, beside the windows, still has every column without scrolling.
+  const board = page.getByRole('region', { name: 'Board' })
+  expect(await board.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0)
 })
 
 test('keeps every button of a lane inside its column, however narrow the board', async ({
@@ -1886,6 +2539,26 @@ test('switches the lead from its row: an installed harness on its default, or a 
   await expect(dialog).toBeHidden()
 })
 
+test('opens Switch lead letting the lead finish its turn, whatever was picked last time', async ({
+  page,
+}) => {
+  await open(page)
+  const switchLead = page.getByRole('button', {
+    name: 'Switch the lead to another harness or model',
+  })
+  const dialog = page.getByRole('dialog', { name: 'Switch the lead' })
+  await switchLead.click()
+  await dialog.getByLabel('Switch now, cutting its turn off').check()
+  await dialog.getByLabel('First ask the lead to write down where things stand').check()
+  await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await switchLead.click()
+  await expect(dialog.getByLabel('Let it finish its turn, then switch')).toBeChecked()
+  await expect(
+    dialog.getByLabel('First ask the lead to write down where things stand'),
+  ).not.toBeChecked()
+})
+
 test("the lead's row says when a switch waits for its turn", async ({ page }) => {
   const data = model()
   data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').switching = {
@@ -1896,4 +2569,149 @@ test("the lead's row says when a switch waits for its turn", async ({ page }) =>
   await expect(page.locator('.row-status[data-state="switching"]')).toHaveText(
     'Switching the lead to Codex after this turn',
   )
+})
+
+test('opens a task only over its own project, and every redraw after still draws', async ({
+  page,
+}) => {
+  const data = twoOpen()
+  data.tasks['1:4'] = { ...task(4, 'Add the tests', 'queued', 'chief', 'zeus', 1), messages: [] }
+  await open(page, data)
+  // harbour's T-4 is asked for and is slow to come; the human chooses foundry meanwhile.
+  await page.evaluate(() => {
+    window.__delay['task.get'] = 300
+    window.__delay['task.transcript'] = 300
+  })
+  await page.locator('button.card[data-task="4"]').click()
+  await chooseProject(page, 'foundry')
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await page.waitForTimeout(500)
+  await expect(page.locator('#task-drawer')).toBeHidden()
+  // The next change still draws, and nothing was refused on the way.
+  await page.evaluate(() => {
+    const [, chief] = window.__model.boards[2].lanes
+    window.__model.boards[2].lanes.push({
+      participant: { ...chief.participant, id: 11, handle: 'ares', role: 'worker' },
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    })
+    window.__listeners.get('state-changed')()
+  })
+  await expect(page.locator('tr[data-handle="ares"]')).toHaveCount(1)
+  await expect(page.locator('#status')).toHaveText('')
+})
+
+test('closes a drawer whose task is gone, and still draws the board', async ({ page }) => {
+  const data = model()
+  data.tasks['1:4'] = { ...task(4, 'Add the tests', 'queued', 'chief', 'zeus', 1), messages: [] }
+  await open(page, data)
+  await page.locator('button.card[data-task="4"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-4' })
+  await expect(drawer).toBeVisible()
+  await page.evaluate(() => {
+    delete window.__model.tasks['1:4']
+    const zeus = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+    zeus.activity = { state: 'idle' }
+    window.__listeners.get('state-changed')()
+  })
+  await expect(page.locator('tr[data-handle="zeus"]').getByTestId('lamp')).toHaveAttribute(
+    'data-state',
+    'idle',
+  )
+  await expect(drawer).toBeHidden()
+  await expect(page.locator('#status')).toHaveText('no task T-4 in this project')
+})
+
+test("acts on the project a control was drawn for, while another one's board is on its way", async ({
+  page,
+}) => {
+  const data = twoOpen()
+  const zeus = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
+  data.boards[1].lanes.push({
+    participant: session(20, zeus.participant, 'amber-pine'),
+    tasks: [task(21, 'Write the lexer', 'done', 'chief', 'zeus-amber-pine', 3)],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  await page.evaluate(() => {
+    window.__delay['board.get'] = 400
+  })
+  await chooseProject(page, 'foundry')
+  // harbour's board is still the one shown: what is done on it is done in harbour.
+  await page.getByRole('button', { name: "Open @zeus · amber-pine's terminal" }).click()
+  await expect
+    .poll(() => calls(page, 'session.open'))
+    .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
+})
+
+test('switches the lead only of the project it was asked for', async ({ page }) => {
+  await open(page, twoOpen())
+  // The agents come slowly; the human chooses foundry before the dialog is up.
+  await page.evaluate(() => {
+    window.__delay['agents.list'] = 300
+  })
+  await page.getByRole('button', { name: 'Switch the lead to another harness or model' }).click()
+  await chooseProject(page, 'foundry')
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await page.waitForTimeout(500)
+  await expect(page.getByRole('dialog', { name: 'Switch the lead' })).toBeHidden()
+  // Asked for again on foundry's own row, it switches foundry's lead.
+  await page.evaluate(() => {
+    window.__delay = {}
+  })
+  await page.getByRole('button', { name: 'Switch the lead to another harness or model' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Switch the lead' })
+  await dialog.getByLabel('The lead runs on').selectOption('harness:codex')
+  await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'chief.switch'))
+    .toEqual([{ project: 2, harness: 'codex', when: 'turn', note: false }])
+})
+
+test('says the daemon is down while it is, why, and what comes next, and reads everything again once it is back', async ({
+  page,
+}) => {
+  await open(page)
+  // The app gives the core's state when the output is subscribed to: the page listens first.
+  const order = await page.evaluate(() =>
+    window.__calls.map(([command, args]) => (command === 'listen' ? args.name : command)),
+  )
+  expect(order).toContain('core-status')
+  expect(order.indexOf('core-status')).toBeLessThan(order.indexOf('subscribe_output'))
+  const banner = page.getByRole('alert')
+  await expect(banner).toBeHidden()
+  const coreStatus = (payload) =>
+    page.evaluate(
+      (payload) => window.__listeners.get('core-status')({ event: 'core-status', payload }),
+      payload,
+    )
+  await page.evaluate(() => {
+    window.__down = 'the Node bridge is not running'
+  })
+  await coreStatus({ available: false, cause: 'the daemon stopped (exit code 1)', retrying: true })
+  await expect(banner).toHaveText(
+    'The daemon is not running. The daemon stopped (exit code 1). Starting it again…',
+  )
+  // What the human does meanwhile is refused with why, not with a code.
+  await page.getByRole('button', { name: 'Close harbour' }).click()
+  await expect(page.locator('#status')).toHaveText('the Node bridge is not running')
+  await coreStatus({ available: false, cause: 'it stopped again.', retrying: false })
+  await expect(banner).toHaveText(
+    'The daemon is not running. It stopped again. Quit ConsensFlow and open it again.',
+  )
+  // Back: the banner goes, and the agents and the board are read again.
+  await page.evaluate(() => {
+    window.__down = null
+  })
+  const [agents, boards] = [
+    (await calls(page, 'agents.list')).length,
+    (await calls(page, 'board.get')).length,
+  ]
+  await coreStatus({ available: true, cause: null, retrying: false })
+  await expect(banner).toBeHidden()
+  await expect.poll(async () => (await calls(page, 'agents.list')).length).toBeGreaterThan(agents)
+  await expect.poll(async () => (await calls(page, 'board.get')).length).toBeGreaterThan(boards)
+  await expect(page.locator('tr[data-handle="zeus"]')).toHaveCount(1)
 })

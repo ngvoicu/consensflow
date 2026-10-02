@@ -15,7 +15,6 @@ const SETTLE_MS = 200
  * @typedef {object} Emulator
  * @property {(bytes: Uint8Array) => Promise<void>} write
  * @property {(callback: (data: string) => void) => {dispose: () => void}} onData
- * @property {(cols: number, rows: number) => void} resize
  * @property {() => void} dispose
  */
 
@@ -61,6 +60,8 @@ export class XtermEmulator {
     /** Whether the terminal has taken its host's size once. */
     this.sized = false
     this.settling = null
+    /** The size the settle waits to take, "colsxrows". */
+    this.pending = null
     this.resizeObserver = new ResizeObserver(() => this.fit())
     this.resizeObserver.observe(host)
   }
@@ -78,25 +79,30 @@ export class XtermEmulator {
     return { dispose: () => this.humanListeners.delete(callback) }
   }
 
-  resize(cols, rows) {
-    if (Number.isInteger(cols) && Number.isInteger(rows) && cols > 0 && rows > 0) {
-      this.terminal.resize(cols, rows)
-    }
-  }
-
   /** Take the host's size: the first at once, a later one once it holds still. */
   fit() {
     if (this.host.clientWidth < 2 || this.host.clientHeight < 2) return
-    clearTimeout(this.settling)
     if (!this.sized) {
       this.#fitNow()
       return
     }
+    const size = this.fitAddon.proposeDimensions()
+    if (!Number.isInteger(size?.cols) || !Number.isInteger(size?.rows)) return
+    // Every redraw asks again: the size already waited for keeps its wait,
+    // so redraws faster than the settle cannot hold a resize off for good.
+    const target = `${size.cols}x${size.rows}`
+    if (target === this.pending) return
+    clearTimeout(this.settling)
+    this.pending = null
+    // The size it has already: nothing to take.
+    if (size.cols === this.terminal.cols && size.rows === this.terminal.rows) return
+    this.pending = target
     this.settling = setTimeout(() => this.#fitNow(), SETTLE_MS)
   }
 
   #fitNow() {
     this.settling = null
+    this.pending = null
     if (this.host.clientWidth < 2 || this.host.clientHeight < 2) return
     try {
       this.fitAddon.fit()
@@ -161,20 +167,9 @@ export class EmulatorRegistry {
     this.emulators.delete(key)
   }
 
-  reconcile(liveKeys) {
-    for (const key of this.emulators.keys()) {
-      if (liveKeys.has(key)) continue
-      this.retire(key)
-    }
-  }
-
   fit(id, generation) {
     const emulator = this.get(id, generation)
     if (emulator === null) return
     if (typeof emulator.fit === 'function') requestAnimationFrame(() => emulator.fit())
-  }
-
-  dispose() {
-    this.reconcile(new Set())
   }
 }

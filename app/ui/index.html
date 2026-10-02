@@ -49,8 +49,8 @@
       height: 100dvh;
       display: grid;
       grid-template-columns: 224px minmax(0, 1fr);
-      grid-template-rows: 52px minmax(0, 1fr);
-      grid-template-areas: "bar bar" "side main";
+      grid-template-rows: 52px auto minmax(0, 1fr);
+      grid-template-areas: "bar bar" "down down" "side main";
     }
     /* Either side panel folds to a rail with its icon; the board takes the room. */
     .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -127,6 +127,18 @@
     }
     .spacer { flex: 1; }
     #inbox-button[data-waiting="true"] { border-color: var(--amber); color: var(--amber); }
+
+    /* The daemon down: a line under the command bar, there until it is back. */
+    .core-down {
+      grid-area: down;
+      margin: 0;
+      padding: 10px 16px;
+      border-bottom: 1px solid rgba(255, 120, 104, .45);
+      border-left: 4px solid var(--buoy);
+      background: rgba(255, 120, 104, .1);
+      font-size: 13px;
+    }
+    .core-down strong { color: var(--buoy); }
 
     /* Projects. */
     .sidebar {
@@ -266,7 +278,7 @@
     .suspended .primary-button { margin-left: auto; }
     .main[data-suspended="true"] .foryou,
     .main[data-suspended="true"] .kanban,
-    .main[data-suspended="true"] .dock { opacity: .45; pointer-events: none; }
+    .main[data-suspended="true"] .dock { opacity: .45; }
     .foryou {
       border: 1px solid rgba(231, 185, 104, .32);
       border-radius: 10px;
@@ -286,12 +298,13 @@
     .bay-empty { color: var(--muted); font-size: 12px; padding: 2px 2px 0; list-style: none; }
 
     /* The kanban: a row per participant, a column per state. A board too
-       narrow for its columns scrolls sideways rather than crush them. */
+       narrow for its columns scrolls sideways rather than crush them: the
+       staff column, and each state's room for a card's title. */
     .kanban {
       border-collapse: separate;
       border-spacing: 0;
       width: 100%;
-      min-width: 680px;
+      min-width: calc(176px + 6 * 96px);
       table-layout: fixed;
     }
     .kanban thead th {
@@ -360,8 +373,10 @@
     }
     @keyframes lamp-blink { 50% { border-color: transparent; } }
 
-    /* A card: the number block in the colour of its state, the result on it when done. */
-    .cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+    /* A card: the number block in the colour of its state, the result on it
+       when done. The list is what a card measures itself against: a cell of
+       the table cannot be. */
+    .cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; container-type: inline-size; }
     .card {
       --state: var(--slate);
       --state-ink: var(--foam);
@@ -400,8 +415,8 @@
       -webkit-line-clamp: 3;
       overflow: hidden;
     }
-    .card-route { grid-area: route; font: 11px var(--mono); color: var(--muted); }
-    .card-state, .card-age { display: none; }
+    .card-route { grid-area: route; font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+    .card-state { display: none; }
     .card-result {
       grid-area: result;
       padding-bottom: 6px;
@@ -421,21 +436,24 @@
     .card[data-state="failed"] { --state: var(--buoy); --state-ink: var(--ink); }
     .card[data-state="accepted"] { --state: var(--seafoam-dim); }
     .card[data-state="cancelled"] { opacity: .6; }
+    /* A column too narrow for the number beside the title: the number heads
+       the card, and the title has the card's whole width. */
+    @container (max-width: 150px) {
+      .card { grid-template-columns: minmax(0, 1fr); grid-template-areas: "number" "title" "route" "result"; padding: 0; }
+      .card-number { padding: 3px 6px; }
+      .card-title, .card-route, .card-result { padding-left: 6px; padding-right: 6px; }
+      .card-title { padding-top: 4px; -webkit-line-clamp: 4; }
+    }
 
     /* A message waiting for the human: a strip with what they may do with it. */
     .strips { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
     .strip {
       --state: var(--slate);
       --state-ink: var(--foam);
-      width: 100%;
       min-height: 38px;
-      display: grid;
-      align-items: stretch;
-      padding: 0;
       background: var(--strip);
       border: 1px solid var(--line-soft);
       border-radius: 5px;
-      text-align: left;
       overflow: hidden;
     }
     .strip-line > span {
@@ -471,7 +489,7 @@
     .strip-age { white-space: nowrap; }
     .strip-age { justify-content: flex-end; }
 
-    .strip-message { display: block; cursor: default; }
+    .strip-message { cursor: default; }
     .strip-line {
       display: grid;
       grid-template-columns: 66px minmax(0, 1fr) fit-content(30%) 70px;
@@ -484,13 +502,6 @@
     .strip[data-overdue="true"] .strip-route { color: var(--amber); }
     .strip[data-gated="true"] .strip-route { color: var(--seafoam); }
     .strip[data-gated="true"] { border-left: 3px solid var(--seafoam-dim); }
-    .backlog {
-      background: var(--deep);
-      border: 1px dashed var(--slate);
-      border-radius: 10px;
-      padding: 10px 12px 12px;
-    }
-    .backlog .bay-name { color: var(--muted); }
 
     /* One task and its thread. */
     .drawer {
@@ -702,12 +713,11 @@
       .dock { border-left: 0; border-top: 1px solid var(--line-soft); }
       .shell {
         grid-template-columns: 1fr;
-        grid-template-rows: auto auto minmax(0, 1fr);
-        grid-template-areas: "bar" "side" "main";
+        grid-template-rows: auto auto auto minmax(0, 1fr);
+        grid-template-areas: "bar" "down" "side" "main";
       }
       .command-bar { flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
       .sidebar { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; }
-      .strip { grid-template-columns: 58px minmax(0, 1fr) 76px; }
       .strip-route, .strip-age, .strip-line > .strip-route { display: none !important; }
       .strip-line { grid-template-columns: 58px minmax(0, 1fr) 60px; }
       .strip-actions { padding-left: 12px; }
@@ -734,6 +744,7 @@
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
       </button>
     </header>
+    <p class="core-down" id="core-down" role="alert" hidden></p>
     <nav class="sidebar" aria-label="Projects">
       <div class="panel-head">
         <h2 class="sidebar-title">Projects</h2>
@@ -769,7 +780,7 @@
   <dialog id="delete-dialog" class="settings" aria-labelledby="delete-title">
     <form class="dialog-form" method="dialog">
       <h2 id="delete-title">Delete this project?</h2>
-      <p class="dialog-help" id="delete-help">Its board, staff, sessions, every message and every file ConsensFlow kept for its windows go for good; the trace keeps one line saying it was deleted. This cannot be undone.</p>
+      <p class="dialog-help">Its board, staff, sessions, every message and every file ConsensFlow kept for its windows go for good; the trace keeps one line saying it was deleted. This cannot be undone.</p>
       <div class="dialog-actions">
         <button class="quiet-button" type="submit" value="keep">Keep</button>
         <button class="danger-button" type="button" id="delete-confirm">Delete for good</button>

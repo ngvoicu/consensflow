@@ -60,7 +60,7 @@ const ACTIVITY_LABEL = {
   unknown: 'Unknown',
   out: 'Out of quota',
 }
-/** The work tiers, in the order the composer offers them. */
+/** How a message's kind reads. */
 const KIND_LABEL = {
   task: 'Task',
   result: 'Result',
@@ -74,6 +74,59 @@ export function element(tag, className, text) {
   if (className) node.className = className
   if (text !== undefined && text !== null) node.textContent = text
   return node
+}
+
+/**
+ * Draws `nodes` into `parent`, leaving whatever comes out the same where it
+ * is: replacing it would take the keyboard from it, and lose a click whose
+ * press came before the redraw and its release after. A changed element is
+ * replaced whole, unless its own markup is the same and it holds only
+ * elements: then it is drawn the same way inside. A changed button is
+ * always replaced whole, its handler with it; a kept one acts on what its
+ * own markup shows, or looks up the rest when it is clicked. If the element
+ * that had the keyboard went all the same, the one drawn in its place takes
+ * it back.
+ */
+export function redraw(parent, nodes) {
+  const focused = parent.contains(document.activeElement) ? document.activeElement : null
+  const key = focused === null ? null : focusKey(focused, parent)
+  patch(parent, nodes)
+  if (focused === null || focused.isConnected) return
+  const again = [...parent.querySelectorAll('button, summary')].find(
+    (node) => focusKey(node, parent) === key,
+  )
+  again?.focus({ preventScroll: true })
+}
+
+function patch(parent, nodes) {
+  for (const [at, node] of nodes.entries()) {
+    const shown = parent.children[at]
+    if (shown === undefined) parent.append(node)
+    else if (shown.isEqualNode(node)) continue
+    else if (opens(shown, node)) patch(shown, [...node.children])
+    else shown.replaceWith(node)
+  }
+  while (parent.children.length > nodes.length) parent.lastElementChild.remove()
+}
+
+const opens = (shown, node) =>
+  shown.tagName === node.tagName &&
+  shown.tagName !== 'BUTTON' &&
+  shown.attributes.length === node.attributes.length &&
+  [...shown.attributes].every(({ name, value }) => node.getAttribute(name) === value) &&
+  [shown, node].every((element) => element.childNodes.length === element.children.length)
+
+/**
+ * What tells an element from the others across redraws: a card its task,
+ * wherever it moved, any other control its label; and what it sits in.
+ */
+function focusKey(node, root) {
+  const path = [node.dataset.task ?? node.getAttribute('aria-label') ?? node.textContent]
+  for (let at = node; at !== root; at = at.parentElement) {
+    const { task, message, handle, role, project } = at.dataset
+    path.push([at.tagName, task, message, handle, role, project].join(':'))
+  }
+  return path.join('/')
 }
 
 function button(text, className, action, label) {
@@ -101,7 +154,6 @@ export function age(iso, now = Date.now()) {
   return `${Math.round(hours / 24)}d`
 }
 
-/** The human and the chief first, then each member with its sessions right under it. */
 /** The role a member's task is for: its pool's. */
 const roleOf = (task, roles) => task.pool ?? roles[0]
 
@@ -143,6 +195,7 @@ export function boardRows(lanes) {
   return rows
 }
 
+/** The human and the chief first, then each member with its sessions right under it. */
 export function laneOrder(lanes) {
   const rank = ({ participant }) => [
     participant.role === 'chief' ? 0 : 1,
@@ -162,7 +215,7 @@ const clock = (iso) =>
 const outOfQuota = (participant, now) =>
   participant.outUntil !== null && Date.parse(participant.outUntil) > now
 /** "@zeus · amber-pine" for a session; the member's own name otherwise. */
-const laneName = (participant) =>
+export const laneName = (participant) =>
   participant.member
     ? `@${participant.member} · ${participant.session}`
     : ({ human: 'You', chief: 'Chief of Staff' }[participant.handle] ?? `@${participant.handle}`)
@@ -206,7 +259,8 @@ const resting = (participant, activity) =>
   participant.member === null &&
   (activity?.state ?? 'closed') === 'closed'
 
-function lamp(activity) {
+/** A participant's lamp: what its window is doing, at a glance. */
+export function lamp(activity) {
   const node = element('span', 'lamp')
   node.dataset.testid = 'lamp'
   node.dataset.state = activity?.state ?? 'closed'
@@ -214,25 +268,62 @@ function lamp(activity) {
   return node
 }
 
+/**
+ * Whether anything on a board acts: a closed project's board reads (its
+ * cards open, its messages and transcripts show) and has no control that
+ * would change it, for the mouse or the keyboard.
+ */
+const acts = (board) => board.project.state === 'open'
+
 export class BoardView {
   #root
   #actions
-  #drafts = new Map()
+  /** The board drawn last: a row's button kept across redraws acts on its lane as it is now. */
+  #board = null
 
   constructor(root, actions) {
     this.#root = root
     this.#actions = actions
   }
 
-  /** Redraw from the core's state, keeping an open composer and its text. */
+  /** Redraw from the core's state. */
   render({ board, inbox, agents = [], now = Date.now() }) {
-    this.#saveDrafts()
+    this.#board = board
     const models = new Map(agents.map((agent) => [agent.name, agent]))
-    this.#root.replaceChildren(this.#forYou(inbox, board, now), this.#kanban(board, models, now))
-    this.#restoreDrafts()
+    redraw(this.#root, [
+      ...(acts(board) ? [] : [this.#closed(board.project)]),
+      this.#forYou(inbox, board, now),
+      this.#kanban(board, models, now),
+    ])
   }
 
-  /** What waits for the human, and where a new task starts. */
+  /** `participant`'s lane on the board drawn last, which a kept button acts on. */
+  #lane(participant) {
+    return this.#board.lanes.find((lane) => lane.participant.handle === participant.handle)
+  }
+
+  /** A row's action, on its participant as the board drawn last has it. */
+  #onLane(action, participant) {
+    return () => action(this.#lane(participant).participant)
+  }
+
+  /** What a closed project shows above its board: why it is still, and the one way on. */
+  #closed(project) {
+    const banner = element('section', 'suspended')
+    banner.setAttribute('role', 'status')
+    banner.append(
+      element('strong', null, `${project.name} is closed.`),
+      element(
+        'span',
+        null,
+        ' Its windows are gone, its open work went back to the backlog, and nothing is delivered until you resume it.',
+      ),
+      button('Resume project', 'primary-button', () => this.#actions.onResume(this.#board.project)),
+    )
+    return banner
+  }
+
+  /** What waits for the human. */
   #forYou(inbox, board, now) {
     // What waits for the human's approval, then the questions a coordinator
     // has left unanswered too long.
@@ -264,7 +355,7 @@ export class BoardView {
     section.append(head)
     const strips = element('ol', 'strips')
     strips.setAttribute('aria-label', 'Waiting for you')
-    for (const message of waiting) strips.append(this.#messageStrip(message, now))
+    for (const message of waiting) strips.append(this.#messageStrip(message, board, now))
     if (waiting.length === 0) {
       strips.append(
         element(
@@ -280,13 +371,13 @@ export class BoardView {
     if (notes.length > 0) {
       const list = element('ol', 'strips')
       list.setAttribute('aria-label', 'Notes for you')
-      for (const message of notes) list.append(this.#messageStrip(message, now))
+      for (const message of notes) list.append(this.#messageStrip(message, board, now))
       section.append(element('h3', 'foryou-sub', 'Notes from your agents'), list)
     }
     return section
   }
 
-  #messageStrip(message, now) {
+  #messageStrip(message, board, now) {
     const item = element('li', 'strip strip-message')
     item.dataset.kind = message.kind
     item.dataset.message = String(message.id)
@@ -308,28 +399,25 @@ export class BoardView {
     if (message.overdue) item.dataset.overdue = 'true'
     if (gated) item.dataset.gated = 'true'
     item.append(line)
-    if (gated) {
-      item.append(this.#gateActions(message))
-    } else {
-      const actions = element('div', 'strip-actions')
-      if (message.taskNumber) {
-        actions.append(
-          button('Open task', 'quiet-button', () => this.#actions.onOpenTask(message.taskNumber)),
-        )
-      }
-      // An unanswered question of the chief's was never in the human's inbox.
-      if (!message.overdue) {
-        actions.append(
-          button(
-            'Mark read',
-            'quiet-button',
-            () => this.#actions.onRead(message),
-            `Mark m-${message.id} read`,
-          ),
-        )
-      }
-      item.append(actions)
+    const actions = element('div', 'strip-actions')
+    if (gated && acts(board)) actions.append(...this.#gateActions(message))
+    if (message.taskNumber) {
+      actions.append(
+        button('Open task', 'quiet-button', () => this.#actions.onOpenTask(message.taskNumber)),
+      )
     }
+    // An unanswered question of the chief's was never in the human's inbox.
+    if (!gated && !message.overdue && acts(board)) {
+      actions.append(
+        button(
+          'Mark read',
+          'quiet-button',
+          () => this.#actions.onRead(message),
+          `Mark m-${message.id} read`,
+        ),
+      )
+    }
+    if (actions.childElementCount > 0) item.append(actions)
     return item
   }
 
@@ -340,28 +428,22 @@ export class BoardView {
    * decides and answers in its terminal.
    */
   #gateActions(message) {
-    const actions = element('div', 'strip-actions')
-    actions.append(
+    const actions = [
       button(
         'Approve',
         'primary-button',
         () => this.#actions.onApprove(message),
         `Approve m-${message.id} for ${who(message.recipient)}`,
       ),
-    )
+    ]
     if (message.kind === 'task' || message.kind === 'answer') {
-      actions.append(
+      actions.push(
         button(
           'Decline',
           'quiet-button',
           () => this.#actions.onDecline(message),
           `Decline m-${message.id}`,
         ),
-      )
-    }
-    if (message.taskNumber) {
-      actions.append(
-        button('Open task', 'quiet-button', () => this.#actions.onOpenTask(message.taskNumber)),
       )
     }
     return actions
@@ -402,7 +484,7 @@ export class BoardView {
   }
 
   #row(lane, board, agent, now) {
-    const { participant, activity, pane } = lane
+    const { participant } = lane
     const row = element('tr')
     row.dataset.handle = participant.handle
     row.dataset.role = participant.role
@@ -419,12 +501,11 @@ export class BoardView {
       const list = element('ol', 'cards')
       for (const task of mine) {
         if (columnOf(task) !== state) continue
-        list.append(this.#card(task, now))
+        list.append(this.#card(task))
       }
       if (list.childElementCount > 0) cell.append(list)
       row.append(cell)
     }
-    if (pane === null && !resting(participant, activity)) row.dataset.window = 'none'
     return row
   }
 
@@ -482,55 +563,56 @@ export class BoardView {
     // row heads its sessions and has no terminal of its own, and the chief's
     // opens and closes with the project. An open terminal is in the dock; a
     // closed one opens again on its own conversation, and its copy is on its
-    // last task's card. The session is deleted from here too.
+    // last task's card. The session is deleted from here too. A closed
+    // project's rows keep only the copy.
     const session = participant.member !== null
-    const latest = lane.tasks.at(-1)
-    if (session && pane === null) {
+    const acting = acts(board)
+    if (session && pane === null && acting) {
       tools.append(
         button(
           'Open terminal',
           'quiet-button',
-          () => this.#actions.onOpenTerminal(participant),
+          this.#onLane(this.#actions.onOpenTerminal, participant),
           `Open ${laneName(participant)}'s terminal`,
         ),
       )
-      if (latest !== undefined) {
-        tools.append(
-          button(
-            'Transcript',
-            'quiet-button',
-            () => this.#actions.onOpenTask(latest.number),
-            `What ${laneName(participant)}'s terminal wrote`,
-          ),
-        )
-      }
     }
-    if (session && pane !== null) {
+    if (session && pane === null && lane.tasks.length > 0) {
+      tools.append(
+        button(
+          'Transcript',
+          'quiet-button',
+          () => this.#actions.onOpenTask(this.#lane(participant).tasks.at(-1).number),
+          `What ${laneName(participant)}'s terminal wrote`,
+        ),
+      )
+    }
+    if (session && pane !== null && acting) {
       tools.append(
         button(
           'Close terminal',
           'quiet-button',
-          () => this.#actions.onCloseTerminal(participant),
+          this.#onLane(this.#actions.onCloseTerminal, participant),
           `Close ${laneName(participant)}'s terminal`,
         ),
       )
     }
-    if (coordinator) {
+    if (coordinator && acting) {
       tools.append(
         button(
           'Switch lead',
           'quiet-button',
-          () => this.#actions.onSwitchLead(participant),
+          this.#onLane(this.#actions.onSwitchLead, participant),
           'Switch the lead to another harness or model',
         ),
       )
     }
-    if (session) {
+    if (session && acting) {
       tools.append(
         button(
           'Delete session',
           'danger-button',
-          () => this.#actions.onEndSession(participant),
+          this.#onLane(this.#actions.onEndSession, participant),
           `Delete ${laneName(participant)}'s session`,
         ),
       )
@@ -544,7 +626,7 @@ export class BoardView {
     return head
   }
 
-  #card(task, now) {
+  #card(task) {
     const item = element('li', 'card-item')
     const card = button('', 'card', () => this.#actions.onOpenTask(task.number))
     card.dataset.task = String(task.number)
@@ -558,27 +640,10 @@ export class BoardView {
       element('span', 'card-title', task.title),
       element('span', 'card-route', route(task)),
       element('span', 'card-state', STATE_LABEL[task.state]),
-      element('span', 'card-age', age(task.updatedAt, now)),
     )
     if (task.result) card.append(element('span', 'card-result', task.result))
     item.append(card)
     return item
-  }
-
-  /** What the human is writing in a text area survives a redraw. */
-  #saveDrafts() {
-    for (const field of this.#root.querySelectorAll('textarea')) {
-      const key = field.dataset.draft ?? field.getAttribute('aria-label')
-      if (field.value) this.#drafts.set(key, field.value)
-      else this.#drafts.delete(key)
-    }
-  }
-
-  #restoreDrafts() {
-    for (const field of this.#root.querySelectorAll('textarea')) {
-      const key = field.dataset.draft ?? field.getAttribute('aria-label')
-      if (this.#drafts.has(key)) field.value = this.#drafts.get(key)
-    }
   }
 }
 
@@ -599,17 +664,36 @@ const TRANSCRIPT_ROLE = {
 export class TaskDrawer {
   #root
   #actions
+  /** The task drawn, as it was read. */
+  #task = null
+  /** Its fold of what its window wrote, kept open or shut while the task is shown. */
+  #fold = null
 
   constructor(root, actions) {
     this.#root = root
     this.#actions = actions
   }
 
-  get open() {
-    return !this.#root.hidden
+  /** Whether `task` is the one drawn, unchanged since. */
+  shows(task) {
+    return JSON.stringify(task) === JSON.stringify(this.#task)
   }
 
-  show(task, { transcript = { items: [], total: 0 }, now = Date.now() } = {}) {
+  /** Whether `task` is the one drawn, as it was then or since. */
+  #drawn(task) {
+    return this.#task?.projectId === task.projectId && this.#task?.number === task.number
+  }
+
+  /**
+   * Draws `task`. `total` is how many items its window wrote: the fold reads
+   * them when it opens, and again when the task changed while it is open.
+   * `closed`: the task's project is closed, and its task reads with nothing
+   * to do on it. The same task drawn again keeps whatever did not change in
+   * place: its fold open or shut, and the drawer where it was scrolled.
+   */
+  show(task, { total, closed = false, now = Date.now() }) {
+    const same = this.#drawn(task)
+    const changed = !this.shows(task)
     const head = element('header', 'drawer-head')
     const title = element('h2', 'drawer-title')
     title.append(
@@ -625,15 +709,11 @@ export class TaskDrawer {
       'drawer-meta',
       `${who(task.requester)} asked ${task.assignee === null ? `for a ${task.tier} ${task.pool}` : who(task.assignee)} · ${STATE_LABEL[task.state]} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
-    meta.dataset.state = task.state
     const sections = [head, meta]
     const panel = (name, label, count) => {
-      const section = element(name === 'transcript' ? 'details' : 'section', 'drawer-section')
+      const section = element('section', 'drawer-section')
       section.dataset.section = name
-      const heading = element(name === 'transcript' ? 'summary' : 'h3', 'drawer-section-head')
-      heading.append(element('span', null, label))
-      if (count !== undefined) heading.append(element('span', 'drawer-count', count))
-      section.append(heading)
+      section.append(sectionHead('h3', label, count))
       return section
     }
     const brief = panel('brief', 'Brief')
@@ -677,71 +757,111 @@ export class TaskDrawer {
       block.append(thread)
       sections.push(block)
     }
-    if (transcript.items.length > 0) {
-      const block = panel(
-        'transcript',
-        'What the agent did',
-        `${transcript.total} item${transcript.total === 1 ? '' : 's'}`,
-      )
-      if (transcript.total > transcript.items.length) {
-        block.append(
-          element(
-            'p',
-            'transcript-more',
-            `The last ${transcript.items.length} of ${transcript.total} items.`,
-          ),
-        )
-      }
-      const list = element('ol', 'transcript')
-      list.setAttribute('aria-label', `What T-${task.number}'s window wrote`)
-      for (const item of transcript.items) {
-        const entry = element('li', 'transcript-item')
-        entry.dataset.role = item.role
-        entry.append(
-          element(
-            'div',
-            'transcript-head',
-            `${TRANSCRIPT_ROLE[item.role] ?? item.role}${item.complete ? '' : ' · still writing'}`,
-          ),
-          element('pre', 'transcript-body', item.text),
-        )
-        list.append(entry)
-      }
-      block.append(list)
-      sections.push(block)
+    // What its window wrote is read only when asked for, folded until then.
+    this.#fold = total > 0 ? ((same ? this.#fold : null) ?? this.#newFold()) : null
+    if (this.#fold !== null) {
+      redraw(this.#fold, [transcriptHead(total), ...[...this.#fold.children].slice(1)])
+      sections.push(this.#fold)
     }
-    // What the human may do: nothing that writes to the agent (that is done
-    // in its terminal), and no accepting (that is the chief's).
     const actions = element('div', 'drawer-actions')
+    if (!closed) actions.append(...this.#taskActions(task))
+    if (actions.childElementCount > 0) sections.push(actions)
+    this.#task = task
+    this.#root.setAttribute('aria-label', `Task T-${task.number}`)
+    this.#root.dataset.state = task.state
+    if (same) {
+      redraw(this.#root, sections)
+    } else {
+      this.#root.replaceChildren(...sections)
+      this.#root.scrollTop = 0
+    }
+    this.#root.hidden = false
+    if (same && changed && this.#fold?.open) this.#actions.onTranscript(task)
+  }
+
+  /** What the task's window wrote, read for its open fold. */
+  fill(task, { items, total }) {
+    if (!this.#drawn(task) || this.#fold === null) return
+    const list = element('ol', 'transcript')
+    list.setAttribute('aria-label', `What T-${task.number}'s window wrote`)
+    for (const item of items) {
+      const entry = element('li', 'transcript-item')
+      entry.dataset.role = item.role
+      entry.append(
+        element(
+          'div',
+          'transcript-head',
+          `${TRANSCRIPT_ROLE[item.role] ?? item.role}${item.complete ? '' : ' · still writing'}`,
+        ),
+        element('pre', 'transcript-body', item.text),
+      )
+      list.append(entry)
+    }
+    redraw(this.#fold, [
+      transcriptHead(total),
+      ...(total > items.length
+        ? [element('p', 'transcript-more', `The last ${items.length} of ${total} items.`)]
+        : []),
+      list,
+    ])
+  }
+
+  #newFold() {
+    const fold = element('details', 'drawer-section')
+    fold.dataset.section = 'transcript'
+    fold.addEventListener('toggle', () => {
+      if (fold.open) this.#actions.onTranscript(this.#task)
+    })
+    return fold
+  }
+
+  /**
+   * What the human may do with a task: nothing that writes to the agent
+   * (that is done in its terminal), and no accepting (that is the chief's).
+   */
+  #taskActions(task) {
+    // A button kept across redraws acts on the task as it was read last.
+    const on = (action) => () => action(this.#task)
+    const actions = []
     if (PAUSABLE.includes(task.state) && task.assignee !== 'chief') {
-      actions.append(button('Pause', 'quiet-button', () => this.#actions.onPause(task)))
+      actions.push(button('Pause', 'quiet-button', on(this.#actions.onPause)))
     }
     if (task.state === 'paused') {
-      actions.append(button('Resume', 'primary-button', () => this.#actions.onResume(task)))
+      actions.push(button('Resume', 'primary-button', on(this.#actions.onResume)))
     }
     // Taken from its member and back on the board for its tier; the chief's
     // own work and work given by name have no tier to go back to.
     if (REASSIGNABLE.includes(task.state) && task.pool !== null && task.assignee !== null) {
-      actions.append(
+      actions.push(
         button(
           'Reassign',
           'quiet-button',
-          () => this.#actions.onReassign(task),
+          on(this.#actions.onReassign),
           `Reassign T-${task.number} to another member of its tier`,
         ),
       )
     }
     if (ACTIVE.includes(task.state)) {
-      actions.append(button('Cancel task', 'danger-button', () => this.#actions.onCancel(task)))
+      actions.push(button('Cancel task', 'danger-button', on(this.#actions.onCancel)))
     }
-    this.#root.setAttribute('aria-label', `Task T-${task.number}`)
-    this.#root.dataset.state = task.state
-    this.#root.replaceChildren(...sections, ...(actions.childElementCount > 0 ? [actions] : []))
-    this.#root.hidden = false
+    return actions
   }
 
   hide() {
+    this.#task = null
+    this.#fold = null
     this.#root.hidden = true
     this.#root.replaceChildren()
   }
 }
+
+/** A drawer section's heading: what it is, and how many when that says something. */
+function sectionHead(tag, label, count) {
+  const heading = element(tag, 'drawer-section-head')
+  heading.append(element('span', null, label))
+  if (count !== undefined) heading.append(element('span', 'drawer-count', count))
+  return heading
+}
+
+const transcriptHead = (total) =>
+  sectionHead('summary', 'What the agent did', `${total} item${total === 1 ? '' : 's'}`)
