@@ -43,6 +43,9 @@ const OWN_INSTALLER = {
  * lives: the release feed to compare against, the words for the page, and the
  * command that brings it to the latest release the same way (null when the
  * method is not recognized, so the human updates it as they installed it).
+ * Exported for its tests: they read the layouts of machines they do not run
+ * on (Homebrew, npm, Claude's versioned links), which `check` would reach
+ * only through an executable really there.
  */
 export function releaseSource(id, executable, env) {
   let path = executable

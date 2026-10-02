@@ -12,14 +12,14 @@
  * a page that printed one could prove a delivery that never landed.
  */
 
-export const PAGE_BYTES = 8_000
-export const PAGE_LINES = 200
+const PAGE_BYTES = 8_000
+const PAGE_LINES = 200
 
 /** Room each page keeps for its own first and last lines. */
 const FRAME_BYTES = 600
 const FRAME_LINES = 6
 
-export const HARNESS_NAMES = {
+const HARNESS_NAMES = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
   opencode: 'OpenCode',

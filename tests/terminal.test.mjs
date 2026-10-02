@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
-import { installTerminalCommand, terminalCommandStatus, terminalRuntime } from '../src/terminal.js'
+import { installTerminalCommand, terminalRuntime } from '../src/terminal.js'
 import { tempEnv } from './helpers.mjs'
 
 /** A launcher is `cf` on POSIX and `cf.cmd` on Windows. */
@@ -15,7 +15,7 @@ describe('the app can put its own CLI on your PATH', () => {
   mkdirSync(bin, { recursive: true })
 
   it('reports nothing installed to begin with', () => {
-    assert.equal(terminalCommandStatus(t.env, { candidates: [bin] }).installed, false)
+    assert.equal(terminalRuntime(t.env, { candidates: [bin] }), null)
   })
 
   it('writes a launcher that runs this very copy', () => {
@@ -34,12 +34,12 @@ describe('the app can put its own CLI on your PATH', () => {
   })
 
   it('says where it went, and whether that place is on PATH', () => {
-    const status = terminalCommandStatus({ ...t.env, PATH: bin }, { candidates: [bin] })
+    const status = installTerminalCommand({ ...t.env, PATH: bin }, { candidates: [bin] })
     assert.equal(status.installed, true)
     assert.equal(status.path, join(bin, `consensflow${CMD}`))
     assert.equal(status.onPath, true)
 
-    const elsewhere = terminalCommandStatus({ ...t.env, PATH: '/nowhere' }, { candidates: [bin] })
+    const elsewhere = installTerminalCommand({ ...t.env, PATH: '/nowhere' }, { candidates: [bin] })
     assert.equal(elsewhere.onPath, false)
   })
 

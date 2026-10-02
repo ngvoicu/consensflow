@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { existsSync, readdirSync } from 'node:fs'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { createServer as createNetServer } from 'node:net'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { it } from 'node:test'
+import { fileURLToPath } from 'node:url'
 import WebSocket, { WebSocketServer } from 'ws'
 import * as codexSession from '../hosts/codex-session.mjs'
 import {
@@ -10,6 +15,7 @@ import {
   consensflowShellEnvironment,
   startBroker,
 } from '../hosts/codex-session.mjs'
+import { fakeNodeExecutable } from './helpers.mjs'
 
 const A = '01a09094-938f-7fd1-a2d3-315cf92b4559'
 const B = '01a09094-a559-7db0-bf50-e2309856c3c0'
@@ -31,12 +37,13 @@ async function fixture(t, options = {}) {
       else if (message.id !== undefined) pending.push({ socket, message })
     })
   })
+  const native = `ws://127.0.0.1:${upstream.address().port}`
   const broker = await startBroker({
     ...options,
     port: 0,
     token: TOKEN,
     launchId: 'launch-1',
-    upstream: `ws://127.0.0.1:${upstream.address().port}`,
+    upstream: native,
   })
   const clients = []
   t.after(async () => {
@@ -93,7 +100,32 @@ async function fixture(t, options = {}) {
     entry.socket.send(JSON.stringify({ id: entry.message.id, ...(error ? { error } : { result }) }))
     return entry.message
   }
-  return { broker, requests, pending, sockets, wait, connect, read, deliver, respond }
+  return { broker, native, requests, pending, sockets, wait, connect, read, deliver, respond }
+}
+
+/**
+ * The TUI starts its main thread through the broker, and Codex answers it.
+ * The broker takes the thread before it passes the answer on, so the TUI
+ * holding the answer means the broker has it.
+ */
+async function startThread(f, tui, id, thread) {
+  const answered = new Promise((resolve) => {
+    const seen = (raw) => {
+      if (JSON.parse(raw).id !== id) return
+      tui.off('message', seen)
+      resolve()
+    }
+    tui.on('message', seen)
+  })
+  tui.send(
+    JSON.stringify({
+      id,
+      method: 'thread/start',
+      params: { ephemeral: false, threadSource: 'user' },
+    }),
+  )
+  await f.respond('thread/start', { thread })
+  await answered
 }
 
 it('follows successful main new/resume while ignoring title threads, child focus and picker connections', async (t) => {
@@ -286,6 +318,30 @@ it('restores a rejected switch, rejects invalid ingress, and reports a possible 
   await f.respond('thread/resume', null, { code: -1, message: 'not found' })
   assert.equal((await f.read()).sessionId, A)
   assert.equal((await fetch(`${f.broker.endpoint}/session`)).status, 401)
+  // A window's connection without the launch's token, or to another path, never opens.
+  const address = f.broker.endpoint.replace('http:', 'ws:')
+  for (const [url, headers] of [
+    [address, {}],
+    [`${address}/other`, { authorization: `Bearer ${TOKEN}` }],
+  ]) {
+    const stranger = new WebSocket(url, { headers })
+    const outcome = await new Promise((resolve) => {
+      stranger.on('open', () => resolve('opened'))
+      stranger.on('error', () => {})
+      stranger.on('close', () => resolve('turned away'))
+    })
+    stranger.terminate()
+    assert.equal(outcome, 'turned away', url)
+  }
+  const garbled = await fetch(`${f.broker.endpoint}/deliver`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+    body: '{"launchId":',
+  })
+  assert.deepEqual(
+    [garbled.status, await garbled.json()],
+    [400, { ok: false, admitted: false, bytesWritten: 0, error: 'invalid-record' }],
+  )
   assert.equal((await f.deliver(A, { launchId: 'foreign' })).error, 'invalid-record')
   assert.equal((await f.deliver(A, { expiresAt: Date.now() - 1 })).error, 'expired')
   const delivery = f.deliver(A)
@@ -295,6 +351,93 @@ it('restores a rejected switch, rejects invalid ingress, and reports a possible 
   tui.terminate()
   await new Promise((resolve) => setTimeout(resolve, 20))
   assert.equal((await f.read()).sessionId, null)
+})
+
+it("a turn the human starts in the window makes the next delivery wait in Codex's queue", async (t) => {
+  const f = await fixture(t)
+  const tui = await f.connect()
+  await startThread(f, tui, 1, { id: A, turns: [], status: { type: 'idle' } })
+  assert.equal((await f.read()).empty, true)
+  tui.send(JSON.stringify({ id: 2, method: 'turn/start', params: { threadId: A, input: [] } }))
+  await f.wait(() => f.pending.some((p) => p.message.id === 2))
+  assert.equal((await f.read()).empty, false)
+  const delivery = f.deliver(A)
+  const queued = await f.respond('thread/queue/add', { queuedMessage: { id: 'queue-1' } })
+  assert.equal(queued.params.input[0].text, 'complete\nworker result')
+  assert.deepEqual(await delivery, { ok: true, admitted: true })
+  assert.deepEqual(
+    f.requests.filter((r) => r.method === 'turn/start').map((r) => r.id),
+    [2],
+    'the only turn is the one the human started',
+  )
+})
+
+it('a delivery whose turn Codex refuses, a turn having just started, waits in the queue instead', async (t) => {
+  const f = await fixture(t)
+  const tui = await f.connect()
+  await startThread(f, tui, 1, { id: A, status: { type: 'idle' } })
+  const delivery = f.deliver(A)
+  await f.respond('turn/start', null, { code: -32600, message: 'a turn is already running' })
+  const queued = await f.respond('thread/queue/add', { queuedMessage: { id: 'queue-1' } })
+  assert.deepEqual(
+    [queued.params.threadId, queued.params.input[0].text],
+    [A, 'complete\nworker result'],
+  )
+  assert.deepEqual(await delivery, { ok: true, admitted: true })
+})
+
+it('a connection that is not speaking JSON is closed, and the thread it chose is forgotten', async (t) => {
+  const f = await fixture(t)
+  const tui = await f.connect()
+  await startThread(f, tui, 1, { id: A })
+  assert.equal((await f.read()).sessionId, A)
+  const closed = once(tui, 'close')
+  tui.send('not json')
+  await closed
+  assert.equal((await f.read()).sessionId, null)
+  // The same from Codex's end of a window's connection.
+  const next = await f.connect()
+  await startThread(f, next, 2, { id: B })
+  assert.equal((await f.read()).sessionId, B)
+  const gone = once(next, 'close')
+  f.sockets.at(-1).send('not json')
+  await gone
+  assert.equal((await f.read()).sessionId, null)
+  // And from Codex's end of the broker's own: nothing can be delivered then.
+  const window = await f.connect()
+  await startThread(f, window, 3, { id: A })
+  assert.equal((await f.read()).available, true)
+  const control = f.sockets[0]
+  control.send('not json')
+  await once(control, 'close')
+  assert.equal((await f.read()).available, false)
+  assert.equal((await f.deliver(A)).error, 'native-session-unavailable')
+})
+
+it('does not start on a Codex server that will not initialize, nor on a port already taken', async (t) => {
+  const refusing = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+  await once(refusing, 'listening')
+  t.after(() => new Promise((resolve) => refusing.close(resolve)))
+  refusing.on('connection', (socket) =>
+    socket.on('message', (raw) =>
+      socket.send(JSON.stringify({ id: JSON.parse(raw).id, error: { message: 'not ready' } })),
+    ),
+  )
+  const options = { port: 0, token: TOKEN, launchId: 'launch-1' }
+  await assert.rejects(
+    startBroker({ ...options, upstream: `ws://127.0.0.1:${refusing.address().port}` }),
+    /^Error: Codex native server did not initialize$/,
+  )
+  const f = await fixture(t)
+  const connections = f.sockets.length
+  await assert.rejects(
+    startBroker({ ...options, port: Number(new URL(f.broker.endpoint).port), upstream: f.native }),
+    { code: 'EADDRINUSE' },
+  )
+  // Neither leaves its own connection to Codex's server open.
+  await f.wait(
+    () => refusing.clients.size === 0 && f.sockets[connections]?.readyState === WebSocket.CLOSED,
+  )
 })
 
 it("sets ConsensFlow's own variables in Codex's shell policy, so a user policy that inherits only core ones keeps them", () => {
@@ -532,3 +675,292 @@ it("Codex's question goes on to the TUI when the board does not answer in time, 
   plain.sockets.at(-1).send(JSON.stringify(REQUEST_USER_INPUT))
   await plain.wait(() => shown.some((m) => m.id === 'ask-1'))
 })
+
+const SUPERVISOR = fileURLToPath(new URL('../hosts/codex-session.mjs', import.meta.url))
+const REPO = fileURLToPath(new URL('..', import.meta.url))
+
+/**
+ * A stand-in `codex` for the supervisor: given `app-server --listen unix://…`
+ * it is Codex's server on that socket, starting thread A when asked; given
+ * `--remote …` it is the TUI, which starts a thread through the broker, reads
+ * the broker's /session with its token, and exits 7 (or waits to be ended).
+ * Each run writes what it was given, and what it saw, to CF_TEST_CODEX_LOG.
+ * CF_TEST_CODEX_BACKEND says how the server goes: `fail` at once, `die` once
+ * a thread starts.
+ */
+function fakeCodex(root) {
+  return fakeNodeExecutable(
+    join(root, 'codex'),
+    `#!${process.execPath}
+import { appendFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import { createRequire } from 'node:module'
+const WebSocket = createRequire(${JSON.stringify(join(REPO, 'package.json'))})('ws')
+const args = process.argv.slice(2)
+const record = (entry) =>
+  appendFileSync(process.env.CF_TEST_CODEX_LOG, JSON.stringify({ pid: process.pid, ...entry }) + '\\n')
+const how = process.env.CF_TEST_CODEX_BACKEND
+if (args.includes('app-server')) {
+  record({ run: 'server', args, apiKey: process.env.OPENAI_API_KEY ?? null })
+  if (how === 'fail') {
+    process.stderr.write('not logged in\\n')
+    process.exitCode = 1
+  } else {
+    const server = createServer()
+    new WebSocket.WebSocketServer({ server }).on('connection', (socket) => {
+      socket.on('message', (raw) => {
+        const message = JSON.parse(raw)
+        if (message.id === undefined) return
+        const start = message.method === 'thread/start'
+        if (start) record({ run: 'server', started: message.params })
+        const result = start ? { thread: { id: ${JSON.stringify(A)}, turns: [], status: { type: 'idle' } } } : {}
+        socket.send(JSON.stringify({ id: message.id, result }), () => {
+          if (start && how === 'die') process.exit(0)
+        })
+      })
+    })
+    server.listen(args[args.indexOf('--listen') + 1].slice('unix://'.length))
+  }
+} else {
+  const [, remote, , tokenName] = args
+  const token = process.env[tokenName]
+  record({ run: 'tui', args, token, apiKey: process.env.OPENAI_API_KEY ?? null })
+  const socket = new WebSocket(remote, { headers: { authorization: 'Bearer ' + token } })
+  socket.on('error', () => {})
+  let last = 0
+  const call = (method, params) =>
+    new Promise((resolve) => {
+      const id = ++last
+      const answer = (raw) => {
+        if (JSON.parse(raw).id !== id) return
+        socket.off('message', answer)
+        resolve()
+      }
+      socket.on('message', answer)
+      socket.send(JSON.stringify({ id, method, params }))
+    })
+  socket.on('open', async () => {
+    await call('initialize', { clientInfo: { name: 'codex-tui', version: 'test' } })
+    await call('thread/start', { ephemeral: false, threadSource: 'user' })
+    const session = await fetch(remote.replace('ws:', 'http:') + '/session', {
+      headers: { authorization: 'Bearer ' + token },
+    })
+    record({ run: 'tui', session: await session.json() })
+    if (process.env.CF_TEST_CODEX_TUI !== 'wait') process.exit(7)
+  })
+}
+`,
+  )
+}
+
+async function freePort() {
+  const server = createNetServer()
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address()
+  await new Promise((resolve) => server.close(resolve))
+  return port
+}
+
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The supervisor as a Codex window runs it: `node codex-session.mjs <codex> <args>`,
+ * with the session bridge the channel configured, in a window's environment.
+ */
+async function supervised(t, args, extraEnv = {}, executable = fakeCodex) {
+  const root = await mkdtemp(join(tmpdir(), 'cf-cx-'))
+  let child = null
+  let exited = null
+  // A test that ends early closes the window as the app would: the
+  // supervisor ends Codex's processes, then their files go.
+  t.after(async () => {
+    if (child !== null && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM')
+      const stuck = setTimeout(() => child.kill('SIGKILL'), 5_000)
+      await exited
+      clearTimeout(stuck)
+    }
+    await rm(root, { recursive: true, force: true })
+  })
+  const codex = executable(root)
+  const port = await freePort()
+  const log = join(root, 'codex.jsonl')
+  const inherited = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.startsWith('CONSENSFLOW_')),
+  )
+  child = spawn(process.execPath, [SUPERVISOR, codex, ...args], {
+    env: {
+      ...inherited,
+      CONSENSFLOW_HOME: root,
+      CONSENSFLOW_URL: 'http://127.0.0.1:1',
+      CONSENSFLOW_TOKEN: 'window-token',
+      CF_CODEX_SESSION_BRIDGE: JSON.stringify({ launchId: 'launch-1', port, token: TOKEN }),
+      CF_TEST_CODEX_LOG: log,
+      OPENAI_API_KEY: 'sk-not-for-codex',
+      ...extraEnv,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  exited = once(child, 'exit')
+  let stderr = ''
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk
+  })
+  const runs = async () =>
+    (await readFile(log, 'utf8').catch(() => ''))
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+  const until = async (predicate) => {
+    for (let i = 0; i < 400; i++) {
+      const seen = await runs()
+      if (predicate(seen)) return seen
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    assert.fail(`the supervised Codex never got there: ${stderr}`)
+  }
+  return {
+    root,
+    port,
+    child,
+    runs,
+    until,
+    stderr: () => stderr,
+    exit: async () => {
+      const [code, signal] = await exited
+      return { code, signal }
+    },
+  }
+}
+
+const UNIX_ONLY = { skip: process.platform === 'win32' && 'Unix sockets only' }
+/** The private folder of the socket Codex's server was told to listen on. */
+const socketFolder = (server) =>
+  dirname(server.args[server.args.indexOf('--listen') + 1].slice('unix://'.length))
+
+it(
+  'opens Codex as its server on a private socket and its TUI through the broker, and leaves nothing behind',
+  UNIX_ONLY,
+  async (t) => {
+    const s = await supervised(t, [
+      '--model',
+      'native-model',
+      '--dangerously-bypass-approvals-and-sandbox',
+    ])
+    assert.deepEqual(await s.exit(), { code: 7, signal: null }, s.stderr())
+    const runs = await s.runs()
+    const serverRuns = runs.filter((entry) => entry.run === 'server')
+    const tuiRuns = runs.filter((entry) => entry.run === 'tui')
+    const socket = join(socketFolder(serverRuns[0]), 'native.sock')
+    assert.ok(socket.startsWith(join(s.root, 'tmp', 'codex-')), socket)
+    // The server gets the model and the bypass as configuration, and
+    // ConsensFlow's own variables set in its shell policy.
+    assert.deepEqual(serverRuns[0].args, [
+      '-c',
+      'model="native-model"',
+      '-c',
+      'approval_policy="never"',
+      '-c',
+      'sandbox_mode="danger-full-access"',
+      '-c',
+      `shell_environment_policy.set.CONSENSFLOW_HOME=${JSON.stringify(s.root)}`,
+      '-c',
+      'shell_environment_policy.set.CONSENSFLOW_TOKEN="window-token"',
+      '-c',
+      'shell_environment_policy.set.CONSENSFLOW_URL="http://127.0.0.1:1"',
+      'app-server',
+      '--listen',
+      `unix://${socket}`,
+    ])
+    // The TUI reaches the server only through the broker, its token in its
+    // environment and never on its command line.
+    assert.deepEqual(tuiRuns[0].args, [
+      '--remote',
+      `ws://127.0.0.1:${s.port}`,
+      '--remote-auth-token-env',
+      'CF_CODEX_TUI_TOKEN',
+      '--model',
+      'native-model',
+    ])
+    assert.equal(tuiRuns[0].token, TOKEN)
+    assert.deepEqual(
+      [serverRuns[0].apiKey, tuiRuns[0].apiKey],
+      [null, null],
+      'an OpenAI API key never reaches Codex',
+    )
+    // The fresh thread the TUI started is the broker's to deliver to, with the bypass.
+    assert.deepEqual(
+      [serverRuns[1].started.approvalPolicy, serverRuns[1].started.sandbox],
+      ['never', 'danger-full-access'],
+    )
+    assert.deepEqual(tuiRuns[1].session, {
+      launchId: 'launch-1',
+      sessionId: A,
+      revision: 1,
+      empty: true,
+      available: true,
+    })
+    assert.equal(alive(serverRuns[0].pid), false, 'the server went with the window')
+    assert.equal(existsSync(dirname(socket)), false, 'the socket folder went with the session')
+  },
+)
+
+it(
+  "says why Codex's server could not start, in the window, and leaves nothing behind",
+  UNIX_ONLY,
+  async (t) => {
+    const s = await supervised(t, [], { CF_TEST_CODEX_BACKEND: 'fail' })
+    assert.deepEqual(await s.exit(), { code: 1, signal: null })
+    assert.equal(
+      s.stderr(),
+      'ConsensFlow could not open Codex: Codex server could not start: not logged in\n\n',
+    )
+    const runs = await s.runs()
+    assert.deepEqual(
+      runs.map((entry) => entry.run),
+      ['server'],
+      'no TUI was opened',
+    )
+    assert.equal(existsSync(socketFolder(runs[0])), false)
+    // A Codex gone from where the launch found it fails the same way, in its own words.
+    const missing = await supervised(t, [], {}, (root) => join(root, 'gone', 'codex'))
+    assert.deepEqual(await missing.exit(), { code: 1, signal: null })
+    assert.equal(
+      missing.stderr(),
+      `ConsensFlow could not open Codex: Codex server could not start: spawn ${join(missing.root, 'gone', 'codex')} ENOENT\n`,
+    )
+    assert.deepEqual(readdirSync(join(missing.root, 'tmp')), [])
+  },
+)
+
+it('ends both Codex processes when its window is closed', {
+  skip: process.platform === 'win32' && 'Unix sockets only, and no SIGTERM on Windows',
+}, async (t) => {
+  const s = await supervised(t, [], { CF_TEST_CODEX_TUI: 'wait' })
+  const seen = await s.until((runs) => runs.some((entry) => entry.session !== undefined))
+  const server = seen.find((entry) => entry.run === 'server')
+  const tui = seen.find((entry) => entry.run === 'tui')
+  s.child.kill('SIGTERM')
+  assert.deepEqual(await s.exit(), { code: 0, signal: null }, s.stderr())
+  assert.deepEqual([alive(server.pid), alive(tui.pid)], [false, false])
+  assert.equal(existsSync(socketFolder(server)), false)
+})
+
+it(
+  "ends the TUI when Codex's server dies under it, so the window does not hang",
+  UNIX_ONLY,
+  async (t) => {
+    const s = await supervised(t, [], { CF_TEST_CODEX_BACKEND: 'die', CF_TEST_CODEX_TUI: 'wait' })
+    assert.equal((await s.exit()).code, 0, s.stderr())
+    const runs = await s.runs()
+    assert.equal(alive(runs.find((entry) => entry.run === 'tui').pid), false)
+    assert.equal(existsSync(socketFolder(runs.find((entry) => entry.run === 'server'))), false)
+  },
+)

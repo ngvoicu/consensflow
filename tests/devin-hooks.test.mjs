@@ -1,11 +1,23 @@
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 import { runHook, selectedSession } from '../hosts/devin-hooks.mjs'
 import { prepareDevinIntegration } from '../src/devin-install.js'
 import { roleConfiguration } from '../src/role-skills.js'
 import { tempEnv } from './helpers.mjs'
+
+const HOOK = fileURLToPath(new URL('../hosts/devin-hooks.mjs', import.meta.url))
+
+/** The line Devin's wire log gains when its window configures a conversation it opens. */
+const shows = (sessionId) =>
+  `${JSON.stringify({
+    sessionId,
+    update: { sessionUpdate: 'config_option_update', configOptions: [{ id: 'mode' }] },
+  })}\n`
 
 function fixture() {
   let selected = 'native-a'
@@ -64,18 +76,135 @@ test('selection uses complete native records and ignores an in-progress final wr
   t.after(f.cleanup)
   const file = path.join(f.env.CONSENSFLOW_HOME, 'wire.jsonl')
   await fs.mkdir(path.dirname(file), { recursive: true })
-  const select = (sessionId) =>
-    JSON.stringify({
-      sessionId,
-      update: {
-        sessionUpdate: 'config_option_update',
-        configOptions: [{ id: 'mode' }],
-      },
-    }) + '\n'
-  await fs.writeFile(file, select('native-a') + select('native-b') + '{"sessionId":')
+  await fs.writeFile(file, `${shows('native-a')}${shows('native-b')}{"sessionId":`)
   assert.equal(await selectedSession(file), 'native-b')
-  await fs.writeFile(file, select('native-a') + '{invalid}\n' + select('native-b'))
+  await fs.writeFile(file, `${shows('native-a')}{invalid}\n${shows('native-b')}`)
   await assert.rejects(selectedSession(file), /JSON|Unexpected|Expected/)
+})
+
+/**
+ * One launch's files as Devin's hook command finds them in its environment:
+ * the wire log naming the conversation the window shows, the hook log, and
+ * the role text.
+ */
+async function launchFiles(t) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-devin-hook-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const files = {
+    wire: path.join(root, 'wire.jsonl'),
+    log: path.join(root, 'hooks.jsonl'),
+    role: path.join(root, 'SKILL.md'),
+  }
+  await fs.writeFile(files.wire, shows('native-a'))
+  await fs.writeFile(files.role, '# ConsensFlow worker\n')
+  const env = {
+    CHISEL_PURE_ACP_WIRE_LOG: files.wire,
+    CF_DEVIN_EVENTS: files.log,
+    CF_DEVIN_ROLE_FILE: files.role,
+  }
+  const logged = async () =>
+    (await fs.readFile(files.log, 'utf8').catch(() => ''))
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+  return { ...files, env, logged }
+}
+
+/** Devin running the hook command for one event: the event on stdin, the launch's files in the environment. */
+function runAsDevin(input, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [HOOK], {
+      env: { ...process.env, ...env },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    let stdout = ''
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk
+    })
+    child.on('error', reject)
+    child.on('close', (code) => resolve({ code, stdout }))
+    // A hook that stops reading early closes its input: that is its answer, not the test's error.
+    child.stdin.on('error', () => {})
+    child.stdin.end(typeof input === 'string' ? input : JSON.stringify(input))
+  })
+}
+
+test("Devin's hook gives a session of the shown conversation its role text and logs its turns", async (t) => {
+  const launch = await launchFiles(t)
+  const event = (name, extra = {}) => ({ hook_event_name: name, session_id: 'native-a', ...extra })
+  const started = await runAsDevin(event('SessionStart', { source: 'startup' }), launch.env)
+  assert.deepEqual(
+    [started.code, JSON.parse(started.stdout)],
+    [
+      0,
+      {
+        hookSpecificOutput: {
+          hookEventName: 'SessionStart',
+          additionalContext: '# ConsensFlow worker\n',
+        },
+      },
+    ],
+  )
+  for (const name of ['UserPromptSubmit', 'Stop', 'SessionEnd'])
+    assert.deepEqual(await runAsDevin(event(name), launch.env), { code: 0, stdout: '' })
+  const turns = await launch.logged()
+  assert.deepEqual(
+    turns.map((turn) => [turn.hook_event_name, turn.session_id, turn.source]),
+    [
+      ['SessionStart', 'native-a', 'startup'],
+      ['UserPromptSubmit', 'native-a', undefined],
+      ['Stop', 'native-a', undefined],
+      ['SessionEnd', 'native-a', undefined],
+    ],
+  )
+  assert.ok(turns.every((turn) => Number.isInteger(turn.at)))
+
+  // Another conversation's events, a subagent's, and events Devin's hooks
+  // carry that are not turns: nothing said, nothing logged.
+  for (const other of [
+    event('SessionStart', { session_id: 'native-b' }),
+    event('Stop', { agent_id: 'subagent-1' }),
+    event('Stop', { parent_session_id: 'native-a' }),
+    event('PreToolUse'),
+  ])
+    assert.deepEqual(await runAsDevin(other, launch.env), { code: 0, stdout: '' })
+  assert.equal((await launch.logged()).length, 4)
+
+  // After a /new the window shows native-b: its turns are the window's now.
+  await fs.appendFile(launch.wire, shows('native-b'))
+  assert.deepEqual(await runAsDevin(event('Stop'), launch.env), { code: 0, stdout: '' })
+  assert.deepEqual(await runAsDevin(event('Stop', { session_id: 'native-b' }), launch.env), {
+    code: 0,
+    stdout: '',
+  })
+  assert.deepEqual(
+    (await launch.logged()).slice(4).map((turn) => turn.session_id),
+    ['native-b'],
+  )
+})
+
+test("Devin's hook never stops Devin: no role text, no wire log, or input that is no event", async (t) => {
+  const launch = await launchFiles(t)
+  const start = { hook_event_name: 'SessionStart', session_id: 'native-a' }
+  // A window with no role text starts plain; its turn is logged all the same.
+  assert.deepEqual(await runAsDevin(start, { ...launch.env, CF_DEVIN_ROLE_FILE: '' }), {
+    code: 0,
+    stdout: '',
+  })
+  const missing = path.join(path.dirname(launch.role), 'gone.md')
+  assert.deepEqual(await runAsDevin(start, { ...launch.env, CF_DEVIN_ROLE_FILE: missing }), {
+    code: 0,
+    stdout: '',
+  })
+  assert.equal((await launch.logged()).length, 2)
+  // Without the wire log nothing is known of the window: nothing said, nothing logged.
+  const noWire = { ...launch.env, CHISEL_PURE_ACP_WIRE_LOG: path.join(missing, 'wire.jsonl') }
+  assert.deepEqual(await runAsDevin(start, noWire), { code: 0, stdout: '' })
+  assert.deepEqual(await runAsDevin('{"hook_event_name":', launch.env), { code: 0, stdout: '' })
+  // Input past a mebibyte is refused before it is read as an event.
+  const huge = { ...start, padding: 'x'.repeat(1024 * 1024) }
+  assert.deepEqual(await runAsDevin(huge, launch.env), { code: 0, stdout: '' })
+  assert.equal((await launch.logged()).length, 2)
 })
 
 test('private installation preserves native defaults and hooks, and does not edit project/global files', async (t) => {

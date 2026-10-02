@@ -95,3 +95,23 @@ it('app preparation owns its launcher and integrations, not role documents or gl
     t.cleanup()
   }
 })
+
+it('app preparation says why its launcher could not be installed, and prepares the integrations all the same', () => {
+  const t = tempEnv()
+  try {
+    for (const name of ['pi', 'opencode']) stubCli(t.env, name)
+    // A file where the launcher's folder goes: nothing can be written into it.
+    mkdirSync(t.env.CONSENSFLOW_HOME, { recursive: true })
+    writeFileSync(join(t.env.CONSENSFLOW_HOME, 'bin'), 'not a folder')
+    const prepared = installation.prepareApp(t.env)
+    assert.equal(prepared.report.length, 1)
+    assert.match(prepared.report[0], /^The cf launcher could not be installed: \S/)
+    assert.deepEqual(
+      [prepared.piExtension.state, prepared.opencodeExtension.state],
+      ['installed-unverified', 'installed-unverified'],
+    )
+    assert.equal(readFileSync(join(t.env.CONSENSFLOW_HOME, 'bin'), 'utf8'), 'not a folder')
+  } finally {
+    t.cleanup()
+  }
+})

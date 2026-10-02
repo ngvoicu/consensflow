@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import {
-  HANDOFF_TITLE,
-  handoffText,
-  historyPage,
-  historyPages,
-  PAGE_BYTES,
-  PAGE_LINES,
-} from '../src/core/handoff.js'
+import { HANDOFF_TITLE, handoffText, historyPage, historyPages } from '../src/core/handoff.js'
+
+/**
+ * A page of `cf history` at its longest: under what Codex shows of a
+ * command's output, the least of any harness (about 10 KiB and 256 lines).
+ */
+const PAGE_BYTES = 8_000
+const PAGE_LINES = 200
 
 /**
  * What passes to a lead the human switched in: its first message, and

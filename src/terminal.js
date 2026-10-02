@@ -74,7 +74,8 @@ function launcherNames(env) {
   return isWindows(env) ? NAMES.map((name) => `${name}.cmd`) : NAMES
 }
 
-export function terminalCommandStatus(env, options = {}) {
+/** Whether our launcher is installed here, where, and whether that place is on PATH. */
+function terminalCommandStatus(env, options = {}) {
   const candidates = options.candidates ?? defaultCandidates(env)
   for (const dir of candidates) {
     const path = join(dir, launcherNames(env)[0])

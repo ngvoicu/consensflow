@@ -59,7 +59,6 @@ const HARNESS_TO_KIND = {
   image: 'image',
 }
 
-/** The manifest and other v3-only state; the roster deliberately not here. */
 /**
  * Everything ConsensFlow owns, in one directory.
  *
@@ -73,8 +72,12 @@ export function configRoot(env) {
   return rosterHome(env)
 }
 
-/** Where the state lived before the roots were merged (2026-08-22). */
-export function legacyConfigRoot(env) {
+/**
+ * Where the state lived before the roots were merged (2026-08-22): every
+ * start still looks there once, through `migrateStateRoot`, for a machine
+ * coming from an older version.
+ */
+function legacyConfigRoot(env) {
   const xdg = env?.XDG_CONFIG_HOME
   const base =
     typeof xdg === 'string' && xdg.length > 0 ? xdg : join(env?.HOME ?? homedir(), '.config')
@@ -120,6 +123,11 @@ function rosterHome(env) {
   return join(env?.HOME ?? homedir(), '.consensflow')
 }
 
+/**
+ * The human's agents file. Exported for tests in several suites (the CLI's,
+ * the agents screens', the packaged app's): they put a hand-written file in
+ * its place and read back what was saved, and find that place here.
+ */
 export function rosterPath(env) {
   return join(rosterHome(env), 'agents.json')
 }
