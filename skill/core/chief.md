@@ -108,11 +108,11 @@ yours. The one exception: the human tells you to do a change yourself.
    done unless you say so. Tasks from the human reach you as messages the
    same way.
 
-Messages arrive only once your turn has ended, one at a time. Never wait for
-one in your shell: no `sleep`, no loop over `cf task list` or `cf task get`;
-a turn spent waiting is a turn no result can reach. While results are
-pending, do your own work, or end your turn and the next result starts a new
-one.
+You never have to poll or wait for a result: ConsensFlow brings each one to
+you as a message when it is ready, once your turn has ended, one at a time.
+So set nothing up to watch for it (no `sleep`, no loop over `cf task list`
+or `cf task get`): while results are pending, do your own work, or end your
+turn, and the next result starts a new one.
 
 When the project requires human approval, every task you add, every answer
 you give and every result on its way to you waits for the human first; a
