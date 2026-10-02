@@ -137,4 +137,41 @@ mod tests {
         }
         assert_eq!(*seen.lock().unwrap(), vec!["p-pm", "p-chief", "p-pm"]);
     }
+
+    /// A destination that has gone (a page that reloaded, its channel with
+    /// it) parks what follows, and the next one gets all of it, in order,
+    /// before anything newer.
+    #[test]
+    fn output_waits_for_the_next_destination_when_one_goes() {
+        let hub = OutputHub::new();
+        let message = |seq| PaneOutputMessage {
+            id: "p-chief".into(),
+            generation: 1,
+            seq,
+            bytes: vec![65],
+        };
+        let gone = Arc::new(Mutex::new(Vec::new()));
+        let seen_by_gone = Arc::clone(&gone);
+        hub.register_sink(Arc::new(move |message: PaneOutputMessage| {
+            seen_by_gone.lock().unwrap().push(message.seq);
+            message.seq == 1
+        }));
+        for seq in 1..=3 {
+            hub.publish(message(seq));
+        }
+        let next = Arc::new(Mutex::new(Vec::new()));
+        let seen_by_next = Arc::clone(&next);
+        hub.register_sink(Arc::new(move |message: PaneOutputMessage| {
+            seen_by_next.lock().unwrap().push(message.seq);
+            true
+        }));
+        hub.publish(message(4));
+
+        assert_eq!(
+            *gone.lock().unwrap(),
+            vec![1, 2],
+            "a destination that had gone was asked again"
+        );
+        assert_eq!(*next.lock().unwrap(), vec![2, 3, 4]);
+    }
 }

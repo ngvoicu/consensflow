@@ -400,6 +400,25 @@ mod tests {
         );
     }
 
+    /// What the page asks while the core is down is answered with why,
+    /// under the operation it asked, and never reaches a daemon.
+    #[test]
+    fn a_request_while_the_core_is_down_says_why() {
+        assert_eq!(
+            request_node(
+                Err("ConsensFlow's core stopped while the app was running".to_string()),
+                "board.get".to_string(),
+                json!({"project":1}),
+            ),
+            json!({
+                "ok":false,
+                "error":"not-available-yet",
+                "operation":"board.get",
+                "detail":"ConsensFlow's core stopped while the app was running",
+            })
+        );
+    }
+
     #[test]
     fn agents_screens_open_at_the_daemon_pages_with_the_token() {
         let roster = RosterHandle::from_value(json!({

@@ -412,12 +412,14 @@ mod tests {
     #[cfg(unix)]
     use std::time::{Duration, Instant};
 
+    use crate::arbiter::SanitizeError;
     #[cfg(unix)]
     use crate::bridge::BridgeBuilder;
     #[cfg(unix)]
     use crate::output_hub::OutputHub;
     #[cfg(unix)]
     use crate::pane_handlers::register_pane_handlers;
+    use crate::pty::PaneError;
 
     /// A pane's input lives as long as the pane: killed, or ended on its own,
     /// it takes its input worker and queue, its page sequence and its arbiter
@@ -530,5 +532,83 @@ mod tests {
         ));
         assert!(inputs.senders.lock().unwrap().is_empty());
         assert!(inputs.workers.lock().unwrap().is_empty());
+    }
+
+    /// A host that is stopping takes no more input: what is sent is refused
+    /// as closed, nothing of it written, and no pane gets a queue.
+    #[test]
+    fn a_stopping_host_refuses_input_as_closed() {
+        let panes = Arc::new(PaneTable::new());
+        let inputs = InputQueue::new(Arc::clone(&panes), Arc::new(InputArbiter::new(0)));
+        let key = PaneKey::new("open-pane", 1);
+        inputs.open(&key).expect("open the pane's input");
+        inputs.close_and_drain();
+
+        let refused = inputs.write(key, b"x".to_vec());
+        assert!(matches!(
+            refused,
+            Err(InputError::Refused { code: "input-closed", ref cause }) if cause == "pane input admission is closed"
+        ));
+        assert_eq!(
+            inputs.open(&PaneKey::new("late-pane", 1)),
+            Err("pane input admission is closed".to_string())
+        );
+        assert!(inputs.workers.lock().unwrap().is_empty());
+    }
+
+    /// A paste refused by the arbiter answers that nothing of it went in,
+    /// with the code and the cause, so the daemon may send it again; a write
+    /// that failed once begun answers that it may have.
+    #[test]
+    fn a_refused_paste_says_nothing_went_in_and_a_failed_one_is_uncertain() {
+        for (error, code) in [
+            (ArbiterError::Stale, "stale-pane"),
+            (ArbiterError::Busy, "paste-in-flight"),
+            (ArbiterError::InputFailed, "input-failed"),
+            (
+                ArbiterError::InvalidBody(SanitizeError::ControlByte(7)),
+                "invalid-body",
+            ),
+            (ArbiterError::LockPoisoned, "lock-poisoned"),
+        ] {
+            let cause = error.to_string();
+            assert_eq!(
+                InputError::from(error).paste_answer(),
+                json!({"ok":false,"admitted":false,"bytesWritten":0,"error":code,"cause":cause})
+            );
+        }
+        assert_eq!(
+            InputError::from(ArbiterError::Pane(PaneError::LockPoisoned)).paste_answer(),
+            json!({"ok":false,"admitted":null,"error":"uncertain","cause":"pane table lock is poisoned"})
+        );
+    }
+
+    /// The page's input whose answers it never collects is held to a bound,
+    /// and a new page, which owes none of them, starts with none.
+    #[test]
+    fn unanswered_page_input_is_bounded_until_a_new_page() {
+        let panes = Arc::new(PaneTable::new());
+        let inputs = InputQueue::new(Arc::clone(&panes), Arc::new(InputArbiter::new(0)));
+        let key = PaneKey::new("unanswered-pane", 1);
+        inputs.open(&key).expect("open the pane's input");
+        let typed = || InputWork::Write(b"x".to_vec());
+        for sequence in 1..=MAX_PENDING_INPUT_TICKETS as u64 {
+            inputs
+                .enqueue_page(key.clone(), sequence, typed(), true)
+                .expect("admitted");
+        }
+        assert_eq!(
+            inputs.enqueue_page(
+                key.clone(),
+                MAX_PENDING_INPUT_TICKETS as u64 + 1,
+                typed(),
+                true
+            ),
+            Err("pane-input-ticket-capacity".to_string())
+        );
+
+        inputs.begin_page();
+        assert!(inputs.enqueue_page(key, 1, typed(), true).is_ok());
+        inputs.close_and_drain();
     }
 }
