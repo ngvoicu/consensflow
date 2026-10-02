@@ -2003,7 +2003,10 @@ mod tests {
         let streamed = table
             .open_streamed(
                 Path::new("/tmp"),
-                &shell("/bin/sleep 0.25; printf x; /bin/sleep 1000"),
+                // A second before its output: the child starts as the pane
+                // opens, and a busy runner once took over 100 ms to return
+                // from opening it, so a quarter second came before the look.
+                &shell("/bin/sleep 1; printf x; /bin/sleep 1000"),
                 PaneEnvironment::new(&HashMap::new(), &[]),
                 terminal_size(24, 80),
                 1024,
@@ -2014,7 +2017,7 @@ mod tests {
         let idle_before_output = table.list().expect("list before output")[0].idle_ms;
         let output = streamed
             .output
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(Duration::from_secs(5))
             .expect("receive delayed output");
         assert_eq!(output.bytes, b"x");
         table.ack(&streamed.key, output.seq).expect("ack output");

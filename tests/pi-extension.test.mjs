@@ -59,7 +59,10 @@ async function setup(
   record,
   {
     idle = true,
-    ackTimeoutMs = 1000,
+    // The record's life, as the channel gives it: long, so a busy runner reads
+    // it before it expires (1 s once expired one before its other refusal);
+    // a test about expiry sets its own.
+    ackTimeoutMs = 30_000,
     editor = '',
     hasUI = true,
     mode = 'tui',
@@ -85,7 +88,6 @@ async function setup(
     settled,
     expired,
     launchId: 'launch-pi-test',
-    ackTimeoutMs,
     logger: { error: (...args) => logs.push(args.join(' ')) },
     ...(watchInbox ? { watchInbox } : {}),
     ...(pollMs ? { pollMs } : {}),
