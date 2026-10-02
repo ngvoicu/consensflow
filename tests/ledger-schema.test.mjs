@@ -47,12 +47,25 @@ function contents(file) {
   }
 }
 
+/** A file at `version` made by that many migrations: an empty ledger as a build of that schema made it. */
+function migratedTo(file, version) {
+  const db = new DatabaseSync(file)
+  migrate(db, MIGRATIONS.slice(0, version))
+  db.close()
+  return file
+}
+
+/** The schema an empty ledger of `version` has. */
+const schemaAt = (dir, version) =>
+  contents(migratedTo(path.join(dir, `v${version}.db`), version)).schema
+
 /**
- * A ledger as a schema-5 build left it: made by the first five migrations,
- * in WAL mode like every ledger, holding the rows the ledger's own
- * operations write for two busy projects, ids and all.
+ * A ledger as a build of schema `version` left it: made by its first
+ * migrations, in WAL mode like every ledger, holding the rows the ledger's
+ * own operations write for two busy projects, ids and all, in the columns
+ * that schema has.
  */
-function schema5Ledger(dir) {
+function ledgerAt(dir, version) {
   const source = path.join(dir, 'source.db')
   const ledger = openLedger(source, { now: clock(), names: names() })
   busyProject(ledger, '/work/app')
@@ -61,10 +74,17 @@ function schema5Ledger(dir) {
   const file = path.join(dir, 'consensflow.db')
   const db = new DatabaseSync(file)
   db.exec('PRAGMA journal_mode = WAL')
-  migrate(db, MIGRATIONS.slice(0, 5))
+  migrate(db, MIGRATIONS.slice(0, version))
   db.exec('PRAGMA foreign_keys = OFF')
   db.prepare('ATTACH DATABASE ? AS source').run(source)
-  for (const table of TABLES) db.exec(`INSERT INTO main.${table} SELECT * FROM source.${table}`)
+  for (const table of TABLES) {
+    const columns = db
+      .prepare(`PRAGMA main.table_info(${table})`)
+      .all()
+      .map((column) => column.name)
+      .join(', ')
+    db.exec(`INSERT INTO main.${table} (${columns}) SELECT ${columns} FROM source.${table}`)
+  }
   db.exec('DETACH DATABASE source')
   db.close()
   return file
@@ -184,13 +204,7 @@ describe('the schema', () => {
 describe('schema 6: no id is given twice', () => {
   it('makes the schema 5 had, with AUTOINCREMENT on every table whose ids leave the ledger', async () => {
     await withDir(async (dir) => {
-      const [before, after] = [5, 6].map((version) => {
-        const file = path.join(dir, `v${version}.db`)
-        const db = new DatabaseSync(file)
-        migrate(db, MIGRATIONS.slice(0, version))
-        db.close()
-        return contents(file).schema
-      })
+      const [before, after] = [5, 6].map((version) => schemaAt(dir, version))
       assert.deepEqual(
         after.filter((row) => row.sql?.includes(' AUTOINCREMENT')).map((row) => row.name),
         WITH_IDS,
@@ -211,16 +225,13 @@ describe('schema 6: no id is given twice', () => {
 
   it('migrates a schema-5 ledger with every row, id and reference as it was, then gives none of its ids again', async () => {
     await withDir(async (dir) => {
-      const file = schema5Ledger(dir)
+      const file = ledgerAt(dir, 5)
       const before = contents(file)
-      const fresh = path.join(dir, 'fresh.db')
-      openLedger(fresh).close()
 
-      openLedger(file).close()
-      const after = contents(file)
-      assert.equal(after.version, SCHEMA_VERSION)
+      const after = contents(migratedTo(file, 6))
+      assert.equal(after.version, 6)
       assert.deepEqual(after.rows, before.rows, 'every row, with its id and references')
-      assert.deepEqual(after.schema, contents(fresh).schema, "the schema is a fresh ledger's")
+      assert.deepEqual(after.schema, schemaAt(dir, 6), "the schema is a fresh schema-6 ledger's")
       const raw = new DatabaseSync(file, { readOnly: true })
       assert.deepEqual(raw.prepare('PRAGMA foreign_key_check').all(), [], 'nothing dangles')
       assert.deepEqual(
@@ -256,7 +267,7 @@ describe('schema 6: no id is given twice', () => {
 
   it('leaves a schema-5 ledger as it was when its migration fails partway, start after start', async () => {
     await withDir(async (dir) => {
-      const file = schema5Ledger(dir)
+      const file = ledgerAt(dir, 5)
       // A message its rebuilt table refuses: the four tables before it are rebuilt when it fails.
       const db = new DatabaseSync(file)
       db.exec('PRAGMA ignore_check_constraints = ON')
@@ -285,6 +296,57 @@ describe('schema 6: no id is given twice', () => {
       assert.throws(() => migrate(db, MIGRATIONS.slice(0, 5)), {
         code: 'ledger-newer',
         message: `this home was written by a newer ConsensFlow (schema ${SCHEMA_VERSION}; this build knows 5)`,
+      })
+      db.close()
+      assert.deepEqual(contents(file), before, 'and left as it was')
+    })
+  })
+})
+
+describe('schema 7: a task deleted from the board keeps its row', () => {
+  it('adds to the schema 6 had when a task was deleted, and nothing else', async () => {
+    await withDir(async (dir) => {
+      const [before, after] = [6, 7].map((version) => schemaAt(dir, version))
+      const task = (schema) => schema.find((row) => row.name === 'task').sql
+      assert.equal(
+        task(after),
+        task(before).replace('held_until TEXT,', 'held_until TEXT, deleted_at TEXT,'),
+      )
+      const others = (schema) => schema.filter((row) => row.name !== 'task')
+      assert.deepEqual(others(after), others(before), 'nothing else differs')
+    })
+  })
+
+  it('migrates a schema-6 ledger with every row as it was, and no task deleted', async () => {
+    await withDir(async (dir) => {
+      const file = ledgerAt(dir, 6)
+      const before = contents(file)
+      const fresh = path.join(dir, 'fresh.db')
+      openLedger(fresh).close()
+
+      openLedger(file).close()
+      const after = contents(file)
+      assert.equal(after.version, SCHEMA_VERSION)
+      assert.deepEqual(
+        after.rows,
+        { ...before.rows, task: before.rows.task.map((row) => ({ ...row, deleted_at: null })) },
+        'every row, with its id and references; every task still on the board',
+      )
+      assert.deepEqual(after.schema, contents(fresh).schema, "the schema is a fresh ledger's")
+    })
+  })
+
+  it('is refused by a build that knows only schema 6', async () => {
+    await withDir(async (dir) => {
+      const file = path.join(dir, 'consensflow.db')
+      const ledger = openLedger(file, { now: clock(), names: names() })
+      busyProject(ledger, '/work/app')
+      ledger.close()
+      const before = contents(file)
+      const db = new DatabaseSync(file)
+      assert.throws(() => migrate(db, MIGRATIONS.slice(0, 6)), {
+        code: 'ledger-newer',
+        message: `this home was written by a newer ConsensFlow (schema ${SCHEMA_VERSION}; this build knows 6)`,
       })
       db.close()
       assert.deepEqual(contents(file), before, 'and left as it was')

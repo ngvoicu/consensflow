@@ -401,6 +401,13 @@ export const MIGRATIONS = [
   DROP TABLE event_rows;
   CREATE INDEX event_project_index ON event (project_id, id);
   `,
+  // A finished task the human deleted from the board (2026-10-02): when. It
+  // leaves the board and cf task list, and keeps its row, so its number is
+  // never given again, the threads that name it stay whole, and cf task get
+  // still reads it.
+  `
+  ALTER TABLE task ADD COLUMN deleted_at TEXT;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length
