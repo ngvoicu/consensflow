@@ -44,6 +44,17 @@ function zeroByteClaimRefusal(claimed) {
   }
 }
 
+/** A failure before the inbox rename: the record never reached Pi's inbox. */
+function zeroByteTransport(cause) {
+  return {
+    ok: false,
+    admitted: false,
+    error: 'transport',
+    bytesWritten: 0,
+    cause: cause?.message ?? String(cause),
+  }
+}
+
 function messageConfig(target) {
   const launch = launchConfig(target)
   const config = channelConfig(target, launch)
@@ -77,7 +88,7 @@ async function publishRaw(inbox, ackDirectory, record) {
     return { inboxFile, ackFile, temporary }
   } catch (cause) {
     await rm(temporary, { force: true }).catch(() => {})
-    return { error: { ok: false, error: 'transport', cause: cause?.message ?? String(cause) } }
+    return { error: zeroByteTransport(cause) }
   }
 }
 
@@ -126,9 +137,11 @@ export async function shownSession(channel) {
  * The inbox record is strictly bounded `{id, type, launchId, session, text,
  * expiresAt}` with a unique `m-<hex>` id, the launch's immutable launchId,
  * the target's native session and one absolute expiry. Native admission is
- * gated by pane.claim immediately before the inbox rename; a failed
- * claim is known zero bytes, a missing ack after publish is uncertain, and
- * the message is never retried automatically.
+ * gated by pane.claim immediately before the inbox rename, the handover
+ * point: a failed claim, or any failure before the rename, is known zero
+ * bytes. From the rename on, Pi may have taken the message, so a missing ack
+ * or any error is uncertain and Pi's own record decides; the message is
+ * never retried automatically.
  */
 export async function send(target, text) {
   const { inbox, ackDirectory, ackTimeoutMs, launchId } = messageConfig(target)
@@ -157,6 +170,11 @@ export async function send(target, text) {
       await rm(temporary, { force: true })
       return zeroByteClaimRefusal(claimed)
     }
+  } catch (cause) {
+    await rm(temporary, { force: true }).catch(() => {})
+    return zeroByteTransport(cause)
+  }
+  try {
     await rename(temporary, inboxFile)
     const ack = await ackFor(ackFile, id, expiresAt)
     if (ack === null) {
@@ -164,7 +182,9 @@ export async function send(target, text) {
     }
     return readAckResult(ack)
   } catch (cause) {
+    // The record stays in the inbox: Pi may be taking it now, and the
+    // extension refuses it once it expires.
     await rm(temporary, { force: true }).catch(() => {})
-    return { ok: false, error: 'transport', cause: cause?.message ?? String(cause) }
+    return { ok: false, admitted: null, error: 'uncertain', cause: cause?.message ?? String(cause) }
   }
 }

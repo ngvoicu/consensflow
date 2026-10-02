@@ -24,8 +24,11 @@ import { admission, executableFor, SHOWS_ANOTHER, switchedTo, windowText } from 
  *   that misnames the human's own answers, so it is not used (2026-09-22).
  * - Claude's own `sessions/<pid>.json` says busy, idle or waiting (and why);
  *   the transcript holds the conversation and says whether the turn settled.
- * - The window's Claude process is the one whose file first named the
- *   launch's conversation. A /clear or /resume in the window changes the
+ * - The window's Claude process is the pane's own child when a status file
+ *   is named after it, so the first look already sees a /clear. Otherwise
+ *   (Claude may run as another process the child starts) it is the process
+ *   whose file first named the launch's conversation, which a /clear before
+ *   that look leaves unknown. A /clear or /resume in the window changes the
  *   conversation that file names, never the process, so the window is
  *   followed to it.
  */
@@ -42,11 +45,18 @@ export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
   const configDir = path.resolve(
     env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? homedir(), '.claude'),
   )
-  /** Claude's status of the window's process, known once its file names the launch's session. */
+  /**
+   * Claude's status of the window's process: the file named after the pane's
+   * own child (`launch.pid`, when the pane host named it), else the one that
+   * first named the launch's session.
+   */
   const windowStatus = async (launch) => {
     const statuses = await claudeStatuses(configDir)
-    launch.pid ??= [...statuses].find(([, live]) => live.sessionId === launch.nativeSession)?.[0]
-    return launch.pid === undefined ? undefined : statuses.get(launch.pid)
+    if (statuses.has(launch.pid)) return statuses.get(launch.pid)
+    launch.claudePid ??= [...statuses].find(
+      ([, live]) => live.sessionId === launch.nativeSession,
+    )?.[0]
+    return launch.claudePid === undefined ? undefined : statuses.get(launch.claudePid)
   }
   return {
     harness: 'claude-code',

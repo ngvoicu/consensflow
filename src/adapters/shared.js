@@ -49,6 +49,14 @@ export const switchedTo = (observed, nativeSession) => ({
 export const SHOWS_ANOTHER = 'the window shows another conversation'
 
 /**
+ * A window that has not said which conversation it shows (it is starting,
+ * switching conversations or reconnecting): a message waits, for this
+ * reason. Until the window has named its first conversation, or while it
+ * still draws its screen, the dispatcher reads it as starting, not waiting.
+ */
+export const unnamed = (observed, reason) => ({ ...observed, waiting: { reason }, unnamed: true })
+
+/**
  * Text as a window can take it, for a first message and every later one. The
  * pane host refuses a frame with half a character in it (the dispatcher cuts
  * a long body at 3,000 code units, and an emoji across the cut leaves its
@@ -74,14 +82,14 @@ export function windowText(text) {
 }
 
 /**
- * How the native channels answer a send, as an adapter delivery outcome. The
- * bridge's own deadline, or its end, came after the request went out: the
- * host may have taken it, so it is uncertain and the record decides, rather
- * than a blind second paste.
+ * How a channel's answer to a send reads as an adapter delivery outcome.
+ * Only a refusal before the channel's handover point (`admitted: false`)
+ * says nothing reached the harness. Any other failure may have reached it,
+ * so it is uncertain and the harness's own record decides, rather than a
+ * blind second send.
  */
 export function admission(sent, refusal, { queued = false } = {}) {
   if (sent?.ok === true) return queued ? { admitted: true, queued: true } : { admitted: true }
-  if (sent?.admitted === null || sent?.error === 'deadline' || sent?.error === 'eof')
-    return { admitted: null, reason: sent.cause ?? sent.error }
-  return { admitted: false, reason: sent?.cause ?? sent?.error ?? refusal }
+  const reason = sent?.cause ?? sent?.error ?? refusal
+  return { admitted: sent?.admitted === false ? false : null, reason }
 }

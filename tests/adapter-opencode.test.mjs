@@ -213,11 +213,16 @@ describe('the OpenCode adapter', () => {
         },
       })
       const launch = { nativeSession: 'ses_abc123', channel: { kind: 'opencode-server' } }
-      assert.match(await adapter.ready({ launch }), /plugin does not answer yet/)
-      assert.equal((await adapter.observe({ launch })).settled, false)
+      // Its plugin does not answer yet: the window names no conversation.
+      const loading = await adapter.observe({ launch })
+      assert.equal(loading.settled, false)
+      assert.equal(loading.unnamed, true)
+      assert.equal(await adapter.ready({ launch }), loading.waiting.reason)
+      assert.match(loading.waiting.reason, /plugin does not answer yet/)
       // Its home screen or session list: no conversation shown, a message waits.
       shown = null
       const home = await adapter.observe({ launch })
+      assert.equal(home.unnamed, true)
       assert.match(home.waiting?.reason ?? '', /shows no conversation/)
       assert.equal(await adapter.ready({ launch }), home.waiting.reason)
       shown = 'ses_abc123'

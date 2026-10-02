@@ -235,9 +235,10 @@ console.log('devin ${version}')
       }
       const pane = { id: 's1-zeus', generation: 2 }
       // Devin has not said yet which conversation the window shows: a message waits.
-      const unnamed = await adapter.observe({ launch })
-      assert.match(unnamed.waiting?.reason ?? '', /Devin has not said/)
-      assert.equal(await adapter.ready({ launch, pane, host }), unnamed.waiting.reason)
+      const before = await adapter.observe({ launch })
+      assert.equal(before.unnamed, true)
+      assert.match(before.waiting?.reason ?? '', /Devin has not said/)
+      assert.equal(await adapter.ready({ launch, pane, host }), before.waiting.reason)
       await selects(env, 'mild-coin')
       assert.equal((await adapter.observe({ launch })).settled, true)
       assert.equal(await adapter.ready({ launch, pane, host }), true)

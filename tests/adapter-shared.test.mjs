@@ -39,19 +39,28 @@ describe('the text a window is given', () => {
 })
 
 describe('a delivery outcome', () => {
-  it("reads the bridge's own deadline or end as uncertain, never as a refusal", () => {
-    assert.deepEqual(admission({ ok: true }, 'refused'), { admitted: true })
-    assert.deepEqual(admission({ ok: false, error: 'deadline' }, 'refused'), {
-      admitted: null,
-      reason: 'deadline',
-    })
-    assert.deepEqual(admission({ ok: false, error: 'eof' }, 'refused'), {
-      admitted: null,
-      reason: 'eof',
-    })
-    assert.deepEqual(admission({ ok: false, error: 'stale pane' }, 'refused'), {
+  it('reads a refusal only where the channel says nothing reached the harness', () => {
+    assert.deepEqual(admission({ ok: true, admitted: true }, 'refused'), { admitted: true })
+    assert.deepEqual(
+      admission(
+        { ok: false, admitted: false, bytesWritten: 0, error: 'stale-generation', cause: 'gone' },
+        'refused',
+      ),
+      { admitted: false, reason: 'gone' },
+    )
+    assert.deepEqual(admission({ ok: false, admitted: false }, 'refused'), {
       admitted: false,
-      reason: 'stale pane',
+      reason: 'refused',
+    })
+    assert.deepEqual(
+      admission({ ok: false, admitted: null, error: 'uncertain', cause: 'cut off' }, 'refused'),
+      { admitted: null, reason: 'cut off' },
+    )
+    // An answer that does not say may have reached the harness: sending it
+    // again at once is how Pi got a message twice.
+    assert.deepEqual(admission({ ok: false, error: 'transport', cause: 'EISDIR' }, 'refused'), {
+      admitted: null,
+      reason: 'EISDIR',
     })
   })
 })

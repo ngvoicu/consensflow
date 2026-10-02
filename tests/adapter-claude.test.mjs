@@ -79,12 +79,13 @@ const stopLine = (sessionId, n) =>
     hookCount: 1,
   })
 
-async function status(env, sessionId, fields) {
+/** Claude's own status file of a live process, this test's unless named. */
+async function status(env, sessionId, fields, pid = process.pid) {
   const directory = path.join(env.CLAUDE_CONFIG_DIR, 'sessions')
   await mkdir(directory, { recursive: true })
   await writeFile(
-    path.join(directory, `${process.pid}.json`),
-    JSON.stringify({ pid: process.pid, sessionId, kind: 'interactive', ...fields }),
+    path.join(directory, `${pid}.json`),
+    JSON.stringify({ pid, sessionId, kind: 'interactive', ...fields }),
   )
 }
 
@@ -340,6 +341,41 @@ describe('the Claude Code adapter', () => {
     })
   })
 
+  it("follows a /clear before the first look by the status file named after the window's process", async () => {
+    await withHome(async ({ env }) => {
+      const adapter = claudeCodeAdapter({ env })
+      const first = '1b4e28ba-2fa1-41d2-883f-0016d3cca427'
+      const cleared = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
+      // The pane host named the window's process, whose Claude was cleared
+      // before ConsensFlow first looked; another Claude still shows the
+      // launch's conversation (the human resumed it elsewhere).
+      await status(env, cleared, { status: 'idle' })
+      await status(env, first, { status: 'idle' }, process.ppid)
+      const observed = await adapter.observe({ launch: { nativeSession: first, pid: process.pid } })
+      assert.deepEqual(observed.switched, { nativeSession: cleared })
+      // Unnamed, the window's process is the first whose file names the
+      // launch's conversation, as it always was: here, the wrong one.
+      const guessed = await adapter.observe({ launch: { nativeSession: first } })
+      assert.deepEqual([guessed.switched, guessed.settled], [undefined, true])
+    })
+  })
+
+  it("takes the first status file naming the launch's conversation when none is named after the window's process", async () => {
+    await withHome(async ({ env }) => {
+      const adapter = claudeCodeAdapter({ env })
+      const first = '1b4e28ba-2fa1-41d2-883f-0016d3cca427'
+      const cleared = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
+      // Claude may run as another process than the pane's own child (one it
+      // starts in its place): no status file is named after the child.
+      const launch = { nativeSession: first, pid: process.ppid }
+      await status(env, first, { status: 'idle' })
+      assert.equal((await adapter.observe({ launch })).settled, true)
+      // That process is the window's from then on: a /clear in it is followed.
+      await status(env, cleared, { status: 'idle' })
+      assert.deepEqual((await adapter.observe({ launch })).switched, { nativeSession: cleared })
+    })
+  })
+
   it('gives the window text it can take, and leaves a paste the bridge lost uncertain', async () => {
     await withHome(async ({ env }) => {
       const adapter = claudeCodeAdapter({ env })
@@ -372,8 +408,11 @@ describe('the Claude Code adapter', () => {
       assert.deepEqual(await deliver(), { admitted: null, reason: 'deadline' })
       answer = Object.assign(new Error('eof'), { error: 'eof' })
       assert.deepEqual(await deliver(), { admitted: null, reason: 'eof' })
-      answer = { ok: false, error: 'stale pane' }
+      // The host's word: refused before a byte, or failed once bytes went out.
+      answer = { ok: false, admitted: false, bytesWritten: 0, error: 'stale', cause: 'stale pane' }
       assert.deepEqual(await deliver(), { admitted: false, reason: 'stale pane' })
+      answer = { ok: false, admitted: null, error: 'uncertain', cause: 'broken pipe' }
+      assert.deepEqual(await deliver(), { admitted: null, reason: 'broken pipe' })
     })
   })
 

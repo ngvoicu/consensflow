@@ -10,13 +10,16 @@ export function paneOf(target) {
 }
 
 /**
- * Pastes a body into the pane, as the human would type it. A request the
- * bridge had sent before it ended may have been written: uncertain, never a
- * refusal.
+ * Pastes a body into the pane, as the human would type it. The host says
+ * whether a paste it did not finish wrote nothing (`admitted: false`) or may
+ * have written some (`admitted: null`). An answer that does not say (the
+ * bridge's own deadline), or a request the bridge had sent before it ended,
+ * may have been written: uncertain, never a refusal.
  */
 export async function writePaste(bridge, pane, body) {
+  let answer
   try {
-    return await bridge.request('pane.write_paste', {
+    answer = await bridge.request('pane.write_paste', {
       id: pane.id,
       generation: pane.generation,
       body,
@@ -24,6 +27,8 @@ export async function writePaste(bridge, pane, body) {
   } catch (cause) {
     return { ok: false, admitted: null, error: cause?.error ?? 'transport', cause: cause?.message }
   }
+  if (answer?.ok === true) return { ...answer, admitted: true }
+  return answer?.admitted === undefined ? { ...answer, admitted: null } : answer
 }
 
 /**
