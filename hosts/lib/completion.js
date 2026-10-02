@@ -9,7 +9,7 @@
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { devinFolders, piSessionDir } from '../../src/harnesses.js'
+import { devinFolders, opencodeStores, piSessionDir } from '../../src/harnesses.js'
 import { codexQuota, exhaustedQuota } from './quota.js'
 
 export async function answers(kind, sessionId, env, options = {}) {
@@ -1500,7 +1500,7 @@ function opencodeToolText(part) {
 }
 
 async function opencodeAnswers(sessionId, env, options) {
-  const db = await openOpencodeDb(env)
+  const db = await openOpencodeDb(env, sessionId)
   if (db === null) {
     return { unknown: true, reason: `unreadable: no opencode store for ${sessionId}` }
   }
@@ -1737,28 +1737,41 @@ async function opencodeAnswers(sessionId, env, options) {
   }
 }
 
-async function openOpencodeDb(env) {
-  const file = path.join(
-    env.XDG_DATA_HOME ?? path.join(home(env), '.local', 'share'),
-    'opencode',
-    'opencode.db',
-  )
-  try {
-    await fs.access(file)
-  } catch {
-    return null
-  }
+/**
+ * OpenCode's store, read-only: the one of its places that holds `sessionId`,
+ * else the first there is (whose answer is then that the session is not in
+ * it yet), else null.
+ */
+async function openOpencodeDb(env, sessionId) {
   let sqlite
   try {
     sqlite = await import('node:sqlite')
   } catch {
     return null
   }
-  try {
-    return new sqlite.DatabaseSync(file, { readOnly: true })
-  } catch {
-    return null
+  let first = null
+  for (const file of opencodeStores(env)) {
+    let db
+    try {
+      await fs.access(file)
+      db = new sqlite.DatabaseSync(file, { readOnly: true })
+    } catch {
+      continue
+    }
+    let holds = false
+    try {
+      holds = db.prepare('select 1 from session where id = ?').get(sessionId) !== undefined
+    } catch {
+      // A store that cannot be read as OpenCode's holds nothing of ours.
+    }
+    if (holds) {
+      first?.close()
+      return db
+    }
+    if (first === null) first = db
+    else db.close()
   }
+  return first
 }
 
 // Devin persists revisions, including cancelled assistant text. Only its main

@@ -1012,6 +1012,29 @@ test('completion/opencode: MessageAbortedError is a failure, never cancellation 
   assert.equal(result.settlement.provenance, 'native')
 })
 
+test('completion/opencode: its store is found where this OpenCode keeps it, the one holding the session first', async () => {
+  const session = 'ses_f87e22f72ffewC2qJ2dAyyfPe1'
+  const staged = await stageOpencode('opencode/tool-result.json')
+  const home = await tempRoot('cf-completion-opencode-home-')
+  const seen = async (env) => (await answers('opencode', session, env)).unknown === undefined
+  // On Windows, under %LOCALAPPDATA%, where some versions keep it.
+  assert.ok(await seen({ HOME: home, OS: 'Windows_NT', LOCALAPPDATA: staged.XDG_DATA_HOME }))
+  // Wherever OPENCODE_DATA names.
+  assert.ok(await seen({ HOME: home, OPENCODE_DATA: path.join(staged.XDG_DATA_HOME, 'opencode') }))
+  // A store at the first place that does not hold the session gives way to one that does.
+  const other = path.join(home, '.local', 'share', 'opencode')
+  await fs.mkdir(other, { recursive: true })
+  const empty = new DatabaseSync(path.join(other, 'opencode.db'))
+  empty.exec('create table session (id text primary key)')
+  empty.close()
+  assert.ok(await seen({ HOME: home, OS: 'Windows_NT', LOCALAPPDATA: staged.XDG_DATA_HOME }))
+  // With none holding it, the first there is answers that the session is not in it.
+  assert.match(
+    (await answers('opencode', 'ses_unknown', { HOME: home, OS: 'Windows_NT' })).reason,
+    /no opencode session ses_unknown/,
+  )
+})
+
 test('completion/opencode: its question tool still running is asking; a finished one is not', async () => {
   const session = 'ses_f87e22f72ffewC2qJ2dAyyfPe1'
   const env = await stageOpencode('opencode/tool-result.json')

@@ -76,6 +76,29 @@ function onWindows(env) {
 }
 
 /**
+ * Where OpenCode's store, opencode.db, may be, likeliest first: OPENCODE_DB,
+ * or OPENCODE_DATA, when set (OpenCode honours both everywhere); else its XDG
+ * data place, which it uses on every platform; on Windows, %LOCALAPPDATA%
+ * and %APPDATA% too, where some of its versions keep it.
+ */
+export function opencodeStores(env) {
+  if (env.OPENCODE_DB) return [env.OPENCODE_DB]
+  if (env.OPENCODE_DATA) return [join(env.OPENCODE_DATA, 'opencode.db')]
+  const xdg = join(
+    env.XDG_DATA_HOME ?? join(home(env), '.local', 'share'),
+    'opencode',
+    'opencode.db',
+  )
+  if (!onWindows(env)) return [xdg]
+  return [
+    xdg,
+    ...[env.LOCALAPPDATA, env.APPDATA]
+      .filter(Boolean)
+      .map((folder) => join(folder, 'opencode', 'opencode.db')),
+  ]
+}
+
+/**
  * Devin's own folders: `config` holds its config.json, `data` its cli/
  * sessions.db. On Windows both are %APPDATA%\devin (Devin's docs); elsewhere
  * the XDG places, ~/.config/devin and ~/.local/share/devin unless set.

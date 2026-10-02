@@ -8,6 +8,7 @@ import {
   harnessPath,
   missingHarnesses,
   offerable,
+  opencodeStores,
   paneArgv,
   probeExecutable,
   runnable,
@@ -147,6 +148,39 @@ describe("Devin's folders", () => {
     assert.deepEqual(
       devinFolders({ OS: 'Windows_NT', USERPROFILE: '/Users/a', XDG_DATA_HOME: '/xdg/data' }),
       { config: join(roaming, 'devin'), data: join(roaming, 'devin') },
+    )
+  })
+})
+
+describe("OpenCode's store", () => {
+  it('is its XDG data place off Windows, unless OpenCode is told another', {
+    skip: process.platform === 'win32' && 'this platform is Windows',
+  }, () => {
+    assert.deepEqual(opencodeStores({ HOME: '/home/a' }), [
+      join('/home/a', '.local', 'share', 'opencode', 'opencode.db'),
+    ])
+    assert.deepEqual(opencodeStores({ HOME: '/home/a', XDG_DATA_HOME: '/xdg' }), [
+      join('/xdg', 'opencode', 'opencode.db'),
+    ])
+  })
+
+  it('is where OPENCODE_DB or OPENCODE_DATA says, on every platform', () => {
+    assert.deepEqual(opencodeStores({ OS: 'Windows_NT', HOME: '/a', OPENCODE_DB: '/x/o.db' }), [
+      '/x/o.db',
+    ])
+    assert.deepEqual(opencodeStores({ HOME: '/a', OPENCODE_DATA: '/data' }), [
+      join('/data', 'opencode.db'),
+    ])
+  })
+
+  it('may also be under %LOCALAPPDATA% or %APPDATA% on Windows', () => {
+    assert.deepEqual(
+      opencodeStores({ OS: 'Windows_NT', HOME: '/a', LOCALAPPDATA: '/local', APPDATA: '/roaming' }),
+      [
+        join('/a', '.local', 'share', 'opencode', 'opencode.db'),
+        join('/local', 'opencode', 'opencode.db'),
+        join('/roaming', 'opencode', 'opencode.db'),
+      ],
     )
   })
 })
