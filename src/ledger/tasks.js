@@ -379,9 +379,10 @@ export function acceptTask(store, projectId, number, { by }) {
 
 /**
  * The chief (or the human) stops a worker's task without ending it: its
- * window closes on the daemon's next look, whatever was on its way to it is
- * withdrawn, and the task keeps its member, its conversation and its place
- * until it is resumed or cancelled. The chief's own work is not paused.
+ * agent is interrupted on the daemon's next look and its window stays for
+ * the resumption, whatever was on its way to it is withdrawn, and the task
+ * keeps its member, its conversation and its place until it is resumed or
+ * cancelled. The chief's own work is not paused.
  */
 export function pauseTask(store, projectId, number, { by, because } = {}) {
   if (because !== undefined) requireText(because, 'because', 1000)
@@ -403,8 +404,8 @@ export function pauseTask(store, projectId, number, { by, because } = {}) {
 
 /**
  * The daemon holds a task with its window while its member is out of
- * quota: paused, with the time it goes on by itself. The window closes as
- * any paused task's does and comes back on its conversation at the reset.
+ * quota: paused, with the time it goes on by itself. Its agent stops as any
+ * paused task's does, and its window waits to go on at the reset.
  */
 export function holdTask(store, projectId, number, { until, because }) {
   requireText(because, 'because', 1000)
