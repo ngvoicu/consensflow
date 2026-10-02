@@ -1,8 +1,9 @@
 use std::collections::{HashMap, VecDeque};
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Mutex, MutexGuard};
+use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -36,6 +37,14 @@ const CORE_RESTART: Backoff = Backoff {
     most: Duration::from_secs(30),
 };
 const CORE_STOPPED: &str = "ConsensFlow's core stopped while the app was running";
+/// How long a daemon has to say it is ready (its handle line) before its
+/// start counts as failed. It opens its ledger first and migrates it, and
+/// each step of a migration rebuilds a table and checks every reference in
+/// the ledger under full sync: a limit too short would cut each start of a
+/// big ledger short, undone every time, and the app would never start. A
+/// daemon that hangs is still reported, and started again, within two
+/// minutes.
+const CORE_READY_TIMEOUT: Duration = Duration::from_secs(120);
 /// How long the human's login shell has to say its PATH.
 const LOGIN_PATH_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
@@ -44,6 +53,11 @@ const INPUT_QUEUE_CAPACITY: usize = 1024;
 const MAX_PENDING_INPUT_BYTES_PER_PANE: usize = 4 * 1024 * 1024;
 const MAX_PENDING_INPUT_TICKETS: usize = 4096;
 const INPUT_QUEUE_FULL: &str = "pane-input-queue-full";
+/// The host is stopping, and takes no more input.
+const INPUT_CLOSED: &str = "input-closed";
+/// A request, or a body, no window can take.
+const INVALID_BODY: &str = "invalid-body";
+const LOCK_POISONED: &str = "lock-poisoned";
 const INPUT_SEQUENCE_GAP: &str = "pane-input-sequence-gap";
 const INPUT_SEQUENCE_REGRESSION: &str = "pane-input-sequence-regression";
 const MAX_TERMINAL_DIMENSION: u16 = 4096;
@@ -127,7 +141,72 @@ impl InputWork {
     }
 }
 
-type InputResponse = Result<(), String>;
+/// Why a pane's input did not go in. Refused: nothing of it was written, so
+/// it may be sent again. Uncertain: the write itself failed partway, and some
+/// of it may have reached the window.
+#[derive(Debug)]
+enum InputError {
+    Refused { code: &'static str, cause: String },
+    Uncertain(String),
+}
+
+impl InputError {
+    fn refused(code: &'static str, cause: impl Into<String>) -> Self {
+        Self::Refused {
+            code,
+            cause: cause.into(),
+        }
+    }
+
+    fn queue_full() -> Self {
+        Self::refused(INPUT_QUEUE_FULL, "the pane's input queue is full")
+    }
+
+    /// A paste's answer: whether anything reached the window decides whether
+    /// the daemon may paste again or must ask the harness what it got.
+    fn paste_answer(&self) -> Value {
+        match self {
+            Self::Refused { code, cause } => json!({
+                "ok":false,
+                "admitted":false,
+                "bytesWritten":0,
+                "error":code,
+                "cause":cause,
+            }),
+            Self::Uncertain(cause) => json!({
+                "ok":false,
+                "admitted":null,
+                "error":"uncertain",
+                "cause":cause,
+            }),
+        }
+    }
+}
+
+/// The cause, which is all the page and the other operations answer.
+impl fmt::Display for InputError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused { cause, .. } | Self::Uncertain(cause) => formatter.write_str(cause),
+        }
+    }
+}
+
+impl From<ArbiterError> for InputError {
+    fn from(error: ArbiterError) -> Self {
+        let code = match &error {
+            ArbiterError::Pane(_) => return Self::Uncertain(error.to_string()),
+            ArbiterError::Stale => "stale-pane",
+            ArbiterError::Busy => "paste-in-flight",
+            ArbiterError::InputFailed => "input-failed",
+            ArbiterError::InvalidBody(_) => INVALID_BODY,
+            ArbiterError::LockPoisoned => LOCK_POISONED,
+        };
+        Self::refused(code, error.to_string())
+    }
+}
+
+type InputResponse = Result<(), InputError>;
 
 struct InputJob {
     work: InputWork,
@@ -216,7 +295,7 @@ impl InputQueue {
             .next_ticket
             .checked_add(1)
             .ok_or_else(|| "pane-input-ticket-overflow".to_string())?;
-        let receiver = self.submit(key, work)?;
+        let receiver = self.submit(key, work).map_err(|error| error.to_string())?;
         let ticket = format!("pane-input-{}", page.next_ticket);
         page.next_ticket = next_ticket;
         page.completions
@@ -246,7 +325,7 @@ impl InputQueue {
         &self,
         key: PaneKey,
         bytes: Vec<u8>,
-    ) -> Result<oneshot::Receiver<InputResponse>, String> {
+    ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
         self.submit(key, InputWork::Write(bytes))
     }
 
@@ -254,14 +333,14 @@ impl InputQueue {
         &self,
         key: PaneKey,
         body: Vec<u8>,
-    ) -> Result<oneshot::Receiver<InputResponse>, String> {
+    ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
         self.submit(key, InputWork::Paste(body))
     }
 
     /// Admit a native-channel send: the pane is current and its input works,
     /// and no paste is going in, since the pane's worker runs one job at a
     /// time.
-    fn claim(&self, key: PaneKey) -> Result<oneshot::Receiver<InputResponse>, String> {
+    fn claim(&self, key: PaneKey) -> Result<oneshot::Receiver<InputResponse>, InputError> {
         self.submit(key, InputWork::Claim)
     }
 
@@ -322,22 +401,21 @@ impl InputQueue {
         &self,
         key: PaneKey,
         work: InputWork,
-    ) -> Result<oneshot::Receiver<InputResponse>, String> {
+    ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
+        let closed = || InputError::refused(INPUT_CLOSED, "pane input admission is closed");
         if !self.accepting.load(Ordering::Acquire) {
-            return Err("pane input admission is closed".to_string());
+            return Err(closed());
         }
         let senders = self
             .senders
             .lock()
-            .map_err(|_| "pane input queue lock is poisoned".to_string())?;
+            .map_err(|_| InputError::refused(LOCK_POISONED, "pane input queue lock is poisoned"))?;
         if !self.accepting.load(Ordering::Acquire) {
-            return Err("pane input admission is closed".to_string());
+            return Err(closed());
         }
         // A pane the table does not hold has no queue: it was never opened,
         // or it is gone.
-        let route = senders
-            .get(&key)
-            .ok_or_else(|| ArbiterError::Stale.to_string())?;
+        let route = senders.get(&key).ok_or(ArbiterError::Stale)?;
         let reserved_bytes = work.byte_count();
         route
             .pending_bytes
@@ -346,7 +424,7 @@ impl InputQueue {
                     .checked_add(reserved_bytes)
                     .filter(|next| *next <= MAX_PENDING_INPUT_BYTES_PER_PANE)
             })
-            .map_err(|_| INPUT_QUEUE_FULL.to_string())?;
+            .map_err(|_| InputError::queue_full())?;
         let (response, receiver) = oneshot::channel();
         let job = InputJob {
             work,
@@ -359,12 +437,15 @@ impl InputQueue {
             Err(mpsc::TrySendError::Full(job)) => {
                 job.pending_bytes
                     .fetch_sub(job.reserved_bytes, Ordering::AcqRel);
-                Err(INPUT_QUEUE_FULL.to_string())
+                Err(InputError::queue_full())
             }
             Err(mpsc::TrySendError::Disconnected(job)) => {
                 job.pending_bytes
                     .fetch_sub(job.reserved_bytes, Ordering::AcqRel);
-                Err(format!("pane input queue for {} is closed", key.id))
+                Err(InputError::refused(
+                    INPUT_CLOSED,
+                    format!("pane input queue for {} is closed", key.id),
+                ))
             }
         }
     }
@@ -401,7 +482,7 @@ fn input_worker(
             InputWork::Paste(body) => arbiter.write_paste(&panes, &key, &body),
             InputWork::Claim => arbiter.claim(&key),
         }
-        .map_err(|error| error.to_string());
+        .map_err(InputError::from);
         job.pending_bytes
             .fetch_sub(job.reserved_bytes, Ordering::AcqRel);
         let _ = job.response.send(result);
@@ -409,9 +490,11 @@ fn input_worker(
 }
 
 async fn wait_for_input(receiver: oneshot::Receiver<InputResponse>) -> InputResponse {
+    // The worker answers every job it takes: one left unanswered went down
+    // with the worker, perhaps in the middle of its write.
     receiver
         .await
-        .map_err(|_| "pane input queue ended before answering".to_string())?
+        .map_err(|_| InputError::Uncertain("pane input queue ended before answering".to_string()))?
 }
 
 fn wait_for_input_blocking(receiver: oneshot::Receiver<InputResponse>) -> InputResponse {
@@ -554,6 +637,8 @@ struct Backoff {
 /// still run in the pane host.
 struct Core {
     state: Mutex<CoreState>,
+    /// Woken when the first start has its outcome, or the app stops.
+    settled: Condvar,
     report: CoreReport,
 }
 
@@ -562,6 +647,9 @@ struct CoreState {
     bridge: Option<Bridge>,
     roster: Option<RosterHandle>,
     status: CoreStatus,
+    /// The first start has its outcome. Until then the page is told nothing,
+    /// since a core that is starting is not down, and what it asks waits.
+    settled: bool,
     /// Starts so far, and the one whose bridge is in hand: only that bridge
     /// closing is the core stopping.
     starts: u64,
@@ -577,10 +665,12 @@ impl Core {
                 bridge: None,
                 roster: None,
                 status: CoreStatus::down("ConsensFlow's core has not started", false),
+                settled: false,
                 starts: 0,
                 current: 0,
                 stopping: false,
             }),
+            settled: Condvar::new(),
             report,
         })
     }
@@ -589,30 +679,34 @@ impl Core {
         self.state.lock().unwrap_or_else(|error| error.into_inner())
     }
 
-    /// Starts the daemon. A start that fails is tried again from a thread of
-    /// its own, waiting longer each time, while no pane is open and the app
-    /// is not stopping.
+    /// Starts the daemon from a thread of its own, so the app's window opens
+    /// meanwhile: a daemon may take a while to start (a migration on a big
+    /// ledger), and the first start used to run before the window existed.
     fn start(self: &Arc<Self>, starter: CoreStarter, panes: Arc<PaneTable>, backoff: Backoff) {
-        let Err(failure) = self.attempt(&starter) else {
-            return;
-        };
-        self.fail(&failure);
-        if !failure.retry {
-            return;
-        }
         let core = Arc::clone(self);
-        if thread::Builder::new()
+        if let Err(error) = thread::Builder::new()
             .name("consensflow-core-start".to_string())
-            .spawn(move || core.retry(&starter, &panes, backoff))
-            .is_err()
+            .spawn(move || core.run(&starter, &panes, backoff))
         {
-            self.tell(CoreStatus::down(&failure.cause, false));
+            self.fail(&CoreFailure {
+                cause: format!("ConsensFlow's core could not be started: {error}"),
+                retry: false,
+            });
         }
     }
 
-    fn retry(self: &Arc<Self>, starter: &CoreStarter, panes: &PaneTable, backoff: Backoff) {
+    /// Starts the daemon, and again after a start that failed, waiting longer
+    /// each time, while no pane is open and the app is not stopping.
+    fn run(self: &Arc<Self>, starter: &CoreStarter, panes: &PaneTable, backoff: Backoff) {
         let mut wait = backoff.first;
         loop {
+            let Err(failure) = self.attempt(starter) else {
+                return;
+            };
+            self.fail(&failure);
+            if !failure.retry {
+                return;
+            }
             thread::sleep(wait);
             wait = (wait * 2).min(backoff.most);
             let status = {
@@ -628,15 +722,6 @@ impl Core {
                     ..status
                 });
                 return;
-            }
-            match self.attempt(starter) {
-                Ok(()) => return,
-                Err(failure) => {
-                    self.fail(&failure);
-                    if !failure.retry {
-                        return;
-                    }
-                }
             }
         }
     }
@@ -663,7 +748,7 @@ impl Core {
         }
         // A daemon that ended before it was in hand was not the core's yet
         // when its bridge closed, so its end is read here.
-        state.status = if started.bridge.is_closed() {
+        let status = if started.bridge.is_closed() {
             CoreStatus::down(CORE_STOPPED, false)
         } else {
             CoreStatus::up()
@@ -672,7 +757,7 @@ impl Core {
         state.editor = Some(started.editor);
         state.bridge = Some(started.bridge);
         state.roster = Some(started.roster);
-        (self.report)(&state.status);
+        self.change(&mut state, status);
         Ok(())
     }
 
@@ -688,8 +773,7 @@ impl Core {
             return;
         }
         eprintln!("consensflow: {CORE_STOPPED}");
-        state.status = CoreStatus::down(CORE_STOPPED, false);
-        (self.report)(&state.status);
+        self.change(&mut state, CoreStatus::down(CORE_STOPPED, false));
     }
 
     /// A change, told to the page, unless the app is stopping.
@@ -698,21 +782,38 @@ impl Core {
         if state.stopping {
             return;
         }
+        self.change(&mut state, status);
+    }
+
+    /// Every change is told to the page. The first is the first start's
+    /// outcome, which what the page asked meanwhile is waiting for.
+    fn change(&self, state: &mut CoreState, status: CoreStatus) {
         state.status = status;
+        state.settled = true;
         (self.report)(&state.status);
+        self.settled.notify_all();
     }
 
     /// Where the core stands, told again: a page that has just loaded missed
-    /// what was told before it listened. Under the same lock as every change,
-    /// so the last the page hears is the current one.
+    /// what was told before it listened. Nothing while the first start is
+    /// under way, since a core that is starting is not down. Under the same
+    /// lock as every change, so the last the page hears is the current one.
     fn tell_again(&self) {
         let state = self.lock();
-        (self.report)(&state.status);
+        if state.settled {
+            (self.report)(&state.status);
+        }
     }
 
-    /// The bridge to ask while the core is up; why not otherwise.
+    /// The bridge to ask while the core is up; why not otherwise. Asked
+    /// while the first start is under way, it waits for the outcome: a page
+    /// loads meanwhile and reads the board, and a read that failed is not
+    /// made again when the core comes up.
     fn connection(&self) -> Result<Bridge, String> {
-        let state = self.lock();
+        let state = self
+            .settled
+            .wait_while(self.lock(), |state| !state.settled && !state.stopping)
+            .unwrap_or_else(|error| error.into_inner());
         match &state.bridge {
             Some(bridge) if state.status.available => Ok(bridge.clone()),
             _ => Err(state.status.cause.clone().unwrap_or_default()),
@@ -728,14 +829,16 @@ impl Core {
             .flatten()
     }
 
-    /// The app is stopping: no start is taken in, nothing more is told. The
-    /// first call has the daemon and its bridge handed over to be stopped.
+    /// The app is stopping: no start is taken in, nothing more is told, and
+    /// nothing waits for a first start. The first call has the daemon and its
+    /// bridge handed over to be stopped.
     fn stop(&self) -> Option<(Option<Child>, Option<Bridge>)> {
         let mut state = self.lock();
         if state.stopping {
             return None;
         }
         state.stopping = true;
+        self.settled.notify_all();
         Some((state.editor.take(), state.bridge.clone()))
     }
 
@@ -792,7 +895,7 @@ impl AppRuntime {
                 );
                 builder.on_error(|error| eprintln!("consensflow bridge: {error}"));
                 builder.on_close(closed);
-                connect_core(command, builder)
+                connect_core(command, builder, CORE_READY_TIMEOUT)
             })
         };
         core.start(starter, Arc::clone(&panes), CORE_RESTART);
@@ -1015,8 +1118,13 @@ fn core_command(app: &AppHandle) -> Result<Command, CoreFailure> {
 }
 
 /// Starts a daemon and connects to it: its output carries the handle line,
-/// then the bridge's frames; its input carries the app's.
-fn connect_core(mut command: Command, builder: BridgeBuilder) -> Result<StartedCore, CoreFailure> {
+/// then the bridge's frames; its input carries the app's. A daemon that has
+/// not said it is ready `within` its time is ended, and its start failed.
+fn connect_core(
+    mut command: Command,
+    builder: BridgeBuilder,
+    within: Duration,
+) -> Result<StartedCore, CoreFailure> {
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1038,18 +1146,44 @@ fn connect_core(mut command: Command, builder: BridgeBuilder) -> Result<StartedC
         let _ = child.wait();
         CoreFailure::transient(cause)
     };
-    let connected = match builder.connect(input, writer) {
-        Ok(connected) => connected,
-        Err(BridgeError::Eof) => {
+    // The handle line is read on a thread of its own, since the read has no
+    // limit: one behind a daemon that hung held the start for good.
+    let (handed, handle) = mpsc::channel();
+    if let Err(error) = thread::Builder::new()
+        .name("consensflow-core-handle".to_string())
+        .spawn(move || {
+            let _ = handed.send(builder.connect(input, writer));
+        })
+    {
+        return Err(failed(
+            &mut child,
+            format!("could not read the bundled ConsensFlow's handle: {error}"),
+        ));
+    }
+    let connected = match handle.recv_timeout(within) {
+        Ok(Ok(connected)) => connected,
+        Ok(Err(BridgeError::Eof)) => {
             return Err(failed(
                 &mut child,
                 "ConsensFlow's core stopped before it was ready".to_string(),
             ));
         }
-        Err(error) => {
+        Ok(Err(error)) => {
             return Err(failed(
                 &mut child,
                 format!("could not connect to the bundled ConsensFlow: {error}"),
+            ));
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            return Err(failed(
+                &mut child,
+                format!("ConsensFlow's core did not say it was ready within {within:?}"),
+            ));
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            return Err(failed(
+                &mut child,
+                "could not read the bundled ConsensFlow's handle".to_string(),
             ));
         }
     };
@@ -1256,6 +1390,12 @@ fn register_pane_handlers(
             }
         };
         let key = streamed.key.clone();
+        // The window's process, so the daemon can find what the harness
+        // writes about itself from the window's first moment.
+        let mut opened = json!({"ok":true,"id":key.id,"generation":key.generation});
+        if let Some(pid) = streamed.pid {
+            opened["pid"] = json!(pid);
+        }
         stream_to_page(
             streamed,
             bridge,
@@ -1264,7 +1404,7 @@ fn register_pane_handlers(
             Arc::clone(&open_inputs),
             Arc::clone(&open_output),
         );
-        Ok(json!({"ok":true,"id":key.id,"generation":key.generation}))
+        Ok(opened)
     });
 
     // Keys typed into a pane and an emulator's replies (a page-less peer
@@ -1275,24 +1415,35 @@ fn register_pane_handlers(
             let request: BytesRequest = parse_body(body)?;
             validate_input(&request.bytes)?;
             let key = pane_key(&request.id, request.generation)?;
-            wait_for_input_blocking(input_queue.write(key, request.bytes)?)?;
+            input_queue
+                .write(key, request.bytes)
+                .and_then(wait_for_input_blocking)
+                .map_err(|error| error.to_string())?;
             Ok(json!({"ok":true}))
         });
     }
 
+    // Every way a paste fails is an answer that says whether anything of it
+    // reached the window, a request it could not read included.
     let paste_queue = Arc::clone(&inputs);
     builder.on("pane.write_paste", move |_bridge, body| {
-        let request: PasteRequest = parse_body(body)?;
-        let key = pane_key(&request.id, request.generation)?;
-        wait_for_input_blocking(paste_queue.paste(key, request.body.into_bytes())?)?;
-        Ok(json!({"ok":true}))
+        let pasted = paste_request(body).and_then(|(key, body)| {
+            wait_for_input_blocking(paste_queue.paste(key, body.into_bytes())?)
+        });
+        Ok(match pasted {
+            Ok(()) => json!({"ok":true}),
+            Err(error) => error.paste_answer(),
+        })
     });
 
     let claim_queue = Arc::clone(&inputs);
     builder.on("pane.claim", move |_bridge, body| {
         let request: ClaimRequest = parse_body(body)?;
         let key = pane_key(&request.pane, request.generation)?;
-        wait_for_input_blocking(claim_queue.claim(key)?)?;
+        claim_queue
+            .claim(key)
+            .and_then(wait_for_input_blocking)
+            .map_err(|error| error.to_string())?;
         Ok(json!({"ok":true}))
     });
 
@@ -1452,7 +1603,16 @@ pub fn run_headless() -> Result<(), String> {
 struct EmptyBody {}
 
 fn parse_body<T: DeserializeOwned>(body: Value) -> Result<T, String> {
-    serde_json::from_value(body).map_err(|error| format!("invalid-body: {error}"))
+    serde_json::from_value(body).map_err(|error| format!("{INVALID_BODY}: {error}"))
+}
+
+/// A paste's pane and body. A request that does not name them was refused
+/// before anything was written.
+fn paste_request(body: Value) -> Result<(PaneKey, String), InputError> {
+    let refused = |cause| InputError::refused(INVALID_BODY, cause);
+    let request: PasteRequest = parse_body(body).map_err(refused)?;
+    let key = pane_key(&request.id, request.generation).map_err(refused)?;
+    Ok((key, request.body))
 }
 
 /// Everything a `pane.open` asks for, checked before anything is spawned; the
@@ -1555,7 +1715,7 @@ async fn input_result(result: Result<PageInputCompletion, String>) -> Value {
     };
     match wait_for_input(completion.receiver).await {
         Ok(()) => json!({"ok":true}),
-        Err(error) => json!({"ok":false,"error":error}),
+        Err(error) => json!({"ok":false,"error":error.to_string()}),
     }
 }
 
@@ -1678,9 +1838,10 @@ async fn task_operation<R: Runtime>(
     operation: &'static str,
     body: Value,
 ) -> Value {
-    let connection = app.state::<AppRuntime>().core.connection();
+    let core = Arc::clone(&app.state::<AppRuntime>().core);
+    // Off the async runtime: asked while the core is starting, it waits.
     run_blocking(operation, move || {
-        request_node(connection, operation.to_string(), body)
+        request_node(core.connection(), operation.to_string(), body)
     })
     .await
 }
@@ -1747,8 +1908,8 @@ pub async fn core_request<R: Runtime>(app: AppHandle<R>, operation: String, body
 /// next keystrokes were refused as a regression until the app restarted.
 ///
 /// And it is when a new page hears where the core stands: what was told
-/// before it listened (a first start fails before the window exists) is told
-/// again, so the page listens to `core-status` before it subscribes.
+/// before it listened (a first start that failed while the page loaded) is
+/// told again, so the page listens to `core-status` before it subscribes.
 #[tauri::command]
 pub async fn subscribe_output<R: Runtime>(
     app: AppHandle<R>,
@@ -1843,6 +2004,7 @@ mod tests {
             if bridge.is_some() {
                 state.status = CoreStatus::up();
             }
+            state.settled = true;
             state.editor = editor;
             state.bridge = bridge;
         }
@@ -1886,7 +2048,7 @@ mod tests {
             .arg(format!("{}{then}", if ready { handle } else { "" }));
         let mut builder = BridgeBuilder::new(1024);
         builder.on_close(closed);
-        connect_core(command, builder)
+        connect_core(command, builder, Duration::from_secs(5))
     }
 
     /// A daemon that stops before it is ready (its ledger still held by one
@@ -1932,6 +2094,159 @@ mod tests {
             heard.recv_timeout(Duration::from_millis(200)).is_err(),
             "an app that is quitting tells the page nothing"
         );
+    }
+
+    /// A daemon that never says it is ready (a migration that hangs) is
+    /// killed at the limit, and its start counts as failed: the page is told
+    /// and it is started again. The read of its handle line had no limit, and
+    /// held the start for good.
+    #[cfg(unix)]
+    #[test]
+    fn a_daemon_that_never_says_it_is_ready_is_killed_and_started_again() {
+        let home = tempfile::tempdir().expect("home");
+        let pid_file = home.path().join("hung.pid");
+        let starts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&starts);
+        let hung = pid_file.clone();
+        let starter: CoreStarter = Arc::new(move |closed| {
+            if counted.fetch_add(1, Ordering::SeqCst) > 0 {
+                return stand_in_core(true, "while read -r line; do :; done", closed);
+            }
+            let mut command = Command::new("/bin/sh");
+            command.arg("-c").arg(format!(
+                "echo $$ > '{}'; exec /bin/sleep 60",
+                hung.display()
+            ));
+            let mut builder = BridgeBuilder::new(1024);
+            builder.on_close(closed);
+            connect_core(command, builder, Duration::from_millis(300))
+        });
+        let (report, heard) = listener();
+        let core = Core::new(report);
+        let panes = Arc::new(PaneTable::new());
+        core.start(starter, Arc::clone(&panes), QUICK);
+
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(5)).expect("told"),
+            CoreStatus::down(
+                "ConsensFlow's core did not say it was ready within 300ms",
+                true
+            )
+        );
+        let hung_pid = std::fs::read_to_string(&pid_file)
+            .expect("the hung daemon's pid")
+            .trim()
+            .parse::<i32>()
+            .expect("a pid");
+        assert!(
+            !process_exists(hung_pid),
+            "the hung daemon was left running"
+        );
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(5)).expect("up"),
+            CoreStatus::up()
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 2);
+
+        let arbiter = Arc::new(InputArbiter::new(0));
+        AppRuntime {
+            inputs: Arc::new(InputQueue::new(Arc::clone(&panes), arbiter)),
+            panes,
+            core,
+            output: Arc::new(OutputHub::new()),
+        }
+        .shutdown();
+    }
+
+    /// The first start runs apart, so the app's window opens while the daemon
+    /// starts: a page that loads meanwhile is told nothing, since a core that
+    /// is starting is not down, and what it asks waits for the outcome. The
+    /// first start used to run before the window existed, for as long as the
+    /// daemon took.
+    #[cfg(unix)]
+    #[test]
+    fn the_first_start_runs_apart_and_what_a_page_asks_waits_for_it() {
+        let (release, released) = mpsc::channel::<()>();
+        let released = Mutex::new(released);
+        let starter: CoreStarter = Arc::new(move |closed| {
+            let _ = released.lock().expect("the release").recv();
+            stand_in_core(true, "while read -r line; do :; done", closed)
+        });
+        let (report, heard) = listener();
+        let core = Core::new(report);
+        let panes = Arc::new(PaneTable::new());
+        let (returned, start_returned) = mpsc::channel();
+        let starting = Arc::clone(&core);
+        let starting_panes = Arc::clone(&panes);
+        thread::spawn(move || {
+            starting.start(starter, starting_panes, QUICK);
+            let _ = returned.send(());
+        });
+        assert!(
+            start_returned.recv_timeout(Duration::from_secs(2)).is_ok(),
+            "the start held up the app until the daemon was ready"
+        );
+
+        core.tell_again();
+        assert!(
+            heard.recv_timeout(Duration::from_millis(100)).is_err(),
+            "a core that is starting was told as down"
+        );
+        let asking = Arc::clone(&core);
+        let (answered, answer) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = answered.send(asking.connection().is_ok());
+        });
+        assert!(
+            answer.recv_timeout(Duration::from_millis(200)).is_err(),
+            "a request did not wait for the start"
+        );
+
+        release.send(()).expect("let the start go on");
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(5)).expect("up"),
+            CoreStatus::up()
+        );
+        assert_eq!(answer.recv_timeout(Duration::from_secs(5)), Ok(true));
+
+        let arbiter = Arc::new(InputArbiter::new(0));
+        AppRuntime {
+            inputs: Arc::new(InputQueue::new(Arc::clone(&panes), arbiter)),
+            panes,
+            core,
+            output: Arc::new(OutputHub::new()),
+        }
+        .shutdown();
+    }
+
+    /// An app that stops while its first start is under way answers what a
+    /// page asked meanwhile at once.
+    #[test]
+    fn stopping_ends_a_wait_for_the_first_start() {
+        let (release, released) = mpsc::channel::<()>();
+        let released = Mutex::new(released);
+        let starter: CoreStarter = Arc::new(move |_closed| {
+            let _ = released.lock().expect("the release").recv();
+            Err(CoreFailure::transient("the app stopped".to_string()))
+        });
+        let (report, _heard) = listener();
+        let core = Core::new(report);
+        core.start(starter, Arc::new(PaneTable::new()), QUICK);
+        let asking = Arc::clone(&core);
+        let (answered, answer) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = answered.send(asking.connection().err());
+        });
+        assert!(answer.recv_timeout(Duration::from_millis(200)).is_err());
+
+        assert!(core.stop().is_some());
+        assert_eq!(
+            answer
+                .recv_timeout(Duration::from_secs(1))
+                .expect("answered"),
+            Some("ConsensFlow's core has not started".to_string())
+        );
+        drop(release);
     }
 
     /// A daemon that stops while the app runs is not started again (its
@@ -2831,7 +3146,7 @@ mod tests {
         assert!(
             blocked_outcomes
                 .iter()
-                .any(|value| value["error"] == "pane-input-queue-full"),
+                .any(|value| value["error"] == "the pane's input queue is full"),
             "a production-sized blocked burst must hit the bounded pane queue"
         );
     }
@@ -3474,6 +3789,130 @@ mod tests {
         connected.bridge.wait_closed().expect("bridge closes");
     }
 
+    /// A paste says whether anything of it reached the window. Refused before
+    /// a byte was written, it was not sent and may be sent again; cut short
+    /// in its write, it is uncertain. Both used to answer a bare error, which
+    /// the daemon read as not sent.
+    #[cfg(unix)]
+    #[test]
+    fn a_paste_answers_whether_anything_reached_the_window() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        let _pty_guard = crate::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(0));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let output = Arc::new(OutputHub::new());
+        let (printed, seen) = mpsc::channel();
+        output.register_sink(Arc::new(move |message: PaneOutputMessage| {
+            printed.send(message.bytes).is_ok()
+        }));
+        let mut builder = BridgeBuilder::new(MAX_FRAME_BYTES);
+        register_pane_handlers(
+            &mut builder,
+            Arc::clone(&panes),
+            arbiter,
+            output,
+            Arc::clone(&inputs),
+        );
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
+        let mut number = 0;
+        let mut send = |op: &str, body: Value| -> String {
+            number += 1;
+            let id = format!("n-paste-{number}");
+            let mut frame =
+                serde_json::to_vec(&json!({"v":1,"id":id,"kind":"req","op":op,"body":body}))
+                    .expect("serialize request");
+            frame.push(b'\n');
+            node_stream.write_all(&frame).expect("write request");
+            id
+        };
+        // Answers are kept by request, whatever order they come in.
+        let mut answers = HashMap::new();
+        let mut answer = |id: &str| -> Value {
+            while !answers.contains_key(id) {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read a frame");
+                let frame: Value = serde_json::from_str(line.trim()).expect("frame JSON");
+                if frame["kind"] == "res" {
+                    let answered = frame["id"].as_str().expect("response id").to_string();
+                    answers.insert(answered, frame["body"].clone());
+                }
+            }
+            answers.remove(id).expect("the answer")
+        };
+
+        // A window that reads nothing: a large paste fills its terminal and
+        // waits, once the terminal is raw.
+        let opened = send(
+            "pane.open",
+            json!({"id":"pasted-pane","generation":1,"cwd":"/tmp",
+                   "argv":["/bin/sh","-c","/bin/stty raw -echo; printf ready; exec /bin/sleep 1000"],
+                   "env":{},"size":{"rows":24,"cols":80},"backlogBytes":4096}),
+        );
+        assert_eq!(answer(&opened)["ok"], true);
+        let mut terminal = Vec::new();
+        while !terminal.ends_with(b"ready") {
+            terminal.extend(
+                seen.recv_timeout(Duration::from_secs(5))
+                    .expect("the window says it is ready"),
+            );
+        }
+
+        let stale = send(
+            "pane.write_paste",
+            json!({"id":"pasted-pane","generation":2,"body":"late"}),
+        );
+        assert_eq!(
+            answer(&stale),
+            json!({"ok":false,"admitted":false,"bytesWritten":0,
+                   "error":"stale-pane","cause":"stale pane generation"})
+        );
+        let unreadable = send(
+            "pane.write_paste",
+            json!({"id":"pasted-pane","generation":1}),
+        );
+        let unreadable = answer(&unreadable);
+        assert_eq!(
+            (
+                &unreadable["admitted"],
+                &unreadable["bytesWritten"],
+                &unreadable["error"]
+            ),
+            (&json!(false), &json!(0), &json!("invalid-body")),
+            "{unreadable}"
+        );
+
+        let paste = send(
+            "pane.write_paste",
+            json!({"id":"pasted-pane","generation":1,"body":"x".repeat(512 * 1024)}),
+        );
+        thread::sleep(Duration::from_millis(150));
+        let kill = send("pane.kill", json!({"id":"pasted-pane","generation":1}));
+        assert_eq!(answer(&kill), json!({"ok":true}));
+        let cut = answer(&paste);
+        assert_eq!(
+            (&cut["ok"], &cut["admitted"], &cut["error"]),
+            (&json!(false), &Value::Null, &json!("uncertain")),
+            "{cut}"
+        );
+        assert!(cut["cause"].is_string(), "{cut}");
+        assert!(cut.get("bytesWritten").is_none(), "{cut}");
+
+        inputs.close_and_drain();
+        drop(reader);
+        drop(node_stream);
+        connected.bridge.wait_closed().expect("bridge closes");
+    }
+
     /// Input for a pane the table never held is refused, and starts no
     /// worker: every key used to get a thread and a queue of its own.
     #[test]
@@ -3481,7 +3920,10 @@ mod tests {
         let panes = Arc::new(PaneTable::new());
         let inputs = InputQueue::new(Arc::clone(&panes), Arc::new(InputArbiter::new(0)));
         let refused = inputs.write(PaneKey::new("never-opened", 1), b"x".to_vec());
-        assert_eq!(refused.err().as_deref(), Some("stale pane generation"));
+        assert!(matches!(
+            refused,
+            Err(InputError::Refused { code: "stale-pane", ref cause }) if cause == "stale pane generation"
+        ));
         assert!(inputs.senders.lock().unwrap().is_empty());
         assert!(inputs.workers.lock().unwrap().is_empty());
     }

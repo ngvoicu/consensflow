@@ -55,6 +55,8 @@ pub struct PaneOutput {
 
 pub struct StreamedPane {
     pub key: PaneKey,
+    /// The window's program, when its process id is known.
+    pub pid: Option<u32>,
     pub output: mpsc::Receiver<PaneOutput>,
 }
 
@@ -563,17 +565,21 @@ impl PaneTable {
             size,
         )?;
         let flow = Arc::new(OutputFlow::new(backlog_bytes));
-        self.lock_panes()?
-            .get_mut(&key)
-            .ok_or_else(|| PaneError::NotFound(key.clone()))?
-            .output_flow = Some(Arc::clone(&flow));
+        let pid = {
+            let mut panes = self.lock_panes()?;
+            let pane = panes
+                .get_mut(&key)
+                .ok_or_else(|| PaneError::NotFound(key.clone()))?;
+            pane.output_flow = Some(Arc::clone(&flow));
+            pane.child.process_id()
+        };
         #[cfg(windows)]
         self.watch_exit(&key)?;
 
         let (sender, output) = mpsc::channel();
         let output_key = key.clone();
         std::thread::spawn(move || stream_output(output_key, reader, flow, sender));
-        Ok(StreamedPane { key, output })
+        Ok(StreamedPane { key, pid, output })
     }
 
     pub fn ack(&self, key: &PaneKey, seq: u64) -> Result<(), PaneError> {
@@ -2296,8 +2302,10 @@ mod tests {
             GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
         };
 
+        use portable_pty::PtySize;
+
         use super::super::conpty_test::{line_echo, open, powershell, read_until, system};
-        use super::super::{serial_pty_test, PaneTable};
+        use super::super::{serial_pty_test, PaneEnvironment, PaneTable};
 
         fn number_after(text: &str, marker: &str) -> u32 {
             let at = text.find(marker).expect("marker printed") + marker.len();
@@ -2406,6 +2414,30 @@ mod tests {
                 table.list().expect("list the panes").is_empty(),
                 "the ended pane stayed in the table"
             );
+        }
+
+        /// A pane names its program's process: PowerShell's own `$PID`.
+        #[test]
+        fn a_pane_names_its_programs_process() {
+            let _pty_guard = serial_pty_test();
+            let table = Arc::new(PaneTable::new());
+            let streamed = table
+                .open_streamed(
+                    &std::env::temp_dir(),
+                    &powershell("Write-Output \"PID=$PID#\"; Start-Sleep 1000"),
+                    PaneEnvironment::new(&HashMap::new(), &[]),
+                    PtySize {
+                        rows: 24,
+                        cols: 80,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    },
+                    1 << 20,
+                )
+                .expect("open a ConPTY pane");
+            let text = read_until(&table, &streamed.key, &streamed.output, "#");
+            assert_eq!(streamed.pid, Some(number_after(&text, "PID=")), "{text:?}");
+            table.kill(&streamed.key).expect("kill the pane");
         }
 
         #[test]

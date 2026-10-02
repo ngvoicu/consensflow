@@ -893,6 +893,101 @@ fn stdin_eof_kills_a_pane_before_draining_its_blocked_paste_handler() {
     assert!(pids.iter().all(|pid| !process_exists(*pid)));
 }
 
+/// A paste says whether anything of it reached the window: one refused before
+/// a byte was written was not sent, and the daemon may send it again; one
+/// whose write failed partway is uncertain, and the daemon asks the harness.
+#[test]
+fn a_paste_answers_whether_anything_reached_the_window() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    // A window that reads nothing: a large paste fills its terminal and waits.
+    let opened = helper.request(
+        "pane.open",
+        open_body(
+            "/bin/stty raw -echo; printf ready; exec /bin/sleep 1000",
+            4096,
+        ),
+        &mut events,
+    );
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let _ = output_until(&helper, &mut events, &pane_id, generation, b"ready");
+
+    fn refused(error: &str, cause: &str) -> Value {
+        json!({"ok":false,"admitted":false,"bytesWritten":0,"error":error,"cause":cause})
+    }
+    assert_eq!(
+        helper.request(
+            "pane.write_paste",
+            json!({"id":pane_id,"generation":generation + 1,"body":"late"}),
+            &mut events,
+        ),
+        refused("stale-pane", "stale pane generation")
+    );
+    assert_eq!(
+        helper.request(
+            "pane.write_paste",
+            json!({"id":pane_id,"generation":generation,"body":"\u{7}"}),
+            &mut events,
+        ),
+        refused(
+            "invalid-body",
+            "invalid paste body: control byte 0x07 is not allowed"
+        )
+    );
+    let unnamed = helper.request(
+        "pane.write_paste",
+        json!({"generation":generation,"body":"no pane"}),
+        &mut events,
+    );
+    assert_eq!(
+        (
+            &unnamed["admitted"],
+            &unnamed["bytesWritten"],
+            &unnamed["error"]
+        ),
+        (&json!(false), &json!(0), &json!("invalid-body")),
+        "{unnamed}"
+    );
+    assert!(unnamed["cause"].is_string(), "{unnamed}");
+
+    // The window is closed while a paste is going into it: some of the paste
+    // reached its terminal.
+    let paste = helper.send_request(
+        "pane.write_paste",
+        json!({"id":pane_id,"generation":generation,"body":"x".repeat(512 * 1024)}),
+    );
+    assert!(
+        matches!(
+            helper.receive_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ),
+        "the paste did not wait on the window that reads nothing"
+    );
+    let kill = helper.send_request("pane.kill", json!({"id":pane_id,"generation":generation}));
+    let mut answers = std::collections::HashMap::new();
+    while answers.len() < 2 {
+        let frame = helper.receive();
+        if frame["kind"] == "res" {
+            answers.insert(
+                frame["id"].as_str().unwrap_or_default().to_string(),
+                frame["body"].clone(),
+            );
+        }
+    }
+    assert_eq!(answers[&kill], json!({"ok":true}));
+    let cut = &answers[&paste];
+    assert_eq!(
+        (&cut["ok"], &cut["admitted"], &cut["error"]),
+        (&json!(false), &Value::Null, &json!("uncertain")),
+        "{cut}"
+    );
+    assert!(cut["cause"].is_string(), "{cut}");
+    assert!(cut.get("bytesWritten").is_none(), "{cut}");
+    helper.close_input_and_wait();
+}
+
 #[test]
 fn helper_is_inert_when_stdin_is_not_a_pipe() {
     let output = Command::new(env!("CARGO_BIN_EXE_consensflow-bridge"))
@@ -1091,7 +1186,12 @@ fn product_bridge_contract_preserves_app_identity_and_opens_it_once() {
     });
     let opened = helper.request("pane.open", body.clone(), &mut events);
     assert_eq!(opened["ok"], true, "production open rejected: {opened}");
-    assert_eq!(opened, json!({"ok":true,"id":"product-pane","generation":7}));
+    let pid = opened["pid"].as_u64().filter(|pid| *pid > 0);
+    assert!(pid.is_some(), "the window's process id: {opened}");
+    assert_eq!(
+        opened,
+        json!({"ok":true,"id":"product-pane","generation":7,"pid":pid})
+    );
     assert_eq!(
         helper.request("pane.open", body, &mut events),
         json!({"ok":false,"error":"pane product-pane generation 7 is already open"})
@@ -1107,6 +1207,91 @@ fn product_bridge_contract_preserves_app_identity_and_opens_it_once() {
             .as_array()
             .map(Vec::len),
         Some(1)
+    );
+    helper.close_input_and_wait();
+}
+
+/// The answer to `pane.open` names the window's process, so the daemon can
+/// find what the harness writes about itself from the window's first moment.
+#[test]
+fn a_pane_open_answers_the_process_id_of_the_windows_program() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body("printf 'PID:%s:' \"$$\"; exec /bin/sleep 30", 1024),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let printed = output_until(&helper, &mut events, &pane_id, generation, b":");
+    let pid = String::from_utf8_lossy(&printed)
+        .trim_start_matches("PID:")
+        .trim_end_matches(':')
+        .parse::<u64>()
+        .expect("the pane's pid");
+    assert_eq!(opened["pid"], pid, "{opened}");
+    assert_eq!(
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events,
+        ),
+        json!({"ok":true})
+    );
+    helper.close_input_and_wait();
+}
+
+/// A window whose program exits while something it started still holds its
+/// terminal (a dev server deaf to the hangup) ends all the same, and what it
+/// left running ends with it. The program is its terminal's controlling
+/// process, and macOS revokes the terminal when it exits, so the output ends
+/// and `pane.exit` follows; Linux keeps the terminal open for the child, and
+/// would need an exit watcher as ConPTY does.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_terminal() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body(
+            "trap '' HUP; /bin/sleep 1000 & printf 'CHILD %s END' \"$!\"; exit 0",
+            1024,
+        ),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let printed = output_until(&helper, &mut events, &pane_id, generation, b" END");
+    let child = String::from_utf8_lossy(&printed)
+        .trim_start_matches("CHILD ")
+        .trim_end_matches(" END")
+        .parse::<i32>()
+        .expect("the background child's pid");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !events
+        .iter()
+        .any(|event| event["op"] == "pane.exit" && event["body"]["id"] == pane_id.as_str())
+    {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match helper.receive_timeout(left) {
+            Ok(frame) => events.push(frame),
+            Err(_) => panic!("no pane.exit while the background child holds the terminal"),
+        }
+    }
+    let gone = Instant::now() + Duration::from_secs(2);
+    while process_exists(child) && Instant::now() < gone {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        !process_exists(child),
+        "what the window left running survived it"
     );
     helper.close_input_and_wait();
 }
