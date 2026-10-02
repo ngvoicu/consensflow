@@ -1,5 +1,6 @@
 //! What the app starts as its daemon: the bundled runtime running the bundled
-//! CLI, `cf ui --json`, on the PATH the human's login shell sets up.
+//! CLI, `cf ui --json`, on the PATH the human's login shell sets up. The
+//! portable Windows app carries both inside its exe and unpacks them first.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -39,6 +40,13 @@ pub(crate) fn core_command(app: &AppHandle) -> Result<Command, CoreFailure> {
 }
 
 fn bundled_cli(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
+    #[cfg(windows)]
+    if let Some(runtime) = portable_runtime(app)? {
+        return present(
+            runtime.join("node.exe"),
+            runtime.join("cli").join("bin").join("cf.mjs"),
+        );
+    }
     let resources = app
         .path()
         .resource_dir()
@@ -56,10 +64,14 @@ fn bundled_cli(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
             .ok_or_else(|| "the app executable has no directory".to_string())?
             .join(sidecar)
     };
-    let cli = resources.join("cli").join("bin").join("cf.mjs");
-    // Tauri may answer its resource directory in Windows' verbatim form
-    // (`\\?\C:\…`), which Node cannot take as a script path: it stops at
-    // the drive with `lstat 'C:'`. The plain spelling names the same file.
+    present(node, resources.join("cli").join("bin").join("cf.mjs"))
+}
+
+/// The runtime and the CLI, when both are there.
+fn present(node: PathBuf, cli: PathBuf) -> Result<(PathBuf, PathBuf), String> {
+    // Tauri may answer its folders in Windows' verbatim form (`\\?\C:\…`),
+    // which Node cannot take as a script path: it stops at the drive with
+    // `lstat 'C:'`. The plain spelling names the same file.
     let node = plain_path(node);
     let cli = plain_path(cli);
     if !node.is_absolute() || !node.exists() {
@@ -73,6 +85,22 @@ fn bundled_cli(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
         ));
     }
     Ok((node, cli))
+}
+
+/// The portable app's runtime (see `portable`), unpacked from its own exe by
+/// its first start into the app's local data folder: on Windows,
+/// `%LOCALAPPDATA%\<identifier>\runtime`. `None` for an app installed with its
+/// runtime beside it.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn portable_runtime(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    let exe = std::env::current_exe()
+        .map_err(|error| format!("the app could not find itself: {error}"))?;
+    let root = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("the app could not find its local data folder: {error}"))?
+        .join("runtime");
+    crate::portable::unpacked_runtime(&exe, &root, &app.package_info().version.to_string())
 }
 
 /// A Windows path without the `\\?\` verbatim prefix; any other path as it is.
