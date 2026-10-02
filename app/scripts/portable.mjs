@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 /**
- * The portable Windows build: what the NSIS installer puts in
- * %LOCALAPPDATA%\ConsensFlow, minus its uninstaller, zipped under one
- * ConsensFlow folder, to unpack anywhere and run without installing. Its
- * data lives where the installed app's does (%USERPROFILE%\.consensflow), and
- * the app installs no update in place on Windows, so a portable copy is never
- * swapped for an installed one.
+ * The portable Windows app: one exe to run from anywhere, without installing.
+ * ConsensFlow.exe carries its own Node and CLI after its own bytes, and its
+ * first start unpacks them into %LOCALAPPDATA%\dev.ngvoicu.consensflow\runtime.
+ * The file's layout, and how the app reads it, are written down once, in
+ * app/src-tauri/src/portable.rs. Its data lives where the installed app's
+ * does (%USERPROFILE%\.consensflow), and the app installs no update in place
+ * on Windows, so a portable copy is never swapped for an installed one.
  *
  * Run after `npm --prefix app run build` on Windows:
  *   node app/scripts/portable.mjs [--release <dir>] [--out <dir>] [--version <x>]
  */
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -19,9 +20,8 @@ import { parseArgs } from 'node:util'
 
 const APP = dirname(dirname(fileURLToPath(import.meta.url)))
 const RELEASE = join(APP, 'src-tauri', 'target', 'release')
-
-/** The installed layout (2026-09-30, %LOCALAPPDATA%\ConsensFlow), without uninstall.exe. */
-const LAYOUT = ['ConsensFlow.exe', 'node.exe', 'cli']
+/** The footer's tag: the last eight bytes of an exe that carries its runtime. */
+const TAG = 'CFPAYLD1'
 
 const { values } = parseArgs({
   options: {
@@ -34,7 +34,7 @@ const version =
   values.version ??
   JSON.parse(readFileSync(join(APP, 'src-tauri', 'tauri.conf.json'), 'utf8')).version
 
-for (const name of LAYOUT) {
+for (const name of ['ConsensFlow.exe', 'node.exe', 'cli']) {
   if (!existsSync(join(values.release, name))) {
     console.error(
       `portable: ${name} is missing from ${values.release}; build first with npm --prefix app run build`,
@@ -43,20 +43,28 @@ for (const name of LAYOUT) {
   }
 }
 
+// Windows' own tar.exe, which gzips as the Mac's does; a bare `tar` there may
+// be Git's GNU tar, which reads `C:` as a remote host. COPYFILE_DISABLE keeps
+// the Mac's from adding a `._` twin of every file.
+const tar =
+  process.platform === 'win32'
+    ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+    : 'tar'
 const staging = mkdtempSync(join(tmpdir(), 'cf-portable-'))
 try {
-  const folder = join(staging, 'ConsensFlow')
-  for (const name of LAYOUT) cpSync(join(values.release, name), join(folder, name), { recursive: true })
+  const runtime = join(staging, 'runtime.tar.gz')
+  execFileSync(tar, ['-c', '-z', '-f', runtime, '-C', values.release, 'node.exe', 'cli'], {
+    env: { ...process.env, COPYFILE_DISABLE: '1' },
+  })
+  const payload = readFileSync(runtime)
+  const footer = Buffer.alloc(16)
+  footer.writeBigUInt64LE(BigInt(payload.length), 0)
+  footer.write(TAG, 8, 'ascii')
   mkdirSync(values.out, { recursive: true })
-  const zip = join(values.out, `ConsensFlow_${version}_x64-portable.zip`)
-  rmSync(zip, { force: true })
-  // Windows' own tar.exe writes a zip for a .zip name (-a), as the Mac's does.
-  const tar =
-    process.platform === 'win32'
-      ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
-      : 'tar'
-  execFileSync(tar, ['-a', '-c', '-f', zip, '-C', staging, 'ConsensFlow'])
-  console.log(`portable: ${zip}`)
+  const exe = join(values.out, `ConsensFlow_${version}_x64-portable.exe`)
+  const app = readFileSync(join(values.release, 'ConsensFlow.exe'))
+  writeFileSync(exe, Buffer.concat([app, payload, footer]))
+  console.log(`portable: ${exe}`)
 } finally {
   rmSync(staging, { recursive: true, force: true })
 }
