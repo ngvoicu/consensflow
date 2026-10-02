@@ -148,9 +148,9 @@ function modelAndEffort({ kind, model, effort, thinking }) {
       return [...(model ? ['--model', model] : []), ...(thinking ? ['--thinking', thinking] : [])]
     case 'devin':
       // Devin writes the level into the id (claude-opus-5-5-max): an agent
-      // names the family and its effort, joined here. `default` is Devin's
-      // own setting.
-      return model && model !== 'default' ? ['--model', effort ? `${model}-${effort}` : model] : []
+      // names the family and its effort, joined here. No model is Devin's own
+      // setting, which a lead from before every lead had an agent still runs on.
+      return model ? ['--model', effort ? `${model}-${effort}` : model] : []
     case 'opencode':
       return model ? ['--model', model] : []
     default:

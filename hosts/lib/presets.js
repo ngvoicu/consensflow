@@ -80,15 +80,6 @@
 // OpenCode trio does: a tier ladder is a choice, and asteria/astraeus were asked for as xhigh and
 // max. Add an ultra row when someone wants the top; the level is there and proven.
 export const AGENT_PRESETS = [
-  {
-    preset: "devin",
-    id: "devin",
-    name: "Devin",
-    label: "Devin configured model",
-    description: "Coding and review using the model selected in your Devin settings.",
-    kind: "devin",
-    model: "default",
-  },
   // --- Devin's flagship models (Egyptian names, 2026-10-01) ---------------
   // Devin lists 54 model families; these are the ladders Claude Code and Codex
   // carry, at the same levels, and Devin's own SWE-2. Devin writes the level
@@ -345,6 +336,29 @@ export const AGENT_PRESETS = [
     kind: "devin",
     model: "swe-2",
     effort: "medium",
+  },
+  // --- Devin's SWE-1.6 (2026-10-02) ----------------------------------------
+  // Devin lists SWE-1.6 with no levels, under three ids: swe-1-6, swe-1-6-fast
+  // and swe-1-6-slow. The owner asked for the plain one and the slow one; the
+  // slow one is what a free Devin plan runs (proven 2026-09-19, when plain
+  // swe-1-6 answered "Upgrade to Pro" there).
+  {
+    preset: "hapi",
+    id: "hapi",
+    name: "Hapi",
+    label: "Devin SWE-1.6",
+    description: "Devin’s own SWE-1.6: everyday implementation and tests.",
+    kind: "devin",
+    model: "swe-1-6",
+  },
+  {
+    preset: "khnum",
+    id: "khnum",
+    name: "Khnum",
+    label: "Devin SWE-1.6 Slow",
+    description: "Devin’s own SWE-1.6 Slow: everyday implementation and tests.",
+    kind: "devin",
+    model: "swe-1-6-slow",
   },
   // Lower-effort choices; existing names and higher tiers stay stable.
   {
@@ -1395,6 +1409,8 @@ const MODEL_LABELS = {
   'muse-spark-1.3': 'Muse Spark 1.3',
   'mimo-v2.6-pro': 'MiMo V2.6 Pro',
   'swe-2': 'SWE-2',
+  'swe-1-6': 'SWE-1.6',
+  'swe-1-6-slow': 'SWE-1.6 Slow',
 }
 
 
@@ -1439,10 +1455,11 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
   harness ??= kind === "claude-code" ? "claude" : kind
   if (harness === "pi") effort = thinking ?? effort
   const known = AGENT_PRESETS.some((p) => (p.kind === "claude-code" ? "claude" : p.kind) === harness && p.model === model)
-  // Devin's own setting, or an agent off the catalog on whatever id it names.
-  if (harness === 'devin' && (!known || !model || model === 'default')) return {
-    modelKey: model && model !== 'default' ? model : 'devin-configured',
-    modelLabel: model && model !== 'default' ? model : 'Devin configured model',
+  // Devin's own setting (a lead from before every lead had an agent), or an
+  // agent off the catalog on whatever id it names.
+  if (harness === 'devin' && (!known || !model)) return {
+    modelKey: model || 'devin-configured',
+    modelLabel: model || 'Devin configured model',
     routeLabel: 'Devin account',
   }
   if (harness === 'image')

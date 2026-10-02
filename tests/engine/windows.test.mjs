@@ -273,5 +273,5 @@ test('window: devin joins a family and its level into the model id it writes', (
   assert.equal(model({ model: 'claude-opus-5-5', effort: 'max' }), 'claude-opus-5-5-max')
   assert.equal(model({ model: 'gpt-6-1-sol', effort: 'low' }), 'gpt-6-1-sol-low')
   assert.equal(model({ model: 'swe-1-6-slow' }), 'swe-1-6-slow', 'an id without a level as it is')
-  assert.equal(model({ model: 'default', effort: 'max' }), null, "Devin's own setting")
+  assert.equal(model({}), null, "no model: Devin's own setting")
 })

@@ -25,7 +25,7 @@ chief's harness (claude, codex, pi, opencode, devin), saved as the lead's
 agent with its model and effort. Every chief but
 Devin takes its model from `--model`; unless given, Claude Code runs Opus,
 Codex its cheap model, and Pi and OpenCode DeepSeek V4 Pro
-(`evals/plan.mjs`). Devin runs the model its own configuration names.
+(`evals/plan.mjs`). Devin runs its staff's model, SWE-1.6 Slow.
 Claude and Codex windows start through wrappers the runner writes
 (`~/.consensflow-candidate/evals/bin`) that shut out MCP servers,
 connectors and the browser for the chief too (ConsensFlow already does it

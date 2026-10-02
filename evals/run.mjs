@@ -88,15 +88,11 @@ const { agents, staff } = staffFor(
 /** The chief's effort as it reached the chief: null where its harness has no switch for it. */
 const chiefEffort = ['claude', 'codex', 'pi'].includes(chief) ? values.effort : null
 const chiefSetup = chiefEnvironment(chief, values.model)
-/**
- * The lead's agent, which the core opens no project without: the chief's
- * harness, model and effort. A Devin chief runs the model its own
- * configuration names, as before.
- */
+/** The lead's agent, which the core opens no project without: the chief's harness, model and effort. */
 const lead = {
   id: `eval-${chief}-lead`,
   kind: HARNESSES[chief].kind,
-  model: chief === 'devin' ? 'default' : chiefSetup.model,
+  model: chiefSetup.model,
   workTier: 'standard',
   ...(chiefEffort == null ? {} : { [chief === 'pi' ? 'thinking' : 'effort']: chiefEffort }),
 }

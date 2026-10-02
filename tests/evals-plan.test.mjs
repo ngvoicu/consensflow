@@ -59,7 +59,8 @@ describe('an eval run’s plan', () => {
     assert.deepEqual(chiefEnvironment('pi').model, CHIEF_MODELS.pi)
     assert.deepEqual(chiefEnvironment('claude').model, 'claude-opus-5')
     assert.deepEqual(chiefEnvironment('opencode').model, CHIEF_MODELS.opencode)
-    assert.deepEqual(chiefEnvironment('devin', 'x').model, "devin's default")
+    // A Devin chief runs its staff's model, whatever --model says.
+    assert.deepEqual(chiefEnvironment('devin', 'x'), { env: {}, model: HARNESSES.devin.model })
     assert.throws(() => chiefEnvironment('kimi', 'x'), /no such eval harness/)
   })
 

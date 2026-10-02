@@ -91,7 +91,8 @@ export function chiefEnvironment(chief, model = undefined) {
   // Codex takes it through the eval's Codex wrapper (`-c model=…`, see run.mjs).
   if (chief === 'codex') return { env: {}, model: model ?? HARNESSES.codex.model }
   if (!(chief in HARNESSES)) throw new Error(`no such eval harness: ${chief}`)
-  return { env: {}, model: `${chief}'s default` }
+  // Devin runs its staff's model, through the lead's agent (see run.mjs).
+  return { env: {}, model: HARNESSES.devin.model }
 }
 
 /**
