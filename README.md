@@ -83,7 +83,10 @@ chief's acceptance and your approval, not a fence around the run.
 
 Download it from [Releases](https://github.com/ngvoicu/consensflow/releases):
 on a Mac, open the DMG and drag ConsensFlow to Applications; on Windows, run
-the installer, or unpack the portable zip anywhere and run `ConsensFlow.exe`.
+the installer, or the portable `ConsensFlow_<version>_x64-portable.exe`, one
+exe you run from anywhere. Its first start unpacks Node and the CLI into
+`%LOCALAPPDATA%\dev.ngvoicu.consensflow\runtime`; its data stays in
+`%USERPROFILE%\.consensflow`, as the installed app's does.
 It carries its own Node runtime and its own copy of ConsensFlow. Nothing else to install: the harness
 integrations it needs are prepared under its home the first time a window of
 that harness opens, and updated the same way.
