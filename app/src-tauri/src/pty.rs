@@ -619,15 +619,6 @@ impl PaneTable {
         Ok(())
     }
 
-    pub fn write_paste(
-        &self,
-        key: &PaneKey,
-        body: &[u8],
-        enter_delay_ms: u64,
-    ) -> Result<(), PaneError> {
-        write_paste_via(self, key, body, enter_delay_ms)
-    }
-
     pub fn resize(&self, key: &PaneKey, rows: u16, cols: u16) -> Result<(), PaneError> {
         let mut panes = self.lock_panes()?;
         let pane = panes
@@ -1230,7 +1221,9 @@ mod tests {
     use portable_pty::PtySize;
 
     #[cfg(unix)]
-    use super::{process_exists, serial_pty_test, OpenedPane, PaneEnvironment, PaneKey};
+    use super::{
+        process_exists, serial_pty_test, write_paste_via, OpenedPane, PaneEnvironment, PaneKey,
+    };
     use super::{PaneError, PaneTable};
 
     fn terminal_size(rows: u16, cols: u16) -> PtySize {
@@ -1940,7 +1933,7 @@ mod tests {
     #[cfg(unix)]
 
     #[test]
-    fn pane_table_write_paste_writes_brackets_then_delayed_enter() {
+    fn a_paste_through_the_table_writes_brackets_then_delayed_enter() {
         let _pty_guard = serial_pty_test();
         let table = PaneTable::new();
         let OpenedPane { key, mut reader } = open_shell(
@@ -1952,9 +1945,7 @@ mod tests {
         assert_eq!(&ready, b"ready");
 
         let started = Instant::now();
-        table
-            .write_paste(&key, b"body", 25)
-            .expect("write paste through PaneTable");
+        write_paste_via(&table, &key, b"body", 25).expect("write paste through PaneTable");
 
         assert!(started.elapsed() >= Duration::from_millis(25));
         assert_eq!(
