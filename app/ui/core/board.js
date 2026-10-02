@@ -1,4 +1,5 @@
 import { button, element, iconButton, redraw } from '../dom.js'
+import { preview, render } from './markdown.js'
 
 /**
  * The board: a kanban of the project's tasks. One row per participant, one
@@ -156,7 +157,7 @@ export function laneOrder(lanes) {
 }
 
 const who = (handle) => (handle === null || handle === undefined ? 'ConsensFlow' : `@${handle}`)
-/** "18:30": when a member out of quota is back. */
+/** "18:30": a time of day, as when a member out of quota is back. */
 const clock = (iso) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
 const outOfQuota = (participant, now) =>
@@ -184,11 +185,14 @@ function sessionsNote(lane, board) {
 /** "T-3, T-4": task numbers in a sentence. */
 const taskNumbers = (numbers) => numbers.map((number) => `T-${number}`).join(', ')
 
+/** Whom a task given by tier waits for: "a light worker", "an image designer". */
+const aPool = (task) =>
+  task.pool === 'designer' ? 'an image designer' : `a ${task.tier} ${task.pool}`
+
 /** Where a task is going or came from, on its card; what it waits for first. */
 function route(task) {
   if (task.assignee === null) {
-    const waitsFor =
-      task.pool === 'designer' ? 'for an image designer' : `for a ${task.tier} ${task.pool}`
+    const waitsFor = `for ${aPool(task)}`
     return task.blockedBy.length === 0
       ? waitsFor
       : `blocked by ${taskNumbers(task.blockedBy)} · ${waitsFor}`
@@ -698,10 +702,10 @@ const TRANSCRIPT_ROLE = {
 }
 
 /**
- * One task: its brief, its result apart from it, the rest of its thread,
- * what its window wrote (ConsensFlow's own
- * copy of the conversation, kept after the window is gone), and what the
- * human may do next.
+ * One task: its story (each request, question, answer and result, in the
+ * order they came), what its window wrote (ConsensFlow's own copy of the
+ * conversation, kept after the window is gone), and what the human may do
+ * next.
  */
 export class TaskDrawer {
   #root
@@ -731,7 +735,8 @@ export class TaskDrawer {
    * them when it opens, and again when the task changed while it is open.
    * `closed`: the task's project is closed, and its task reads with nothing
    * to do on it. The same task drawn again keeps whatever did not change in
-   * place: its fold open or shut, and the drawer where it was scrolled.
+   * place: each step of its story and its fold open or shut, and the drawer
+   * where it was scrolled.
    */
   show(task, { total, closed = false, now = Date.now() }) {
     const same = this.#drawn(task)
@@ -751,19 +756,7 @@ export class TaskDrawer {
       'drawer-meta',
       `${who(task.requester)} asked ${task.assignee === null ? `for a ${task.tier} ${task.pool}` : who(task.assignee)} · ${STATE_LABEL[task.state]} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
-    const brief = panel('brief', 'Brief')
-    brief.append(element('p', 'drawer-brief', task.body), ...cutNote(task, task.number))
-    const sections = [head, meta, brief]
-    const result = task.messages.findLast((message) => message.kind === 'result')
-    if (result !== undefined) {
-      const block = panel('result', 'Result')
-      block.append(element('p', 'drawer-result', result.body), ...cutNote(result, task.number))
-      sections.push(block)
-    }
-    const thread = threadOf(task.messages, result)
-    if (thread.length > 0 || (task.messagesLeftOut ?? 0) > 0) {
-      sections.push(threadPanel(task, thread))
-    }
+    const sections = [head, meta, this.#story(task, same, now)]
     // What its window wrote is read only when asked for, folded until then.
     this.#fold = total > 0 ? ((same ? this.#fold : null) ?? this.#newFold()) : null
     if (this.#fold !== null) {
@@ -784,6 +777,45 @@ export class TaskDrawer {
     }
     this.#root.hidden = false
     if (same && changed && this.#fold?.open) this.#actions.onTranscript(task)
+  }
+
+  /**
+   * The task's story, a step for each part of it, oldest first. Only the
+   * newest step is open until the human opens or shuts one: the same task
+   * drawn again keeps each step as the human left it, and a step new since
+   * opens when it is the newest. The earliest messages of a story too long
+   * for one frame are left out after its first request.
+   */
+  #story(task, same, now) {
+    // Each step drawn now, open or shut, by its message ('body' for the
+    // request made from the task's body), read before it is drawn again.
+    const shown = new Map()
+    if (same) {
+      for (const step of this.#root.querySelectorAll('details.step')) {
+        shown.set(step.dataset.message ?? 'body', step.open)
+      }
+    }
+    const steps = storyOf(task)
+    const list = element('ol', 'story')
+    list.setAttribute('aria-label', `T-${task.number}'s story`)
+    const left = task.messagesLeftOut ?? 0
+    for (const [at, step] of steps.entries()) {
+      const open = shown.get(String(step.id ?? 'body')) ?? at === steps.length - 1
+      list.append(storyStep(step, task.number, open, now))
+      if (at === 0 && left > 0) {
+        list.append(
+          element(
+            'li',
+            'story-more',
+            `${plural(left, 'earlier message')} not shown: cf task get T-${task.number} shows the whole thread.`,
+          ),
+        )
+      }
+    }
+    const story = element('section', 'drawer-section')
+    story.dataset.section = 'story'
+    story.append(sectionHead('h3', 'Story'), list)
+    return story
   }
 
   /** What the task's window wrote, read for its open fold: the last items one frame holds. */
@@ -877,14 +909,6 @@ function sectionHead(tag, label, count) {
 const transcriptHead = (total) =>
   sectionHead('summary', 'What the agent did', plural(total, 'item'))
 
-/** Each part of a task is a panel of its own, headed by what it is. */
-function panel(name, label, count) {
-  const section = element('section', 'drawer-section')
-  section.dataset.section = name
-  section.append(sectionHead('h3', label, count))
-  return section
-}
-
 /** What the core cut to carry task T-`number` in one frame says where it reads whole. */
 const cutNote = (part, number) =>
   part.bodyCut
@@ -892,52 +916,109 @@ const cutNote = (part, number) =>
     : []
 
 /**
- * The thread keeps only what the rest of the drawer does not say: the
- * questions, answers, follow-ups and earlier results. Each window's first
- * task message is the brief it was given, a note is ConsensFlow talking to
- * the chief, and a withdrawn message reached nobody.
+ * A task's story, oldest first: every message but a note (ConsensFlow
+ * talking to the chief) and a withdrawn one (it reached nobody), each with
+ * who sent it to whom and how its delivery went. A request is numbered,
+ * and a result takes the number of the request it answers.
  */
-function threadOf(messages, result) {
-  const briefed = new Set()
-  return messages.filter((message) => {
-    if (message === result || message.kind === 'note' || message.state === 'cancelled') {
-      return false
-    }
-    if (message.kind !== 'task' || briefed.has(message.recipient)) return true
-    briefed.add(message.recipient)
-    return false
+function storyOf(task) {
+  const told = task.messages.filter(
+    (message) => message.kind !== 'note' && message.state !== 'cancelled',
+  )
+  const steps = told.map((message) => ({
+    ...message,
+    route: `${who(message.sender)} → ${who(message.recipient)}`,
+    delivery: delivery(message),
+  }))
+  // A task sent to nobody yet (open, waiting on what it needs, the chief's
+  // own) asks in its body, from its requester. It was never sent: no time.
+  if (!told.some((message) => message.kind === 'task')) {
+    steps.unshift({
+      id: null,
+      kind: 'task',
+      route: `${who(task.requester)} → ${task.assignee === null ? aPool(task) : who(task.assignee)}`,
+      delivery: null,
+      createdAt: null,
+      body: task.body,
+      bodyCut: task.bodyCut,
+    })
+  }
+  let round = 0
+  return steps.map((step) => {
+    if (step.kind === 'task') round += 1
+    const label =
+      step.kind === 'task'
+        ? `Request ${round}`
+        : step.kind === 'result' && round > 0
+          ? `Result ${round}`
+          : (KIND_LABEL[step.kind] ?? step.kind)
+    return { ...step, label }
   })
 }
 
-/** The thread's panel; the earliest messages of a thread too long for one frame are left out. */
-function threadPanel(task, messages) {
-  const block = panel('thread', 'Thread', String(messages.length))
-  const left = task.messagesLeftOut ?? 0
-  if (left > 0) {
-    block.append(
-      element(
-        'p',
-        'thread-more',
-        `${plural(left, 'earlier message')} not shown: cf task get T-${task.number} shows the whole thread.`,
-      ),
-    )
+/** How a message's delivery reads while it has not reached its window. */
+const DELIVERY = {
+  queued: 'queued',
+  delivering: 'delivering',
+  gated: 'needs your approval',
+  failed: 'not delivered',
+}
+
+/**
+ * What a step says of its message's delivery, and why: nothing once it
+ * reached its window, or was read at once (an answer picked from options).
+ */
+function delivery({ state, reason }) {
+  if (state === 'delivered' || state === 'read') return null
+  const said = DELIVERY[state] ?? state
+  return reason ? `${said}: ${reason}` : said
+}
+
+/** When a message was sent: "14:05" today, "Sep 30 14:05" before; all of it on hover. */
+function sentAt(iso, now) {
+  const sent = new Date(iso)
+  const day =
+    sent.toDateString() === new Date(now).toDateString()
+      ? ''
+      : `${sent.toLocaleDateString([], { month: 'short', day: 'numeric' })} `
+  const node = element('time', 'step-time', `${day}${clock(iso)}`)
+  node.dateTime = iso
+  node.title = sent.toLocaleString([], { dateStyle: 'full', timeStyle: 'medium', hour12: false })
+  return node
+}
+
+/**
+ * A step of a task's story: a fold whose line says what it is, who sent it
+ * to whom, how its delivery went and when, then the first line of its
+ * body; open, it reads whole, its markdown drawn. Its body is drawn once
+ * it is open, so a long story draws only what is read.
+ */
+function storyStep(step, number, open, now) {
+  const line = element('summary', 'step-head')
+  line.append(element('span', 'step-label', step.label), element('span', 'step-route', step.route))
+  if (step.delivery !== null) {
+    const state = element('span', 'step-state', step.delivery)
+    state.dataset.state = step.state
+    line.append(state)
   }
-  const thread = element('ol', 'thread')
-  thread.setAttribute('aria-label', `T-${task.number}'s thread`)
-  for (const message of messages) {
-    const item = element('li', 'thread-item')
-    item.dataset.kind = message.kind
-    item.append(
-      element(
-        'p',
-        'thread-head',
-        `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)} to ${who(message.recipient)} · ${message.state}${message.reason ? ` (${message.reason})` : ''}`,
-      ),
-      element('p', 'thread-body', message.body),
-      ...cutNote(message, task.number),
-    )
-    thread.append(item)
+  if (step.createdAt !== null) line.append(sentAt(step.createdAt, now))
+  line.append(element('span', 'step-preview', preview(step.body)))
+  const fold = element('details', 'step')
+  fold.dataset.kind = step.kind
+  if (step.id !== null) fold.dataset.message = String(step.id)
+  fold.open = open
+  fold.append(line)
+  const drawBody = () => {
+    const body = element('div', 'step-body')
+    body.append(...render(step.body))
+    fold.append(body, ...cutNote(step, number))
   }
-  block.append(thread)
-  return block
+  if (open) drawBody()
+  // The click that opens it draws its body before it opens, unless it is there from before.
+  line.addEventListener('click', () => {
+    if (!fold.open && fold.childElementCount === 1) drawBody()
+  })
+  const item = element('li')
+  item.append(fold)
+  return item
 }
