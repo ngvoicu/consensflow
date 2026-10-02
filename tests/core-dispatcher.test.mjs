@@ -3469,6 +3469,66 @@ describe('work in flight when its participant is forgotten', () => {
       )
     })
   })
+
+  it("hands nothing of a new project that took its ids to the old lead's window that was getting ready for a paste", async () => {
+    await setup(async (context) => {
+      const { project: old } = await withStaff(context)
+      await context.dispatcher.pass()
+      // The old lead's window takes its time to be ready for a paste.
+      context.adapter.ready = async () => true
+      const release = hold(
+        context.adapter,
+        'ready',
+        looksAt(context.adapter.agent('chief').launchId),
+      )
+      const waiting = context.ledger.note(old.id, { from: 'zeus', to: 'chief', body: 'Waiting' })
+      await context.dispatcher.pass()
+      const { fresh, gone } = await replaceProject(context, old)
+      const welcome = context.ledger.note(fresh.id, { to: 'chief', body: 'Welcome' })
+      assert.equal(welcome.id, waiting.id, "the ledger gives the old message's id again")
+      release()
+      await gone
+      await flush()
+      assert.equal(
+        context.ledger.message(welcome.id).state,
+        'queued',
+        'it waits for its own window',
+      )
+    })
+  })
+
+  it("settles nothing of a new project that took its ids by what the old lead's harness did with a paste", async () => {
+    await setup(async (context) => {
+      const { project: old } = await withStaff(context)
+      await context.dispatcher.pass()
+      // The old lead's harness takes long to refuse a paste.
+      const before = context.adapter.agent('chief')
+      const release = hold(context.adapter, 'deliver', looksAt(before.launchId))
+      const refused = context.ledger.note(old.id, { from: 'zeus', to: 'chief', body: 'Refused' })
+      await context.dispatcher.pass()
+      const { fresh, gone } = await replaceProject(context, old)
+      // Meanwhile the new lead is handed its first message.
+      const welcome = context.ledger.note(fresh.id, { to: 'chief', body: 'Welcome' })
+      assert.equal(welcome.id, refused.id, "the ledger gives the old message's id again")
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(welcome.id).state, 'delivering')
+      before.admit = false
+      release()
+      await gone
+      await flush()
+      assert.equal(
+        context.ledger.message(welcome.id).state,
+        'delivering',
+        "the old harness's refusal does not send it back",
+      )
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        [context.ledger.message(welcome.id).state, context.ledger.message(welcome.id).attempts],
+        ['delivered', 1],
+        'it arrives, once',
+      )
+    })
+  })
 })
 
 describe('a lead whose window does not come up', () => {

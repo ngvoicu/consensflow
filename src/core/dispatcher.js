@@ -1040,12 +1040,17 @@ export class Dispatcher {
   }
 
   async #deliver(runtime, message) {
+    // A participant forgotten while its delivery waits (it left, or its
+    // project was deleted) is handed nothing, and what its harness did with
+    // the message settles nothing: the message's id may be another
+    // project's by now.
     if (runtime.adapter.ready !== undefined) {
       const ready = await runtime.adapter.ready({
         launch: runtime.launch,
         pane: runtime.pane,
         host: this.#host,
       })
+      if (this.#forgotten(runtime)) return
       if (ready !== true) {
         // Said once per message, so a wait is in the trace, not a mystery.
         if (runtime.held !== message.id) {
@@ -1074,6 +1079,7 @@ export class Dispatcher {
       // throws never handed it over, and its error must show.
       outcome = { admitted: false, reason: `the delivery failed: ${cause.message}` }
     }
+    if (this.#forgotten(runtime)) return
     const delivering = {
       messageId: message.id,
       marker: markerOf(message.id),
