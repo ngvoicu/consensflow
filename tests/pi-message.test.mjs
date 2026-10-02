@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -384,6 +384,32 @@ describe('consensflow Pi worker followup', () => {
       assert.equal((await readdir(s.inbox)).length, 0)
     } finally {
       clearInterval(pump)
+      await s.close()
+    }
+  })
+
+  it('takes the verdict the extension gives at the expiry when it lands late', async () => {
+    // The extension gives it from a timer in Pi's process, then writes it in
+    // three file operations: on a busy CI runner it landed after the channel
+    // had stopped looking, 30 ms past the expiry, on macOS and on Windows.
+    const s = await setup({ ackTimeoutMs: 200 })
+    const inbox = join(s.root, 'unwatched-inbox')
+    await mkdir(inbox)
+    const target = s.targetFor()
+    target.launch.channel.inbox = inbox
+    try {
+      const sending = send(target, 'followup answered late')
+      const record = JSON.parse(await readFile(await waitForInboxFile(inbox), 'utf8'))
+      await new Promise((resolve) => setTimeout(resolve, record.expiresAt + 200 - Date.now()))
+      const verdict = join(s.ack, `${record.id}.json`)
+      const late = { id: record.id, admitted: null, reason: 'admission-unknown' }
+      await writeFile(`${verdict}.tmp`, `${JSON.stringify(late)}\n`)
+      await rename(`${verdict}.tmp`, verdict)
+      const result = await sending
+      assert.equal(result.admitted, null)
+      assert.equal(result.cause, 'admission-unknown')
+      assert.deepEqual(result.ack, late)
+    } finally {
       await s.close()
     }
   })

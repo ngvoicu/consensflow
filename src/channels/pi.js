@@ -4,7 +4,14 @@ import { dirname, join } from 'node:path'
 import { claim } from './pty.js'
 
 const ACK_POLL_MS = 10
-const ACK_GRACE_MS = ACK_POLL_MS * 3
+/**
+ * How long past a record's expiry the channel still looks for the
+ * extension's verdict. The extension gives one at the expiry, from a timer
+ * in Pi's process and then three file operations, so on a busy machine it
+ * lands late: 30 ms missed it on CI. A verdict seen late is still Pi's own;
+ * one missed leaves the message uncertain, for its record to decide.
+ */
+const ACK_GRACE_MS = 1000
 
 function launchConfig(target) {
   const launch = target?.launch
