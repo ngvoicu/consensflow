@@ -1,3 +1,5 @@
+import { LedgerError } from './model.js'
+
 /**
  * The ledger's schema, as an ordered list of migrations. Migration `n` takes
  * the database from `PRAGMA user_version = n` to `n + 1`; the version is the
@@ -230,3 +232,44 @@ export const MIGRATIONS = [
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length
+
+/** Takes a ledger from the version it was written at to SCHEMA_VERSION; a newer one is refused. */
+export function migrate(db) {
+  const version = db.prepare('PRAGMA user_version').get().user_version
+  if (version > SCHEMA_VERSION) {
+    throw new LedgerError(
+      'ledger-newer',
+      `this home was written by a newer ConsensFlow (schema ${version}; this build knows ${SCHEMA_VERSION})`,
+      409,
+    )
+  }
+  if (version === SCHEMA_VERSION) return
+  // A migration may rebuild a table others refer to; with foreign keys on,
+  // dropping it would cascade through them. Off for the migrations, every
+  // reference checked before each one commits, then on again: a start
+  // refused here leaves the version as it was, so the next start checks too.
+  db.exec('PRAGMA foreign_keys = OFF')
+  try {
+    for (let from = version; from < SCHEMA_VERSION; from += 1) {
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        db.exec(MIGRATIONS[from])
+        db.exec(`PRAGMA user_version = ${from + 1}`)
+        const broken = db.prepare('PRAGMA foreign_key_check').all()
+        if (broken.length > 0) {
+          throw new LedgerError(
+            'ledger-broken',
+            `the ledger's references do not hold after migration: ${JSON.stringify(broken[0])}`,
+            500,
+          )
+        }
+        db.exec('COMMIT')
+      } catch (cause) {
+        db.exec('ROLLBACK')
+        throw cause
+      }
+    }
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON')
+  }
+}
