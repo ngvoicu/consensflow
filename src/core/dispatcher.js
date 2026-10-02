@@ -22,6 +22,8 @@ import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.j
  *   one that never shows in time (admitted or uncertain), is tried again, up
  *   to `maxAttempts`; a launch whose first message never shows is ended and its
  *   task failed. Adapters say when a window can take input at all (`ready`).
+ *   A message withdrawn on its way (its task cancelled, or taken back from
+ *   the window) is waited for no longer, and never handed over again.
  * - A worker's turn that ends after its task's latest message finishes the
  *   task with the answer written after that message. A task waiting on a
  *   question is left alone. The chief finishes its own tasks explicitly,
@@ -974,10 +976,16 @@ export class Dispatcher {
   /**
    * Whether the message on its way shows in the window's record; it is
    * confirmed if so. Only what the window was given counts: a tool's output
-   * that prints a header (cf inbox read, a log) proves nothing arrived.
+   * that prints a header (cf inbox read, a log) proves nothing arrived. One
+   * withdrawn on its way (its task cancelled, or taken back from the window)
+   * is waited for no longer, and stays withdrawn whether it shows or not.
    */
   #confirmArrival(runtime, observed) {
     const { delivering } = runtime
+    if (this.#ledger.message(delivering.messageId)?.state !== 'delivering') {
+      runtime.delivering = null
+      return true
+    }
     const arrived = observed.items.find(
       (item) => item.role === 'user' && item.text.includes(delivering.marker),
     )
@@ -1059,6 +1067,9 @@ export class Dispatcher {
         host: this.#host,
       })
       if (this.#forgotten(runtime)) return
+      // Withdrawn while the window got ready (its task cancelled or paused
+      // meanwhile): it is handed nothing, and nothing fails.
+      if (this.#ledger.message(message.id)?.state !== 'queued') return
       if (ready !== true) {
         // Said once per message, so a wait is in the trace, not a mystery.
         if (runtime.held !== message.id) {

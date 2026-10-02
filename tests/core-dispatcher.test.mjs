@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { unnamed } from '../src/adapters/shared.js'
-import { deliveryText } from '../src/core/delivery-text.js'
+import { deliveryText, markerOf } from '../src/core/delivery-text.js'
 import { Dispatcher } from '../src/core/dispatcher.js'
 import { openLedger } from '../src/ledger/index.js'
 
@@ -2618,6 +2618,74 @@ describe('a window that is not ready for a paste', () => {
       },
       { trace: (entry) => entries.push(entry) },
     )
+  })
+})
+
+describe('a message withdrawn on its way into a window', () => {
+  /** T-1 waits on its window's question; its answer goes to that window next. */
+  async function asked(context) {
+    const fixture = await withTiers(context)
+    fixture.open()
+    await context.dispatcher.pass()
+    await context.dispatcher.pass()
+    const question = context.ledger.ask(fixture.project.id, {
+      from: fixture.task(1).assignee,
+      to: 'chief',
+      task: 1,
+      body: 'Which grammar?',
+    })
+    context.adapter.answer('zeus', 'I asked.')
+    await context.dispatcher.pass()
+    const answer = context.ledger.answer(question.id, {
+      from: fixture.id('chief'),
+      body: 'The small one',
+    })
+    return { ...fixture, answer }
+  }
+
+  it('is not confirmed when it shows after all, and its window goes with its work', async () => {
+    await setup(async (context) => {
+      const { project, task, answer } = await asked(context)
+      const zeus = context.adapter.agent('zeus')
+      zeus.arrive = false
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(answer.id).state, 'delivering', 'handed over')
+      const pane = context.host.last('zeus')
+      // The human takes the task back: the answer on its way is withdrawn,
+      // and the window's harness shows it anyway.
+      context.ledger.releaseTask(project.id, 1, { because: 'by @human' })
+      zeus.items.push(item('user', deliveryText(context.ledger.message(answer.id))))
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(answer.id).state, 'cancelled', 'it stays withdrawn')
+      assert.ok(
+        context.host.killed.some((killed) => killed.generation === pane.generation),
+        'the window went with its work',
+      )
+      assert.match(task(1).assignee, /^diana-/, 'and the task went on elsewhere')
+    })
+  })
+
+  it('is handed nothing when it was withdrawn while its window got ready, and fails nothing', async () => {
+    await setup(async (context) => {
+      const { project, answer } = await asked(context)
+      let ready
+      const readying = new Promise((resolve) => {
+        ready = resolve
+      })
+      context.adapter.ready = async () => {
+        await readying
+        return true
+      }
+      await context.dispatcher.pass()
+      context.ledger.cancelTask(project.id, 1, { by: 'chief' })
+      ready()
+      await flush()
+      assert.equal(context.ledger.message(answer.id).state, 'cancelled')
+      assert.ok(
+        !context.adapter.agent('zeus').items.some((i) => i.text.includes(markerOf(answer.id))),
+        'nothing pasted',
+      )
+    })
   })
 })
 
