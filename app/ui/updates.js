@@ -1,3 +1,5 @@
+import { element } from './dom.js'
+
 const SIX_HOURS = 6 * 60 * 60 * 1_000
 const QUIET_DELAY = 10_000
 const BUSY_PHASES = new Set(['checking', 'downloading', 'installing'])
@@ -85,156 +87,116 @@ function blockerName(blocker, getState) {
   return generation === null ? id : `${id} (generation ${generation})`
 }
 
+/** An element found by its `id`: by the dialog's own labels, and by the updater's tests. */
+function named(tag, id, className, text) {
+  const node = element(tag, className, text)
+  node.id = id
+  return node
+}
+
+/** A line read out when it changes. */
+function liveLine(id) {
+  const line = named('p', id, id)
+  line.setAttribute('role', 'status')
+  line.setAttribute('aria-live', 'polite')
+  return line
+}
+
+/** A button of the updater's; what it does is wired once the dialog and banner are drawn. */
+function updaterButton(className, text, id) {
+  const node = element('button', className, text)
+  node.type = 'button'
+  if (id) node.id = id
+  return node
+}
+
 export async function initializeUpdates({ invoke, listen, getState } = {}) {
-  const dialog = document.createElement('dialog')
-  dialog.id = 'updates-dialog'
+  const dialog = named('dialog', 'updates-dialog')
   dialog.setAttribute('aria-labelledby', 'updates-title')
   dialog.setAttribute('aria-describedby', 'updates-description')
-
-  const form = document.createElement('form')
-  form.className = 'updates-dialog-form'
-  form.method = 'dialog'
-  dialog.append(form)
-
-  const header = document.createElement('header')
-  header.className = 'updates-header'
-  const brand = document.createElement('span')
-  brand.className = 'updates-brand'
-  brand.textContent = 'ConsensFlow'
-  const title = document.createElement('h2')
-  title.id = 'updates-title'
-  title.textContent = 'Updates'
-  const close = document.createElement('button')
-  close.className = 'quiet-button'
-  close.id = 'updates-close'
-  close.type = 'button'
+  const close = updaterButton('quiet-button', 'Close', 'updates-close')
   close.autofocus = true
   close.setAttribute('aria-label', 'Close Updates')
-  close.textContent = 'Close'
-  header.append(brand, title, close)
-  form.append(header)
+  const header = element('header', 'updates-header')
+  header.append(
+    element('span', 'updates-brand', 'ConsensFlow'),
+    named('h2', 'updates-title', null, 'Updates'),
+    close,
+  )
 
-  const content = document.createElement('div')
-  content.className = 'updates-content'
-  const description = document.createElement('p')
-  description.id = 'updates-description'
-  description.className = 'updates-description'
-  description.textContent = 'Review signed releases and choose when to download or restart.'
-  content.append(description)
-
-  const metadata = document.createElement('div')
-  metadata.className = 'updates-metadata'
-  const installed = document.createElement('p')
-  installed.className = 'updates-installed'
-  installed.textContent = 'Installed: '
-  const installedValue = document.createElement('strong')
-  installedValue.id = 'updates-installed-version'
+  const installed = element('p', 'updates-installed', 'Installed: ')
+  const installedValue = named('strong', 'updates-installed-version')
   installed.append(installedValue)
-  const channelLabel = document.createElement('label')
-  channelLabel.textContent = 'Channel'
-  const channel = document.createElement('select')
-  channel.id = 'updates-channel'
+  const channel = named('select', 'updates-channel')
   channel.name = 'channel'
   for (const value of ['stable', 'alpha']) {
-    const option = document.createElement('option')
+    const option = element('option', null, value === 'alpha' ? 'Alpha' : 'Stable')
     option.value = value
-    option.textContent = value === 'alpha' ? 'Alpha' : 'Stable'
     channel.append(option)
   }
+  const channelLabel = element('label', null, 'Channel')
   channelLabel.append(channel)
+  const metadata = element('div', 'updates-metadata')
   metadata.append(installed, channelLabel)
-  content.append(metadata)
 
-  const stateLine = document.createElement('p')
-  stateLine.className = 'updates-state'
-  stateLine.id = 'updates-state'
-  stateLine.setAttribute('role', 'status')
-  stateLine.setAttribute('aria-live', 'polite')
-  content.append(stateLine)
-
-  const feedback = document.createElement('p')
-  feedback.className = 'updates-feedback'
-  feedback.id = 'updates-feedback'
-  feedback.setAttribute('role', 'status')
-  feedback.setAttribute('aria-live', 'polite')
-  content.append(feedback)
-
-  const candidateSection = document.createElement('section')
-  candidateSection.className = 'updates-candidate'
-  const candidateHeading = document.createElement('h3')
-  candidateHeading.textContent = 'Available version: '
-  const candidateVersion = document.createElement('strong')
-  candidateVersion.id = 'updates-candidate-version'
+  const candidateVersion = named('strong', 'updates-candidate-version')
+  const candidateHeading = element('h3', null, 'Available version: ')
   candidateHeading.append(candidateVersion)
-  const candidateDate = document.createElement('p')
-  candidateDate.className = 'updates-date'
-  const notesLabel = document.createElement('h4')
-  notesLabel.textContent = 'Release notes'
-  const notes = document.createElement('p')
-  notes.className = 'updates-notes'
-  notes.id = 'updates-notes'
-  candidateSection.append(candidateHeading, candidateDate, notesLabel, notes)
-  content.append(candidateSection)
+  const candidateDate = element('p', 'updates-date')
+  const notes = named('p', 'updates-notes', 'updates-notes')
+  const candidateSection = element('section', 'updates-candidate')
+  candidateSection.append(
+    candidateHeading,
+    candidateDate,
+    element('h4', null, 'Release notes'),
+    notes,
+  )
 
-  const progress = document.createElement('p')
-  progress.className = 'updates-progress'
-  progress.id = 'updates-progress'
-  content.append(progress)
+  const blockersMessage = named('p', 'updates-blockers-message')
+  const blockerList = named('ul', 'updates-blocker-list')
+  const blockers = element('section', 'updates-blockers')
+  blockers.append(element('h3', null, 'Before installing'), blockersMessage, blockerList)
 
-  const blockers = document.createElement('section')
-  blockers.className = 'updates-blockers'
-  const blockersHeading = document.createElement('h3')
-  blockersHeading.textContent = 'Before installing'
-  const blockersMessage = document.createElement('p')
-  blockersMessage.id = 'updates-blockers-message'
-  const blockerList = document.createElement('ul')
-  blockerList.id = 'updates-blocker-list'
-  blockers.append(blockersHeading, blockersMessage, blockerList)
-  content.append(blockers)
+  const stateLine = liveLine('updates-state')
+  const feedback = liveLine('updates-feedback')
+  const progress = named('p', 'updates-progress', 'updates-progress')
+  const content = element('div', 'updates-content')
+  content.append(
+    named(
+      'p',
+      'updates-description',
+      'updates-description',
+      'Review signed releases and choose when to download or restart.',
+    ),
+    metadata,
+    stateLine,
+    feedback,
+    candidateSection,
+    progress,
+    blockers,
+  )
 
-  form.append(content)
-
-  const actions = document.createElement('div')
-  actions.className = 'updates-actions'
-  const check = document.createElement('button')
-  check.className = 'quiet-button'
-  check.id = 'updates-check'
-  check.type = 'button'
-  check.textContent = 'Check for updates'
-  const download = document.createElement('button')
-  download.className = 'primary-button'
-  download.id = 'updates-download'
-  download.type = 'button'
-  download.textContent = 'Download update'
-  const later = document.createElement('button')
-  later.className = 'quiet-button'
-  later.id = 'updates-later'
-  later.type = 'button'
-  later.textContent = 'Later'
-  const install = document.createElement('button')
-  install.className = 'primary-button'
-  install.id = 'updates-install'
-  install.type = 'button'
-  install.textContent = 'Install and restart'
+  const check = updaterButton('quiet-button', 'Check for updates', 'updates-check')
+  const download = updaterButton('primary-button', 'Download update', 'updates-download')
+  const later = updaterButton('quiet-button', 'Later', 'updates-later')
+  const install = updaterButton('primary-button', 'Install and restart', 'updates-install')
+  const actions = element('div', 'updates-actions')
   actions.append(check, download, later, install)
-  form.append(actions)
+
+  const form = element('form', 'updates-dialog-form')
+  form.method = 'dialog'
+  form.append(header, content, actions)
+  dialog.append(form)
   document.body.append(dialog)
 
-  const banner = document.createElement('aside')
-  banner.className = 'update-banner'
-  banner.id = 'update-banner'
+  // The notice that an update is out: its version, Review and Dismiss.
+  const banner = named('aside', 'update-banner', 'update-banner')
   banner.setAttribute('role', 'status')
   banner.setAttribute('aria-live', 'polite')
-  const bannerText = document.createElement('span')
-  const bannerOpen = document.createElement('button')
-  bannerOpen.className = 'quiet-button'
-  bannerOpen.type = 'button'
-  bannerOpen.textContent = 'Review update'
-  const bannerDismiss = document.createElement('button')
-  bannerDismiss.className = 'icon-button'
-  bannerDismiss.type = 'button'
+  const bannerText = element('span')
+  const bannerOpen = updaterButton('quiet-button', 'Review update')
+  const bannerDismiss = updaterButton('icon-button', '×')
   bannerDismiss.setAttribute('aria-label', 'Dismiss update notice')
-  bannerDismiss.textContent = '×'
   banner.append(bannerText, bannerOpen, bannerDismiss)
   document.body.append(banner)
 
@@ -298,9 +260,7 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
           'All open panes must be closed or suspended first, even if idle. ' +
           'ConsensFlow cannot safely infer unsent native-editor drafts.'
     for (const blocker of currentBlockers) {
-      const item = document.createElement('li')
-      item.textContent = blockerName(blocker, getState)
-      blockerList.append(item)
+      blockerList.append(element('li', null, blockerName(blocker, getState)))
     }
   }
 
