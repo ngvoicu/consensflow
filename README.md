@@ -106,8 +106,11 @@ projects.
   live sessions under it. A task moves from the backlog through queued and
   working to done; you open any card to read its brief, its result, its thread
   and what its window wrote, and to pause it, reassign it (back to the board
-  for another member of its tier) or cancel it. The chief's window is docked beside the board; a strip holds every
-  live window.
+  for another member of its tier) or cancel it. The chief's terminal is
+  docked beside the board while its window lives. A session's terminal stays
+  out of the dock until you choose Show terminal on its row; Hide terminal
+  (or Hide on its card) puts it away while its window works on, and it keeps
+  all it wrote.
 - **New project.** A folder, the saved agent the lead runs on (its harness,
   model and effort come with it), the staff (the last project's ticked
   already) and whether human approval is required.
