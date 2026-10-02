@@ -222,6 +222,25 @@ test('quiet checks run at ten seconds and six hours without reopening a dismisse
   await expect(page.locator('#update-banner')).toBeHidden()
 })
 
+test("the banner's Review update opens the dialog on the candidate and checks again", async ({
+  page,
+}) => {
+  const candidate = updateSnapshot({
+    available: { version: '3.0.0-alpha.36', notes: 'Quiet release', date: '2026-09-09' },
+  })
+  await boot(page)
+  await page.evaluate((next) => window.__setCommandResult('update_check', next), candidate)
+  await page.evaluate(() => window.__runUpdateTimer(10_000))
+  const banner = page.locator('#update-banner')
+  await expect(banner).toContainText('Update available: 3.0.0-alpha.36')
+  await banner.getByRole('button', { name: 'Review update' }).click()
+  const dialog = page.locator('#updates-dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText('Available version: 3.0.0-alpha.36')
+  await expect.poll(async () => (await commandCalls(page, 'update_check')).length).toBe(2)
+  await expect(page.getByRole('button', { name: 'Close Updates' })).toBeFocused()
+})
+
 test('quiet failures stay invisible while a manual check shows offline and up-to-date states', async ({
   page,
 }) => {
