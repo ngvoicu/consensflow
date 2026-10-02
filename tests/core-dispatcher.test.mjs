@@ -3115,11 +3115,15 @@ describe('switching the lead to another harness', () => {
     })
   })
 
-  it("copies nothing of the old lead's last look once its project is deleted, nor switches a project created meanwhile", async () => {
+  it("copies and confirms nothing of the old lead's last look once its project is deleted, nor switches a project created meanwhile", async () => {
     await withCodex(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
-      // The human told the old lead something since the last look, which waits on its harness.
+      // A note is on its way to the old lead, and the human told it something
+      // since the last look: the switch's last look, which shows both, waits
+      // on its harness.
+      context.ledger.note(old.id, { from: 'zeus', to: 'chief', body: 'Parser done' })
+      await context.dispatcher.pass()
       const told = 'The codeword is tern'
       context.adapter.agent('chief').items.push(item('user', told))
       const launch = context.adapter.agent('chief').launchId
@@ -3155,7 +3159,11 @@ describe('switching the lead to another harness', () => {
         ['claude-code', 0],
         'the new lead is not switched',
       )
-      assert.equal(await switched, `no project ${old.id}`, 'the switch says its project is gone')
+      assert.equal(
+        await switched,
+        `no project ${old.id}`,
+        'the switch says its project is gone, and confirmed none of its messages',
+      )
     })
   })
 
@@ -3189,6 +3197,44 @@ describe('switching the lead to another harness', () => {
         'the new lead is not switched',
       )
       assert.equal(await switched, `no project ${old.id}`, 'the switch says its project is gone')
+    })
+  })
+
+  it("switches nothing once its project is deleted while the old lead's window closes after its turn, nor a project created meanwhile", async () => {
+    await withCodex(async (context) => {
+      const { project: old } = await withStaff(context)
+      await context.dispatcher.pass()
+      // The lead is at work, so the switch waits for the end of its turn.
+      context.adapter.busy('chief')
+      await context.dispatcher.switchChief(old.id, { harness: 'codex', when: 'turn' })
+      // The turn ends, and the step that switches the lead closes its old
+      // window, which takes its time.
+      context.adapter.answer('chief', 'Done with that')
+      const window = context.host.last('chief')
+      let release
+      const held = new Promise((resolve) => {
+        release = resolve
+      })
+      const kill = context.host.kill
+      context.host.kill = async (pane) => {
+        if (pane.generation === window.generation) await held
+        return kill(pane)
+      }
+      const stepping = context.dispatcher.pass()
+      await flush()
+      const { fresh, gone } = await replaceProject(context, old)
+      release()
+      // The step stops there, and fails nothing: the deleted project's lead
+      // has nothing left to switch.
+      await stepping
+      await gone
+      await flush()
+      const lead = chiefOf(context, fresh)
+      assert.deepEqual(
+        [lead.harness, context.codex.prepared.length, context.dispatcher.pendingSwitch(lead.id)],
+        ['claude-code', 0, null],
+        'the new lead is not switched, and nothing waits to switch it',
+      )
     })
   })
 })
@@ -3316,7 +3362,7 @@ describe('work in flight when its participant is forgotten', () => {
     )
   })
 
-  it("delivers nothing once the project is deleted while a paused task's agent is interrupted, nor for a project created meanwhile", async () => {
+  it("delivers nothing to a session's window once its project is deleted while its paused task's agent is interrupted, nor for a project created meanwhile", async () => {
     await setup(async (context) => {
       const first = await withTiers(context, { workers: ['zeus'] })
       first.open()
@@ -3324,7 +3370,10 @@ describe('work in flight when its participant is forgotten', () => {
       await context.dispatcher.pass()
       assert.equal(first.task(1).state, 'working')
       const session = first.id('zeus-amber-pine')
-      // The chief pauses the task; the Escape that stops its agent waits on the pane host.
+      // The human keeps the session's window open, so it stays after its
+      // work. The chief pauses the task; the Escape that stops its agent
+      // waits on the pane host.
+      await context.dispatcher.openWindow(first.project.id, 'zeus-amber-pine')
       context.ledger.pauseTask(first.project.id, 1, { by: 'chief' })
       context.adapter.agent('zeus').settled = true
       const window = context.host.last('zeus')
