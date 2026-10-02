@@ -214,7 +214,11 @@ describe('the agents screens on the new core', () => {
     assert.equal('tags' in mine, false, 'an agent carries no tags')
     assert.ok(Array.isArray(listed.harnesss), 'the harnesses the form offers')
     assert.equal(Object.hasOwn(listed, 'catalog'), false, 'the agents are the catalog')
-    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'roles')), false, 'no role files prepared')
+    assert.equal(
+      existsSync(join(t.env.CONSENSFLOW_HOME, 'integrations')),
+      false,
+      "no role files prepared: they are a launch's",
+    )
 
     const invalid = await api('/api/agents', {
       method: 'POST',

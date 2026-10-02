@@ -599,7 +599,8 @@ let LAST = null;
 
 async function load() {
   const response = await fetch('/api/agents', { headers });
-  if (!response.ok) throw new Error('Could not refresh agents. Reopen this screen to try again.');
+  // The server says why (an agents file that is not valid JSON names itself and the fix).
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? 'Could not refresh agents. Reopen this screen to try again.');
   LAST = await response.json();
   document.querySelector('[name=ownHarnessOnly]').checked = LAST.preferences?.ownHarnessOnly === true;
   renderLists();

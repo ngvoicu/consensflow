@@ -23,12 +23,6 @@ pub struct PaneKey {
     pub generation: u64,
 }
 
-pub struct PeerSendError {
-    pub uncertain: bool,
-    pub code: &'static str,
-    pub reason: String,
-}
-
 impl PaneKey {
     pub fn new(id: impl Into<String>, generation: u64) -> Self {
         Self {
@@ -813,94 +807,6 @@ impl PaneTable {
             .ok_or_else(|| PaneError::Pty("the PTY has no process group".to_string()))
     }
 
-    /// Authenticate the connected local process before sending any bytes.
-    /// A successful write is transport submission, never native acceptance.
-    #[cfg(target_os = "macos")]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "Keep peer identity, transport bounds and the admission guard explicit at this boundary"
-    )]
-    pub fn send_peer(
-        &self,
-        key: &PaneKey,
-        path: &Path,
-        expected_pid: i32,
-        allow_descendant: bool,
-        body: &[u8],
-        timeout: Duration,
-        before_write: impl FnOnce() -> Result<(), String>,
-    ) -> Result<(), PeerSendError> {
-        use socket2::{Domain, SockAddr, Socket, Type};
-        use std::os::fd::AsRawFd;
-        let refused = |reason: String| PeerSendError {
-            uncertain: false,
-            code: "peer-refused",
-            reason,
-        };
-        let group = self
-            .process_group_id(key)
-            .map_err(|e| refused(e.to_string()))?;
-        let started = Instant::now();
-        let socket =
-            Socket::new(Domain::UNIX, Type::STREAM, None).map_err(|e| refused(e.to_string()))?;
-        let address = SockAddr::unix(path).map_err(|e| refused(e.to_string()))?;
-        socket
-            .connect_timeout(&address, timeout)
-            .map_err(|e| refused(e.to_string()))?;
-        let mut pid: libc::pid_t = 0;
-        let mut len = std::mem::size_of_val(&pid) as libc::socklen_t;
-        let mut uid: libc::uid_t = 0;
-        let mut gid: libc::gid_t = 0;
-        // These calls fill initialized scalar buffers of their exact C sizes.
-        let identity_matches = unsafe {
-            libc::getsockopt(
-                socket.as_raw_fd(),
-                libc::SOL_LOCAL,
-                libc::LOCAL_PEERPID,
-                (&mut pid as *mut libc::pid_t).cast(),
-                &mut len,
-            ) == 0
-                && len as usize == std::mem::size_of_val(&pid)
-                && pid == expected_pid
-                && libc::getpeereid(socket.as_raw_fd(), &mut uid, &mut gid) == 0
-                && uid == libc::getuid()
-                && (libc::getpgid(pid) == group
-                    || (allow_descendant && process_owned_by_group(pid, group)))
-        };
-        if !identity_matches {
-            return Err(refused(
-                "native peer is not the expected pane process".to_string(),
-            ));
-        }
-        before_write().map_err(|reason| PeerSendError {
-            uncertain: false,
-            code: "peer-refused",
-            reason,
-        })?;
-        if self
-            .process_group_id(key)
-            .map_err(|e| refused(e.to_string()))?
-            != group
-        {
-            return Err(refused("native peer pane changed before send".to_string()));
-        }
-        let left = timeout
-            .checked_sub(started.elapsed())
-            .filter(|left| !left.is_zero())
-            .ok_or_else(|| refused("native peer deadline elapsed before send".to_string()))?;
-        socket
-            .set_write_timeout(Some(left))
-            .map_err(|e| refused(e.to_string()))?;
-        (&socket).write_all(body).map_err(|e| PeerSendError {
-            uncertain: true,
-            code: "uncertain",
-            reason: e.to_string(),
-        })?;
-        // Native macOS inboxes inspect the connecting PID asynchronously.
-        // This process remains alive; closing the stream terminates the frame.
-        Ok(())
-    }
-
     fn lock_panes(&self) -> Result<MutexGuard<'_, HashMap<PaneKey, Pane>>, PaneError> {
         self.panes.lock().map_err(|_| PaneError::LockPoisoned)
     }
@@ -1175,68 +1081,6 @@ fn signal_for_termination(pane: &mut Pane, detached: bool) -> Result<bool, PaneE
     }
 
     Ok(child_exited)
-}
-
-// A continuation can create a new process group while staying below the pane.
-// The caller separately proves the native continued-in chain. Recheck ancestry
-// of the authenticated socket peer immediately before admitting the write.
-#[cfg(target_os = "macos")]
-fn process_owned_by_group(mut pid: i32, group: i32) -> bool {
-    let mut seen = std::collections::HashSet::new();
-    for _ in 0..64 {
-        if pid <= 1 || !seen.insert(pid) {
-            return false;
-        }
-        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
-        let size = std::mem::size_of_val(&info);
-        let read = unsafe {
-            libc::proc_pidinfo(
-                pid,
-                libc::PROC_PIDTBSDINFO,
-                0,
-                (&mut info as *mut libc::proc_bsdinfo).cast(),
-                size as i32,
-            )
-        };
-        if read != size as i32
-            || info.pbi_pid != pid as u32
-            || info.pbi_uid != unsafe { libc::getuid() }
-        {
-            return false;
-        }
-        if info.pbi_pgid == group as u32 {
-            return true;
-        }
-        pid = info.pbi_ppid as i32;
-    }
-    false
-}
-
-#[cfg(all(test, target_os = "macos"))]
-#[test]
-fn continuation_ancestry_accepts_detached_descendant_and_refuses_foreign_group() {
-    use std::os::unix::process::CommandExt;
-    let mut command = std::process::Command::new("/bin/sleep");
-    command.arg("30");
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let mut child = command.spawn().unwrap();
-    let pid = child.id() as i32;
-    let group = unsafe { libc::getpgid(0) };
-    assert_ne!(unsafe { libc::getpgid(pid) }, group);
-    let own = process_owned_by_group(pid, group);
-    let foreign = process_owned_by_group(pid, 1);
-    child.kill().unwrap();
-    child.wait().unwrap();
-    assert!(own);
-    assert!(!foreign);
-    assert!(!process_owned_by_group(i32::MAX, group));
 }
 
 #[cfg(unix)]

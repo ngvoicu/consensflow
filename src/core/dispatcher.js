@@ -769,7 +769,11 @@ export class Dispatcher {
     const history = this.#ledger.leadHistory(project.id)
     if (!history.some((conversation) => conversation.items.length > 0)) return null
     const switched = this.#ledger.lastSwitch(project.id)
-    const message = (id) => this.#ledger.message(id)
+    // The page count is cf history's: a line names only this project's messages.
+    const message = (id) => {
+      const found = this.#ledger.message(id)
+      return found?.projectId === project.id ? found : null
+    }
     return this.#ledger.note(project.id, {
       to: 'chief',
       body: handoffText({

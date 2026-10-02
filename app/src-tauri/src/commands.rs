@@ -973,20 +973,6 @@ struct PasteRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PeerSendRequest {
-    id: String,
-    generation: u64,
-    socket: PathBuf,
-    peer_pid: i32,
-    #[serde(default)]
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    allow_descendant: bool,
-    body: String,
-    timeout_ms: u64,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ClaimRequest {
     pane: String,
     generation: u64,
@@ -1308,34 +1294,6 @@ fn register_pane_handlers(
         let key = pane_key(&request.pane, request.generation)?;
         wait_for_input_blocking(claim_queue.claim(key)?)?;
         Ok(json!({"ok":true}))
-    });
-
-    let peer_panes = Arc::clone(&panes);
-    let peer_queue = Arc::clone(&inputs);
-    builder.on("pane.send_peer", move |_bridge, body| {
-        let request: PeerSendRequest = parse_body(body)?;
-        let key = pane_key(&request.id, request.generation)?;
-        if !request.socket.is_absolute() || request.peer_pid <= 0
-            || request.body.len() > MAX_INPUT_BYTES || !(1..=3000).contains(&request.timeout_ms) {
-            return Ok(json!({"ok":false,"admitted":false,"bytesWritten":0,"error":"invalid native peer request"}));
-        }
-        #[cfg(target_os = "macos")]
-        {
-            let result = peer_panes.send_peer(&key, &request.socket, request.peer_pid, request.allow_descendant,
-                request.body.as_bytes(), std::time::Duration::from_millis(request.timeout_ms), || {
-                    wait_for_input_blocking(peer_queue.claim(key.clone())?)
-                });
-            Ok(match result {
-                Ok(()) => json!({"ok":true}),
-                Err(error) if error.uncertain => json!({"ok":false,"admitted":null,"error":"uncertain","cause":error.reason}),
-                Err(error) => json!({"ok":false,"admitted":false,"bytesWritten":0,"error":error.code,"cause":error.reason}),
-            })
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (&peer_panes, &peer_queue, key);
-            Ok(json!({"ok":false,"admitted":false,"bytesWritten":0,"error":"native peer identity is unsupported on this platform"}))
-        }
     });
 
     let resize_panes = Arc::clone(&panes);

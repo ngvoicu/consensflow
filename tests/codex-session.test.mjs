@@ -265,21 +265,6 @@ it('consumes native empty-thread proof at admission and never forces fresh permi
   assert.deepEqual((await f.respond('thread/start', { thread: { id: A } })).params, start)
 })
 
-it('requires an authenticated native empty-session observation before delivering without a rollout', async () => {
-  const { tempEnv } = await import('./helpers.mjs')
-  const { answers } = await import('../hosts/lib/completion.js')
-  const temporary = tempEnv()
-  try {
-    const options = { codexSession: { sessionId: A, empty: true } }
-    const empty = await answers('codex', A, temporary.env, options)
-    assert.equal(empty.settlement.state, 'settled')
-    assert.equal((await answers('codex', B, temporary.env, options)).unknown, true)
-    assert.equal((await answers('codex', A, temporary.env)).unknown, true)
-  } finally {
-    temporary.cleanup()
-  }
-})
-
 it('restores a rejected switch, rejects invalid ingress, and reports a possible write as uncertain', async (t) => {
   const f = await fixture(t)
   const tui = await f.connect()

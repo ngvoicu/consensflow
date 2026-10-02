@@ -493,23 +493,9 @@ function codexTurn(turns, turnId) {
 
 async function codexAnswers(sessionId, env, options) {
   const file = options.file ?? (await locateTranscript('codex', sessionId, env))
-  if (file === null) {
-    // Only a current authenticated native observation proves an empty thread.
-    // The adapter owns its initial cursor; missing history alone proves nothing.
-    if (options.codexSession?.sessionId === sessionId && options.codexSession.empty === true) {
-      const result = resultBase()
-      result.cursor = mintCursor('codex', 0)
-      result.settlement = {
-        ...result.settlement,
-        state: 'settled',
-        provenance: 'native',
-        cursor: result.cursor,
-        boundary: 'thread/started-empty',
-      }
-      return result
-    }
+  // A thread with no rollout yet is unknown: missing history alone proves nothing.
+  if (file === null)
     return { unknown: true, reason: `unreadable: no codex rollout for ${sessionId}` }
-  }
 
   const result = resultBase()
   const items = new Map()

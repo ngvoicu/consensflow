@@ -119,10 +119,13 @@ describe('role files belong to pane launch, not CLI administration', () => {
   stubCli(t, 'claude')
 
   it('roster edits, setup and diagnostic reads leave role files and old manifests alone', async () => {
+    // A launch's own role file, where a window writes it (src/role-skills.js).
     const role = join(
       t.env.CONSENSFLOW_HOME,
-      'roles',
-      'chief',
+      'integrations',
+      'claude',
+      'launch-canary',
+      'role',
       '.claude',
       'skills',
       'consensflow-chief',
@@ -275,7 +278,8 @@ it('setup preserves a legacy roster and prepares no role or manifest before pane
     const before = readFileSync(rosterPath(t.env))
     for (let i = 0; i < 2; i++) assert.equal((await cf(['setup'], t.env)).code, 0)
     assert.deepEqual(readFileSync(rosterPath(t.env)), before)
-    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'roles')), false)
+    // Role files are a launch's: setup writes none.
+    assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'integrations')), false)
     assert.equal(existsSync(join(t.env.CONSENSFLOW_HOME, 'skills-manifest.json')), false)
     assert.match((await cf(['agent', 'list'], t.env)).stdout, /pygmalion/)
   } finally {
@@ -325,7 +329,7 @@ it('the chief can discover saved capability profiles without refreshing or chang
     assert.match(refused.stderr, /catalog agent/)
     const role = join(
       t.env.CONSENSFLOW_HOME,
-      'roles/chief/.claude/skills/consensflow-chief/SKILL.md',
+      'integrations/claude/launch-canary/role/.claude/skills/consensflow-chief/SKILL.md',
     )
     mkdirSync(dirname(role), { recursive: true })
     writeFileSync(role, 'Keep existing chief context untouched')
