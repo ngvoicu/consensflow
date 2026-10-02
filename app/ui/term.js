@@ -155,8 +155,8 @@ export class EmulatorRegistry {
     return emulator
   }
 
-  get(id, generation) {
-    return this.emulators.get(`${id}:${generation}`)?.emulator ?? null
+  get(pane) {
+    return this.emulators.get(paneKey(pane))?.emulator ?? null
   }
 
   retire(key) {
@@ -167,8 +167,8 @@ export class EmulatorRegistry {
     this.emulators.delete(key)
   }
 
-  fit(id, generation) {
-    const emulator = this.get(id, generation)
+  fit(pane) {
+    const emulator = this.get(pane)
     if (emulator === null) return
     if (typeof emulator.fit === 'function') requestAnimationFrame(() => emulator.fit())
   }

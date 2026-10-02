@@ -37,7 +37,7 @@ export class TerminalsView {
 
   /** Bytes from the pane host; a pane the board has not drawn yet still gets them. */
   output(message) {
-    this.#link.output(message, (pane) => this.#emulator(pane))
+    this.#link.output(message, (sent) => this.#emulator(sent))
   }
 
   /** The emulators, keyed `id:generation`: what the packaged smoke reads the screen from. */
@@ -141,18 +141,13 @@ export class TerminalsView {
     }
     const shown = cards.find((entry) => entry.handle === focused) ?? cards[0]
     for (const entry of cards) entry.card.dataset.focused = String(entry === shown)
-    for (const entry of cards) {
-      const [id, generation] = [entry.pane.id, entry.pane.generation]
-      this.#registry.fit(id, generation)
-    }
+    for (const { pane } of cards) this.#registry.fit(pane)
     // A redraw follows the board every few seconds: scrolling and focusing
     // on each one would drag the human back from a card they scrolled to.
     if (shown.key === this.#shownKey) return
     this.#shownKey = shown.key
     shown.card.scrollIntoView({ inline: 'nearest', block: 'nearest' })
-    requestAnimationFrame(() =>
-      this.#registry.get(shown.pane.id, shown.pane.generation)?.terminal?.focus(),
-    )
+    requestAnimationFrame(() => this.#registry.get(shown.pane)?.terminal?.focus())
   }
 
   /**
@@ -179,7 +174,7 @@ export class TerminalsView {
    * the pane (or for a project not shown): its card waits, with no project,
    * until a board places it.
    */
-  #card(pane, lane, order = Number.MAX_SAFE_INTEGER, project = null) {
+  #card(pane, lane, order, project) {
     const key = paneKey(pane)
     let entry = this.#cards.get(key)
     if (entry === undefined) {
@@ -226,11 +221,16 @@ export class TerminalsView {
       entry.project = project
       entry.order = order
     }
-    return entry.card
   }
 
-  #emulator(pane) {
+  /**
+   * The emulator a message from the pane host is for. Its pane is the
+   * message's id and generation, not the message itself, which a card made
+   * for it would keep, bytes and all, for as long as its window lives.
+   */
+  #emulator({ id, generation }) {
+    const pane = { id, generation }
     this.#card(pane, null)
-    return this.#registry.get(pane.id, pane.generation)
+    return this.#registry.get(pane)
   }
 }
