@@ -102,28 +102,30 @@ projects.
 
 ## Inside the app
 
-- **The board.** One lane per participant: you, the chief, each member and its
-  live sessions under it. A task moves from the backlog through queued and
-  working to done; you open any card to read its brief, its result, its thread
-  and what its window wrote, and to pause it, reassign it (back to the board
-  for another member of its tier) or cancel it. The chief's terminal is
-  docked beside the board while its window lives. A session's terminal stays
-  out of the dock until you choose Show terminal on its row; Hide terminal
-  (or Hide on its card) puts it away while its window works on, and it keeps
-  all it wrote.
+- **The board.** One lane per member, its live sessions under it, and one for
+  the chief while a task is on it. A task moves from the backlog through
+  queued and working to done; you open any card to read its brief, its
+  result, its thread and what its window wrote, and to pause it, reassign it
+  (back to the board for another member of its tier) or cancel it. A cell of
+  four tasks or more is one tile, a stack and how many, that lists them. The
+  chief's card is always docked beside the board: what the lead is doing and
+  runs on, Switch lead, and its terminal while its window lives. A session's
+  terminal stays out of the dock until you choose Show terminal on its row;
+  Hide terminal (or Hide on its card) puts it away while its window works on,
+  and it keeps all it wrote.
 - **New project.** A folder, the saved agent the lead runs on (its harness,
   model and effort come with it), the staff (the last project's ticked
   already) and whether human approval is required.
-- **Switch lead.** On the chief's row: the lead goes on in a new window on
-  another saved agent, with its harness, model and effort. A lead always runs
-  on a saved agent, never on a harness's own default model; a lead that was
-  started on its harness's default before keeps running on it until you
-  switch it. A lead at work finishes its turn first, or is cut off if you say
-  so; it can first be asked to write down where things stand. Its first
-  message hands it the lead: what waits on the board, your last words, and
-  `cf history`, which pages through what you and the leads before it said.
-  The staff keeps working, and what was on its way to the lead goes to the
-  new one.
+- **Switch lead.** On the chief's card in the dock: the lead goes on in a new
+  window on another saved agent, with its harness, model and effort. A lead
+  always runs on a saved agent, never on a harness's own default model; a
+  lead that was started on its harness's default before keeps running on it
+  until you switch it. A lead at work finishes its turn first, or is cut off
+  if you say so; it can first be asked to write down where things stand. Its
+  first message hands it the lead: what waits on the board, your last words,
+  and `cf history`, which pages through what you and the leads before it
+  said. The staff keeps working, and what was on its way to the lead goes to
+  the new one.
 - **Staff.** Which agents this project may use, each with its roles and what
   it runs (model, harness, effort, tier), plus the approval setting. The
   rows read by role, then by work tier with the most critical first; the

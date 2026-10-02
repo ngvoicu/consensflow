@@ -413,7 +413,7 @@ async function run(index) {
       if (followUps.length > 0 && !busy && Date.now() - lastChange > FOLLOW_UP_AFTER_MS) {
         const next = followUps.shift()
         if (next.switch === true) {
-          // The owner switches the lead from the chief's row; the new window
+          // The owner switches the lead from the chief's card; the new window
           // takes the handoff first, then the owner goes on in it.
           const agent = `eval-${values['switch-to']}-worker`
           const before = pane.generation
