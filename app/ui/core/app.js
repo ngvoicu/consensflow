@@ -158,7 +158,6 @@ const board = new BoardView(boardRoot, {
       await core('session.end', { project: participant.projectId, handle: participant.handle })
       note(`@${participant.handle} is gone; its tasks stay on @${participant.member}'s lane.`)
     }),
-  onSwitchLead: (chief) => act(() => switchLead.open(chief)),
   onResume: (project) =>
     act(async () => {
       await core('project.resume', { project: project.id })
@@ -227,6 +226,8 @@ const terminals = new TerminalsView(stage, {
   report,
   createEmulator: tauri.test?.createEmulator,
   onChange: () => render(),
+  // The lead is switched from its card in the dock.
+  onSwitchLead: (chief) => act(() => switchLead.open(chief)),
 })
 
 // A fold changes the room the board and the windows have: both draw again.
@@ -379,7 +380,7 @@ function render() {
       shows: (participant) => terminals.shows(participant.projectId, participant.handle),
     })
   }
-  terminals.render(state.board, { focused: state.focus })
+  terminals.render(state.board, { focused: state.focus, agents: state.agents })
 }
 
 // Deleting a project is confirmed in a dialog that names it.

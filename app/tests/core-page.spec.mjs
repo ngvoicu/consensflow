@@ -430,8 +430,12 @@ test('draws the kanban: a row per participant, a column per state, and cards tha
   const zeus = table.locator('tr[data-handle="zeus"]')
   await expect(zeus.getByTestId('lamp')).toHaveAttribute('data-state', 'waiting')
   await expect(zeus.locator('.row-status')).toHaveText('Waiting: permission to run a command')
+  // The lead's row holds its tasks; what it is doing is on its card in the dock.
   const chief = table.locator('tr[data-handle="chief"]')
-  await expect(chief.locator('.row-status')).toHaveText('Working')
+  await expect(chief.locator('.row-status')).toHaveCount(0)
+  await expect(
+    page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status'),
+  ).toHaveText('Working')
   await expect(zeus.locator('td[data-state="queued"] .card-title')).toHaveText(['Add the tests'])
   const done = zeus.locator('td[data-state="done"] button.card[data-task="2"]')
   await expect(done.locator('.card-title')).toHaveText('Write the parser')
@@ -698,7 +702,47 @@ test("shows a task waiting for a member in its requester's backlog, with the tie
   )
 })
 
-test("says on each row the effort its agent runs at, after its model: a member's, a session's and the lead's", async ({
+test("draws the lead's row only while a task is on it: its own, or one it asked for that waits for a member", async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').tasks = []
+  data.boards[1].open = []
+  await open(page, data)
+  const row = page.locator('tr[data-handle="chief"]')
+  await expect(page.locator('tr[data-handle="zeus"]')).toHaveCount(1)
+  await expect(row).toHaveCount(0)
+  /** The lead's own tasks, as `tasks` has them. */
+  const own = (tasks) =>
+    changed(
+      page,
+      (tasks) => {
+        window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief').tasks = tasks
+      },
+      tasks,
+    )
+  // A task of its own (cf task add --self): the row comes for it, headed by its name alone.
+  await own([task(7, 'Tidy the notes', 'working', 'chief', 'chief', 1)])
+  await expect(row.locator('td[data-state="working"] button.card[data-task="7"]')).toHaveCount(1)
+  await expect(row.locator('.row-head')).toHaveText('Chief of Staff')
+  await expect(row.locator('.row-head button')).toHaveCount(0)
+  // Finished, the task stays on the row as any does; with none left, the row goes.
+  await own([task(7, 'Tidy the notes', 'accepted', 'chief', 'chief', 1)])
+  await expect(row.locator('td[data-state="finished"] button.card[data-task="7"]')).toHaveCount(1)
+  await own([])
+  await expect(row).toHaveCount(0)
+  // A task it asked for, waiting for a member, sits in its backlog: the row comes back for it.
+  await changed(
+    page,
+    (open) => {
+      window.__model.boards[1].open = open
+    },
+    [task(8, 'Write the docs', 'open', 'chief', null, 1, { pool: 'worker', tier: 'standard' })],
+  )
+  await expect(row.locator('td[data-state="open"] button.card[data-task="8"]')).toHaveCount(1)
+})
+
+test("says the effort an agent runs at, after its model: on a member's row, a session's, and the lead's card", async ({
   page,
 }) => {
   const data = model()
@@ -724,7 +768,9 @@ test("says on each row the effort its agent runs at, after its model: a member's
   )
   await open(page, data)
   const meta = (handle) => page.locator(`tr[data-handle="${handle}"] .row-meta`)
-  await expect(meta('chief')).toHaveText('codex · gpt-6-astra · max')
+  await expect(
+    page.locator('#stage .terminal-card[data-handle="chief"] .terminal-meta'),
+  ).toHaveText('codex · gpt-6-astra · max')
   await expect(meta('zeus')).toHaveText('worker · standard · claude-code · claude-sonnet-5 · high')
   await expect(meta('zeus-amber-pine')).toHaveText(
     'worker session of @zeus · claude-code · claude-sonnet-5 · high',
@@ -1190,19 +1236,62 @@ test('a member whose agent is gone says so on the board and in the staff, with R
   await expect(member.getByRole('button', { name: 'Remove Worker @diana' })).toBeVisible()
 })
 
-test('a lead whose agent is gone says so on its row, and that Switch lead is the way on', async ({
+test("says on the lead's card in the dock what the lead is doing and runs on, and switches it from there", async ({
+  page,
+}) => {
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  Object.assign(chief.participant, { agent: 'hera', harness: 'codex' })
+  chief.activity = { state: 'waiting', reason: 'permission to run a command' }
+  await open(page, data)
+  const card = page.locator('#stage .terminal-card[data-handle="chief"]')
+  await expect(card.getByTestId('lamp')).toHaveAttribute('data-state', 'waiting')
+  await expect(card.locator('.terminal-status')).toHaveText('Waiting: permission to run a command')
+  await expect(card.locator('.terminal-meta')).toHaveText('codex · gpt-6-astra · max')
+  // Out of quota, it says until when, whatever its window does.
+  await changed(page, () => {
+    const lead = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+    lead.participant.outUntil = new Date(Date.now() + 90 * 60_000).toISOString()
+  })
+  await expect(card.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
+  await expect(card.locator('.terminal-status')).toHaveText(/^Out of quota until \d\d:\d\d$/)
+  await expect(card.locator('.terminal-status')).toHaveAttribute('data-state', 'out')
+  // Switch lead is on the card: none on the board, though the lead's row is there for its tasks.
+  await expect(page.locator('tr[data-handle="chief"]')).toHaveCount(1)
+  const board = page.getByRole('region', { name: 'Board' })
+  const switchLead = { name: 'Switch the lead to another agent' }
+  await expect(board.getByRole('button', switchLead)).toHaveCount(0)
+  await card.getByRole('button', switchLead).click()
+  const dialog = page.getByRole('dialog', { name: 'Switch the lead' })
+  await expect(dialog).toBeVisible()
+  // What the lead runs on now is no switch.
+  expect(await leadGroups(dialog.getByLabel('The lead runs on'))).toContainEqual([
+    'Codex',
+    [
+      ['diana', false],
+      ['hera', true],
+    ],
+  ])
+})
+
+test("keeps the lead's card in the dock while its window is down: its agent gone, it says so, and Switch lead is the way on", async ({
   page,
 }) => {
   const data = model()
   const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
   Object.assign(chief.participant, { agent: 'astraeus', harness: 'codex' })
-  chief.agentMissing = true
+  // A lead whose agent is gone has no window: it does not open without one.
+  Object.assign(chief, { agentMissing: true, activity: { state: 'closed' }, pane: null })
   await open(page, data)
-  const status = page.locator('tr[data-handle="chief"] .row-status')
+  const card = page.locator('#stage .terminal-card[data-handle="chief"]')
+  const status = card.locator('.terminal-status')
   await expect(status).toHaveText(
     'No agent named astraeus any more: define one under Agents, or switch the lead',
   )
   await expect(status).toHaveAttribute('data-state', 'missing')
+  await expect(card.locator('.terminal-host')).toHaveCount(0)
+  await card.getByRole('button', { name: 'Switch the lead to another agent' }).click()
+  await expect(page.getByRole('dialog', { name: 'Switch the lead' })).toBeVisible()
 })
 
 test('a terminal and a board too narrow for its columns keep a visible scrollbar', async ({
@@ -2176,10 +2265,12 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
     /^Open .*'s terminal$/,
     /^Close .*'s terminal$/,
     /^Delete .*'s session$/,
-    'Switch the lead to another agent',
   ]) {
     await expect(board.getByRole('button', { name })).toHaveCount(0)
   }
+  // Nor is the lead switched from anywhere: its card in the dock went with its window.
+  const switchLead = page.getByRole('button', { name: 'Switch the lead to another agent' })
+  await expect(switchLead).toHaveCount(0)
   await banner.getByRole('button', { name: 'Resume project' }).focus()
   const reached = []
   for (let press = 0; press < 3; press += 1) {
@@ -2797,8 +2888,10 @@ test("takes a closed window's card out of the dock: its lane says so and opens i
   await expect
     .poll(() => calls(page, 'session.open'))
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
-  // The chief's window opens and closes with the project: its row has no Open.
-  await expect.poll(() => toolsOf(page.locator('tr[data-handle="chief"]'))).toEqual(['Switch lead'])
+  // The chief's window opens and closes with the project: its card has no Open, only Switch lead.
+  await expect
+    .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
+    .toEqual(['Switch lead'])
 })
 
 /**
@@ -2882,9 +2975,12 @@ test("keeps a session's terminal out of the dock until the human shows it, and t
   await expect(
     reviewer.getByRole('button', { name: "Show @zeus · brisk-birch's terminal" }),
   ).toBeVisible()
-  // The chief's terminal has nothing to show or hide, on its row or its card.
-  await expect.poll(() => toolsOf(page.locator('tr[data-handle="chief"]'))).toEqual(['Switch lead'])
-  await expect(page.locator('#stage .terminal-card[data-handle="chief"] button')).toHaveCount(0)
+  // The chief's terminal has nothing to show or hide, on its row or its card:
+  // its row has no tools, and its card switches the lead.
+  await expect(page.locator('tr[data-handle="chief"] .row-head button')).toHaveCount(0)
+  await expect
+    .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
+    .toEqual(['Switch lead'])
   // Out of the dock, a session's window is fed all the same: what it prints
   // is taken and acknowledged, so it never waits for a reader.
   expect(await page.evaluate(() => window.__emulators.length)).toBe(3)
@@ -3113,18 +3209,27 @@ test("forgets on a reload which terminals were shown: the dock starts again with
   ).toBeVisible()
 })
 
-test("says how to see a session's terminal while the chief's window is down and the session works on", async ({
+test("keeps the lead's card first in the dock while its window is down and a session works on, its terminal once it is up", async ({
   page,
 }) => {
   const data = atWork()
   const chief = data.boards[1].lanes.find((l) => l.participant.handle === 'chief')
   Object.assign(chief, { activity: { state: 'starting' }, pane: null })
   await open(page, data)
-  await expect(page.locator('#stage .stage-empty')).toHaveText(
-    "Choose Show terminal on a session's row to see its terminal here.",
-  )
+  const card = page.locator('#stage .terminal-card[data-handle="chief"]')
+  await expect(card.locator('.terminal-status')).toHaveText('Starting')
+  await expect(card.getByRole('button', { name: 'Switch the lead to another agent' })).toBeVisible()
+  await expect(page.locator('#stage .stage-empty')).toHaveCount(0)
   await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
-  await expect.poll(() => docked(page)).toEqual(['zeus-amber-pine'])
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  // Its window up, the lead's card holds its terminal, where the card without one was.
+  await changed(page, () => {
+    const lead = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+    Object.assign(lead, { activity: { state: 'idle' }, pane: { id: 'p1-chief', generation: 6 } })
+  })
+  await expect(card.locator('.terminal-host')).toHaveCount(1)
+  await expect(card.locator('.terminal-status')).toHaveText('Idle')
+  expect(await docked(page)).toEqual(['chief', 'zeus-amber-pine'])
 })
 
 test('resizes a terminal once, when a drag that narrows it holds still', async ({ page }) => {
@@ -3346,7 +3451,7 @@ test("gives a member's heading row no buttons, and a closed session's row no Tra
   await expect(page.getByRole('complementary', { name: 'Task T-3' })).toBeVisible()
 })
 
-test('switches the lead from its row to a saved agent on a harness installed here, after its turn or now', async ({
+test('switches the lead from its card to a saved agent on a harness installed here, after its turn or now', async ({
   page,
 }) => {
   const data = model()
@@ -3406,16 +3511,17 @@ test('opens Switch lead letting the lead finish its turn, whatever was picked la
   ).not.toBeChecked()
 })
 
-test("the lead's row says when a switch waits for its turn", async ({ page }) => {
+test("the lead's card says when a switch waits for its turn", async ({ page }) => {
   const data = model()
   data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').switching = {
     harness: 'codex',
     agent: 'hera',
   }
   await open(page, data)
-  await expect(page.locator('.row-status[data-state="switching"]')).toHaveText(
-    'Switching the lead to hera after this turn',
-  )
+  await expect(
+    page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status'),
+  ).toHaveText('Switching the lead to hera after this turn')
+  await expect(page.locator('.row-status[data-state="switching"]')).toHaveCount(0)
 })
 
 test("offers a lead still on its harness's own default every saved agent, and moves it to one", async ({
@@ -3536,7 +3642,7 @@ test('switches the lead only of the project it was asked for', async ({ page }) 
   await expect(page.locator('#project-title')).toHaveText('foundry')
   await page.waitForTimeout(500)
   await expect(page.getByRole('dialog', { name: 'Switch the lead' })).toBeHidden()
-  // Asked for again on foundry's own row, it switches foundry's lead.
+  // Asked for again on foundry's own lead card, it switches foundry's lead.
   await page.evaluate(() => {
     window.__delay = {}
   })
