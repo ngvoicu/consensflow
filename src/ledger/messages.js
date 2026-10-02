@@ -73,8 +73,10 @@ export function ask(store, projectId, { from, to, body, task, questions, urgent 
  * question with options is answered by choice (or by text, one line per
  * question): that answer is read at once and never delivered, because the
  * harness door that asked collects it and the tool call completes with it;
- * the asker's task resumes here. `from` is the answerer's participant id:
- * handles repeat across projects (every chief is `chief`), ids never do.
+ * the asker's task resumes here. A question on a cancelled task takes no
+ * answer, from either side: nobody waits for it. `from` is the answerer's
+ * participant id: handles repeat across projects (every chief is `chief`),
+ * ids never do.
  */
 export function answer(store, questionId, { from, body, choices }) {
   return store.write(() => {
@@ -94,6 +96,14 @@ export function answer(store, questionId, { from, body, choices }) {
         'not-your-question',
         `the question was put to ${question.recipient}, not ${answerer.handle}`,
         403,
+      )
+    }
+    const task = messageTask(store, questionId)
+    if (task?.state === 'cancelled') {
+      throw new LedgerError(
+        'task-cancelled',
+        `T-${task.number} is cancelled: nobody waits for this answer`,
+        409,
       )
     }
     if (answered(store, questionId)) {

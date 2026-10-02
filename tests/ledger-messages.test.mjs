@@ -312,6 +312,40 @@ describe('the inbox queue: delivery, questions and answers', () => {
     })
   })
 
+  it('takes no answer on a cancelled task, either way: nobody waits for it', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      deliver(
+        ledger,
+        ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' }).message,
+      )
+      const asked = ledger.ask(project.id, { from: 'zeus', to: 'chief', task: 1, body: 'Which?' })
+      deliver(ledger, asked)
+      const told = ledger.ask(project.id, {
+        from: 'chief',
+        to: 'zeus',
+        task: 1,
+        body: 'Where are you?',
+        urgent: true,
+      })
+      deliver(ledger, told)
+      ledger.cancelTask(project.id, 1, { by: 'human' })
+      for (const [question, from] of [
+        [told, id('zeus')],
+        [asked, id('chief')],
+      ]) {
+        assert.throws(() => ledger.answer(question.id, { from, body: 'Here' }), {
+          code: 'task-cancelled',
+          message: 'T-1 is cancelled: nobody waits for this answer',
+        })
+      }
+      assert.deepEqual(
+        ledger.task(project.id, 1).messages.filter((m) => m.kind === 'answer'),
+        [],
+      )
+    })
+  })
+
   it('maps a text answer onto the options, one line per question, and keeps free text', async () => {
     await withLedger((ledger) => {
       const { question } = asked(ledger)
