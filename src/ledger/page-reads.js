@@ -163,9 +163,9 @@ function overdueQuestions(store, projectId) {
  * how long it was, whichever fits, and marked `bodyCut`; the earliest
  * messages that do not fit even so are left out, and `messagesLeftOut`
  * says how many. A task message (a brief delivered, a resume, a reopen)
- * always stays, cut to its line at least: there are few, and a window's
- * first one is how the drawer knows the brief it was given. `cf task get`
- * reads it all whole.
+ * always stays, cut to its line at least: there are few, and each is a
+ * round of the task's story in the drawer. `cf task get` reads it all
+ * whole.
  */
 export function taskThatFits(store, projectId, number) {
   const task = readTask(store, projectId, number)

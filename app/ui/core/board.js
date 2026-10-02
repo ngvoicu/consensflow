@@ -754,7 +754,7 @@ export class TaskDrawer {
     const meta = element(
       'p',
       'drawer-meta',
-      `${who(task.requester)} asked ${task.assignee === null ? `for a ${task.tier} ${task.pool}` : who(task.assignee)} · ${STATE_LABEL[task.state]} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
+      `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)} · ${STATE_LABEL[task.state]}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
     const sections = [head, meta, this.#story(task, same, now)]
     // What its window wrote is read only when asked for, folded until then.

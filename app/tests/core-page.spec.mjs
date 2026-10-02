@@ -1012,6 +1012,9 @@ test("starts the story of a task not yet given, or of the chief's own, with its 
   await expect(docs.locator('time')).toHaveCount(0)
   const logo = await storyOf(7)
   await expect(logo.locator('.step-route')).toHaveText(['@chief → an image designer'])
+  await expect(
+    page.getByRole('complementary', { name: 'Task T-7' }).locator('.drawer-meta'),
+  ).toContainText('@chief asked for an image designer ·')
   const own = await storyOf(1)
   await expect(own.locator('.step-label')).toHaveText(['Request 1'])
   await expect(own.locator('.step-route')).toHaveText(['@human → @chief'])
@@ -1353,6 +1356,23 @@ test('deletes every finished task that may go from the Finished heading, after o
   await expect(page.locator('td[data-state="finished"] button.card')).toHaveText([/^T-3/])
   // What is left is kept for T-9: nothing more may go, so the heading offers nothing.
   await expect(heading.getByRole('button')).toHaveCount(0)
+})
+
+test('says on a deleted task that it left the board, and offers nothing to do on it', async ({
+  page,
+}) => {
+  const data = model()
+  const zeus = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
+  data.tasks['1:5'] = {
+    ...zeus.tasks.find((t) => t.number === 5),
+    messages: [],
+    deletedAt: '2026-10-02T20:00:00.000Z',
+  }
+  await open(page, data)
+  await page.locator('button.card[data-task="5"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-5' })
+  await expect(drawer.locator('.drawer-meta')).toContainText('· deleted from the board ·')
+  await expect(drawer.getByRole('button', { name: 'Delete task' })).toHaveCount(0)
 })
 
 test('says why the core keeps a finished task on the board, from the drawer or the heading', async ({
