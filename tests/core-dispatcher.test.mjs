@@ -958,6 +958,34 @@ describe('the dispatcher', () => {
     })
   })
 
+  it('forgets the files a launch wrote when its window never opens: refused by the host, or its adapter failed', async () => {
+    const forgotten = []
+    await setup(
+      async (context) => {
+        const { project } = await withStaff(context)
+        context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+        context.host.refuse = true
+        await context.dispatcher.pass()
+        assert.equal(context.ledger.task(project.id, 1).state, 'failed')
+        assert.ok(
+          forgotten.includes(context.adapter.prepared.at(-1).launchId),
+          'the host refused the window',
+        )
+
+        let written = null
+        context.adapter.prepare = async (request) => {
+          written = request.launchId
+          throw new Error('the settings could not be written')
+        }
+        context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Lexer' })
+        await context.dispatcher.pass()
+        assert.equal(context.ledger.task(project.id, 2).state, 'failed')
+        assert.ok(forgotten.includes(written), 'the adapter failed after writing them')
+      },
+      { launchFiles: { forget: (launch) => forgotten.push(launch) } },
+    )
+  })
+
   it('waits on a message a harness queued itself, and re-sends only a paste the record never showed', async () => {
     await setup(async (context) => {
       const { project } = await withStaff(context)

@@ -1126,6 +1126,8 @@ export class Dispatcher {
         instructions: this.#roles(participant, project),
       })
     } catch (cause) {
+      // An adapter may fail after writing the launch's files; no window will read them.
+      this.#launchFiles.forget(launchId)
       this.#launchFailed(project, participant, delivering, `the launch failed: ${cause.message}`)
       return
     }
@@ -1147,6 +1149,7 @@ export class Dispatcher {
     runtime.opening = null
     if (opened?.ok !== true) {
       this.#credentials.revoke(token)
+      this.#launchFiles.forget(launchId)
       this.#launchFailed(
         project,
         participant,
