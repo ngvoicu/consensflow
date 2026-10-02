@@ -35,12 +35,13 @@ const participant = (id, handle, role, extra = {}) => ({
   ...extra,
 })
 
-/** A session of a member: its own participant, named after the member. */
+/** A session of a member: its own participant, named after the member, on the member's agent. */
 const session = (id, member, name, role = 'worker', extra = {}) =>
   participant(id, `${member.handle}-${name}`, role, {
     memberId: member.id,
     member: member.handle,
     session: name,
+    agent: member.agent,
     harness: member.harness,
     tier: member.tier,
     ...extra,
@@ -690,8 +691,43 @@ test("shows a task waiting for a member in its requester's backlog, with the tie
   )
   await expect(card.locator('.card-route')).toHaveText('for a standard worker')
   await expect(page.locator('tr[data-handle="zeus"] .row-meta')).toHaveText(
-    'worker · standard · claude-code · claude-sonnet-5',
+    'worker · standard · claude-code · claude-sonnet-5 · high',
   )
+})
+
+test("says on each row the effort its agent runs at, after its model: a member's, a session's and the lead's", async ({
+  page,
+}) => {
+  const data = model()
+  const { lanes } = data.boards[1]
+  Object.assign(lanes.find((lane) => lane.participant.handle === 'chief').participant, {
+    agent: 'hera',
+    harness: 'codex',
+  })
+  const zeus = lanes.find((lane) => lane.participant.handle === 'zeus').participant
+  lanes.push(
+    {
+      participant: session(20, zeus, 'amber-pine'),
+      tasks: [],
+      activity: { state: 'working' },
+      pane: { id: 'p1-zeus-amber-pine', generation: 1 },
+    },
+    {
+      participant: participant(7, 'athena', 'advisor', { harness: 'opencode', tier: 'light' }),
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+  )
+  await open(page, data)
+  const meta = (handle) => page.locator(`tr[data-handle="${handle}"] .row-meta`)
+  await expect(meta('chief')).toHaveText('codex · gpt-6-astra · max')
+  await expect(meta('zeus')).toHaveText('worker · standard · claude-code · claude-sonnet-5 · high')
+  await expect(meta('zeus-amber-pine')).toHaveText(
+    'worker session of @zeus · claude-code · claude-sonnet-5 · high',
+  )
+  // An agent with no effort shows none.
+  await expect(meta('athena')).toHaveText('advisor · light · opencode · muse-spark')
 })
 
 test('shows what a task on the board waits for, on its card and in its drawer', async ({

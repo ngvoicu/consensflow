@@ -190,15 +190,25 @@ function route(task) {
 const resting = (participant, activity) =>
   isMember(participant) && (activity?.state ?? 'closed') === 'closed'
 
-/** A session's row says whose window it is; the member's row says what it is. */
+/**
+ * A session's row says whose window it is; the member's row says what it
+ * is. Each says what its agent runs: its model, and its effort when it has
+ * one, as the staff dialog does.
+ */
 const identity = (participant, agent) =>
   (participant.member
-    ? [`${participant.role} session of @${participant.member}`, participant.harness, agent?.model]
+    ? [
+        `${participant.role} session of @${participant.member}`,
+        participant.harness,
+        agent?.model,
+        agent?.effort,
+      ]
     : [
         participant.role === 'chief' ? null : participant.roles.join('+'),
         participant.tier,
         participant.harness,
         agent?.model,
+        agent?.effort,
       ]
   )
     .filter(Boolean)
