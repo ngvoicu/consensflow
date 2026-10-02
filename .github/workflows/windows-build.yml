@@ -97,7 +97,8 @@ jobs:
             if (Test-Path $root) { "--- $root"; Get-ChildItem $root -Recurse -Depth 1 | ForEach-Object FullName }
           }
           if (-not $app.HasExited) { taskkill /PID $app.Id /T /F | Out-Host }
-          $app.WaitForExit()
+          # Bounded: this step runs inside every release.
+          [void]$app.WaitForExit(30000)
           if ($outcome -ne 'up') { exit 1 }
           "the portable exe unpacked $runtime and its daemon came up on that Node"
           exit 0
