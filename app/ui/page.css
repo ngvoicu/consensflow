@@ -687,7 +687,7 @@ dialog {
   overflow: auto;
 }
 dialog::backdrop { background: rgba(4, 12, 15, .6); }
-/* The dialogs: New project, and the project staff. */
+/* The dialogs: Delete, Settings, New project, Switch lead and the project staff. */
 .dialog-form { display: grid; gap: 16px; padding: 22px 26px 24px; }
 .dialog-form h2 { margin: 0; font-size: 20px; }
 .dialog-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
