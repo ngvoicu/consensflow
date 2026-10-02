@@ -18,6 +18,8 @@ export const PURPOSES = ['critical-review', 'architecture', 'hard-problem', 'imp
 export const ACTIVE_TASK_STATES = ['working', 'waiting']
 /** A task on a member's hands: from assignment until its result. */
 export const HELD_TASK_STATES = ['queued', 'working', 'waiting']
+/** A task that is over, accepted or not: the board's last column, and what the human may delete. */
+export const FINISHED_TASK_STATES = ['accepted', 'cancelled', 'failed']
 export const MAX_BODY = 1_000_000
 export const MAX_TITLE = 120
 const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/

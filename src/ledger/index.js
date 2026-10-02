@@ -68,6 +68,11 @@ export { RESUME_WORDS } from './tasks.js'
  * - Nothing of a cancelled task is delivered or tried again: what of it is
  *   still on its way, a delivery into a window included, is withdrawn. Its
  *   requester hears of the cancel in the same step, unless it made it.
+ * - A finished task (accepted, cancelled or failed) is the human's to delete
+ *   from the board, unless a task not yet finished still needs it. It leaves
+ *   the board and `cf task list` for good, and keeps its row: its number is
+ *   never given again, its thread stays whole, and `cf task get` still reads
+ *   it. A deleted task moves no more, and nothing new waits for it.
  * - A review is a task like any other: the chief puts it on the board for a
  *   reviewer of a tier, and the reviewer's findings come back as its result.
  *
@@ -322,6 +327,9 @@ class Ledger {
   }
   failTask(projectId, number, request) {
     return tasks.failTask(this.#store, projectId, number, request)
+  }
+  deleteTasks(projectId, numbers) {
+    return tasks.deleteTasks(this.#store, projectId, numbers)
   }
 
   // --- views -------------------------------------------------------------------
