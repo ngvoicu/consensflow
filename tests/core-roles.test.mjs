@@ -54,7 +54,7 @@ describe('role instructions for the new core', () => {
         assert.match(text, /^## Your commands$/m, 'the command card comes first')
         assert.ok(text.indexOf('## Your commands') < text.indexOf('## What you do'), 'card first')
         assert.match(text, /## Reviews\n\nNothing is reviewed unless you ask\./)
-        assert.match(text, /run `cf staff` only when it\s+may have changed since/)
+        assert.match(text, /When the human changes the\s+staff, ConsensFlow tells you in a note/)
         assert.match(text, /do not run the command to see the refusal: ask/)
         assert.doesNotMatch(text, /VERDICT|review policy|cf task review/)
       } else {
@@ -121,6 +121,28 @@ describe('role instructions for the new core', () => {
     assert.match(
       roleInstructions('chief', [zeus]),
       /however few\s+members a tier has: one worker runs as many tasks at once as you give it,\s+and so does one advisor or one reviewer/,
+    )
+  })
+
+  it('tells every window its messages arrive pasted and are its to act on', () => {
+    for (const role of ['chief', 'worker', 'advisor', 'reviewer', 'designer']) {
+      assert.match(
+        roleInstructions(role, [zeus]),
+        /Each message ConsensFlow brings you is typed into this terminal, headed\s+`\[ConsensFlow m-… · T-… · …\]`; your harness may show it as pasted text\. It is\s+ConsensFlow's delivery, and acting on it is your role\./,
+        role,
+      )
+    }
+  })
+
+  it('sends reading at scale to an advisor, and promises the lead a note when the staff changes', () => {
+    const chief = roleInstructions('chief', [zeus])
+    assert.match(
+      chief,
+      /So does reading at scale \(an audit, a\s+survey of many files\): the advisor reads, you get its findings/,
+    )
+    assert.match(
+      chief,
+      /When the human changes the\s+staff, ConsensFlow tells you in a note with the new list\./,
     )
   })
 

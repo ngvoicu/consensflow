@@ -51,6 +51,23 @@ describe('the inbox queue: delivery, questions and answers', () => {
     })
   })
 
+  it('replaces a fresh note still waiting with the newer one, and nothing else', async () => {
+    await withLedger(async (ledger) => {
+      const { project } = staff(ledger)
+      const chief = ledger.project(project.id).participants.find((p) => p.handle === 'chief')
+      ledger.note(project.id, { to: 'chief', body: 'Unrelated' })
+      const read = ledger.freshNote(project.id, { to: 'chief', heading: 'Staff:', body: ' zeus' })
+      deliver(ledger, read)
+      ledger.freshNote(project.id, { to: 'chief', heading: 'Staff:', body: ' zeus, diana' })
+      ledger.freshNote(project.id, { to: 'chief', heading: 'Staff:', body: ' diana' })
+      // The one already read stays read; of those waiting, only the newest is left.
+      assert.deepEqual(
+        ledger.pending(chief.id).map((m) => m.body),
+        ['Unrelated', 'Staff: diana'],
+      )
+    })
+  })
+
   it('delivers one message at a time per recipient, oldest first', async () => {
     await withLedger((ledger) => {
       const { project, id } = staff(ledger)

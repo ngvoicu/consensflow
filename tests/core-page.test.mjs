@@ -245,6 +245,31 @@ describe('the page protocol of the new core', () => {
     })
   })
 
+  it('tells a running lead of a change to the staff, in one note the next change replaces', async () => {
+    await withPage(async ({ ledger, operations }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        agent: 'leto',
+      })
+      const lead = () => ledger.project(project.id).participants.find((p) => p.handle === 'chief')
+      // A lead not yet started reads the staff in its role text: no note.
+      await operations['member.add']({ project: project.id, agent: 'zeus' })
+      assert.deepEqual(ledger.pending(lead().id), [])
+      ledger.startConversation(lead().id, { harness: 'claude-code' })
+      await operations['member.add']({ project: project.id, agent: 'diana', roles: ['reviewer'] })
+      await operations['member.remove']({ project: project.id, agent: 'zeus' })
+      const notes = ledger.pending(lead().id)
+      assert.equal(notes.length, 1, 'one note: the newest')
+      assert.equal(notes[0].kind, 'note')
+      assert.match(
+        notes[0].body,
+        /^The human changed the staff; it is now:\n\n\| Member \| Roles \| Work tier \|/,
+      )
+      assert.match(notes[0].body, /\| diana \| reviewer \|/)
+      assert.doesNotMatch(notes[0].body, /\| zeus \|/)
+    })
+  })
+
   it('adds no member on a harness the core cannot open a window of', async () => {
     await withPage(async ({ ledger, operations, dispatcher }) => {
       const { project } = await operations['project.open']({

@@ -13,7 +13,7 @@ import { forgetLaunch, sweepLaunches } from './launch-files.js'
 import { daemonLog } from './log.js'
 import { pageOperations } from './page.js'
 import { PaneHost } from './pane-host.js'
-import { roleInstructions } from './roles.js'
+import { roleInstructions, staffOf } from './roles.js'
 import { eventTrace } from './trace.js'
 
 /**
@@ -141,7 +141,7 @@ export async function startCore(
     credentials,
     roster: (agent) => agentRow(agent, env) ?? null,
     roles: (participant, project) =>
-      roleInstructions(participant.role, teamOf(project), {
+      roleInstructions(participant.role, staffOf(project), {
         cf: join(BUNDLE_BIN, process.platform === 'win32' ? 'cf.cmd' : 'cf'),
       }),
     trace,
@@ -182,14 +182,6 @@ export async function startCore(
 }
 
 /** The staff as the chief's text lists it: each member's name, roles and tier. */
-function teamOf(project) {
-  return project.participants
-    .filter(
-      (member) => member.role !== 'chief' && member.agent !== null && member.memberId === null,
-    )
-    .map((member) => ({ name: member.handle, roles: member.roles, workTier: member.tier }))
-}
-
 /**
  * Runs `work` on a timer and on demand, never two at once; a kick during a
  * run runs it again after. A pass that fails or runs long goes to the log,

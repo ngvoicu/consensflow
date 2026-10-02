@@ -10,6 +10,15 @@ import { teamTable, workTierList } from '../skill.js'
 const MEMBERS = ['advisor', 'worker', 'reviewer', 'designer']
 const text = (name) => readFileSync(new URL(`../../skill/core/${name}.md`, import.meta.url), 'utf8')
 
+/** A project's staff as its lead reads it: each member's name, roles and tier, sessions left out. */
+export function staffOf(project) {
+  return project.participants
+    .filter(
+      (member) => member.role !== 'chief' && member.agent !== null && member.memberId === null,
+    )
+    .map((member) => ({ name: member.handle, roles: member.roles, workTier: member.tier }))
+}
+
 /** `staff.md`'s shared text, each `{{slot}}` filled from the part under `<!-- role: slot -->`. */
 function memberText(role) {
   const [head, ...parts] = text('staff').split(/^<!-- (\w+): (\w+) -->\n/m)
