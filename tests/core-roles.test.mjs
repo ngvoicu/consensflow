@@ -82,6 +82,7 @@ describe('role instructions for the new core', () => {
     const shared = [
       'Run each of these in your shell (your Bash or terminal tool).',
       "Do not hand out tasks, launch other agents or type into other windows, and\nnever read another agent's session files: the board is your only channel.",
+      "Your harness's own subagents may search and read for you; every change is\nyours to make.",
       'This window is for one task: it opened with the task and closes when the task\nleaves your hands.',
     ]
     const titles = {
@@ -175,10 +176,15 @@ describe('role instructions for the new core', () => {
     )
   })
 
-  it("tells the chief its harness's own subagents are not the staff", () => {
+  it("lets the chief's own subagents search and read, and gives them no other work", () => {
+    const chief = roleInstructions('chief', [])
     assert.match(
-      roleInstructions('chief', []),
-      /Hand work to your harness's own subagents or task tool: the board, the\s+human and the staff never see that work/,
+      chief,
+      /Your harness's own subagents may search and\s+read for you, as you may yourself; they change nothing\./,
+    )
+    assert.match(
+      chief,
+      /Hand work to your harness's own subagents or task tool beyond searching\s+and reading: the board, the human and the staff never see that work/,
     )
   })
 
