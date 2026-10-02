@@ -692,6 +692,56 @@ describe('the page protocol of the new core', () => {
     })
   })
 
+  it('lets the human delete finished tasks from the board, all of them or none, and says why not', async () => {
+    await withPage(async ({ ledger, operations, kicks }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        agent: 'leto',
+      })
+      await operations['member.add']({ project: project.id, agent: 'artemis' })
+      const artemis = ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
+      for (const [body, needs] of [
+        ['Lexer', []],
+        ['Parser', [1]],
+        ['Docs', []],
+      ]) {
+        ledger.createTask(project.id, {
+          from: 'chief',
+          pool: 'worker',
+          tier: artemis.tier,
+          body,
+          needs,
+        })
+      }
+      for (const number of [1, 3]) {
+        ledger.assignTask(project.id, number, artemis.id)
+        ledger.cancelTask(project.id, number, { by: 'human' })
+      }
+      const cards = (board) =>
+        [...board.open, ...board.lanes.flatMap((lane) => lane.tasks)].map((task) => task.number)
+      assert.deepEqual(
+        cards((await operations['board.get']({ project: project.id })).board),
+        [2, 1, 3],
+      )
+      const before = kicks()
+      await assert.rejects(operations['tasks.delete']({ project: project.id, tasks: [3, 1] }), {
+        message: 'T-2 still needs T-1: it stays on the board until T-2 is finished',
+      })
+      const { tasks } = await operations['tasks.delete']({ project: project.id, tasks: [3] })
+      assert.deepEqual(
+        tasks.map((task) => [task.number, task.state]),
+        [[3, 'cancelled']],
+      )
+      assert.equal(kicks(), before + 1, 'only the delete that went wakes the dispatcher')
+      assert.deepEqual(
+        cards((await operations['board.get']({ project: project.id })).board),
+        [2, 1],
+      )
+      const { task } = await operations['task.get']({ project: project.id, task: 3 })
+      assert.equal(task.deletedAt, tasks[0].deletedAt, 'its drawer still reads it')
+    })
+  })
+
   it('lets the human pause a task and resume it without writing to the agent', async () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({

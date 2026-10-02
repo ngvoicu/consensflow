@@ -155,6 +155,12 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       ledger.resumeTask(project, task, { by: 'human', body: RESUME_WORDS }),
     ),
 
+    // Finished tasks off the board for good, the ones the human confirmed or
+    // none; nobody is told, and cf task get still reads each.
+    'tasks.delete': change(async ({ project, tasks }) => ({
+      tasks: ledger.deleteTasks(project, tasks),
+    })),
+
     'message.read': change(async ({ message }) => ({ message: ledger.markRead(message) })),
 
     'message.approve': change(async ({ message }) => {
