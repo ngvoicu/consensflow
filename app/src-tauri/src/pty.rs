@@ -531,14 +531,7 @@ impl PaneTable {
         size: PtySize,
         backlog_bytes: usize,
     ) -> Result<StreamedPane, PaneError> {
-        self.open_streamed_at(
-            self.mint_key(),
-            cwd,
-            argv,
-            environment,
-            size,
-            backlog_bytes,
-        )
+        self.open_streamed_at(self.mint_key(), cwd, argv, environment, size, backlog_bytes)
     }
 
     /// Opens a streamed pane at the app-owned identity Node already reserved.
@@ -1323,7 +1316,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-
     #[test]
     fn update_installation_blocks_all_pane_launches_and_failure_restores_admission() {
         let _serial = serial_pty_test();
@@ -1401,7 +1393,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-
     #[test]
     fn open_reads_hello_then_eof() {
         let _pty_guard = serial_pty_test();
@@ -1421,7 +1412,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-
     #[test]
     fn pane_table_keys_same_id_by_generation() {
         let _pty_guard = serial_pty_test();
@@ -1466,7 +1456,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-
     #[test]
     fn streamed_open_at_preserves_the_store_reserved_identity() {
         let _pty_guard = serial_pty_test();
@@ -1495,7 +1484,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-
     #[test]
     fn resize_reaches_the_child_terminal() {
         let _pty_guard = serial_pty_test();
@@ -1598,7 +1586,10 @@ mod tests {
     fn a_pane_whose_program_runs_on_is_not_retired() {
         let _pty_guard = serial_pty_test();
         let table = Arc::new(PaneTable::new());
-        let OpenedPane { key, reader: _reader } = open_shell(&table, "exec /bin/sleep 30");
+        let OpenedPane {
+            key,
+            reader: _reader,
+        } = open_shell(&table, "exec /bin/sleep 30");
         let pid = child_process_id(&table, &key);
 
         assert!(!table
@@ -1759,7 +1750,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-
     #[test]
     fn environment_map_reaches_the_child() {
         let _pty_guard = serial_pty_test();
@@ -1779,7 +1769,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-
     #[test]
     fn child_environment_is_inherited_then_overlaid() {
         let _pty_guard = serial_pty_test();
@@ -1822,7 +1811,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-
     #[test]
     fn raw_mode_recorder_receives_exact_bytes() {
         let _pty_guard = serial_pty_test();
@@ -1931,7 +1919,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-
     #[test]
     fn a_paste_through_the_table_writes_brackets_then_delayed_enter() {
         let _pty_guard = serial_pty_test();
@@ -2007,7 +1994,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-
     #[test]
     fn reader_activity_resets_idle_then_silence_increases_it() {
         let _pty_guard = serial_pty_test();
@@ -2043,7 +2029,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-
     #[test]
     fn unacked_yes_output_is_bounded_then_resumes_after_ack() {
         let _pty_guard = serial_pty_test();
@@ -2081,7 +2066,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-
     #[test]
     fn ack_rejects_future_sequences_and_cumulative_progress_stays_bounded() {
         const BACKLOG_BYTES: usize = 12;
@@ -2160,7 +2144,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-
     #[test]
     fn input_remains_responsive_while_output_waits_for_ack() {
         let _pty_guard = serial_pty_test();

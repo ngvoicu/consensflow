@@ -33,10 +33,13 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             app/package-lock.json
-      - run: rustup update stable --no-self-update && rustup default stable && rustup component add clippy
+      - run: rustup update stable --no-self-update && rustup default stable && rustup component add clippy rustfmt
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: app/src-tauri
+      # The Rust laid out as rustfmt lays it out, checked before anything builds.
+      - run: cargo fmt --check
+        working-directory: app/src-tauri
 
       - run: npm ci
       - run: npm ci --prefix app

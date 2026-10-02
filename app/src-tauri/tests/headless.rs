@@ -701,7 +701,8 @@ fn parked_page_probe_stops_at_1024_then_drains_14400_bytes_via_wire_acks() {
     // The window ends once its last output is read and leaves the table after
     // its exit, so an ack that comes later has nothing left to free.
     let mut ended = false;
-    let gone = json!({"ok":false,"error":format!("pane {pane_id} generation {generation} is not open")});
+    let gone =
+        json!({"ok":false,"error":format!("pane {pane_id} generation {generation} is not open")});
     while received_bytes < OUTPUT_BYTES {
         if events.is_empty() {
             events.push(helper.receive());
@@ -1362,7 +1363,10 @@ fn a_pane_whose_program_exits_leaves_the_table_after_its_exit_event() {
         );
         thread::sleep(Duration::from_millis(20));
     }
-    assert!(!process_exists(pid), "the ended window's child was not reaped");
+    assert!(
+        !process_exists(pid),
+        "the ended window's child was not reaped"
+    );
     assert_eq!(
         helper.request(
             "pane.kill",
@@ -1602,4 +1606,3 @@ fn pane_does_not_inherit_a_launchers_disabled_colors() {
     );
     helper.close_input_and_wait();
 }
-

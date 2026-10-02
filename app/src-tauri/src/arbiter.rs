@@ -266,7 +266,12 @@ impl InputArbiter {
     }
 
     /// The human's keys and the emulator's replies, written at once.
-    pub fn write(&self, table: &PaneTable, pane: &PaneKey, bytes: &[u8]) -> Result<(), ArbiterError> {
+    pub fn write(
+        &self,
+        table: &PaneTable,
+        pane: &PaneKey,
+        bytes: &[u8],
+    ) -> Result<(), ArbiterError> {
         self.write_via(table, pane, bytes)
     }
 
@@ -441,7 +446,9 @@ mod tests {
         );
 
         let newer = PaneKey::new("quiet-pane", 2);
-        arbiter.register(&newer).expect("register a newer generation");
+        arbiter
+            .register(&newer)
+            .expect("register a newer generation");
         printed.note();
         assert_eq!(
             arbiter.snapshot(&newer).expect("snapshot").output_quiet_ms,
@@ -673,8 +680,9 @@ mod tests {
 
         let writing_arbiter = Arc::clone(&arbiter);
         let writing_key = key.clone();
-        let writing =
-            thread::spawn(move || writing_arbiter.write_via(writer.as_ref(), &writing_key, b"typed"));
+        let writing = thread::spawn(move || {
+            writing_arbiter.write_via(writer.as_ref(), &writing_key, b"typed")
+        });
         first_write.wait();
         printed.note();
         let (read, snapshot) = mpsc::channel();

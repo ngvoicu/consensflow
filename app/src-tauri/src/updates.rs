@@ -838,7 +838,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-
     #[test]
     fn real_updater_verifies_download_and_rejects_tampering_before_ready() {
         use std::io::{Read, Write};

@@ -1,9 +1,7 @@
 use std::io::{BufRead, Write};
 
 use serde_json::{json, Value};
-use tauri::{
-    AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent,
-};
+use tauri::{AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 pub mod arbiter;
 pub mod bridge;
