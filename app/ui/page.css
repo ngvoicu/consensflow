@@ -708,6 +708,28 @@ dialog::backdrop { background: rgba(4, 12, 15, .6); }
 .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
 .icon-button:hover { color: var(--foam); border-color: var(--foam); }
+.icon-button.danger-button { color: var(--buoy); border-color: rgba(255, 120, 104, .55); }
+.icon-button.danger-button:hover { color: var(--buoy); border-color: var(--buoy); background: rgba(255, 120, 104, .1); }
+.icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+/* A tip names an icon button on hover and keyboard focus. */
+.icon-button[data-tip] { position: relative; }
+.icon-button[data-tip]:is(:hover, :focus-visible)::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-raised);
+  color: var(--foam);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 12px var(--shadow);
+}
+.row-tools .icon-button { width: 30px; height: 28px; border-radius: 6px; }
 dialog.settings { width: min(560px, calc(100vw - 48px)); }
 .settings-menu { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .settings-menu li { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }

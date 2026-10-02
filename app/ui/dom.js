@@ -20,6 +20,33 @@ export function button(text, className, action, label) {
   return node
 }
 
+const SVG = 'http://www.w3.org/2000/svg'
+
+/** A line icon drawn from `paths` (path data on a 24-unit grid), hidden from assistive technology. */
+export function icon(paths) {
+  const svg = document.createElementNS(SVG, 'svg')
+  svg.setAttribute('class', 'icon')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('aria-hidden', 'true')
+  for (const d of paths) {
+    const path = document.createElementNS(SVG, 'path')
+    path.setAttribute('d', d)
+    svg.append(path)
+  }
+  return svg
+}
+
+/**
+ * A button drawn as an icon: `tip` shows beside it on hover and keyboard
+ * focus, `label` names it, and `className` adds to how it looks.
+ */
+export function iconButton(paths, tip, action, label, className) {
+  const node = button('', className ? `icon-button ${className}` : 'icon-button', action, label)
+  node.dataset.tip = tip
+  node.append(icon(paths))
+  return node
+}
+
 /**
  * Draws `nodes` into `parent`, leaving whatever comes out the same where it
  * is: replacing it would take the keyboard from it, and lose a click whose

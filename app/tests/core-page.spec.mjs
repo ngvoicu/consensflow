@@ -378,6 +378,12 @@ async function open(page, data = model()) {
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
 }
 
+/** A row's tools as the human reads them: an icon button by its tip, any other by its text. */
+const toolsOf = (row) =>
+  row
+    .locator('.row-tools button')
+    .evaluateAll((buttons) => buttons.map((button) => button.dataset.tip ?? button.textContent))
+
 const calls = (page, operation) =>
   page.evaluate(
     (operation) =>
@@ -469,11 +475,9 @@ test("gives a session's lane the human's hand on its window: show, open, close, 
   )
   await open(page, data)
   const live = page.locator('tr[data-handle="zeus-amber-pine"]')
-  await expect(live.locator('.row-tools button')).toHaveText([
-    'Show terminal',
-    'Close terminal',
-    'Delete session',
-  ])
+  await expect
+    .poll(() => toolsOf(live))
+    .toEqual(['Show terminal', 'Close terminal', 'Delete session'])
   await expect(
     live.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }),
   ).toBeVisible()
@@ -481,7 +485,7 @@ test("gives a session's lane the human's hand on its window: show, open, close, 
     live.getByRole('button', { name: "Open @zeus · amber-pine's terminal" }),
   ).toHaveCount(0)
   const closed = page.locator('tr[data-handle="zeus-brisk-birch"]')
-  await expect(closed.locator('.row-status')).toHaveText('Terminal closed')
+  await expect(closed.locator('.row-status')).toHaveCount(0)
   // Opening a terminal unfolds the dock it shows in.
   await page.getByRole('button', { name: 'Hide terminals' }).click()
   await expect(page.getByRole('region', { name: 'Terminals' })).toBeHidden()
@@ -611,7 +615,7 @@ test("draws a member's sessions as lanes under it, named, and counts its open wi
   await expect(first.locator('.row-meta')).toContainText('worker session of @zeus')
   await expect(first.locator('td[data-state="working"] button.card')).toHaveCount(1)
   const second = page.locator('tr[data-handle="zeus-brisk-birch"]')
-  await expect(second.locator('.row-status')).toHaveText('Terminal closed')
+  await expect(second.locator('.row-status')).toHaveCount(0)
   await expect(page.locator('tr[data-handle="zeus"] .row-status')).toHaveText(
     '1 terminal open, one per task',
   )
@@ -2787,16 +2791,14 @@ test("takes a closed window's card out of the dock: its lane says so and opens i
     'true',
   )
   const row = page.locator('tr[data-handle="zeus-amber-pine"]')
-  await expect(row.locator('.row-status')).toHaveText('Terminal closed')
+  await expect(row.locator('.row-status')).toHaveCount(0)
   await expect(row.getByTestId('lamp')).toHaveAttribute('data-state', 'closed')
   await row.getByRole('button', { name: "Open @zeus · amber-pine's terminal" }).click()
   await expect
     .poll(() => calls(page, 'session.open'))
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
   // The chief's window opens and closes with the project: its row has no Open.
-  await expect(page.locator('tr[data-handle="chief"] .row-tools button')).toHaveText([
-    'Switch lead',
-  ])
+  await expect.poll(() => toolsOf(page.locator('tr[data-handle="chief"]'))).toEqual(['Switch lead'])
 })
 
 /**
@@ -2872,20 +2874,16 @@ test("keeps a session's terminal out of the dock until the human shows it, and t
   await expect.poll(() => docked(page)).toEqual(['chief'])
   const worker = page.locator('tr[data-handle="zeus-amber-pine"]')
   await expect(worker.locator('.row-status')).toHaveText('Working')
-  await expect(worker.locator('.row-tools button')).toHaveText([
-    'Show terminal',
-    'Close terminal',
-    'Delete session',
-  ])
+  await expect
+    .poll(() => toolsOf(worker))
+    .toEqual(['Show terminal', 'Close terminal', 'Delete session'])
   const reviewer = page.locator('tr[data-handle="zeus-brisk-birch"]')
   await expect(reviewer.locator('.row-status')).toHaveText('Waiting: permission to run a command')
   await expect(
     reviewer.getByRole('button', { name: "Show @zeus · brisk-birch's terminal" }),
   ).toBeVisible()
   // The chief's terminal has nothing to show or hide, on its row or its card.
-  await expect(page.locator('tr[data-handle="chief"] .row-tools button')).toHaveText([
-    'Switch lead',
-  ])
+  await expect.poll(() => toolsOf(page.locator('tr[data-handle="chief"]'))).toEqual(['Switch lead'])
   await expect(page.locator('#stage .terminal-card[data-handle="chief"] button')).toHaveCount(0)
   // Out of the dock, a session's window is fed all the same: what it prints
   // is taken and acknowledged, so it never waits for a reader.
@@ -2920,11 +2918,9 @@ test("shows a session's terminal in front, the dock unfolded, and hides it again
   await expect(page.getByRole('region', { name: 'Terminals' })).toBeVisible()
   await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
   await expect(card).toHaveAttribute('data-focused', 'true')
-  await expect(row.locator('.row-tools button')).toHaveText([
-    'Hide terminal',
-    'Close terminal',
-    'Delete session',
-  ])
+  await expect
+    .poll(() => toolsOf(row))
+    .toEqual(['Hide terminal', 'Close terminal', 'Delete session'])
   // Hidden from its row: the card goes and the chief's is in front again.
   await row.getByRole('button', { name: "Hide @zeus · amber-pine's terminal" }).click()
   await expect.poll(() => docked(page)).toEqual(['chief'])
@@ -3055,7 +3051,7 @@ test("takes a shown terminal out with its window; the session's next window wait
   await windowOf(null)
   await expect.poll(() => docked(page)).toEqual(['chief'])
   expect(await disposed(page)).toBe(1)
-  await expect(row.locator('.row-status')).toHaveText('Terminal closed')
+  await expect(row.locator('.row-status')).toHaveCount(0)
   // A follow-up opens a window of its own accord: it waits to be shown.
   await windowOf(10)
   await expect(
@@ -3273,13 +3269,11 @@ test('keeps every button of a lane inside its column, however narrow the board',
   for (let press = 0; press < 30; press += 1) await grip.press('ArrowLeft')
   await expect(grip).toHaveAttribute('aria-valuenow', '280')
   const row = page.locator('tr[data-handle="zeus-lively-comet"]')
-  await expect(row.locator('.row-tools button')).toHaveText(['Open terminal', 'Delete session'])
+  await expect.poll(() => toolsOf(row)).toEqual(['Open terminal', 'Delete session'])
   const live = page.locator('tr[data-handle="zeus-amber-pine"]')
-  await expect(live.locator('.row-tools button')).toHaveText([
-    'Show terminal',
-    'Close terminal',
-    'Delete session',
-  ])
+  await expect
+    .poll(() => toolsOf(live))
+    .toEqual(['Show terminal', 'Close terminal', 'Delete session'])
   const outside = () =>
     page.locator('table[aria-label="Tasks"] tbody th').evaluateAll((heads) =>
       heads.flatMap((head) => {
@@ -3295,11 +3289,9 @@ test('keeps every button of a lane inside its column, however narrow the board',
   expect(await outside()).toEqual([])
   // Its terminal shown, the live lane offers to hide it, in the same room.
   await live.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
-  await expect(live.locator('.row-tools button')).toHaveText([
-    'Hide terminal',
-    'Close terminal',
-    'Delete session',
-  ])
+  await expect
+    .poll(() => toolsOf(live))
+    .toEqual(['Hide terminal', 'Close terminal', 'Delete session'])
   expect(await outside()).toEqual([])
 })
 
@@ -3316,10 +3308,16 @@ test("gives a member's heading row no buttons, and a closed session's row no Tra
   })
   await open(page, data)
   await expect(page.locator('tr[data-handle="diana"] .row-tools button')).toHaveCount(0)
-  await expect(page.locator('tr[data-handle="diana-amber-pine"] .row-tools button')).toHaveText([
-    'Open terminal',
-    'Delete session',
-  ])
+  await expect
+    .poll(() => toolsOf(page.locator('tr[data-handle="diana-amber-pine"]')))
+    .toEqual(['Open terminal', 'Delete session'])
+  // Each tool is an icon, its name in a tip on hover.
+  const openTerminal = page.getByRole('button', { name: "Open @diana · amber-pine's terminal" })
+  await expect(openTerminal.locator('svg.icon')).toHaveCount(1)
+  await openTerminal.hover()
+  await expect
+    .poll(() => openTerminal.evaluate((node) => getComputedStyle(node, '::after').content))
+    .toBe('"Open terminal"')
   await page.locator('tr[data-handle="diana-amber-pine"] button.card[data-task="3"]').click()
   await expect(page.getByRole('complementary', { name: 'Task T-3' })).toBeVisible()
 })

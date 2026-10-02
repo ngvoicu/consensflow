@@ -1,4 +1,4 @@
-import { button, element, redraw } from '../dom.js'
+import { button, element, iconButton, redraw } from '../dom.js'
 
 /**
  * The board: a kanban of the project's tasks. One row per participant, one
@@ -28,6 +28,23 @@ const COLUMNS = [
   ['done', 'Done'],
   ['finished', 'Finished'],
 ]
+/** A session row's tools, each drawn as an icon: path data on a 24-unit grid. */
+const ICONS = {
+  show: ['M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z', 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z'],
+  hide: [
+    'M3 3l18 18',
+    'M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-2.2 3.2',
+    'M6.6 6.6C3.8 8.5 2 12 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6',
+    'M9.9 9.9a3 3 0 0 0 4.2 4.2',
+  ],
+  open: [
+    'M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z',
+    'M7 9l3 3-3 3',
+    'M13 15h4',
+  ],
+  close: ['M12 3v9', 'M18.4 6.6a9 9 0 1 1-12.8 0'],
+  remove: ['M4 7h16', 'M9 7V4h6v3', 'M6 7l1 13h10l1-13', 'M10 11v6', 'M14 11v6'],
+}
 const columnOf = (task) =>
   ['accepted', 'failed', 'cancelled'].includes(task.state)
     ? 'finished'
@@ -244,7 +261,8 @@ function rowStatus(lane, board, now) {
     const note = sessionsNote(lane, board)
     return note === null ? null : [state, note]
   }
-  if (participant.member !== null && state === 'closed') return [state, 'Terminal closed']
+  // A closed session's row says nothing: its lamp and its Open terminal say it.
+  if (participant.member !== null && state === 'closed') return null
   return [state, ACTIVITY_LABEL[state] ?? 'No window']
 }
 
@@ -540,8 +558,8 @@ export class BoardView {
    * opens and closes with the project. An open terminal stays out of the
    * dock until the human shows it, and hides again; a closed one opens
    * again on its own conversation, and its copy is on its last task's card.
-   * The session is deleted from here too. A closed project's rows keep only
-   * the copy.
+   * The session is deleted from here too. Each of these is an icon, named in
+   * its tip; a closed project's rows have none.
    */
   #rowTools(lane, board) {
     const { participant, pane } = lane
@@ -552,15 +570,15 @@ export class BoardView {
     if (session && pane !== null && acting) {
       tools.append(
         this.#shows(participant)
-          ? button(
+          ? iconButton(
+              ICONS.hide,
               'Hide terminal',
-              'quiet-button',
               this.#onLane(this.#actions.onHideTerminal, participant),
               `Hide ${name}'s terminal`,
             )
-          : button(
+          : iconButton(
+              ICONS.show,
               'Show terminal',
-              'quiet-button',
               this.#onLane(this.#actions.onShowTerminal, participant),
               `Show ${name}'s terminal`,
             ),
@@ -568,9 +586,9 @@ export class BoardView {
     }
     if (session && pane === null && acting) {
       tools.append(
-        button(
+        iconButton(
+          ICONS.open,
           'Open terminal',
-          'quiet-button',
           this.#onLane(this.#actions.onOpenTerminal, participant),
           `Open ${name}'s terminal`,
         ),
@@ -578,9 +596,9 @@ export class BoardView {
     }
     if (session && pane !== null && acting) {
       tools.append(
-        button(
+        iconButton(
+          ICONS.close,
           'Close terminal',
-          'quiet-button',
           this.#onLane(this.#actions.onCloseTerminal, participant),
           `Close ${name}'s terminal`,
         ),
@@ -598,11 +616,12 @@ export class BoardView {
     }
     if (session && acting) {
       tools.append(
-        button(
+        iconButton(
+          ICONS.remove,
           'Delete session',
-          'danger-button',
           this.#onLane(this.#actions.onEndSession, participant),
           `Delete ${name}'s session`,
+          'danger-button',
         ),
       )
     }
