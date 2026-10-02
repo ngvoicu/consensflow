@@ -40,7 +40,8 @@ import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.j
  *   deleted project) is forgotten at once, quota marks and all, so one that
  *   comes back or takes its id starts clean; its window closes once its step
  *   in progress ends, and that exit fails nothing: a member's open tasks
- *   were cancelled when it left.
+ *   were cancelled when it left. An Open that waited on it then opens
+ *   nothing, for it or for one that took its id.
  * - A task for a tier of member starts open: each pass gives it to a free
  *   member of that pool and tier that is not out of quota, on the harness
  *   whose members of the tier have taken the fewest tasks, then the one with
@@ -1614,14 +1615,17 @@ export class Dispatcher {
    * Opens a participant's window once its step in progress is over, apart
    * from whoever asked: a page operation answers once the ledger has its
    * change, and a launch that fails says so on the board. A window open by
-   * then, or a project closed meanwhile, opens nothing. Nobody waits for it,
-   * so a failure is written down.
+   * then, or a project closed meanwhile, opens nothing; so does a participant
+   * forgotten meanwhile (it left, or its project was deleted), whose id may
+   * be another's by then, and no record is made for it again. Nobody waits
+   * for it, so a failure is written down.
    */
   #openSoon(participantId) {
+    const runtime = this.#runtimeOf(participantId)
     this.#exclusive(
       participantId,
       () => {
-        const runtime = this.#runtimeOf(participantId)
+        if (this.#forgotten(runtime)) return
         const project = this.#projectOf(participantId)
         if (runtime.pane !== null || project?.state !== 'open') return
         const participant = project.participants.find((p) => p.id === participantId)
@@ -1663,6 +1667,15 @@ export class Dispatcher {
       this.#runtime.set(participantId, runtime)
     }
     return runtime
+  }
+
+  /**
+   * Whether a record was forgotten (`#forget`) since work took it: its
+   * participant left, or its project was deleted, and the ledger may have
+   * given its id to another since. That work does nothing more by the id.
+   */
+  #forgotten(runtime) {
+    return this.#runtime.get(runtime.id) !== runtime
   }
 
   #setActivity(runtime, activity) {

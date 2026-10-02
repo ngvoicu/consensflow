@@ -2415,6 +2415,63 @@ describe('a participant that leaves', () => {
     })
   })
 
+  it("opens nothing for a session's Open that waited while its project was deleted, not even for the member that has its id now", async () => {
+    await setup(async (context) => {
+      const first = await withTiers(context, { workers: ['zeus'] })
+      first.open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.answer('zeus', 'Parser done')
+      await context.dispatcher.pass()
+      assert.equal(first.task(1).state, 'done', "the session's window went with its task")
+      const session = first.id('zeus-amber-pine')
+      // The human opens the session's window, and again while the first one
+      // comes up; that one exits at once, before its open is answered.
+      let release
+      const held = new Promise((resolve) => {
+        release = resolve
+      })
+      const prepare = context.adapter.prepare
+      context.adapter.prepare = async (request) => {
+        if (request.participant.handle === 'zeus-amber-pine') await held
+        return prepare(request)
+      }
+      const open = context.host.open
+      context.host.open = async (body) => {
+        const opened = await open(body)
+        if (windowOf(body.id, 'zeus-amber-pine')) await context.host.exit('zeus-amber-pine')
+        return opened
+      }
+      const launches = context.adapter.prepared.length
+      await context.dispatcher.openWindow(first.project.id, 'zeus-amber-pine')
+      await context.dispatcher.openWindow(first.project.id, 'zeus-amber-pine')
+      // Meanwhile the project is closed and deleted, and a new one takes its ids.
+      const closing = context.dispatcher.closeProject(first.project.id)
+      const deleting = context.dispatcher.deleteProject(first.project.id)
+      const second = await withTiers(context, { workers: ['zeus'] })
+      const diana = context.ledger.addMember(second.project.id, {
+        agent: 'diana',
+        harness: 'claude-code',
+        role: 'worker',
+        tier: 'standard',
+      })
+      assert.equal(diana.id, session, "the ledger gives the session's id to a new member")
+      release()
+      await closing
+      await deleting
+      await flush()
+      assert.deepEqual(
+        context.adapter.prepared
+          .slice(launches)
+          .filter((request) => request.participant.id === session)
+          .map((request) => request.participant.handle),
+        ['zeus-amber-pine'],
+        'the first Open launched for the session, and the second opened nothing',
+      )
+      assert.equal(context.dispatcher.pane(session), null, 'no window has its id')
+    })
+  })
+
   it("stops a closed project's windows acting at once, before their exits come", async () => {
     // A token names a participant and a project by id, and once the project
     // is deleted the ledger gives both ids to what it writes next: by then
