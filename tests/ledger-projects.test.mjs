@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { deliver, staff, withLedger } from './ledger-fixtures.mjs'
+import { busyProject, deliver, staff, withLedger } from './ledger-fixtures.mjs'
 
 /** Projects and who is in them (src/ledger/projects.js, src/ledger/staff.js). */
 
@@ -49,6 +49,24 @@ describe('deleting a project', () => {
       assert.deepEqual(ledger.events(project.id), [], 'nothing of it is left')
       assert.equal(ledger.task(project.id, 1), null)
       assert.equal(ledger.inbox(leadId).length, 0, 'its messages went with it')
+    })
+  })
+
+  it("gives none of a deleted project's ids to the next one, though they were the highest", async () => {
+    await withLedger((ledger) => {
+      busyProject(ledger, '/work/app')
+      // The highest ids of every table: the ones SQLite alone would give again.
+      const gone = busyProject(ledger, '/work/site')
+      ledger.setProjectState(gone.project[0], 'suspended')
+      ledger.deleteProject(gone.project[0])
+      const next = busyProject(ledger, '/work/api')
+      for (const [table, ids] of Object.entries(next)) {
+        assert.deepEqual(
+          ids.filter((id) => id <= Math.max(...gone[table])),
+          [],
+          `every ${table} id of the new project is past the deleted one's`,
+        )
+      }
     })
   })
 })

@@ -1647,7 +1647,7 @@ describe('the dispatcher assigns open tasks', () => {
     })
   })
 
-  it("tells the requester of a waiting task, though a deleted project's waiting task had its id", async () => {
+  it("tells the requester of a waiting task, though a deleted project's waiting task was told before it", async () => {
     await setup(
       async (context) => {
         const waits =
@@ -1660,7 +1660,11 @@ describe('the dispatcher assigns open tasks', () => {
         await context.dispatcher.deleteProject(first.project.id)
 
         const second = await withTiers(context, { workers: ['zeus'] })
-        assert.equal(second.open().id, gone.id, "the ledger gives the deleted task's id again")
+        assert.notEqual(
+          second.open().id,
+          gone.id,
+          "the ledger never gives the deleted task's id again",
+        )
         await context.dispatcher.pass()
         assert.deepEqual(second.notes('chief'), [waits])
       },
@@ -2327,7 +2331,7 @@ describe('a participant that leaves', () => {
     })
   })
 
-  it('is forgotten with its project: a session the ledger gives its id after starts clean', async () => {
+  it('is forgotten with its project: a session of the next project starts clean', async () => {
     await setup(async (context) => {
       const first = await withTiers(context, { workers: ['zeus'] })
       first.open()
@@ -2347,7 +2351,11 @@ describe('a participant that leaves', () => {
       const second = await withTiers(context, { workers: ['zeus'] })
       second.open()
       await context.dispatcher.pass()
-      assert.equal(second.id(second.task(1).assignee), gone, 'the ledger gives its id again')
+      assert.notEqual(
+        second.id(second.task(1).assignee),
+        gone,
+        'the ledger never gives its id again',
+      )
       context.adapter.agent('zeus').items.push(item('assistant', 'Half', { complete: false }))
       await context.dispatcher.pass()
       assert.deepEqual(
@@ -2415,7 +2423,7 @@ describe('a participant that leaves', () => {
     })
   })
 
-  it("opens nothing for a session's Open that waited while its project was deleted, not even for the member that has its id now", async () => {
+  it("opens nothing for a session's Open that waited while its project was deleted, nor for a new project's member", async () => {
     await setup(async (context) => {
       const first = await withTiers(context, { workers: ['zeus'] })
       first.open()
@@ -2445,7 +2453,7 @@ describe('a participant that leaves', () => {
       const launches = context.adapter.prepared.length
       await context.dispatcher.openWindow(first.project.id, 'zeus-amber-pine')
       await context.dispatcher.openWindow(first.project.id, 'zeus-amber-pine')
-      // Meanwhile the project is closed and deleted, and a new one takes its ids.
+      // Meanwhile the project is closed and deleted, and a new one is opened with a member added.
       const closing = context.dispatcher.closeProject(first.project.id)
       const deleting = context.dispatcher.deleteProject(first.project.id)
       const second = await withTiers(context, { workers: ['zeus'] })
@@ -2455,7 +2463,7 @@ describe('a participant that leaves', () => {
         role: 'worker',
         tier: 'standard',
       })
-      assert.equal(diana.id, session, "the ledger gives the session's id to a new member")
+      assert.notEqual(diana.id, session, "the ledger never gives the session's id to a new member")
       release()
       await closing
       await deleting
@@ -2463,19 +2471,19 @@ describe('a participant that leaves', () => {
       assert.deepEqual(
         context.adapter.prepared
           .slice(launches)
-          .filter((request) => request.participant.id === session)
+          .filter((request) => [session, diana.id].includes(request.participant.id))
           .map((request) => request.participant.handle),
         ['zeus-amber-pine'],
-        'the first Open launched for the session, and the second opened nothing',
+        'the first Open launched for the session, and the second opened nothing, nor for diana',
       )
       assert.equal(context.dispatcher.pane(session), null, 'no window has its id')
     })
   })
 
   it("stops a closed project's windows acting at once, before their exits come", async () => {
-    // A token names a participant and a project by id, and once the project
-    // is deleted the ledger gives both ids to what it writes next: by then
-    // none of its windows may act for anyone, exit or no exit.
+    // A token names a participant and a project by id. Once the project is
+    // closed none of its windows may act, exit or no exit; once it is
+    // deleted, those ids name nothing.
     const revoked = []
     await setup(
       async (context) => {
@@ -2684,8 +2692,9 @@ const handoffsOf = (context, project) =>
     .filter((m) => m.body.startsWith('You are the lead now'))
 /**
  * The human closes and deletes a project while something of it waits, and
- * opens another (with these workers), which the ledger gives the deleted
- * one's ids. `gone` ends once the old windows have closed.
+ * opens another (with these workers), whose ids are its own: the ledger
+ * never gives the deleted one's again. `gone` ends once the old windows have
+ * closed.
  */
 async function replaceProject(context, old, workers = []) {
   const gone = Promise.all([
@@ -2703,7 +2712,7 @@ async function replaceProject(context, old, workers = []) {
       tier: 'standard',
     })),
   })
-  assert.equal(fresh.id, old.id, 'the ledger gives its id again')
+  assert.notEqual(fresh.id, old.id, 'the ledger never gives its id again')
   return { fresh, gone }
 }
 
@@ -3019,7 +3028,7 @@ describe('switching the lead to another harness', () => {
     })
   })
 
-  it('switches nothing of a new project that took its id while the switch waited for the old lead', async () => {
+  it('switches nothing once its project is deleted while the switch waits for the old lead, nor a project created meanwhile', async () => {
     await withCodex(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
@@ -3067,7 +3076,7 @@ describe('switching the lead to another harness', () => {
     })
   })
 
-  it("hands nothing of a new project that took its id to an old lead whose switch waited for its turn's end", async () => {
+  it("hands nothing to an old lead whose switch waited for its turn's end once its project is deleted, nor switches a project created meanwhile", async () => {
     await withCodex(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
@@ -3092,7 +3101,7 @@ describe('switching the lead to another harness', () => {
       const looking = context.dispatcher.pass()
       const { fresh, gone } = await replaceProject(context, old)
       const welcome = context.ledger.note(fresh.id, { to: 'chief', body: 'Welcome' })
-      assert.equal(welcome.id, asked.id, "the ledger gives the note's id again")
+      assert.notEqual(welcome.id, asked.id, "the ledger never gives the note's id again")
       release()
       await looking
       await gone
@@ -3106,11 +3115,15 @@ describe('switching the lead to another harness', () => {
     })
   })
 
-  it("copies nothing of the old lead's last look into a new project that took its id meanwhile", async () => {
+  it("copies and confirms nothing of the old lead's last look once its project is deleted, nor switches a project created meanwhile", async () => {
     await withCodex(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
-      // The human told the old lead something since the last look, which waits on its harness.
+      // A note is on its way to the old lead, and the human told it something
+      // since the last look: the switch's last look, which shows both, waits
+      // on its harness.
+      context.ledger.note(old.id, { from: 'zeus', to: 'chief', body: 'Parser done' })
+      await context.dispatcher.pass()
       const told = 'The codeword is tern'
       context.adapter.agent('chief').items.push(item('user', told))
       const launch = context.adapter.agent('chief').launchId
@@ -3146,11 +3159,15 @@ describe('switching the lead to another harness', () => {
         ['claude-code', 0],
         'the new lead is not switched',
       )
-      assert.equal(await switched, `no project ${old.id}`, 'the switch says its project is gone')
+      assert.equal(
+        await switched,
+        `no project ${old.id}`,
+        'the switch says its project is gone, and confirmed none of its messages',
+      )
     })
   })
 
-  it("switches nothing of a new project that took its id while the old lead's window closed", async () => {
+  it("switches nothing once its project is deleted while the old lead's window closes, nor a project created meanwhile", async () => {
     await withCodex(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
@@ -3180,6 +3197,44 @@ describe('switching the lead to another harness', () => {
         'the new lead is not switched',
       )
       assert.equal(await switched, `no project ${old.id}`, 'the switch says its project is gone')
+    })
+  })
+
+  it("switches nothing once its project is deleted while the old lead's window closes after its turn, nor a project created meanwhile", async () => {
+    await withCodex(async (context) => {
+      const { project: old } = await withStaff(context)
+      await context.dispatcher.pass()
+      // The lead is at work, so the switch waits for the end of its turn.
+      context.adapter.busy('chief')
+      await context.dispatcher.switchChief(old.id, { harness: 'codex', when: 'turn' })
+      // The turn ends, and the step that switches the lead closes its old
+      // window, which takes its time.
+      context.adapter.answer('chief', 'Done with that')
+      const window = context.host.last('chief')
+      let release
+      const held = new Promise((resolve) => {
+        release = resolve
+      })
+      const kill = context.host.kill
+      context.host.kill = async (pane) => {
+        if (pane.generation === window.generation) await held
+        return kill(pane)
+      }
+      const stepping = context.dispatcher.pass()
+      await flush()
+      const { fresh, gone } = await replaceProject(context, old)
+      release()
+      // The step stops there, and fails nothing: the deleted project's lead
+      // has nothing left to switch.
+      await stepping
+      await gone
+      await flush()
+      const lead = chiefOf(context, fresh)
+      assert.deepEqual(
+        [lead.harness, context.codex.prepared.length, context.dispatcher.pendingSwitch(lead.id)],
+        ['claude-code', 0, null],
+        'the new lead is not switched, and nothing waits to switch it',
+      )
     })
   })
 })
@@ -3246,7 +3301,7 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it("copies nothing into, and delivers nothing of, a new project that took its ids while the old lead's window was looked at", async () => {
+  it("copies and delivers nothing once the lead's project is deleted while its window is looked at, nor for a project created meanwhile", async () => {
     await setup(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
@@ -3278,7 +3333,7 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it("says nothing of a new project that took its ids when the old window's look fails", async () => {
+  it("says nothing once the lead's project is deleted while its window's look fails, of it or a project created meanwhile", async () => {
     const entries = []
     await setup(
       async (context) => {
@@ -3300,14 +3355,14 @@ describe('work in flight when its participant is forgotten', () => {
         assert.deepEqual(
           entries.filter((entry) => entry.kind === 'window.activity' && entry.state === 'unknown'),
           [],
-          "no line says the new lead's window could not be read",
+          "no line says the old lead's window, or the new lead's, could not be read",
         )
       },
       { trace: (entry) => entries.push(entry) },
     )
   })
 
-  it("delivers nothing of a new project that took its ids while a paused task's agent was interrupted", async () => {
+  it("delivers nothing to a session's window once its project is deleted while its paused task's agent is interrupted, nor for a project created meanwhile", async () => {
     await setup(async (context) => {
       const first = await withTiers(context, { workers: ['zeus'] })
       first.open()
@@ -3315,7 +3370,10 @@ describe('work in flight when its participant is forgotten', () => {
       await context.dispatcher.pass()
       assert.equal(first.task(1).state, 'working')
       const session = first.id('zeus-amber-pine')
-      // The chief pauses the task; the Escape that stops its agent waits on the pane host.
+      // The human keeps the session's window open, so it stays after its
+      // work. The chief pauses the task; the Escape that stops its agent
+      // waits on the pane host.
+      await context.dispatcher.openWindow(first.project.id, 'zeus-amber-pine')
       context.ledger.pauseTask(first.project.id, 1, { by: 'chief' })
       context.adapter.agent('zeus').settled = true
       const window = context.host.last('zeus')
@@ -3326,7 +3384,7 @@ describe('work in flight when its participant is forgotten', () => {
       )
       const stepping = context.dispatcher.pass()
       await flush()
-      // Meanwhile the project is closed and deleted, and a member of a new one takes the session's id.
+      // Meanwhile the project is closed and deleted, and a member of a new one is given a task.
       const closing = context.dispatcher.closeProject(first.project.id)
       const deleting = context.dispatcher.deleteProject(first.project.id)
       const second = await withTiers(context, { workers: ['zeus'] })
@@ -3336,7 +3394,7 @@ describe('work in flight when its participant is forgotten', () => {
         role: 'worker',
         tier: 'standard',
       })
-      assert.equal(diana.id, session, "the ledger gives the session's id to a new member")
+      assert.notEqual(diana.id, session, "the ledger never gives the session's id to a new member")
       context.ledger.createTask(second.project.id, { from: 'chief', to: 'diana', body: 'Docs' })
       release()
       await stepping
@@ -3377,7 +3435,7 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it('tells a new project that took its ids nothing of a launch that failed for the deleted one', async () => {
+  it('tells nobody of a launch that failed once its project was deleted, not a project created meanwhile', async () => {
     await setup(async (context) => {
       const release = hold(
         context.adapter,
@@ -3403,7 +3461,7 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it("starts no conversation for a new project that took its ids while the old lead's window opened, and that window closes", async () => {
+  it('starts no conversation for a lead whose project is deleted while its window opens, nor for a project created meanwhile, and that window closes', async () => {
     await setup(async (context) => {
       const release = hold(context.host, 'open', (body) => body.cwd === '/work/app')
       const { project: old } = await withStaff(context)
@@ -3452,7 +3510,7 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it("binds no conversation of a new project that took its ids to the thread the old lead's window named", async () => {
+  it("binds no conversation, of a deleted project's lead or of a project created meanwhile, to the thread the old lead's window named", async () => {
     await setup(async (context) => {
       // The old lead's window takes long to come up, then names its thread.
       let calls = 0
@@ -3476,7 +3534,7 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it("hands nothing of a new project that took its ids to the old lead's window that was getting ready for a paste", async () => {
+  it("hands nothing to the old lead's window that was getting ready for a paste once its project is deleted, nor anything of a project created meanwhile", async () => {
     await setup(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
@@ -3491,7 +3549,7 @@ describe('work in flight when its participant is forgotten', () => {
       await context.dispatcher.pass()
       const { fresh, gone } = await replaceProject(context, old)
       const welcome = context.ledger.note(fresh.id, { to: 'chief', body: 'Welcome' })
-      assert.equal(welcome.id, waiting.id, "the ledger gives the old message's id again")
+      assert.notEqual(welcome.id, waiting.id, "the ledger never gives the old message's id again")
       release()
       await gone
       await flush()
@@ -3503,7 +3561,7 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it("settles nothing of a new project that took its ids by what the old lead's harness did with a paste", async () => {
+  it("settles nothing by what the old lead's harness did with a paste once its project is deleted, and a project created meanwhile gets its message once", async () => {
     await setup(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
@@ -3515,7 +3573,7 @@ describe('work in flight when its participant is forgotten', () => {
       const { fresh, gone } = await replaceProject(context, old)
       // Meanwhile the new lead is handed its first message.
       const welcome = context.ledger.note(fresh.id, { to: 'chief', body: 'Welcome' })
-      assert.equal(welcome.id, refused.id, "the ledger gives the old message's id again")
+      assert.notEqual(welcome.id, refused.id, "the ledger never gives the old message's id again")
       await context.dispatcher.pass()
       assert.equal(context.ledger.message(welcome.id).state, 'delivering')
       before.admit = false
@@ -3536,7 +3594,7 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it('takes no member of a new project that took its ids off the staff for a removal that waited', async () => {
+  it('takes nobody off the staff for a removal that waited while its project was deleted, not a member of a project created meanwhile', async () => {
     await setup(async (context) => {
       const { project: old } = await withStaff(context)
       // zeus's window takes long to come up with its task, and the removal waits for it.
@@ -3563,7 +3621,7 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it("keeps the trace of a new project that took its ids while the deleted one's windows closed", async () => {
+  it("keeps the trace of a project created while a deleted one's windows close, and drops the deleted one's", async () => {
     // As the event file in the home: forgetting a project drops its lines.
     const lines = []
     const trace = Object.assign((entry) => lines.push(entry), {
@@ -3594,7 +3652,12 @@ describe('work in flight when its participant is forgotten', () => {
             .filter((line) => line.kind === 'window.activity' && line.project === fresh.id)
             .map((line) => line.state),
           ['idle'],
-          "the new lead's line stays, and the deleted lead's went",
+          "the new lead's line stays",
+        )
+        assert.deepEqual(
+          lines.filter((line) => line.project === old.id),
+          [],
+          "and the deleted project's went",
         )
       },
       { trace },
