@@ -147,7 +147,8 @@ fn unpack(file: &mut File, payload: &Payload, root: &Path, folder: &Path) -> io:
 
 /// Renames `staged` to `folder`, and again for a few seconds while Windows
 /// denies it: an antivirus scanning what was just unpacked holds on to it for
-/// a moment. A folder another copy of the app completed meanwhile ends it.
+/// a moment. A `folder` already there ends it at once: Windows denies a
+/// rename onto a folder too, and that one waits on nothing.
 fn place(staged: &Path, folder: &Path) -> io::Result<()> {
     let mut wait = Duration::from_millis(50);
     loop {
@@ -155,7 +156,7 @@ fn place(staged: &Path, folder: &Path) -> io::Result<()> {
             Err(error)
                 if error.kind() == io::ErrorKind::PermissionDenied
                     && wait <= Duration::from_secs(2)
-                    && !complete(folder) =>
+                    && !folder.exists() =>
             {
                 thread::sleep(wait);
                 wait *= 2;
