@@ -314,7 +314,9 @@ button:disabled { opacity: .45; cursor: default; }
    column's width as given, and a width mixing % and px as none at all. */
 .kanban .kanban-staff { width: 176px; }
 .kanban th[data-state="finished"] { color: var(--muted); }
-/* Delete finished sits under the heading it acts on, in the board's own type. */
+/* Delete finished sits under the heading it acts on, in the board's own
+   type, and the other headings stay level with that one. */
+.kanban thead th { vertical-align: top; }
 .kanban thead .danger-button {
   display: block;
   margin-top: 6px;
