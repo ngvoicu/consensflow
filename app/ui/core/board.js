@@ -155,7 +155,7 @@ export const laneName = (participant) =>
 /** "1 note", "3 notes": how many of something. */
 const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`
 
-/** A member's row: how many of its sessions' terminals (of the row's role) are open now. */
+/** A member's row: how many of its sessions' terminals (of the row's role) are open now; null for none. */
 function sessionsNote(lane, board) {
   const open = board.lanes.filter(
     (other) =>
@@ -163,9 +163,7 @@ function sessionsNote(lane, board) {
       other.participant.role === lane.participant.role &&
       other.pane !== null,
   ).length
-  return open === 0
-    ? 'Free: a terminal opens with its next task'
-    : `${plural(open, 'terminal')} open, one per task`
+  return open === 0 ? null : `${plural(open, 'terminal')} open, one per task`
 }
 
 /** "T-3, T-4": task numbers in a sentence. */
@@ -209,7 +207,8 @@ const identity = (participant, agent) =>
 /**
  * What a row says its participant is doing, and the state that colours it:
  * an agent gone, a lead being switched or a member out of quota say so
- * before anything its window does.
+ * before anything its window does. A member with no terminal open says
+ * nothing (null): its row has no status line.
  */
 function rowStatus(lane, board, now) {
   const { participant, activity } = lane
@@ -231,7 +230,10 @@ function rowStatus(lane, board, now) {
   }
   const state = activity?.state ?? 'closed'
   if (state === 'waiting' && activity.reason) return [state, `Waiting: ${activity.reason}`]
-  if (resting(participant, activity)) return [state, sessionsNote(lane, board)]
+  if (resting(participant, activity)) {
+    const note = sessionsNote(lane, board)
+    return note === null ? null : [state, note]
+  }
   if (participant.member !== null && state === 'closed') return [state, 'Terminal closed']
   return [state, ACTIVITY_LABEL[state] ?? 'No window']
 }
@@ -511,15 +513,15 @@ export class BoardView {
       lamp(outOfQuota(participant, now) ? { state: 'out' } : activity),
       element('span', 'row-name', laneName(participant)),
     )
-    const [state, text] = rowStatus(lane, board, now)
-    const status = element('span', 'row-status', text)
-    status.dataset.state = state
-    head.append(
-      title,
-      element('span', 'row-meta', identity(participant, agent)),
-      status,
-      this.#rowTools(lane, board),
-    )
+    head.append(title, element('span', 'row-meta', identity(participant, agent)))
+    const said = rowStatus(lane, board, now)
+    if (said !== null) {
+      const [state, text] = said
+      const status = element('span', 'row-status', text)
+      status.dataset.state = state
+      head.append(status)
+    }
+    head.append(this.#rowTools(lane, board))
     return head
   }
 

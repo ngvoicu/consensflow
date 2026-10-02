@@ -1995,7 +1995,7 @@ test('opens the agents screens in their own window, and refreshes the agents whe
   expect(await page.getByRole('dialog').count()).toBe(0)
 })
 
-test('shows a member between tasks as free, its window gone until the next task', async ({
+test('shows a member between tasks with no status line, its window gone until the next task', async ({
   page,
 }) => {
   const data = model()
@@ -2003,16 +2003,17 @@ test('shows a member between tasks as free, its window gone until the next task'
   diana.participant.outUntil = null
   await open(page, data)
   const row = page.locator('tr[data-handle="diana"]')
-  await expect(row.locator('.row-status')).toHaveText('Free: a terminal opens with its next task')
+  await expect(row.locator('.row-meta')).toBeVisible()
+  await expect(row.locator('.row-status')).toHaveCount(0)
   await expect(row.getByTestId('lamp')).toHaveAttribute('data-state', 'closed')
 })
 
-test('shows an image designer between tasks as free, as any member, and counts its open terminals', async ({
+test('shows an image designer between tasks as any member: no status line until a terminal of it opens, then the count', async ({
   page,
 }) => {
   const data = model()
   // An image designer has no tier; its tasks run in sessions like any member's.
-  const iris = participant(8, 'iris', 'designer', { agent: 'iris', harness: 'codex', tier: null })
+  const iris = participant(8, 'iris', 'designer', { agent: 'iris', harness: 'image', tier: null })
   data.boards[1].lanes.push({
     participant: iris,
     tasks: [],
@@ -2021,7 +2022,7 @@ test('shows an image designer between tasks as free, as any member, and counts i
   })
   await open(page, data)
   const row = page.locator('tr[data-handle="iris"]')
-  await expect(row.locator('.row-status')).toHaveText('Free: a terminal opens with its next task')
+  await expect(row.locator('.row-status')).toHaveCount(0)
   await changed(
     page,
     (iris) => {
