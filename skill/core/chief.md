@@ -41,8 +41,9 @@ reply does nothing.
 
 Any "…" can be `-` instead: the text then comes from standard input, as
 written. Pass a brief that holds backticks, `$` or quotes that way, in a
-quoted heredoc; in double quotes the shell would run its backticks and
-`$( )` before ConsensFlow sees them:
+heredoc whose word is quoted, `<<'BRIEF'`, always; to put a value in, write
+it out. In double quotes or an unquoted heredoc the shell runs the brief's
+backticks and `$( )` as commands before ConsensFlow sees them:
 
     cf task add --tier standard - <<'BRIEF'
     The brief, as long as it needs, `code` and all.

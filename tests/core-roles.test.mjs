@@ -55,6 +55,9 @@ describe('role instructions for each window the daemon opens', () => {
         assert.ok(text.indexOf('## Your commands') < text.indexOf('## What you do'), 'card first')
         assert.match(text, /## Reviews\n\nNothing is reviewed unless you ask\./)
         assert.match(text, /`cf staff` shows them as they are now/)
+        // A chief that left the heredoc's word bare to fit a timestamp in ran
+        // every backticked snippet of its brief (poker-lab, 2026-10-03).
+        assert.match(text, /`<<'BRIEF'`, always; to put a value in, write\s+it out/)
         assert.match(
           text,
           /A tier nobody on the staff holds\s+goes to the nearest one somebody does/,
