@@ -4,7 +4,9 @@
  * tarball and are unpacked into a build folder there (a file gone from the
  * tree since the last run goes from there too; node_modules and the Rust
  * build stay). The command then runs in that folder with Node and Cargo on
- * PATH, its output streamed back; its exit code is this one's.
+ * PATH, its output streamed back; its exit code is this one's. One run at a
+ * time: a second is refused while the first goes on there, and a run stopped
+ * here (Ctrl+C) is ended there too, which Windows' SSH server does not do.
  *
  *   npm run windows -- --host <ssh host> [--build] -- npm run live:paste
  *   npm run windows -- --host <ssh host> -- npm run eval -- --scenario round-trip --chief devin --staff devin
@@ -15,7 +17,7 @@
  * %USERPROFILE%\consensflow-build unless --dir names another under it. Run
  * one at a time: a live run's windows are the machine's.
  */
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -38,6 +40,13 @@ if (!/^[\w.-]+$/.test(values.dir)) throw new Error(`--dir is a folder name: ${va
 
 /** The list of what went over, kept beside it there, so the next run knows what left the tree. */
 const SYNCED = '.synced-files'
+/** The running script's process id, there, while a run goes on. */
+const RUNNING = '.windows-run.pid'
+/** A PowerShell script, as ssh hands it to the machine. */
+const remote = (script) => [
+  values.host,
+  `powershell -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(script, 'utf16le').toString('base64')}`,
+]
 const scratch = mkdtempSync(join(tmpdir(), 'cf-windows-'))
 try {
   const files = execFileSync('git', ['ls-files', '-co', '--exclude-standard', '-z'], {
@@ -85,6 +94,13 @@ try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false) } catch {}
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
 $dir = Join-Path $env:USERPROFILE '${values.dir}'
 New-Item -ItemType Directory -Force $dir | Out-Null
+$running = Join-Path $dir '${RUNNING}'
+if (Test-Path $running) {
+  $other = Get-Process -Id (Get-Content $running) -ErrorAction SilentlyContinue
+  if ($other) { Write-Output "A run is still going on this machine (process $($other.Id)): one at a time."; exit 75 }
+}
+Set-Content -Path $running -Value $PID
+try {
 $synced = Join-Path $dir '${SYNCED}'
 $before = if (Test-Path $synced) { Get-Content $synced } else { @() }
 tar.exe -xzf (Join-Path $env:USERPROFILE '${values.dir}.tgz') -C $dir
@@ -109,13 +125,24 @@ $run = Join-Path $dir '.windows-run.cmd'
 [IO.File]::WriteAllText($run, "@echo off\r\n" + '${command.replace(/'/g, "''")}' + "\r\n")
 cmd /c "$run 2>&1"
 exit $LASTEXITCODE
+} finally {
+  Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue
+}
 `
-  const encoded = Buffer.from(script, 'utf16le').toString('base64')
-  const child = spawn(
-    'ssh',
-    [values.host, `powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`],
-    { stdio: ['ignore', 'inherit', 'inherit'] },
-  )
+  const child = spawn('ssh', remote(script), { stdio: ['ignore', 'inherit', 'inherit'] })
+  // Stopped here: the run's whole tree is ended there, its record with it.
+  const stop = `
+$running = Join-Path (Join-Path $env:USERPROFILE '${values.dir}') '${RUNNING}'
+if (Test-Path $running) { taskkill /PID (Get-Content $running) /T /F | Out-Null; Remove-Item -LiteralPath $running -Force }
+`
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.once(signal, () => {
+      child.kill()
+      spawnSync('ssh', remote(stop), { stdio: 'inherit' })
+      rmSync(scratch, { recursive: true, force: true })
+      process.exit(130)
+    })
+  }
   const code = await new Promise((resolve) => child.on('exit', (exit) => resolve(exit ?? 1)))
   process.exitCode = code
 } finally {

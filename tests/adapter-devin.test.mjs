@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { devinAdapter } from '../src/adapters/devin.js'
+import { SHOWS_ANOTHER } from '../src/adapters/shared.js'
 import { fakeExecutable, fakeNodeExecutable } from './helpers.mjs'
 
 /**
@@ -214,6 +215,24 @@ console.log('devin ${version}')
       assert.equal(await adapter.ready({ launch, pane, host }), true)
       pasteInFlight = true
       assert.equal(await adapter.ready({ launch, pane, host }), false)
+    })
+  })
+
+  it('reads a wire log that was replaced from its start, with nothing of the old one carried', async () => {
+    await withHome(async ({ env }) => {
+      const adapter = devinAdapter({ env })
+      const { launch } = await adapter.prepare(request({ resume: 'mild-coin', message: null }))
+      const host = { request: async () => ({ ok: true, pasteInFlight: false }) }
+      const pane = { id: 's1-zeus', generation: 2 }
+      const wire = path.join(integration(env), 'wire.jsonl')
+      // A line half written when it was read: carried until the rest comes.
+      await writeFile(
+        wire,
+        `${selection('another-one')}${selection('mild-coin')}{"sessionId":"mild`,
+      )
+      assert.equal(await adapter.ready({ launch, pane, host }), true)
+      await writeFile(wire, selection('another-one'))
+      assert.equal(await adapter.ready({ launch, pane, host }), SHOWS_ANOTHER)
     })
   })
 

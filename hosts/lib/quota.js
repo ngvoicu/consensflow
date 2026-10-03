@@ -3,9 +3,9 @@
  * terms: `{state, usedPercent?, resetsAt?}`, or null when the record says
  * nothing. Codex reports its usage ahead of time; Claude Code, OpenCode, Pi
  * and Devin only say so once a request is refused (a 429, or a 402 for spent
- * credit), so for them the
- * daemon learns at the first refusal. OpenCode says it only in its window's
- * live status, never in its store, since it waits to retry the request.
+ * credit), so for them the daemon learns at the first refusal. OpenCode says
+ * it only in its window's live status, never in its store, since it waits to
+ * retry the request.
  */
 
 const LOW_PERCENT = 95

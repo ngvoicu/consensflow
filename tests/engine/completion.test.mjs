@@ -1778,6 +1778,23 @@ test('completion/devin: a final message that links a file settles, though Devin 
   }
 })
 
+test('completion/devin: a reply naming files on Windows, linked and quoted, is the one Devin streamed', async () => {
+  const { streamed, stored } = JSON.parse(
+    await fs.readFile(path.join(FIX, 'devin/file-link-windows.json'), 'utf8'),
+  )
+  const { root, env } = await stageDevin(stored, [
+    devinChunk(streamed),
+    { sessionId: 'calm-river', turnClientMessageId: 'request-1', cause: 'complete' },
+  ])
+  try {
+    const result = await completion.answers('devin', 'calm-river', env)
+    assert.equal(result.items.at(-1).complete, true, 'C:\\… and file:///C:/… are one path')
+    assert.equal(result.settlement.state, 'settled')
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 test('completion/devin: a turn whose work shows on the wire after the last end is in flight, whatever the store says', async () => {
   // Devin writes a turn to its store as it goes, but a turn it is still on
   // shows only on the wire: thoughts, messages and tool calls after the last end.

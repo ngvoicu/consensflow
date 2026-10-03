@@ -1864,21 +1864,26 @@ async function openOpencodeDb(env, sessionId) {
 // chain plus a matching native request/complete boundary proves a reply.
 /**
  * The text a Devin message is compared by: its wire streams a file link as
- * `[name](file:///path)` and its store keeps `<ref_file file="/path" />`
- * (Devin 3000.11, 2026-09-26), so both are read as the path; nothing else is
- * loosened, since the comparison is what tells a final message from a half
- * one.
+ * `[name](file:///path)`, a quoted range as `[name:1-3](file:///path)`, and
+ * its store keeps `<ref_file file="/path" />` and `<ref_snippet file="/path"
+ * lines="1-3" />` (Devin 3000.11, 2026-09-26 and 10-03), so each is read as
+ * its path; on Windows the wire's `file:///C:/Users/…` and the store's
+ * `C:\Users\…` are one path. Nothing else is loosened, since the comparison
+ * is what tells a final message from a half one.
  */
 function devinComparable(text) {
   const path = (value) => {
+    let decoded
     try {
-      return decodeURI(value)
+      decoded = decodeURI(value)
     } catch {
-      return value
+      decoded = value
     }
+    const slashed = decoded.replaceAll('\\', '/')
+    return /^\/[A-Za-z]:\//.test(slashed) ? slashed.slice(1) : slashed
   }
   return text
-    .replace(/<ref_file\s+file="([^"]*)"\s*\/>/g, (_, file) => path(file))
+    .replace(/<ref_\w+\s+file="([^"]*)"[^>]*\/>/g, (_, file) => path(file))
     .replace(/\[[^\]]*\]\(file:\/\/([^)\s]*)\)/g, (_, file) => path(file))
 }
 

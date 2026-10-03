@@ -145,7 +145,8 @@ async function readWire(channel) {
   try {
     const { size } = await file.stat()
     let from = channel.wireOffset ?? 0
-    if (size < from) from = 0
+    // A log that shrank was replaced: read from its start, carrying nothing of the old one.
+    if (size < from) [from, channel.wireCarry] = [0, '']
     if (size > from) {
       const buffer = Buffer.alloc(size - from)
       await file.read(buffer, 0, size - from, from)
