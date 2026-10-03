@@ -5,12 +5,12 @@ import { cachedAnswers } from '../../hosts/lib/completion.js'
 import { DEVIN_REFUSAL, exhaustedQuota } from '../../hosts/lib/quota.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
 import { send as sendDevin } from '../channels/devin.js'
+import { consoleText } from '../console-text.js'
 import { prepareDevinIntegration, prepareDevinPrompt } from '../devin-install.js'
 import { onWindows } from '../harnesses.js'
 import { roleConfiguration } from '../role-skills.js'
 import {
   admission,
-  consoleText,
   dialogWaiting,
   executableFor,
   recordState,

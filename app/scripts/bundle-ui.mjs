@@ -32,4 +32,7 @@ await copyFile(
   join(VENDOR, 'xterm.css'),
 )
 
-process.stdout.write('ui: xterm 6 and addon-fit bundled locally\n')
+// The daemon's own module, for what the human types into a Devin or Codex window.
+await copyFile(join(APP, '..', 'src', 'console-text.js'), join(VENDOR, 'console-text.js'))
+
+process.stdout.write('ui: xterm 6, addon-fit and console-text bundled locally\n')

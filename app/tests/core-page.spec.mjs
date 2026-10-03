@@ -2151,6 +2151,44 @@ test('every key the human types reaches the pane in order, flagged as nothing', 
     )
 })
 
+test.describe('on Windows', () => {
+  test.use({
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 Edg/140.0',
+  })
+  /** What reaches the chief's window when the human types `text` there, its harness `harness`. */
+  const sent = async (page, harness, text) => {
+    const data = model()
+    data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').participant.harness =
+      harness
+    await open(page, data)
+    await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+    await page.evaluate((typed) => window.__emulators[0].type(typed), text)
+    let bytes = null
+    await expect
+      .poll(async () => {
+        bytes = await page.evaluate(
+          () =>
+            window.__calls.filter(([command]) => command === 'pane_input_enqueue').at(-1)?.[1]
+              .bytes ?? null,
+        )
+        return bytes !== null
+      })
+      .toBe(true)
+    return new TextDecoder().decode(new Uint8Array(bytes))
+  }
+
+  // Windows' console drops a non-ASCII mark on its way to a window that reads
+  // key presses (Devin, Codex); Claude reads its terminal as text.
+  test("the human's marks reach a Devin window in ASCII", async ({ page }) => {
+    expect(await sent(page, 'devin', 'a — “b” → €5, ăîș')).toBe('a -- "b" -> EUR5, ăîș')
+  })
+
+  test("the human's marks reach a Claude window as typed", async ({ page }) => {
+    expect(await sent(page, 'claude-code', 'a — “b” → €5')).toBe('a — “b” → €5')
+  })
+})
+
 test('shows the staff as one row per member and role, and adds a saved agent in a role it fits', async ({
   page,
 }) => {

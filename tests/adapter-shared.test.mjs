@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { claudeCodeAdapter } from '../src/adapters/claude-code.js'
 import { codexAdapter } from '../src/adapters/codex.js'
 import { devinAdapter } from '../src/adapters/devin.js'
 import { openCodeAdapter } from '../src/adapters/opencode.js'
 import { piAdapter } from '../src/adapters/pi.js'
-import { admission, consoleText, windowText } from '../src/adapters/shared.js'
+import { admission, windowText } from '../src/adapters/shared.js'
+import { consoleText } from '../src/console-text.js'
 
 /**
  * What every adapter shares (`src/adapters/shared.js`): the text a window is
@@ -29,6 +31,15 @@ describe('the text Devin is given on Windows', () => {
     )
     const letters = 'Culoarea: albastră; îți scriu, café, Straße, 5 µs, Ñandú'
     assert.equal(consoleText(letters), letters)
+  })
+
+  it("is the page's too: the build hands it the very same module", () => {
+    const at = (relative) => readFileSync(new URL(relative, import.meta.url), 'utf8')
+    assert.equal(
+      at('../app/ui/vendor/console-text.js'),
+      at('../src/console-text.js'),
+      'npm --prefix app run bundle:ui copies it',
+    )
   })
 
   it('spells what Unicode also writes plainly, and shown control characters in caret notation', () => {

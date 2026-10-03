@@ -1,7 +1,12 @@
 import { button, element, iconButton, redraw } from '../dom.js'
 import { EmulatorRegistry, paneKey } from '../term.js'
 import { TerminalLink } from '../terminal-link.js'
+import { consoleText } from '../vendor/console-text.js'
 import { ICONS, identity, lamp, laneName, laneOrder, laneStatus } from './board.js'
+
+/** The windows that read key presses on Windows, where the console drops a non-ASCII mark. */
+const KEY_READERS = new Set(['devin', 'codex', 'image'])
+const WINDOWS = /Windows/.test(globalThis.navigator?.userAgent ?? '')
 
 /** A session in `#showing`: its project's id and its handle. */
 const showingKey = (project, handle) => `${project}:${handle}`
@@ -62,7 +67,7 @@ export class TerminalsView {
     this.#onSwitchLead = onSwitchLead
     this.#registry = new EmulatorRegistry({
       ...(createEmulator ? { createEmulator } : {}),
-      onData: (pane, data) => void this.#link.input(pane, data),
+      onData: (pane, data) => void this.#link.input(pane, this.#typed(pane, data)),
       onReply: (pane, data) => void this.#link.reply(pane, data),
       onResize: (pane, cols, rows) => this.#link.resize(pane, cols, rows),
     })
@@ -81,7 +86,18 @@ export class TerminalsView {
 
   /** Typed input for a pane, on the same path a keystroke takes. */
   input(pane, data) {
-    return this.#link.input(pane, data)
+    return this.#link.input(pane, this.#typed(pane, data))
+  }
+
+  /**
+   * What the human typed, as the window can take it: on Windows a Devin or
+   * Codex window reads key presses, and the console drops every non-ASCII
+   * mark among them, so there those go in ASCII, as ConsensFlow's own
+   * messages to Devin do (src/console-text.js).
+   */
+  #typed(pane, data) {
+    const harness = this.#cards.get(paneKey(pane))?.harness
+    return WINDOWS && KEY_READERS.has(harness) ? consoleText(data) : data
   }
 
   /**
@@ -265,6 +281,7 @@ export class TerminalsView {
         head,
         host,
         handle: null,
+        harness: null,
         participant: null,
         project: null,
         session: false,
@@ -277,6 +294,7 @@ export class TerminalsView {
       const { lane, order, board, agent } = placed
       this.#head(entry, lane, board, agent)
       entry.handle = lane.participant.handle
+      entry.harness = lane.participant.harness
       entry.project = board.project.id
       entry.session = lane.participant.member !== null
       entry.order = order
