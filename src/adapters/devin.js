@@ -146,10 +146,10 @@ export function devinAdapter({
 
 /**
  * What Devin's own wire log of this launch says: the conversation the window
- * shows, and its word on its quota, a refusal in its message text after the
- * latest prompt ("Reached overall message rate limit … reset in 35 minutes",
- * "Usage limit reached", "Quota exhausted"). The log only grows, so each look
- * reads what was appended since the last.
+ * shows, and its word on its quota, a refusal after the latest prompt: in its
+ * message text ("Reached overall message rate limit … reset in 35 minutes",
+ * "Usage limit reached", "Quota exhausted"), or as the prompt's own error.
+ * The log only grows, so each look reads what was appended since the last.
  */
 async function readWire(channel) {
   const file = await open(channel.wire, 'r').catch(() => null)
@@ -178,6 +178,16 @@ async function readWire(channel) {
           event.update?.sessionUpdate === 'agent_message_chunk' ? event.update.content?.text : null
         if (typeof text === 'string' && DEVIN_REFUSAL.test(text)) {
           channel.quota = exhaustedQuota(text, Date.now())
+        }
+        // Or a refusal of the prompt itself, as Devin 3000.11 writes one: a
+        // JSON-RPC error, "Quota exhausted." (-32011, resource_exhausted).
+        const refused = event.error
+        if (
+          refused?.code === -32011 ||
+          refused?.data?.['cognition.ai/errorKind'] === 'resource_exhausted' ||
+          (typeof refused?.message === 'string' && DEVIN_REFUSAL.test(refused.message))
+        ) {
+          channel.quota = exhaustedQuota(refused.message ?? '', Date.now())
         }
       }
     }

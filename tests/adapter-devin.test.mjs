@@ -387,6 +387,24 @@ console.log('devin ${version}')
         update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'On it.' } },
       })
       assert.equal((await adapter.observe({ launch })).quota, null)
+
+      // The prompt refused outright, in the words Devin 3000.11 carries for it.
+      await line({
+        jsonrpc: '2.0',
+        id: 4,
+        method: 'session/prompt',
+        params: { sessionId: 'dev-1' },
+      })
+      await line({
+        jsonrpc: '2.0',
+        id: 4,
+        error: {
+          code: -32011,
+          message: 'Quota exhausted.',
+          data: { 'cognition.ai/errorKind': 'resource_exhausted', 'cognition.ai/retryable': true },
+        },
+      })
+      assert.equal((await adapter.observe({ launch })).quota?.state, 'exhausted')
     })
   })
 })
