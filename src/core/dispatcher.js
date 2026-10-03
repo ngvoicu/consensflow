@@ -69,6 +69,14 @@ import { Windows } from './windows.js'
  *   owner's choice, 2026-10-01): a paste goes in behind it. The pane host
  *   holds only their keys pressed during a paste, until it is in.
  *
+ * The dispatcher answers the human's operations, steps every window on each
+ * pass, and holds each participant for one piece of work at a time. What it
+ * orchestrates has an owner each, beside it: who takes which task and who
+ * is out of quota (`scheduler.js`), each window's launch, looks and close
+ * (`windows.js`), what goes into a window and what comes back out
+ * (`deliveries.js`), the human's Switch lead (`lead-switch.js`), and the copy
+ * of each window's conversation (`transcripts.js`).
+ *
  * Harness specifics live in the adapters (`src/adapters/`); the pane host is
  * the Rust PTY host behind the bridge. Time is an argument, so every rule is
  * testable with explicit passes (`tests/core-dispatcher.test.mjs`).
@@ -837,11 +845,12 @@ export class Dispatcher {
 
   /**
    * The dispatcher's record of a participant's window, made the first time
-   * it is asked for. Its parts are kept apart by what owns them: the window
-   * itself, what is on its way into it, what its harness said of its quota,
-   * a Switch lead waiting for the lead's turn to end, and how much of its
-   * conversation is copied. `running` and `acting` are whoever holds the
-   * participant now (`#exclusive`, `#act`).
+   * it is asked for. Each part has one owner: the window itself
+   * (`windows.js`), what is on its way into it (`deliveries.js`), what its
+   * harness said of its quota (`scheduler.js`), a Switch lead waiting for the
+   * lead's turn to end (`lead-switch.js`), and how much of its conversation
+   * is copied (`transcripts.js`). `running` and `acting` are whoever holds
+   * the participant now (`#exclusive`, `#act`).
    */
   #runtimeOf(participantId) {
     let runtime = this.#runtime.get(participantId)
