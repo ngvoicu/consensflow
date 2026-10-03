@@ -4,9 +4,15 @@
  * shows the header's start (`markerOf`), so the two are written together.
  */
 
-/** A body longer than this goes as its opening and the command that reads the rest. */
-const INLINE_LIMIT = 4000
-const OPENING = 3000
+/**
+ * A body longer than this goes as its opening and the command that reads the
+ * rest. Measured with npm run live:paste --long (2026-10-03): Claude and
+ * Devin take 16,000 characters whole on macOS and Windows; at 32,000, Devin
+ * on Windows was still taking the paste when its Enter came. 4,000, the
+ * first guess, cut every long brief.
+ */
+const INLINE_LIMIT = 16_000
+const OPENING = 15_000
 
 /** How a message reads in the recipient's pane. The header doubles as the arrival marker. */
 export function deliveryText(message) {

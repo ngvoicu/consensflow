@@ -102,10 +102,10 @@ a score).
 - `long-trip`: long messages both ways. The owner pastes about 8000
   characters into the chief's terminal; a worker, an advisor and a reviewer
   each send a result of 8000 characters or more; the owner answers the
-  chief's one question in about 6000. The daemon delivers a message over
-  4000 characters as its opening and `cf inbox read m-N`, so each ends in a
-  code (the members read theirs from `interne/`), and the chief's one note
-  must hold all five. Expected: the three long results, the long answer
+  chief's one question in about 6000. Each ends in a code (the members read
+  theirs from `interne/`), and the chief's one note must hold all five: the
+  daemon delivers a message up to 16,000 characters whole, a longer one as
+  its opening and `cf inbox read m-N`. Expected: the three long results, the long answer
   delivered, the five codes in the note, no file changed.
 - `conversation`: the owner works with the chief in short messages, one small
   change each, the way Gabriel does. Expected: the changes go on the board

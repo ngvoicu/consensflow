@@ -4,8 +4,7 @@
  * 6250 characters long (a file it pastes whole, a code on its last line):
  * the question reaches the chief, the chief answers, the answer reaches the
  * member's own window, the result comes back. The chief's note to the owner
- * must hold the code, proof it read the long question to its end (a message
- * over 4000 characters reaches a window as its opening and `cf inbox read`).
+ * must hold the code, proof it read the long question to its end.
  * Run with one harness as the whole staff, once per harness; the report
  * says who asked, by role and harness.
  */

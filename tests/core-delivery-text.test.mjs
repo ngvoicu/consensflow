@@ -36,13 +36,21 @@ describe('the delivered text', () => {
       taskNumber: 1,
       sender: 'zeus',
       kind: 'result',
-      body: 'x'.repeat(20_000),
+      body: 'x'.repeat(40_000),
     })
-    assert.ok(text.length < 5_000)
+    assert.ok(text.length < 16_000)
     assert.match(
       text,
-      /\n… \(20000 characters; read all of it with: cf inbox read m-7\)\n\nDecide with: /,
+      /\n… \(40000 characters; read all of it with: cf inbox read m-7\)\n\nDecide with: /,
     )
+    const whole = deliveryText({
+      id: 8,
+      taskNumber: 1,
+      sender: 'chief',
+      kind: 'task',
+      body: 'y'.repeat(16_000),
+    })
+    assert.ok(whole.endsWith('y'.repeat(16_000)), 'a body of 16,000 characters goes whole')
   })
 
   it('tells the reader of an urgent question that its task waits for it, and who resumes the task', () => {

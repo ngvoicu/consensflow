@@ -52,8 +52,8 @@ describe('the text Devin is given on Windows', () => {
 
 describe('the text a window is given', () => {
   it('keeps whole characters: the half of an emoji a cut left behind is dropped', () => {
-    // The dispatcher cuts a long body at 3,000 code units; an emoji across
-    // the cut leaves its first half, which no JSON frame to the host carries.
+    // The daemon cuts a long body at a fixed count of code units; an emoji
+    // across the cut leaves its first half, which no JSON frame to the host carries.
     const cut = `${'a'.repeat(2999)}\ud83d\n… (4200 characters; read all of it with: cf inbox read m-9)`
     assert.equal(cut.isWellFormed(), false)
     const sent = windowText(cut)

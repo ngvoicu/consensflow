@@ -2,10 +2,10 @@
  * Long messages both ways. The owner pastes a long message into the chief's
  * terminal; a worker, an advisor and a reviewer each send the chief a result
  * of at least 8000 characters; the owner answers the chief's question at
- * length. The daemon delivers a message up to 4000 characters whole and
- * longer ones as their opening and `cf inbox read m-N`, so each carries a code
- * on its last line, and the chief's one note to the owner must hold all five:
- * proof that every long text was read to its end. Each member reads its code
+ * length. Each carries a code on its last line, and the chief's one note to
+ * the owner must hold all five: proof that every long text was read to its
+ * end, delivered whole (up to 16,000 characters) or as its opening and
+ * `cf inbox read m-N`. Each member reads its code
  * from a file only its brief names.
  */
 
