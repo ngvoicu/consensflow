@@ -82,10 +82,15 @@ describe('role instructions for each window the daemon opens', () => {
         if (role === 'advisor') assert.match(text, /You advise this project's chief/)
         if (role === 'designer') assert.match(text, /image generation tool/)
         // Poker-lab, 2026-10-03: a worker's rm -rf "$W/$d" stopped Claude Code
-        // for a human, with a countdown, in a window where every permission is granted.
+        // for a human, with a countdown, in a window where every permission is
+        // granted; after the rule named rm -rf, another's rm -f -- "$R/$b" did.
         assert.match(
           text,
-          /an `rm -rf` whose path a\s+variable makes \(`"\$W\/\$d"`\)\. Give such a command a literal path, or `\$\{W:\?\}`\./,
+          /any removal \(`rm`, `rm -f`,\s+`rmdir`\) whose path a variable makes \(`"\$R\/\$b"`\)/,
+        )
+        assert.match(
+          text,
+          /Write a removal's paths out in full, or as `"\$\{R:\?\}\/\$\{b:\?\}"`\./,
         )
       }
     })

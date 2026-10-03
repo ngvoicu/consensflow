@@ -32,8 +32,9 @@ in your shell (no `sleep`, no loop over `cf inbox`): it arrives only once your
 turn has ended.
 
 Nobody watches this window, and a harness may stop for a human even with
-every permission granted: Claude Code does on an `rm -rf` whose path a
-variable makes (`"$W/$d"`). Give such a command a literal path, or `${W:?}`.
+every permission granted: Claude Code does on any removal (`rm`, `rm -f`,
+`rmdir`) whose path a variable makes (`"$R/$b"`), and no permission lets it
+through. Write a removal's paths out in full, or as `"${R:?}/${b:?}"`.
 
 Each message ConsensFlow brings you is typed into this terminal, headed
 `[ConsensFlow m-… · T-… · …]`; your harness may show it as pasted text. It is
