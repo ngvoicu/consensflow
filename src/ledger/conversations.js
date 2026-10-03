@@ -116,35 +116,23 @@ export function copyTranscript(store, conversationId, items, { from = 0 } = {}) 
 }
 
 /**
- * What the window that has a task wrote: the copied items of its
- * assignee's conversations in order, whole, the last `limit` of them (all
- * of them when no limit is given). `cf task get --transcript` reads it
- * over the local API; the page reads `latestTranscript`.
+ * What the windows that had a task wrote: the copied items of each window
+ * the task was given to, in the order it was (a reassigned task's first
+ * window, then the one that took it), whole, the last `limit` of them (all
+ * of them when no limit is given). `cf task get --transcript` reads it over
+ * the local API; the page reads `latestTranscript`.
  */
 export function transcript(store, projectId, number, { limit = Number.POSITIVE_INFINITY } = {}) {
   const task = store.taskRow(projectId, number)
-  if (task.assignee_id === null) return { items: [], total: 0 }
-  const copied = store.db
+  const windows = store.db
     .prepare(
-      `SELECT t.conversation_id, t.item_id, t.role, t.text, t.complete, t.at
-       FROM transcript t JOIN conversation c ON c.id = t.conversation_id
-       WHERE c.participant_id = ? ORDER BY t.conversation_id, t.seq`,
+      `SELECT recipient_id FROM message WHERE task_id = ? AND kind = 'task'
+       GROUP BY recipient_id ORDER BY MIN(id)`,
     )
-    .all(task.assignee_id)
-  // A window's copy may hold more than this task (the chief's own, after
-  // its other work): the task's part starts where its first brief arrived,
-  // not a later one (a resume or a reopen sends another).
-  const brief = store.db
-    .prepare(
-      `SELECT id FROM message WHERE task_id = ? AND kind = 'task' AND recipient_id = ?
-       ORDER BY id LIMIT 1`,
-    )
-    .get(task.id, task.assignee_id)
-  const start =
-    brief === undefined
-      ? -1
-      : copied.findIndex((row) => row.text.includes(`[ConsensFlow m-${brief.id} ·`))
-  const rows = start > 0 ? copied.slice(start) : copied
+    .all(task.id)
+    .map((row) => row.recipient_id)
+  if (windows.length === 0 && task.assignee_id !== null) windows.push(task.assignee_id)
+  const rows = windows.flatMap((participantId) => partOf(store, task.id, participantId))
   return {
     total: rows.length,
     items: rows.slice(Math.max(0, rows.length - limit)).map((row) => ({
@@ -156,6 +144,49 @@ export function transcript(store, projectId, number, { limit = Number.POSITIVE_I
       at: row.at,
     })),
   }
+}
+
+/** The header every delivery opens with, naming its message. */
+const HEADER = /\[ConsensFlow m-(\d+) ·/
+
+/**
+ * The part of a window's copy that is task `taskId`'s. A window may hold
+ * more than one task (the chief's own after its other work, a follow-up
+ * given with --after): each task message that arrived in it (a brief, a
+ * resume, a reopen), known by its header, turns the window to that task
+ * until the next one does. A copy that shows none of the task's headers is
+ * the task's whole.
+ */
+function partOf(store, taskId, participantId) {
+  const copied = store.db
+    .prepare(
+      `SELECT t.conversation_id, t.item_id, t.role, t.text, t.complete, t.at
+       FROM transcript t JOIN conversation c ON c.id = t.conversation_id
+       WHERE c.participant_id = ? ORDER BY t.conversation_id, t.seq`,
+    )
+    .all(participantId)
+  const taskOf = new Map(
+    store.db
+      .prepare(
+        `SELECT id, task_id FROM message
+         WHERE recipient_id = ? AND kind = 'task' AND task_id IS NOT NULL`,
+      )
+      .all(participantId)
+      .map((row) => [row.id, row.task_id]),
+  )
+  let current = null
+  let shown = false
+  const part = []
+  for (const row of copied) {
+    const header = row.role === 'user' ? HEADER.exec(row.text) : null
+    const turned = header === null ? undefined : taskOf.get(Number(header[1]))
+    if (turned !== undefined) {
+      current = turned
+      shown ||= turned === taskId
+    }
+    if (current === taskId) part.push(row)
+  }
+  return shown ? part : copied
 }
 
 /**

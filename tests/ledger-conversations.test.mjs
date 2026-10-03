@@ -319,6 +319,72 @@ describe('the transcript copy', () => {
     })
   })
 
+  it("ends a task's part where a later task in its window began, and takes it up again at its reopen", async () => {
+    await withLedger((ledger) => {
+      const { project, conversation } = windowed(ledger)
+      const marker = (message) => `[ConsensFlow m-${message.id} · task from @chief]`
+      const brief = ledger.task(project.id, 1).messages[0]
+      deliver(ledger, brief)
+      ledger.copyTranscript(conversation.id, [
+        item('u1', 'user', `${marker(brief)}\nParser`),
+        item('a1', 'assistant', 'Parser done'),
+      ])
+      ledger.recordResult(project.id, 1, { body: 'Parser done' })
+      // A follow-up given to the same window: its part is its own.
+      const follow = ledger.createTask(project.id, {
+        from: 'chief',
+        after: 1,
+        body: 'Docs',
+      }).message
+      deliver(ledger, follow)
+      ledger.copyTranscript(
+        conversation.id,
+        [item('u2', 'user', `${marker(follow)}\nDocs`), item('a2', 'assistant', 'Docs done')],
+        { from: 2 },
+      )
+      ledger.recordResult(project.id, 2, { body: 'Docs done' })
+      const again = ledger.reopenTask(project.id, 1, { by: 'chief', body: 'Add tests' }).message
+      deliver(ledger, again)
+      ledger.copyTranscript(
+        conversation.id,
+        [item('u3', 'user', `${marker(again)}\nAdd tests`), item('a3', 'assistant', 'Tests added')],
+        { from: 4 },
+      )
+      assert.deepEqual(
+        ledger.transcript(project.id, 1).items.map((i) => i.id),
+        ['u1', 'a1', 'u3', 'a3'],
+      )
+      assert.deepEqual(
+        ledger.transcript(project.id, 2).items.map((i) => i.id),
+        ['u2', 'a2'],
+      )
+    })
+  })
+
+  it("shows a reassigned task's first window, then the one that took it", async () => {
+    await withLedger((ledger) => {
+      const { project, id, conversation } = windowed(ledger)
+      const first = ledger.task(project.id, 1).messages[0]
+      deliver(ledger, first)
+      ledger.copyTranscript(conversation.id, [
+        item('u1', 'user', `[ConsensFlow m-${first.id} · T-1 · task from @chief]\nParser`),
+        item('a1', 'assistant', 'Half a parser'),
+      ])
+      ledger.releaseTask(project.id, 1, { because: 'by @human' })
+      const second = ledger.assignTask(project.id, 1, id('diana')).message
+      deliver(ledger, second)
+      const other = ledger.startConversation(second.recipientId, { harness: 'codex' })
+      ledger.copyTranscript(other.id, [
+        item('u2', 'user', `[ConsensFlow m-${second.id} · T-1 · task from @chief]\nParser`),
+        item('a2', 'assistant', 'Parser done'),
+      ])
+      assert.deepEqual(
+        ledger.transcript(project.id, 1).items.map((i) => i.id),
+        ['u1', 'a1', 'u2', 'a2'],
+      )
+    })
+  })
+
   it('copies what is new, brings an item still being written up to date, and reads it by task', async () => {
     await withLedger((ledger) => {
       const { project, conversation } = windowed(ledger)
