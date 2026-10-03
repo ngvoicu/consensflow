@@ -614,7 +614,12 @@ async function start() {
   if (typeof listen === 'function') {
     try {
       let pending = false
-      await listen('state-changed', () => {
+      await listen('state-changed', (event) => {
+        // A window that wrote more changes only what an open fold shows.
+        if (event?.payload?.reason === 'transcript') {
+          drawer.reread()
+          return
+        }
         if (pending) return
         pending = true
         setTimeout(() => {

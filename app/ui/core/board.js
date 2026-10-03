@@ -877,6 +877,11 @@ export class TaskDrawer {
     return story
   }
 
+  /** The open fold read again: its window wrote more since. */
+  reread() {
+    if (this.#task !== null && this.#fold?.open) this.#actions.onTranscript(this.#task)
+  }
+
   /** What the task's window wrote, read for its open fold: the last items one frame holds. */
   fill(task, { items, total, shown }) {
     if (!this.#drawn(task) || this.#fold === null) return

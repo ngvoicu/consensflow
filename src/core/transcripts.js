@@ -10,10 +10,12 @@
 export class Transcripts {
   #ledger
   #changed
+  #wrote
 
-  constructor({ ledger, changed }) {
+  constructor({ ledger, changed, wrote }) {
     this.#ledger = ledger
     this.#changed = changed
+    this.#wrote = wrote
   }
 
   /**
@@ -21,7 +23,8 @@ export class Transcripts {
    * what the agent was told, wrote and got back from its tools, readable on
    * the card once the window is gone. Each look copies what is new and the
    * item still being written; a record that shrank (a resumed window rewrote
-   * it) is copied over from the start.
+   * it) is copied over from the start. A look that wrote anything says so
+   * (`wrote`): a view of what the window did reads it again.
    */
   copy(participant, runtime, observed) {
     const conversation = this.#ledger.currentConversation(participant.id)
@@ -29,8 +32,11 @@ export class Transcripts {
     const items = observed.items
     const copied = runtime.copied?.conversation === conversation.id ? runtime.copied.count : 0
     const from = items.length < copied ? 0 : Math.max(0, copied - 1)
-    if (items.length > from) {
-      this.#ledger.copyTranscript(conversation.id, items.slice(from), { from })
+    if (
+      items.length > from &&
+      this.#ledger.copyTranscript(conversation.id, items.slice(from), { from }) > 0
+    ) {
+      this.#wrote()
     }
     runtime.copied = { conversation: conversation.id, count: items.length }
   }

@@ -2886,6 +2886,26 @@ describe('a window that closes', () => {
 })
 
 describe('the dispatcher traces what its windows do', () => {
+  it('tells its transcript listeners when a window wrote more, and not after a look that found nothing new', async () => {
+    await setup(async (context) => {
+      const { open } = await withTiers(context)
+      let told = 0
+      context.dispatcher.onTranscript(() => {
+        told += 1
+      })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.ok(told > 0, 'the brief its window took is new')
+      const before = told
+      await context.dispatcher.pass()
+      assert.equal(told, before, 'nothing new: nothing told')
+      context.adapter.answer('zeus', 'Parser done')
+      await context.dispatcher.pass()
+      assert.ok(told > before, 'its answer is new')
+    })
+  })
+
   it("tells a trace each change of a window's activity, by participant", async () => {
     const entries = []
     await setup(

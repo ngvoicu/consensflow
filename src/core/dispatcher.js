@@ -130,6 +130,7 @@ export class Dispatcher {
   /** The records of participants forgotten while their window was still open, until it exits. */
   #leaving = new Set()
   #listeners = new Set()
+  #transcriptListeners = new Set()
 
   constructor({
     ledger,
@@ -175,7 +176,13 @@ export class Dispatcher {
       now: () => this.#now(),
       changed: () => this.#changed(),
     })
-    this.#transcripts = new Transcripts({ ledger, changed: () => this.#changed() })
+    this.#transcripts = new Transcripts({
+      ledger,
+      changed: () => this.#changed(),
+      wrote: () => {
+        for (const listener of this.#transcriptListeners) listener()
+      },
+    })
     this.#windows = new Windows({
       ledger,
       host,
@@ -212,6 +219,12 @@ export class Dispatcher {
   onChange(listener) {
     this.#listeners.add(listener)
     return () => this.#listeners.delete(listener)
+  }
+
+  /** Hears each look that copied something new of what a window wrote (`Transcripts`). */
+  onTranscript(listener) {
+    this.#transcriptListeners.add(listener)
+    return () => this.#transcriptListeners.delete(listener)
   }
 
   /** What a participant's window is doing: starting, working, idle, waiting (with why), closed. */

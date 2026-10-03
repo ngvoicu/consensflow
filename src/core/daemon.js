@@ -160,6 +160,11 @@ export async function startDaemon(
   dispatcher.onChange(
     throttle(() => bridge.event('state.changed', { reason: 'core' }), STATE_EVENT_MS),
   )
+  // A window that wrote more changes only a view of what it did: the page
+  // reads that again, not the board.
+  dispatcher.onTranscript(
+    throttle(() => bridge.event('state.changed', { reason: 'transcript' }), STATE_EVENT_MS),
+  )
   for (const [operation, handle] of Object.entries(
     pageOperations({ ledger, dispatcher, env, kick: () => loop.kick() }),
   )) {

@@ -1743,6 +1743,36 @@ test('reads what a window wrote when its fold opens, and keeps the fold and its 
   expect(await calls(page, 'task.transcript')).toHaveLength(2)
 })
 
+test('reads an open fold again when its window wrote more, and nothing else', async ({ page }) => {
+  await open(page, longTranscript())
+  await page.locator('button.card[data-task="2"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-2' })
+  const fold = drawer.locator('details[data-section="transcript"]')
+  await fold.locator('summary').click()
+  await expect(drawer.locator('.transcript-item')).toHaveCount(2)
+  const boards = (await calls(page, 'board.get')).length
+  const wrote = () =>
+    page.evaluate(() =>
+      window.__listeners.get('state-changed')({ payload: { reason: 'transcript' } }),
+    )
+  await page.evaluate(() => {
+    const written = window.__model.transcripts['1:2']
+    written.items.push({ id: 'a2', role: 'assistant', text: 'And the tests', complete: false })
+    written.total = 3
+  })
+  await wrote()
+  await expect(drawer.locator('.transcript-item')).toHaveCount(3)
+  await expect(fold.locator('summary')).toHaveText('What the agent did3 items')
+  await expect(drawer.locator('.transcript-head').last()).toContainText('still writing')
+  expect((await calls(page, 'board.get')).length, 'the board is not read for it').toBe(boards)
+  // A shut fold is not read.
+  await fold.locator('summary').click()
+  const reads = (await calls(page, 'task.transcript')).length
+  await wrote()
+  await page.waitForTimeout(100)
+  expect((await calls(page, 'task.transcript')).length).toBe(reads)
+})
+
 test('redraws a drawer whose task changed, its fold still open and read again', async ({
   page,
 }) => {
