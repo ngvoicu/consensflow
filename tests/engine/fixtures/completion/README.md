@@ -199,8 +199,8 @@ All OpenCode row fixtures come from
   original-message admission at sequence 1, assistant admissions at 2342 and
   2354, final completion at 2362, the intervening session update at 2363, and
   the original user's metadata-only summary update at 2364. Native `seq` values
-  supply the positions encoded in adapter-minted opaque cursors; timestamps
-  remain display evidence and are never ordering positions.
+  supply item positions; timestamps remain display evidence and are never
+  ordering positions.
 
 ## Claude Code 2.1.265 (Phase 17)
 

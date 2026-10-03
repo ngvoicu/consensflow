@@ -119,37 +119,12 @@ const home = (env) => {
   return value
 }
 
-const CURSOR_NAMESPACE = 4_000_000_000_000_000
-const CURSOR_KIND_SPAN = 100_000_000_000
-const cursorKindCodes = Object.freeze(
-  Object.assign(Object.create(null), {
-    codex: 1,
-    'claude-code': 2,
-    pi: 3,
-    opencode: 5,
-    devin: 6,
-  }),
-)
 const ITEM_ROLES = new Set(['user', 'assistant', 'tool', 'custom'])
 
-function cursorKindCode(kind) {
-  if (typeof kind !== 'string' || !Object.hasOwn(cursorKindCodes, kind)) return null
-  return cursorKindCodes[kind]
-}
-
-function mintCursor(kind, position) {
-  const code = cursorKindCode(kind)
-  if (
-    code === null ||
-    !Number.isSafeInteger(position) ||
-    position < 0 ||
-    position >= CURSOR_KIND_SPAN
-  ) {
-    throw new Error(`invalid ${kind} native cursor position`)
-  }
-  return CURSOR_NAMESPACE + code * CURSOR_KIND_SPAN + position
-}
-
+/**
+ * What a reading says. An item's `seq` is its native position in the record
+ * (a line's place, Codex's ordinal, OpenCode's event seq, Devin's row id).
+ */
 function resultBase() {
   return {
     items: [],
@@ -157,47 +132,11 @@ function resultBase() {
     // Its own question dialog is open: the window waits for the human's answer.
     asking: false,
     cancelled: false,
-    replaced: false,
     failed: false,
     failure: null,
     quota: null,
-    cursor: null,
-    settlement: {
-      state: 'unknown',
-      provenance: 'unknown',
-      cursor: null,
-      boundary: null,
-      evidence: {
-        complete: false,
-        openTools: [],
-        queuedTurns: [],
-        hooksInFlight: [],
-      },
-    },
+    settlement: { state: 'unknown' },
   }
-}
-
-function boundary(record, seq, at, extra = {}) {
-  return { record, cursor: seq, at, ...extra }
-}
-
-function setSettlement(result, state, provenance, nativeBoundary, cursor, evidence) {
-  result.settlement = {
-    state,
-    provenance,
-    cursor,
-    boundary: nativeBoundary?.record ?? null,
-    evidence: {
-      complete: Boolean(evidence.complete),
-      openTools: uniqueSorted(evidence.openTools),
-      queuedTurns: uniqueSorted(evidence.queuedTurns),
-      hooksInFlight: uniqueSorted(evidence.hooksInFlight),
-    },
-  }
-}
-
-function uniqueSorted(values) {
-  return [...new Set(values)].sort()
 }
 
 function nativeId(value, kind, seq) {
@@ -524,17 +463,8 @@ async function codexAnswers(sessionId, env, options) {
   }
 
   const count = await readJsonl(file, (record, recordIndex) => {
-    const nativeSeq = jsonlSeq(record, recordIndex)
-    const seq = mintCursor('codex', nativeSeq)
-    const at = record.timestamp ?? nativeSeq
-    result.cursor = seq
-
-    if (record.type === 'session_meta') {
-      const meta = record.payload ?? {}
-      const own = meta.id ?? meta.session_id
-      if ((own && own !== sessionId) || meta.forked_from_id) result.replaced = true
-      return
-    }
+    const seq = jsonlSeq(record, recordIndex)
+    const at = record.timestamp ?? seq
 
     if (record.type === 'response_item') {
       const payload = record.payload ?? {}
@@ -606,7 +536,6 @@ async function codexAnswers(sessionId, env, options) {
         kind: payload.error ? 'error' : 'complete',
         error: payload.error ?? null,
         lastAgentMessage: payload.last_agent_message,
-        boundary: boundary('task_complete', seq, at, { turnId: payload.turn_id }),
       }
       if (payload.error) {
         result.failed = true
@@ -617,14 +546,7 @@ async function codexAnswers(sessionId, env, options) {
 
     if (payload.type === 'turn_aborted') {
       latestTurnId = payload.turn_id
-      const owner = codexTurn(turns, payload.turn_id)
-      owner.terminal = {
-        kind: 'cancelled',
-        boundary: boundary('turn_aborted', seq, at, {
-          turnId: payload.turn_id,
-          reason: payload.reason ?? null,
-        }),
-      }
+      codexTurn(turns, payload.turn_id).terminal = { kind: 'cancelled' }
       result.cancelled = true
       return
     }
@@ -702,7 +624,6 @@ async function codexAnswers(sessionId, env, options) {
       .reverse()
       .map((id) => items.get(id))
       .find((item) => item?.complete && item._nativeFinalText === turn.terminal.lastAgentMessage)
-    turn.final = final ?? null
     turn.validComplete = Boolean(final)
     if (turn.validComplete && turn.openTools.size === 0 && turn.openSubagents.size === 0) {
       final.settled = true
@@ -710,43 +631,19 @@ async function codexAnswers(sessionId, env, options) {
   }
 
   const latest = latestTurnId ? turns.get(latestTurnId) : null
-  const openTools = latest
-    ? [...latest.openTools, ...[...latest.openSubagents].map((id) => `subagent:${id}`)]
-    : []
   const activeTurn = Boolean(latest?.started && !latest.terminal)
-  result.inFlight = activeTurn || openTools.length > 0
+  result.inFlight =
+    activeTurn || (latest ? latest.openTools.size + latest.openSubagents.size > 0 : false)
 
   result.cancelled = latest?.terminal?.kind === 'cancelled'
   result.failed = latest?.terminal?.kind === 'error'
   result.failure = result.failed
     ? (latest.terminal.error?.message ?? visibleText(latest.terminal.error))
     : null
-  const complete = Boolean(latest?.validComplete)
-  const nativeBoundary = latest?.terminal?.boundary ?? null
-  if (latest?.terminal && !result.inFlight) {
-    if (latest.terminal.kind === 'complete' && !latest.validComplete) {
-      setSettlement(result, 'unknown', 'native', nativeBoundary, null, {
-        complete: false,
-        openTools,
-        queuedTurns: [],
-        hooksInFlight: [],
-      })
-    } else {
-      setSettlement(result, 'settled', 'native', nativeBoundary, nativeBoundary.cursor, {
-        complete,
-        openTools,
-        queuedTurns: [],
-        hooksInFlight: [],
-      })
-    }
-  } else if (result.inFlight) {
-    setSettlement(result, 'in-flight', 'native', nativeBoundary, null, {
-      complete,
-      openTools,
-      queuedTurns: [],
-      hooksInFlight: [],
-    })
-  }
+  // A task_complete whose final answer cannot be matched proves nothing.
+  if (result.inFlight) result.settlement = { state: 'in-flight' }
+  else if (latest?.terminal && (latest.terminal.kind !== 'complete' || latest.validComplete))
+    result.settlement = { state: 'settled' }
 
   for (const item of result.items) {
     delete item._nativeFinalText
@@ -873,17 +770,12 @@ async function claudeAnswers(sessionId, env, options = {}) {
     result.items.push(item)
   }
 
-  const queueEvidence = () => [
-    ...queued.map((entry) => entry.id),
-    ...dequeued.map((entry) => entry.id),
-    ...popped.map((entry) => entry.id),
-  ]
+  const queuedTurns = () => queued.length + dequeued.length + popped.length
 
   const candidateCanSettle = () =>
     terminal?.provenance === 'derived' &&
-    terminal.complete &&
     openTools.size === 0 &&
-    queueEvidence().length === 0 &&
+    queuedTurns() === 0 &&
     hooks.size === 0
 
   const settleCandidate = () => {
@@ -905,7 +797,7 @@ async function claudeAnswers(sessionId, env, options = {}) {
   })
   const lateAncestor = (user) => {
     if (terminal?.provenance !== 'derived' || terminal.itemId !== candidate?.itemId) return false
-    const end = parents.get(terminal.boundary.uuid)
+    const end = parents.get(terminal.uuid)
     if (
       end?.sessionId !== sessionId ||
       end.isSidechain !== false ||
@@ -924,15 +816,11 @@ async function claudeAnswers(sessionId, env, options = {}) {
     return false
   }
 
-  records.forEach((record, recordIndex) => {
-    const seq = mintCursor('claude-code', recordIndex)
-    const at = record.timestamp ?? recordIndex
-    result.cursor = seq
-    const own = record.sessionId
-    if (own && own !== sessionId) result.replaced = true
+  records.forEach((record, seq) => {
+    const at = record.timestamp ?? seq
     if (
       record.type === 'attachment' &&
-      own === sessionId &&
+      record.sessionId === sessionId &&
       record.isSidechain === false &&
       record.attachment?.type === 'hook_additional_context' &&
       record.attachment.hookEvent === 'UserPromptSubmit' &&
@@ -950,35 +838,16 @@ async function claudeAnswers(sessionId, env, options = {}) {
           seq,
         })
     }
-    if (record.type === 'continued-in' && own === sessionId && record.isSidechain !== true) {
-      const successor = record.continuedInSessionId
-      if (
-        typeof successor !== 'string' ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-          successor,
-        ) ||
-        successor === sessionId ||
-        (result.continuedInSessionId && result.continuedInSessionId !== successor)
-      ) {
-        throw new Error('invalid or ambiguous native continuation')
-      }
-      result.continuedInSessionId = successor
-      result.continuedAt = record.timestamp ?? null
-    }
 
     if (record.type === 'queue-operation') {
       if (record.operation === 'enqueue') {
-        queued.push({ id: `queue:${recordIndex}`, content: String(record.content ?? '') })
+        queued.push({ content: String(record.content ?? '') })
       } else if (record.operation === 'dequeue') {
-        dequeued.push(queued.shift() ?? { id: `queue:${recordIndex}`, content: '' })
+        dequeued.push(queued.shift() ?? { content: '' })
       } else if (record.operation === 'popAll') {
         const content = String(record.content ?? '')
         const queuedIndex = queued.findIndex((entry) => sameQueuedContent(entry.content, content))
-        popped.push(
-          queuedIndex === -1
-            ? { id: `queue:${recordIndex}`, content }
-            : queued.splice(queuedIndex, 1)[0],
-        )
+        popped.push(queuedIndex === -1 ? { content } : queued.splice(queuedIndex, 1)[0])
       } else if (record.operation === 'remove') {
         const content = String(record.content ?? '')
         const queuedIndex = queued.findIndex((entry) => sameQueuedContent(entry.content, content))
@@ -1035,15 +904,7 @@ async function claudeAnswers(sessionId, env, options = {}) {
         if (record.apiErrorStatus === 429 || record.error === 'rate_limit') {
           result.quota = exhaustedQuota(text, Date.parse(record.timestamp))
         }
-        terminal = {
-          provenance: 'native',
-          complete: false,
-          itemId: item.id,
-          boundary: boundary('assistant.api_error', seq, at, {
-            uuid: record.uuid,
-            status: record.apiErrorStatus ?? null,
-          }),
-        }
+        terminal = { provenance: 'native', itemId: item.id }
         return
       }
 
@@ -1076,13 +937,7 @@ async function claudeAnswers(sessionId, env, options = {}) {
         result.cancelled = true
         turnOpen = false
         hooks.clear()
-        terminal = {
-          provenance: 'native',
-          complete: false,
-          boundary: boundary('user.request_interrupted', seq, at, {
-            uuid: record.uuid,
-          }),
-        }
+        terminal = { provenance: 'native' }
         candidate = null
         return
       }
@@ -1138,11 +993,7 @@ async function claudeAnswers(sessionId, env, options = {}) {
     ) {
       turnOpen = false
       candidate = null
-      terminal = {
-        provenance: 'native',
-        complete: true,
-        boundary: boundary('system.local_command', seq, at, { uuid: record.uuid }),
-      }
+      terminal = { provenance: 'native' }
       return
     }
 
@@ -1169,45 +1020,18 @@ async function claudeAnswers(sessionId, env, options = {}) {
       const item = assistants.get(candidate.itemId)
       if (item) item.complete = true
       turnOpen = false
-      terminal = {
-        provenance: 'derived',
-        complete: true,
-        itemId: candidate.itemId,
-        boundary: boundary(`system.${record.subtype}`, seq, at, {
-          uuid: record.uuid,
-          hookCount: record.hookCount ?? null,
-        }),
-      }
+      terminal = { provenance: 'derived', itemId: candidate.itemId, uuid: record.uuid }
       settleCandidate()
     }
   })
 
   if (count === 0) throw new Error(`empty claude session ${sessionId}`)
-  const queuedTurns = queueEvidence()
-  const hookEvidence = [...hooks].map((id) => `stop-hook:${id}`)
-  const evidence = {
-    complete: terminal?.complete ?? false,
-    openTools: [...openTools],
-    queuedTurns,
-    hooksInFlight: hookEvidence,
-  }
-
   let state = 'unknown'
-  const provenance = terminal?.provenance ?? (turnOpen ? 'derived' : 'unknown')
-  let settlementCursor = null
-  if (terminal?.provenance === 'native' && openTools.size === 0 && queuedTurns.length === 0) {
+  if (terminal?.provenance === 'native' && openTools.size === 0 && queuedTurns() === 0) {
     state = 'settled'
-    settlementCursor = terminal.boundary.cursor
-  } else if (terminal?.provenance === 'derived' && candidateCanSettle()) {
+  } else if (candidateCanSettle()) {
     state = 'settled'
-    settlementCursor = terminal.boundary.cursor
-  } else if (
-    turnOpen ||
-    openTools.size > 0 ||
-    queuedTurns.length > 0 ||
-    hooks.size > 0 ||
-    terminal
-  ) {
+  } else if (turnOpen || openTools.size > 0 || queuedTurns() > 0 || hooks.size > 0 || terminal) {
     state = 'in-flight'
   }
 
@@ -1216,7 +1040,7 @@ async function claudeAnswers(sessionId, env, options = {}) {
     const item = assistants.get(terminal.itemId)
     if (item) item.settled = true
   }
-  setSettlement(result, state, provenance, terminal?.boundary ?? null, settlementCursor, evidence)
+  result.settlement = { state }
   for (const item of result.items) {
     delete item._fragmentOrder
     delete item._fragmentText
@@ -1308,8 +1132,7 @@ async function piAnswers(sessionId, env, options = {}) {
       return { unknown: true, reason: `unreadable: no pi session ${sessionId}` }
     const working = resultBase()
     working.inFlight = true
-    working.cursor = mintCursor('pi', 0)
-    setSettlement(working, 'in-flight', 'native', null, working.cursor, {})
+    working.settlement = { state: 'in-flight' }
     return working
   }
 
@@ -1318,15 +1141,9 @@ async function piAnswers(sessionId, env, options = {}) {
   let turnOpen = false
   let terminal = null
 
-  const count = await readJsonl(file, (record, recordIndex) => {
-    const seq = mintCursor('pi', recordIndex)
-    const at = record.timestamp ?? record.message?.timestamp ?? recordIndex
-    result.cursor = seq
+  const count = await readJsonl(file, (record, seq) => {
+    const at = record.timestamp ?? record.message?.timestamp ?? seq
 
-    if (record.type === 'session') {
-      if (record.id && record.id !== sessionId) result.replaced = true
-      return
-    }
     if (record.type === 'custom_message') {
       const text = typeof record.content === 'string' ? record.content : piText(record.content)
       if (text)
@@ -1405,12 +1222,7 @@ async function piAnswers(sessionId, env, options = {}) {
       result.failed = false
       result.failure = null
       result.cancelled = false
-      terminal = {
-        provenance: 'derived',
-        complete: true,
-        item,
-        boundary: boundary('message.assistant.stop', seq, at, { id }),
-      }
+      terminal = { complete: true, item }
     } else if (message.stopReason === 'aborted') {
       // Stopped by an Escape (a pause, a tell, the human): the turn is over,
       // not failed, and the extension's settled evidence names this message.
@@ -1418,13 +1230,7 @@ async function piAnswers(sessionId, env, options = {}) {
       result.failed = false
       result.failure = null
       result.cancelled = true
-      terminal = {
-        provenance: 'derived',
-        complete: false,
-        aborted: true,
-        item,
-        boundary: boundary('message.assistant.aborted', seq, at, { id }),
-      }
+      terminal = { complete: false, aborted: true, item }
     } else if (message.stopReason === 'error') {
       turnOpen = true
       result.failed = true
@@ -1432,12 +1238,7 @@ async function piAnswers(sessionId, env, options = {}) {
       if (/^429\b/.test(result.failure)) {
         result.quota = exhaustedQuota(result.failure, Number(message.timestamp))
       }
-      terminal = {
-        provenance: 'derived',
-        complete: false,
-        item,
-        boundary: boundary('message.assistant.error', seq, at, { id }),
-      }
+      terminal = { complete: false, item }
     } else {
       turnOpen = true
       terminal = null
@@ -1451,37 +1252,15 @@ async function piAnswers(sessionId, env, options = {}) {
   )
   const { mtimeMs } = await fs.stat(file)
   const quiet = Date.now() - mtimeMs >= PI_SETTLEMENT_QUIET_MS
-  const open = [...openTools]
-  const canSettle = Boolean((terminal?.complete || terminal?.aborted) && quiet && open.length === 0)
-  const nativeSettled = Boolean(hasNativeBoundary && open.length === 0)
+  const open = openTools.size > 0
+  const canSettle = Boolean((terminal?.complete || terminal?.aborted) && quiet && !open)
+  const nativeSettled = hasNativeBoundary && !open
   if (canSettle || nativeSettled) terminal.item.settled = true
 
-  result.inFlight = open.length > 0 || (terminal ? !(quiet || nativeSettled) : turnOpen)
-  const state = nativeSettled || canSettle ? 'settled' : result.inFlight ? 'in-flight' : 'unknown'
-  const quietBoundary = nativeSettled
-    ? boundary('agent_settled', terminal.boundary.cursor, terminal.boundary.at, {
-        launchId: nativeEvidence.launchId,
-        sessionId: nativeEvidence.sessionId,
-        frontier: nativeEvidence.frontier,
-      })
-    : canSettle
-      ? boundary('session.quiet_window', terminal.boundary.cursor, terminal.boundary.at, {
-          quietMs: PI_SETTLEMENT_QUIET_MS,
-        })
-      : null
-  setSettlement(
-    result,
-    state,
-    nativeSettled ? 'native' : 'derived',
-    quietBoundary,
-    quietBoundary?.cursor ?? null,
-    {
-      complete: terminal?.complete ?? false,
-      openTools: open,
-      queuedTurns: [],
-      hooksInFlight: [],
-    },
-  )
+  result.inFlight = open || (terminal ? !(quiet || nativeSettled) : turnOpen)
+  result.settlement = {
+    state: nativeSettled || canSettle ? 'settled' : result.inFlight ? 'in-flight' : 'unknown',
+  }
   return result
 }
 
@@ -1532,12 +1311,11 @@ async function opencodeAnswers(sessionId, env, options) {
     const partPositions = new Map()
     let previousPosition = -1
     for (const row of events) {
-      const nativeSeq = Number(row.seq)
-      if (!Number.isInteger(nativeSeq) || nativeSeq < 0 || nativeSeq <= previousPosition) {
+      const seq = Number(row.seq)
+      if (!Number.isInteger(seq) || seq < 0 || seq <= previousPosition) {
         throw new Error(`malformed OpenCode event sequence at ${String(row.seq)}`)
       }
-      previousPosition = nativeSeq
-      const seq = mintCursor('opencode', nativeSeq)
+      previousPosition = seq
       const data = parseStoredJson(row.data, `event ${row.id}`)
       if (row.type === 'message.updated.1' && data.info?.id) {
         if (!messagePositions.has(data.info.id)) messagePositions.set(data.info.id, seq)
@@ -1553,7 +1331,6 @@ async function opencodeAnswers(sessionId, env, options) {
       }
     }
     if (previousPosition < 0) throw new Error(`missing OpenCode event sequence for ${sessionId}`)
-    result.cursor = mintCursor('opencode', previousPosition)
 
     const position = (positions, id, description) => {
       const seq = positions.get(id)
@@ -1685,41 +1462,17 @@ async function opencodeAnswers(sessionId, env, options) {
         }
       }
 
-      if (closesTurn) {
-        turnOpen = false
-        terminal = {
-          complete,
-          item,
-          boundary: boundary('message.time.completed', completionSeq, at, {
-            id: row.id,
-            finish: data.finish ?? null,
-            error: errorName ?? null,
-          }),
-        }
-      } else {
-        turnOpen = true
-        terminal = null
-      }
+      // The answer that closed the turn.
+      terminal = closesTurn ? item : null
+      turnOpen = !closesTurn
     }
 
-    const open = [...openTools]
-    const canSettle = Boolean(terminal && open.length === 0)
-    if (canSettle) terminal.item.settled = true
-    result.inFlight = turnOpen || open.length > 0
-    const state = canSettle ? 'settled' : result.inFlight ? 'in-flight' : 'unknown'
-    setSettlement(
-      result,
-      state,
-      state === 'unknown' ? 'unknown' : 'native',
-      terminal?.boundary ?? null,
-      canSettle ? terminal.boundary.cursor : null,
-      {
-        complete: terminal?.complete ?? false,
-        openTools: open,
-        queuedTurns: [],
-        hooksInFlight: [],
-      },
-    )
+    const canSettle = terminal !== null && openTools.size === 0
+    if (canSettle) terminal.settled = true
+    result.inFlight = turnOpen || openTools.size > 0
+    result.settlement = {
+      state: canSettle ? 'settled' : result.inFlight ? 'in-flight' : 'unknown',
+    }
 
     result.items.sort((left, right) => left.seq - right.seq || left.id.localeCompare(right.id))
     return result
@@ -1857,7 +1610,6 @@ async function devinAnswers(sessionId, env) {
                 .map((part) => part.text)
                 .join('')
             : ''
-      const seq = mintCursor('devin', Number(row.row_id))
       result.items.push({
         id: message.message_id,
         role,
@@ -1865,10 +1617,9 @@ async function devinAnswers(sessionId, env) {
         complete: role !== 'assistant',
         settled: role !== 'assistant',
         at: message.metadata?.created_at ?? row.created_at,
-        seq,
+        seq: Number(row.row_id),
         _request: request,
       })
-      result.cursor = Math.max(result.cursor ?? seq, seq)
     }
     result.asking = asking !== null
     db.exec('COMMIT')
@@ -1952,18 +1703,13 @@ async function devinAnswers(sessionId, env) {
   result.failed = outcome?.cause === 'error'
   result.inFlight =
     working || (last?.role === 'assistant' && !last.complete && !result.cancelled && !result.failed)
-  setSettlement(
-    result,
-    working
+  result.settlement = {
+    state: working
       ? 'in-flight'
       : last?.complete || result.cancelled || result.failed
         ? 'settled'
         : 'unknown',
-    'native',
-    null,
-    result.cursor,
-    { complete: last?.complete === true, openTools: [], queuedTurns: [], hooksInFlight: [] },
-  )
+  }
   for (const item of result.items) delete item._request
   return result
 }

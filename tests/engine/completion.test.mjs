@@ -226,6 +226,16 @@ function insertRows(db, table, rows) {
 
 function shape(result) {
   assert.equal(result.unknown, undefined)
+  assert.deepEqual(Object.keys(result).sort(), [
+    'asking',
+    'cancelled',
+    'failed',
+    'failure',
+    'inFlight',
+    'items',
+    'quota',
+    'settlement',
+  ])
   assert.ok(Array.isArray(result.items))
   assert.equal(new Set(result.items.map((item) => item.id)).size, result.items.length, 'unique ids')
   for (const item of result.items) {
@@ -240,24 +250,14 @@ function shape(result) {
   }
   assert.equal(typeof result.inFlight, 'boolean')
   assert.equal(typeof result.cancelled, 'boolean')
-  assert.equal(typeof result.replaced, 'boolean')
   assert.equal(typeof result.failed, 'boolean')
   assert.ok(result.failure === null || typeof result.failure === 'string')
-  assert.ok(result.cursor !== undefined && result.cursor !== null)
+  assert.deepEqual(Object.keys(result.settlement), ['state'])
   assert.ok(['settled', 'in-flight', 'unknown'].includes(result.settlement.state))
-  assert.ok(['native', 'derived', 'unknown'].includes(result.settlement.provenance))
-  assert.equal(typeof result.settlement.evidence.complete, 'boolean')
-  for (const key of ['openTools', 'queuedTurns', 'hooksInFlight']) {
-    assert.ok(Array.isArray(result.settlement.evidence[key]))
-  }
-  if (result.settlement.state === 'settled') {
-    assert.ok(result.settlement.cursor !== null)
-    assert.equal(typeof result.settlement.boundary, 'string')
-  }
 }
 
 function assertNotReady(result) {
-  assert.ok(result.unknown || result.replaced || result.settlement.state !== 'settled')
+  assert.ok(result.unknown || result.settlement.state !== 'settled')
 }
 
 test('completion/codex: native ids survive duplicate text and task_complete settles an exact final', async () => {
@@ -276,11 +276,7 @@ test('completion/codex: native ids survive duplicate text and task_complete sett
   assert.equal(final.settled, true)
   assert.equal(final.commentary, undefined, 'a final answer is no commentary')
   assert.equal(result.version, undefined)
-  assert.equal(result.settlement.state, 'settled')
-  assert.equal(result.settlement.provenance, 'native')
-  assert.equal(result.settlement.boundary, 'task_complete')
-  assert.equal(result.settlement.cursor, result.cursor)
-  assert.deepEqual(result.settlement.evidence.openTools, [])
+  assert.equal(result.inFlight, false)
   assert.equal(result.settlement.state, 'settled')
 })
 
@@ -318,11 +314,9 @@ test('completion/codex: errored task_complete never promotes commentary and wait
   })
   const partial = await answers('codex', session, partialStage.env)
   shape(partial)
-  assert.equal(partial.inFlight, true)
+  assert.equal(partial.failed, true, 'its task_complete is read')
+  assert.equal(partial.inFlight, true, 'its spawned sub-agent is still at work')
   assert.equal(partial.settlement.state, 'in-flight')
-  assert.deepEqual(partial.settlement.evidence.openTools, [
-    'subagent:01a07741-0722-7131-82df-b7996049a6d5',
-  ])
 
   const { env } = await stageJsonl('codex', session, 'codex/errored-task-complete.jsonl')
   const result = await answers('codex', session, env)
@@ -338,14 +332,7 @@ test('completion/codex: errored task_complete never promotes commentary and wait
   assert.match(result.failure, /capacity/i)
   assert.equal(result.cancelled, false)
   assert.equal(result.inFlight, false)
-  assert.equal(result.settlement.state, 'settled')
-  assert.equal(result.settlement.provenance, 'native')
-  assert.equal(result.settlement.evidence.complete, false)
-  assert.equal(result.settlement.boundary, 'task_complete')
-  assert.ok(
-    result.settlement.cursor < result.cursor,
-    'later sub-agent activity follows the boundary',
-  )
+  assert.equal(result.settlement.state, 'settled', 'once its sub-agent completed')
 })
 
 test('completion/codex: an earlier provider failure does not label a later successful turn failed', async () => {
@@ -360,10 +347,11 @@ test('completion/codex: an earlier provider failure does not label a later succe
   assert.equal(result.failure, null)
   assert.equal(result.cancelled, false)
   assert.equal(result.settlement.state, 'settled')
-  assert.equal(result.settlement.evidence.complete, true)
+  const final = result.items.findLast((item) => item.role === 'assistant')
+  assert.equal(final.complete && final.settled, true, "the later answer is its turn's final")
 })
 
-test('completion/codex: verified turn_aborted is cancellation; a native fork is replacement', async () => {
+test('completion/codex: verified turn_aborted is cancellation; a native fork reads as its own turns', async () => {
   const cancelledSession = '01a077f6-6663-7bc2-81cd-e287ccaabdbd'
   const cancelledStage = await stageJsonl('codex', cancelledSession, 'codex/interrupted.jsonl')
   const cancelled = await answers('codex', cancelledSession, cancelledStage.env)
@@ -372,13 +360,11 @@ test('completion/codex: verified turn_aborted is cancellation; a native fork is 
   assert.equal(cancelled.failed, false)
   assert.equal(cancelled.inFlight, false)
   assert.equal(cancelled.settlement.state, 'settled')
-  assert.equal(cancelled.settlement.boundary, 'turn_aborted')
 
   const forkSession = '01a077fa-5968-7b62-8fdd-043410a3d4b9'
   const forkStage = await stageJsonl('codex', forkSession, 'codex/forked.jsonl')
   const fork = await answers('codex', forkSession, forkStage.env)
   shape(fork)
-  assert.equal(fork.replaced, true)
   assert.deepEqual(
     fork.items.map((item) => item.id),
     [
@@ -387,7 +373,6 @@ test('completion/codex: verified turn_aborted is cancellation; a native fork is 
     ],
   )
   assert.equal(fork.settlement.state, 'settled')
-  assert.equal(fork.replaced, true, 'replacement voids a populated native proof')
 })
 
 test('completion/codex: a 60,000-character answer is never display-normalised', async () => {
@@ -402,7 +387,7 @@ test('completion/codex: a 60,000-character answer is never display-normalised', 
 
 const lateClaudeSession = '4e761651-511b-4065-8a65-6ff21582faad'
 const lateClaudeFixture = 'claude-code/v268-late-ancestors.jsonl'
-test('completion/claude-code: late native user ancestors preserve completion and cursor freshness', async (t) => {
+test('completion/claude-code: late native user ancestors preserve completion and item positions', async (t) => {
   const { env, file, root } = await stageJsonl('claude-code', lateClaudeSession, lateClaudeFixture)
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const records = (await fs.readFile(file, 'utf8')).trim().split('\n').map(JSON.parse)
@@ -414,11 +399,11 @@ test('completion/claude-code: late native user ancestors preserve completion and
   shape(result)
   assert.equal(result.inFlight, false)
   assert.equal(result.settlement.state, 'settled')
-  assert.deepEqual(result.settlement, before.settlement, 'late ancestry is not a new boundary')
+  assert.deepEqual(result.settlement, before.settlement, 'late ancestry is not a new turn')
   assert.deepEqual(
     result.items[0],
     before.items[0],
-    'assistant text and physical cursor remain stable',
+    'assistant text and physical position remain stable',
   )
   assert.equal(result.items[1].id, records[6].uuid, 'late user stays in the native history')
   assert.equal(result.items[1].text, records[6].message.content)
@@ -476,8 +461,6 @@ test('completion/claude-code: late ancestry cannot settle unrelated or unproven 
       t.after(() => fs.rm(root, { recursive: true, force: true }))
       const result = await answers('claude-code', lateClaudeSession, env)
       assertNotReady(result)
-      if (name.startsWith('later queue'))
-        assert.equal(result.settlement.evidence.queuedTurns.length, 1)
     })
   }
 })
@@ -491,9 +474,7 @@ test('completion/claude-code: fragments share message.id, server tool result is 
   shape(before)
   assert.equal(before.items.filter((item) => item.role === 'assistant').length, 1)
   assert.equal(before.items.find((item) => item.role === 'assistant').complete, false)
-  assert.equal(before.settlement.state, 'in-flight')
-  assert.deepEqual(before.settlement.evidence.openTools, [])
-  assert.equal(before.settlement.evidence.hooksInFlight.length, 1)
+  assert.equal(before.settlement.state, 'in-flight', 'its stop hooks have not reported')
 
   const { env } = await stageJsonl('claude-code', session, 'claude-code/fragments.jsonl')
   const result = await answers('claude-code', session, env)
@@ -508,15 +489,7 @@ test('completion/claude-code: fragments share message.id, server tool result is 
   assert.match(tool.text, /advisor_redacted_result/)
   assert.match(tool.text, /redacted 4852 chars/)
   assert.equal(result.version, undefined)
-  assert.equal(result.settlement.state, 'settled')
-  assert.equal(result.settlement.provenance, 'derived')
-  assert.equal(result.settlement.boundary, 'system.stop_hook_summary')
-  assert.deepEqual(result.settlement.evidence, {
-    complete: true,
-    openTools: [],
-    queuedTurns: [],
-    hooksInFlight: [],
-  })
+  assert.equal(result.inFlight, false)
   assert.equal(result.settlement.state, 'settled')
 })
 
@@ -572,8 +545,6 @@ test('completion/claude-code: historical interrupt, advisor, and removed queue d
   assert.equal(result.cancelled, false)
   assert.equal(result.inFlight, false)
   assert.equal(result.settlement.state, 'settled')
-  assert.deepEqual(result.settlement.evidence.openTools, [])
-  assert.deepEqual(result.settlement.evidence.queuedTurns, [])
 })
 
 test('completion/claude-code: queued work prevents a settled window through dequeue and hooks', async () => {
@@ -583,16 +554,13 @@ test('completion/claude-code: queued work prevents a settled window through dequ
   })
   const queued = await answers('claude-code', session, queuedStage.env)
   shape(queued)
-  assert.equal(queued.settlement.evidence.complete, true)
-  assert.equal(queued.settlement.evidence.queuedTurns.length, 1)
-  assert.equal(queued.settlement.state, 'in-flight')
+  assert.equal(queued.items.find((item) => item.role === 'assistant').complete, true)
+  assert.equal(queued.settlement.state, 'in-flight', 'a queued message is still to come')
   assert.equal(queued.inFlight, true)
 
   const { env } = await stageJsonl('claude-code', session, 'claude-code/queued-turn.jsonl')
   const nextTurn = await answers('claude-code', session, env)
   shape(nextTurn)
-  assert.deepEqual(nextTurn.settlement.evidence.queuedTurns, [])
-  assert.equal(nextTurn.settlement.evidence.complete, false)
   assert.equal(nextTurn.settlement.state, 'in-flight')
   assert.equal(nextTurn.inFlight, true, 'the dequeued user turn is now open')
 })
@@ -616,7 +584,6 @@ test('completion/claude-code: a removed cross-session message clears its queue e
   try {
     const result = await answers('claude-code', session, env)
     shape(result)
-    assert.deepEqual(result.settlement.evidence.queuedTurns, [])
     assert.equal(result.settlement.state, 'settled')
     assert.equal(result.inFlight, false)
   } finally {
@@ -679,8 +646,6 @@ test('completion/claude-code: the captured interrupt cancels; compaction keeps p
   assert.equal(interrupted.cancelled, true)
   assert.equal(interrupted.inFlight, false)
   assert.equal(interrupted.settlement.state, 'settled')
-  assert.equal(interrupted.settlement.boundary, 'user.request_interrupted')
-  assert.equal(interrupted.settlement.state, 'settled')
 
   const quotedStage = await stageJsonl('claude-code', session, 'claude-code/interrupted.jsonl', {
     mutate(records) {
@@ -712,7 +677,6 @@ test('completion/claude-code: popAll consumes every popped item and later queue 
   })
   const popped = await answers('claude-code', session, poppedStage.env)
   shape(popped)
-  assert.deepEqual(popped.settlement.evidence.queuedTurns, ['queue:1', 'queue:2'])
   assertNotReady(popped)
 
   const consumedStage = await stageJsonl(
@@ -723,15 +687,11 @@ test('completion/claude-code: popAll consumes every popped item and later queue 
   )
   const consumed = await answers('claude-code', session, consumedStage.env)
   shape(consumed)
-  assert.deepEqual(consumed.settlement.evidence.queuedTurns, [])
   assertNotReady(consumed)
 
   const finalStage = await stageJsonl('claude-code', session, 'claude-code/queue-pop-all.jsonl')
   const final = await answers('claude-code', session, finalStage.env)
   shape(final)
-  assert.deepEqual(final.settlement.evidence.queuedTurns, [])
-  assert.equal(final.settlement.boundary, 'system.stop_hook_summary')
-  assert.equal(final.settlement.state, 'settled')
   assert.equal(final.settlement.state, 'settled')
 })
 
@@ -748,9 +708,6 @@ test('completion/claude-code: native API error settles incomplete as failure, no
   assert.equal(result.items.at(-1).complete, false)
   assert.equal(result.items.at(-1).settled, true)
   assert.equal(result.settlement.state, 'settled')
-  assert.equal(result.settlement.provenance, 'native')
-  assert.equal(result.settlement.evidence.complete, false)
-  assert.equal(result.settlement.boundary, 'assistant.api_error')
 })
 
 // -------------------------------------------------------------------- pi
@@ -788,16 +745,23 @@ test('completion/pi: a turn stays open between tool results and the next assista
   const betweenStage = await stageJsonl('pi', session, 'pi/between-tool-steps.jsonl', { take: 5 })
   const between = await answers('pi', session, betweenStage.env)
   shape(between)
-  assert.deepEqual(between.settlement.evidence.openTools, [])
   assert.equal(between.settlement.state, 'in-flight')
   assert.equal(between.inFlight, true)
   assert.equal(between.items.filter((item) => item.role === 'tool').length, 2)
 
-  const { env } = await stageJsonl('pi', session, 'pi/between-tool-steps.jsonl')
+  // Its next step calls two tools: even a step that says it stopped, in a quiet
+  // file, waits for their results.
+  const { env } = await stageJsonl('pi', session, 'pi/between-tool-steps.jsonl', {
+    mutate(records) {
+      records.at(-1).message.stopReason = 'stop'
+      return records
+    },
+    ageMs: PI_QUIET_MS + 1_000,
+  })
   const next = await answers('pi', session, env)
   shape(next)
   assert.equal(next.inFlight, true)
-  assert.equal(next.settlement.evidence.openTools.length, 2)
+  assert.equal(next.settlement.state, 'in-flight')
 })
 
 test('completion/pi: toolCallId closes the loop and a 120-second quiet window derives settlement', async () => {
@@ -816,8 +780,6 @@ test('completion/pi: toolCallId closes the loop and a 120-second quiet window de
   assert.equal(final.settled, true)
   assert.equal(result.inFlight, false)
   assert.equal(result.settlement.state, 'settled')
-  assert.equal(result.settlement.provenance, 'derived')
-  assert.equal(result.settlement.boundary, 'session.quiet_window')
 })
 
 test('completion/pi: a turn stopped by Escape (aborted) is over, not failed, settled by its evidence or the quiet window', async () => {
@@ -835,8 +797,7 @@ test('completion/pi: a turn stopped by Escape (aborted) is over, not failed, set
   assert.equal(native.cancelled, true)
   assert.equal(native.failed, false)
   assert.equal(native.items.at(-1).complete, false)
-  assert.equal(native.settlement.state, 'settled')
-  assert.equal(native.settlement.provenance, 'native')
+  assert.equal(native.settlement.state, 'settled', 'by its evidence: the file was just written')
 
   const quietStage = await stageJsonl('pi', 'hazy-ridge', 'pi/tool-loop.jsonl', {
     mutate: abort,
@@ -847,22 +808,21 @@ test('completion/pi: a turn stopped by Escape (aborted) is over, not failed, set
   assert.equal(quiet.settlement.state, 'settled', 'without the evidence, the quiet window ends it')
 })
 
-test('completion/pi: matching settlement evidence promotes the native boundary, mismatches stay derived', async () => {
+test('completion/pi: matching settlement evidence settles at once, mismatches wait for the quiet window', async () => {
+  // Each file was just written: only the extension's evidence can settle it now.
   const settledStage = await stageJsonl('pi', 'hazy-ridge', 'pi/tool-loop.jsonl', {
     settlement: { launchId: 'launch-pi-1', frontierId: '3f9b029e' },
   })
   const settled = await answers('pi', 'hazy-ridge', settledStage.env)
   shape(settled)
   assert.equal(settled.settlement.state, 'settled')
-  assert.equal(settled.settlement.provenance, 'native')
-  assert.equal(settled.settlement.boundary, 'agent_settled')
-  assert.equal(settled.settlement.evidence.complete, true)
+  assert.equal(settled.items.at(-1).settled, true)
 
   const wrongFrontierStage = await stageJsonl('pi', 'hazy-ridge', 'pi/tool-loop.jsonl', {
     settlement: { launchId: 'launch-pi-1', frontierId: 'not-the-leaf' },
   })
   const wrongFrontier = await answers('pi', 'hazy-ridge', wrongFrontierStage.env)
-  assert.equal(wrongFrontier.settlement.provenance, 'derived')
+  assert.equal(wrongFrontier.settlement.state, 'in-flight')
 
   const wrongLaunchStage = await stageJsonl('pi', 'hazy-ridge', 'pi/tool-loop.jsonl', {
     settlement: {
@@ -872,7 +832,7 @@ test('completion/pi: matching settlement evidence promotes the native boundary, 
     },
   })
   const wrongLaunch = await answers('pi', 'hazy-ridge', wrongLaunchStage.env)
-  assert.equal(wrongLaunch.settlement.provenance, 'derived')
+  assert.equal(wrongLaunch.settlement.state, 'in-flight')
 })
 
 test('completion/pi: every retry prefix stays unready until success plus the real quiet boundary', async () => {
@@ -881,7 +841,6 @@ test('completion/pi: every retry prefix stays unready until success plus the rea
     const stage = await stageJsonl('pi', session, 'pi/provider-429.jsonl', { take })
     const prefix = await answers('pi', session, stage.env)
     shape(prefix)
-    assert.equal(prefix.settlement.provenance, 'derived')
     assert.notEqual(prefix.settlement.state, 'settled', `record prefix ${take} settled early`)
     assertNotReady(prefix)
   }
@@ -896,7 +855,6 @@ test('completion/pi: every retry prefix stays unready until success plus the rea
   assert.equal(exhausted.failed, true)
   assert.match(exhausted.failure, /429|rate limit/i)
   assert.equal(exhausted.settlement.state, 'unknown')
-  assert.equal(exhausted.settlement.provenance, 'derived')
   assertNotReady(exhausted)
 
   const settledStage = await stageJsonl('pi', session, 'pi/provider-429.jsonl', {
@@ -908,8 +866,6 @@ test('completion/pi: every retry prefix stays unready until success plus the rea
   assert.equal(settled.failed, false)
   assert.equal(settled.items.at(-1).id, '465fb416')
   assert.equal(settled.settlement.state, 'settled')
-  assert.equal(settled.settlement.provenance, 'derived')
-  assert.equal(settled.settlement.boundary, 'session.quiet_window')
 })
 
 test('completion/pi: historical finals remain readable during the next turn, with open tools excluded', async () => {
@@ -960,13 +916,7 @@ test('completion/opencode: step-finish is in-flight until native time.completed 
   assert.equal(after.items.find((item) => item.role === 'assistant').complete, true)
   assert.equal(after.inFlight, false)
   assert.equal(after.settlement.state, 'settled')
-  assert.equal(after.settlement.provenance, 'native')
-  assert.equal(after.settlement.boundary, 'message.time.completed')
-  assert.ok(before.cursor < after.cursor)
   assert.equal(after.items[0].seq, before.items[0].seq)
-  assert.ok(after.items[0].seq < after.settlement.cursor)
-  assert.equal(after.settlement.cursor, after.cursor)
-  assert.equal(after.settlement.state, 'settled')
 })
 
 test('completion/opencode: native length and APIError are settled incomplete, failure is separate', async () => {
@@ -981,7 +931,6 @@ test('completion/opencode: native length and APIError are settled incomplete, fa
   assert.equal(length.cancelled, false)
   assert.equal(length.inFlight, false)
   assert.equal(length.settlement.state, 'settled')
-  assert.equal(length.settlement.evidence.complete, false)
 
   const failed = await answers(
     'opencode',
@@ -994,7 +943,6 @@ test('completion/opencode: native length and APIError are settled incomplete, fa
   assert.match(failed.failure, /18\+ age confirmation/)
   assert.equal(failed.inFlight, false)
   assert.equal(failed.settlement.state, 'settled')
-  assert.equal(failed.settlement.provenance, 'native')
 })
 
 test('completion/opencode: MessageAbortedError is a failure, never cancellation without a native fixture', async () => {
@@ -1011,7 +959,6 @@ test('completion/opencode: MessageAbortedError is a failure, never cancellation 
   assert.equal(result.failed, true)
   assert.match(result.failure, /18\+ age confirmation/)
   assert.equal(result.settlement.state, 'settled')
-  assert.equal(result.settlement.provenance, 'native')
 })
 
 test('completion/opencode: its store is found where this OpenCode keeps it, the one holding the session first', async () => {
@@ -1072,7 +1019,6 @@ test('completion/opencode: tool output and long final text are emitted whole fro
   assert.equal(final.text.length, 4515)
   assert.equal(final.complete, true)
   assert.equal(result.settlement.state, 'settled')
-  assert.equal(result.settlement.state, 'settled')
 })
 
 test('completion/opencode: one read transaction rejects a competing writer from its snapshot', async () => {
@@ -1118,7 +1064,6 @@ test('completion/opencode: one read transaction rejects a competing writer from 
     second.items.find((item) => item.id === 'msg_07834e4450017pCEw2eVdPoUxQ').text,
     'written between snapshot reads',
   )
-  assert.ok(second.cursor > first.cursor)
 })
 
 test('completion: every positive fixture keeps exact native identity across repeated reads', async () => {
