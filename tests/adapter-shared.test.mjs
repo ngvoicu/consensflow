@@ -5,13 +5,40 @@ import { codexAdapter } from '../src/adapters/codex.js'
 import { devinAdapter } from '../src/adapters/devin.js'
 import { openCodeAdapter } from '../src/adapters/opencode.js'
 import { piAdapter } from '../src/adapters/pi.js'
-import { admission, windowText } from '../src/adapters/shared.js'
+import { admission, consoleText, windowText } from '../src/adapters/shared.js'
 
 /**
  * What every adapter shares (`src/adapters/shared.js`): the text a window is
  * given, which the pane host must be able to take, and how a send's answer
  * reads as a delivery outcome.
  */
+describe('the text Devin is given on Windows', () => {
+  // What a paste into Devin lost on its way through Windows' console (Devin
+  // 3000.11, 2026-10-03): every non-ASCII mark and symbol, letters kept.
+  const LOST = '·—–…→←’‘“”«»•°±×÷€£¥©®™§¶¦¨¬¯´¸¼½¾¿'
+
+  it('spells in ASCII every mark the console dropped, and keeps letters as they are', () => {
+    for (const character of LOST) {
+      assert.match(consoleText(character), /^[\x20-\x7e]+$/, `${character} has an ASCII spelling`)
+    }
+    assert.equal(
+      consoleText(
+        '[ConsensFlow m-3 · T-1 · result from @worker]\nCosts €100 — 20× faster → “done”…',
+      ),
+      '[ConsensFlow m-3 | T-1 | result from @worker]\nCosts EUR100 -- 20x faster -> "done"...',
+    )
+    const letters = 'Culoarea: albastră; îți scriu, café, Straße, 5 µs, Ñandú'
+    assert.equal(consoleText(letters), letters)
+  })
+
+  it('spells what Unicode also writes plainly, and shown control characters in caret notation', () => {
+    assert.equal(consoleText('x² ½\u00a0end'), 'x2 1/2 end')
+    assert.equal(consoleText(windowText('a\u001b[31mb\r\u007f')), 'a^[[31mb^M^?')
+    assert.equal(consoleText('─┼─ │ ✅ done'), '-+- | OK done')
+    assert.equal(consoleText('a 🙂'), 'a 🙂', 'no ASCII for an emoji: left as it is')
+  })
+})
+
 describe('the text a window is given', () => {
   it('keeps whole characters: the half of an emoji a cut left behind is dropped', () => {
     // The dispatcher cuts a long body at 3,000 code units; an emoji across

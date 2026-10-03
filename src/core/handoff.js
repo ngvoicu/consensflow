@@ -28,7 +28,7 @@ const HARNESS_NAMES = {
 }
 
 const nameOf = (harness) => HARNESS_NAMES[harness] ?? harness
-const DELIVERY = /\[ConsensFlow m-(\d+) ·/
+const DELIVERY = /\[ConsensFlow m-(\d+) /
 /** A first message from ConsensFlow that hands the lead over. */
 export const HANDOFF_TITLE = 'You are the lead now'
 

@@ -62,5 +62,10 @@ describe('the delivered text', () => {
     const text = deliveryText({ id: 12, taskNumber: 3, sender: 'chief', kind: 'task', body: 'x' })
     assert.ok(text.startsWith(markerOf(12)))
     assert.ok(!text.startsWith(markerOf(1)), 'm-1 is not m-12')
+    // A window that did not keep the · still shows the marker: Devin on
+    // Windows got it as |, and before that lost it.
+    for (const kept of [text.replace(/·/g, '|'), text.replace(/·/g, '')]) {
+      assert.ok(kept.startsWith(markerOf(12)))
+    }
   })
 })

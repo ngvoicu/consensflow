@@ -32,6 +32,7 @@ import {
   chiefEnvironment,
   claudeProjectKey,
   codexIsolation,
+  codexLiveFlags,
   HARNESSES,
   lastLines,
   liveEnvironment,
@@ -200,7 +201,7 @@ if (realCodex !== null) {
   wrapper(
     'codex',
     realCodex,
-    ['-c', `model=${JSON.stringify(codexModel)}`]
+    [...codexLiveFlags(), '-c', `model=${JSON.stringify(codexModel)}`]
       .concat(
         chief === 'codex' ? ['-c', `model_reasoning_effort=${JSON.stringify(values.effort)}`] : [],
       )

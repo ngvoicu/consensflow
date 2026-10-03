@@ -200,6 +200,17 @@ console.log('devin ${version}')
         text: 'half \ud83d of it, \u001b[31mred\u001b[0m and 50%\r60%',
       })
       assert.equal(requests.at(-1)[1].body, 'half  of it, ␛[31mred␛[0m and 50%␍60%')
+      // On Windows the console drops a paste's non-ASCII marks: they go in ASCII.
+      await devinAdapter({ env: { ...env, OS: 'Windows_NT' } }).deliver({
+        launch,
+        pane,
+        host,
+        text: '[ConsensFlow m-3 · T-1 · answer from @chief]\nblue — not “red” → done…',
+      })
+      assert.equal(
+        requests.at(-1)[1].body,
+        '[ConsensFlow m-3 | T-1 | answer from @chief]\nblue -- not "red" -> done...',
+      )
       assert.equal(await adapter.ready({ launch, pane, host }), true)
       pasteInFlight = true
       assert.equal(await adapter.ready({ launch, pane, host }), false)

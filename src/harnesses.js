@@ -71,7 +71,7 @@ export function piSessionDir(env) {
 }
 
 /** Windows, by the environment's own word or the platform this runs on. */
-function onWindows(env) {
+export function onWindows(env) {
   return (env.OS ?? '').toLowerCase().includes('windows') || process.platform === 'win32'
 }
 

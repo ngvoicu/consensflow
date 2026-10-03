@@ -8,6 +8,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { devinFolders, opencodeStores } from '../src/harnesses.js'
 import { countQuestions, ownerQuestions } from './measure.mjs'
 
 /**
@@ -19,17 +20,23 @@ import { countQuestions, ownerQuestions } from './measure.mjs'
 export function findSession(kind, { workspace, since, home, env = {} }) {
   if (kind === 'codex')
     return codexSession(workspace, since, env.CODEX_HOME ?? join(home, '.codex'))
+  // The stores where the app reads them, on this platform, from this home.
+  const where = { HOME: home, ...env }
   if (kind === 'opencode') {
-    return newestRow(
-      join(env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'opencode', 'opencode.db'),
-      'SELECT id FROM session WHERE directory = ? AND parent_id IS NULL AND time_created >= ? ORDER BY time_created DESC LIMIT 1',
-      [workspace, since],
-    )
+    for (const store of opencodeStores(where)) {
+      const id = newestRow(
+        store,
+        'SELECT id FROM session WHERE directory = ? AND parent_id IS NULL AND time_created >= ? ORDER BY time_created DESC LIMIT 1',
+        [workspace, since],
+      )
+      if (id !== null) return id
+    }
+    return null
   }
   if (kind === 'devin') {
     // Devin keeps seconds.
     return newestRow(
-      join(env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'devin', 'cli', 'sessions.db'),
+      join(devinFolders(where).data, 'cli', 'sessions.db'),
       'SELECT id FROM sessions WHERE working_directory = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 1',
       [workspace, Math.floor(since / 1000)],
     )

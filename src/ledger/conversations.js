@@ -147,7 +147,7 @@ export function transcript(store, projectId, number, { limit = Number.POSITIVE_I
 }
 
 /** The header every delivery opens with, naming its message. */
-const HEADER = /\[ConsensFlow m-(\d+) ·/
+const HEADER = /\[ConsensFlow m-(\d+) /
 
 /**
  * The part of a window's copy that is task `taskId`'s. A window may hold

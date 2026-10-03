@@ -6,9 +6,11 @@ import { DEVIN_REFUSAL, exhaustedQuota } from '../../hosts/lib/quota.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
 import { send as sendDevin } from '../channels/devin.js'
 import { prepareDevinIntegration, prepareDevinPrompt } from '../devin-install.js'
+import { onWindows } from '../harnesses.js'
 import { roleConfiguration } from '../role-skills.js'
 import {
   admission,
+  consoleText,
   dialogWaiting,
   executableFor,
   recordState,
@@ -104,7 +106,8 @@ export function devinAdapter({
           pane: pane.id,
           generation: pane.generation,
         },
-        windowText(text),
+        // Windows' console drops a paste's non-ASCII marks on their way to Devin.
+        onWindows(env) ? consoleText(windowText(text)) : windowText(text),
       )
       return admission(sent, 'Devin refused the paste')
     },

@@ -37,6 +37,8 @@ export function deliveryText(message) {
 
 /**
  * The start of a message's header, as a window's record shows it once the
- * message arrived. The separator after the id keeps m-1 from matching m-12.
+ * message arrived. The space after the id keeps m-1 from matching m-12; what
+ * follows it is not part of the marker, since a window may not keep the ·
+ * (Devin on Windows takes it as |, see consoleText).
  */
-export const markerOf = (messageId) => `[ConsensFlow m-${messageId} ·`
+export const markerOf = (messageId) => `[ConsensFlow m-${messageId} `

@@ -8,8 +8,11 @@
  * drawn it): one line, a few lines shaped like a ConsensFlow message, and one
  * of about 3,800 characters, which Devin and Claude fold into a placeholder.
  * Each asks for a sum the message does not hold, so its answer on the screen
- * means the window sent it. Nothing presses Enter a second time: a message
- * left waiting in the input is a failure, the one Devin showed on Windows.
+ * means the window sent it, and the harness's own record must then hold the
+ * message whole, its marks included (— “” → € …), as the app reads it there.
+ * Each goes in as the app gives it to that window: Devin on Windows gets its
+ * marks in ASCII. Nothing presses Enter a second time: a message left
+ * waiting in the input is a failure, the one Devin showed on Windows.
  *
  *   npm run live:paste                      Devin
  *   npm run live:paste -- --harness claude --harness codex
@@ -24,9 +27,18 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { codexIsolation, HARNESSES, liveEnvironment, realOnPath } from '../../evals/plan.mjs'
+import { findSession } from '../../evals/bare.mjs'
+import {
+  codexIsolation,
+  codexLiveFlags,
+  HARNESSES,
+  liveEnvironment,
+  realOnPath,
+} from '../../evals/plan.mjs'
+import { answers } from '../../hosts/lib/completion.js'
 import { interactiveStart } from '../../hosts/lib/windows.js'
-import { paneArgv, runnable } from '../../src/harnesses.js'
+import { consoleText, recordState, windowText } from '../../src/adapters/shared.js'
+import { onWindows, paneArgv, runnable } from '../../src/harnesses.js'
 import { startIntegration } from '../integration/harness.mjs'
 import { trustForClaude } from './trust-claude.mjs'
 
@@ -39,6 +51,8 @@ for (const name of harnesses) {
 }
 const H = process.env.HOME ?? homedir()
 const ENV = liveEnvironment({ home: H })
+/** Where a harness looks for its records: the environment without the sandbox's removals. */
+const RECORD_ENV = Object.fromEntries(Object.entries(ENV).filter(([, value]) => value !== null))
 const WORKSPACE = join(H, '.consensflow-candidate', 'live', 'paste')
 mkdirSync(WORKSPACE, { recursive: true })
 
@@ -56,8 +70,8 @@ const CASES = [
     sum: [2468, 1357],
     body: (line) =>
       [
-        '[ConsensFlow m-1 · result from @worker · T-1]',
-        'The page is done.',
+        '[ConsensFlow m-1 · T-1 · result from @worker]',
+        'The page is done — “Contact” moved → the footer, €0 spent…',
         '',
         'Files changed: index.html.',
         line,
@@ -67,9 +81,9 @@ const CASES = [
     name: 'a long message',
     sum: [3141, 2718],
     body: (line) => {
-      const lines = ['[ConsensFlow m-2 · result from @worker · T-1]']
+      const lines = ['[ConsensFlow m-2 · T-1 · result from @worker]']
       for (let n = 1; lines.join('\n').length < 3_700; n += 1) {
-        lines.push(`${n}. Checked section ${n} of the page: its headings, links and footer match.`)
+        lines.push(`${n}. Section ${n} — headings, “links” → footer: all match…`)
       }
       return [...lines, line].join('\n')
     },
@@ -90,9 +104,12 @@ function isolation(name, executable) {
   if (name === 'claude') return ['--strict-mcp-config', '--no-chrome']
   if (name !== 'codex') return []
   const list = runnable(executable, ['mcp', 'list', '--json'])
-  return codexIsolation(
-    JSON.parse(execFileSync(list.file, list.args, { ...list.options, encoding: 'utf8' })),
-  )
+  return [
+    ...codexLiveFlags(),
+    ...codexIsolation(
+      JSON.parse(execFileSync(list.file, list.args, { ...list.options, encoding: 'utf8' })),
+    ),
+  ]
 }
 
 const app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
@@ -108,6 +125,24 @@ try {
       process.stdout.write(`trust: ${await trustForClaude(app, WORKSPACE, executable)}\n`)
     }
     const pane = { id: `paste-${name}`, generation: 1 }
+    /** The message as the app gives it to this window: Devin on Windows gets its marks in ASCII. */
+    const given = (body) =>
+      name === 'devin' && onWindows(ENV) ? consoleText(windowText(body)) : windowText(body)
+    let native = session
+    const openedAt = Date.now()
+    /** The user messages the harness's own record holds so far. */
+    const recorded = async () => {
+      native ??= findSession(kind, {
+        workspace: WORKSPACE,
+        since: openedAt,
+        home: H,
+        env: RECORD_ENV,
+      })
+      if (native === null) return []
+      const read = await answers(kind, native, RECORD_ENV).catch(() => null)
+      if (read === null || read.unknown) return []
+      return recordState(read).items.filter((item) => item.role === 'user')
+    }
     const opened = await app.request('pane.open', {
       ...pane,
       cwd: WORKSPACE,
@@ -141,22 +176,34 @@ try {
         const answer = String(check.sum[0] + check.sum[1])
         const from = screen().length
         const pasted = Date.now()
-        const written = await app.request('pane.write_paste', {
-          ...pane,
-          body: check.body(ask(check.sum)),
-        })
+        const body = given(check.body(ask(check.sum)))
+        const written = await app.request('pane.write_paste', { ...pane, body })
         let shown = false
         while (!shown && Date.now() - pasted < ANSWER_MS && !closed()) {
           await sleep(500)
           shown = screen().slice(from).includes(answer)
         }
+        const seconds = ((Date.now() - pasted) / 1000).toFixed(1)
+        // Its record holds what was pasted, whole: where the app looks for it.
+        const whole = body.replace(/\r\n/g, '\n').trim()
+        let users = []
+        let kept = false
+        for (let tries = 0; shown && !kept && tries < 20; tries += 1) {
+          users = await recorded()
+          kept = users.some((item) => item.text.replace(/\r\n/g, '\n').includes(whole))
+          if (!kept) await sleep(500)
+        }
+        const escaped = (text) =>
+          text.slice(0, 160).replace(/[^\x20-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16)}`)
         results.push({
           name,
           check: check.name,
-          ok: written?.ok === true && shown,
-          detail: shown
-            ? `sent, answered in ${((Date.now() - pasted) / 1000).toFixed(1)} s`
-            : `NOT SENT (${JSON.stringify(written)}): ${lastLines(screen())}`,
+          ok: written?.ok === true && shown && kept,
+          detail: !shown
+            ? `NOT SENT (${JSON.stringify(written)}): ${lastLines(screen())}`
+            : kept
+              ? `sent and recorded whole, answered in ${seconds} s`
+              : `sent, but recorded otherwise: ${escaped(users.at(-1)?.text ?? '(no record found)')}`,
         })
         if (!shown) break
         await still(ANSWER_MS)
