@@ -52,8 +52,12 @@ export function devinAdapter({
 }) {
   return {
     harness: 'devin',
-    // Devin's own status line says it: "esc twice to interrupt".
-    interrupt: { presses: 2 },
+    // Devin's own status line says it: "esc twice to interrupt". The same two
+    // at a Devin already idle open its rewind ("Revert"), and the next Enter
+    // confirms it, cutting the conversation back: a third Escape a second
+    // later closes it, and changes nothing after a stopped turn or at an idle
+    // prompt (probed 2026-10-03).
+    interrupt: { presses: 2, closeAfterMs: 1_000 },
 
     async prepare({ launchId, role, directory, resume, message, agent, instructions }) {
       const executable = executableFor('devin', env)

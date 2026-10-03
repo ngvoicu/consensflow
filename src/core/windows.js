@@ -428,12 +428,18 @@ export class Windows {
       return
     }
     runtime.window.interrupted = { stop, rounds: (done?.rounds ?? 0) + 1, at: this.#now() }
-    const presses = runtime.window.adapter.interrupt?.presses ?? 1
+    const { presses = 1, closeAfterMs = null } = runtime.window.adapter.interrupt ?? {}
+    const pressEscape = () =>
+      this.#host.request('pane.input', { ...runtime.window.pane, bytes: [ESCAPE] }).catch(() => {})
     for (let press = 0; press < presses; press += 1) {
       if (press > 0) await new Promise((resolve) => setTimeout(resolve, DOUBLE_PRESS_MS))
-      await this.#host
-        .request('pane.input', { ...runtime.window.pane, bytes: [ESCAPE] })
-        .catch(() => {})
+      await pressEscape()
+    }
+    // Where the presses open a dialog at a turn that ended just before them
+    // (Devin's rewind), one more closes it, and is nothing anywhere else.
+    if (closeAfterMs !== null) {
+      await new Promise((resolve) => setTimeout(resolve, closeAfterMs))
+      await pressEscape()
     }
   }
 

@@ -224,6 +224,12 @@ console.log('devin ${version}')
     })
   })
 
+  it('interrupts with Escape twice, and closes with a third the rewind the two open at an idle prompt', () => {
+    // poker-lab, 2026-10-03: two Escapes at a Devin already stopped opened its
+    // rewind, and the next message's Enter rewound the conversation.
+    assert.deepEqual(devinAdapter({ env: {} }).interrupt, { presses: 2, closeAfterMs: 1_000 })
+  })
+
   it('tells Devin on Windows to name files the way its file tools write them, and nowhere else', () => {
     const role = '# ConsensFlow worker\n\nRole text.'
     const windows = devinRoleText(role, { OS: 'Windows_NT' })

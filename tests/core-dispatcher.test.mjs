@@ -812,6 +812,21 @@ describe('the dispatcher', () => {
     })
   })
 
+  it('presses one Escape more a moment later for a harness whose two can open a dialog', async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context)
+      context.adapter.interrupt = { presses: 2, closeAfterMs: 20 }
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.ledger.pauseTask(project.id, 1, { by: 'chief' })
+      const started = Date.now()
+      await context.dispatcher.pass()
+      assert.equal(context.host.requests.filter(([op]) => op === 'pane.input').length, 3)
+      assert.ok(Date.now() - started >= 20, 'the third after the pause the adapter names')
+    })
+  })
+
   it("presses no Escape into an idle window whose task is paused, and gives it the chief's tell as it is", async () => {
     // poker-lab, 2026-10-03: a tell's pause sent Escape twice to a Devin that
     // had stopped; its rewind opened, and the tell's Enter rewound the agent's
