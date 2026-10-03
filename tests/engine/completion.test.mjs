@@ -1816,6 +1816,21 @@ test('completion/devin: a turn whose work shows on the wire after the last end i
   } finally {
     await fs.rm(root, { recursive: true, force: true })
   }
+  // Seen on Windows, 2026-10-03: an Escape stopped the turn while its shell
+  // ran, and the shell's end came after the turn's.
+  const stopped = await stageDevin('Done.', [
+    ...ended,
+    work('tool_call'),
+    { sessionId: 'calm-river', update: { sessionUpdate: 'tool_call_update', status: 'failed' } },
+    { sessionId: 'calm-river', turnClientMessageId: 'request-2', cause: 'cancelled' },
+    { sessionId: 'calm-river', update: { sessionUpdate: 'tool_call_update', status: 'completed' } },
+  ])
+  try {
+    const after = await completion.answers('devin', 'calm-river', stopped.env)
+    assert.equal(after.inFlight, false, "a tool's last word after its turn is not work")
+  } finally {
+    await fs.rm(stopped.root, { recursive: true, force: true })
+  }
   const settings = await stageDevin('Done.', [
     { sessionId: 'calm-river', update: { sessionUpdate: 'config_option_update' } },
     ...ended,

@@ -1979,11 +1979,16 @@ function devinReader(sessionId, env) {
   }
 
   // A turn Devin is still on shows only on the wire: thoughts, messages and
-  // tool calls after the last end; its store holds the finished steps.
+  // tool calls after the last end; its store holds the finished steps. A
+  // tool's last word is not new work: a shell an Escape left running ends
+  // after its turn did, and its window would read as working for good.
   const visitWire = (wire, event) => {
     if (event.sessionId !== sessionId) return
     const update = event.update
-    if (DEVIN_WORK.has(update?.sessionUpdate)) wire.busy = true
+    const toolEnded =
+      update?.sessionUpdate === 'tool_call_update' &&
+      ['completed', 'failed', 'cancelled'].includes(update.status)
+    if (DEVIN_WORK.has(update?.sessionUpdate) && !toolEnded) wire.busy = true
     if (update?.sessionUpdate === 'agent_message_chunk') {
       const id = update._meta?.['cognition.ai/streamingMessageId']
       // History replay has timestamps but no streaming UUID.
