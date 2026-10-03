@@ -409,6 +409,7 @@ pub(crate) fn wait_for_input_blocking(receiver: oneshot::Receiver<InputResponse>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::arbiter::EnterTiming;
     #[cfg(unix)]
     use std::time::{Duration, Instant};
 
@@ -433,7 +434,7 @@ mod tests {
 
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
         let mut builder = BridgeBuilder::new(1024 * 1024);
         register_pane_handlers(
@@ -524,7 +525,10 @@ mod tests {
     #[test]
     fn input_for_a_pane_never_opened_is_refused() {
         let panes = Arc::new(PaneTable::new());
-        let inputs = InputQueue::new(Arc::clone(&panes), Arc::new(InputArbiter::new(0)));
+        let inputs = InputQueue::new(
+            Arc::clone(&panes),
+            Arc::new(InputArbiter::new(EnterTiming::fixed(0))),
+        );
         let refused = inputs.write(PaneKey::new("never-opened", 1), b"x".to_vec());
         assert!(matches!(
             refused,
@@ -539,7 +543,10 @@ mod tests {
     #[test]
     fn a_stopping_host_refuses_input_as_closed() {
         let panes = Arc::new(PaneTable::new());
-        let inputs = InputQueue::new(Arc::clone(&panes), Arc::new(InputArbiter::new(0)));
+        let inputs = InputQueue::new(
+            Arc::clone(&panes),
+            Arc::new(InputArbiter::new(EnterTiming::fixed(0))),
+        );
         let key = PaneKey::new("open-pane", 1);
         inputs.open(&key).expect("open the pane's input");
         inputs.close_and_drain();
@@ -588,7 +595,10 @@ mod tests {
     #[test]
     fn unanswered_page_input_is_bounded_until_a_new_page() {
         let panes = Arc::new(PaneTable::new());
-        let inputs = InputQueue::new(Arc::clone(&panes), Arc::new(InputArbiter::new(0)));
+        let inputs = InputQueue::new(
+            Arc::clone(&panes),
+            Arc::new(InputArbiter::new(EnterTiming::fixed(0))),
+        );
         let key = PaneKey::new("unanswered-pane", 1);
         inputs.open(&key).expect("open the pane's input");
         let typed = || InputWork::Write(b"x".to_vec());

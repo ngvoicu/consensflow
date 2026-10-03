@@ -508,7 +508,7 @@ mod tests {
     use tauri::ipc::Channel;
     use tauri::{Emitter, Manager};
 
-    use crate::arbiter::InputArbiter;
+    use crate::arbiter::{EnterTiming, InputArbiter};
     use crate::commands::subscribe_output;
     use crate::input_queue::InputQueue;
     use crate::output_hub::OutputHub;
@@ -582,7 +582,7 @@ mod tests {
         assert!(core.connection().is_ok());
         assert!(core.roster().is_some());
 
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let runtime = AppRuntime {
             inputs: Arc::new(InputQueue::new(Arc::clone(&panes), arbiter)),
             panes,
@@ -648,7 +648,7 @@ mod tests {
         );
         assert_eq!(starts.load(Ordering::SeqCst), 2);
 
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         AppRuntime {
             inputs: Arc::new(InputQueue::new(Arc::clone(&panes), arbiter)),
             panes,
@@ -709,7 +709,7 @@ mod tests {
         );
         assert_eq!(answer.recv_timeout(Duration::from_secs(5)), Ok(true));
 
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         AppRuntime {
             inputs: Arc::new(InputQueue::new(Arc::clone(&panes), arbiter)),
             panes,
@@ -865,7 +865,7 @@ mod tests {
         }));
         core.tell(CoreStatus::down("the core is held up", true));
         let panes = Arc::new(PaneTable::new());
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         app.manage(AppRuntime {
             inputs: Arc::new(InputQueue::new(Arc::clone(&panes), arbiter)),
             panes,

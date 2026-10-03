@@ -338,6 +338,7 @@ fn validate_open_request(request: &OpenRequest) -> Result<PaneKey, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::arbiter::EnterTiming;
     #[cfg(unix)]
     use std::sync::mpsc;
     #[cfg(unix)]
@@ -428,7 +429,7 @@ mod tests {
 
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
         let mut builder = BridgeBuilder::new(1024 * 1024);
         register_pane_handlers(
@@ -511,7 +512,7 @@ mod tests {
 
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
         let output = Arc::new(OutputHub::new());
         let (printed, seen) = mpsc::channel();

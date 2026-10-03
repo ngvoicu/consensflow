@@ -808,18 +808,21 @@ impl PaneInputWriter for PaneTable {
     }
 }
 
+/// A paste in brackets, then its Enter as a write of its own, once
+/// `before_enter` returns: a harness takes an Enter that arrives with the
+/// paste into it.
 pub(crate) fn write_paste_via<W: PaneInputWriter + ?Sized>(
     writer: &W,
     key: &PaneKey,
     body: &[u8],
-    enter_delay_ms: u64,
+    before_enter: impl FnOnce(),
 ) -> Result<(), PaneError> {
     let mut bracketed = Vec::with_capacity(12 + body.len());
     bracketed.extend_from_slice(b"\x1b[200~");
     bracketed.extend_from_slice(body);
     bracketed.extend_from_slice(b"\x1b[201~");
     writer.write(key, &bracketed)?;
-    thread_sleep_ms(enter_delay_ms);
+    before_enter();
     writer.write(key, b"\r")
 }
 
@@ -846,12 +849,6 @@ impl Read for ActivityReader {
                 .map_err(|_| io::Error::other("pane activity lock is poisoned"))? = Instant::now();
         }
         Ok(byte_count)
-    }
-}
-
-fn thread_sleep_ms(milliseconds: u64) {
-    if milliseconds > 0 {
-        std::thread::sleep(Duration::from_millis(milliseconds));
     }
 }
 
@@ -1934,7 +1931,10 @@ mod tests {
         assert_eq!(&ready, b"ready");
 
         let started = Instant::now();
-        write_paste_via(&table, &key, b"body", 25).expect("write paste through PaneTable");
+        write_paste_via(&table, &key, b"body", || {
+            std::thread::sleep(Duration::from_millis(25));
+        })
+        .expect("write paste through PaneTable");
 
         assert!(started.elapsed() >= Duration::from_millis(25));
         assert_eq!(

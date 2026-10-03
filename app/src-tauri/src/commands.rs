@@ -342,7 +342,7 @@ mod tests {
     use portable_pty::PtySize;
 
     #[cfg(unix)]
-    use crate::arbiter::InputArbiter;
+    use crate::arbiter::{EnterTiming, InputArbiter};
     #[cfg(unix)]
     use crate::bridge::BridgeBuilder;
     #[cfg(unix)]
@@ -438,7 +438,7 @@ mod tests {
     fn production_ipc_arrivals_admit_1000_human_writes_in_order() {
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
         let key = PaneKey::new("ordered-command", 1);
         let mut reader = panes
@@ -543,7 +543,7 @@ mod tests {
     fn production_ipc_consumes_sequence_before_size_refusal() {
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
         let key = PaneKey::new("sequenced-command", 1);
         let mut reader = panes
@@ -679,7 +679,7 @@ mod tests {
     fn a_reloaded_page_types_into_the_panes_it_finds() {
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
         let key = PaneKey::new("reloaded-page", 1);
         let mut reader = panes
@@ -765,7 +765,7 @@ mod tests {
     fn blocked_command_input_does_not_starve_another_pane_or_output_ack() {
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
         let size = PtySize {
             rows: 24,
@@ -987,7 +987,7 @@ mod tests {
         });
 
         let panes = Arc::new(PaneTable::new());
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
         let runtime = test_runtime(panes, inputs, None, Some(connected.bridge));
         let app = tauri::test::mock_builder()

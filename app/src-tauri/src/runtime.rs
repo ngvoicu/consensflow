@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
-use crate::arbiter::InputArbiter;
+use crate::arbiter::{EnterTiming, InputArbiter};
 use crate::bridge::BridgeBuilder;
 use crate::daemon::{
     connect_core, stop_editor, Core, CoreStarter, CoreStatus, CORE_READY_TIMEOUT, CORE_RESTART,
@@ -27,7 +27,15 @@ pub(crate) const MAX_FRAME_BYTES: usize = 1024 * 1024;
 const SHUTDOWN_DRAIN: Duration = Duration::from_secs(5);
 /// The page-side name of Node's `state.changed`. No dot: Tauri rejects it.
 pub(crate) const PAGE_STATE_EVENT: &str = "state-changed";
-const ENTER_DELAY_MS: u64 = 10;
+/// A paste's Enter goes once the window has printed nothing for 120 ms since
+/// the paste (its echo done), never sooner than 10 ms, never later than 2 s.
+/// A fixed 10 ms was a Mac's speed: through Windows' ConPTY the paste was
+/// still going in when its Enter came, and Devin took the Enter into it.
+const ENTER: EnterTiming = EnterTiming {
+    least_ms: 10,
+    quiet_ms: 120,
+    most_ms: 2_000,
+};
 
 type PageEventSink = Arc<dyn Fn(&str, Value) + Send + Sync>;
 
@@ -42,7 +50,7 @@ impl AppRuntime {
     pub fn start(app: &AppHandle) -> Self {
         let panes = Arc::new(PaneTable::new());
         let output = Arc::new(OutputHub::new());
-        let arbiter = Arc::new(InputArbiter::new(ENTER_DELAY_MS));
+        let arbiter = Arc::new(InputArbiter::new(ENTER));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
 
         let reporter = app.clone();
@@ -184,7 +192,7 @@ fn register_page_events(builder: &mut BridgeBuilder, sink: PageEventSink) {
 pub fn run_headless() -> Result<(), String> {
     let panes = Arc::new(PaneTable::new());
     let output = Arc::new(OutputHub::new());
-    let arbiter = Arc::new(InputArbiter::new(ENTER_DELAY_MS));
+    let arbiter = Arc::new(InputArbiter::new(ENTER));
     let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
 
     let mut builder = BridgeBuilder::new(MAX_FRAME_BYTES);
@@ -306,7 +314,7 @@ mod tests {
 
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
         let release = Arc::new(Barrier::new(2));
         let handler_release = Arc::clone(&release);
@@ -445,7 +453,7 @@ mod tests {
         drop(node_stream);
 
         let panes = Arc::new(PaneTable::new());
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
         let runtime = Arc::new(test_runtime(panes, inputs, None, Some(connected.bridge)));
         let quitting = Arc::clone(&runtime);
@@ -478,7 +486,7 @@ mod tests {
 
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
         let release = Arc::new(Barrier::new(2));
         let handler_release = Arc::clone(&release);
@@ -588,7 +596,7 @@ mod tests {
                 .read_line(&mut ready)
                 .expect("the stand-in says it is ready");
             assert_eq!(ready, "ready\n");
-            let arbiter = Arc::new(InputArbiter::new(0));
+            let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
             let panes = Arc::new(PaneTable::new());
             let runtime = test_runtime(
                 Arc::clone(&panes),

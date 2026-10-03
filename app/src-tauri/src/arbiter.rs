@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::pty::{write_paste_via, PaneError, PaneInputWriter, PaneKey, PaneTable};
 
@@ -115,6 +115,40 @@ impl OutputClock {
     }
 }
 
+/// When a paste's Enter goes: once the window has taken the paste in, that
+/// is, printed nothing for `quiet_ms` since the paste (its echo done), never
+/// sooner than `least_ms` and never later than `most_ms`.
+#[derive(Clone, Copy, Debug)]
+pub struct EnterTiming {
+    pub least_ms: u64,
+    pub quiet_ms: u64,
+    pub most_ms: u64,
+}
+
+impl EnterTiming {
+    /// A fixed wait, whatever the window prints.
+    pub const fn fixed(milliseconds: u64) -> Self {
+        Self {
+            least_ms: milliseconds,
+            quiet_ms: 0,
+            most_ms: milliseconds,
+        }
+    }
+
+    /// Waits, after a paste, until its Enter may go.
+    fn wait(&self, output: &OutputClock) {
+        let pasted = Instant::now();
+        loop {
+            let since = u64::try_from(pasted.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let quiet = output.quiet_ms().map_or(since, |quiet| quiet.min(since));
+            if since >= self.most_ms || (since >= self.least_ms && quiet >= self.quiet_ms) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+
 /// One pane's input. A pane's worker runs its keys, replies, pastes and
 /// claims one at a time, in order, so nothing waits in here: none of the
 /// human's keys can land inside a paste or before its Enter, and they hold
@@ -153,14 +187,14 @@ impl PaneInputState {
 
 pub struct InputArbiter {
     panes: Mutex<PaneStateMap>,
-    enter_delay_ms: u64,
+    enter: EnterTiming,
 }
 
 impl InputArbiter {
-    pub fn new(enter_delay_ms: u64) -> Self {
+    pub fn new(enter: EnterTiming) -> Self {
         Self {
             panes: Mutex::new(HashMap::new()),
-            enter_delay_ms,
+            enter,
         }
     }
 
@@ -320,12 +354,13 @@ impl InputArbiter {
     ) -> Result<(), ArbiterError> {
         let body = sanitize(body)?;
         let state = self.pane_state(pane)?;
-        {
+        let output = {
             let mut state = lock_state(&state)?;
             validate_admission(&state, pane)?;
             state.paste_in_flight = true;
-        }
-        let written = write_paste_via(writer, pane, &body, self.enter_delay_ms);
+            Arc::clone(&state.output)
+        };
+        let written = write_paste_via(writer, pane, &body, || self.enter.wait(&output));
         // A paste is answered as it went: a lock poisoned meanwhile fails the
         // pane's next admission, never what this paste already wrote.
         if let Ok(mut state) = lock_state(&state) {
@@ -423,14 +458,14 @@ mod tests {
     #[cfg(unix)]
     use portable_pty::PtySize;
 
-    use super::{sanitize, ArbiterError, InputArbiter, SanitizeError};
+    use super::{sanitize, ArbiterError, EnterTiming, InputArbiter, SanitizeError};
     #[cfg(unix)]
     use crate::pty::{serial_pty_test, OpenedPane, PaneTable};
     use crate::pty::{PaneError, PaneInputWriter, PaneKey};
 
     #[test]
     fn a_snapshot_says_how_long_the_pane_has_printed_nothing() {
-        let arbiter = InputArbiter::new(0);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
         let pane = PaneKey::new("quiet-pane", 1);
         let printed = arbiter.register(&pane).expect("register");
         assert_eq!(
@@ -619,7 +654,7 @@ mod tests {
     fn typing_never_holds_a_paste_or_a_claim() {
         let key = PaneKey::new("typed", 1);
         let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(0);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
         arbiter.register(&key).expect("register pane");
 
         arbiter
@@ -648,7 +683,7 @@ mod tests {
     /// generation retiring late leaves the newer one's state alone.
     #[test]
     fn a_retired_pane_leaves_and_a_newer_generation_stays() {
-        let arbiter = InputArbiter::new(0);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
         let old = PaneKey::new("worker", 1);
         let new = PaneKey::new("worker", 2);
         arbiter.register(&old).expect("register the old generation");
@@ -675,7 +710,7 @@ mod tests {
             first_write: Arc::clone(&first_write),
             release_first_write: Arc::clone(&release_first_write),
         });
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let printed = arbiter.register(&key).expect("register pane");
 
         let writing_arbiter = Arc::clone(&arbiter);
@@ -704,7 +739,7 @@ mod tests {
     fn paste_is_bracketed_then_enter_is_a_delayed_separate_write() {
         let key = PaneKey::new("recorded", 1);
         let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(25);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(25));
         arbiter.register(&key).expect("register pane");
 
         arbiter
@@ -716,6 +751,70 @@ mod tests {
         assert_eq!(records[0].bytes, b"\x1b[200~body\x1b[201~");
         assert_eq!(records[1].bytes, b"\r");
         assert!(records[1].at.duration_since(records[0].at) >= Duration::from_millis(25));
+    }
+
+    /// Pastes `body` through an arbiter with `enter`, the pane printing every
+    /// 10 ms for `printing`, and says how long its Enter waited.
+    fn enter_waited(enter: EnterTiming, printing: Duration) -> Duration {
+        let key = PaneKey::new("echoing", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(enter);
+        let clock = arbiter.register(&key).expect("register pane");
+        let printer = thread::spawn(move || {
+            let started = Instant::now();
+            while started.elapsed() < printing {
+                clock.note();
+                thread::sleep(Duration::from_millis(10));
+            }
+        });
+        arbiter
+            .write_paste_via(writer.as_ref(), &key, b"body")
+            .expect("write paste");
+        printer.join().expect("printer");
+        let records = writer.records();
+        records[1].at.duration_since(records[0].at)
+    }
+
+    #[test]
+    fn a_pastes_enter_waits_for_the_window_to_finish_echoing_it() {
+        let enter = EnterTiming {
+            least_ms: 0,
+            quiet_ms: 60,
+            most_ms: 5_000,
+        };
+        let waited = enter_waited(enter, Duration::from_millis(250));
+        assert!(
+            waited >= Duration::from_millis(250),
+            "{waited:?}: before the echo ended"
+        );
+        assert!(
+            waited < Duration::from_millis(2_000),
+            "{waited:?}: long after it"
+        );
+    }
+
+    #[test]
+    fn a_pastes_enter_goes_after_a_quiet_spell_when_nothing_echoes() {
+        let enter = EnterTiming {
+            least_ms: 0,
+            quiet_ms: 60,
+            most_ms: 5_000,
+        };
+        let waited = enter_waited(enter, Duration::ZERO);
+        assert!(waited >= Duration::from_millis(60), "{waited:?}");
+        assert!(waited < Duration::from_millis(2_000), "{waited:?}");
+    }
+
+    #[test]
+    fn a_window_that_never_stops_printing_gets_its_enter_at_the_most() {
+        let enter = EnterTiming {
+            least_ms: 0,
+            quiet_ms: 60,
+            most_ms: 300,
+        };
+        let waited = enter_waited(enter, Duration::from_millis(3_000));
+        assert!(waited >= Duration::from_millis(300), "{waited:?}");
+        assert!(waited < Duration::from_millis(2_500), "{waited:?}");
     }
 
     #[cfg(unix)]
@@ -744,7 +843,7 @@ mod tests {
             .expect("blocked pane ready");
         assert_eq!(&ready, b"ready");
         let (responsive_key, reader) = raw_recorder(&table, 1);
-        let arbiter = Arc::new(InputArbiter::new(5));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(5)));
         arbiter
             .register(&blocked_key)
             .expect("register blocked pane");
@@ -823,7 +922,7 @@ mod tests {
     fn claims_and_pastes_refuse_a_stale_pane() {
         let key = PaneKey::new("guarded", 1);
         let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(0);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
         arbiter.register(&key).expect("register pane");
         let stale = PaneKey::new(&key.id, key.generation + 1);
         assert!(matches!(arbiter.claim(&stale), Err(ArbiterError::Stale)));
@@ -840,7 +939,7 @@ mod tests {
     fn a_new_generation_cannot_cut_a_paste_short() {
         let old_key = PaneKey::new("worker", 1);
         let new_key = PaneKey::new("worker", 2);
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         arbiter.register(&old_key).expect("register old generation");
 
         let registration_checked = Arc::new(Barrier::new(2));
@@ -910,7 +1009,7 @@ mod tests {
             first_write: Arc::clone(&first_write),
             release_first_write: Arc::clone(&release_first_write),
         });
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         arbiter.register(&key).expect("register pane");
         let cell = arbiter
             .lock_panes()
@@ -946,7 +1045,7 @@ mod tests {
     fn generation_replacement_that_holds_the_cell_rejects_old_input_before_write() {
         let old_key = PaneKey::new("worker", 1);
         let new_key = PaneKey::new("worker", 2);
-        let arbiter = Arc::new(InputArbiter::new(0));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         arbiter.register(&old_key).expect("register old generation");
         let cell = arbiter
             .lock_panes()
@@ -1012,7 +1111,7 @@ mod tests {
     fn a_failed_write_stops_the_pane_input_until_a_new_generation() {
         let key = PaneKey::new("recorded", 1);
         let (first_write_fails, _observed) = RecordingWriter::new(Some(1));
-        let arbiter = InputArbiter::new(0);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
         arbiter.register(&key).expect("register pane");
 
         assert!(matches!(
@@ -1081,7 +1180,7 @@ mod tests {
         use std::collections::HashMap;
         use std::sync::Arc;
 
-        use super::super::InputArbiter;
+        use super::super::{EnterTiming, InputArbiter};
         use crate::pty::conpty_test::{line_echo, open, read_until};
         use crate::pty::{serial_pty_test, PaneTable};
 
@@ -1092,7 +1191,7 @@ mod tests {
             let _pty_guard = serial_pty_test();
             let table = Arc::new(PaneTable::new());
             let (key, output) = open(&table, &line_echo(), &HashMap::new(), 1 << 20);
-            let arbiter = InputArbiter::new(5);
+            let arbiter = InputArbiter::new(EnterTiming::fixed(5));
             arbiter.register(&key).expect("register pane");
             read_until(&table, &key, &output, "READY");
 
@@ -1110,7 +1209,7 @@ mod tests {
             let _pty_guard = serial_pty_test();
             let table = Arc::new(PaneTable::new());
             let (key, output) = open(&table, &line_echo(), &HashMap::new(), 1 << 20);
-            let arbiter = InputArbiter::new(5);
+            let arbiter = InputArbiter::new(EnterTiming::fixed(5));
             arbiter.register(&key).expect("register pane");
             read_until(&table, &key, &output, "READY");
 
