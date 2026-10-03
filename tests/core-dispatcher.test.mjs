@@ -22,7 +22,6 @@ const item = (role, text, extra = {}) => ({
   role,
   text,
   complete: role === 'assistant',
-  settled: true,
   ...extra,
 })
 
@@ -535,7 +534,7 @@ describe('the dispatcher', () => {
         'the brief, as the window got it',
       )
       const zeus = context.adapter.agent('zeus')
-      zeus.items.push(item('assistant', 'Half', { complete: false, settled: false }))
+      zeus.items.push(item('assistant', 'Half', { complete: false }))
       zeus.settled = false
       await context.dispatcher.pass()
       const half = context.ledger.transcript(project.id, 1).items.at(-1)
