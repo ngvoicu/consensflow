@@ -23,56 +23,30 @@
  * OpenCode take their messages through their own queues). They run one
  * after another; the exit code is 1 when any message was not sent.
  */
-import { randomUUID } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { findSession } from '../../evals/bare.mjs'
-import { HARNESSES, liveEnvironment, realOnPath } from '../../evals/plan.mjs'
-import { answers } from '../../hosts/lib/completion.js'
-import { interactiveStart } from '../../hosts/lib/windows.js'
-import { recordState, windowText } from '../../src/adapters/shared.js'
-import { prepareClaudeSettings } from '../../src/claude-install.js'
-import { consoleText } from '../../src/console-text.js'
-import { onWindows, paneArgv } from '../../src/harnesses.js'
-import { startIntegration } from '../integration/harness.mjs'
-import { trustForClaude } from './trust-claude.mjs'
+import {
+  ANSWER_MS,
+  lastLines,
+  openWindow,
+  pastedHarnesses,
+  READY_MS,
+  send,
+  sleep,
+  startLiveApp,
+} from './live-window.mjs'
 
-const HERE = dirname(fileURLToPath(import.meta.url))
-const DAEMON = join(HERE, 'core-live-daemon.mjs')
 const { values } = parseArgs({
   options: {
     harness: { type: 'string', multiple: true },
     long: { type: 'string', multiple: true },
   },
 })
-const harnesses = values.harness ?? ['devin']
+const harnesses = pastedHarnesses(values.harness ?? ['devin'])
 /** The long messages' lengths, in characters. */
 const LONG = (values.long ?? ['3700']).map(Number)
 if (!LONG.every((length) => Number.isInteger(length) && length > 0)) {
   throw new Error('--long takes a length in characters')
 }
-for (const name of harnesses) {
-  if (!['claude', 'devin'].includes(name)) {
-    throw new Error(
-      `the app pastes into claude and devin only; ${name} takes its messages through its own queue`,
-    )
-  }
-}
-const H = process.env.HOME ?? homedir()
-const ENV = liveEnvironment({ home: H })
-/** Where a harness looks for its records: the environment without the sandbox's removals. */
-const RECORD_ENV = Object.fromEntries(Object.entries(ENV).filter(([, value]) => value !== null))
-const WORKSPACE = join(H, '.consensflow-candidate', 'live', 'paste')
-mkdirSync(WORKSPACE, { recursive: true })
-
-/** How long a window may take to draw its prompt, and a sent message its answer. */
-const READY_MS = 120_000
-const ANSWER_MS = 180_000
-/** How long a window holds still before it counts as drawn, or done with its turn. */
-const STILL_MS = 3_000
 
 const ask = ([a, b]) => `Reply with only the sum of ${a} and ${b}, in digits, and run no tools.`
 const CASES = [
@@ -102,117 +76,27 @@ const CASES = [
   })),
 ]
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-const lastLines = (text) =>
-  text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(-8)
-    .join(' ⏎ ')
-
-/**
- * What a scripted Claude window needs besides its command line: no MCP
- * servers, connectors or browser, and the settings file the app writes for
- * each launch, which skips the full-permission warning (here, its home is
- * the folder's own).
- */
-async function claudeExtras() {
-  const home = { ...RECORD_ENV, CONSENSFLOW_HOME: join(WORKSPACE, '.consensflow') }
-  return [
-    ...(await prepareClaudeSettings(home, 'paste', { boardQuestions: false })),
-    '--strict-mcp-config',
-    '--no-chrome',
-  ]
-}
-
-const app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV })
+const app = await startLiveApp()
 const results = []
 try {
   for (const name of harnesses) {
-    const { kind, model } = HARNESSES[name]
-    // Claude and Pi open on an id they are given; the others name their own.
-    const session = kind === 'claude-code' || kind === 'pi' ? randomUUID() : null
-    const start = interactiveStart({ kind, model }, session, null)
-    const executable = realOnPath(start.command, ENV.PATH)
-    if (name === 'claude') {
-      process.stdout.write(`trust: ${await trustForClaude(app, WORKSPACE, executable)}\n`)
-    }
-    const pane = { id: `paste-${name}`, generation: 1 }
-    /** The message as the app gives it to this window: Devin on Windows gets its marks in ASCII. */
-    const given = (body) =>
-      name === 'devin' && onWindows(ENV) ? consoleText(windowText(body)) : windowText(body)
-    let native = session
-    const openedAt = Date.now()
-    /** What the harness's own record holds so far. */
-    const recorded = async () => {
-      native ??= findSession(kind, {
-        workspace: WORKSPACE,
-        since: openedAt,
-        home: H,
-        env: RECORD_ENV,
-      })
-      if (native === null) return []
-      const read = await answers(kind, native, RECORD_ENV).catch(() => null)
-      if (read === null || read.unknown) return []
-      return recordState(read).items
-    }
-    const opened = await app.request('pane.open', {
-      ...pane,
-      cwd: WORKSPACE,
-      argv: paneArgv(
-        [executable, ...(name === 'claude' ? await claudeExtras() : []), ...start.args],
-        ENV,
-      ),
-      env: start.env,
-      dropEnv: start.dropEnv,
-      size: { rows: 40, cols: 120 },
-    })
-    if (opened?.ok !== true) throw new Error(`${name} did not open: ${JSON.stringify(opened)}`)
-    const screen = () => app.output(pane.id)
-    const closed = () => app.exits.some((exit) => exit.id === pane.id)
-    /** Until the window has printed and then held still, or `ms` passed; whether it did. */
-    const still = async (ms) => {
-      const end = Date.now() + ms
-      let seen = -1
-      let since = Date.now()
-      while (Date.now() < end && !closed()) {
-        const length = screen().length
-        if (length !== seen) [seen, since] = [length, Date.now()]
-        else if (length > 0 && Date.now() - since >= STILL_MS) return true
-        await sleep(200)
-      }
-      return false
-    }
+    const window = await openWindow(app, name, { folder: 'paste', id: `paste-${name}` })
+    if (window.trust !== null) process.stdout.write(`trust: ${window.trust}\n`)
     try {
-      if (!(await still(READY_MS))) {
-        results.push({ name, check: 'opens', ok: false, detail: lastLines(screen()) })
+      if (!(await window.still(READY_MS))) {
+        results.push({ name, check: 'opens', ok: false, detail: lastLines(window.screen()) })
         continue
       }
       for (const check of CASES) {
         const answer = String(check.sum[0] + check.sum[1])
-        const from = screen().length
-        const pasted = Date.now()
-        const body = given(check.body(ask(check.sum)))
-        const written = await app.request('pane.write_paste', { ...pane, body })
-        // Its answer on the screen, or in its record: Windows' console host may
-        // draw "5555" in two strokes, which the screen's text then splits.
-        let shown = false
-        while (!shown && Date.now() - pasted < ANSWER_MS && !closed()) {
-          await sleep(500)
-          shown =
-            screen().slice(from).includes(answer) ||
-            (await recorded()).some(
-              (item) => item.role === 'assistant' && item.text.includes(answer),
-            )
-        }
-        const seconds = ((Date.now() - pasted) / 1000).toFixed(1)
+        const body = window.given(check.body(ask(check.sum)))
+        const { written, shown, seconds } = await send(app, window, body, answer)
         // Its record holds what was pasted, whole: where the app looks for it.
         const whole = body.replace(/\r\n/g, '\n').trim()
         let users = []
         let kept = false
         for (let tries = 0; shown && !kept && tries < 20; tries += 1) {
-          users = (await recorded()).filter((item) => item.role === 'user')
+          users = (await window.recorded()).filter((item) => item.role === 'user')
           kept = users.some((item) => item.text.replace(/\r\n/g, '\n').includes(whole))
           if (!kept) await sleep(500)
         }
@@ -223,16 +107,16 @@ try {
           check: check.name,
           ok: written?.ok === true && shown && kept,
           detail: !shown
-            ? `NOT SENT (${JSON.stringify(written)}): ${lastLines(screen())}`
+            ? `NOT SENT (${JSON.stringify(written)}): ${lastLines(window.screen())}`
             : kept
               ? `sent and recorded whole, answered in ${seconds} s`
               : `sent, but recorded otherwise: ${escaped(users.at(-1)?.text ?? '(no record found)')}`,
         })
         if (!shown) break
-        await still(ANSWER_MS)
+        await window.still(ANSWER_MS)
       }
     } finally {
-      await app.request('pane.kill', pane).catch(() => {})
+      await window.kill()
     }
   }
 } finally {

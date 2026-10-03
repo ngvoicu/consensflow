@@ -26,6 +26,25 @@ const RELAUNCH_MAX_MS = 5 * 60_000
  * its adapter, pane and launch, the token and files it was given, what it
  * is doing, whether the human opened it, and how it closes.
  */
+/**
+ * A harness's interrupt as keys into its window: Escape as many times in a
+ * row as it asks for, and, where those presses open a dialog at a turn that
+ * ended just before them (Devin's rewind), one more after a pause, which
+ * closes it and is nothing anywhere else. `npm run live:interrupt` presses
+ * it at real windows.
+ */
+export async function pressInterrupt(host, pane, { presses = 1, closeAfterMs = null } = {}) {
+  const pressEscape = () => host.request('pane.input', { ...pane, bytes: [ESCAPE] }).catch(() => {})
+  for (let press = 0; press < presses; press += 1) {
+    if (press > 0) await new Promise((resolve) => setTimeout(resolve, DOUBLE_PRESS_MS))
+    await pressEscape()
+  }
+  if (closeAfterMs !== null) {
+    await new Promise((resolve) => setTimeout(resolve, closeAfterMs))
+    await pressEscape()
+  }
+}
+
 export class Windows {
   #ledger
   #host
@@ -428,19 +447,7 @@ export class Windows {
       return
     }
     runtime.window.interrupted = { stop, rounds: (done?.rounds ?? 0) + 1, at: this.#now() }
-    const { presses = 1, closeAfterMs = null } = runtime.window.adapter.interrupt ?? {}
-    const pressEscape = () =>
-      this.#host.request('pane.input', { ...runtime.window.pane, bytes: [ESCAPE] }).catch(() => {})
-    for (let press = 0; press < presses; press += 1) {
-      if (press > 0) await new Promise((resolve) => setTimeout(resolve, DOUBLE_PRESS_MS))
-      await pressEscape()
-    }
-    // Where the presses open a dialog at a turn that ended just before them
-    // (Devin's rewind), one more closes it, and is nothing anywhere else.
-    if (closeAfterMs !== null) {
-      await new Promise((resolve) => setTimeout(resolve, closeAfterMs))
-      await pressEscape()
-    }
+    await pressInterrupt(this.#host, runtime.window.pane, runtime.window.adapter.interrupt)
   }
 
   /**
