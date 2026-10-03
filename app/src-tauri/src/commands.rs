@@ -19,26 +19,14 @@ pub(crate) fn window_command_allowed(window: &str, _command: &str) -> bool {
     window == "main"
 }
 
-fn request_node(connection: Result<Bridge, String>, operation: String, body: Value) -> Value {
+fn request_daemon(connection: Result<Bridge, String>, operation: String, body: Value) -> Value {
     let bridge = match connection {
         Ok(bridge) => bridge,
         Err(cause) => return not_available(&operation, &cause),
     };
     match bridge.request(operation.clone(), body, None) {
-        Ok(response) => normalize_node_response(&operation, response),
+        Ok(response) => response,
         Err(error) => json!({"ok":false,"error":error.to_string(),"operation":operation}),
-    }
-}
-
-fn normalize_node_response(operation: &str, response: Value) -> Value {
-    let unavailable = response
-        .get("error")
-        .and_then(Value::as_str)
-        .is_some_and(|error| error == "unknown-op");
-    if unavailable {
-        not_available(operation, "the Node handler has not landed yet")
-    } else {
-        response
     }
 }
 
@@ -203,7 +191,7 @@ async fn task_operation<R: Runtime>(
     let daemon = Arc::clone(&app.state::<AppRuntime>().daemon);
     // Off the async runtime: asked while the daemon is starting, it waits.
     run_blocking(operation, move || {
-        request_node(daemon.connection(), operation.to_string(), body)
+        request_daemon(daemon.connection(), operation.to_string(), body)
     })
     .await
 }
@@ -274,6 +262,13 @@ pub async fn daemon_request<R: Runtime>(
 /// process replaced, or the human's Reload) starts again from 1; every pane's
 /// next keystrokes were refused as a regression until the app restarted.
 ///
+/// It is also where the page before is let off what it never drew. A pane
+/// stops reading once a window of its output is unacknowledged, and only the
+/// page acknowledges; sends to a page that has gone still succeed (a
+/// channel's send is a script the webview runs), so those bytes stayed owed,
+/// and a pane printing faster than the page drew at the reload never printed
+/// again, its harness waiting on its terminal for good.
+///
 /// And it is when a new page hears where the daemon stands: what was told
 /// before it listened (a first start that failed while the page loaded) is
 /// told again, so the page listens to `daemon-status` before it subscribes.
@@ -282,9 +277,10 @@ pub async fn subscribe_output<R: Runtime>(
     app: AppHandle<R>,
     on_output: Channel<PaneOutputMessage>,
 ) -> Value {
-    let (output, inputs, daemon) = {
+    let (panes, output, inputs, daemon) = {
         let state = app.state::<AppRuntime>();
         (
+            Arc::clone(&state.panes),
             Arc::clone(&state.output),
             Arc::clone(&state.inputs),
             Arc::clone(&state.daemon),
@@ -292,6 +288,8 @@ pub async fn subscribe_output<R: Runtime>(
     };
     inputs.begin_page();
     output.register(on_output);
+    // Once the new page listens: everything sent before it went to the old.
+    panes.ack_all();
     daemon.tell_again();
     json!({"ok":true})
 }
@@ -360,22 +358,9 @@ mod tests {
 
     #[test]
     fn only_main_window_has_application_command_authority() {
-        assert!(window_command_allowed("main", "open_pm"));
-        assert!(!window_command_allowed("pm-t-2", "open_pm"));
+        assert!(window_command_allowed("main", "daemon_request"));
+        assert!(!window_command_allowed("p1-zeus", "daemon_request"));
         assert!(!window_command_allowed("stranger", "pane_input_enqueue"));
-    }
-
-    #[test]
-    fn unknown_node_operations_are_explicitly_not_available() {
-        assert_eq!(
-            normalize_node_response("answers.list", json!({"ok":false,"error":"unknown-op"})),
-            json!({
-                "ok":false,
-                "error":"not-available-yet",
-                "operation":"answers.list",
-                "detail":"the Node handler has not landed yet",
-            })
-        );
     }
 
     /// What the page asks while the daemon is down is answered with why,
@@ -383,7 +368,7 @@ mod tests {
     #[test]
     fn a_request_while_the_daemon_is_down_says_why() {
         assert_eq!(
-            request_node(
+            request_daemon(
                 Err("ConsensFlow's daemon stopped while the app was running".to_string()),
                 "board.get".to_string(),
                 json!({"project":1}),
@@ -761,6 +746,71 @@ mod tests {
             "414243",
             "every admitted keystroke reached the pane, in order"
         );
+        drop(app);
+    }
+
+    /// A reloaded page finds every pane still printing. A pane stops reading
+    /// once a window of its output is unacknowledged, and what the page
+    /// before was sent and never drew is never acknowledged: a pane that had
+    /// filled its window printed nothing more, its harness waiting on its
+    /// terminal for good.
+    #[cfg(unix)]
+    #[test]
+    fn a_reloaded_page_finds_every_pane_printing() {
+        const BACKLOG_BYTES: usize = 1024;
+        let _pty_guard = crate::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
+        let streamed = panes
+            .open_streamed_at(
+                PaneKey::new("p1-zeus", 1),
+                Path::new("/tmp"),
+                &["/usr/bin/yes".to_string()],
+                PaneEnvironment::new(&HashMap::new(), &[]),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+                BACKLOG_BYTES,
+            )
+            .expect("open a pane that never stops printing");
+        // The page that reloaded was sent a window's worth and drew none of it.
+        let mut sent = 0;
+        while sent < BACKLOG_BYTES {
+            sent += streamed
+                .output
+                .recv_timeout(Duration::from_secs(5))
+                .expect("output up to the window")
+                .bytes
+                .len();
+        }
+        assert!(
+            matches!(
+                streamed.output.recv_timeout(Duration::from_millis(150)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ),
+            "the pane waits for its window to be read"
+        );
+
+        let runtime = test_runtime(Arc::clone(&panes), inputs, None, None);
+        let app = tauri::test::mock_builder()
+            .manage(runtime)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        let subscribed = tauri::async_runtime::block_on(subscribe_output(
+            app.handle().clone(),
+            Channel::new(|_| Ok(())),
+        ));
+        assert_eq!(subscribed["ok"], true);
+        streamed
+            .output
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the pane prints again for the new page");
+
+        panes.kill(&streamed.key).expect("kill the pane");
         drop(app);
     }
 

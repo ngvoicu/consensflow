@@ -328,7 +328,7 @@ impl InputArbiter {
         }
         writer
             .write(pane, bytes)
-            .map_err(|error| fail_input(&state, pane, error))
+            .map_err(|error| fail_input(&state, pane, error, false))
     }
 
     pub fn write_paste(
@@ -366,13 +366,18 @@ impl InputArbiter {
             state.paste_in_flight = true;
             Arc::clone(&state.output)
         };
-        let written = write_paste_via(writer, pane, &body, || self.enter.wait(&output));
+        // The Enter's wait begins once the paste itself is written.
+        let mut pasted = false;
+        let written = write_paste_via(writer, pane, &body, || {
+            pasted = true;
+            self.enter.wait(&output);
+        });
         // A paste is answered as it went: a lock poisoned meanwhile fails the
         // pane's next admission, never what this paste already wrote.
         if let Ok(mut state) = lock_state(&state) {
             state.paste_in_flight = false;
         }
-        written.map_err(|error| fail_input(&state, pane, error))
+        written.map_err(|error| fail_input(&state, pane, error, pasted))
     }
 
     fn pane_state(&self, pane: &PaneKey) -> Result<PaneState, ArbiterError> {
@@ -411,8 +416,14 @@ fn validate_admission(state: &PaneInputState, pane: &PaneKey) -> Result<(), Arbi
 
 /// A write that failed may have reached the pane in part, so the pane takes
 /// no more input until a new generation replaces it. A newer generation that
-/// took its place meanwhile keeps working input.
-fn fail_input(state: &PaneState, pane: &PaneKey, error: PaneError) -> ArbiterError {
+/// took its place meanwhile keeps working input. But a write that found the
+/// pane gone from the table (killed, or ended, while the input waited its
+/// turn) wrote nothing: an input no earlier write had `begun` is refused, as
+/// it is once the pane's input is retired, and fails nothing.
+fn fail_input(state: &PaneState, pane: &PaneKey, error: PaneError, begun: bool) -> ArbiterError {
+    if !begun && matches!(error, PaneError::NotFound(_)) {
+        return ArbiterError::Stale;
+    }
     if let Ok(mut state) = lock_state(state) {
         if state.generation == pane.generation {
             state.input_failed = true;
@@ -466,8 +477,8 @@ mod tests {
 
     use super::{sanitize, ArbiterError, EnterTiming, InputArbiter, SanitizeError};
     #[cfg(unix)]
-    use crate::pty::{serial_pty_test, OpenedPane, PaneTable};
-    use crate::pty::{PaneError, PaneInputWriter, PaneKey};
+    use crate::pty::{serial_pty_test, OpenedPane};
+    use crate::pty::{PaneError, PaneInputWriter, PaneKey, PaneTable};
 
     #[test]
     fn a_snapshot_says_how_long_the_pane_has_printed_nothing() {
@@ -1182,6 +1193,65 @@ mod tests {
             !arbiter
                 .snapshot(&restarted_key)
                 .expect("restarted state")
+                .input_failed
+        );
+    }
+
+    /// A pane that leaves the table once `writes` writes have gone in.
+    struct GoneAfter {
+        writes: usize,
+        attempts: AtomicUsize,
+    }
+
+    impl PaneInputWriter for GoneAfter {
+        fn write(&self, pane: &PaneKey, _bytes: &[u8]) -> Result<(), PaneError> {
+            if self.attempts.fetch_add(1, Ordering::SeqCst) < self.writes {
+                Ok(())
+            } else {
+                Err(PaneError::NotFound(pane.clone()))
+            }
+        }
+    }
+
+    /// A write that finds its pane gone from the table (killed while the
+    /// input waited its turn, its input not yet retired) wrote nothing: it is
+    /// refused, as input sent after the retirement is, and the pane's input
+    /// is not failed for it. It used to be uncertain, and fail the pane's
+    /// input. An Enter that finds the pane gone after its paste went in is
+    /// uncertain still.
+    #[test]
+    fn a_write_that_finds_its_pane_gone_is_refused_and_fails_nothing() {
+        let key = PaneKey::new("p1-zeus", 1);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        arbiter.register(&key).expect("register pane");
+        let without_the_pane = PaneTable::new();
+
+        assert!(matches!(
+            arbiter.write(&without_the_pane, &key, b"typed"),
+            Err(ArbiterError::Stale)
+        ));
+        assert!(matches!(
+            arbiter.write_paste(&without_the_pane, &key, b"body"),
+            Err(ArbiterError::Stale)
+        ));
+        let snapshot = arbiter.snapshot(&key).expect("the pane's input");
+        assert!(
+            !snapshot.input_failed && !snapshot.paste_in_flight,
+            "{snapshot:?}"
+        );
+
+        let gone_before_the_enter = GoneAfter {
+            writes: 1,
+            attempts: AtomicUsize::new(0),
+        };
+        assert!(matches!(
+            arbiter.write_paste_via(&gone_before_the_enter, &key, b"body"),
+            Err(ArbiterError::Pane(PaneError::NotFound(_)))
+        ));
+        assert!(
+            arbiter
+                .snapshot(&key)
+                .expect("the pane's input")
                 .input_failed
         );
     }

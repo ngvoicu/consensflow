@@ -62,15 +62,6 @@ struct PaneRequest {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ResizeRequest {
-    id: String,
-    generation: u64,
-    rows: u16,
-    cols: u16,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct BytesRequest {
     id: String,
     generation: u64,
@@ -204,20 +195,6 @@ pub(crate) fn register_pane_handlers(
         Ok(json!({"ok":true}))
     });
 
-    let resize_panes = Arc::clone(&panes);
-    builder.on("pane.resize", move |_bridge, body| {
-        let request: ResizeRequest = parse_body(body)?;
-        validate_size(request.cols, request.rows)?;
-        resize_panes
-            .resize(
-                &pane_key(&request.id, request.generation)?,
-                request.rows,
-                request.cols,
-            )
-            .map_err(|error| error.to_string())?;
-        Ok(json!({"ok":true}))
-    });
-
     let ack_panes = Arc::clone(&panes);
     builder.on("pane.ack", move |_bridge, body| {
         let request: AckRequest = parse_body(body)?;
@@ -233,8 +210,11 @@ pub(crate) fn register_pane_handlers(
     builder.on("pane.kill", move |_bridge, body| {
         let request: PaneRequest = parse_body(body)?;
         let key = pane_key(&request.id, request.generation)?;
-        kill_panes.kill(&key).map_err(|error| error.to_string())?;
+        // The daemon is done with the window whatever its kill answers: its
+        // input goes with it, and the daemon hears the failure.
+        let killed = kill_panes.kill(&key);
         kill_inputs.retire(&key);
+        killed.map_err(|error| error.to_string())?;
         Ok(json!({"ok":true}))
     });
 
@@ -495,6 +475,78 @@ mod tests {
         panes
             .kill(&PaneKey::new("typing-pane", 1))
             .expect("kill the pane");
+        inputs.close_and_drain();
+        drop(reader);
+        drop(node_stream);
+        connected.bridge.wait_closed().expect("bridge closes");
+    }
+
+    /// A pane whose kill failed takes its input with it all the same, and the
+    /// daemon hears the failure. Its input worker used to stay until the app
+    /// quit, admitting input for a window the daemon had closed.
+    #[cfg(unix)]
+    #[test]
+    fn a_kill_that_fails_still_takes_the_panes_input() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        use crate::arbiter::ArbiterError;
+
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let key = PaneKey::new("p1-zeus", 1);
+        arbiter.register(&key).expect("register the pane");
+        inputs.open(&key).expect("open the pane's input");
+        let mut builder = BridgeBuilder::new(1024 * 1024);
+        register_pane_handlers(
+            &mut builder,
+            Arc::clone(&panes),
+            Arc::clone(&arbiter),
+            Arc::new(OutputHub::new()),
+            Arc::clone(&inputs),
+        );
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        panes.poison();
+
+        let mut frame = serde_json::to_vec(&json!({
+            "v":1,"id":"n-kill","kind":"req","op":"pane.kill",
+            "body":{"id":key.id,"generation":key.generation},
+        }))
+        .expect("serialize the kill");
+        frame.push(b'\n');
+        node_stream.write_all(&frame).expect("ask for the kill");
+        let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
+        let answer = loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("read a frame");
+            let frame: Value = serde_json::from_str(line.trim()).expect("frame JSON");
+            if frame["kind"] == "res" && frame["id"] == "n-kill" {
+                break frame["body"].clone();
+            }
+        };
+        assert_eq!(
+            answer,
+            json!({"ok":false,"error":"pane table lock is poisoned"})
+        );
+        assert!(
+            matches!(
+                inputs.write(key.clone(), b"x".to_vec()),
+                Err(InputError::Refused {
+                    code: "stale-pane",
+                    ..
+                })
+            ),
+            "the pane kept its input"
+        );
+        assert!(matches!(arbiter.snapshot(&key), Err(ArbiterError::Stale)));
+
         inputs.close_and_drain();
         drop(reader);
         drop(node_stream);

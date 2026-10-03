@@ -431,11 +431,10 @@ impl RosterHandle {
     }
 }
 
-/// Where the daemon's error output goes. On Windows a windowed app has no
-/// stderr to hand down (inheriting an invalid handle fails the spawn), so the
-/// daemon appends to the app's error log, the file the macOS build redirects
-/// the app's own stderr to, kept the same way; elsewhere the daemon inherits
-/// the app's.
+/// Where the daemon's error output goes: the app's error log. On Windows the
+/// daemon opens it itself, kept the same way, since a windowed app whose own
+/// stderr could not be pointed at the log has none to hand down (inheriting
+/// an invalid handle fails the spawn); elsewhere it inherits the app's.
 #[cfg(windows)]
 fn daemon_stderr() -> Stdio {
     crate::error_log()
@@ -909,7 +908,7 @@ mod tests {
     }
 
     /// On Windows the daemon's errors go to the app's error log, kept as the
-    /// macOS app keeps it: a log past its limit is moved aside first. It used
+    /// app keeps its own: a log past its limit is moved aside first. It used
     /// to grow without end.
     #[cfg(windows)]
     #[test]

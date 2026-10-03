@@ -101,7 +101,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn headless_output_includes_companion_panes() {
+    fn headless_output_includes_a_members_window() {
         let hub = OutputHub::new();
         let seen = Arc::new(Mutex::new(Vec::new()));
         let copy = Arc::clone(&seen);
@@ -110,16 +110,16 @@ mod tests {
             true
         }));
         hub.publish(PaneOutputMessage {
-            id: "p-pm".into(),
+            id: "p1-zeus".into(),
             generation: 1,
             seq: 1,
             bytes: vec![65],
         });
-        assert_eq!(*seen.lock().unwrap(), vec!["p-pm"]);
+        assert_eq!(*seen.lock().unwrap(), vec!["p1-zeus"]);
     }
 
     #[test]
-    fn main_subscription_receives_pm_and_chief_output_without_replacing_either() {
+    fn main_subscription_receives_the_chief_and_a_member_without_replacing_either() {
         let hub = OutputHub::new();
         let seen = Arc::new(Mutex::new(Vec::new()));
         let copy = Arc::clone(&seen);
@@ -127,7 +127,7 @@ mod tests {
             copy.lock().unwrap().push(message.id);
             true
         }));
-        for id in ["p-pm", "p-chief", "p-pm"] {
+        for id in ["p1-zeus", "p1-chief", "p1-zeus"] {
             hub.publish(PaneOutputMessage {
                 id: id.into(),
                 generation: 1,
@@ -135,7 +135,10 @@ mod tests {
                 bytes: vec![65],
             });
         }
-        assert_eq!(*seen.lock().unwrap(), vec!["p-pm", "p-chief", "p-pm"]);
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec!["p1-zeus", "p1-chief", "p1-zeus"]
+        );
     }
 
     /// A destination that has gone (a page that reloaded, its channel with
@@ -145,7 +148,7 @@ mod tests {
     fn output_waits_for_the_next_destination_when_one_goes() {
         let hub = OutputHub::new();
         let message = |seq| PaneOutputMessage {
-            id: "p-chief".into(),
+            id: "p1-chief".into(),
             generation: 1,
             seq,
             bytes: vec![65],

@@ -286,6 +286,14 @@ impl OutputFlow {
         Ok(())
     }
 
+    /// Everything issued so far counts as read.
+    fn acknowledge_all(&self) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.unacked.clear();
+        state.unacked_bytes = 0;
+        self.ready.notify_all();
+    }
+
     fn close(&self) {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         state.closed = true;
@@ -591,6 +599,23 @@ impl PaneTable {
             })
     }
 
+    /// Every pane's output so far, acknowledged: a page that has gone never
+    /// acknowledges what it was sent, and only acknowledgements free a pane's
+    /// window of unread output, so a pane whose window it filled printed
+    /// nothing more.
+    pub fn ack_all(&self) {
+        let flows: Vec<_> = self
+            .panes
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .values()
+            .filter_map(|pane| pane.output_flow.clone())
+            .collect();
+        for flow in flows {
+            flow.acknowledge_all();
+        }
+    }
+
     pub fn write(&self, key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError> {
         let (writer, last_activity, active_writes) = {
             let panes = self.lock_panes()?;
@@ -799,6 +824,21 @@ impl PaneTable {
 
     fn lock_panes(&self) -> Result<MutexGuard<'_, HashMap<PaneKey, Pane>>, PaneError> {
         self.panes.lock().map_err(|_| PaneError::LockPoisoned)
+    }
+
+    /// The table as a thread that panicked holding its lock leaves it: every
+    /// operation on it fails from then on, a kill's included.
+    #[cfg(test)]
+    pub(crate) fn poison(&self) {
+        std::thread::scope(|scope| {
+            let poisoned = scope
+                .spawn(|| {
+                    let _held = self.panes.lock();
+                    panic!("the pane table's lock is poisoned");
+                })
+                .join();
+            assert!(poisoned.is_err());
+        });
     }
 }
 
