@@ -4346,6 +4346,20 @@ test("the chief's card says when a switch waits for its turn", async ({ page }) 
   await expect(page.locator('.row-status[data-state="switching"]')).toHaveCount(0)
 })
 
+test('says on a card and a row when a message waits for what the human typed there and has not sent', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').holding = true
+  data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus').holding = true
+  await open(page, data)
+  const words = 'A message waits until you send or erase what you typed here'
+  await expect(
+    page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status'),
+  ).toHaveText(words)
+  await expect(page.locator('tr[data-handle="zeus"] .row-status')).toHaveText(words)
+})
+
 test("offers a chief still on its harness's own default every saved agent, and moves it to one", async ({
   page,
 }) => {

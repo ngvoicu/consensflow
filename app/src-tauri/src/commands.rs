@@ -92,7 +92,7 @@ pub fn pane_input_enqueue<R: Runtime>(
     sequence: u64,
     bytes: Vec<u8>,
 ) -> Value {
-    enqueue_page_input(app, id, generation, sequence, InputWork::Write(bytes), true)
+    enqueue_page_input(app, id, generation, sequence, InputWork::Typed(bytes), true)
 }
 
 #[tauri::command]
@@ -512,6 +512,16 @@ mod tests {
         }
 
         let output = output_reader.join().expect("join ordered output reader");
+        // The page's keys are the human's own: what they leave stays unsent,
+        // and holds a paste, until it is sent.
+        let counted = std::time::Instant::now() + Duration::from_secs(5);
+        while !arbiter.snapshot(&key).expect("snapshot").unsent {
+            assert!(
+                std::time::Instant::now() < counted,
+                "the human's typing never counted"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
         let actual = String::from_utf8(output)
             .expect("od output is UTF-8")
             .split_whitespace()

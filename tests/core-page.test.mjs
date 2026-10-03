@@ -84,6 +84,7 @@ async function withPage(fn) {
     activity: () => ({ state: 'idle' }),
     pane: () => null,
     pendingSwitch: () => null,
+    holding: () => false,
     // The harnesses a test says the daemon has no adapter for.
     adapterless: new Set(),
     requireAdapter(harness) {

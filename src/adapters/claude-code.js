@@ -7,7 +7,14 @@ import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
 import { writePaste } from '../channels/pty.js'
 import { prepareClaudeSettings } from '../claude-install.js'
 import { roleConfiguration } from '../role-skills.js'
-import { admission, executableFor, SHOWS_ANOTHER, switchedTo, windowText } from './shared.js'
+import {
+  admission,
+  executableFor,
+  SHOWS_ANOTHER,
+  switchedTo,
+  UNSENT,
+  windowText,
+} from './shared.js'
 
 /**
  * Claude Code, for the daemon (see `src/core/dispatcher.js` for the adapter
@@ -111,7 +118,7 @@ export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
       if (snapshot?.ok !== true)
         return `the window cannot be read: ${snapshot?.error ?? 'no answer'}`
       if (snapshot.pasteInFlight) return 'a paste is on its way to the window'
-      return true
+      return snapshot.unsent ? UNSENT : true
     },
 
     async deliver({ pane, host, text }) {

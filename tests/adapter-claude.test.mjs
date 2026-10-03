@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { claudeCodeAdapter } from '../src/adapters/claude-code.js'
+import { UNSENT } from '../src/adapters/shared.js'
 import { fakeExecutable } from './helpers.mjs'
 
 /**
@@ -416,23 +417,22 @@ describe('the Claude Code adapter', () => {
     })
   })
 
-  it('pastes a message into the window by default, waiting only for a paste on its way', async () => {
+  it('pastes a message into the window, waiting for a paste on its way and for what the human has not sent', async () => {
     await withHome(async ({ env }) => {
       const adapter = claudeCodeAdapter({ env })
       const requests = []
       let pasteInFlight = false
+      let unsent = false
       const host = {
         async request(op, body) {
           requests.push([op, body])
-          if (op === 'pane.snapshot') return { ok: true, pasteInFlight }
+          if (op === 'pane.snapshot') return { ok: true, pasteInFlight, unsent }
           if (op === 'pane.write_paste') return { ok: true }
           return { ok: false, error: 'unexpected' }
         },
       }
       const pane = { id: 's1-zeus', generation: 7 }
       const launch = { nativeSession: 'e2c56db5-dffb-48d2-b060-d0f5a71096e0' }
-      // Text the human typed and left unsent holds nothing (the owner's choice,
-      // 2026-10-01): the window is ready, and the paste goes in behind it.
       assert.equal(await adapter.ready({ launch, pane, host }), true)
       assert.deepEqual(await adapter.deliver({ launch, pane, host, text: 'hello' }), {
         admitted: true,
@@ -446,6 +446,11 @@ describe('the Claude Code adapter', () => {
         await adapter.ready({ launch, pane, host }),
         'a paste is on its way to the window',
       )
+      // What the human typed and has not sent holds the paste: never pasted
+      // into their text (the owner's choice, 2026-10-03).
+      pasteInFlight = false
+      unsent = true
+      assert.equal(await adapter.ready({ launch, pane, host }), UNSENT)
     })
   })
 

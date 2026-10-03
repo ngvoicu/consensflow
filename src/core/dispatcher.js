@@ -232,6 +232,14 @@ export class Dispatcher {
     return this.#runtime.get(participantId)?.window.activity ?? { state: 'closed' }
   }
 
+  /** Whether a message waits for this participant until the human sends what they typed in its window. */
+  holding(participantId) {
+    return (
+      this.#runtime.get(participantId)?.delivery.unsent === true &&
+      this.#ledger.nextDelivery(participantId) !== null
+    )
+  }
+
   /** The Switch chief waiting for this chief's turn to end, `{harness, agent}`, or null. */
   pendingSwitch(participantId) {
     const pending = this.#runtime.get(participantId)?.pendingSwitch ?? null
@@ -901,7 +909,7 @@ export class Dispatcher {
           interrupted: null,
           activity: { state: 'closed' },
         },
-        delivery: { delivering: null, held: null },
+        delivery: { delivering: null, held: null, unsent: false },
         quota: { reported: null, lowUntil: null },
         pendingSwitch: null,
         copied: null,

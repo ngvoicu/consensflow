@@ -38,6 +38,8 @@ pub enum ArbiterError {
     Stale,
     Busy,
     InputFailed,
+    /// The human has typed in the window and not sent it yet.
+    Unsent,
     InvalidBody(SanitizeError),
     /// The write itself failed, once begun: some of the input may have
     /// reached the pane.
@@ -51,6 +53,7 @@ impl fmt::Display for ArbiterError {
             Self::Stale => write!(formatter, "stale pane generation"),
             Self::Busy => write!(formatter, "a paste is already in flight"),
             Self::InputFailed => write!(formatter, "pane input is failed until restart"),
+            Self::Unsent => write!(formatter, "the human has unsent text in the window"),
             Self::InvalidBody(error) => write!(formatter, "invalid paste body: {error}"),
             Self::Pane(error) => error.fmt(formatter),
             Self::LockPoisoned => write!(formatter, "input arbiter lock is poisoned"),
@@ -77,6 +80,8 @@ pub struct ArbiterSnapshot {
     pub generation: u64,
     pub paste_in_flight: bool,
     pub input_failed: bool,
+    /// The human has typed in the window and not sent it: a paste waits.
+    pub unsent: bool,
     /// How long the pane has printed nothing, once it has printed anything:
     /// a harness still drawing its screen is not ready for input.
     pub output_quiet_ms: Option<u64>,
@@ -157,14 +162,18 @@ impl EnterTiming {
 
 /// One pane's input. A pane's worker runs its keys, replies, pastes and
 /// claims one at a time, in order, so nothing waits in here: none of the
-/// human's keys can land inside a paste or before its Enter, and they hold
-/// nothing back either (a delivery is pasted into a window whatever its input
-/// box holds, the human's unsent text included: the owner's choice,
-/// 2026-10-01). The lock is never held across a write.
+/// human's keys can land inside a paste or before its Enter. What the human
+/// typed and has not sent holds a paste back until they send it or erase it
+/// (`unsent`, a count of characters as near as keys tell): a delivery is
+/// never pasted into their text (the owner's choice, 2026-10-03, after
+/// "send right away" on 10-01 pasted over what he was typing). A native
+/// send's claim leaves the input box alone, so unsent text holds none. The
+/// lock is never held across a write.
 struct PaneInputState {
     generation: u64,
     paste_in_flight: bool,
     input_failed: bool,
+    unsent: usize,
     output: Arc<OutputClock>,
 }
 
@@ -177,6 +186,7 @@ impl PaneInputState {
             generation,
             paste_in_flight: false,
             input_failed: false,
+            unsent: 0,
             output: Arc::new(OutputClock::new()),
         }
     }
@@ -186,6 +196,7 @@ impl PaneInputState {
             generation: self.generation,
             paste_in_flight: self.paste_in_flight,
             input_failed: self.input_failed,
+            unsent: self.unsent > 0,
             output_quiet_ms: self.output.quiet_ms(),
         }
     }
@@ -305,7 +316,33 @@ impl InputArbiter {
         Ok(snapshot)
     }
 
-    /// The human's keys and the emulator's replies, written at once.
+    /// The human's own keys, written at once, and counted for what they
+    /// leave unsent in the window's input box.
+    pub fn write_typed(
+        &self,
+        table: &PaneTable,
+        pane: &PaneKey,
+        bytes: &[u8],
+    ) -> Result<(), ArbiterError> {
+        self.write_typed_via(table, pane, bytes)
+    }
+
+    fn write_typed_via<W: PaneInputWriter + ?Sized>(
+        &self,
+        writer: &W,
+        pane: &PaneKey,
+        bytes: &[u8],
+    ) -> Result<(), ArbiterError> {
+        self.write_via(writer, pane, bytes)?;
+        let state = self.pane_state(pane)?;
+        let mut state = lock_state(&state)?;
+        if state.generation == pane.generation {
+            state.unsent = unsent_after(state.unsent, bytes);
+        }
+        Ok(())
+    }
+
+    /// The emulator's replies and the daemon's own keys, written at once.
     pub fn write(
         &self,
         table: &PaneTable,
@@ -363,6 +400,9 @@ impl InputArbiter {
         let output = {
             let mut state = lock_state(&state)?;
             validate_admission(&state, pane)?;
+            if state.unsent > 0 {
+                return Err(ArbiterError::Unsent);
+            }
             state.paste_in_flight = true;
             Arc::clone(&state.output)
         };
@@ -404,6 +444,56 @@ fn validate_generation(state: &PaneInputState, pane: &PaneKey) -> Result<(), Arb
     } else {
         Err(ArbiterError::Stale)
     }
+}
+
+/// How many characters the human's keys leave unsent in a window's input
+/// box, as near as keys tell: each character typed or pasted counts one,
+/// Backspace takes one off, and Enter (sent), Ctrl+C or Ctrl+U (the line
+/// cleared) leave none. Ctrl+V counts one, for what it pastes from the
+/// clipboard (an image's placeholder, in Claude Code). A bracketed paste
+/// counts its characters, its line breaks included. Other escape sequences
+/// (arrows, function keys, Alt+Enter's new line) and control keys change
+/// nothing.
+fn unsent_after(mut unsent: usize, bytes: &[u8]) -> usize {
+    const PASTE_START: &[u8] = b"\x1b[200~";
+    const PASTE_END: &[u8] = b"\x1b[201~";
+    let characters = |text: &[u8]| text.iter().filter(|byte| *byte & 0xC0 != 0x80).count();
+    let mut at = 0;
+    while at < bytes.len() {
+        let rest = &bytes[at..];
+        match rest[0] {
+            b'\r' | b'\n' | 0x03 | 0x15 => unsent = 0,
+            0x7f | 0x08 => unsent = unsent.saturating_sub(1),
+            0x16 => unsent += 1,
+            0x1b if rest.starts_with(PASTE_START) => {
+                let text = &rest[PASTE_START.len()..];
+                let end = text
+                    .windows(PASTE_END.len())
+                    .position(|window| window == PASTE_END)
+                    .unwrap_or(text.len());
+                unsent += characters(&text[..end]);
+                at += PASTE_START.len() + (end + PASTE_END.len()).min(text.len());
+                continue;
+            }
+            0x1b => {
+                at += match rest.get(1) {
+                    Some(b'[') => rest[2..]
+                        .iter()
+                        .position(|byte| (0x40..=0x7e).contains(byte))
+                        .map_or(rest.len(), |end| end + 3),
+                    Some(b'O') => 3.min(rest.len()),
+                    Some(_) => 2,
+                    None => 1,
+                };
+                continue;
+            }
+            byte if byte < 0x20 => {}
+            byte if byte & 0xC0 != 0x80 => unsent += 1,
+            _ => {}
+        }
+        at += 1;
+    }
+    unsent
 }
 
 fn validate_admission(state: &PaneInputState, pane: &PaneKey) -> Result<(), ArbiterError> {
@@ -664,23 +754,45 @@ mod tests {
         }
     }
 
-    /// Unsent typing holds nothing: a paste admitted after it goes in behind
-    /// the human's text, and a native send is admitted too (the owner's choice
-    /// on 2026-10-01: an idle window gets its message at once).
+    /// What the human typed and has not sent holds a paste back until they
+    /// send it or erase it, and never a native send's claim, which leaves the
+    /// input box alone (the owner's choice, 2026-10-03). The daemon's own keys
+    /// are not the human's: they hold nothing.
     #[test]
-    fn typing_never_holds_a_paste_or_a_claim() {
+    fn unsent_typing_holds_a_paste_until_it_is_sent_but_never_a_claim() {
         let key = PaneKey::new("typed", 1);
         let (writer, _observed) = RecordingWriter::new(None);
         let arbiter = InputArbiter::new(EnterTiming::fixed(0));
         arbiter.register(&key).expect("register pane");
+        let unsent = || arbiter.snapshot(&key).expect("snapshot").unsent;
 
         arbiter
-            .write_via(writer.as_ref(), &key, b"half a thought")
+            .write_typed_via(writer.as_ref(), &key, b"half a thought")
             .expect("type without sending");
+        assert!(unsent());
         arbiter.claim(&key).expect("a native send is admitted");
+        assert!(matches!(
+            arbiter.write_paste_via(writer.as_ref(), &key, b"result"),
+            Err(ArbiterError::Unsent)
+        ));
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, &[0x7f; 14])
+            .expect("erase it all");
+        assert!(!unsent(), "erased to nothing, it holds nothing");
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, b"more")
+            .expect("type again");
+        assert!(unsent());
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, b"\r")
+            .expect("send it");
         arbiter
             .write_paste_via(writer.as_ref(), &key, b"result")
-            .expect("a paste is admitted");
+            .expect("a paste goes in once the text is sent");
+        arbiter
+            .write_via(writer.as_ref(), &key, b"x")
+            .expect("the daemon's key");
+        assert!(!unsent(), "the daemon's keys are not the human's");
 
         assert_eq!(
             writer
@@ -690,9 +802,54 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 b"half a thought".to_vec(),
+                vec![0x7f; 14],
+                b"more".to_vec(),
+                b"\r".to_vec(),
                 b"\x1b[200~result\x1b[201~".to_vec(),
                 b"\r".to_vec(),
+                b"x".to_vec(),
             ]
+        );
+    }
+
+    /// What keys leave unsent, as near as keys tell.
+    #[test]
+    fn unsent_counts_what_the_keys_leave_in_the_input() {
+        assert_eq!(super::unsent_after(0, b"abc"), 3);
+        assert_eq!(super::unsent_after(3, b"\x7f\x7f"), 1);
+        assert_eq!(
+            super::unsent_after(1, b"\x7f\x7f"),
+            0,
+            "never below nothing"
+        );
+        assert_eq!(super::unsent_after(5, b"\r"), 0, "Enter sends it");
+        assert_eq!(super::unsent_after(5, b"\x03"), 0, "Ctrl+C clears the line");
+        assert_eq!(super::unsent_after(5, b"\x15"), 0, "and Ctrl+U");
+        assert_eq!(
+            super::unsent_after(0, "ăîș—".as_bytes()),
+            4,
+            "characters, not bytes"
+        );
+        assert_eq!(
+            super::unsent_after(2, b"\x1b[D\x1b[A\x1bOP"),
+            2,
+            "arrows and function keys change nothing"
+        );
+        assert_eq!(
+            super::unsent_after(2, b"\x1b\r"),
+            2,
+            "Alt+Enter's new line sends nothing"
+        );
+        assert_eq!(
+            super::unsent_after(0, b"\x1b[200~two\nlines\x1b[201~"),
+            9,
+            "a paste counts its line breaks"
+        );
+        assert_eq!(super::unsent_after(0, b"\x1b[200~unfinished"), 10);
+        assert_eq!(
+            super::unsent_after(0, b"\x16"),
+            1,
+            "Ctrl+V pastes from the clipboard"
         );
     }
 
@@ -1142,6 +1299,7 @@ mod tests {
                 generation: 2,
                 paste_in_flight: false,
                 input_failed: false,
+                unsent: false,
                 output_quiet_ms: None,
             }
         );

@@ -49,6 +49,13 @@ export const switchedTo = (observed, nativeSession) => ({
 export const SHOWS_ANOTHER = 'the window shows another conversation'
 
 /**
+ * The human has typed in the window and not sent it: a message waits until
+ * they send it or erase it, never pasted into their text (the pane host
+ * counts their keys; the owner's choice, 2026-10-03).
+ */
+export const UNSENT = 'you have typed in this window and not sent it'
+
+/**
  * A window that has not said which conversation it shows (it is starting,
  * switching conversations or reconnecting): a message waits, for this
  * reason. Until the window has named its first conversation, or while it

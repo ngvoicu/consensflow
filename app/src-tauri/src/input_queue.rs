@@ -25,9 +25,11 @@ const LOCK_POISONED: &str = "lock-poisoned";
 const INPUT_SEQUENCE_GAP: &str = "pane-input-sequence-gap";
 const INPUT_SEQUENCE_REGRESSION: &str = "pane-input-sequence-regression";
 
-/// What a pane's worker does, in order: the human's keys and the emulator's
-/// replies, a delivery's paste, a native send's claim.
+/// What a pane's worker does, in order: the human's own keys (counted for
+/// what they leave unsent), the emulator's replies and the daemon's keys, a
+/// delivery's paste, a native send's claim.
 pub(crate) enum InputWork {
+    Typed(Vec<u8>),
     Write(Vec<u8>),
     Paste(Vec<u8>),
     Claim,
@@ -36,7 +38,7 @@ pub(crate) enum InputWork {
 impl InputWork {
     fn byte_count(&self) -> usize {
         match self {
-            Self::Write(bytes) => bytes.len(),
+            Self::Typed(bytes) | Self::Write(bytes) => bytes.len(),
             Self::Paste(body) => body.len().saturating_add(13),
             Self::Claim => 0,
         }
@@ -101,6 +103,7 @@ impl From<ArbiterError> for InputError {
             ArbiterError::Stale => "stale-pane",
             ArbiterError::Busy => "paste-in-flight",
             ArbiterError::InputFailed => "input-failed",
+            ArbiterError::Unsent => "unsent-text",
             ArbiterError::InvalidBody(_) => INVALID_BODY,
             ArbiterError::LockPoisoned => LOCK_POISONED,
         };
@@ -187,7 +190,9 @@ impl InputQueue {
 
         page.last_sequences.insert(key.clone(), sequence);
         match &work {
-            InputWork::Write(bytes) | InputWork::Paste(bytes) => validate_input(bytes)?,
+            InputWork::Typed(bytes) | InputWork::Write(bytes) | InputWork::Paste(bytes) => {
+                validate_input(bytes)?
+            }
             InputWork::Claim => {}
         }
         if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
@@ -383,6 +388,7 @@ fn input_worker(
 ) {
     for job in jobs {
         let result = match job.work {
+            InputWork::Typed(bytes) => arbiter.write_typed(&panes, &key, &bytes),
             InputWork::Write(bytes) => arbiter.write(&panes, &key, &bytes),
             InputWork::Paste(body) => arbiter.write_paste(&panes, &key, &body),
             InputWork::Claim => arbiter.claim(&key),
@@ -572,6 +578,7 @@ mod tests {
             (ArbiterError::Stale, "stale-pane"),
             (ArbiterError::Busy, "paste-in-flight"),
             (ArbiterError::InputFailed, "input-failed"),
+            (ArbiterError::Unsent, "unsent-text"),
             (
                 ArbiterError::InvalidBody(SanitizeError::ControlByte(7)),
                 "invalid-body",

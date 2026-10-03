@@ -277,6 +277,9 @@ export function laneStatus(lane, board, now) {
   if (outOfQuota(participant, now)) {
     return ['out', `Out of quota until ${clock(participant.outUntil)}`]
   }
+  if (lane.holding) {
+    return ['holding', 'A message waits until you send or erase what you typed here']
+  }
   const state = activity?.state ?? 'closed'
   if (state === 'waiting' && activity.reason) return [state, `Waiting: ${activity.reason}`]
   if (resting(participant, activity)) {

@@ -1,3 +1,4 @@
+import { UNSENT } from '../adapters/shared.js'
 import { deliveryText, markerOf } from './delivery-text.js'
 
 /** An Enter, pressed once more for a paste its window did not send. */
@@ -77,6 +78,8 @@ export class Deliveries {
       // Withdrawn while the window got ready (its task cancelled or paused
       // meanwhile): it is handed nothing, and nothing fails.
       if (this.#ledger.message(message.id)?.state !== 'queued') return
+      // Held for what the human typed and has not sent: the board says so.
+      runtime.delivery.unsent = ready === UNSENT
       if (ready !== true) {
         // Said once per message, so a wait is in the trace, not a mystery.
         if (runtime.delivery.held !== message.id) {
@@ -197,7 +200,12 @@ export class Deliveries {
     if (pane === null) return
     delivering.enteredAgain = true
     const snapshot = await this.#host.request('pane.snapshot', pane).catch(() => null)
-    if (snapshot?.ok !== true || !(snapshot.outputQuietMs >= ENTER_AGAIN_QUIET_MS)) {
+    // What the human has typed since would go with it: they send both.
+    if (
+      snapshot?.ok !== true ||
+      snapshot.unsent ||
+      !(snapshot.outputQuietMs >= ENTER_AGAIN_QUIET_MS)
+    ) {
       delivering.enteredAgain = false
       return
     }

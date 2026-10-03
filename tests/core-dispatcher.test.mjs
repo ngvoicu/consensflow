@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { unnamed } from '../src/adapters/shared.js'
+import { UNSENT, unnamed } from '../src/adapters/shared.js'
 import { deliveryText, markerOf } from '../src/core/delivery-text.js'
 import { Dispatcher } from '../src/core/dispatcher.js'
 import { openLedger } from '../src/ledger/index.js'
@@ -3012,6 +3012,47 @@ describe('a window that is not ready for a paste', () => {
       },
       { trace: (entry) => entries.push(entry) },
     )
+  })
+})
+
+describe('what the human typed in a window and has not sent', () => {
+  it('holds a message for it, says so on the board, and lets it go once the text is sent', async () => {
+    // Poker-lab, 2026-10-03: "if I type, sometimes the daemon pastes over".
+    await setup(async (context) => {
+      const { id, open, task } = await withTiers(context)
+      let typed = true
+      context.adapter.ready = async () => (typed ? UNSENT : true)
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.answer('zeus', 'Parser done.')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'done')
+      const result = () => context.ledger.inbox(id('chief')).find((m) => m.kind === 'result')
+      assert.equal(result().state, 'queued')
+      assert.equal(context.dispatcher.holding(id('chief')), true, 'the board says why')
+      typed = false
+      await context.dispatcher.pass()
+      assert.notEqual(result().state, 'queued', 'delivered once the text is sent')
+      assert.equal(context.dispatcher.holding(id('chief')), false)
+    })
+  })
+
+  it('presses no Enter again into a window where the human has typed since the paste', async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context)
+      context.adapter.agent('chief').arrive = false
+      context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'One' })
+      await context.dispatcher.pass()
+      context.host.snapshot = { outputQuietMs: 60_000, unsent: true }
+      context.clock.advance(11_000)
+      await context.dispatcher.pass()
+      const enters = context.host.requests.filter(
+        ([op, body]) => op === 'pane.input' && body.bytes?.[0] === 13,
+      )
+      assert.deepEqual(enters, [], 'its Enter would send their text too')
+    })
   })
 })
 

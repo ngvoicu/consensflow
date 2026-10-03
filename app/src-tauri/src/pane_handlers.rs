@@ -249,6 +249,7 @@ pub(crate) fn register_pane_handlers(
             "generation":snapshot.generation,
             "pasteInFlight":snapshot.paste_in_flight,
             "inputFailed":snapshot.input_failed,
+            "unsent":snapshot.unsent,
             "outputQuietMs":snapshot.output_quiet_ms,
         }))
     });
@@ -399,12 +400,12 @@ mod tests {
         .is_err());
     }
 
-    /// Over the bridge as the daemon speaks it: text the human typed and never
-    /// sent holds neither a paste nor a native send (the owner's choice,
-    /// 2026-10-01), and the snapshot has no draft to wait on.
+    /// Over the bridge as the daemon speaks it: its own keys are not the
+    /// human's unsent text, so they hold neither a paste nor a native send,
+    /// and the snapshot says nothing is unsent.
     #[cfg(unix)]
     #[test]
-    fn unsent_typing_holds_no_paste_and_no_claim() {
+    fn the_daemons_own_keys_hold_no_paste_and_no_claim() {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixStream;
 
@@ -470,7 +471,8 @@ mod tests {
         );
         let snapshot = ask("pane.snapshot", json!({"id":"typing-pane","generation":1}));
         assert_eq!(snapshot["pasteInFlight"], false, "{snapshot}");
-        assert!(snapshot.get("draftLatched").is_none(), "{snapshot}");
+        // Keys over the bridge are the daemon's, never the human's unsent text.
+        assert_eq!(snapshot["unsent"], false, "{snapshot}");
 
         panes
             .kill(&PaneKey::new("typing-pane", 1))

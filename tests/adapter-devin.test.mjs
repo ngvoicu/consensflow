@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { devinAdapter, devinRoleText } from '../src/adapters/devin.js'
-import { SHOWS_ANOTHER } from '../src/adapters/shared.js'
+import { SHOWS_ANOTHER, UNSENT } from '../src/adapters/shared.js'
 import { consoleText } from '../src/console-text.js'
 import { fakeExecutable, fakeNodeExecutable } from './helpers.mjs'
 
@@ -167,16 +167,17 @@ console.log('devin ${version}')
     })
   })
 
-  it('pastes only into the conversation it knows, whatever the human left unsent', async () => {
+  it('pastes only into the conversation it knows, and never into what the human has not sent', async () => {
     await withHome(async ({ env }) => {
       const adapter = devinAdapter({ env })
       const { launch } = await adapter.prepare(request({ resume: 'mild-coin', message: null }))
       const requests = []
       let pasteInFlight = false
+      let unsent = false
       const host = {
         async request(op, body) {
           requests.push([op, body])
-          if (op === 'pane.snapshot') return { ok: true, pasteInFlight }
+          if (op === 'pane.snapshot') return { ok: true, pasteInFlight, unsent }
           return { ok: true }
         },
       }
@@ -221,6 +222,9 @@ console.log('devin ${version}')
       assert.equal(await adapter.ready({ launch, pane, host }), true)
       pasteInFlight = true
       assert.equal(await adapter.ready({ launch, pane, host }), false)
+      pasteInFlight = false
+      unsent = true
+      assert.equal(await adapter.ready({ launch, pane, host }), UNSENT)
     })
   })
 

@@ -16,6 +16,7 @@ import {
   recordState,
   SHOWS_ANOTHER,
   switchedTo,
+  UNSENT,
   unnamed,
   windowText,
 } from './shared.js'
@@ -110,7 +111,8 @@ export function devinAdapter({
       if (shown === undefined) return HOLD
       if (shown !== launch.nativeSession) return SHOWS_ANOTHER
       const snapshot = await host.request('pane.snapshot', pane)
-      return snapshot?.ok === true && !snapshot.pasteInFlight
+      if (snapshot?.ok !== true || snapshot.pasteInFlight) return false
+      return snapshot.unsent ? UNSENT : true
     },
 
     async deliver({ launch, pane, host, text }) {

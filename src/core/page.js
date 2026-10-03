@@ -110,6 +110,8 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
             pane: dispatcher.pane(lane.participant.id),
             // A Switch chief that waits for the chief's turn to end.
             switching: dispatcher.pendingSwitch(lane.participant.id),
+            // A message that waits until the human sends what they typed there.
+            holding: dispatcher.holding(lane.participant.id),
           })),
         },
       }
