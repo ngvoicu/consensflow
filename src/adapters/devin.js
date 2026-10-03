@@ -31,6 +31,18 @@ import {
  */
 const HOLD = 'Devin has not said yet which conversation its window shows'
 
+/**
+ * Devin's shell on Windows is Git Bash, which names folders /c/Users/…, and
+ * its file tools write such a path to C:\c\Users\…: a Devin worker's file
+ * landed there and its task's work was lost (2026-10-03).
+ */
+const WINDOWS_PATHS =
+  'This machine runs Windows and your shell is Git Bash: give file tools Windows paths (C:\\Users\\…) or paths relative to the project folder, never /c/… paths, which they write under C:\\c\\.'
+
+/** The role text a Devin window gets: on Windows, with how to name a file there. */
+export const devinRoleText = (instructions, env) =>
+  onWindows(env) ? `${instructions}\n\n${WINDOWS_PATHS}\n` : instructions
+
 export function devinAdapter({
   env,
   send = sendDevin,
@@ -57,7 +69,7 @@ export function devinAdapter({
         launch: launchId,
         cwd: directory,
         executable,
-        content: instructions,
+        content: devinRoleText(instructions, env),
       })
       const identity = { kind: 'devin', model: agent?.model, effort: agent?.effort }
       const runner = await prepareDevinPrompt(

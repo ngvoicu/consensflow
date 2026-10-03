@@ -3,7 +3,7 @@ import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/pro
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { devinAdapter } from '../src/adapters/devin.js'
+import { devinAdapter, devinRoleText } from '../src/adapters/devin.js'
 import { SHOWS_ANOTHER } from '../src/adapters/shared.js'
 import { fakeExecutable, fakeNodeExecutable } from './helpers.mjs'
 
@@ -216,6 +216,14 @@ console.log('devin ${version}')
       pasteInFlight = true
       assert.equal(await adapter.ready({ launch, pane, host }), false)
     })
+  })
+
+  it('tells Devin on Windows to name files the way its file tools write them, and nowhere else', () => {
+    const role = '# ConsensFlow worker\n\nRole text.'
+    assert.equal(devinRoleText(role, { HOME: '/h' }), role)
+    const windows = devinRoleText(role, { OS: 'Windows_NT' })
+    assert.ok(windows.startsWith(role))
+    assert.match(windows, /never \/c\/… paths/)
   })
 
   it('reads a wire log that was replaced from its start, with nothing of the old one carried', async () => {
