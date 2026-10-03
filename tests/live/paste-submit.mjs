@@ -17,10 +17,10 @@
  *   npm run live:paste                      Devin
  *   npm run live:paste -- --harness claude --harness codex
  *
- * Harnesses: claude, codex, devin, opencode, pi. They run one after another;
- * the exit code is 1 when any message was not sent.
+ * Harnesses: the two the app pastes into, claude and devin (Codex, Pi and
+ * OpenCode take their messages through their own queues). They run one
+ * after another; the exit code is 1 when any message was not sent.
  */
-import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -28,18 +28,12 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { findSession } from '../../evals/bare.mjs'
-import {
-  codexIsolation,
-  codexLiveFlags,
-  HARNESSES,
-  liveEnvironment,
-  realOnPath,
-} from '../../evals/plan.mjs'
+import { HARNESSES, liveEnvironment, realOnPath } from '../../evals/plan.mjs'
 import { answers } from '../../hosts/lib/completion.js'
 import { interactiveStart } from '../../hosts/lib/windows.js'
 import { consoleText, recordState, windowText } from '../../src/adapters/shared.js'
 import { prepareClaudeSettings } from '../../src/claude-install.js'
-import { onWindows, paneArgv, runnable } from '../../src/harnesses.js'
+import { onWindows, paneArgv } from '../../src/harnesses.js'
 import { startIntegration } from '../integration/harness.mjs'
 import { trustForClaude } from './trust-claude.mjs'
 
@@ -48,7 +42,11 @@ const EDITOR = join(HERE, 'core-live-editor.mjs')
 const { values } = parseArgs({ options: { harness: { type: 'string', multiple: true } } })
 const harnesses = values.harness ?? ['devin']
 for (const name of harnesses) {
-  if (!(name in HARNESSES)) throw new Error(`no such harness: ${name}`)
+  if (!['claude', 'devin'].includes(name)) {
+    throw new Error(
+      `the app pastes into claude and devin only; ${name} takes its messages through its own queue`,
+    )
+  }
 }
 const H = process.env.HOME ?? homedir()
 const ENV = liveEnvironment({ home: H })
@@ -101,26 +99,17 @@ const lastLines = (text) =>
     .join(' ⏎ ')
 
 /**
- * The extra flags a scripted window needs: no MCP servers, connectors or
- * browser; and Claude's settings file as the app writes it for each launch,
- * which skips the full-permission warning (here, its home is the folder's own).
+ * What a scripted Claude window needs besides its command line: no MCP
+ * servers, connectors or browser, and the settings file the app writes for
+ * each launch, which skips the full-permission warning (here, its home is
+ * the folder's own).
  */
-async function isolation(name, executable) {
-  if (name === 'claude') {
-    const home = { ...RECORD_ENV, CONSENSFLOW_HOME: join(WORKSPACE, '.consensflow') }
-    return [
-      ...(await prepareClaudeSettings(home, 'paste', { boardQuestions: false })),
-      '--strict-mcp-config',
-      '--no-chrome',
-    ]
-  }
-  if (name !== 'codex') return []
-  const list = runnable(executable, ['mcp', 'list', '--json'])
+async function claudeExtras() {
+  const home = { ...RECORD_ENV, CONSENSFLOW_HOME: join(WORKSPACE, '.consensflow') }
   return [
-    ...codexLiveFlags(),
-    ...codexIsolation(
-      JSON.parse(execFileSync(list.file, list.args, { ...list.options, encoding: 'utf8' })),
-    ),
+    ...(await prepareClaudeSettings(home, 'paste', { boardQuestions: false })),
+    '--strict-mcp-config',
+    '--no-chrome',
   ]
 }
 
@@ -142,7 +131,7 @@ try {
       name === 'devin' && onWindows(ENV) ? consoleText(windowText(body)) : windowText(body)
     let native = session
     const openedAt = Date.now()
-    /** The user messages the harness's own record holds so far. */
+    /** What the harness's own record holds so far. */
     const recorded = async () => {
       native ??= findSession(kind, {
         workspace: WORKSPACE,
@@ -153,12 +142,15 @@ try {
       if (native === null) return []
       const read = await answers(kind, native, RECORD_ENV).catch(() => null)
       if (read === null || read.unknown) return []
-      return recordState(read).items.filter((item) => item.role === 'user')
+      return recordState(read).items
     }
     const opened = await app.request('pane.open', {
       ...pane,
       cwd: WORKSPACE,
-      argv: paneArgv([executable, ...(await isolation(name, executable)), ...start.args], ENV),
+      argv: paneArgv(
+        [executable, ...(name === 'claude' ? await claudeExtras() : []), ...start.args],
+        ENV,
+      ),
       env: start.env,
       dropEnv: start.dropEnv,
       size: { rows: 40, cols: 120 },
@@ -190,10 +182,16 @@ try {
         const pasted = Date.now()
         const body = given(check.body(ask(check.sum)))
         const written = await app.request('pane.write_paste', { ...pane, body })
+        // Its answer on the screen, or in its record: Windows' console host may
+        // draw "5555" in two strokes, which the screen's text then splits.
         let shown = false
         while (!shown && Date.now() - pasted < ANSWER_MS && !closed()) {
           await sleep(500)
-          shown = screen().slice(from).includes(answer)
+          shown =
+            screen().slice(from).includes(answer) ||
+            (await recorded()).some(
+              (item) => item.role === 'assistant' && item.text.includes(answer),
+            )
         }
         const seconds = ((Date.now() - pasted) / 1000).toFixed(1)
         // Its record holds what was pasted, whole: where the app looks for it.
@@ -201,7 +199,7 @@ try {
         let users = []
         let kept = false
         for (let tries = 0; shown && !kept && tries < 20; tries += 1) {
-          users = await recorded()
+          users = (await recorded()).filter((item) => item.role === 'user')
           kept = users.some((item) => item.text.replace(/\r\n/g, '\n').includes(whole))
           if (!kept) await sleep(500)
         }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { existsSync, readdirSync } from 'node:fs'
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
@@ -540,6 +541,33 @@ it('keeps native Codex sockets private and inside ConsensFlow home', {
     codexSession.createSocketDirectory({ CONSENSFLOW_HOME: deep, TMPDIR: deep }),
     /socket path.*too long/i,
   )
+})
+
+it("listens, on Windows, on loopback for the window's own token, and is up once it says where", async () => {
+  const server = await codexSession.serverEndpoint('win32')
+  assert.equal(server.directory, null, 'no Unix socket folder')
+  const [hash] = server.listen.slice(-1)
+  assert.deepEqual(server.listen, [
+    '--listen',
+    'ws://127.0.0.1:0',
+    '--ws-auth',
+    'capability-token',
+    '--ws-token-sha256',
+    hash,
+  ])
+  const token = server.headers.authorization.replace(/^Bearer /, '')
+  assert.equal(createHash('sha256').update(token).digest('hex'), hash)
+  assert.equal(
+    await server.upstream('codex app-server (WebSockets)\n'),
+    null,
+    'not before it says where',
+  )
+  assert.equal(
+    await server.upstream('codex app-server (WebSockets)\n  listening on: ws://127.0.0.1:53111\n'),
+    'ws://127.0.0.1:53111',
+  )
+  const other = await codexSession.serverEndpoint('win32')
+  assert.notEqual(other.headers.authorization, server.headers.authorization, 'each window its own')
 })
 
 /** A stand-in for the board's API: the questions posted, the answer once the test gives it. */

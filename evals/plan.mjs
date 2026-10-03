@@ -237,15 +237,6 @@ export function realOnPath(
 }
 
 /**
- * Codex's flags for a live window on this platform. On Windows its shared
- * background server refuses an elevated session ("start the Windows daemon
- * from a non-elevated terminal"), and a session over SSH is one: a live
- * run's Codex works without that server there.
- */
-export const codexLiveFlags = (platform = process.platform) =>
-  platform === 'win32' ? ['--no-daemon'] : []
-
-/**
  * The `-c` overrides that switch off every MCP server Codex would start
  * (`codex mcp list --json`): each gets a harmless, disabled definition,
  * which also covers servers a plugin or the ChatGPT app adds outside

@@ -32,7 +32,6 @@ import {
   chiefEnvironment,
   claudeProjectKey,
   codexIsolation,
-  codexLiveFlags,
   HARNESSES,
   lastLines,
   liveEnvironment,
@@ -201,7 +200,7 @@ if (realCodex !== null) {
   wrapper(
     'codex',
     realCodex,
-    [...codexLiveFlags(), '-c', `model=${JSON.stringify(codexModel)}`]
+    ['-c', `model=${JSON.stringify(codexModel)}`]
       .concat(
         chief === 'codex' ? ['-c', `model_reasoning_effort=${JSON.stringify(values.effort)}`] : [],
       )
@@ -325,9 +324,17 @@ async function run(index) {
         await app.waitFor(predicate, ms)
       } catch (cause) {
         const lane = await chiefLane().catch(() => null)
-        const shown = lane?.pane ? lastLines(app.output(lane.pane.id)).slice(-12) : []
+        // A window that closed already: the last one opened for the chief, as it was started.
+        const opened = app.openFrames.findLast((frame) => /^p\d+-chief-|-chief$/.test(frame.id))
+        const pane = lane?.pane ?? opened ?? null
+        const shown = pane ? lastLines(app.output(pane.id)).slice(-12) : []
+        const started = opened
+          ? ` started (${opened.argv.join(' ').length} characters) as ${opened.argv
+              .map((arg) => (arg.length > 100 ? `${arg.slice(0, 100)}…(${arg.length})` : arg))
+              .join(' ')};`
+          : ''
         note(
-          `gave up waiting for ${what}: chief ${JSON.stringify(lane?.activity ?? null)}; its screen: ${shown.join(' ⏎ ')}`,
+          `gave up waiting for ${what}: chief ${JSON.stringify(lane?.activity ?? null)};${started} its screen: ${shown.join(' ⏎ ')}`,
         )
         throw cause
       }

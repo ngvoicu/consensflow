@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { once } from 'node:events'
 import { chmod, mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -22,6 +22,7 @@ export async function startBroker({
   token,
   launchId,
   upstream,
+  upstreamHeaders = {},
   freshBypass = false,
   board: boardOptions,
   questionWaitMs,
@@ -58,6 +59,7 @@ export async function startBroker({
   // the request goes on to the TUI and its own dialog takes over.
   const board = boardClient(boardOptions)
   const control = new WebSocket(upstream, {
+    headers: upstreamHeaders,
     maxPayload: MAX_FRAME,
     handshakeTimeout: 3000,
     perMessageDeflate: false,
@@ -207,6 +209,7 @@ export async function startBroker({
     }
     websocket.handleUpgrade(incoming, socket, head, (client) => {
       const native = new WebSocket(upstream, {
+        headers: upstreamHeaders,
         maxPayload: MAX_FRAME,
         handshakeTimeout: 3000,
         perMessageDeflate: false,
@@ -466,22 +469,55 @@ export async function createSocketDirectory(env) {
   return directory
 }
 
+/**
+ * Where this window's Codex server listens. On Unix, a socket in a private
+ * folder. Windows' Node reaches no Unix socket (a socket path is a named pipe
+ * to it), so there the server listens on loopback, on a port it picks and
+ * names when it starts, and takes only this window's token, which no other
+ * program sees.
+ */
+export async function serverEndpoint(platform = process.platform) {
+  if (platform !== 'win32') {
+    const directory = await createSocketDirectory(process.env)
+    const socket = join(directory, 'native.sock')
+    return {
+      directory,
+      listen: ['--listen', `unix://${socket}`],
+      // Up once its socket is there.
+      upstream: async () =>
+        (await stat(socket).catch(() => null))?.isSocket() ? `ws+unix://${socket}` : null,
+      headers: {},
+    }
+  }
+  const token = randomBytes(32).toString('hex')
+  return {
+    directory: null,
+    listen: [
+      '--listen',
+      'ws://127.0.0.1:0',
+      '--ws-auth',
+      'capability-token',
+      '--ws-token-sha256',
+      createHash('sha256').update(token).digest('hex'),
+    ],
+    // Up once it says where: "listening on: ws://127.0.0.1:PORT" on its stderr.
+    upstream: async (printed) => {
+      const bound = /listening on:\s*ws:\/\/(127\.0\.0\.1:\d+)/.exec(printed)
+      return bound === null ? null : `ws://${bound[1]}`
+    },
+    headers: { authorization: `Bearer ${token}` },
+  }
+}
+
 async function supervise(executable, args) {
   const configuration = JSON.parse(process.env.CF_CODEX_SESSION_BRIDGE ?? '{}')
   const split = codexProcessArguments(args)
-  const directory = await createSocketDirectory(process.env)
-  const socket = join(directory, 'native.sock')
+  const server = await serverEndpoint()
   const env = { ...process.env }
   delete env.OPENAI_API_KEY
   const backendRun = runnable(
     executable,
-    [
-      ...split.backend,
-      ...consensflowShellEnvironment(env),
-      'app-server',
-      '--listen',
-      `unix://${socket}`,
-    ],
+    [...split.backend, ...consensflowShellEnvironment(env), 'app-server', ...server.listen],
     env,
   )
   const backend = spawn(backendRun.file, backendRun.args, {
@@ -506,14 +542,17 @@ async function supervise(executable, args) {
   process.on('SIGINT', stop)
   try {
     const deadline = Date.now() + 15000
-    while (!(await stat(socket).catch(() => null))?.isSocket()) {
+    let upstream = await server.upstream(startupError)
+    while (upstream === null) {
       if (backend.exitCode !== null || backend.signalCode || Date.now() > deadline)
         throw new Error(`Codex server could not start: ${startupError}`)
       await new Promise((resolve) => setTimeout(resolve, 50))
+      upstream = await server.upstream(startupError)
     }
     broker = await startBroker({
       ...configuration,
-      upstream: `ws+unix://${socket}`,
+      upstream,
+      upstreamHeaders: server.headers,
       freshBypass: args.includes('--dangerously-bypass-approvals-and-sandbox'),
     })
     const tuiRun = runnable(
@@ -547,7 +586,7 @@ async function supervise(executable, args) {
     }
     process.off('SIGTERM', stop)
     process.off('SIGINT', stop)
-    await rm(directory, { recursive: true, force: true })
+    if (server.directory !== null) await rm(server.directory, { recursive: true, force: true })
   }
 }
 
