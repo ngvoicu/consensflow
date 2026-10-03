@@ -39,6 +39,7 @@ Usage: cf <command> [options]
   catalog [--harness <h>] [--json]            List available agent presets
   agent add <name>                           Add a catalog agent
     [--harness <h>] [--model <m>] [--effort <e>] [--description <d>]
+    [--designer]                            An image agent (Codex only): an image designer
   agent list [--json]
   agent edit <name> [--model <m>] [--effort <e>] [--description <d>]
     [--work-tier critical|complex|standard|light|auto]
@@ -62,7 +63,8 @@ function fail(message) {
 /**
  * A catalog name is a whole agent: `cf agent add zeus` needs no
  * flags. Anything passed explicitly wins over the catalog entry, and a name
- * nobody knows still needs a harness and a model.
+ * nobody knows still needs a harness and a model; `--designer` makes it an
+ * image agent, which only a Codex agent can be.
  */
 function resolveAdd(name, values) {
   // Every catalog agent is in the roster already; an add defines one by hand.
@@ -82,6 +84,7 @@ function resolveAdd(name, values) {
     model: values.model,
     effort: values.effort,
     description: values.description,
+    ...(values.designer ? { designer: true } : {}),
   }
 }
 
@@ -129,6 +132,7 @@ function agentVerb(rest) {
       effort: { type: 'string' },
       'work-tier': { type: 'string' },
       description: { type: 'string' },
+      designer: { type: 'boolean', default: false },
       json: { type: 'boolean', default: false },
     },
   })

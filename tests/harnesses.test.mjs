@@ -299,17 +299,18 @@ describe('what the pickers offer', () => {
     const agents = [
       { name: 'zeus', harness: 'claude' },
       { name: 'ares', harness: 'devin' },
-      { name: 'iris', harness: 'image' },
+      { name: 'iris', harness: 'codex', designer: true },
     ]
     assert.deepEqual(offerable(agents, ['devin']), [
       { name: 'zeus', harness: 'claude' },
       { name: 'ares', harness: 'devin', hidden: true, notInstalled: true },
-      { name: 'iris', harness: 'image' },
+      { name: 'iris', harness: 'codex', designer: true },
     ])
-    // An image agent runs through Codex: without Codex it is not offered.
-    assert.deepEqual(offerable([{ name: 'pygmalion', harness: 'image' }], ['codex']), [
-      { name: 'pygmalion', harness: 'image', hidden: true, notInstalled: true },
-    ])
+    // An image agent is a Codex agent: without Codex it is not offered.
+    assert.deepEqual(
+      offerable([{ name: 'pygmalion', harness: 'codex', designer: true }], ['codex']),
+      [{ name: 'pygmalion', harness: 'codex', designer: true, hidden: true, notInstalled: true }],
+    )
     // One saved for a harness this build does not run (Kimi) has no window to open.
     assert.deepEqual(offerable([{ name: 'old', harness: 'kimi', unsupported: true }], []), [
       { name: 'old', harness: 'kimi', unsupported: true, hidden: true, notInstalled: true },

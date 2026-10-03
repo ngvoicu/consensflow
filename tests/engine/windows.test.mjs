@@ -58,21 +58,12 @@ test('window: codex opens cold on a positional prompt, id found afterwards', () 
   assert.deepEqual(w.dropEnv, ['OPENAI_API_KEY'], 'the billing guard holds in a window too')
 })
 
-test('window: an image agent opens Codex on its default model; Kimi opens no window', () => {
+test('window: Kimi, and any kind ConsensFlow does not run, opens no window', () => {
   // ConsensFlow does not run Kimi Code (paused 2026-09-19, removed since).
   assert.equal(interactiveStart({ kind: 'kimi' }, 'anything', 'seed'), null)
   assert.equal(interactiveResume({ kind: 'kimi' }, 'session_abc', 'seed'), null)
-  // The image designer draws with Codex's image tool, whatever model answers:
-  // its window is Codex's own, with no model or effort of its own.
-  const image = interactiveStart({ kind: 'image', model: 'codex-image' }, null, 'seed')
-  assert.deepEqual(
-    [image.command, image.args, image.dropEnv],
-    ['codex', ['--dangerously-bypass-approvals-and-sandbox', 'seed'], ['OPENAI_API_KEY']],
-  )
-  assert.deepEqual(interactiveResume({ kind: 'image' }, 'thread-9').args.slice(0, 2), [
-    'resume',
-    'thread-9',
-  ])
+  // An image agent is a Codex agent now: `image` is no kind of its own.
+  assert.equal(interactiveStart({ kind: 'image', model: 'codex-image' }, null, 'seed'), null)
 })
 
 test('window: claude and pi refuse to open fresh without the id they need', () => {

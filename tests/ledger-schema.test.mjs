@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { describe, it } from 'node:test'
 import { openLedger, SCHEMA_VERSION } from '../src/ledger/index.js'
 import { MIGRATIONS, migrate } from '../src/ledger/schema.js'
-import { busyProject, clock, names, staff, withDir } from './ledger-fixtures.mjs'
+import { busyProject, clock, deliver, names, staff, withDir } from './ledger-fixtures.mjs'
 
 /** The ledger's schema and its migrations (src/ledger/schema.js). */
 
@@ -62,10 +62,10 @@ const schemaAt = (dir, version) =>
 /**
  * A ledger as a build of schema `version` left it: made by its first
  * migrations, in WAL mode like every ledger, holding the rows the ledger's
- * own operations write for a quiet project and two busy ones, ids and all,
- * in the columns that schema has.
+ * own operations write for a quiet project and two busy ones, and whatever
+ * `more` writes after them, ids and all, in the columns that schema has.
  */
-function ledgerAt(dir, version) {
+function ledgerAt(dir, version, more = () => {}) {
   const source = path.join(dir, 'source.db')
   const ledger = openLedger(source, { now: clock(), names: names() })
   ledger.createProject({
@@ -75,6 +75,7 @@ function ledgerAt(dir, version) {
   })
   busyProject(ledger, '/work/app')
   busyProject(ledger, '/work/site')
+  more(ledger)
   ledger.close()
   const file = path.join(dir, 'consensflow.db')
   const db = new DatabaseSync(file)
@@ -472,6 +473,171 @@ describe("schema 8: a task's last pause and the chief's last switch are kept in 
       assert.throws(() => migrate(db, MIGRATIONS.slice(0, 7)), {
         code: 'ledger-newer',
         message: `this home was written by a newer ConsensFlow (schema ${SCHEMA_VERSION}; this build knows 7)`,
+      })
+      db.close()
+      assert.deepEqual(contents(file), before, 'and left as it was')
+    })
+  })
+})
+
+/**
+ * An image designer at work beside a Codex worker: each member with a
+ * session on its task, and that session's conversation on its own thread.
+ */
+function designing(ledger) {
+  const project = ledger.createProject({
+    directory: '/work/logo',
+    name: 'logo',
+    chief: { harness: 'codex', agent: 'astraeus' },
+  })
+  const pygmalion = ledger.addMember(project.id, {
+    agent: 'pygmalion',
+    harness: 'codex',
+    designer: true,
+    role: 'designer',
+    tier: 'light',
+  })
+  const diana = ledger.addMember(project.id, {
+    agent: 'diana',
+    harness: 'codex',
+    role: 'worker',
+    tier: 'standard',
+  })
+  for (const [member, pool, thread] of [
+    [pygmalion, 'designer', 'thread-logo'],
+    [diana, 'worker', 'thread-page'],
+  ]) {
+    const { task } = ledger.createTask(project.id, {
+      from: 'chief',
+      pool,
+      tier: 'standard',
+      body: thread,
+    })
+    const { message } = ledger.assignTask(project.id, task.number, member.id)
+    deliver(ledger, message)
+    const conversation = ledger.startConversation(message.recipientId, { harness: 'codex' })
+    ledger.bindConversation(conversation.id, thread)
+  }
+}
+
+/** The designer as a build of schema 8 wrote it: its member and session on the `image` harness, their conversations too. */
+function onImage(file) {
+  const db = new DatabaseSync(file)
+  db.exec("UPDATE participant SET harness = 'image' WHERE agent = 'pygmalion'")
+  db.exec(
+    "UPDATE conversation SET harness = 'image' WHERE participant_id IN (SELECT id FROM participant WHERE agent = 'pygmalion')",
+  )
+  db.close()
+  return file
+}
+
+describe('schema 9: an image agent is a Codex agent with a designer flag', () => {
+  it("adds to the schema 8 had a participant's designer flag, and nothing else", async () => {
+    await withDir(async (dir) => {
+      const [before, after] = [8, 9].map((version) => schemaAt(dir, version))
+      const sql = (schema, name) => schema.find((row) => row.name === name).sql
+      assert.equal(
+        sql(after, 'participant'),
+        sql(before, 'participant').replace(
+          'switched_from_cut INTEGER NOT NULL DEFAULT 0,',
+          'switched_from_cut INTEGER NOT NULL DEFAULT 0, designer INTEGER NOT NULL DEFAULT 0,',
+        ),
+      )
+      const others = (schema) => schema.filter((row) => row.name !== 'participant')
+      assert.deepEqual(others(after), others(before), 'nothing else differs')
+    })
+  })
+
+  it('migrates a schema-8 ledger: an image agent and its sessions run on Codex and design, their conversations are Codex’s, and every other row is as it was', async () => {
+    await withDir(async (dir) => {
+      const file = onImage(ledgerAt(dir, 8, designing))
+      const before = contents(file)
+      const drawing = new Set(
+        before.rows.participant.filter((row) => row.harness === 'image').map((row) => row.id),
+      )
+      assert.equal(drawing.size, 2, 'the image agent and its session')
+
+      const after = contents(migratedTo(file, 9))
+      assert.equal(after.version, 9)
+      assert.deepEqual(
+        after.rows,
+        {
+          ...before.rows,
+          participant: before.rows.participant.map((row) =>
+            drawing.has(row.id)
+              ? { ...row, harness: 'codex', designer: 1 }
+              : { ...row, designer: 0 },
+          ),
+          conversation: before.rows.conversation.map((row) =>
+            row.harness === 'image' ? { ...row, harness: 'codex' } : row,
+          ),
+        },
+        'every row with its id; the image agent on Codex, as a designer',
+      )
+      assert.deepEqual(after.schema, schemaAt(dir, 9), "the schema is a fresh schema-9 ledger's")
+
+      // It works on as it did: a Codex window that designs, and nothing else.
+      const ledger = openLedger(file, { now: clock(), names: names() })
+      try {
+        assert.equal(ledger.integrity(), 'ok')
+        const logo = ledger.projects().find((project) => project.name === 'logo')
+        const [member, session] = logo.participants.filter((p) => p.agent === 'pygmalion')
+        assert.deepEqual(
+          [member, session].map((p) => [p.member, p.harness, p.designer]),
+          [
+            [null, 'codex', true],
+            ['pygmalion', 'codex', true],
+          ],
+        )
+        assert.deepEqual(
+          [
+            ledger.currentConversation(session.id).harness,
+            ledger.currentConversation(session.id).nativeSession,
+          ],
+          ['codex', 'thread-logo'],
+        )
+        assert.throws(() => ledger.setRoles(logo.id, 'pygmalion', ['designer', 'worker']), {
+          code: 'invalid-role',
+        })
+      } finally {
+        ledger.close()
+      }
+    })
+  })
+
+  it("leaves a designer's conversation unbound, rather than fail, when a Codex conversation holds its thread too", async () => {
+    await withDir(async (dir) => {
+      const file = onImage(ledgerAt(dir, 8, designing))
+      // The human resumed the worker's thread in the designer's window: schema 8 kept the
+      // two apart by their harnesses, `image` and `codex`.
+      const db = new DatabaseSync(file)
+      db.exec("UPDATE conversation SET native_session = 'thread-page' WHERE harness = 'image'")
+      db.close()
+      const before = contents(file).rows.conversation
+
+      const after = contents(migratedTo(file, 9)).rows.conversation
+      assert.deepEqual(
+        after,
+        before.map((row) =>
+          row.harness === 'image' ? { ...row, harness: 'codex', native_session: null } : row,
+        ),
+        "the worker's conversation keeps the thread; the designer's is left unbound",
+      )
+      assert.equal(after.filter((row) => row.native_session === 'thread-page').length, 1)
+    })
+  })
+
+  it('is refused by a build that knows only schema 8', async () => {
+    await withDir(async (dir) => {
+      const file = path.join(dir, 'consensflow.db')
+      const ledger = openLedger(file, { now: clock(), names: names() })
+      busyProject(ledger, '/work/app')
+      ledger.close()
+      const before = contents(file)
+      const db = new DatabaseSync(file)
+      assert.throws(() => migrate(db, MIGRATIONS.slice(0, 8)), {
+        code: 'ledger-newer',
+        message: `this home was written by a newer ConsensFlow (schema ${SCHEMA_VERSION}; this build knows 8)`,
       })
       db.close()
       assert.deepEqual(contents(file), before, 'and left as it was')

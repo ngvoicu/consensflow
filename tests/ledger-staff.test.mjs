@@ -150,7 +150,7 @@ describe('the project staff', () => {
     })
   })
 
-  it('takes a member back in the role and harness it rejoins with', async () => {
+  it('takes a member back in the role, harness and designer flag it rejoins with', async () => {
     await withLedger((ledger) => {
       const { project, id } = staff(ledger)
       const before = id('zeus')
@@ -177,6 +177,22 @@ describe('the project staff', () => {
           .map((event) => event.data.rejoined ?? false),
         [false, true],
       )
+      // Its agent became an image agent meanwhile: it rejoins as one, and only as one.
+      ledger.removeMember(project.id, 'zeus')
+      const drawing = ledger.addMember(project.id, {
+        agent: 'zeus',
+        harness: 'codex',
+        designer: true,
+        role: 'designer',
+        tier: 'light',
+      })
+      assert.deepEqual(
+        [drawing.id, drawing.roles, drawing.harness, drawing.designer],
+        [before, ['designer'], 'codex', true],
+      )
+      assert.throws(() => ledger.setRoles(project.id, 'zeus', ['designer', 'reviewer']), {
+        code: 'invalid-role',
+      })
     })
   })
 
@@ -243,6 +259,7 @@ describe('the project staff', () => {
   it('makes an image designer of an image agent alone, and an image agent nothing else', async () => {
     await withLedger((ledger) => {
       const { project } = staff(ledger)
+      // An image agent is a Codex agent with the designer flag: Codex alone is no designer.
       const notImage = {
         code: 'invalid-role',
         message: 'only an image agent can be an image designer, and hera is not one',
@@ -264,12 +281,37 @@ describe('the project staff', () => {
       assert.throws(
         () =>
           ledger.addMember(project.id, {
+            agent: 'diana-2',
+            harness: 'codex',
+            roles: ['designer'],
+            tier: 'light',
+          }),
+        {
+          code: 'invalid-role',
+          message: 'only an image agent can be an image designer, and diana-2 is not one',
+        },
+      )
+      assert.throws(
+        () =>
+          ledger.addMember(project.id, {
             agent: 'pygmalion',
-            harness: 'image',
+            harness: 'codex',
+            designer: true,
             roles: ['designer', 'reviewer'],
             tier: 'light',
           }),
         image,
+      )
+      assert.throws(
+        () =>
+          ledger.addMember(project.id, {
+            agent: 'pygmalion',
+            harness: 'codex',
+            designer: 'yes',
+            roles: ['designer'],
+            tier: 'light',
+          }),
+        { code: 'invalid-designer' },
       )
       // Nor does a new project's staff hold one.
       assert.throws(
@@ -284,11 +326,15 @@ describe('the project staff', () => {
       )
       const pygmalion = ledger.addMember(project.id, {
         agent: 'pygmalion',
-        harness: 'image',
+        harness: 'codex',
+        designer: true,
         role: 'designer',
         tier: 'light',
       })
-      assert.deepEqual(pygmalion.roles, ['designer'])
+      assert.deepEqual(
+        [pygmalion.roles, pygmalion.harness, pygmalion.designer],
+        [['designer'], 'codex', true],
+      )
       // A member's roles change only to roles that fit its agent.
       assert.throws(() => ledger.setRoles(project.id, 'pygmalion', ['designer', 'worker']), image)
       assert.throws(() => ledger.setRoles(project.id, 'zeus', ['worker', 'designer']), {
@@ -315,7 +361,8 @@ describe('the project staff', () => {
       const { project } = staff(ledger)
       ledger.addMember(project.id, {
         agent: 'pygmalion',
-        harness: 'image',
+        harness: 'codex',
+        designer: true,
         role: 'designer',
         tier: 'light',
       })

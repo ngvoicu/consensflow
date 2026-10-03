@@ -3397,6 +3397,54 @@ describe('switching the lead to another agent', () => {
     })
   })
 
+  it('opens no project on an image agent, nor switches a lead to one: an image agent only designs', async () => {
+    const designing = {
+      message: 'pygmalion is an image agent, which can only be an image designer',
+    }
+    await withCodex(
+      async (context) => {
+        const { project, id } = await withStaff(context)
+        await context.dispatcher.pass()
+        context.adapter.busy('chief')
+        await assert.rejects(
+          context.dispatcher.openProject({
+            directory: '/work/api',
+            name: 'api',
+            chief: { harness: 'codex', agent: 'pygmalion' },
+          }),
+          designing,
+        )
+        for (const when of ['now', 'turn']) {
+          await assert.rejects(
+            context.dispatcher.switchChief(project.id, {
+              harness: 'codex',
+              agent: 'pygmalion',
+              when,
+            }),
+            designing,
+          )
+        }
+        assert.deepEqual(
+          context.ledger.projects().map((p) => p.name),
+          ['app'],
+          'nothing was opened',
+        )
+        assert.deepEqual(
+          [chiefOf(context, project).harness, chiefOf(context, project).agent],
+          ['claude-code', 'apollo'],
+        )
+        assert.equal(context.dispatcher.pendingSwitch(id('chief')), null, 'nothing waits to switch')
+        assert.deepEqual([context.host.killed, context.codex.prepared], [[], []])
+      },
+      {
+        roster: (name) =>
+          name === 'pygmalion'
+            ? { id: name, model: 'codex-image', designer: true, profile: {} }
+            : { id: name, model: MODELS[name], profile: { modelKey: MODELS[name] } },
+      },
+    )
+  })
+
   it("keeps a lead on its harness's own default model as it is, until Switch lead moves it to an agent", async () => {
     await withCodex(async (context) => {
       // Opened before a lead was always a saved agent: its record names none.

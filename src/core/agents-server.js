@@ -90,10 +90,7 @@ export function agentsUi(
           const missing = missingHarnesses(env)
           return json(200, {
             agents: offerable(listAgents(env), missing),
-            // An image agent runs through Codex: it goes when Codex is missing.
-            harnesses: HARNESSES.filter(
-              (harness) => !missing.includes(harness === 'image' ? 'codex' : harness),
-            ),
+            harnesses: HARNESSES.filter((harness) => !missing.includes(harness)),
             efforts: EFFORTS,
             preferences: preferences(env),
           })
@@ -323,6 +320,7 @@ ${FRAMED}
   <form id="add">
     <input name="name" placeholder="callsign, lowercase" required>
     <select name="harness"></select>
+    <label class="full"><input type="checkbox" name="designer"> Image agent: draws with Codex's image tool, as an image designer only</label>
     <input class="full" name="model" placeholder="model — anything this harness accepts" required>
     <input name="effort" list="effort-options" placeholder="effort (optional)">
     <datalist id="effort-options"></datalist>
@@ -346,10 +344,10 @@ const el = (tag, className, text) => {
   return node;
 };
 
-const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', devin: 'Devin', image: 'Codex' };
+const HARNESS_LABELS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', devin: 'Devin' };
 const WORK_TIERS = ${JSON.stringify(WORK_TIERS)};
 const EFFORT_ORDER = ['ultra', 'max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'off', 'default', 'not-applicable'];
-const effortValue = p => p.harness === 'image' ? 'not-applicable' : (p.effort || 'default');
+const effortValue = p => p.designer ? 'not-applicable' : (p.effort || 'default');
 const effortLabel = value => value === 'not-applicable' ? 'Not applicable' : EFFORT_ORDER.includes(value) ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 const rank = (values, value) => values.includes(value) ? values.indexOf(value) : values.length;
 const compareText = (a, b) => String(a).localeCompare(String(b));
@@ -389,8 +387,7 @@ function browsingGroups(entries, sectionId) {
   const groups = new Map();
   for (const p of filtered) {
     const effort = effortValue(p);
-    // An image agent runs through Codex, so it groups with Codex.
-    const key = by === 'model-reasoning' ? JSON.stringify([p.profile.modelKey, effort]) : by === 'harness' ? (p.harness === 'image' ? 'codex' : p.harness) : by === 'tier' ? p.profile.workTier : '';
+    const key = by === 'model-reasoning' ? JSON.stringify([p.profile.modelKey, effort]) : by === 'harness' ? p.harness : by === 'tier' ? p.profile.workTier : '';
     const title = by === 'model-reasoning' ? p.profile.modelLabel + ' · ' + effortLabel(effort) : by === 'harness' ? (HARNESS_LABELS[key] || key) : by === 'tier' ? WORK_TIERS[key].label : '';
     if (!groups.has(key)) groups.set(key, { key, title, modelGroup: by === 'model-reasoning', modelKey: p.profile.modelKey, modelLabel: p.profile.modelLabel, effort, rows: [] });
     groups.get(key).rows.push(p);
@@ -494,7 +491,7 @@ function openEditor(card, agent) {
     ['model', agent.model, 'model'],
     ['effort', agent.effort ?? '', 'effort (blank for none)'],
   ];
-  for (const [name, value, placeholder] of agent.harness === 'image' ? [] : fields) {
+  for (const [name, value, placeholder] of agent.designer ? [] : fields) {
     const input = document.createElement('input');
     input.name = name;
     input.value = value;
@@ -565,26 +562,36 @@ function removeButton(agent, label) {
 function renderForm(data) {
   const harnessSelect = document.querySelector('select[name=harness]');
   if (harnessSelect.options.length === 0) {
-    // An image agent is Codex's own image generation, not a harness of its own.
-    for (const r of data.harnesses) harnessSelect.add(new Option(r === 'image' ? 'codex images' : r, r));
-    harnessSelect.onchange = () => showEfforts(data.efforts, harnessSelect.value);
+    for (const r of data.harnesses) harnessSelect.add(new Option(r, r));
+    harnessSelect.onchange = () => showEfforts(data.efforts);
+    document.querySelector('#add [name=designer]').onchange = () => showEfforts(data.efforts);
   }
-  showEfforts(data.efforts, harnessSelect.value);
+  showEfforts(data.efforts);
 }
 
-function showEfforts(efforts, harness) {
+/**
+ * The add form for the harness picked. Only a Codex agent may be an image
+ * agent, which names no model or effort: its window is Codex on its own
+ * model, and its model is the Codex Images route.
+ */
+function showEfforts(efforts) {
+  const harness = document.querySelector('#add [name=harness]').value;
+  const choice = document.querySelector('#add [name=designer]');
+  choice.parentElement.hidden = harness !== 'codex';
+  if (harness !== 'codex') choice.checked = false;
+  const designer = choice.checked;
   const model = document.querySelector('#add [name=model]');
   const effort = document.querySelector('#add [name=effort]');
-  if (harness === 'image') {
+  if (designer) {
     if (!model.hidden) model.dataset.previous = model.value;
     model.value = 'codex-image';
   } else if (model.hidden) {
     model.value = model.dataset.previous || '';
     delete model.dataset.previous;
   }
-  model.hidden = harness === 'image';
-  effort.hidden = harness === 'image';
-  effort.disabled = harness === 'image';
+  model.hidden = designer;
+  effort.hidden = designer;
+  effort.disabled = designer;
   const list = document.querySelector('#effort-options');
   list.innerHTML = '';
   for (const e of efforts[harness] ?? []) list.appendChild(new Option(e, e));
@@ -634,6 +641,7 @@ document.querySelector('#add').onsubmit = async (event) => {
   const form = new FormData(event.target);
   const body = Object.fromEntries([...form.entries()].filter(([, v]) => v !== ''));
   if (body.workTier === 'auto') delete body.workTier;
+  if (form.has('designer')) body.designer = true;
   const res = await fetch('/api/agents', { method: 'POST', headers, body: JSON.stringify(body) });
   const data = await res.json();
   document.querySelector('#error').textContent = res.ok ? '' : data.error;

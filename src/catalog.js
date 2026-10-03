@@ -39,10 +39,8 @@ export const EFFORTS = {
 }
 
 /**
- * The payload speaks in kinds, the manager in harnesses. `image` has no
- * harness here on purpose: an image agent is generated through the
- * Codex backend rather than launched as a CLI, so the roster cannot create
- * one and offering it as a quick-add would hand the user a dead button.
+ * The payload speaks in kinds, the manager in harnesses. An image agent is
+ * a Codex agent with the designer flag, listed with Codex's.
  */
 const KIND_TO_HARNESS = {
   'claude-code': 'claude',
@@ -50,20 +48,26 @@ const KIND_TO_HARNESS = {
   pi: 'pi',
   opencode: 'opencode',
   devin: 'devin',
-  image: 'image',
 }
 
 function entryFor(preset) {
   const effort = preset.effort ?? preset.thinking
+  const designer = preset.designer === true
   return {
     name: preset.preset,
+    ...(designer ? { designer } : {}),
     model: preset.model,
     ...(effort ? { effort } : {}),
     // `label` is the one-line headline ("Claude Code Fable 5.1 MAX"); the
     // preset's own prose is kept alongside for the card that wants it.
     description: preset.label ?? preset.description,
     detail: preset.description,
-    profile: agentProfile({ harness: KIND_TO_HARNESS[preset.kind], model: preset.model, effort }),
+    profile: agentProfile({
+      harness: KIND_TO_HARNESS[preset.kind],
+      model: preset.model,
+      effort,
+      designer,
+    }),
     // Provenance, as a row an older build saved names its entry: the roster
     // reads such a copy as the catalog's own agent.
     preset: preset.preset,

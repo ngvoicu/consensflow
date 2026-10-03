@@ -6,14 +6,12 @@ import { piAdapter } from './pi.js'
 
 /**
  * One adapter per supported harness, keyed the way the ledger names them.
- * An image agent runs in Codex's own window, whose image tool draws on the
- * Codex login.
+ * An image agent is a Codex agent: Codex's adapter opens its window.
  */
 export function createAdapters(env) {
   return {
     'claude-code': claudeCodeAdapter({ env }),
     codex: codexAdapter({ env }),
-    image: codexAdapter({ env, harness: 'image' }),
     devin: devinAdapter({ env }),
     opencode: openCodeAdapter({ env }),
     pi: piAdapter({ env }),

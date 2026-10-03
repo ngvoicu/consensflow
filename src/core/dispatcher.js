@@ -1,3 +1,4 @@
+import { fitsRole } from '../ledger/index.js'
 import { Deliveries } from './deliveries.js'
 import { LeadSwitch } from './lead-switch.js'
 import { Scheduler } from './scheduler.js'
@@ -236,12 +237,16 @@ export class Dispatcher {
 
   /**
    * The lead asked for: one of the human's saved agents, on its harness,
-   * whose windows ConsensFlow opens.
+   * whose windows ConsensFlow opens, and no image agent: it only designs.
    */
   #requireLead({ harness, agent }) {
     requireLeadAgent(agent)
     this.requireAdapter(harness)
-    if (this.#roster(agent) === null) throw new Error(`${agent} is not among your agents`)
+    const saved = this.#roster(agent)
+    if (saved === null) throw new Error(`${agent} is not among your agents`)
+    if (!fitsRole(saved.designer === true, 'chief')) {
+      throw new Error(`${agent} is an image agent, which can only be an image designer`)
+    }
   }
 
   /**

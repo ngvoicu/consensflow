@@ -5,7 +5,7 @@ import { consoleText } from '../vendor/console-text.js'
 import { ICONS, identity, lamp, laneName, laneOrder, laneStatus } from './board.js'
 
 /** The windows that read key presses on Windows, where the console drops a non-ASCII mark. */
-const KEY_READERS = new Set(['devin', 'codex', 'image'])
+const KEY_READERS = new Set(['devin', 'codex'])
 const WINDOWS = /Windows/.test(globalThis.navigator?.userAgent ?? '')
 
 /** A session in `#showing`: its project's id and its handle. */

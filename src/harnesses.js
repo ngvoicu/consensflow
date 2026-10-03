@@ -356,13 +356,12 @@ export function missingHarnesses(env) {
 /**
  * Agents as the pickers offer them: one whose harness is not installed here is
  * hidden, so only the Harnesses page shows that harness, where it is installed.
- * An image agent (@pygmalion) runs through Codex, so it goes with Codex. One
- * saved for a harness this build does not run (Kimi, dropped) is hidden too:
- * no window could open for it.
+ * One saved for a harness this build does not run (Kimi, dropped) is hidden
+ * too: no window could open for it.
  */
 export function offerable(agents, missing) {
   return agents.map((agent) =>
-    agent.unsupported || missing.includes(agent.harness === 'image' ? 'codex' : agent.harness)
+    agent.unsupported || missing.includes(agent.harness)
       ? { ...agent, hidden: true, notInstalled: true }
       : agent,
   )

@@ -4,12 +4,18 @@ import { agentProfile, CATALOG, catalogEntry, EFFORTS } from '../src/catalog.js'
 import { HARNESSES } from '../src/roster.js'
 
 describe('every tool ships a list of ready-made agents', () => {
-  it('covers every harness, each with a real list (image has one)', () => {
+  it('covers every harness, each with a real list, the image agent among Codex’s', () => {
     assert.deepEqual(Object.keys(CATALOG).sort(), [...HARNESSES].sort())
     for (const [harness, entries] of Object.entries(CATALOG)) {
-      const least = ['image', 'devin'].includes(harness) ? 1 : 3
+      const least = harness === 'devin' ? 1 : 3
       assert.ok(entries.length >= least, `${harness} needs a real list`)
     }
+    assert.deepEqual(
+      Object.entries(CATALOG).flatMap(([harness, entries]) =>
+        entries.filter((entry) => entry.designer).map((entry) => [harness, entry.name]),
+      ),
+      [['codex', 'pygmalion']],
+    )
   })
 
   it('gives every entry a name, a model and a description', () => {
@@ -62,6 +68,9 @@ describe('every tool ships a list of ready-made agents', () => {
       // MiMo V2.6 Pro (2026-09-30): reasoning on or off, no level in any catalog.
       'selene', // on pi
       'idun', // on opencode
+      // Codex Images, among Codex's agents since 2026-10-03: an image agent's
+      // window is Codex on its own model, with no effort of its own.
+      'pygmalion',
     ])
     for (const [harness, entries] of Object.entries(CATALOG)) {
       if ((EFFORTS[harness] ?? []).length === 0) continue
@@ -195,8 +204,7 @@ describe('every tool ships a list of ready-made agents', () => {
       }
     }
 
-    // Every preset the manager can actually create is offered; the image
-    // preset is not, because the roster has no harness that launches it.
+    // Every preset is offered, the image agent among Codex's.
     const offered = Object.values(CATALOG).flat().length
     assert.equal(offered, AGENT_PRESETS.length, 'every preset is offered, image included')
   })

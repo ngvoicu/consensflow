@@ -1,11 +1,4 @@
-import {
-  cut,
-  LedgerError,
-  requireAgentId,
-  requireChiefHarness,
-  requireHarness,
-  requireText,
-} from './model.js'
+import { cut, LedgerError, requireAgentId, requireHarness, requireText } from './model.js'
 import { project } from './projects.js'
 import { conversationView, MESSAGE_SELECT, messageView, TASK_SELECT, taskView } from './views.js'
 
@@ -267,7 +260,7 @@ export function leadOpenWork(store, projectId) {
  * of a turn, for the handoff to say.
  */
 export function switchChief(store, projectId, { harness, agent, cut = false }) {
-  requireChiefHarness(harness)
+  requireHarness(harness)
   requireAgentId(agent)
   return store.write(() => {
     const chief = store.participantByHandle(projectId, 'chief')

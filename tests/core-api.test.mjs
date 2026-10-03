@@ -1027,7 +1027,8 @@ describe('tiered tasks through the API and cf', () => {
       assert.equal(ledger.task(project.id, 3).pool, 'advisor')
       ledger.addMember(project.id, {
         agent: 'pygmalion',
-        harness: 'image',
+        harness: 'codex',
+        designer: true,
         role: 'designer',
         tier: 'light',
       })

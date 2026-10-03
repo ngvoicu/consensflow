@@ -1370,13 +1370,16 @@ export const AGENT_PRESETS = [
   },
 
   // --- Image generation through the existing Codex login -----------------
+  // An image agent is a Codex agent with the designer flag: its window is
+  // Codex on its own default model, whose image tool draws.
   {
     preset: "pygmalion",
     id: "pygmalion",
     name: "Pygmalion",
     label: "Codex Images (via Codex login)",
     description: "Generate illustrations and edit reference images through your existing Codex login.",
-    kind: "image",
+    kind: "codex",
+    designer: true,
     // A logical route, not a selectable image model.
     model: "codex-image",
   },
@@ -1451,7 +1454,7 @@ export function agentProfile(agent) {
   return profile;
 }
 
-function modelProfile({ harness, kind, model, effort, thinking }) {
+function modelProfile({ harness, kind, model, effort, thinking, designer }) {
   harness ??= kind === "claude-code" ? "claude" : kind
   if (harness === "pi") effort = thinking ?? effort
   const known = AGENT_PRESETS.some((p) => (p.kind === "claude-code" ? "claude" : p.kind) === harness && p.model === model)
@@ -1462,7 +1465,8 @@ function modelProfile({ harness, kind, model, effort, thinking }) {
     modelLabel: model || 'Devin configured model',
     routeLabel: 'Devin account',
   }
-  if (harness === 'image')
+  // An image agent's window runs on Codex's own model, whatever model it names.
+  if (designer)
     return {
       modelKey: 'codex-image',
       modelLabel: 'Codex Images',
