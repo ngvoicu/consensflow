@@ -378,12 +378,21 @@ export async function startIntegration({
       return openFrames.find((frame) => frame.id === id)
     },
     exits,
-    /** Everything a pane printed so far, control sequences stripped, newest last. */
+    /**
+     * Everything a pane printed so far, control sequences stripped, newest
+     * last. Windows' console host draws a run of blanks as a cursor move and
+     * starts a line by jumping to it: those stay the blanks and the line
+     * break they stand for, so text reads the same on every platform.
+     */
     output(paneId) {
       const esc = String.fromCharCode(27)
       const bell = String.fromCharCode(7)
       return Buffer.concat(outputs.get(paneId) ?? [])
         .toString('utf8')
+        .replace(new RegExp(`${esc}\\[(\\d*)C`, 'g'), (_, count) =>
+          ' '.repeat(Math.min(Number(count || 1), 512)),
+        )
+        .replace(new RegExp(`${esc}\\[[0-9;]*[Hf]`, 'g'), '\n')
         .replace(new RegExp(`${esc}\\[[0-9;?]*[ -/]*[@-~]`, 'g'), '')
         .replace(new RegExp(`${esc}\\][^${bell}]*${bell}`, 'g'), '')
         .replaceAll('\r', '')

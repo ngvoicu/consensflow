@@ -22,6 +22,7 @@ import { parseArgs } from 'node:util'
 import { answers } from '../hosts/lib/completion.js'
 import { interactiveStart } from '../hosts/lib/windows.js'
 import { recordState } from '../src/adapters/shared.js'
+import { runnable } from '../src/harnesses.js'
 import { startIntegration } from '../tests/integration/harness.mjs'
 import { trustForClaude } from '../tests/live/trust-claude.mjs'
 import { askingTurnEnd, bareMetrics, findSession } from './bare.mjs'
@@ -110,11 +111,29 @@ const ISOLATED_BIN = join(H, '.consensflow-candidate', 'evals', 'bin')
 const WINDOWS = process.platform === 'win32'
 const wrapper = (name, real, flags) => {
   if (WINDOWS) {
-    // cmd's own: the real program with these flags, then every argument it was given.
-    const args = [real, ...flags].map((arg) => `"${arg.replace(/"/g, '\\"')}"`).join(' ')
+    // A window opens on a .cmd only in npm's shape, node and a script: the
+    // script starts the real program with these flags and every argument it
+    // was given, in the same console, and ends as it ends. Ctrl+C is the
+    // program's to answer, not the script's.
+    const relay = join(ISOLATED_BIN, `${name}.mjs`)
+    const harnesses = pathToFileURL(join(HERE, '..', 'src', 'harnesses.js')).href
+    writeFileSync(
+      relay,
+      [
+        '// Written by evals/run.mjs: eval windows reach no MCP server and no browser.',
+        "import { spawn } from 'node:child_process'",
+        `import { runnable } from ${JSON.stringify(harnesses)}`,
+        `const { file, args, options } = runnable(${JSON.stringify(real)}, [...${JSON.stringify(flags)}, ...process.argv.slice(2)])`,
+        "for (const signal of ['SIGINT', 'SIGBREAK']) process.on(signal, () => {})",
+        "const child = spawn(file, args, { ...options, stdio: 'inherit' })",
+        "child.on('error', (error) => { console.error(error.message); process.exit(1) })",
+        "child.on('exit', (code) => process.exit(code ?? 1))",
+        '',
+      ].join('\n'),
+    )
     writeFileSync(
       join(ISOLATED_BIN, `${name}.cmd`),
-      `@echo off\r\nREM Written by evals/run.mjs: eval windows reach no MCP server and no browser.\r\n${args} %*\r\n`,
+      `@echo off\r\nREM Written by evals/run.mjs: eval windows reach no MCP server and no browser.\r\n"${process.execPath}" "${relay}" %*\r\n`,
     )
     return
   }
@@ -185,10 +204,14 @@ if (realCodex !== null) {
       .concat(
         codexIsolation(
           JSON.parse(
-            execFileSync(realCodex, ['mcp', 'list', '--json'], {
-              encoding: 'utf8',
-              timeout: 30_000,
-            }),
+            (() => {
+              const list = runnable(realCodex, ['mcp', 'list', '--json'])
+              return execFileSync(list.file, list.args, {
+                ...list.options,
+                encoding: 'utf8',
+                timeout: 30_000,
+              })
+            })(),
           ),
         ),
       ),
