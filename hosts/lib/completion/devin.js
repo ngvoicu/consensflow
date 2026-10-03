@@ -132,6 +132,7 @@ export function devinReader(sessionId, env) {
   // after its turn did, and its window would read as working for good.
   const visitWire = (wire, event) => {
     if (event.sessionId !== sessionId) return
+    wire.mine = true
     const update = event.update
     const toolEnded =
       update?.sessionUpdate === 'tool_call_update' &&
@@ -179,7 +180,7 @@ export function devinReader(sessionId, env) {
       const present = new Set()
       for (const launch of launches) {
         const file = path.join(root, launch, 'wire.jsonl')
-        const wire = wires.get(launch) ?? { seen: null, active: null, busy: false }
+        const wire = wires.get(launch) ?? { seen: null, active: null, busy: false, mine: false }
         let next
         try {
           next = await readOn(file, wire.seen, (event) => visitWire(wire, event))
@@ -281,11 +282,13 @@ function devinChain(nodes, head, parsed) {
  * by the launch whose wire was written last (a resume opens a new one).
  */
 function devinAnswer(chain, outcomes, launches, wires) {
+  // The newest window that carried this session says whether it is at work:
+  // another session's, written later, says nothing of this one.
   let working = false
   let latestWire = -1
   for (const launch of launches) {
     const wire = wires.get(launch)
-    if (wire !== undefined && wire.seen.mtimeMs >= latestWire) {
+    if (wire?.mine && wire.seen.mtimeMs >= latestWire) {
       latestWire = wire.seen.mtimeMs
       working = wire.busy
     }

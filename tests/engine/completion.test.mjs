@@ -1779,6 +1779,33 @@ test('completion/devin: a reply naming files on Windows, linked and quoted, is t
   }
 })
 
+test("completion/devin: a session at work reads as working, though another session's window wrote last", async () => {
+  // Seen with three Devin windows of one worker, 2026-10-03: each read as
+  // working only while its own wire log was the newest of all, so the three
+  // flipped between working and idle at nearly every look.
+  const { root, env } = await stageDevin('Done.', [
+    devinChunk('Done.'),
+    { sessionId: 'calm-river', turnClientMessageId: 'request-1', cause: 'complete' },
+    { sessionId: 'calm-river', update: { sessionUpdate: 'tool_call' } },
+  ])
+  try {
+    const other = path.join(env.CONSENSFLOW_HOME, 'integrations', 'devin', 'launch-2')
+    await fs.mkdir(other, { recursive: true })
+    const wire = path.join(other, 'wire.jsonl')
+    await fs.writeFile(
+      wire,
+      `${JSON.stringify({ sessionId: 'quiet-lake', turnClientMessageId: 'request-9', cause: 'complete' })}\n`,
+    )
+    const later = new Date(Date.now() + 60_000)
+    await fs.utimes(wire, later, later)
+    const working = await completion.answers('devin', 'calm-river', env)
+    assert.equal(working.inFlight, true)
+    assert.equal(working.settlement.state, 'in-flight')
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 test('completion/devin: a turn whose work shows on the wire after the last end is in flight, whatever the store says', async () => {
   // Devin writes a turn to its store as it goes, but a turn it is still on
   // shows only on the wire: thoughts, messages and tool calls after the last end.
