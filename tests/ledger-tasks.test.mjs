@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { openLedger, RESUME_WORDS } from '../src/ledger/index.js'
-import { deliver, names, staff, withDir, withLedger } from './ledger-fixtures.mjs'
+import { clock, deliver, dropTrace, names, staff, withDir, withLedger } from './ledger-fixtures.mjs'
 
 /** Tasks along their state machine, and the plan their needs make (src/ledger/tasks.js). */
 
@@ -622,6 +622,31 @@ describe('pause and resume', () => {
       ledger.resumeTask(project.id, 1, { by: 'chief', body: 'Go on' })
       ledger.pauseTask(project.id, 1, { by: 'chief' })
       assert.equal(told(), false, 'a tell from before the latest pause does not count')
+    })
+  })
+
+  it('knows whether a tell reached the window from the task, not from the event log', async () => {
+    await withDir(async (dir) => {
+      const file = path.join(dir, 'consensflow.db')
+      const before = openLedger(file, { now: clock(), names: names() })
+      const { project, session, sessionId } = running(before)
+      const tell = before.ask(project.id, {
+        from: 'chief',
+        to: session,
+        task: 1,
+        body: 'Use the new grammar',
+        urgent: true,
+      })
+      deliver(before, tell)
+      const task = before.task(project.id, 1)
+      before.close()
+      dropTrace(file)
+      const ledger = openLedger(file)
+      try {
+        assert.equal(ledger.toldSincePaused(sessionId, task.id), true)
+      } finally {
+        ledger.close()
+      }
     })
   })
 })

@@ -391,12 +391,18 @@ export function pauseTask(store, projectId, number, { by, because } = {}) {
       throw new LedgerError('own-work', `T-${number} is the chief's own: finish or cancel it`, 409)
     }
     dropQueued(store, task.id)
-    store.moveTask(task, 'paused', {
-      by: by ?? null,
-      ...(because === undefined ? {} : { because }),
-    })
+    pause(store, task, { by: by ?? null, ...(because === undefined ? {} : { because }) })
     return taskById(store, task.id)
   })
+}
+
+/**
+ * The move to paused, its time kept as the task's last pause: a tell that
+ * reaches the window from then on counts (`toldSincePaused`).
+ */
+function pause(store, task, detail) {
+  store.moveTask(task, 'paused', detail)
+  store.db.prepare('UPDATE task SET paused_at = updated_at WHERE id = ?').run(task.id)
 }
 
 /**
@@ -413,7 +419,7 @@ export function holdTask(store, projectId, number, { until, because }) {
     const task = store.taskRow(projectId, number)
     requireTaskState(task, ['queued', ...ACTIVE_TASK_STATES], 'hold')
     dropQueued(store, task.id)
-    store.moveTask(task, 'paused', { by: null, because, until })
+    pause(store, task, { by: null, because, until })
     store.db.prepare('UPDATE task SET held_until = ? WHERE id = ?').run(until, task.id)
     return taskById(store, task.id)
   })
@@ -454,10 +460,7 @@ export function toldSincePaused(store, participantId, taskId) {
            WHERE q.recipient_id = ? AND q.task_id = ?
              AND q.kind = 'question' AND q.urgent = 1
              AND q.state IN ('delivering', 'delivered', 'read')
-             AND q.created_at >= (SELECT MAX(e.at) FROM event e
-               WHERE e.project_id = t.project_id AND e.kind = 'task.state'
-                 AND json_extract(e.data, '$.task') = t.number
-                 AND json_extract(e.data, '$.to') = 'paused')`,
+             AND q.created_at >= t.paused_at`,
       )
       .get(participantId, taskId) !== undefined
   )
