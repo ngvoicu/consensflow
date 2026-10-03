@@ -812,6 +812,39 @@ describe('the dispatcher', () => {
     })
   })
 
+  it("presses no Escape into an idle window whose task is paused, and gives it the chief's tell as it is", async () => {
+    // poker-lab, 2026-10-03: a tell's pause sent Escape twice to a Devin that
+    // had stopped; its rewind opened, and the tell's Enter rewound the agent's
+    // conversation.
+    await setup(async (context) => {
+      const { project } = await withStaff(context)
+      context.adapter.interrupt = { presses: 2 }
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      // Its turn is over, with nothing written yet: the task is still working.
+      const zeus = context.adapter.agent('zeus')
+      zeus.settled = true
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.task(project.id, 1).state, 'working')
+      context.ledger.pauseTask(project.id, 1, { by: 'chief' })
+      context.ledger.ask(project.id, {
+        from: 'chief',
+        to: 'zeus',
+        task: 1,
+        body: 'Stop: use grammar v2',
+        urgent: true,
+      })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        context.host.requests.filter(([op]) => op === 'pane.input'),
+        [],
+      )
+      assert.match(zeus.items.at(-1).text, /question from @chief\]\nStop: use grammar v2/)
+    })
+  })
+
   it('delivers results to an idle chief one at a time and proves each arrived', async () => {
     await setup(async (context) => {
       const { project, id } = await withStaff(context, ['zeus', 'diana'])

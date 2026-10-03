@@ -413,15 +413,17 @@ export class Windows {
    * where the harness asks for it), and again a few seconds later while the
    * window still reads as working, since a harness may ignore the key while
    * it thinks: three rounds at most for each stop, so a task paused again
-   * after a resume is interrupted again.
+   * after a resume is interrupted again. Only a window at work is: Escape
+   * twice to an idle Devin opens its rewind, whose next Enter (a tell's)
+   * rewound the agent's conversation (poker-lab, 2026-10-03), and one to an
+   * idle Claude clears what the human was typing.
    */
   async #interrupt(runtime, stop) {
+    if (runtime.window.activity.state !== 'working') return
     const done = runtime.window.interrupted?.stop === stop ? runtime.window.interrupted : null
     if (
       done !== null &&
-      (runtime.window.activity.state !== 'working' ||
-        done.rounds >= INTERRUPT_ROUNDS ||
-        this.#now() - done.at < INTERRUPT_AGAIN_MS)
+      (done.rounds >= INTERRUPT_ROUNDS || this.#now() - done.at < INTERRUPT_AGAIN_MS)
     ) {
       return
     }
