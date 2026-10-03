@@ -57,7 +57,8 @@ export function cachedAnswers({ idleMs = 10 * 60_000, now = Date.now } = {}) {
     }
     entry.readAt = at
     const look = entry.looked.then(() => entry.read(options))
-    entry.looked = look
+    // A look that failed must not hold up the ones after it.
+    entry.looked = look.catch(() => {})
     return look
   }
 }
