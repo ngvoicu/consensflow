@@ -15,7 +15,7 @@
  */
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { chmodSync, cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -347,14 +347,31 @@ async function run(index) {
     pane = (await chiefLane()).pane
     await settled(() => app.output(pane.id).length)
     note(`chief (${chief}) ready; typing the prompt`)
+    /** Whether the chief's window went to work after `at`, as the daemon's trace has it. */
+    const workedSince = (at) => {
+      let trace = ''
+      try {
+        trace = readFileSync(join(app.env.CONSENSFLOW_HOME, 'events.jsonl'), 'utf8')
+      } catch {
+        return false
+      }
+      return trace.split('\n').some((line) => {
+        if (!line.includes('"window.activity"') || !line.includes('"working"')) return false
+        const event = JSON.parse(line)
+        return event.participant === 'chief' && event.state === 'working' && event.at >= at
+      })
+    }
     /** Type into the chief's terminal as the owner would, Enter pressed again while the window keeps the text. */
     const say = async (text) => {
+      await app.waitFor(async () => (await chiefLane())?.activity?.state === 'idle', 240_000)
+      const typed = new Date().toISOString()
       await app.tell(project, text, { idleMs: 240_000 })
       // Devin takes a pasted prompt into its box and waits for an Enter of its
-      // own; Codex on Windows once took the second Enter as a new line too.
+      // own; Codex on Windows once took the second Enter as a new line too. A
+      // window that went to work took the text, however soon it was done.
       for (let more = 0; more < 3; more += 1) {
         await sleep(5_000)
-        if ((await chiefLane())?.activity?.state !== 'idle') return
+        if (workedSince(typed) || (await chiefLane())?.activity?.state !== 'idle') return
         await app.request('pane.input', { id: pane.id, generation: pane.generation, bytes: [13] })
         note('Enter pressed again: the window had not taken the text')
       }
