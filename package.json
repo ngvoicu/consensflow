@@ -36,6 +36,7 @@
     "live:paste": "node tests/live/paste-submit.mjs",
     "live:interrupt": "node tests/live/interrupt-idle.mjs",
     "live:asks": "node tests/live/claude-asks.mjs",
+    "live:codex-resume": "node tests/live/codex-resume.mjs",
     "windows": "node tests/live/windows.mjs",
     "check:all": "npm run check && cargo fmt --check --manifest-path app/src-tauri/Cargo.toml && cargo test --offline --features test-helper --manifest-path app/src-tauri/Cargo.toml && cargo clippy --offline --features test-helper --manifest-path app/src-tauri/Cargo.toml --all-targets -- -D warnings && cargo clippy --offline --manifest-path app/src-tauri/Cargo.toml --all-targets -- -D warnings && npm --prefix app run test:ui && npm run build:bridge -- --offline && npm run test:integration && npm run smoke"
   },

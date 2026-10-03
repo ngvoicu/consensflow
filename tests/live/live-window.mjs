@@ -57,6 +57,19 @@ export function pastedHarnesses(names) {
 /** The app's daemon and pane host, as the live tests drive them. */
 export const startLiveApp = () => startIntegration({ daemon: DAEMON, fakeEnv: ENV })
 
+/** A live test's own folder, `~/.consensflow-candidate/live/<folder>`. */
+export function liveFolder(folder) {
+  const workspace = join(H, '.consensflow-candidate', 'live', folder)
+  mkdirSync(workspace, { recursive: true })
+  return workspace
+}
+
+/** The environment an adapter prepares a window with here: the folder is its ConsensFlow home. */
+export const windowEnv = (workspace) => ({
+  ...RECORD_ENV,
+  CONSENSFLOW_HOME: join(workspace, '.consensflow'),
+})
+
 /**
  * What a scripted Claude window needs besides its command line: no MCP
  * servers, connectors or browser, and the settings file the app writes for
@@ -64,9 +77,8 @@ export const startLiveApp = () => startIntegration({ daemon: DAEMON, fakeEnv: EN
  * the folder's own).
  */
 async function claudeExtras(workspace) {
-  const home = { ...RECORD_ENV, CONSENSFLOW_HOME: join(workspace, '.consensflow') }
   return [
-    ...(await prepareClaudeSettings(home, 'live', { boardQuestions: false })),
+    ...(await prepareClaudeSettings(windowEnv(workspace), 'live', { boardQuestions: false })),
     '--strict-mcp-config',
     '--no-chrome',
   ]
@@ -77,8 +89,7 @@ async function claudeExtras(workspace) {
  * `~/.consensflow-candidate/live/<folder>`, as pane `id`.
  */
 export async function openWindow(app, name, { folder, id }) {
-  const workspace = join(H, '.consensflow-candidate', 'live', folder)
-  mkdirSync(workspace, { recursive: true })
+  const workspace = liveFolder(folder)
   const { kind, model } = HARNESSES[name]
   // Claude and Pi open on an id they are given; the others name their own.
   const session = kind === 'claude-code' || kind === 'pi' ? randomUUID() : null

@@ -261,13 +261,15 @@ export async function startBroker({
           message.method === 'thread/start' &&
           params.ephemeral === false &&
           params.threadSource === 'user'
+        // The TUI's own resume and fork name its workspace roots: a list, or
+        // since Codex 0.159 null, so it is the field being there that counts.
         const mainResume =
-          message.method === 'thread/resume' && Array.isArray(params.runtimeWorkspaceRoots)
+          message.method === 'thread/resume' && Object.hasOwn(params, 'runtimeWorkspaceRoots')
         const mainFork =
           message.method === 'thread/fork' &&
           params.ephemeral !== true &&
           params.threadSource === 'user' &&
-          Array.isArray(params.runtimeWorkspaceRoots)
+          Object.hasOwn(params, 'runtimeWorkspaceRoots')
         if (mainStart || mainResume || mainFork) {
           const prior = switching ? null : selected
           const priorEmpty = !switching && empty

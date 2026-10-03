@@ -184,6 +184,41 @@ it('follows successful main new/resume while ignoring title threads, child focus
   assert.deepEqual(await delivery, { ok: true, admitted: true })
 })
 
+it('a window opened on its thread is named by its resume, whose roots Codex 0.159 sends as null', async (t) => {
+  const f = await fixture(t)
+  const tui = await f.connect()
+  // `codex resume <thread> <message>`, as Codex 0.159.2 sends it (traced 2026-10-03).
+  const resume = {
+    threadId: B,
+    history: null,
+    path: null,
+    model: 'gpt-5.6-luna',
+    modelProvider: null,
+    serviceTier: 'default',
+    cwd: null,
+    runtimeWorkspaceRoots: null,
+    approvalPolicy: null,
+    approvalsReviewer: null,
+    sandbox: null,
+    permissions: null,
+    config: { model_reasoning_effort: 'low' },
+    baseInstructions: null,
+    developerInstructions: null,
+    personality: null,
+    excludeTurns: true,
+    initialTurnsPage: null,
+  }
+  tui.send(JSON.stringify({ id: 5, method: 'thread/resume', params: resume }))
+  await f.wait(() => f.pending.some((p) => p.message.id === 5))
+  assert.equal((await f.read()).available, false, 'nothing is taken while it resumes')
+  await f.respond('thread/resume', { thread: { id: B, status: { type: 'idle' } } })
+  assert.deepEqual([(await f.read()).sessionId, (await f.read()).available], [B, true])
+  const delivery = f.deliver(B)
+  const started = await f.respond('turn/start', { turn: { id: 'turn-1' } })
+  assert.equal(started.params.threadId, B)
+  assert.deepEqual(await delivery, { ok: true, admitted: true })
+})
+
 it('starts a turn with a delivery when the thread is idle, queues it only while a turn runs, and says when it can take one', async (t) => {
   const f = await fixture(t)
   const tui = await f.connect()
