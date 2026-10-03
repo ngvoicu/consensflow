@@ -1443,7 +1443,7 @@ export function agentProfile(agent) {
     if (['gpt-6-astra', 'claude-fable-5.1'].includes(profile.modelKey))
       tier = ['max', 'ultra'].includes(effort) ? 'critical' : ['high', 'xhigh'].includes(effort) ? 'complex' : effort === 'medium' ? 'standard' : 'light';
     else if (profile.modelKey === 'claude-opus-5.5')
-      tier = effort === 'max' ? 'critical' : effort === 'xhigh' ? 'complex' : effort === 'low' ? 'light' : 'standard';
+      tier = effort === 'max' ? 'critical' : effort === 'low' ? 'light' : 'complex';
     else if (profile.modelKey === 'gpt-6.1-sol')
       tier = ['max', 'ultra'].includes(effort) ? 'complex' : ['low', 'medium'].includes(effort) ? 'light' : 'standard';
     else if (profile.modelKey === 'claude-sonnet-5.5')

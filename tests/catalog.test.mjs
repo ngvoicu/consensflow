@@ -367,10 +367,12 @@ it('assigns four work tiers by model and effort across routes, without agent-nam
     ['endymion', 'complex'],
     ['apollo', 'complex'],
     ['kronos', 'complex'],
-    // Sol and Sonnet at max are complex work (Gabriel, 2026-09-30).
+    // Sol and Sonnet at max are complex work (Gabriel, 2026-09-30), and so
+    // is Opus 5.5 at medium and high, beside Sonnet at max (2026-10-03).
     ['hyperion', 'complex'],
     ['hermod', 'complex'],
-    ['artemis', 'standard'],
+    ['artemis', 'complex'],
+    ['poseidon', 'complex'],
     ['thalia', 'standard'],
     ['maia', 'standard'],
     ['phoebus', 'standard'],
@@ -405,6 +407,18 @@ it('assigns four work tiers by model and effort across routes, without agent-nam
   ]) {
     const sonnet = agentProfile({ harness: 'claude', model: 'claude-sonnet-5-5', effort })
     assert.equal(sonnet.workTier, tier, `Sonnet 5.5 ${effort}`)
+  }
+  // Opus 5.5, as an agent of your own on Claude Code: max is critical work,
+  // low light, and every level between them complex.
+  for (const [effort, tier] of [
+    ['max', 'critical'],
+    ['xhigh', 'complex'],
+    ['high', 'complex'],
+    ['medium', 'complex'],
+    ['low', 'light'],
+  ]) {
+    const opus = agentProfile({ harness: 'claude', model: 'claude-opus-5-5', effort })
+    assert.equal(opus.workTier, tier, `Opus 5.5 ${effort}`)
   }
   // Codex's ultra sits above max: Sol there is complex work too.
   assert.equal(
