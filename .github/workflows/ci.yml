@@ -3,7 +3,8 @@
 # Playwright suite (on macOS: it needs no app, and once is enough), and the
 # Rust host's tests, headless ones included, and clippy. The packaged smoke
 # needs a built app and stays with the release build. Rust comes from the
-# runner's own rustup; the one third-party action is pinned to a commit.
+# runner's own rustup; the one third-party action is pinned to a commit. A
+# release runs this same gate on the commit it releases.
 name: CI
 
 on:
@@ -11,6 +12,7 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   gate:

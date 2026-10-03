@@ -118,9 +118,14 @@ jobs:
   windows:
     uses: ./.github/workflows/windows-build.yml
 
+  # The whole gate (ci.yml) on the commit being released: what goes out passed
+  # it on both platforms, not only its build and the packaged smoke.
+  gate:
+    uses: ./.github/workflows/ci.yml
+
   publish:
     if: github.ref_type == 'tag'
-    needs: [mac, windows]
+    needs: [mac, windows, gate]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
