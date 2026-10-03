@@ -353,7 +353,7 @@ pub fn run() {
             }
             let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool> =
                 Box::new(tauri::generate_handler![
-                    commands::core_request,
+                    commands::daemon_request,
                     commands::pane_input_enqueue,
                     commands::pane_reply_enqueue,
                     commands::pane_input_wait,

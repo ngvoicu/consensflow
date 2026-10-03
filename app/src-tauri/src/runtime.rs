@@ -12,10 +12,10 @@ use tauri::{AppHandle, Emitter};
 use crate::arbiter::{EnterTiming, InputArbiter};
 use crate::bridge::BridgeBuilder;
 use crate::daemon::{
-    connect_core, stop_daemon, Core, CoreStarter, CoreStatus, CORE_READY_TIMEOUT, CORE_RESTART,
-    CORE_STATUS_EVENT,
+    connect_daemon, stop_daemon, Daemon, DaemonStarter, DaemonStatus, DAEMON_READY_TIMEOUT,
+    DAEMON_RESTART, DAEMON_STATUS_EVENT,
 };
-use crate::daemon_command::core_command;
+use crate::daemon_command::daemon_command;
 use crate::input_queue::InputQueue;
 use crate::output_hub::{OutputHub, PaneOutputMessage};
 use crate::pane_handlers::register_pane_handlers;
@@ -43,7 +43,7 @@ type PageEventSink = Arc<dyn Fn(&str, Value) + Send + Sync>;
 
 pub struct AppRuntime {
     pub(crate) panes: Arc<PaneTable>,
-    pub(crate) core: Arc<Core>,
+    pub(crate) daemon: Arc<Daemon>,
     pub(crate) output: Arc<OutputHub>,
     pub(crate) inputs: Arc<InputQueue>,
 }
@@ -56,18 +56,18 @@ impl AppRuntime {
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
 
         let reporter = app.clone();
-        let core = Core::new(Arc::new(move |status: &CoreStatus| {
-            if let Err(error) = reporter.emit(CORE_STATUS_EVENT, status) {
-                eprintln!("consensflow page event {CORE_STATUS_EVENT}: {error}");
+        let daemon = Daemon::new(Arc::new(move |status: &DaemonStatus| {
+            if let Err(error) = reporter.emit(DAEMON_STATUS_EVENT, status) {
+                eprintln!("consensflow page event {DAEMON_STATUS_EVENT}: {error}");
             }
         }));
-        let starter: CoreStarter = {
+        let starter: DaemonStarter = {
             let app = app.clone();
             let panes = Arc::clone(&panes);
             let output = Arc::clone(&output);
             let inputs = Arc::clone(&inputs);
             Arc::new(move |closed| {
-                let command = core_command(&app)?;
+                let command = daemon_command(&app)?;
                 let mut builder = BridgeBuilder::new(MAX_FRAME_BYTES);
                 let page_app = app.clone();
                 let page_events: PageEventSink = Arc::new(move |name, body| {
@@ -85,13 +85,13 @@ impl AppRuntime {
                 );
                 builder.on_error(|error| eprintln!("consensflow bridge: {error}"));
                 builder.on_close(closed);
-                connect_core(command, builder, CORE_READY_TIMEOUT)
+                connect_daemon(command, builder, DAEMON_READY_TIMEOUT)
             })
         };
-        core.start(starter, Arc::clone(&panes), CORE_RESTART);
+        daemon.start(starter, Arc::clone(&panes), DAEMON_RESTART);
         Self {
             panes,
-            core,
+            daemon,
             output,
             inputs,
         }
@@ -104,7 +104,7 @@ impl AppRuntime {
     }
 
     pub(crate) fn begin_shutdown(&self) -> bool {
-        let Some((daemon, bridge)) = self.core.stop() else {
+        let Some((daemon, bridge)) = self.daemon.stop() else {
             return false;
         };
         if let Some(mut daemon) = daemon {
@@ -122,7 +122,7 @@ impl AppRuntime {
     /// app from quitting. `false` when the drain did not finish in time; the
     /// quit or the update's restart goes on without it.
     pub(crate) fn finish_shutdown(&self) -> bool {
-        let bridge = self.core.bridge();
+        let bridge = self.daemon.bridge();
         let panes = Arc::clone(&self.panes);
         let inputs = Arc::clone(&self.inputs);
         finish_before_deadline(SHUTDOWN_DRAIN, move || {
@@ -247,7 +247,7 @@ pub(crate) fn test_runtime(
 ) -> AppRuntime {
     AppRuntime {
         panes,
-        core: Core::settled(daemon, bridge),
+        daemon: Daemon::settled(daemon, bridge),
         output: Arc::new(OutputHub::new()),
         inputs,
     }

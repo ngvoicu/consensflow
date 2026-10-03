@@ -11,7 +11,7 @@ import { TerminalsView } from './terminals.js'
  * window and the sessions' the human asks to see, so the human reads the
  * board and talks to any of them.
  * Everything it shows comes from the daemon through the app's
- * `core_request`, and it redraws when the core says something changed. It
+ * `daemon_request`, and it redraws when the daemon says something changed. It
  * keeps nothing of its own but what is on screen.
  */
 
@@ -32,7 +32,7 @@ const stage = $('#stage')
 const status = $('#status')
 
 /**
- * No notes for the human, in the shape the core reads their unread ones:
+ * No notes for the human, in the shape the daemon reads their unread ones:
  * the newest one frame holds, how many there are and how many came.
  */
 const NO_NOTES = { messages: [], total: 0, shown: 0 }
@@ -71,8 +71,8 @@ function note(text) {
   say(text, 'info', NOTE_MS)
 }
 
-async function core(operation, body = {}) {
-  const result = await invoke('core_request', { operation, body })
+async function daemon(operation, body = {}) {
+  const result = await invoke('daemon_request', { operation, body })
   // A request the app could not hand to the daemon says why in `detail`.
   if (result?.ok !== true) {
     throw new Error(result?.detail ?? result?.error ?? `${operation} did not answer`)
@@ -82,20 +82,20 @@ async function core(operation, body = {}) {
 
 /** The saved agents, read again: what the board says members run, and what the pickers offer. */
 async function readAgents() {
-  state.agents = (await core('agents.list')).agents
+  state.agents = (await daemon('agents.list')).agents
 }
 
 // The daemon down: the banner says why and what comes next, and stays until
 // the daemon is back, when everything is read again.
-const coreDown = $('#core-down')
-function coreStatus({ available, cause, retrying }) {
-  const wasDown = !coreDown.hidden
-  coreDown.hidden = available
+const daemonDown = $('#daemon-down')
+function daemonStatus({ available, cause, retrying }) {
+  const wasDown = !daemonDown.hidden
+  daemonDown.hidden = available
   if (available) {
     if (wasDown) void act(readAgents)
     return
   }
-  coreDown.replaceChildren(
+  daemonDown.replaceChildren(
     element('strong', null, 'The daemon is not running.'),
     ...(cause ? [` ${sentence(cause)}`] : []),
     retrying ? ' Starting it again…' : ' Quit ConsensFlow and open it again.',
@@ -109,7 +109,7 @@ const sentence = (text) =>
 /**
  * Runs an action and redraws; a refusal shows in the status line. The redraw
  * happens either way, so a control the human already moved (a role box, say)
- * goes back to what the ledger holds when the core refuses the change.
+ * goes back to what the ledger holds when the daemon refuses the change.
  */
 async function act(work) {
   try {
@@ -122,16 +122,16 @@ async function act(work) {
 
 // A crowded cell's cards are listed in the stack dialog, the board's own.
 const board = new BoardView(boardRoot, $('#stack-dialog'), {
-  onRead: (message) => act(() => core('message.read', { message: message.id })),
+  onRead: (message) => act(() => daemon('message.read', { message: message.id })),
   // What waits for the human's approval goes on, goes back, or is declined with a word to its sender.
   onApprove: (message) =>
     act(async () => {
-      await core('message.approve', { message: message.id })
+      await daemon('message.approve', { message: message.id })
       note(`m-${message.id} goes on to @${message.recipient}.`)
     }),
   onDecline: (message) =>
     act(async () => {
-      await core('message.decline', { message: message.id })
+      await daemon('message.decline', { message: message.id })
       note(`m-${message.id} declined; @${message.sender} is told.`)
     }),
   // Each control acts on the project of the board it is on: not yet the one
@@ -146,22 +146,22 @@ const board = new BoardView(boardRoot, $('#stack-dialog'), {
   onHideTerminal: (participant) => terminals.hide(participant.projectId, participant.handle),
   onOpenTerminal: (participant) =>
     act(async () => {
-      await core('session.open', { project: participant.projectId, handle: participant.handle })
+      await daemon('session.open', { project: participant.projectId, handle: participant.handle })
       showTerminal(participant)
     }),
   onCloseTerminal: (participant) =>
     act(async () => {
-      await core('session.close', { project: participant.projectId, handle: participant.handle })
+      await daemon('session.close', { project: participant.projectId, handle: participant.handle })
       terminals.forget(participant.projectId, participant.handle)
     }),
   onEndSession: (participant) =>
     act(async () => {
-      await core('session.end', { project: participant.projectId, handle: participant.handle })
+      await daemon('session.end', { project: participant.projectId, handle: participant.handle })
       note(`@${participant.handle} is gone; its tasks stay on @${participant.member}'s lane.`)
     }),
   onResume: (project) =>
     act(async () => {
-      await core('project.resume', { project: project.id })
+      await daemon('project.resume', { project: project.id })
       state.focus = 'chief'
     }),
   onDeleteFinished: (project, { deletable, kept }) =>
@@ -177,22 +177,22 @@ const board = new BoardView(boardRoot, $('#stack-dialog'), {
 const drawer = new TaskDrawer($('#task-drawer'), {
   onClose: () => closeTask(),
   onCancel: (task) =>
-    act(() => core('task.cancel', { project: task.projectId, task: task.number })),
+    act(() => daemon('task.cancel', { project: task.projectId, task: task.number })),
   onPause: (task) =>
     act(async () => {
-      await core('task.pause', { project: task.projectId, task: task.number })
+      await daemon('task.pause', { project: task.projectId, task: task.number })
       note(`T-${task.number} is paused; its work waits.`)
     }),
   onReassign: (task) =>
     act(async () => {
-      await core('task.reassign', { project: task.projectId, task: task.number })
+      await daemon('task.reassign', { project: task.projectId, task: task.number })
       note(
         `T-${task.number} is back on the board for another ${task.pool === 'designer' ? 'image designer' : `${task.tier} ${task.pool}`}.`,
       )
     }),
   onResume: (task) =>
     act(async () => {
-      const { task: resumed } = await core('task.resume', {
+      const { task: resumed } = await daemon('task.resume', {
         project: task.projectId,
         task: task.number,
       })
@@ -208,7 +208,7 @@ const drawer = new TaskDrawer($('#task-drawer'), {
     try {
       drawer.fill(
         task,
-        await core('task.transcript', { project: task.projectId, task: task.number }),
+        await daemon('task.transcript', { project: task.projectId, task: task.number }),
       )
     } catch (cause) {
       report(cause)
@@ -247,14 +247,14 @@ const layout = new Layout({ onFold: () => render() })
  * window's whole copy, so it is read when a drawer opens or its task changed.
  */
 const written = async (project, number) =>
-  (await core('task.transcript', { project, task: number, limit: 0 })).total
+  (await daemon('task.transcript', { project, task: number, limit: 0 })).total
 
 const closedProject = (id) => state.projects.find((project) => project.id === id)?.state !== 'open'
 
 /** A task's drawer; one asked for in a project the human has left since stays shut. */
 async function openTask(project, number) {
   const [{ task }, total] = await Promise.all([
-    core('task.get', { project, task: number }),
+    daemon('task.get', { project, task: number }),
     written(project, number),
   ])
   if (state.selected !== project) return
@@ -282,7 +282,7 @@ async function rereadTask() {
     return
   }
   try {
-    const { task } = await core('task.get', { project, task: number })
+    const { task } = await daemon('task.get', { project, task: number })
     if (!drawer.shows(task)) opened.total = await written(project, number)
     // Closed, or another task opened, while these were on their way.
     if (state.openTask !== opened) return
@@ -302,7 +302,7 @@ async function refresh() {
   }
   refreshing = (async () => {
     try {
-      const { projects } = await core('projects.list')
+      const { projects } = await daemon('projects.list')
       state.projects = projects
       if (!projects.some((project) => project.id === state.selected)) {
         state.selected = (projects.find((s) => s.state === 'open') ?? projects[0])?.id ?? null
@@ -316,7 +316,7 @@ async function refresh() {
       const elsewhere = open
         .filter((project) => project.id !== selected && terminals.holds(project.id))
         .map((project) =>
-          core('board.get', { project: project.id }).then(
+          daemon('board.get', { project: project.id }).then(
             (read) => read.board,
             () => null,
           ),
@@ -324,10 +324,10 @@ async function refresh() {
       const [board, inbox, ...others] = await Promise.all([
         selected === null
           ? null
-          : core('board.get', { project: selected }).then((read) => read.board),
+          : daemon('board.get', { project: selected }).then((read) => read.board),
         selected === null
           ? NO_NOTES
-          : core('inbox.get', { project: selected, participant: 'human', unread: true }),
+          : daemon('inbox.get', { project: selected, participant: 'human', unread: true }),
         ...elsewhere,
       ])
       if (state.selected !== selected) {
@@ -406,7 +406,7 @@ $('#delete-confirm').addEventListener('click', () => {
   deleteDialog.close()
   if (project === null) return
   void act(async () => {
-    await core('project.delete', { project: project.id })
+    await daemon('project.delete', { project: project.id })
     if (state.selected === project.id) state.selected = null
     note(`${project.name} is deleted.`)
   })
@@ -446,7 +446,7 @@ $('#delete-tasks-confirm').addEventListener('click', () => {
   if (asked === null) return
   const { project, numbers } = asked
   void act(async () => {
-    await core('tasks.delete', { project, tasks: numbers })
+    await daemon('tasks.delete', { project, tasks: numbers })
     if (state.openTask?.project === project && numbers.includes(state.openTask.number)) {
       closeTask()
     }
@@ -488,7 +488,7 @@ function renderProjects() {
       button(
         verb,
         'quiet-button',
-        () => act(() => core(open ? 'project.close' : 'project.resume', { project: project.id })),
+        () => act(() => daemon(open ? 'project.close' : 'project.resume', { project: project.id })),
         `${verb} ${project.name}`,
       ),
     )
@@ -510,7 +510,7 @@ inboxButton.addEventListener('click', () => {
 const staff = new StaffDialog($('#staff-dialog'), {
   board: () => state.board,
   agents: () => state.agents,
-  core,
+  daemon,
   act,
   note,
 })
@@ -527,7 +527,7 @@ staffButton.addEventListener('click', () =>
 // is shown.
 const newProject = new NewProjectDialog($('#new-project-dialog'), {
   agents: () => state.agents,
-  core,
+  daemon,
   act,
   onAgents: (agents) => {
     state.agents = agents
@@ -559,7 +559,7 @@ $('#new-project').addEventListener('click', async () => {
 // chosen; once the switch is taken, the chief's window is the one in front.
 const switchChief = new SwitchChiefDialog($('#switch-chief-dialog'), {
   selected: () => state.selected,
-  core,
+  daemon,
   act,
   onSwitch: () => {
     state.focus = 'chief'
@@ -611,7 +611,7 @@ async function start() {
     return
   }
   // Listening comes first: subscribing to the output is when the app tells
-  // the page the core's state, and an event sent before a listener is lost.
+  // the page the daemon's state, and an event sent before a listener is lost.
   if (typeof listen === 'function') {
     try {
       let pending = false
@@ -623,7 +623,7 @@ async function start() {
           void refresh()
         }, 50)
       })
-      await listen('core-status', (event) => coreStatus(event.payload))
+      await listen('daemon-status', (event) => daemonStatus(event.payload))
     } catch (cause) {
       report(cause)
     }
@@ -650,7 +650,7 @@ async function start() {
     void runSelftest({
       config: selftest,
       invoke,
-      core: (operation, body) => invoke('core_request', { operation, body }),
+      daemon: (operation, body) => invoke('daemon_request', { operation, body }),
       refresh,
       registry: terminals.registry,
       sendInput: (pane, data) => terminals.input(pane, data),

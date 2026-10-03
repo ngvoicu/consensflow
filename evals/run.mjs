@@ -92,7 +92,7 @@ const { agents, staff } = staffFor(
 /** The chief's effort as it reached the chief: null where its harness has no switch for it. */
 const chiefEffort = ['claude', 'codex', 'pi'].includes(chief) ? values.effort : null
 const chiefSetup = chiefEnvironment(chief, values.model)
-/** The chief's agent, which the core opens no project without: the chief's harness, model and effort. */
+/** The chief's agent, which the daemon opens no project without: the chief's harness, model and effort. */
 const chiefAgent = {
   id: `eval-${chief}-chief`,
   kind: HARNESSES[chief].kind,

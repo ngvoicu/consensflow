@@ -46,9 +46,9 @@ function expectedReady(snapshot, expected, blockers) {
   )
 }
 
-async function closeOwnProjects(core, refresh, projects) {
+async function closeOwnProjects(daemon, refresh, projects) {
   for (const project of projects) {
-    await core('project.close', { project })
+    await daemon('project.close', { project })
     await refresh()
   }
 }
@@ -73,7 +73,7 @@ async function waitForNoBlockers(invoke, timeoutMs = 10_000) {
  * project opens them and closed the way a human's Close closes them. The
  * Node smoke owns the external HTTPS/signature/build boundary.
  */
-export async function runUpdateSelftest({ config, invoke, core, refresh }) {
+export async function runUpdateSelftest({ config, invoke, daemon, refresh }) {
   const expected = config?.updaterExpectedVersion
   const ownProjects = []
   let installStarted = false
@@ -103,7 +103,7 @@ export async function runUpdateSelftest({ config, invoke, core, refresh }) {
     const secondDir = `${config.dir}/${SECOND_WORKSPACE}`
     for (const directory of [config.dir, secondDir]) {
       // Its chief on terpsichore, a catalog agent of Claude Code, which is the fake `claude` here.
-      const { project } = await core('project.open', { directory, agent: 'terpsichore' })
+      const { project } = await daemon('project.open', { directory, agent: 'terpsichore' })
       if (!Number.isInteger(project?.id)) {
         throw new Error(`project.open returned no project: ${JSON.stringify(project)}`)
       }
@@ -147,7 +147,7 @@ export async function runUpdateSelftest({ config, invoke, core, refresh }) {
     }
 
     await report(invoke, 'update-blocked', blocked)
-    await closeOwnProjects(core, refresh, ownProjects)
+    await closeOwnProjects(daemon, refresh, ownProjects)
     ownProjects.length = 0
     const clear = await waitForNoBlockers(invoke)
     if (!expectedReady(clear, expected, 0)) {
@@ -186,7 +186,7 @@ export async function runUpdateSelftest({ config, invoke, core, refresh }) {
   } catch (cause) {
     if (installStarted) return
     try {
-      await closeOwnProjects(core, refresh, ownProjects)
+      await closeOwnProjects(daemon, refresh, ownProjects)
     } catch {
       // The original failure is the useful evidence; the app's normal
       // selftest shutdown still owns the recorded process group.

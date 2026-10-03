@@ -10,9 +10,9 @@ import { preview, render } from './markdown.js'
  * left unanswered. The human is asked nothing here: the chief asks in its
  * terminal.
  *
- * Everything here is drawn from the core's state with `textContent`, never
+ * Everything here is drawn from the daemon's state with `textContent`, never
  * markup, so an agent-written title cannot become HTML. Actions go out through
- * the callbacks; the controller calls the core and redraws.
+ * the callbacks; the controller calls the daemon and redraws.
  */
 
 const ACTIVE = ['working', 'waiting', 'queued', 'paused', 'open']
@@ -313,7 +313,7 @@ const acts = (board) => board.project.state === 'open'
 /**
  * The finished tasks on a board as Delete finished takes them: those that
  * may go, and those kept because a task not yet finished needs them, each
- * with the tasks that do. The core decides again when it deletes them.
+ * with the tasks that do. The daemon decides again when it deletes them.
  */
 function finishedTasks(board) {
   const tasks = [...board.open, ...board.lanes.flatMap((lane) => lane.tasks)].sort(
@@ -360,7 +360,7 @@ export class BoardView {
     })
   }
 
-  /** Redraw from the core's state; `shows(participant)` says whose terminals the human asked to see. */
+  /** Redraw from the daemon's state; `shows(participant)` says whose terminals the human asked to see. */
   render({ board, inbox, agents = [], shows, now = Date.now() }) {
     this.#board = board
     this.#shows = shows
@@ -409,7 +409,7 @@ export class BoardView {
       ...(board.overdue ?? []).map((message) => ({ ...message, overdue: true })),
     ]
     // The human's notes not yet read: each reads and is marked read, in its
-    // own list. The core reads the newest one frame holds, and says how many
+    // own list. The daemon reads the newest one frame holds, and says how many
     // there are.
     const { messages: notes, total: unread, shown } = inbox
     const section = element('section', 'foryou')
@@ -991,7 +991,7 @@ function sectionHead(tag, label, count) {
 const transcriptHead = (total) =>
   sectionHead('summary', 'What the agent did', plural(total, 'item'))
 
-/** What the core cut to carry task T-`number` in one frame says where it reads whole. */
+/** What the daemon cut to carry task T-`number` in one frame says where it reads whole. */
 const cutNote = (part, number) =>
   part.bodyCut
     ? [element('p', 'drawer-cut', `Cut to fit here: cf task get T-${number} shows it whole.`)]

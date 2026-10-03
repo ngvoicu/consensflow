@@ -10,15 +10,15 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 
-use crate::daemon::CoreFailure;
+use crate::daemon::DaemonFailure;
 
 /// How long the human's login shell has to say its PATH.
 const LOGIN_PATH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The bundled daemon, `cf ui --json`, on the human's login PATH. A runtime
 /// or CLI missing from the app is not worth another start.
-pub(crate) fn core_command(app: &AppHandle) -> Result<Command, CoreFailure> {
-    let (node, cli) = bundled_cli(app).map_err(|cause| CoreFailure {
+pub(crate) fn daemon_command(app: &AppHandle) -> Result<Command, DaemonFailure> {
+    let (node, cli) = bundled_cli(app).map_err(|cause| DaemonFailure {
         cause,
         retry: false,
     })?;

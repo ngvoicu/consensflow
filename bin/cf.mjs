@@ -279,7 +279,7 @@ async function main() {
     case 'ui': {
       // The app's daemon. `--json` prints the handle line the
       // app reads; a person gets the agents screens' address instead.
-      const { startCore } = await import('../src/core/daemon.js')
+      const { startDaemon } = await import('../src/core/daemon.js')
       const { values } = parseArgs({
         args: rest,
         allowPositionals: true,
@@ -288,7 +288,7 @@ async function main() {
           'no-open': { type: 'boolean', default: false },
         },
       })
-      const { stop } = await startCore(env, {
+      const { stop } = await startDaemon(env, {
         onOut: (line) => {
           if (values.json) return out(line)
           const { url, token } = JSON.parse(line)

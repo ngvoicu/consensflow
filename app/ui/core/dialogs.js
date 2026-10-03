@@ -7,7 +7,7 @@ import { isMember } from './board.js'
  * project staff. Each keeps what it is in the middle of to itself, and reads
  * the page's board and saved agents as they are when it draws or acts; what
  * it changes on the page goes back through the page's callbacks. A dialog
- * that cannot open says why by throwing, as the core's refusals do.
+ * that cannot open says why by throwing, as the daemon's refusals do.
  */
 
 const ROLES = ['worker', 'advisor', 'reviewer', 'designer']
@@ -43,7 +43,7 @@ const runsLabel = (agent, tier = agent.profile?.workTier) =>
 /**
  * Whether an agent may take a role, by its designer flag: an image designer
  * is an image agent (a Codex agent that designs), and an image agent is
- * nothing else, the chief included. The core's `fitsRole`, which this page
+ * nothing else, the chief included. The daemon's `fitsRole`, which this page
  * cannot import.
  */
 const fits = (agent, role) => (role === 'designer') === (agent.designer === true)
@@ -216,8 +216,8 @@ export class NewProjectDialog {
   /**
    * `page.agents()` are the page's saved agents as they are now, and
    * `page.onAgents(agents)` hands the page the ones read as the dialog
-   * opens; `page.onStart(project)` is told of the project the core opened.
-   * `page.core` asks the core, `page.act` runs a change and redraws the page.
+   * opens; `page.onStart(project)` is told of the project the daemon opened.
+   * `page.daemon` asks the daemon, `page.act` runs a change and redraws the page.
    */
   constructor(dialog, page) {
     this.#dialog = dialog
@@ -241,7 +241,7 @@ export class NewProjectDialog {
       const staff = this.#pickedStaff()
       dialog.close()
       void page.act(async () => {
-        const { project } = await page.core('project.open', { directory, agent, gate, staff })
+        const { project } = await page.daemon('project.open', { directory, agent, gate, staff })
         page.onStart(project)
       })
     })
@@ -251,8 +251,8 @@ export class NewProjectDialog {
   /** Opens on `directory`; with no harness installed here it refuses, and says where to get one. */
   async open(directory) {
     const [{ agents, missing = [] }, { staff }] = await Promise.all([
-      this.#page.core('agents.list'),
-      this.#page.core('staff.last'),
+      this.#page.daemon('agents.list'),
+      this.#page.daemon('staff.last'),
     ])
     fillChiefs(this.#form.elements.chief, agents, missing)
     this.#page.onAgents(agents)
@@ -317,7 +317,7 @@ export class NewProjectDialog {
     )
   }
 
-  /** The picked rows as the core takes a staff: each agent once, with its roles. */
+  /** The picked rows as the daemon takes a staff: each agent once, with its roles. */
   #pickedStaff() {
     const staff = new Map()
     for (const { agent, role } of this.#picked) {
@@ -330,7 +330,7 @@ export class NewProjectDialog {
 
 /**
  * Switch the chief: the chief goes on in a new window on another saved agent,
- * with its harness, model and effort, and the core hands the work over to it
+ * with its harness, model and effort, and the daemon hands the work over to it
  * (the dispatcher's switchChief).
  */
 export class SwitchChiefDialog {
@@ -342,8 +342,8 @@ export class SwitchChiefDialog {
 
   /**
    * `page.selected()` is the project the human has chosen now, and
-   * `page.onSwitch()` is told once the core took the switch. `page.core`
-   * asks the core, `page.act` runs a change and redraws the page.
+   * `page.onSwitch()` is told once the daemon took the switch. `page.daemon`
+   * asks the daemon, `page.act` runs a change and redraws the page.
    */
   constructor(dialog, page) {
     this.#dialog = dialog
@@ -358,7 +358,7 @@ export class SwitchChiefDialog {
       const project = this.#project
       dialog.close()
       void page.act(async () => {
-        await page.core('chief.switch', { project, agent, when, note: askFirst })
+        await page.daemon('chief.switch', { project, agent, when, note: askFirst })
         page.onSwitch()
       })
     })
@@ -371,7 +371,7 @@ export class SwitchChiefDialog {
    * to get one.
    */
   async open(chief) {
-    const { agents, missing } = await this.#page.core('agents.list')
+    const { agents, missing } = await this.#page.daemon('agents.list')
     // Asked for in a project the human has left since: it stays shut.
     if (this.#page.selected() !== chief.projectId) return
     const form = this.#form
@@ -401,7 +401,7 @@ export class StaffDialog {
 
   /**
    * `page.board()` and `page.agents()` are the page's as they are now;
-   * `page.core` asks the core, `page.act` runs a change and redraws the
+   * `page.daemon` asks the daemon, `page.act` runs a change and redraws the
    * page, `page.note` tells the human what came of it.
    */
   constructor(dialog, page) {
@@ -414,7 +414,7 @@ export class StaffDialog {
     // The dialog's staff is the shown board's, and so is what it changes.
     this.#gate.addEventListener('change', () =>
       page.act(async () => {
-        await page.core('project.gate', {
+        await page.daemon('project.gate', {
           project: page.board().project.id,
           gate: this.#gate.checked,
         })
@@ -437,11 +437,11 @@ export class StaffDialog {
         .find((participant) => isMember(participant) && participant.agent === agent)
       void page.act(async () => {
         if (member === undefined) {
-          await page.core('member.add', { project: project.id, agent, roles: [role] })
+          await page.daemon('member.add', { project: project.id, agent, roles: [role] })
           page.note(`@${agent} joined the staff as ${ROLE_LABEL[role]}.`)
           return
         }
-        await page.core('member.roles', {
+        await page.daemon('member.roles', {
           project: project.id,
           agent,
           roles: [...member.roles, role],
@@ -532,7 +532,7 @@ export class StaffDialog {
       const yes = button(`Remove ${name}`, 'danger-button', () =>
         page.act(async () => {
           const { projectId, handle } = this.#memberNow(member)
-          await page.core('member.remove', { project: projectId, agent: handle })
+          await page.daemon('member.remove', { project: projectId, agent: handle })
           this.#removing = null
           page.note(`${name} left the staff.`)
         }),
@@ -557,7 +557,7 @@ export class StaffDialog {
             return
           }
           void page.act(async () => {
-            await page.core('member.roles', {
+            await page.daemon('member.roles', {
               project: projectId,
               agent: handle,
               roles: roles.filter((held) => held !== role),

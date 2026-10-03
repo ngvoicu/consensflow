@@ -7,7 +7,7 @@
  * the daemon picks the worker (the free one of that tier with the fewest tasks
  * so far, the earliest joined first), which the steps below lean on. The
  * chief (OpenCode on the free Muse Spark model by default; `--chief claude` for a
- * Claude Code chief on Sonnet) must run it itself; the core opens the worker's
+ * Claude Code chief on Sonnet) must run it itself; the daemon opens the worker's
  * window with the task, the worker must answer in full-permission mode, the
  * core must record the answer as the task's result and deliver it into the
  * chief's window, and the worker must read idle. Then the app restarts and the

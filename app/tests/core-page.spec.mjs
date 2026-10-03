@@ -8,7 +8,7 @@ import { serveUi } from './serve-ui.mjs'
 
 /**
  * The board page (TEST-BDC-13), against a stand-in for the app:
- * `core_request` answers from an in-page model and records every call, the way
+ * `daemon_request` answers from an in-page model and records every call, the way
  * the Rust app forwards the page's requests to the core.
  */
 let ui
@@ -70,7 +70,7 @@ const task = (number, title, state, requester, assignee, minutesAgo = 3, extra =
   updatedAt: at(minutesAgo),
   ...extra,
 })
-/** A message of a task's thread as the core reads it: delivered, sent `minutesAgo`. */
+/** A message of a task's thread as the daemon reads it: delivered, sent `minutesAgo`. */
 const message = (id, kind, sender, recipient, body, minutesAgo = 1, extra = {}) => ({
   id,
   kind,
@@ -291,7 +291,7 @@ async function open(page, data = model()) {
           ? { ok: false, error: `no task T-${task} in this project` }
           : answer({ task: found })
       },
-      // Finished tasks leave the board and still read, or the core refuses
+      // Finished tasks leave the board and still read, or the daemon refuses
       // them all in its own words (a test says which with `deleteRefusal`).
       'tasks.delete': ({ project, tasks }) => {
         if (data.deleteRefusal) return { ok: false, error: data.deleteRefusal }
@@ -311,7 +311,7 @@ async function open(page, data = model()) {
         const found = data.tasks[`${project}:${task}`]
         return answer({ task: { ...found, state: found.resumesOpen ? 'open' : 'queued' } })
       },
-      // The last `limit` items, as the core gives them, and how many came.
+      // The last `limit` items, as the daemon gives them, and how many came.
       'task.transcript': ({ project, task, limit = Number.POSITIVE_INFINITY }) => {
         const { items, total } = data.transcripts?.[`${project}:${task}`] ?? { items: [], total: 0 }
         const last = items.slice(Math.max(0, items.length - limit))
@@ -324,7 +324,7 @@ async function open(page, data = model()) {
         command,
         JSON.parse(JSON.stringify(args, (key, value) => (key === 'onOutput' ? 'channel' : value))),
       ])
-      if (command === 'core_request') {
+      if (command === 'daemon_request') {
         const handle = operations[args.operation]
         const ms = window.__delay[args.operation] ?? 0
         if (ms > 0) await new Promise((wake) => setTimeout(wake, ms))
@@ -414,7 +414,7 @@ const calls = (page, operation) =>
   page.evaluate(
     (operation) =>
       window.__calls
-        .filter(([command, args]) => command === 'core_request' && args.operation === operation)
+        .filter(([command, args]) => command === 'daemon_request' && args.operation === operation)
         .map(([, args]) => args.body),
     operation,
   )
@@ -1435,7 +1435,7 @@ test('says on a deleted task that it left the board, and offers nothing to do on
   await expect(drawer.getByRole('button', { name: 'Delete task' })).toHaveCount(0)
 })
 
-test('says why the core keeps a finished task on the board, from the drawer or the heading', async ({
+test('says why the daemon keeps a finished task on the board, from the drawer or the heading', async ({
   page,
 }) => {
   const data = model()
@@ -1621,7 +1621,7 @@ test('says under a body cut to fit the page where it reads whole, and right afte
 }) => {
   const data = model()
   const cut = (start, length) => `${start}\n… (${length} characters; cut here)`
-  // As the core reads a task too long for one frame: every request stays,
+  // As the daemon reads a task too long for one frame: every request stays,
   // cut to its line at least, the earliest of the rest are left out, and
   // what it cut is marked.
   data.tasks['1:2'] = {
@@ -2107,7 +2107,7 @@ test('says how many earlier notes one frame did not hold, and counts them all', 
     questions: null,
     createdAt: at(minutesAgo),
   })
-  // Newest first, as the core reads them: only the two newest fit in its answer.
+  // Newest first, as the daemon reads them: only the two newest fit in its answer.
   data.inbox[1].unshift(note(18, 'The lexer is in.', 1), note(17, 'The parser is in.', 2))
   data.inboxFit = 2
   await open(page, data)
@@ -2399,7 +2399,7 @@ test("offers, after a role is picked, the agents the staff shown does not hold i
   expect(await offered()).toEqual(['hera', 'zeus', 'diana', 'athena'])
 })
 
-test('keeps a pending removal and the chosen agent when the core redraws the staff', async ({
+test('keeps a pending removal and the chosen agent when the daemon redraws the staff', async ({
   page,
 }) => {
   const data = model()
@@ -3473,7 +3473,7 @@ async function redrawn(page, project) {
       (project) =>
         window.__calls.filter(
           ([command, args]) =>
-            command === 'core_request' &&
+            command === 'daemon_request' &&
             args.operation === 'board.get' &&
             args.body.project === project,
         ).length,
@@ -3615,7 +3615,7 @@ test("takes a closed window's card out of the dock: its lane says so and opens i
 })
 
 /**
- * harbour as the core has it while a worker is at work: zeus between tasks,
+ * harbour as the daemon has it while a worker is at work: zeus between tasks,
  * and one session of it with a live window beside the chief's.
  */
 function atWork() {
@@ -3754,7 +3754,7 @@ test("shows a session's terminal in front, the dock unfolded, and hides it again
   await expect(
     row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }),
   ).toBeVisible()
-  // None of it asks the core anything: the window works on, the same one throughout.
+  // None of it asks the daemon anything: the window works on, the same one throughout.
   expect(await calls(page, 'session.open')).toEqual([])
   expect(await calls(page, 'session.close')).toEqual([])
   expect(await disposed(page)).toBe(0)
@@ -3998,7 +3998,7 @@ test('resizes a terminal while the board redraws faster than a size settles', as
         .map(([, args]) => args.cols),
     )
   await expect.poll(async () => (await sizes()).length).toBe(1)
-  // A busy board: a state change every 100 ms, as fast as the core sends them,
+  // A busy board: a state change every 100 ms, as fast as the daemon sends them,
   // each redraw asking every terminal to fit.
   await page.evaluate(() => {
     window.__busy = setInterval(() => window.__listeners.get('state-changed')(), 100)
@@ -4475,30 +4475,34 @@ test('says the daemon is down while it is, why, and what comes next, and reads e
   page,
 }) => {
   await open(page)
-  // The app gives the core's state when the output is subscribed to: the page listens first.
+  // The app gives the daemon's state when the output is subscribed to: the page listens first.
   const order = await page.evaluate(() =>
     window.__calls.map(([command, args]) => (command === 'listen' ? args.name : command)),
   )
-  expect(order).toContain('core-status')
-  expect(order.indexOf('core-status')).toBeLessThan(order.indexOf('subscribe_output'))
+  expect(order).toContain('daemon-status')
+  expect(order.indexOf('daemon-status')).toBeLessThan(order.indexOf('subscribe_output'))
   const banner = page.getByRole('alert')
   await expect(banner).toBeHidden()
-  const coreStatus = (payload) =>
+  const daemonStatus = (payload) =>
     page.evaluate(
-      (payload) => window.__listeners.get('core-status')({ event: 'core-status', payload }),
+      (payload) => window.__listeners.get('daemon-status')({ event: 'daemon-status', payload }),
       payload,
     )
   await page.evaluate(() => {
     window.__down = 'the Node bridge is not running'
   })
-  await coreStatus({ available: false, cause: 'the daemon stopped (exit code 1)', retrying: true })
+  await daemonStatus({
+    available: false,
+    cause: 'the daemon stopped (exit code 1)',
+    retrying: true,
+  })
   await expect(banner).toHaveText(
     'The daemon is not running. The daemon stopped (exit code 1). Starting it again…',
   )
   // What the human does meanwhile is refused with why, not with a code.
   await page.getByRole('button', { name: 'Close harbour' }).click()
   await expect(page.locator('#status')).toHaveText('the Node bridge is not running')
-  await coreStatus({ available: false, cause: 'it stopped again.', retrying: false })
+  await daemonStatus({ available: false, cause: 'it stopped again.', retrying: false })
   await expect(banner).toHaveText(
     'The daemon is not running. It stopped again. Quit ConsensFlow and open it again.',
   )
@@ -4510,7 +4514,7 @@ test('says the daemon is down while it is, why, and what comes next, and reads e
     (await calls(page, 'agents.list')).length,
     (await calls(page, 'board.get')).length,
   ]
-  await coreStatus({ available: true, cause: null, retrying: false })
+  await daemonStatus({ available: true, cause: null, retrying: false })
   await expect(banner).toBeHidden()
   await expect.poll(async () => (await calls(page, 'agents.list')).length).toBeGreaterThan(agents)
   await expect.poll(async () => (await calls(page, 'board.get')).length).toBeGreaterThan(boards)

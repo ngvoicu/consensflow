@@ -76,7 +76,7 @@ function toHex(text) {
 export async function runSelftest({
   config,
   invoke,
-  core,
+  daemon,
   refresh,
   registry,
   sendInput,
@@ -87,7 +87,7 @@ export async function runSelftest({
     typeof config?.updaterExpectedVersion === 'string' &&
     config.updaterExpectedVersion.length > 0
   ) {
-    await runUpdateSelftest({ config, invoke, core, refresh })
+    await runUpdateSelftest({ config, invoke, daemon, refresh })
     return
   }
 
@@ -120,7 +120,7 @@ export async function runSelftest({
 
     // A project on the smoke's folder, its chief and one worker on terpsichore,
     // a catalog agent of Claude Code, which is the fake `claude` here.
-    const opened = await core('project.open', {
+    const opened = await daemon('project.open', {
       directory: config.dir,
       agent: 'terpsichore',
       staff: [{ agent: 'terpsichore', roles: ['worker'] }],
@@ -211,16 +211,16 @@ export async function runSelftest({
     )
     await report('echo', { typed, hex })
 
-    // The board both ways: the chief's own `cf`, the core, a worker window the
+    // The board both ways: the chief's own `cf`, the daemon, a worker window the
     // dispatcher opens, its result, the pane host's paste, the chief's child.
     // The chief's window puts a task on the board (`cf task add`); the worker,
     // on the same stand-in, answers its brief. The child's hex of the delivered
-    // header line is the proof that the board reaches a window; the core's own
+    // header line is the proof that the board reaches a window; the daemon's own
     // confirmation, read back from the record the fake harness keeps, is the
     // proof that it knows it did.
     await sendInput(pane, 'HANDOFF\r')
     const result = await until("the worker's result is on its way to the chief", async () => {
-      const { messages } = await core('inbox.get', {
+      const { messages } = await daemon('inbox.get', {
         project: opened.project.id,
         participant: 'chief',
       })
@@ -253,10 +253,10 @@ export async function runSelftest({
     let state = null
     while (state !== 'delivered') {
       if (Date.now() > confirmedBy) {
-        throw new Error(`the core did not confirm the delivery (the message is ${state})`)
+        throw new Error(`the daemon did not confirm the delivery (the message is ${state})`)
       }
       await sleep(200)
-      const { messages } = await core('inbox.get', {
+      const { messages } = await daemon('inbox.get', {
         project: opened.project.id,
         participant: 'chief',
       })

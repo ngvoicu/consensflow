@@ -88,7 +88,7 @@ async function withPage(fn) {
     activity: () => ({ state: 'idle' }),
     pane: () => null,
     pendingSwitch: () => null,
-    // The harnesses a test says the core has no adapter for.
+    // The harnesses a test says the daemon has no adapter for.
     adapterless: new Set(),
     requireAdapter(harness) {
       if (dispatcher.adapterless.has(harness)) {
@@ -111,7 +111,7 @@ describe('the page protocol of the daemon', () => {
       new URL('../app/src-tauri/src/commands.rs', import.meta.url),
       'utf8',
     )
-    const list = source.match(/const CORE_OPERATIONS: &\[&str\] = &\[([^\]]*)\]/)[1]
+    const list = source.match(/const DAEMON_OPERATIONS: &\[&str\] = &\[([^\]]*)\]/)[1]
     const forwarded = [...list.matchAll(/"([^"]+)"/g)].map((match) => match[1])
     await withPage(async ({ operations }) => {
       assert.deepEqual(Object.keys(operations).sort(), forwarded.sort())
@@ -280,7 +280,7 @@ describe('the page protocol of the daemon', () => {
     })
   })
 
-  it('adds no member on a harness the core cannot open a window of', async () => {
+  it('adds no member on a harness the daemon cannot open a window of', async () => {
     await withPage(async ({ ledger, operations, dispatcher }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',

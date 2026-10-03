@@ -9,7 +9,7 @@ const LAUNCH_FOLDERS = { 'claude-code': 'claude', devin: 'devin', pi: 'pi', open
 
 /**
  * Role documents live outside all native global/project discovery directories.
- * The core passes each window's role text as `content`; this writes it where
+ * The daemon passes each window's role text as `content`; this writes it where
  * the harness loads it and returns the launch arguments that make it load.
  * Each launch writes its own, beside the rest of its files, and they go with
  * it: a chief's text names its project's staff, and a shared file let a chief

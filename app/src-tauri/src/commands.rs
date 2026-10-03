@@ -1,4 +1,4 @@
-//! What the board page may ask of the app: the core's operations it forwards,
+//! What the board page may ask of the app: the daemon's operations it forwards,
 //! its panes' input, size and acknowledgements, its output subscription, and
 //! the address of the agents screens.
 
@@ -200,17 +200,17 @@ async fn task_operation<R: Runtime>(
     operation: &'static str,
     body: Value,
 ) -> Value {
-    let core = Arc::clone(&app.state::<AppRuntime>().core);
-    // Off the async runtime: asked while the core is starting, it waits.
+    let daemon = Arc::clone(&app.state::<AppRuntime>().daemon);
+    // Off the async runtime: asked while the daemon is starting, it waits.
     run_blocking(operation, move || {
-        request_node(core.connection(), operation.to_string(), body)
+        request_node(daemon.connection(), operation.to_string(), body)
     })
     .await
 }
 
 /// What the board page may ask the daemon. The page names the operation and
 /// its body; anything else is refused here, before it reaches the daemon.
-const CORE_OPERATIONS: &[&str] = &[
+const DAEMON_OPERATIONS: &[&str] = &[
     "projects.list",
     "chief.switch",
     "project.open",
@@ -241,15 +241,19 @@ const CORE_OPERATIONS: &[&str] = &[
 ];
 
 #[tauri::command]
-pub async fn core_request<R: Runtime>(app: AppHandle<R>, operation: String, body: Value) -> Value {
-    let Some(operation) = CORE_OPERATIONS
+pub async fn daemon_request<R: Runtime>(
+    app: AppHandle<R>,
+    operation: String,
+    body: Value,
+) -> Value {
+    let Some(operation) = DAEMON_OPERATIONS
         .iter()
         .find(|allowed| **allowed == operation)
     else {
-        return json!({"ok":false,"error":format!("unknown core operation {operation}")});
+        return json!({"ok":false,"error":format!("unknown daemon operation {operation}")});
     };
     if !body.is_object() {
-        return json!({"ok":false,"error":"a core request body is an object"});
+        return json!({"ok":false,"error":"a daemon request body is an object"});
     }
     task_operation(app, operation, body).await
 }
@@ -270,25 +274,25 @@ pub async fn core_request<R: Runtime>(app: AppHandle<R>, operation: String, body
 /// process replaced, or the human's Reload) starts again from 1; every pane's
 /// next keystrokes were refused as a regression until the app restarted.
 ///
-/// And it is when a new page hears where the core stands: what was told
+/// And it is when a new page hears where the daemon stands: what was told
 /// before it listened (a first start that failed while the page loaded) is
-/// told again, so the page listens to `core-status` before it subscribes.
+/// told again, so the page listens to `daemon-status` before it subscribes.
 #[tauri::command]
 pub async fn subscribe_output<R: Runtime>(
     app: AppHandle<R>,
     on_output: Channel<PaneOutputMessage>,
 ) -> Value {
-    let (output, inputs, core) = {
+    let (output, inputs, daemon) = {
         let state = app.state::<AppRuntime>();
         (
             Arc::clone(&state.output),
             Arc::clone(&state.inputs),
-            Arc::clone(&state.core),
+            Arc::clone(&state.daemon),
         )
     };
     inputs.begin_page();
     output.register(on_output);
-    core.tell_again();
+    daemon.tell_again();
     json!({"ok":true})
 }
 
@@ -297,7 +301,7 @@ pub async fn subscribe_output<R: Runtime>(
 /// dialog of its own.
 #[tauri::command]
 pub fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
-    let Some(roster) = app.state::<AppRuntime>().core.roster() else {
+    let Some(roster) = app.state::<AppRuntime>().daemon.roster() else {
         return json!({"ok":false,"error":"the agents screens are not available: the daemon is not up"});
     };
     match agents_url(&roster, &page) {
@@ -374,13 +378,13 @@ mod tests {
         );
     }
 
-    /// What the page asks while the core is down is answered with why,
+    /// What the page asks while the daemon is down is answered with why,
     /// under the operation it asked, and never reaches a daemon.
     #[test]
-    fn a_request_while_the_core_is_down_says_why() {
+    fn a_request_while_the_daemon_is_down_says_why() {
         assert_eq!(
             request_node(
-                Err("ConsensFlow's core stopped while the app was running".to_string()),
+                Err("ConsensFlow's daemon stopped while the app was running".to_string()),
                 "board.get".to_string(),
                 json!({"project":1}),
             ),
@@ -388,7 +392,7 @@ mod tests {
                 "ok":false,
                 "error":"not-available-yet",
                 "operation":"board.get",
-                "detail":"ConsensFlow's core stopped while the app was running",
+                "detail":"ConsensFlow's daemon stopped while the app was running",
             })
         );
     }
@@ -932,13 +936,13 @@ mod tests {
 
         let routes = vec![
             (
-                "core_request",
+                "daemon_request",
                 json!({"operation":"board.get","body":{"project":1}}),
                 "board.get",
                 json!({"project":1}),
             ),
             (
-                "core_request",
+                "daemon_request",
                 json!({"operation":"task.cancel","body":{"project":1,"task":1}}),
                 "task.cancel",
                 json!({"project":1,"task":1}),
@@ -992,7 +996,7 @@ mod tests {
         let runtime = test_runtime(panes, inputs, None, Some(connected.bridge));
         let app = tauri::test::mock_builder()
             .manage(runtime)
-            .invoke_handler(tauri::generate_handler![core_request])
+            .invoke_handler(tauri::generate_handler![daemon_request])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("build mock app");
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -1001,8 +1005,14 @@ mod tests {
 
         // These must be refused before requesting the bridge: the peer expects only valid routes.
         for (command, args) in [
-            ("core_request", json!({"operation":"state.list","body":{}})),
-            ("core_request", json!({"operation":"board.get","body":[1]})),
+            (
+                "daemon_request",
+                json!({"operation":"state.list","body":{}}),
+            ),
+            (
+                "daemon_request",
+                json!({"operation":"board.get","body":[1]}),
+            ),
         ] {
             let response = tauri::test::get_ipc_response(
                 &webview,

@@ -10,7 +10,7 @@ import { startIntegration } from './harness.mjs'
  * ConsensFlow end to end (TEST-BDC-09 through the real pane host): the daemon,
  * the real Rust headless bridge and PTYs, and fake Claude agents in them. The
  * human gives the chief a task on the board; the chief hands part of it to a
- * worker's tier with `cf task add`; the core picks the worker and opens its window with the task,
+ * worker's tier with `cf task add`; the daemon picks the worker and opens its window with the task,
  * collects the worker's answer as the result and delivers it into the chief's
  * window, where the chief's own transcript shows it arrived.
  */

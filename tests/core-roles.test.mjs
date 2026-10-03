@@ -203,7 +203,7 @@ describe('role instructions for each window the daemon opens', () => {
     assert.match(skill, /never type into another window or launch agents/)
     assert.match(skill, /only the human gives you work, here in your terminal/)
     assert.match(skill, /the human never accepts work on the board/)
-    // One role text per role, read by the core: no host payload carries a second copy.
+    // One role text per role, read by the daemon: no host payload carries a second copy.
     const root = path.resolve(import.meta.dirname, '..')
     assert.equal(existsSync(path.join(root, 'hosts', 'claude')), false, 'no claude payload')
     assert.equal(existsSync(path.join(root, 'hosts', 'pi')), false, 'no pi payload')

@@ -9,7 +9,7 @@ import { staffOf } from './roles.js'
 /**
  * What the board page may ask of the daemon: each operation is the human
  * acting on the ledger or the dispatcher. The Rust app forwards exactly these
- * names (`core_request` in `app/src-tauri/src/commands.rs`), and every change
+ * names (`daemon_request` in `app/src-tauri/src/commands.rs`), and every change
  * wakes the dispatcher so it happens in the panes at once.
  */
 export function pageOperations({ ledger, dispatcher, env, kick }) {

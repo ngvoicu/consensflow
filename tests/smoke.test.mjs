@@ -128,7 +128,7 @@ const FAKE_HARNESS = String.raw`#!/bin/sh
 # comes back as hex, which no echo, no replay and no cached frame could
 # produce — and, on request, to out-run the output window.
 #
-# It also keeps the two records a Claude window keeps, because the core reads
+# It also keeps the two records a Claude window keeps, because the daemon reads
 # them before it delivers and after: sessions/<pid>.json says the window is
 # idle, so a delivery may go in, and the transcript holds every line the
 # window took as a user turn answered by an assistant turn, which confirms it.
@@ -189,7 +189,7 @@ else
   printf 'CFSMOKE-TOOLS missing\n'
 fi
 # A worker's first turn is its brief, answered at once: its header line is
-# the record the core looks for, and "noted" is its result.
+# the record the daemon looks for, and "noted" is its result.
 if [ -n "$seed" ]; then
   nl='
 '
@@ -211,7 +211,7 @@ while IFS= read -r line; do
     stty "$saved"
   elif [ "$line" = "HANDOFF" ]; then
     # The chief puts a task on the board, the way a real chief does; a worker
-    # window on this same stand-in does it, and the core delivers its result
+    # window on this same stand-in does it, and the daemon delivers its result
     # into this window.
     cf task add --tier standard "SMOKE BRIEF"
     turn "HANDOFF"
@@ -528,7 +528,11 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     Buffer.from(board.data.hex, 'hex').toString('utf8'),
     /^\[ConsensFlow m-\d+ · T-1 · result from @terpsichore-[a-z]+-[a-z]+\]/,
   )
-  assert.equal(board.data.delivered, true, 'the core never confirmed the delivery from the record')
+  assert.equal(
+    board.data.delivered,
+    true,
+    'the daemon never confirmed the delivery from the record',
+  )
 
   // The agents screens, each in its dialog over the board, framed at the
   // daemon's page with the UI token.

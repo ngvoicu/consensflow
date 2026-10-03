@@ -40,7 +40,7 @@ const HEARTBEAT_MS = 10 * 60_000
  */
 const STOP_WAIT_MS = 1_000
 
-export async function startCore(
+export async function startDaemon(
   env,
   {
     input = process.stdin,

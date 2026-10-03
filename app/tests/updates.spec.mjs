@@ -92,7 +92,7 @@ async function installTauriShim(page, { snapshot = updateSnapshot(), state = cor
         if (Object.hasOwn(window.__commandResults, command)) {
           return copy(window.__commandResults[command])
         }
-        if (command === 'core_request') {
+        if (command === 'daemon_request') {
           const { operation, body } = args
           if (operation === 'projects.list')
             return copy({ ok: true, projects: initialState.projects })

@@ -90,7 +90,7 @@ export function requireOpen(project) {
 
 /**
  * A chief runs on one of the human's saved agents, never on a harness's own
- * default model: asked for without one, the core says what to pick.
+ * default model: asked for without one, the daemon says what to pick.
  */
 export function requireChiefAgent(agent) {
   if (typeof agent !== 'string' || agent.length === 0) {

@@ -119,7 +119,7 @@ button:disabled { opacity: .45; cursor: default; }
 #inbox-button[data-waiting="true"] { border-color: var(--amber); color: var(--amber); }
 
 /* The daemon down: a line under the command bar, there until it is back. */
-.core-down {
+.daemon-down {
   grid-area: down;
   margin: 0;
   padding: 10px 16px;
@@ -128,7 +128,7 @@ button:disabled { opacity: .45; cursor: default; }
   background: rgba(255, 120, 104, .1);
   font-size: 13px;
 }
-.core-down strong { color: var(--buoy); }
+.daemon-down strong { color: var(--buoy); }
 
 /* Projects. */
 .sidebar {
