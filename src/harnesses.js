@@ -189,15 +189,6 @@ function locate(harness, env) {
   return null
 }
 
-/**
- * The absolute path to a harness's CLI on this machine, or null.
- *
- * A pane is opened with an argv the pane host refuses unless argv[0] is
- * absolute (`validate_open_request` in `app/src-tauri/src/pane_handlers.rs`),
- * and the app's own PATH is not the login shell's — the same reason
- * detection looks past PATH at all. So the launcher asks for the path, not
- * the name.
- */
 /** cmd.exe's own special characters; each is escaped with a caret. */
 const CMD_META = /([()\][%!^"`<>&|;, *?])/g
 
@@ -343,6 +334,15 @@ export function terminate(child, signal = 'SIGTERM') {
   })
 }
 
+/**
+ * The absolute path to a harness's CLI on this machine, or null.
+ *
+ * A pane is opened with an argv the pane host refuses unless argv[0] is
+ * absolute (`validate_open_request` in `app/src-tauri/src/pane_handlers.rs`),
+ * and the app's own PATH is not the login shell's — the same reason
+ * detection looks past PATH at all. So the launcher asks for the path, not
+ * the name.
+ */
 export function harnessPath(id, env) {
   const harness = HARNESSES.find((candidate) => candidate.id === id)
   return harness === undefined ? null : locate(harness, env)

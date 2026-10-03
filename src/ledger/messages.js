@@ -185,11 +185,6 @@ export function answerTo(store, questionId) {
 }
 
 /**
- * The head of a participant's queue that may go now, or null. A member's
- * session is its task's: a task message waits while it holds one, and a
- * message about no task of its own (a stray note) never opens a window.
- */
-/**
  * The participants something waits on: a message on its way to them, or a
  * task in their hands. A session with neither and no window has nothing a
  * pass could do for it.
@@ -209,6 +204,11 @@ export function withWork(store, projectId) {
   )
 }
 
+/**
+ * The head of a participant's queue that may go now, or null. A member's
+ * session is its task's: a task message waits while it holds one, and a
+ * message about no task of its own (a stray note) never opens a window.
+ */
 export function nextDelivery(store, participantId) {
   const participant = store.participantRow(participantId)
   if (participant.role === 'human') return null

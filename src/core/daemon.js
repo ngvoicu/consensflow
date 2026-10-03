@@ -187,7 +187,6 @@ export async function startDaemon(
   return { stop }
 }
 
-/** The staff as the chief's text lists it: each member's name, roles and tier. */
 /**
  * Runs `work` on a timer and on demand, never two at once; a kick during a
  * run runs it again after. A pass that fails or runs long goes to the log,
