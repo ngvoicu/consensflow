@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { RESUME_WORDS } from '../ledger/index.js'
+import { Deliveries } from './deliveries.js'
 import { deliveryText, markerOf } from './delivery-text.js'
 import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.js'
 
@@ -131,13 +132,12 @@ export class Dispatcher {
   #roster
   #launchFiles
   #roles
-  #arrivalTimeoutMs
-  #launchTimeoutMs
-  #maxAttempts
   /** Told each change of a window's activity, a delivery a window is not ready for and a deleted project, for the event file in the home. */
   #trace
   /** The daemon's log, for a launch or a delivery that failed apart from any pass. */
   #log
+  /** What goes into each window and what comes back out (`deliveries.js`). */
+  #deliveries
   #runtime = new Map()
   /** The records of participants forgotten while their window was still open, until it exits. */
   #leaving = new Set()
@@ -170,12 +170,22 @@ export class Dispatcher {
     this.#paneEnv = paneEnv
     this.#roster = roster
     this.#roles = roles
-    this.#arrivalTimeoutMs = arrivalTimeoutMs
     this.#trace = trace
     this.#log = log
     this.#launchFiles = launchFiles
-    this.#launchTimeoutMs = launchTimeoutMs
-    this.#maxAttempts = maxAttempts
+    this.#deliveries = new Deliveries({
+      ledger,
+      host,
+      adapters,
+      arrivalTimeoutMs,
+      launchTimeoutMs,
+      maxAttempts,
+      traceWindow: (runtime, kind, details) => this.#traceWindow(runtime, kind, details),
+      retire: (runtime) => this.#retire(runtime),
+      forgotten: (runtime) => this.#forgotten(runtime),
+      now: () => this.#now(),
+      changed: () => this.#changed(),
+    })
     host.onExit((pane) => this.paneExited(pane))
   }
 
@@ -423,7 +433,7 @@ export class Dispatcher {
    * projects that were open when the previous process ended come back.
    */
   async resumeAfterRestart() {
-    await this.#settleInFlight()
+    await this.#deliveries.settleInFlight()
     const outcomes = []
     const due = this.#ledger.projects().filter((project) => project.resumeOnStart)
     for (const project of due) {
@@ -437,44 +447,6 @@ export class Dispatcher {
       }
     }
     return outcomes
-  }
-
-  /**
-   * What was on its way to a window when the previous process ended: no
-   * window survives a restart, so none will show it now. A message whose
-   * header ConsensFlow's copy of the window shows had arrived, and so had one
-   * the harness's own record shows: the copy can lag the record, and a
-   * message the harness took must not go again. Any other goes back to its
-   * queue with its attempt, for the window that comes back, as does one
-   * whose record cannot be read.
-   */
-  async #settleInFlight() {
-    for (const message of this.#ledger.inFlight()) {
-      const marker = markerOf(message.id)
-      const item =
-        this.#ledger.copiedItemWith(message.recipientId, marker) ??
-        (await this.#recordedItemWith(message.recipientId, marker))
-      if (item === null) {
-        this.#ledger.retryDelivery(message.id, 'the daemon stopped before it arrived', {
-          refund: true,
-        })
-      } else this.#ledger.confirmDelivery(message.id, { item })
-    }
-  }
-
-  /**
-   * The first item a participant's harness recorded it was given (a user
-   * item) that holds `marker`, read with no window open: null when none does,
-   * or when its record cannot be read.
-   */
-  async #recordedItemWith(participantId, marker) {
-    const conversation = this.#ledger.currentConversation(participantId)
-    if (!conversation?.nativeSession) return null
-    const adapter = this.#adapters[conversation.harness]
-    if (adapter?.record === undefined) return null
-    const record = await adapter.record({ conversation }).catch(() => null)
-    const items = Array.isArray(record?.items) ? record.items : []
-    return items.find((item) => item.role === 'user' && item.text.includes(marker))?.id ?? null
   }
 
   /**
@@ -580,8 +552,8 @@ export class Dispatcher {
     if (delivering !== null) {
       const because = `@${participant.handle}'s window closed`
       // A lead's first message (a handoff, most often) waits for its next window.
-      if (delivering.chief) this.#giveBack(delivering, because)
-      else this.#settleFailure(delivering, because, { retry: !delivering.launch })
+      if (delivering.chief) this.#deliveries.giveBack(delivering, because)
+      else this.#deliveries.settleFailure(delivering, because, { retry: !delivering.launch })
     }
     if (participant.role === 'chief') {
       // The lead's own exit (the human's /exit, a crash) closes the project
@@ -712,7 +684,7 @@ export class Dispatcher {
     // The human switched the window to another conversation: this look was
     // the old one's last, and nothing is delivered on it.
     if (observed.switched !== undefined) {
-      if (runtime.delivery.delivering !== null) this.#confirmArrival(runtime, observed)
+      if (runtime.delivery.delivering !== null) this.#deliveries.confirmArrival(runtime, observed)
       this.#follow(participant, runtime, observed.switched.nativeSession)
       return
     }
@@ -740,13 +712,13 @@ export class Dispatcher {
       }
       return
     }
-    if (runtime.delivery.delivering !== null) await this.#watchArrival(runtime, observed)
+    if (runtime.delivery.delivering !== null) await this.#deliveries.watchArrival(runtime, observed)
     // A window that began to close in this step (a launch that timed out) is not acted on.
     if (runtime.window.retiring) return
     if (participant.role !== 'chief') {
       await this.#interruptIfStopped(participant, runtime, observed)
       if (this.#forgotten(runtime)) return
-      this.#collect(project, participant, observed)
+      this.#deliveries.collect(project, participant, observed)
       if (await this.#closeIfFree(runtime)) return
     }
     const idle =
@@ -757,7 +729,7 @@ export class Dispatcher {
     }
     if (idle) {
       const next = this.#ledger.nextDelivery(participant.id)
-      if (next !== null) this.#act(runtime, () => this.#deliver(runtime, next))
+      if (next !== null) this.#act(runtime, () => this.#deliveries.deliver(runtime, next))
     }
   }
 
@@ -772,7 +744,7 @@ export class Dispatcher {
     const { note } = runtime.pendingSwitch
     const asked = note === null ? null : this.#ledger.message(note)
     if (asked?.state === 'queued') {
-      this.#act(runtime, () => this.#deliver(runtime, asked))
+      this.#act(runtime, () => this.#deliveries.deliver(runtime, asked))
       return
     }
     if (asked !== null && asked.state === 'delivered') {
@@ -853,12 +825,13 @@ export class Dispatcher {
       if (this.#forgotten(runtime)) return
       if (observed !== null) {
         this.#copyTranscript(chief, runtime, observed)
-        if (runtime.delivery.delivering !== null) this.#confirmArrival(runtime, observed)
+        if (runtime.delivery.delivering !== null) this.#deliveries.confirmArrival(runtime, observed)
         cut = !observed.settled
       }
       const { delivering } = runtime.delivery
       runtime.delivery.delivering = null
-      if (delivering !== null) this.#giveBack(delivering, 'the lead was switched before it arrived')
+      if (delivering !== null)
+        this.#deliveries.giveBack(delivering, 'the lead was switched before it arrived')
       await this.#closeOwn(runtime, pane)
     }
     if (this.#forgotten(runtime)) return
@@ -939,18 +912,9 @@ export class Dispatcher {
       body: `The lead runs on ${chief.agent}, which is no longer among your agents: add it back under Agents, or switch the lead.`,
     })
     if (delivering !== null) {
-      this.#giveBack(delivering, `${chief.agent} is no longer among your agents`)
+      this.#deliveries.giveBack(delivering, `${chief.agent} is no longer among your agents`)
     }
     this.#changed()
-  }
-
-  /**
-   * What a window was to receive goes back to its queue with its attempt:
-   * the window went before it had the chance to land.
-   */
-  #giveBack(delivering, reason) {
-    if (this.#ledger.message(delivering.messageId)?.state !== 'delivering') return
-    this.#ledger.retryDelivery(delivering.messageId, reason, { refund: true })
   }
 
   /**
@@ -1092,161 +1056,6 @@ export class Dispatcher {
     )
     if (brief === undefined || brief.id === message.id) return text
     return `${deliveryText(brief)}\n\n${text}`
-  }
-
-  /**
-   * Whether the message on its way shows in the window's record; it is
-   * confirmed if so. Only what the window was given counts: a tool's output
-   * that prints a header (cf inbox read, a log) proves nothing arrived. One
-   * withdrawn on its way (its task cancelled, or taken back from the window)
-   * is waited for no longer, and stays withdrawn whether it shows or not.
-   */
-  #confirmArrival(runtime, observed) {
-    const { delivering } = runtime.delivery
-    if (this.#ledger.message(delivering.messageId)?.state !== 'delivering') {
-      runtime.delivery.delivering = null
-      return true
-    }
-    const arrived = observed.items.find(
-      (item) => item.role === 'user' && item.text.includes(delivering.marker),
-    )
-    if (arrived === undefined) return false
-    this.#ledger.confirmDelivery(delivering.messageId, { item: arrived.id })
-    runtime.delivery.delivering = null
-    this.#changed()
-    return true
-  }
-
-  async #watchArrival(runtime, observed) {
-    if (this.#confirmArrival(runtime, observed)) return
-    const { delivering } = runtime.delivery
-    const waited = this.#now() - delivering.since
-    if (delivering.launch) {
-      // The lead's window is the human's: however long it takes to show its
-      // first message (the handoff), it is never closed for that.
-      if (delivering.chief || waited <= this.#launchTimeoutMs) return
-      runtime.delivery.delivering = null
-      const closing = this.#retire(runtime)
-      this.#settleFailure(delivering, 'the window never showed its first message', { retry: false })
-      await closing
-      return
-    }
-    if (delivering.queued || waited <= this.#arrivalTimeoutMs) return
-    runtime.delivery.delivering = null
-    // A paste the harness record never showed after the whole window did not
-    // land: sending it again is how it reaches the reader, and the header
-    // would show a late duplicate. (A message the harness queued itself waits
-    // for the record, or for the window to close.)
-    this.#settleFailure(delivering, 'the harness record never showed it', { retry: true })
-  }
-
-  /** A worker's answer to its task's latest message finishes the task. */
-  #collect(project, participant, observed) {
-    const task = this.#ledger.activeTask(participant.id)
-    if (task === null || task.state !== 'working') return
-    const latest = task.messages
-      .filter(
-        (message) =>
-          message.recipient === participant.handle &&
-          message.state === 'delivered' &&
-          (message.kind === 'task' || message.kind === 'answer'),
-      )
-      .at(-1)
-    if (latest === undefined) return
-    const start = observed.items.findIndex((item) => item.text.includes(markerOf(latest.id)))
-    if (start === -1) return
-    if (observed.failed) {
-      this.#failTask(project, task, `@${participant.handle}'s harness reported a failure`)
-      return
-    }
-    if (!observed.settled) return
-    // The turn is over once its last message is complete (the one that ended
-    // it; a message that ended in a tool call never is). The result is
-    // everything the member wrote in it, in order: a report written before a
-    // last command, then "Committed.", is not the last word alone. A tool's
-    // output is not the member's words, and nor are the progress notes a
-    // harness marks as its commentary (Codex's "I'll read the diff…"): its
-    // final answer is the report.
-    const written = observed.items.slice(start + 1).filter((item) => item.role === 'assistant')
-    if (written.at(-1)?.complete !== true) return
-    const body =
-      written
-        .filter((item) => item.commentary !== true)
-        .map((item) => item.text.trim())
-        .filter((text) => text !== '')
-        .join('\n\n') || '(the agent ended its turn without a written answer)'
-    this.#ledger.recordResult(project.id, task.number, { body })
-    this.#changed()
-  }
-
-  async #deliver(runtime, message) {
-    // A participant forgotten while its delivery waits (it left, or its
-    // project was deleted) is handed nothing, and what its harness did with
-    // the message settles nothing: its window goes with the record, and the
-    // message may be gone with its project.
-    if (runtime.window.adapter.ready !== undefined) {
-      const ready = await runtime.window.adapter.ready({
-        launch: runtime.window.launch,
-        pane: runtime.window.pane,
-        host: this.#host,
-      })
-      if (this.#forgotten(runtime)) return
-      // Withdrawn while the window got ready (its task cancelled or paused
-      // meanwhile): it is handed nothing, and nothing fails.
-      if (this.#ledger.message(message.id)?.state !== 'queued') return
-      if (ready !== true) {
-        // Said once per message, so a wait is in the trace, not a mystery.
-        if (runtime.delivery.held !== message.id) {
-          runtime.delivery.held = message.id
-          this.#traceWindow(runtime, 'delivery.held', {
-            message: message.id,
-            reason: `the window is not ready for a paste: ${typeof ready === 'string' ? ready : 'a paste is on its way'}`,
-          })
-        }
-        return
-      }
-    }
-    runtime.delivery.held = null
-    this.#ledger.beginDelivery(message.id)
-    const { pane } = runtime.window
-    let outcome
-    try {
-      outcome = await runtime.window.adapter.deliver({
-        launch: runtime.window.launch,
-        pane,
-        host: this.#host,
-        text: deliveryText(message),
-      })
-    } catch (cause) {
-      // Uncertain is for a harness that may have taken it; an adapter that
-      // throws never handed it over, and its error must show.
-      outcome = { admitted: false, reason: `the delivery failed: ${cause.message}` }
-    }
-    if (this.#forgotten(runtime)) return
-    const delivering = {
-      messageId: message.id,
-      marker: markerOf(message.id),
-      since: this.#now(),
-      launch: false,
-      // The harness's own queue took it (a peer inbox, a broker, a plugin):
-      // it shows when the harness gets to it, and sending it again would only
-      // make a duplicate, which Claude even drops as a repeat.
-      queued: outcome.queued === true,
-    }
-    if (outcome.admitted === false) {
-      this.#settleFailure(delivering, outcome.reason ?? 'the harness refused it', { retry: true })
-      return
-    }
-    // A window that closed while its harness took the message had nothing
-    // on its way to settle when it went: the message goes again.
-    if (runtime.window.pane !== pane) {
-      this.#settleFailure(delivering, 'its window closed while it was handed over', {
-        retry: true,
-      })
-      return
-    }
-    runtime.delivery.delivering = delivering
-    this.#changed()
   }
 
   // --- launches --------------------------------------------------------------------
@@ -1447,7 +1256,7 @@ export class Dispatcher {
   #launchFailed(runtime, project, participant, delivering, reason) {
     if (this.#forgotten(runtime)) return
     if (participant.role !== 'chief') {
-      if (delivering !== null) this.#settleFailure(delivering, reason, { retry: false })
+      if (delivering !== null) this.#deliveries.settleFailure(delivering, reason, { retry: false })
       else {
         this.#ledger.note(project.id, {
           to: 'human',
@@ -1457,7 +1266,7 @@ export class Dispatcher {
       }
       return
     }
-    if (delivering !== null) this.#giveBack(delivering, reason)
+    if (delivering !== null) this.#deliveries.giveBack(delivering, reason)
     const failures = (runtime.window.relaunch?.failures ?? 0) + 1
     runtime.window.relaunch = {
       failures,
@@ -1610,7 +1419,7 @@ export class Dispatcher {
     const tiered = this.#tieredWork(project, participant)
     for (const task of tiered) this.#ledger.releaseTask(project.id, task.number, { because })
     if (delivering !== null)
-      this.#settleFailure(
+      this.#deliveries.settleFailure(
         delivering,
         `${because}: add it back under Agents, or remove @${participant.handle} from the staff`,
         { retry: false },
@@ -1662,7 +1471,7 @@ export class Dispatcher {
     if (runtime.delivery.delivering !== null) {
       const { delivering } = runtime.delivery
       runtime.delivery.delivering = null
-      this.#settleFailure(delivering, 'the harness ran out of quota', { retry: true })
+      this.#deliveries.settleFailure(delivering, 'the harness ran out of quota', { retry: true })
     }
     // Near the reset, or with nobody else to take it, a task keeps its window
     // and goes on by itself; otherwise it goes back to the board.
@@ -1699,58 +1508,6 @@ export class Dispatcher {
       this.#ledger.resumeTask(held.projectId, held.number, { body: RESUME_WORDS })
       this.#changed()
     }
-  }
-
-  // --- failures ----------------------------------------------------------------------
-
-  /** A delivery that did not arrive: try again while attempts remain, or give up. */
-  #settleFailure(delivering, reason, { retry }) {
-    const message = this.#ledger.message(delivering.messageId)
-    if (message === null || message.state !== 'delivering') return
-    if (retry && message.attempts < this.#maxAttempts) {
-      this.#ledger.retryDelivery(message.id, reason)
-    } else this.#failDelivery(message, reason)
-    this.#changed()
-  }
-
-  /**
-   * A message that will not be delivered. A brief fails its task, and whoever
-   * gave it hears why. Whoever waits on any other kind (a worker on its
-   * answer, the chief on a result) would wait forever, so the human hears,
-   * once, what it was, for whom and why.
-   */
-  #failDelivery(message, reason) {
-    this.#ledger.failDelivery(message.id, reason)
-    const project = this.#ledger.project(message.projectId)
-    if (message.kind === 'task' && message.taskNumber !== null) {
-      const task = this.#ledger.task(project.id, message.taskNumber)
-      if (task.state === 'failed') {
-        this.#tellRequester(project, task, reason)
-        // A task the human gave: that note was theirs.
-        if (task.requester === 'human') return
-      }
-    }
-    const kind = message.kind === 'answer' ? 'an answer' : `a ${message.kind}`
-    const from = message.sender === null ? 'ConsensFlow' : `@${message.sender}`
-    const on = message.taskNumber === null ? '' : ` on T-${message.taskNumber}`
-    this.#ledger.note(project.id, {
-      to: 'human',
-      ...(message.taskNumber === null ? {} : { task: message.taskNumber }),
-      body: `m-${message.id}, ${kind} from ${from}${on}, did not reach @${message.recipient}: ${reason}.`,
-    })
-  }
-
-  #failTask(project, task, reason) {
-    this.#ledger.failTask(project.id, task.number, { reason })
-    this.#tellRequester(project, task, reason)
-  }
-
-  #tellRequester(project, task, reason) {
-    this.#ledger.note(project.id, {
-      to: task.requester,
-      task: task.number,
-      body: `T-${task.number} failed: ${reason}. Reopen it with: cf task reopen T-${task.number} "…"`,
-    })
   }
 
   // --- small helpers -------------------------------------------------------------------
