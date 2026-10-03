@@ -273,7 +273,6 @@ const ERROR_LOG_LIMIT: u64 = 10 * 1024 * 1024;
 /// home, as the daemon finds it), with one previous file kept once it passes
 /// its limit. A Finder-launched app's stderr is /dev/null and a windowed app
 /// on Windows has none, so panics and daemon errors used to leave no trace.
-#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 pub(crate) fn error_log() -> Option<std::path::PathBuf> {
     let home = std::env::var_os("CONSENSFLOW_HOME")
         .filter(|home| !home.is_empty())
@@ -282,7 +281,6 @@ pub(crate) fn error_log() -> Option<std::path::PathBuf> {
     prepare_error_log(&home, ERROR_LOG_LIMIT).ok()
 }
 
-#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 fn prepare_error_log(home: &std::path::Path, limit: u64) -> std::io::Result<std::path::PathBuf> {
     let directory = home.join("app");
     std::fs::create_dir_all(&directory)?;
@@ -293,9 +291,10 @@ fn prepare_error_log(home: &std::path::Path, limit: u64) -> std::io::Result<std:
     Ok(log)
 }
 
-/// Points this process's stderr, and so the daemon's and every pane host
-/// message, at the error log. Best effort: the app runs without it.
-#[cfg(target_os = "macos")]
+/// Points this process's stderr at the error log: every message of the host's
+/// own and its panics, and on Unix the daemon's, which inherits it. Best
+/// effort: the app runs without it.
+#[cfg(unix)]
 fn redirect_stderr(log: &std::path::Path) {
     use std::os::fd::AsRawFd;
     if let Ok(file) = std::fs::OpenOptions::new()
@@ -305,6 +304,21 @@ fn redirect_stderr(log: &std::path::Path) {
     {
         // SAFETY: both descriptors are valid; dup2 replaces fd 2 atomically.
         unsafe { libc::dup2(file.as_raw_fd(), 2) };
+    }
+}
+
+#[cfg(windows)]
+fn redirect_stderr(log: &std::path::Path) {
+    use std::os::windows::io::IntoRawHandle;
+    use windows_sys::Win32::System::Console::{SetStdHandle, STD_ERROR_HANDLE};
+    if let Ok(file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log)
+    {
+        // SAFETY: the handle is an open file's, given up to stderr for the
+        // life of the process; Rust's stderr looks it up at every write.
+        unsafe { SetStdHandle(STD_ERROR_HANDLE, file.into_raw_handle()) };
     }
 }
 
@@ -334,7 +348,6 @@ pub fn run() {
     for name in inherited_session_variables(names.iter().map(String::as_str)) {
         std::env::remove_var(name);
     }
-    #[cfg(target_os = "macos")]
     if let Some(log) = error_log() {
         redirect_stderr(&log);
     }
@@ -508,6 +521,37 @@ mod tests {
             std::fs::read_to_string(home.path().join("app").join("app.log.1")).expect("previous"),
             "far more than sixteen bytes"
         );
+    }
+
+    /// The host's own errors reach the error log on every platform. On
+    /// Windows they went nowhere: a windowed app has no console, and only the
+    /// macOS build pointed its stderr at the log. The test runs in a child,
+    /// its own binary again, since the redirect is for good.
+    #[test]
+    fn the_hosts_own_errors_reach_the_error_log() {
+        const LOG: &str = "CONSENSFLOW_TEST_ERROR_LOG";
+        if let Some(log) = std::env::var_os(LOG) {
+            redirect_stderr(Path::new(&log));
+            eprintln!("consensflow: the host's own error");
+            return;
+        }
+        let home = tempfile::tempdir().expect("home");
+        let log = home.path().join("app.log");
+        let status = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+            .args([
+                "--exact",
+                "tests::the_hosts_own_errors_reach_the_error_log",
+                "--nocapture",
+            ])
+            .env(LOG, &log)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("run the test in a child");
+        assert!(status.success(), "{status}");
+        assert!(std::fs::read_to_string(&log)
+            .expect("the log")
+            .contains("consensflow: the host's own error"));
     }
 
     #[test]
