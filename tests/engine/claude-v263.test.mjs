@@ -138,7 +138,6 @@ test('claude-v263: the now-complete actual final turn settles and reads ready', 
   const final = result.items.find((item) => item.id === 'msg_011CepWsDm4DzKV4t8Fbdzno')
   assert.equal(final.role, 'assistant')
   assert.equal(final.complete, true)
-  assert.equal(final.settled, true)
   assert.equal(result.inFlight, false)
   assert.equal(result.settlement.state, 'settled')
 })

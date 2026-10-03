@@ -10,6 +10,7 @@
       "app/ui/core/**",
       "app/tests/**",
       "hosts/lib/completion.js",
+      "hosts/lib/completion/**",
       "hosts/devin-hooks.mjs",
       "hosts/lib/windows.js",
       "hosts/pi-extension/**",
