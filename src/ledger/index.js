@@ -265,6 +265,9 @@ class Ledger {
   nextDelivery(participantId) {
     return messages.nextDelivery(this.#store, participantId)
   }
+  withWork(projectId) {
+    return messages.withWork(this.#store, projectId)
+  }
   beginDelivery(messageId) {
     return messages.beginDelivery(this.#store, messageId)
   }
@@ -342,6 +345,9 @@ class Ledger {
 
   board(projectId) {
     return pageReads.board(this.#store, projectId)
+  }
+  openTasks(projectId) {
+    return pageReads.openTasks(this.#store, projectId)
   }
   task(projectId, number) {
     return tasks.task(this.#store, projectId, number)

@@ -208,6 +208,26 @@ export function answerTo(store, questionId) {
  * session is its task's: a task message waits while it holds one, and a
  * message about no task of its own (a stray note) never opens a window.
  */
+/**
+ * The participants something waits on: a message on its way to them, or a
+ * task in their hands. A session with neither and no window has nothing a
+ * pass could do for it.
+ */
+export function withWork(store, projectId) {
+  return new Set(
+    store.db
+      .prepare(
+        `SELECT recipient_id AS id FROM message
+         WHERE project_id = ? AND state IN ('queued', 'delivering')
+         UNION
+         SELECT assignee_id FROM task
+         WHERE project_id = ? AND assignee_id IS NOT NULL AND state IN ('queued', 'working', 'waiting')`,
+      )
+      .all(projectId, projectId)
+      .map((row) => row.id),
+  )
+}
+
 export function nextDelivery(store, participantId) {
   const participant = store.participantRow(participantId)
   if (participant.role === 'human') return null

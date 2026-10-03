@@ -529,8 +529,17 @@ export class Dispatcher {
       )
     const steps = []
     for (const project of projects) {
+      // Sessions stay until the human deletes them, so an aged project has
+      // many: one with no window and nothing on its way or in its hands is
+      // not stepped, since its step would find nothing to do.
+      const working = this.#ledger.withWork(project.id)
       for (const participant of project.participants) {
         if (participant.role === 'human') continue
+        const idle =
+          participant.memberId !== null &&
+          !working.has(participant.id) &&
+          (this.#runtime.get(participant.id)?.pane ?? null) === null
+        if (idle) continue
         steps.push(this.#exclusive(participant.id, () => this.#step(project, participant)))
       }
     }
@@ -1491,8 +1500,8 @@ export class Dispatcher {
    */
   #assignOpenTasks(project) {
     let assigned = false
-    for (const task of this.#ledger.board(project.id).open) {
-      if (task.blockedBy.length > 0 || task.assignee !== null) continue
+    for (const task of this.#ledger.openTasks(project.id)) {
+      if (task.blockedBy.length > 0) continue
       const candidates = this.#ledger.candidates(project.id, task.number)
       const free = candidates.filter((member) => this.#available(member))
       if (free.length > 0) {

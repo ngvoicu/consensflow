@@ -831,3 +831,52 @@ describe('a finished task the human deletes from the board', () => {
     })
   })
 })
+
+describe('what a pass reads', () => {
+  it('gives out the open tasks alone, each saying what it still waits for', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      const open = (body, needs = []) =>
+        ledger.createTask(project.id, {
+          from: 'chief',
+          pool: 'worker',
+          tier: 'standard',
+          body,
+          needs,
+        })
+      open('Parser')
+      open('Docs', [1])
+      open('Tests')
+      ledger.assignTask(project.id, 3, id('zeus'))
+      assert.deepEqual(
+        ledger.openTasks(project.id).map((task) => [task.number, task.blockedBy]),
+        [
+          [1, []],
+          [2, [1]],
+        ],
+      )
+    })
+  })
+
+  it('names who has work: a message on its way, or a task in hand', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Parser',
+      })
+      const { message } = ledger.assignTask(project.id, 1, id('zeus'))
+      const session = message.recipientId
+      assert.deepEqual([...ledger.withWork(project.id)], [session], 'its brief is on its way')
+      deliver(ledger, message)
+      ledger.recordResult(project.id, 1, { body: 'Done' })
+      assert.ok(!ledger.withWork(project.id).has(session), 'done: nothing in hand')
+      assert.ok(
+        ledger.withWork(project.id).has(id('chief')),
+        'the result is on its way to the lead',
+      )
+    })
+  })
+})

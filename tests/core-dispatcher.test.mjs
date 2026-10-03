@@ -1722,6 +1722,35 @@ describe('the dispatcher assigns open tasks', () => {
     })
   })
 
+  it('steps no session with no window and nothing for it, and steps it again once something is', async () => {
+    await setup(async (context) => {
+      const { open, task } = await withTiers(context)
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const session = context.ledger
+        .project(1)
+        .participants.find((participant) => participant.handle === task(1).assignee)
+      context.adapter.answer('zeus', 'Done')
+      await context.dispatcher.pass()
+      context.ledger.acceptTask(1, 1, { by: 'chief' })
+      // After a restart no window is open: an aged project's sessions all idle.
+      const after = context.make()
+      const stepped = []
+      const next = context.ledger.nextDelivery.bind(context.ledger)
+      context.ledger.nextDelivery = (id) => {
+        stepped.push(id)
+        return next(id)
+      }
+      await after.pass()
+      assert.ok(!stepped.includes(session.id), 'the idle session is not stepped')
+      assert.ok(stepped.includes(context.ledger.project(1).participants[1].id), 'the lead is')
+      context.ledger.note(1, { to: session.handle, body: 'One more thing' })
+      await after.pass()
+      assert.ok(stepped.includes(session.id), 'a message on its way makes it worth a step')
+    })
+  })
+
   it('stops the window of a task the human reassigns before the task leaves it, even one the human opened', async () => {
     await setup(async (context) => {
       const { open, task } = await withTiers(context)

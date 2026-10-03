@@ -78,6 +78,21 @@ export function latestTranscript(store, projectId, number, { limit } = {}) {
   return { items: fit, total, shown: fit.length }
 }
 
+/**
+ * The tasks on the board for a member of their tier, as the dispatcher
+ * gives them out each pass: these alone, not the whole board with every
+ * brief and result an aged project has.
+ */
+export function openTasks(store, projectId) {
+  return store.db
+    .prepare(
+      `${TASK_SELECT} WHERE t.project_id = ? AND t.state = 'open' AND t.assignee_id IS NULL
+       ORDER BY t.number`,
+    )
+    .all(projectId)
+    .map(taskView)
+}
+
 export function board(store, projectId) {
   const project = readProject(store, projectId)
   if (project === null) throw new LedgerError('unknown-project', `no project ${projectId}`, 404)
