@@ -16,16 +16,16 @@ import { PARTICIPANT_SELECT, participantView } from './views.js'
 
 /**
  * A project with its chief, on the saved agent it runs on, and, when given,
- * its staff (the last project's, usually). A chief with no agent is a lead
- * from before leads were always saved agents: it runs on its harness's
+ * its staff (the last project's, usually). A chief with no agent is one
+ * from before chiefs were always saved agents: it runs on its harness's
  * default.
  */
 export function createProject(store, { directory, name, chief, staff = [], gate = false }) {
   requireText(directory, 'directory', 4096)
   requireText(name, 'name', 100)
   requireHarness(chief?.harness)
-  const lead = chief.agent ?? null
-  if (lead !== null) requireAgentId(lead)
+  const chiefAgent = chief.agent ?? null
+  if (chiefAgent !== null) requireAgentId(chiefAgent)
   requireGate(gate)
   const members = staff.map((member) => ({ ...member, roles: requireMember(member) }))
   return store.write(() => {
@@ -40,7 +40,7 @@ export function createProject(store, { directory, name, chief, staff = [], gate 
     addParticipant(store, id, {
       handle: 'chief',
       role: 'chief',
-      agent: lead,
+      agent: chiefAgent,
       harness: chief.harness,
     })
     for (const { agent, harness, designer, roles, tier } of members) {

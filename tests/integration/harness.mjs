@@ -21,7 +21,7 @@ const BRIDGE =
 // at all. The page's xterm answers, and with no page this harness does.
 const CURSOR_QUERY = Buffer.from('\u001b[6n')
 const CURSOR_REPLY = [...Buffer.from('\u001b[1;1R')]
-const EDITOR = fileURLToPath(new URL('./core-editor.mjs', import.meta.url))
+const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fake-agent.mjs')
 
 function parser(onLine) {
@@ -139,7 +139,7 @@ function writeRoster(env) {
       {
         schemaVersion: 1,
         agents: [
-          { id: 'lead', kind: 'claude-code', model: 'fake-lead' },
+          { id: 'chief', kind: 'claude-code', model: 'fake-chief' },
           { id: 'worker', kind: 'claude-code', model: 'fake' },
         ],
       },
@@ -167,7 +167,7 @@ function waitFor(predicate, timeoutMs = 10_000, intervalMs = 25) {
 }
 
 /**
- * A real standalone editor and the real Rust headless bridge, connected by
+ * A real standalone daemon and the real Rust headless bridge, connected by
  * their production JSON-lines pipes. The helper only observes and routes the
  * bytes; pane.open, PTYs, input arbitration and cleanup stay native.
  */
@@ -175,7 +175,7 @@ export async function startIntegration({
   fakeEnv = {},
   bridgeEnv = {},
   existingRoot = null,
-  editor = EDITOR,
+  daemon = DAEMON,
 } = {}) {
   assert.equal(
     existsSync(BRIDGE),
@@ -196,14 +196,14 @@ export async function startIntegration({
   )
   writeRoster(env)
 
-  const ui = spawn(process.execPath, [editor], {
+  const node = spawn(process.execPath, [daemon], {
     cwd: REPO,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
   })
-  const uiErrors = []
-  ui.stderr.on('data', (chunk) => uiErrors.push(String(chunk)))
-  const handleLine = await firstLine(ui.stdout, ui)
+  const nodeErrors = []
+  node.stderr.on('data', (chunk) => nodeErrors.push(String(chunk)))
+  const handleLine = await firstLine(node.stdout, node)
   const handle = JSON.parse(handleLine.line)
   assert.match(handle.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)
 
@@ -257,7 +257,7 @@ export async function startIntegration({
     if (frame.kind === 'res' && rustPending.has(frame.id)) {
       rustPending.get(frame.id).resolve(frame.body)
     }
-    if (!ui.stdin.destroyed) ui.stdin.write(`${line}\n`)
+    if (!node.stdin.destroyed) node.stdin.write(`${line}\n`)
   })
 
   rust.stdout.on('data', (chunk) => {
@@ -265,14 +265,14 @@ export async function startIntegration({
   })
   rust.stdout.on('error', () => {})
   rust.once('close', () => {
-    if (!ui.stdin.destroyed) ui.stdin.end()
+    if (!node.stdin.destroyed) node.stdin.end()
   })
-  ui.stdout.on('data', (chunk) => {
+  node.stdout.on('data', (chunk) => {
     nodeToRust.push(chunk)
   })
-  ui.stdout.on('error', () => {})
+  node.stdout.on('error', () => {})
   // Both processes emit a handle for their parent. The native headless
-  // bridge does not consume the editor handle; after both observations only
+  // bridge does not consume the daemon's handle; after both observations only
   // the buffered post-handshake frames are wired in either direction.
   if (handleLine.rest.length > 0) {
     nodeToRust.push(handleLine.rest)
@@ -280,9 +280,9 @@ export async function startIntegration({
   if (rustHandleLine.rest.length > 0) {
     rustToNode.push(rustHandleLine.rest)
   }
-  ui.stdout.resume()
+  node.stdout.resume()
   rust.stdout.resume()
-  ui.stdin.on('error', () => {})
+  node.stdin.on('error', () => {})
   rust.stdin.on('error', () => {})
 
   let requestNumber = 0
@@ -295,7 +295,7 @@ export async function startIntegration({
         reject(
           new Error(
             `timed out waiting for ${op}; node=${nodeFrames.length} rust=${rustFrames.length}; ` +
-              `ui stderr=${uiErrors.join('').trim()} rust stderr=${rustErrors.join('').trim()}`,
+              `node stderr=${nodeErrors.join('').trim()} rust stderr=${rustErrors.join('').trim()}`,
           ),
         )
       }, 10_000)
@@ -326,7 +326,7 @@ export async function startIntegration({
           resolveRequest(value)
         },
       })
-      ui.stdin.write(line)
+      node.stdin.write(line)
     })
   }
 
@@ -422,20 +422,20 @@ export async function startIntegration({
       return rust.kill(signal)
     },
     /** The app's own quit order: the daemon dies first, then the pane host. */
-    killEditor(signal = 'SIGKILL') {
-      return ui.kill(signal)
+    killDaemon(signal = 'SIGKILL') {
+      return node.kill(signal)
     },
     rustExited() {
       return rust.exitCode !== null || rust.signalCode !== null
     },
-    uiExited() {
-      return ui.exitCode !== null || ui.signalCode !== null
+    daemonExited() {
+      return node.exitCode !== null || node.signalCode !== null
     },
     rustPid() {
       return rust.pid
     },
-    uiPid() {
-      return ui.pid
+    daemonPid() {
+      return node.pid
     },
     signalRust(signal) {
       return process.kill(rust.pid, signal)
@@ -444,7 +444,7 @@ export async function startIntegration({
     // that failed, for one, logs there and nowhere else.
     waitFor: (predicate, timeoutMs, intervalMs) =>
       waitFor(predicate, timeoutMs, intervalMs).catch((cause) => {
-        cause.message += `; ui stderr=${uiErrors.join('').trim()} rust stderr=${rustErrors.join('').trim()}`
+        cause.message += `; node stderr=${nodeErrors.join('').trim()} rust stderr=${rustErrors.join('').trim()}`
         throw cause
       }),
     transcript,
@@ -456,9 +456,9 @@ export async function startIntegration({
         return
       }
       closed = true
-      ui.stdin.end()
+      node.stdin.end()
       rust.stdin.end()
-      await Promise.all([exited(ui), exited(rust)])
+      await Promise.all([exited(node), exited(rust)])
       const pidsFile = join(root, 'pids.jsonl')
       if (existsSync(pidsFile)) {
         // The bridge kills each pane's process as it shuts down, and a killed

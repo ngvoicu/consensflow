@@ -1,23 +1,19 @@
-import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.js'
-
-/** A note from ConsensFlow that hands the lead to a new window (`handoff.js`). */
-const isHandoff = (message) =>
-  message.kind === 'note' && message.sender === null && message.body.startsWith(HANDOFF_TITLE)
+import { handoffText, historyPages, isHandoff, lastWords } from './handoff.js'
 
 /**
- * The lead switch, for the dispatcher (`dispatcher.js`): the human's Switch
- * lead moves the chief to a fresh window on another saved agent, at once or
- * once the lead's turn is over (after it wrote down where things stand,
- * when the human asks for that), and the new window's first message hands
- * it the lead. A lead whose saved agent is gone does not open; the human
- * hears why and switches it.
+ * The chief switch, for the dispatcher (`dispatcher.js`): the human's Switch
+ * chief moves the chief to a fresh window on another saved agent, at once or
+ * once the chief's turn is over (after it wrote down where things stand,
+ * when the human asks for that), and the new window's first message is the
+ * handoff. A chief whose saved agent is gone does not open; the human hears
+ * why and switches it.
  *
- * It keeps the lead switch's part of a participant's record
- * (`runtime.pendingSwitch`): a switch waiting for the lead's turn to end. A
- * switch also starts the new lead clean of the old one's marks in the
+ * It keeps the chief switch's part of a participant's record
+ * (`runtime.pendingSwitch`): a switch waiting for the chief's turn to end. A
+ * switch also starts the new chief clean of the old one's marks in the
  * record's other parts.
  */
-export class LeadSwitch {
+export class ChiefSwitch {
   #ledger
   /** The old window's last look and close, and the new window's launch. */
   #windows
@@ -25,9 +21,9 @@ export class LeadSwitch {
   #deliveries
   /** The old window's last words, copied before it closes. */
   #transcripts
-  /** Starts a launch or a delivery that goes on apart from whoever holds the lead (`dispatcher.js`). */
+  /** Starts a launch or a delivery that goes on apart from whoever holds the chief (`dispatcher.js`). */
   #act
-  /** Whether the lead's record was forgotten while the switch waited. */
+  /** Whether the chief's record was forgotten while the switch waited. */
   #forgotten
   #changed
 
@@ -42,8 +38,8 @@ export class LeadSwitch {
   }
 
   /**
-   * A switch the human asked for after the lead's turn, with a note that
-   * first asks the lead where things stand when they want one: it waits in
+   * A switch the human asked for after the chief's turn, with a note that
+   * first asks the chief where things stand when they want one: it waits in
    * the record (`awaitSwitch`).
    */
   afterTurn(projectId, runtime, { harness, agent, note }) {
@@ -58,7 +54,7 @@ export class LeadSwitch {
       note: note
         ? this.#ledger.note(projectId, {
             to: 'chief',
-            body: `The human is moving this project's lead to ${harness} (${agent}) once you answer. Write down where things stand, for the lead after you: what you and the human decided, what you promised, what you were about to do, and what is unresolved. Do not start anything new.`,
+            body: `The human is moving this project's chief to ${harness} (${agent}) once you answer. Write down where things stand, for the chief after you: what you and the human decided, what you promised, what you were about to do, and what is unresolved. Do not start anything new.`,
           }).id
         : null,
     }
@@ -66,9 +62,9 @@ export class LeadSwitch {
   }
 
   /**
-   * A switch the human asked for after the lead's turn: once the turn is
+   * A switch the human asked for after the chief's turn: once the turn is
    * over (and the note asking where things stand came and was answered, when
-   * they asked for one), the lead goes. Until then nothing else is delivered
+   * they asked for one), the chief goes. Until then nothing else is delivered
    * to it, so its turn can end.
    */
   async awaitSwitch(project, chief, runtime, observed, idle) {
@@ -95,8 +91,8 @@ export class LeadSwitch {
    * arrived), what it was still receiving goes back to the queue with its
    * attempt, the window closes without suspending the project, the ledger
    * moves the chief, and the new window opens with the handoff. A project
-   * deleted on the way (its lead forgotten) stops it there: its rows are
-   * gone, so there is no delivery to confirm and no lead to move, and its
+   * deleted on the way (its chief forgotten) stops it there: its rows are
+   * gone, so there is no delivery to confirm and no chief to move, and its
    * old window closes with the record.
    */
   async performSwitch(project, chief, runtime, { harness, agent }) {
@@ -115,17 +111,17 @@ export class LeadSwitch {
       const { delivering } = runtime.delivery
       runtime.delivery.delivering = null
       if (delivering !== null)
-        this.#deliveries.giveBack(delivering, 'the lead was switched before it arrived')
+        this.#deliveries.giveBack(delivering, 'the chief was switched before it arrived')
       await this.#windows.closeOwn(runtime, pane)
     }
     if (this.#forgotten(runtime)) return
     // A handoff still on its way is an earlier switch's: this one writes its
-    // own. The note asking the old lead where things stand was for it alone,
-    // however the switch came (now, or the lead out of quota).
+    // own. The note asking the old chief where things stand was for it alone,
+    // however the switch came (now, or the chief out of quota).
     for (const message of this.#ledger.pending(chief.id)) {
-      if (isHandoff(message)) this.#ledger.cancelMessage(message.id, 'the lead was switched again')
+      if (isHandoff(message)) this.#ledger.cancelMessage(message.id, 'the chief was switched again')
       else if (message.id === asked) {
-        this.#ledger.cancelMessage(message.id, 'the lead was switched before it came')
+        this.#ledger.cancelMessage(message.id, 'the chief was switched before it came')
       }
     }
     this.#ledger.switchChief(project.id, { harness, agent, cut })
@@ -136,17 +132,17 @@ export class LeadSwitch {
     this.#changed()
     const current = this.#ledger.project(project.id)
     if (current.state !== 'open') return
-    const lead = current.participants.find((participant) => participant.role === 'chief')
-    this.#act(runtime, () => this.#windows.launch(runtime, current, lead, null))
+    const moved = current.participants.find((participant) => participant.role === 'chief')
+    this.#act(runtime, () => this.#windows.launch(runtime, current, moved, null))
   }
 
   /**
-   * The note that hands the lead to a fresh window when there is a history
-   * to hand over, written from the ledger (see `handoff.js`), so it needs no
-   * turn of the old lead's; null for a project's first lead.
+   * The handoff a fresh window of the chief starts with when there is a
+   * history to hand over, written from the ledger (see `handoff.js`), so it
+   * needs no turn of the old chief's; null for a project's first chief.
    */
   #handoff(project, chief) {
-    const history = this.#ledger.leadHistory(project.id)
+    const history = this.#ledger.chiefHistory(project.id)
     if (!history.some((conversation) => conversation.items.length > 0)) return null
     const switched = this.#ledger.lastSwitch(project.id)
     // The page count is cf history's: a line names only this project's messages.
@@ -159,7 +155,7 @@ export class LeadSwitch {
       body: handoffText({
         from: switched?.from ?? { harness: history.at(-1).harness, agent: null },
         to: { harness: chief.harness, agent: chief.agent },
-        open: this.#ledger.leadOpenWork(project.id),
+        open: this.#ledger.chiefOpenWork(project.id),
         last: lastWords(history),
         cut: switched?.cut === true,
         pages: historyPages(history, { message }),
@@ -168,13 +164,13 @@ export class LeadSwitch {
   }
 
   /**
-   * A lead's first message. A handoff still on its way goes first: the
+   * A chief's first message. A handoff still on its way goes first: the
    * window it was written for never came up, or closed before showing it. A
-   * lead that starts fresh with earlier conversations behind it (the human
-   * switched it) is handed the lead. Either way, what was queued for it
-   * waits for its next turn.
+   * chief that starts fresh with earlier conversations behind it (the human
+   * switched it) gets a handoff. Either way, what was queued for it waits
+   * for its next turn.
    */
-  leadFirst(project, chief, conversation, message) {
+  chiefFirst(project, chief, conversation, message) {
     const handoff = this.#ledger
       .pending(chief.id)
       .find((pending) => isHandoff(pending) && pending.state === 'queued')
@@ -184,13 +180,13 @@ export class LeadSwitch {
   }
 
   /**
-   * A lead whose agent is gone does not open: the human hears why, and what
-   * it was to receive waits for the lead they switch in, its attempt given back.
+   * A chief whose agent is gone does not open: the human hears why, and what
+   * it was to receive waits for the chief they switch in, its attempt given back.
    */
-  leadWithoutAgent(project, chief, delivering) {
+  chiefWithoutAgent(project, chief, delivering) {
     this.#ledger.note(project.id, {
       to: 'human',
-      body: `The lead runs on ${chief.agent}, which is no longer among your agents: add it back under Agents, or switch the lead.`,
+      body: `The chief runs on ${chief.agent}, which is no longer among your agents: add it back under Agents, or switch the chief.`,
     })
     if (delivering !== null) {
       this.#deliveries.giveBack(delivering, `${chief.agent} is no longer among your agents`)

@@ -11,7 +11,7 @@ const WINDOWS = /Windows/.test(globalThis.navigator?.userAgent ?? '')
 /** A session in `#showing`: its project's id and its handle. */
 const showingKey = (project, handle) => `${project}:${handle}`
 
-/** What the lead is doing, then what it runs on: the line under its name on its card. */
+/** What the chief is doing, then what it runs on: the line under its name on its card. */
 function about(lane, board, agent, now) {
   const [state, text] = laneStatus(lane, board, now)
   const status = element('span', 'terminal-status', text)
@@ -25,8 +25,8 @@ function about(lane, board, agent, now) {
  * The live windows beside the board: a horizontal strip of terminals, the
  * chief's first, then the sessions' the human asked to see, scrolling
  * sideways. The chief's card is always in the dock: the board has a row for
- * the lead only while a task is on it, so its card says what the lead is
- * doing and runs on, and switches it. While the lead's window is down
+ * the chief only while a task is on it, so its card says what the chief is
+ * doing and runs on, and switches it. While the chief's window is down
  * (starting, being switched, its agent gone) its card is there all the
  * same, with no terminal. A session's terminal (a worker's, an advisor's, a
  * reviewer's or an image designer's task) stays out of the dock until the
@@ -43,9 +43,9 @@ export class TerminalsView {
   #link
   #cards = new Map()
   #onChange
-  /** The human asking to switch the lead, from its card. */
-  #onSwitchLead
-  /** The lead's card while its window is down, made the first time it is: its head alone. */
+  /** The human asking to switch the chief, from its card. */
+  #onSwitchChief
+  /** The chief's card while its window is down, made the first time it is: its head alone. */
   #windowless = null
   /** The card last brought into view: a redraw scrolls only when it changes. */
   #shownKey = null
@@ -60,11 +60,11 @@ export class TerminalsView {
 
   constructor(
     stage,
-    { invoke, report, createEmulator, onChange = () => {}, onSwitchLead = () => {} },
+    { invoke, report, createEmulator, onChange = () => {}, onSwitchChief = () => {} },
   ) {
     this.#stage = stage
     this.#onChange = onChange
-    this.#onSwitchLead = onSwitchLead
+    this.#onSwitchChief = onSwitchChief
     this.#registry = new EmulatorRegistry({
       ...(createEmulator ? { createEmulator } : {}),
       onData: (pane, data) => void this.#link.input(pane, this.#typed(pane, data)),
@@ -152,11 +152,11 @@ export class TerminalsView {
   /**
    * Keep a terminal for every lane of the project `board` is for that has a
    * live one (a closed project has none), in lane order; dock those the
-   * human may see now, the lead's card first, and bring `focused` into view
+   * human may see now, the chief's card first, and bring `focused` into view
    * if it is one of them. The rest stay alive, off screen, with their
    * scrollback: a session's not shown, and another project's. Switching
    * projects loses nothing. `agents` are the saved agents, which say what
-   * the lead runs on.
+   * the chief runs on.
    */
   render(board, { focused, agents = [] }) {
     const project = board?.project.id ?? null
@@ -169,12 +169,12 @@ export class TerminalsView {
     }
     const live = [...this.#cards.values()].filter((entry) => entry.project === project)
     const cards = live.filter((entry) => this.#docked(entry)).sort((a, b) => a.order - b.order)
-    const lead = ordered.find((lane) => lane.participant.role === 'chief')
-    // The lead's window down, its card stays: switching the lead may be the way on.
+    const chief = ordered.find((lane) => lane.participant.role === 'chief')
+    // The chief's window down, its card stays: switching the chief may be the way on.
     const windowless =
-      lead === undefined || live.some((entry) => entry.handle === lead.participant.handle)
+      chief === undefined || live.some((entry) => entry.handle === chief.participant.handle)
         ? []
-        : [this.#windowlessCard(lead, board, agentOf(lead))]
+        : [this.#windowlessCard(chief, board, agentOf(chief))]
     const wanted = [...windowless, ...cards.map((entry) => entry.card)]
     if (wanted.length === 0) {
       this.#stage.replaceChildren(element('p', 'stage-empty', 'No terminal is open yet.'))
@@ -190,7 +190,7 @@ export class TerminalsView {
     }
     // The chief's window takes a whole column; the members' go two to a
     // column, and the last one left alone takes its column whole.
-    const members = cards.filter((entry) => entry.handle !== lead?.participant.handle)
+    const members = cards.filter((entry) => entry.handle !== chief?.participant.handle)
     const alone = members.length % 2 === 1 ? members.at(-1) : null
     for (const entry of cards) {
       entry.card.dataset.tall = String(!members.includes(entry) || entry === alone)
@@ -301,7 +301,7 @@ export class TerminalsView {
     }
   }
 
-  /** The lead's card while its window is down: its head, and no terminal. */
+  /** The chief's card while its window is down: its head, and no terminal. */
   #windowlessCard(lane, board, agent) {
     if (this.#windowless === null) {
       const card = element('section', 'terminal-card')
@@ -316,7 +316,7 @@ export class TerminalsView {
 
   /**
    * A card's head: whose window it is, its lamp, and what is done with it
-   * there. The lead's says what the lead is doing and runs on, and switches
+   * there. The chief's says what the chief is doing and runs on, and switches
    * it. Only a session's terminal hides, as on its board row, and its window
    * works on; closing the window is its row's alone. Only an open project's
    * cards are drawn: nothing on a closed one acts.
@@ -331,10 +331,10 @@ export class TerminalsView {
       participant.role === 'chief'
         ? [
             button(
-              'Switch lead',
+              'Switch chief',
               'quiet-button',
-              () => this.#onSwitchLead(entry.participant),
-              'Switch the lead to another agent',
+              () => this.#onSwitchChief(entry.participant),
+              'Switch the chief to another agent',
             ),
             about(lane, board, agent, now),
           ]

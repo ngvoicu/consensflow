@@ -283,7 +283,7 @@ async function readBoundedText(response, maxBytes) {
 /**
  * Create one empty native session on a throwaway `serve` child, then stop it.
  *
- * Used only for fresh/unbound OpenCode leads and workers. The
+ * Used only for fresh/unbound OpenCode chiefs and workers. The
  * child serves the launch configuration's endpoint just long enough to answer
  * an authenticated `/global/health` and a single `POST /session` with `{}` —
  * no model task, no title — and is reaped BEFORE the id returns, so the

@@ -442,7 +442,7 @@ describe("schema 8: a task's last pause and the chief's last switch are kept in 
       const ledger = openLedger(file)
       try {
         const [quiet, ...busy] = ledger.projects()
-        assert.equal(ledger.lastSwitch(quiet.id), null, 'its lead was never switched')
+        assert.equal(ledger.lastSwitch(quiet.id), null, 'its chief was never switched')
         for (const project of busy) {
           assert.deepEqual(ledger.lastSwitch(project.id), {
             from: { harness: 'claude-code', agent: null },
@@ -638,6 +638,83 @@ describe('schema 9: an image agent is a Codex agent with a designer flag', () =>
       assert.throws(() => migrate(db, MIGRATIONS.slice(0, 8)), {
         code: 'ledger-newer',
         message: `this home was written by a newer ConsensFlow (schema ${SCHEMA_VERSION}; this build knows 8)`,
+      })
+      db.close()
+      assert.deepEqual(contents(file), before, 'and left as it was')
+    })
+  })
+})
+
+/** The chief's reads of its history as a build of schema 9 logged them: as the lead's. */
+function readAsTheLead(file) {
+  const db = new DatabaseSync(file)
+  db.exec("UPDATE event SET kind = 'lead.history.read' WHERE kind = 'chief.history.read'")
+  db.close()
+  return file
+}
+
+describe("schema 10: the chief's reads of its history are logged under the role's one name", () => {
+  it('changes no table', async () => {
+    await withDir(async (dir) => {
+      assert.deepEqual(schemaAt(dir, 10), schemaAt(dir, 9))
+    })
+  })
+
+  it("migrates a schema-9 ledger: a read logged as the lead's is the chief's, and every other row is as it was", async () => {
+    await withDir(async (dir) => {
+      const file = readAsTheLead(
+        ledgerAt(dir, 9, (ledger) => {
+          for (const project of ledger.projects()) ledger.historyRead(project.id, { page: 2 })
+        }),
+      )
+      const before = contents(file)
+      const reads = new Set(
+        before.rows.event.filter((row) => row.kind === 'lead.history.read').map((row) => row.id),
+      )
+      assert.equal(reads.size, 3, 'one read in each project')
+
+      const after = contents(migratedTo(file, 10))
+      assert.equal(after.version, 10)
+      assert.deepEqual(
+        after.rows,
+        {
+          ...before.rows,
+          event: before.rows.event.map((row) =>
+            reads.has(row.id) ? { ...row, kind: 'chief.history.read' } : row,
+          ),
+        },
+        "every row with its id; the lead's reads are the chief's",
+      )
+
+      // What reads the log by its kind finds each of them.
+      const ledger = openLedger(file, { now: clock(), names: names() })
+      try {
+        for (const project of ledger.projects()) {
+          assert.deepEqual(
+            ledger
+              .events(project.id)
+              .filter((event) => event.kind === 'chief.history.read')
+              .map((event) => event.data),
+            [{ page: 2, find: null, tools: false }],
+          )
+        }
+      } finally {
+        ledger.close()
+      }
+    })
+  })
+
+  it('is refused by a build that knows only schema 9', async () => {
+    await withDir(async (dir) => {
+      const file = path.join(dir, 'consensflow.db')
+      const ledger = openLedger(file, { now: clock(), names: names() })
+      busyProject(ledger, '/work/app')
+      ledger.close()
+      const before = contents(file)
+      const db = new DatabaseSync(file)
+      assert.throws(() => migrate(db, MIGRATIONS.slice(0, 9)), {
+        code: 'ledger-newer',
+        message: `this home was written by a newer ConsensFlow (schema ${SCHEMA_VERSION}; this build knows 9)`,
       })
       db.close()
       assert.deepEqual(contents(file), before, 'and left as it was')

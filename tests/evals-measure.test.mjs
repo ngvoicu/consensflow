@@ -12,7 +12,7 @@ import {
   ownerQuestions,
   verdict,
 } from '../evals/measure.mjs'
-import leadSwitch, { CODEWORD } from '../evals/scenarios/lead-switch.mjs'
+import chiefSwitch, { CODEWORD } from '../evals/scenarios/chief-switch.mjs'
 import sixDecisions from '../evals/scenarios/six-decisions.mjs'
 import { openLedger } from '../src/ledger/index.js'
 
@@ -468,8 +468,8 @@ describe('measuring parallel work', () => {
   })
 })
 
-describe('measuring a Switch lead', () => {
-  it('reads the leads in order, the switches, the history the new lead read and its words, and judges the scenario', async () => {
+describe('measuring a Switch chief', () => {
+  it('reads the chiefs in order, the switches, the history the new chief read and its words, and judges the scenario', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-switch-'))
     const file = path.join(dir, 'consensflow.db')
     try {
@@ -497,11 +497,11 @@ describe('measuring a Switch lead', () => {
       ledger.close()
       const metrics = measure(file)
       assert.deepEqual(
-        [metrics.leads, metrics.switches, metrics.historyReads],
+        [metrics.chiefs, metrics.switches, metrics.historyReads],
         [['claude-code', 'codex'], 1, [{ page: 2, find: null, tools: false }]],
       )
-      assert.equal(metrics.leadWordsNow, `The codeword is ${CODEWORD}; it goes out on Friday.`)
-      assert.ok(verdict(leadSwitch, metrics).every((check) => check.ok))
+      assert.equal(metrics.chiefWordsNow, `The codeword is ${CODEWORD}; it goes out on Friday.`)
+      assert.ok(verdict(chiefSwitch, metrics).every((check) => check.ok))
       assert.match(CODEWORD, /^(TERN|LARK|WREN|KITE|ROOK|SWIFT)-\d{4}$/)
     } finally {
       await rm(dir, { recursive: true, force: true })

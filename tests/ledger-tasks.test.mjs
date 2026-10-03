@@ -900,7 +900,7 @@ describe('what a pass reads', () => {
       assert.ok(!ledger.withWork(project.id).has(session), 'done: nothing in hand')
       assert.ok(
         ledger.withWork(project.id).has(id('chief')),
-        'the result is on its way to the lead',
+        'the result is on its way to the chief',
       )
     })
   })

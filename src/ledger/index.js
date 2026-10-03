@@ -53,7 +53,7 @@ export { RESUME_WORDS } from './tasks.js'
  *   flag), and an image agent is nothing else: a member joins, and gains a
  *   role, only in roles its agent fits (`invalid-role`). A role it held from
  *   before stays until it is dropped.
- * - A lead is switched only to a saved agent, never to a harness's own
+ * - A chief is switched only to a saved agent, never to a harness's own
  *   default (`invalid-agent`).
  * - Task states move only along the state machine below; anything else is
  *   refused with `invalid-transition`.
@@ -197,11 +197,11 @@ class Ledger {
   latestTranscript(projectId, number, options = {}) {
     return pageReads.latestTranscript(this.#store, projectId, number, options)
   }
-  leadHistory(projectId) {
-    return conversations.leadHistory(this.#store, projectId)
+  chiefHistory(projectId) {
+    return conversations.chiefHistory(this.#store, projectId)
   }
-  leadOpenWork(projectId) {
-    return conversations.leadOpenWork(this.#store, projectId)
+  chiefOpenWork(projectId) {
+    return conversations.chiefOpenWork(this.#store, projectId)
   }
   switchChief(projectId, request) {
     return conversations.switchChief(this.#store, projectId, request)

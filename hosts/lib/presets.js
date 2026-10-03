@@ -1458,7 +1458,7 @@ function modelProfile({ harness, kind, model, effort, thinking, designer }) {
   harness ??= kind === "claude-code" ? "claude" : kind
   if (harness === "pi") effort = thinking ?? effort
   const known = AGENT_PRESETS.some((p) => (p.kind === "claude-code" ? "claude" : p.kind) === harness && p.model === model)
-  // Devin's own setting (a lead from before every lead had an agent), or an
+  // Devin's own setting (a chief from before every chief had an agent), or an
   // agent off the catalog on whatever id it names.
   if (harness === 'devin' && (!known || !model)) return {
     modelKey: model || 'devin-configured',

@@ -18,7 +18,7 @@ import {
 } from './shared.js'
 
 /**
- * Codex, for the new core. Codex runs under ConsensFlow's supervisor
+ * Codex, for the daemon. Codex runs under ConsensFlow's supervisor
  * (`hosts/codex-session.mjs`): an app-server, a broker that knows the thread
  * the TUI shows and queues messages on it, and the TUI attached to both. The
  * first message is Codex's last argument; the broker names the thread once

@@ -379,8 +379,8 @@ describe('the agents API', () => {
       })
       deliver(ledger, told)
       ledger.cancelTask(project.id, 1, { by: 'human' })
-      const lead = () => ledger.inbox(participantId(ledger, project, 'chief')).map((m) => m.id)
-      const before = lead()
+      const chief = () => ledger.inbox(participantId(ledger, project, 'chief')).map((m) => m.id)
+      const before = chief()
       const zeus = token('zeus')
       const refusals = []
       for (const [route, body] of [
@@ -403,7 +403,7 @@ describe('the agents API', () => {
         [asked.code, asked.err],
         [1, 'cf: T-1 is cancelled: nothing more of it goes to @chief'],
       )
-      assert.deepEqual(lead(), before, 'nothing reached the lead')
+      assert.deepEqual(chief(), before, 'nothing reached the chief')
     })
   })
 
@@ -684,30 +684,34 @@ describe('the agents API', () => {
 })
 
 describe('cf history', () => {
-  it('lets the lead read what the human and the leads before it said, in pages and by search; nobody else', async () => {
+  it('lets the chief read what the human and the chiefs before it said, in pages and by search; nobody else', async () => {
     await withApi(async ({ ledger, project, token, cf }) => {
-      const chief = ledger.project(project.id).participants.find((p) => p.handle === 'chief')
-      const first = ledger.startConversation(chief.id, { harness: 'claude-code' })
+      const first = ledger.startConversation(participantId(ledger, project, 'chief'), {
+        harness: 'claude-code',
+      })
       ledger.copyTranscript(first.id, [
         { id: 'a', role: 'user', text: 'The codeword is tern' },
         { id: 'b', role: 'assistant', text: 'Noted' },
         { id: 'c', role: 'tool', text: 'ok 3 passed' },
       ])
       ledger.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
-      const lead = token('chief')
-      const read = await cf(lead, 'history')
+      const chief = token('chief')
+      const read = await cf(chief, 'history')
       assert.equal(read.code, 0, read.err)
-      assert.match(read.out, /^Lead history, page 1 of 1: the most recent\./)
-      assert.match(read.out, /Human: The codeword is tern\n\nClaude Code lead: Noted/)
+      assert.match(read.out, /^The chief's history, page 1 of 1: the most recent\./)
+      assert.match(read.out, /Human: The codeword is tern\n\nClaude Code chief: Noted/)
       assert.ok(!read.out.includes('ok 3 passed'))
-      assert.match((await cf(lead, 'history', '--tools')).out, /Tool output:\nok 3 passed/)
-      assert.match((await cf(lead, 'history', '--find', 'codeword')).out, /entries with "codeword"/)
-      const beyond = await cf(lead, 'history', '--page', '3')
+      assert.match((await cf(chief, 'history', '--tools')).out, /Tool output:\nok 3 passed/)
+      assert.match(
+        (await cf(chief, 'history', '--find', 'codeword')).out,
+        /entries with "codeword"/,
+      )
+      const beyond = await cf(chief, 'history', '--page', '3')
       assert.notEqual(beyond.code, 0)
       assert.match(beyond.err, /there is 1 page/)
       const member = await cf(token('zeus'), 'history')
       assert.notEqual(member.code, 0)
-      assert.match(member.err, /the lead history is the lead's to read/)
+      assert.match(member.err, /the chief's history is the chief's to read/)
     })
   })
 

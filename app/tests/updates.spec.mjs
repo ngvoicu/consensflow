@@ -29,7 +29,7 @@ function updateSnapshot(overrides = {}) {
   }
 }
 
-/** What the new core answers the board: one project whose worker window is the blocker, if any. */
+/** What the daemon answers the board: one project whose worker window is the blocker, if any. */
 function coreState(blocker = null) {
   const participant = (id, handle, role) => ({
     id,

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The live bench for the new core (VERIFY-BDC-08): its daemon, the real Rust
+ * The live bench (VERIFY-BDC-08): the daemon, the real Rust
  * pane host and the REAL harness TUIs on cheap models, driven by code.
  *
  * The human gives the chief one task per worker: run `cf task add` for its tier;
@@ -25,7 +25,7 @@ import { startIntegration } from '../integration/harness.mjs'
 import { trustForClaude } from './trust-claude.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const EDITOR = join(HERE, 'core-live-editor.mjs')
+const DAEMON = join(HERE, 'core-live-daemon.mjs')
 const H = process.env.HOME
 const WORKSPACE = join(H, '.consensflow-candidate', 'bench', 'workspace')
 
@@ -66,10 +66,10 @@ const AGENTS = {
 const tierFlag = (tier) =>
   tier === 'critical' ? '--tier critical --purpose hard-problem' : `--tier ${tier}`
 const args = process.argv.slice(2)
-const leadAt = args.indexOf('--chief')
-const CHIEF = leadAt === -1 ? 'opencode' : args[leadAt + 1]
+const chiefAt = args.indexOf('--chief')
+const CHIEF = chiefAt === -1 ? 'opencode' : args[chiefAt + 1]
 const named =
-  leadAt === -1 ? args : args.filter((_arg, index) => index !== leadAt && index !== leadAt + 1)
+  chiefAt === -1 ? args : args.filter((_arg, index) => index !== chiefAt && index !== chiefAt + 1)
 const reviewerAt = named.indexOf('--reviewer')
 const REVIEWER = reviewerAt === -1 ? 'devin' : named[reviewerAt + 1]
 const workers =
@@ -141,8 +141,8 @@ const writeRoster = (home) =>
         agents: [
           ...wanted.map((name) => AGENTS[name]),
           { ...AGENTS[REVIEWER], id: 'bench-reviewer' },
-          // The lead runs on a saved agent: its harness's cheap model.
-          { ...AGENTS[CHIEF], id: 'bench-lead' },
+          // The chief runs on a saved agent: its harness's cheap model.
+          { ...AGENTS[CHIEF], id: 'bench-chief' },
         ],
       },
       null,
@@ -150,7 +150,7 @@ const writeRoster = (home) =>
     )}\n`,
   )
 
-let app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
+let app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV })
 process.stdout.write(
   `trust: ${await trustForClaude(app, WORKSPACE, join(H, '.local', 'bin', 'claude'))}\n`,
 )
@@ -160,7 +160,7 @@ try {
   // The baseline measures delivery alone; a review is its own scenario below.
   const opened = await app.requestNode('project.open', {
     directory: WORKSPACE,
-    agent: 'bench-lead',
+    agent: 'bench-chief',
   })
   if (opened.ok !== true) throw new Error(`project.open: ${JSON.stringify(opened)}`)
   const project = opened.project.id
@@ -184,8 +184,8 @@ try {
     (await app.requestNode('inbox.get', { project, participant })).messages
 
   const chief = await until(async () => {
-    const leadLane = await lane('chief')
-    return leadLane?.activity?.state === 'idle' ? leadLane : null
+    const chiefLane = await lane('chief')
+    return chiefLane?.activity?.state === 'idle' ? chiefLane : null
   }, 180_000)
   record('chief-ready', Boolean(chief), { chief: CHIEF, activity: (await lane('chief'))?.activity })
 
@@ -204,7 +204,7 @@ try {
     )
     record(`${name}-dispatched-by-chief`, Boolean(task), {
       seconds: Math.round((Date.now() - started) / 1000),
-      ...(task ? { task: task.number } : { leadActivity: (await lane('chief'))?.activity }),
+      ...(task ? { task: task.number } : { chiefActivity: (await lane('chief'))?.activity }),
     })
     if (!task) continue
     const done = await until(async () => {
@@ -429,11 +429,11 @@ try {
 
   // Restart: a new daemon and pane host over the same home, in the app's quit
   // order. The project must come back on its chief's own conversation.
-  const leadFrame = app.openFrames.find((frame) => frame.id === `p${project}-chief`)
-  app.killEditor()
-  await until(() => app.uiExited(), 10_000, 100)
+  const chiefFrame = app.openFrames.find((frame) => frame.id === `p${project}-chief`)
+  app.killDaemon()
+  await until(() => app.daemonExited(), 10_000, 100)
   await app.close({ preserveRoot: true })
-  app = await startIntegration({ editor: EDITOR, fakeEnv: ENV, existingRoot: root })
+  app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV, existingRoot: root })
   const back = await until(async () => {
     const projects = (await app.requestNode('projects.list', {})).projects
     return projects.find((s) => s.id === project)?.state === 'open'
@@ -444,7 +444,7 @@ try {
   )
   record('restart-restores-project', Boolean(back && reopened), {
     back: Boolean(back),
-    before: leadFrame?.argv?.slice(-4),
+    before: chiefFrame?.argv?.slice(-4),
     after: reopened?.argv?.slice(-4),
   })
 } finally {

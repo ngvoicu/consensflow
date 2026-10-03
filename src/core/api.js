@@ -4,7 +4,7 @@ import { LedgerError } from '../ledger/index.js'
 import { historyPage } from './handoff.js'
 
 /**
- * The agents' door into the new core: what `cf` calls from inside a window.
+ * The agents' door into the daemon: what `cf` calls from inside a window.
  *
  * Every window gets its own bearer token, issued when the dispatcher opens it
  * and revoked when it closes, so a token names exactly one participant of one
@@ -93,17 +93,17 @@ export async function startApi({
         task: task === null ? null : summary(task),
       })
     }
-    // A lead the human switched in reads what the human and the leads before it said.
+    // A chief the human switched in reads what the human and the chiefs before it said.
     if (at === 'GET /api/history') {
       if (participant.role !== 'chief') {
-        throw new Refusal(403, 'not-the-lead', "the lead history is the lead's to read")
+        throw new Refusal(403, 'not-the-chief', "the chief's history is the chief's to read")
       }
       const page = Number(url.searchParams.get('page') ?? '1')
       const find = url.searchParams.get('find')
       const search = find === null || find === '' ? null : find
       const tools = url.searchParams.get('tools') === '1'
       try {
-        const shown = historyPage(ledger.leadHistory(project.id), {
+        const shown = historyPage(ledger.chiefHistory(project.id), {
           // A line may name any number: only this project's messages are read out.
           message: (id) => {
             const found = ledger.message(id)

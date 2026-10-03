@@ -10,14 +10,14 @@ const DOUBLE_PRESS_MS = 150
 /** How long a fresh window's output must hold still before its screen counts as drawn. */
 const DRAWN_QUIET_MS = 1_500
 
-/** How soon a lead that could not start is tried again; the wait doubles with each failure, up to the most. */
+/** How soon a chief that could not start is tried again; the wait doubles with each failure, up to the most. */
 const RELAUNCH_MS = 5_000
 const RELAUNCH_MAX_MS = 5 * 60_000
 
 /**
  * Each window's lifecycle, for the dispatcher (`dispatcher.js`): a launch
  * opens a participant's window on its harness, with its first message (a
- * lead that could not start is tried again, ever more slowly); a look reads
+ * chief that could not start is tried again, ever more slowly); a look reads
  * what the harness's record shows; an agent whose task stopped is
  * interrupted; and a window closes once its work leaves it, at the human's
  * hand, or as the dispatcher's own exit.
@@ -39,9 +39,9 @@ export class Windows {
   #deliveries
   /** Gives back the tiered work of a member whose saved agent is gone. */
   #scheduler
-  /** A lead's first message, and what a lead whose saved agent is gone does instead of opening. */
-  #leadFirst
-  #leadWithoutAgent
+  /** A chief's first message, and what a chief whose saved agent is gone does instead of opening. */
+  #chiefFirst
+  #chiefWithoutAgent
   /** What a window's exit settles, as the dispatcher has it (`paneExited`). */
   #paneExited
   /** Tells the trace what happened at a window: here, a change of what it is doing. */
@@ -63,8 +63,8 @@ export class Windows {
     launchFiles,
     deliveries,
     scheduler,
-    leadFirst,
-    leadWithoutAgent,
+    chiefFirst,
+    chiefWithoutAgent,
     paneExited,
     traceWindow,
     forgotten,
@@ -81,8 +81,8 @@ export class Windows {
     this.#launchFiles = launchFiles
     this.#deliveries = deliveries
     this.#scheduler = scheduler
-    this.#leadFirst = leadFirst
-    this.#leadWithoutAgent = leadWithoutAgent
+    this.#chiefFirst = chiefFirst
+    this.#chiefWithoutAgent = chiefWithoutAgent
     this.#paneExited = paneExited
     this.#traceWindow = traceWindow
     this.#forgotten = forgotten
@@ -120,7 +120,7 @@ export class Windows {
     const resume = conversation?.nativeSession ?? null
     const first =
       participant.role === 'chief'
-        ? this.#leadFirst(project, participant, conversation, message)
+        ? this.#chiefFirst(project, participant, conversation, message)
         : message
     const launchId = randomUUID()
     const generation = this.#nextGeneration()
@@ -147,7 +147,7 @@ export class Windows {
       // has deleted from their agents must not fall back to a harness default.
       const agent = participant.agent === null ? null : this.#roster(participant.agent)
       if (participant.agent !== null && agent === null) {
-        if (participant.role === 'chief') this.#leadWithoutAgent(project, participant, delivering)
+        if (participant.role === 'chief') this.#chiefWithoutAgent(project, participant, delivering)
         else this.#scheduler.withoutAgent(project, participant, delivering)
         // A session's window the human opened, with nothing to deliver, says why it did not come.
         if (participant.role !== 'chief' && delivering === null) {
@@ -260,7 +260,7 @@ export class Windows {
       .catch((cause) => ({ error: cause.message }))
     if (started.error !== undefined && delivering !== null) {
       runtime.delivery.delivering = null
-      // The lead's window goes without taking its project with it: the lead is tried again.
+      // The chief's window goes without taking its project with it: the chief is tried again.
       if (participant.role === 'chief') await this.closeOwn(runtime, pane)
       else this.#host.kill(pane).catch(() => {})
       this.#launchFailed(
@@ -301,10 +301,10 @@ export class Windows {
   /**
    * A launch that did not come up. A member's first message fails with it,
    * so its task fails and the requester hears why; a window the human opened
-   * with nothing to deliver tells them why it did not come. The lead's first
-   * message goes back to its queue with its attempt, and the lead is tried
+   * with nothing to deliver tells them why it did not come. The chief's first
+   * message goes back to its queue with its attempt, and the chief is tried
    * again, ever more slowly while it keeps failing. The human hears why
-   * once, until the lead starts or they ask for it again. A participant
+   * once, until the chief starts or they ask for it again. A participant
    * forgotten while it launched hears nothing and settles nothing: its
    * project may be gone, and its rows with it.
    */
@@ -330,7 +330,7 @@ export class Windows {
     if (failures === 1) {
       this.#ledger.note(project.id, {
         to: 'human',
-        body: `The lead could not start: ${reason}. What comes for the lead waits for it, and ConsensFlow tries again; you may also switch the lead.`,
+        body: `The chief could not start: ${reason}. What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief.`,
       })
     }
     this.#changed()
@@ -467,8 +467,8 @@ export class Windows {
 
   /**
    * Closes a window whose exit is the dispatcher's own (a switch, a Close, a
-   * lead that could not take its first message): the exit settles what the
-   * window was doing, as any exit does, but a lead's does not close its
+   * chief that could not take its first message): the exit settles what the
+   * window was doing, as any exit does, but a chief's does not close its
    * project. It is the dispatcher's whether its event came already or comes
    * later. A window already going with its work had its kill.
    */

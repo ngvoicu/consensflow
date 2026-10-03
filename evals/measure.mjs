@@ -105,12 +105,12 @@ export function measure(file, { fixture = null, workspace = null, pickers = 0 } 
         ]),
       ),
       taskCount: tasks.length,
-      // A Switch lead: the harnesses the lead ran on, in order (each switch
-      // starts a conversation), how many switches, and the history the lead
+      // A Switch chief: the harnesses the chief ran on, in order (each switch
+      // starts a conversation), how many switches, and the history the chief
       // read with cf history (each read is in the ledger, whatever the harness).
-      leads: [...ledger.leadHistory(project.id).map((c) => c.harness), chief.harness],
+      chiefs: [...ledger.chiefHistory(project.id).map((c) => c.harness), chief.harness],
       switches: eventsOf(ledger, project.id, 'chief.switched').length,
-      historyReads: eventsOf(ledger, project.id, 'lead.history.read').map((e) => e.data),
+      historyReads: eventsOf(ledger, project.id, 'chief.history.read').map((e) => e.data),
       chiefId: chief.id,
       chiefHarness: chief.harness,
       humanId: human.id,
@@ -124,7 +124,7 @@ export function measure(file, { fixture = null, workspace = null, pickers = 0 } 
     ...seen,
     ownerQuestions: ownerQuestions(turnEnds, { pickers }),
     plumbing: plumbing(file, metrics.chiefId, metrics.humanId),
-    leadWordsNow: leadWordsNow(file),
+    chiefWordsNow: chiefWordsNow(file),
     memberQuestionsBy: memberQuestionsBy(file, metrics.chiefId, metrics.humanId),
     filesChanged: fixture === null || workspace === null ? [] : changed(fixture, workspace),
   }
@@ -406,8 +406,8 @@ function eventsOf(ledger, projectId, kind) {
   }
 }
 
-/** What the lead wrote in its current conversation: the one the last switch started. */
-export function leadWordsNow(file) {
+/** What the chief wrote in its current conversation: the one the last switch started. */
+export function chiefWordsNow(file) {
   const dir = mkdtempSync(join(tmpdir(), 'cf-eval-ledger-'))
   try {
     const copy = join(dir, 'ledger.db')

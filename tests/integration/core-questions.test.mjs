@@ -12,18 +12,18 @@ import { startIntegration } from './harness.mjs'
  * the worker's window for that.
  */
 
-const CORE_EDITOR = fileURLToPath(new URL('./core-editor.mjs', import.meta.url))
+const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
 
 test("a worker's question with options goes to the chief's inbox and its answer returns through the hook", async () => {
   const app = await startIntegration({
-    editor: CORE_EDITOR,
+    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
     const opened = await app.requestNode('project.open', {
       directory: app.workspace,
-      agent: 'lead',
+      agent: 'chief',
     })
     assert.equal(opened.ok, true, JSON.stringify(opened))
     const project = opened.project.id

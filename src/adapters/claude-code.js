@@ -10,7 +10,7 @@ import { roleConfiguration } from '../role-skills.js'
 import { admission, executableFor, SHOWS_ANOTHER, switchedTo, windowText } from './shared.js'
 
 /**
- * Claude Code, for the new core (see `src/core/dispatcher.js` for the adapter
+ * Claude Code, for the daemon (see `src/core/dispatcher.js` for the adapter
  * contract). Each launch gets its own settings file under the home: full
  * permission without the one-time dialog, and a Stop hook on every turn so
  * every finished turn is recorded.

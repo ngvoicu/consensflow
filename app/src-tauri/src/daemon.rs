@@ -14,7 +14,7 @@ use crate::bridge::{Bridge, BridgeBuilder, BridgeError};
 use crate::pty::PaneTable;
 
 /// How long the daemon gets to stop on its own before it is killed.
-pub(crate) const EDITOR_STOP_GRACE: Duration = Duration::from_secs(2);
+pub(crate) const DAEMON_STOP_GRACE: Duration = Duration::from_secs(2);
 /// What the page is told of the daemon (see `CoreStatus`).
 pub(crate) const CORE_STATUS_EVENT: &str = "core-status";
 /// Between starts of a daemon that failed to start.
@@ -75,7 +75,7 @@ impl CoreFailure {
 /// A daemon that started: its process, its bridge, and the address of the
 /// agents screens it handed the app.
 pub(crate) struct StartedCore {
-    editor: Child,
+    daemon: Child,
     bridge: Bridge,
     roster: RosterHandle,
 }
@@ -83,7 +83,7 @@ pub(crate) struct StartedCore {
 impl StartedCore {
     fn stop(mut self) {
         self.bridge.close_input();
-        stop_editor(&mut self.editor);
+        stop_daemon(&mut self.daemon);
     }
 }
 
@@ -119,7 +119,7 @@ pub(crate) struct Core {
 }
 
 struct CoreState {
-    editor: Option<Child>,
+    daemon: Option<Child>,
     bridge: Option<Bridge>,
     roster: Option<RosterHandle>,
     status: CoreStatus,
@@ -137,7 +137,7 @@ impl Core {
     pub(crate) fn new(report: CoreReport) -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new(CoreState {
-                editor: None,
+                daemon: None,
                 bridge: None,
                 roster: None,
                 status: CoreStatus::down("ConsensFlow's core has not started", false),
@@ -235,7 +235,7 @@ impl Core {
             CoreStatus::up()
         };
         state.current = start;
-        state.editor = Some(started.editor);
+        state.daemon = Some(started.daemon);
         state.bridge = Some(started.bridge);
         state.roster = Some(started.roster);
         self.change(&mut state, status);
@@ -320,7 +320,7 @@ impl Core {
         }
         state.stopping = true;
         self.settled.notify_all();
-        Some((state.editor.take(), state.bridge.clone()))
+        Some((state.daemon.take(), state.bridge.clone()))
     }
 
     pub(crate) fn bridge(&self) -> Option<Bridge> {
@@ -347,10 +347,10 @@ pub(crate) fn connect_core(
             ))
         })?;
     let input = child.stdout.take().ok_or_else(|| {
-        CoreFailure::transient("the editor process gave no output to read".to_string())
+        CoreFailure::transient("the daemon process gave no output to read".to_string())
     })?;
     let writer = child.stdin.take().ok_or_else(|| {
-        CoreFailure::transient("the editor process gave no input pipe".to_string())
+        CoreFailure::transient("the daemon process gave no input pipe".to_string())
     })?;
     let failed = |child: &mut Child, cause: String| {
         let _ = child.kill();
@@ -400,7 +400,7 @@ pub(crate) fn connect_core(
     };
     match RosterHandle::from_value(connected.handle) {
         Ok(roster) => Ok(StartedCore {
-            editor: child,
+            daemon: child,
             bridge: connected.bridge,
             roster,
         }),
@@ -417,14 +417,14 @@ pub(crate) struct RosterHandle {
 impl RosterHandle {
     pub(crate) fn from_value(value: Value) -> Result<Self, String> {
         let mut handle: Self = serde_json::from_value(value)
-            .map_err(|error| format!("the editor returned an invalid handle: {error}"))?;
+            .map_err(|error| format!("the daemon returned an invalid handle: {error}"))?;
         if !handle.url.starts_with("http://127.0.0.1:")
             && !handle.url.starts_with("http://localhost:")
         {
-            return Err("the editor handle is not a loopback HTTP address".to_string());
+            return Err("the daemon's handle is not a loopback HTTP address".to_string());
         }
         if handle.token.is_empty() {
-            return Err("the editor handle omitted its UI token".to_string());
+            return Err("the daemon's handle omitted its UI token".to_string());
         }
         handle.url = handle.url.replace("http://127.0.0.1:", "http://localhost:");
         Ok(handle)
@@ -459,26 +459,26 @@ fn daemon_stderr() -> Stdio {
 /// platform, since an input ending is the one stop Windows can deliver too.
 /// Only what has not gone by then is killed, so a start with no stop after it
 /// in the daemon's log means it was killed from outside, never by the app.
-pub(crate) fn stop_editor(editor: &mut Child) {
+pub(crate) fn stop_daemon(daemon: &mut Child) {
     // The bridge holds the daemon's input and has let it go; a child whose
     // input is still ours (a stand-in in a test) gets its EOF here.
-    drop(editor.stdin.take());
-    let deadline = Instant::now() + EDITOR_STOP_GRACE;
+    drop(daemon.stdin.take());
+    let deadline = Instant::now() + DAEMON_STOP_GRACE;
     while Instant::now() < deadline {
-        if matches!(editor.try_wait(), Ok(Some(_))) {
+        if matches!(daemon.try_wait(), Ok(Some(_))) {
             return;
         }
         thread::sleep(Duration::from_millis(20));
     }
-    let _ = editor.kill();
-    let _ = editor.wait();
+    let _ = daemon.kill();
+    let _ = daemon.wait();
 }
 
 #[cfg(all(test, unix))]
 impl Core {
     /// A core past its first start, holding what a test stood up: up with a
     /// bridge, still down without one.
-    pub(crate) fn settled(editor: Option<Child>, bridge: Option<Bridge>) -> Arc<Self> {
+    pub(crate) fn settled(daemon: Option<Child>, bridge: Option<Bridge>) -> Arc<Self> {
         let core = Self::new(Arc::new(|_: &CoreStatus| {}));
         {
             let mut state = core.lock();
@@ -486,7 +486,7 @@ impl Core {
                 state.status = CoreStatus::up();
             }
             state.settled = true;
-            state.editor = editor;
+            state.daemon = daemon;
             state.bridge = bridge;
         }
         core

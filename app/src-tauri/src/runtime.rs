@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter};
 use crate::arbiter::{EnterTiming, InputArbiter};
 use crate::bridge::BridgeBuilder;
 use crate::daemon::{
-    connect_core, stop_editor, Core, CoreStarter, CoreStatus, CORE_READY_TIMEOUT, CORE_RESTART,
+    connect_core, stop_daemon, Core, CoreStarter, CoreStatus, CORE_READY_TIMEOUT, CORE_RESTART,
     CORE_STATUS_EVENT,
 };
 use crate::daemon_command::core_command;
@@ -104,14 +104,14 @@ impl AppRuntime {
     }
 
     pub(crate) fn begin_shutdown(&self) -> bool {
-        let Some((editor, bridge)) = self.core.stop() else {
+        let Some((daemon, bridge)) = self.core.stop() else {
             return false;
         };
-        if let Some(mut editor) = editor {
+        if let Some(mut daemon) = daemon {
             if let Some(bridge) = &bridge {
                 bridge.close_input();
             }
-            stop_editor(&mut editor);
+            stop_daemon(&mut daemon);
         }
         true
     }
@@ -242,12 +242,12 @@ pub fn run_headless() -> Result<(), String> {
 pub(crate) fn test_runtime(
     panes: Arc<PaneTable>,
     inputs: Arc<InputQueue>,
-    editor: Option<std::process::Child>,
+    daemon: Option<std::process::Child>,
     bridge: Option<crate::bridge::Bridge>,
 ) -> AppRuntime {
     AppRuntime {
         panes,
-        core: Core::settled(editor, bridge),
+        core: Core::settled(daemon, bridge),
         output: Arc::new(OutputHub::new()),
         inputs,
     }
@@ -263,7 +263,7 @@ mod tests {
 
     use portable_pty::PtySize;
 
-    use crate::daemon::EDITOR_STOP_GRACE;
+    use crate::daemon::DAEMON_STOP_GRACE;
     use crate::pty::process_exists;
 
     #[test]
@@ -471,19 +471,19 @@ mod tests {
         assert!(took >= Duration::from_secs(5), "{took:?}");
     }
 
-    /// The case the editor-absent test above could not reach: a REAL editor
+    /// The case the daemon-absent test above could not reach: a REAL daemon
     /// child, its own pipes carrying the bridge, and a `pane.open` admitted
     /// and still spawning when the app is told to quit.
     ///
     /// This is the ordering proof. `Bridge::admit_handler` refuses every new
     /// handler once the transport is `closed`, and only EOF from the peer
-    /// closes it — so ending the editor (its input closed, and the kill for
+    /// closes it — so ending the daemon (its input closed, and the kill for
     /// one that does not stop on that) IS the act that shuts admission, and
     /// nothing else in `shutdown()` can do it. What follows is a drain of what
     /// was ALREADY admitted, and only then the reap, so a pane whose spawn
     /// was in flight is in the table before anything reaps it.
     #[test]
-    fn gui_shutdown_kills_a_present_editor_then_drains_its_admitted_launch() {
+    fn gui_shutdown_kills_a_present_daemon_then_drains_its_admitted_launch() {
         use std::sync::Barrier;
 
         let _pty_guard = crate::pty::serial_pty_test();
@@ -498,7 +498,7 @@ mod tests {
         builder.on_launch("pane.open", move |_bridge, _body| {
             admitted_sender.send(()).expect("announce admitted launch");
             handler_release.wait();
-            let key = PaneKey::new("editor-present-pane", 1);
+            let key = PaneKey::new("daemon-present-pane", 1);
             let _reader = handler_panes
                 .open_at(
                     key,
@@ -522,7 +522,7 @@ mod tests {
 
         // Stands in for `cf ui --json`: the handshake line, one launch request,
         // then a process that holds both pipes open until something kills it.
-        let mut editor = Command::new("/bin/sh")
+        let mut daemon = Command::new("/bin/sh")
             .arg("-c")
             .arg(concat!(
                 r#"printf '%s\n' '{"url":"http://localhost:1/","token":"test"}'; "#,
@@ -532,21 +532,21 @@ mod tests {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
-            .expect("spawn the stand-in editor");
-        let editor_pid = editor.id() as i32;
-        let reader = editor.stdout.take().expect("editor stdout");
-        let writer = editor.stdin.take().expect("editor stdin");
+            .expect("spawn the stand-in daemon");
+        let daemon_pid = daemon.id() as i32;
+        let reader = daemon.stdout.take().expect("daemon stdout");
+        let writer = daemon.stdin.take().expect("daemon stdin");
         let connected = builder.connect(reader, writer).expect("connect bridge");
 
         let runtime = Arc::new(test_runtime(
             Arc::clone(&panes),
             inputs,
-            Some(editor),
+            Some(daemon),
             Some(connected.bridge),
         ));
         admitted_receiver
             .recv_timeout(Duration::from_secs(5))
-            .expect("launch admitted over the real editor pipe");
+            .expect("launch admitted over the real daemon pipe");
 
         let shutdown_runtime = Arc::clone(&runtime);
         let (shutdown_sender, shutdown_receiver) = mpsc::channel();
@@ -571,8 +571,8 @@ mod tests {
         );
         assert!(panes.list().expect("pane list after shutdown").is_empty());
         assert!(
-            !process_exists(editor_pid),
-            "the editor child outlived shutdown"
+            !process_exists(daemon_pid),
+            "the daemon child outlived shutdown"
         );
     }
 
@@ -580,21 +580,21 @@ mod tests {
     /// input ends gets to write its last lines, and one that ignores it is
     /// killed once the grace is over.
     #[test]
-    fn gui_shutdown_asks_the_editor_first_and_kills_only_what_stays() {
+    fn gui_shutdown_asks_the_daemon_first_and_kills_only_what_stays() {
         let mark = std::env::temp_dir().join(format!("consensflow-stop-{}", std::process::id()));
         let _ = std::fs::remove_file(&mark);
         let runtime_for = |script: String| {
             use std::io::{BufRead, BufReader};
-            let mut editor = Command::new("/bin/sh")
+            let mut daemon = Command::new("/bin/sh")
                 .arg("-c")
                 .arg(script)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()
-                .expect("spawn the stand-in editor");
-            let pid = editor.id() as i32;
+                .expect("spawn the stand-in daemon");
+            let pid = daemon.id() as i32;
             let mut ready = String::new();
-            BufReader::new(editor.stdout.take().expect("editor stdout"))
+            BufReader::new(daemon.stdout.take().expect("daemon stdout"))
                 .read_line(&mut ready)
                 .expect("the stand-in says it is ready");
             assert_eq!(ready, "ready\n");
@@ -603,7 +603,7 @@ mod tests {
             let runtime = test_runtime(
                 Arc::clone(&panes),
                 Arc::new(InputQueue::new(panes, arbiter)),
-                Some(editor),
+                Some(daemon),
                 None,
             );
             (runtime, pid)
@@ -615,9 +615,9 @@ mod tests {
         ));
         let started = Instant::now();
         polite.shutdown();
-        assert!(started.elapsed() < EDITOR_STOP_GRACE, "it went on its own");
+        assert!(started.elapsed() < DAEMON_STOP_GRACE, "it went on its own");
         assert_eq!(
-            std::fs::read_to_string(&mark).expect("the editor wrote its last line"),
+            std::fs::read_to_string(&mark).expect("the daemon wrote its last line"),
             "asked\n"
         );
         assert!(!process_exists(polite_pid));
@@ -626,18 +626,18 @@ mod tests {
         let (deaf, deaf_pid) = runtime_for("echo ready; exec sleep 60".to_string());
         let started = Instant::now();
         deaf.shutdown();
-        assert!(started.elapsed() >= EDITOR_STOP_GRACE, "it had its grace");
+        assert!(started.elapsed() >= DAEMON_STOP_GRACE, "it had its grace");
         assert!(!process_exists(deaf_pid), "and was killed after it");
     }
 
-    /// Why the editor is killed FIRST, stated as a test rather than a comment.
+    /// Why the daemon is killed FIRST, stated as a test rather than a comment.
     ///
     /// `wait_launches_closed` waits for `closed` AND an empty launch count,
     /// and only the peer's EOF sets `closed`. Draining before the kill would
     /// therefore wait on a peer that is still writing — every app exit would
     /// hang. This is the shape a reordered `shutdown()` would take.
     #[test]
-    fn draining_launches_before_the_editor_closes_never_returns() {
+    fn draining_launches_before_the_daemon_closes_never_returns() {
         use std::io::Write;
         use std::os::unix::net::UnixStream;
 
@@ -665,7 +665,7 @@ mod tests {
             done_receiver
                 .recv_timeout(Duration::from_millis(300))
                 .is_err(),
-            "wait_launches_closed returned while the editor peer was still open"
+            "wait_launches_closed returned while the daemon peer was still open"
         );
 
         drop(node_stream);

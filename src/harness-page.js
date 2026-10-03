@@ -1,6 +1,6 @@
 /**
- * Standalone harness diagnostics, served by the authenticated app editor;
- * `framed` is what every screen carries for the app's frame.
+ * Standalone harness diagnostics, one of the agents screens the daemon serves
+ * behind its token; `framed` is what every screen carries for the app's frame.
  */
 export const harnessPage = (token, framed) => `<!DOCTYPE html>
 <html lang="en">

@@ -22,7 +22,7 @@ import {
 } from './shared.js'
 
 /**
- * OpenCode, for the new core. A fresh conversation is created on a throwaway
+ * OpenCode, for the daemon. A fresh conversation is created on a throwaway
  * `opencode serve` first, so its id is known before the window opens; the TUI
  * then runs its own server on a private port and password, with ConsensFlow's
  * plugin loaded. OpenCode ignores a prompt on a `--session` launch, so the

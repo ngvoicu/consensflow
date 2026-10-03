@@ -8,14 +8,14 @@ import { roleInstructions } from '../src/core/roles.js'
 import { roleConfiguration } from '../src/role-skills.js'
 
 /**
- * The instructions each window of the new core starts with (TEST-BDC-11): the
+ * The instructions each window the daemon opens starts with (TEST-BDC-11): the
  * board's commands for every role, and for coordinators the staff they choose
  * from, the work tiers and the review rule. Nothing from the old transport.
  */
 const OLD_COMMANDS = /\bcf (run|say|attach|read|results|projects|chief (send|read))\b/
 const zeus = { name: 'zeus', roles: ['worker', 'reviewer'], workTier: 'standard' }
 
-describe('role instructions for the new core', () => {
+describe('role instructions for each window the daemon opens', () => {
   for (const role of ['chief', 'advisor', 'worker', 'reviewer', 'designer']) {
     it(`teach the ${role} only the board's commands`, () => {
       const text = roleInstructions(role, [zeus])
@@ -121,7 +121,7 @@ describe('role instructions for the new core', () => {
       )
   })
 
-  it('tells the lead one member runs as many tasks at once as it is given', () => {
+  it('tells the chief one member runs as many tasks at once as it is given', () => {
     assert.match(
       roleInstructions('chief', [zeus]),
       /however few\s+members a tier has: one worker runs as many tasks at once as you give it,\s+and so does one advisor or one reviewer/,
@@ -138,7 +138,7 @@ describe('role instructions for the new core', () => {
     }
   })
 
-  it('promises the lead a note when the staff changes', () => {
+  it('promises the chief a note when the staff changes', () => {
     assert.match(
       roleInstructions('chief', [zeus]),
       /When the human changes the\s+staff, ConsensFlow tells you in a note with the new list\./,

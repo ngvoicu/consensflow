@@ -633,19 +633,19 @@ test('the packaged updater replaces only the isolated copy after pane admission 
     2,
     'the ready snapshot did not expose both open panes',
   )
-  const leadPids = await until('two fake chief processes', () => {
+  const chiefPids = await until('two fake chief processes', () => {
     const pids = [...new Set(recordedPids(box))]
     return pids.length === 2 ? pids : null
   })
   assert.ok(
-    leadPids.every(pidAlive),
-    `fake leads were not alive before blocked install: ${leadPids.join(',')}`,
+    chiefPids.every(pidAlive),
+    `fake chiefs were not alive before blocked install: ${chiefPids.join(',')}`,
   )
   assert.ok(pidAlive(firstNativePid), 'blocked install changed the first app process')
   assert.ok(pidAlive(oldLockPid), 'blocked install changed the state-lock owner')
 
   app.continueUpdate()
-  await until('two fake leads close', () => leadPids.every((pid) => !pidAlive(pid)))
+  await until('two fake chiefs close', () => chiefPids.every((pid) => !pidAlive(pid)))
   const secondBoot = await app.waitFor(
     'second update boot',
     (event) => event.event === 'update-boot' && event.pid !== firstNativePid,

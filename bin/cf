@@ -1,8 +1,8 @@
 #!/bin/sh
 # Installed by ConsensFlow. Runs THIS bundle's copy of the CLI, so a pane the
 # app opened never reaches an older `cf` left on PATH by an earlier install:
-# `src/launch.js` puts this directory first in a lead pane's PATH, and this is
-# the file that has to be there for that to mean anything.
+# the daemon (`src/core/daemon.js`) puts this directory first in each window's
+# PATH, and this is the file that has to be there for that to mean anything.
 #
 # No external command is used — not even `dirname` — because a pane's PATH is
 # whatever the app gave it, and a launcher that needs coreutils to find itself

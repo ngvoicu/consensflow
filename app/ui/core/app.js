@@ -1,7 +1,7 @@
 import { button, element, redraw } from '../dom.js'
 import { initializeUpdates } from '../updates.js'
 import { BoardView, TaskDrawer } from './board.js'
-import { NewProjectDialog, StaffDialog, SwitchLeadDialog } from './dialogs.js'
+import { NewProjectDialog, StaffDialog, SwitchChiefDialog } from './dialogs.js'
 import { Layout } from './layout.js'
 import { TerminalsView } from './terminals.js'
 
@@ -10,7 +10,7 @@ import { TerminalsView } from './terminals.js'
  * middle, and on the right, in a strip that scrolls sideways, the chief's
  * window and the sessions' the human asks to see, so the human reads the
  * board and talks to any of them.
- * Everything it shows comes from the new core through the app's
+ * Everything it shows comes from the daemon through the app's
  * `core_request`, and it redraws when the core says something changed. It
  * keeps nothing of its own but what is on screen.
  */
@@ -235,8 +235,8 @@ const terminals = new TerminalsView(stage, {
   report,
   createEmulator: tauri.test?.createEmulator,
   onChange: () => render(),
-  // The lead is switched from its card in the dock.
-  onSwitchLead: (chief) => act(() => switchLead.open(chief)),
+  // The chief is switched from its card in the dock.
+  onSwitchChief: (chief) => act(() => switchChief.open(chief)),
 })
 
 // A fold changes the room the board and the windows have: both draw again.
@@ -521,7 +521,7 @@ staffButton.addEventListener('click', () =>
   }),
 )
 
-// New project: the native folder picker first, then the saved agent the lead
+// New project: the native folder picker first, then the saved agent the chief
 // runs on, the staff (the last project's ticked already) and the approval
 // setting. The agents it reads are the page's too, and the project it starts
 // is shown.
@@ -555,9 +555,9 @@ $('#new-project').addEventListener('click', async () => {
   }
 })
 
-// Switch lead opens only while the project it was asked for is the one
-// chosen; once the switch is taken, the lead's window is the one in front.
-const switchLead = new SwitchLeadDialog($('#switch-lead-dialog'), {
+// Switch chief opens only while the project it was asked for is the one
+// chosen; once the switch is taken, the chief's window is the one in front.
+const switchChief = new SwitchChiefDialog($('#switch-chief-dialog'), {
   selected: () => state.selected,
   core,
   act,

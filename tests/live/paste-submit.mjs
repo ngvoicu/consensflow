@@ -39,7 +39,7 @@ import { startIntegration } from '../integration/harness.mjs'
 import { trustForClaude } from './trust-claude.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const EDITOR = join(HERE, 'core-live-editor.mjs')
+const DAEMON = join(HERE, 'core-live-daemon.mjs')
 const { values } = parseArgs({ options: { harness: { type: 'string', multiple: true } } })
 const harnesses = values.harness ?? ['devin']
 for (const name of harnesses) {
@@ -114,7 +114,7 @@ async function claudeExtras() {
   ]
 }
 
-const app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
+const app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV })
 const results = []
 try {
   for (const name of harnesses) {

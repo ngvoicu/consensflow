@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn main_subscription_receives_pm_and_lead_output_without_replacing_either() {
+    fn main_subscription_receives_pm_and_chief_output_without_replacing_either() {
         let hub = OutputHub::new();
         let seen = Arc::new(Mutex::new(Vec::new()));
         let copy = Arc::clone(&seen);

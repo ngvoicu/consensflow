@@ -15,7 +15,7 @@ import { terminalRuntime } from '../src/terminal.js'
 // `cf … | head` closes our stdout mid-stream; dying with an EPIPE stack for
 // that is a crash where a quiet exit is the whole contract of a CLI.
 //
-// The editor is the one verb that owns durable state, so it installs a drain
+// The daemon (`cf ui`) is the one verb that owns durable state, so it installs a drain
 // here: a broken pipe must not cut a delivery's outcome off before it reaches
 // disk. Every other verb has nothing to finish and exits as it always did.
 const owner = { drain: null }
@@ -246,7 +246,7 @@ function doctor() {
 
 async function main() {
   const [command, ...rest] = process.argv.slice(2)
-  // A window the new core opened carries its participant's token; there, `cf`
+  // A window the daemon opened carries its participant's token; there, `cf`
   // is the agents' command set (src/core/cli.js).
   if (env.CONSENSFLOW_TOKEN) {
     const { runCoreCli } = await import('../src/core/cli.js')
@@ -277,7 +277,7 @@ async function main() {
       setup(rest)
       return
     case 'ui': {
-      // The app's daemon: the new core. `--json` prints the handle line the
+      // The app's daemon. `--json` prints the handle line the
       // app reads; a person gets the agents screens' address instead.
       const { startCore } = await import('../src/core/daemon.js')
       const { values } = parseArgs({

@@ -1,8 +1,8 @@
 /**
- * A lead switched to another harness knows what the old one was told. The
- * owner tells the first lead a codeword (random per run, so no model knows it
+ * A chief switched to another harness knows what the old one was told. The
+ * owner tells the first chief a codeword (random per run, so no model knows it
  * from anywhere else) and a decision, then pastes notes long enough to push
- * both off the first page of the lead history; then switches the lead to the
+ * both off the first page of the chief's history; then switches the chief to the
  * staff's harness (`--switch-to`) and asks the new one. Only `cf history`
  * holds the answer: the handoff quotes the owner's last words, the notes.
  */
@@ -15,8 +15,8 @@ const NOTES = Array.from(
 ).join('\n')
 
 export default {
-  id: 'lead-switch',
-  title: 'A lead switched to another harness knows what the old one was told',
+  id: 'chief-switch',
+  title: 'A chief switched to another harness knows what the old one was told',
   fixture: 'site',
   prompt: `Two things to remember for later; nothing to do yet. The codeword for this release is ${CODEWORD}. And we decided the release goes out on Friday, not Thursday. Confirm in one line.`,
   followUps: [
@@ -29,17 +29,17 @@ export default {
   quietMs: 90_000,
   expectations: [
     {
-      name: 'the lead was switched once, to another harness',
-      holds: (m) => m.switches === 1 && m.leads.length === 2 && m.leads[0] !== m.leads[1],
+      name: 'the chief was switched once, to another harness',
+      holds: (m) => m.switches === 1 && m.chiefs.length === 2 && m.chiefs[0] !== m.chiefs[1],
     },
     {
-      name: 'the new lead read the lead history with cf history',
+      name: "the new chief read the chief's history with cf history",
       holds: (m) => m.historyReads.length > 0,
     },
-    { name: 'the new lead names the codeword', holds: (m) => m.leadWordsNow.includes(CODEWORD) },
+    { name: 'the new chief names the codeword', holds: (m) => m.chiefWordsNow.includes(CODEWORD) },
     {
-      name: 'the new lead knows the release goes out on Friday',
-      holds: (m) => /friday/i.test(m.leadWordsNow),
+      name: 'the new chief knows the release goes out on Friday',
+      holds: (m) => /friday/i.test(m.chiefWordsNow),
     },
     { name: 'nothing went on the board', holds: (m) => m.tasks.length === 0 },
   ],

@@ -36,7 +36,7 @@ reply does nothing.
     cf answer m-12 "…"            answer a member's question
     cf note --human "…"           tell the human something on the board; nothing waits on it
     cf staff                       the members: roles and tiers (never to pick one)
-    cf history                    after the human switched the lead to you: what they and the leads before you said (--page 2, --find "…")
+    cf history                    after the human switched you in as chief: what they and the chiefs before you said (--page 2, --find "…")
     cf --help                     all of it
 
 Any "…" can be `-` instead: the text then comes from standard input, as

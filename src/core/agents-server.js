@@ -18,7 +18,7 @@ import {
 } from '../roster.js'
 
 /**
- * The human's agents screens, served by the new core: the agents (`/`: the
+ * The human's agents screens, served by the daemon: the agents (`/`: the
  * catalog and the saved agents as one list, each saved agent with its tier)
  * and the harness diagnostics (`/harnesses`), each an inline page, with the
  * `/api/agents` routes they call. The app checks the UI token it was handed

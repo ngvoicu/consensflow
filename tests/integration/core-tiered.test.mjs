@@ -13,17 +13,17 @@ import { startIntegration } from './harness.mjs'
  * another.
  */
 
-const CORE_EDITOR = fileURLToPath(new URL('./core-editor.mjs', import.meta.url))
+const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
 
-/** Four fake agents on the fake `claude`: the lead, two workers on one model, a reviewer on another. */
+/** Four fake agents on the fake `claude`: the chief, two workers on one model, a reviewer on another. */
 function staff(app) {
   writeFileSync(
     join(app.env.CONSENSFLOW_HOME, 'agents.json'),
     `${JSON.stringify({
       schemaVersion: 1,
       agents: [
-        { id: 'lead', kind: 'claude-code', model: 'fake-lead' },
+        { id: 'chief', kind: 'claude-code', model: 'fake-chief' },
         { id: 'worker', kind: 'claude-code', model: 'fake' },
         { id: 'worker2', kind: 'claude-code', model: 'fake' },
         { id: 'checker', kind: 'claude-code', model: 'fake-2' },
@@ -36,7 +36,7 @@ function staff(app) {
 async function project(app, { gate, members }) {
   const opened = await app.requestNode('project.open', {
     directory: app.workspace,
-    agent: 'lead',
+    agent: 'chief',
     ...(gate === undefined ? {} : { gate }),
     staff: members.map(([agent, role]) => ({ agent, roles: [role] })),
   })
@@ -64,7 +64,7 @@ async function project(app, { gate, members }) {
 
 test('a review is a task the chief puts on the board: a reviewer of its tier takes it and its findings come back as the result', async () => {
   const app = await startIntegration({
-    editor: CORE_EDITOR,
+    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
@@ -107,7 +107,7 @@ test('a review is a task the chief puts on the board: a reviewer of its tier tak
 
 test('each task runs in its own worker session: the window closes with the task, the next opens a new one', async () => {
   const app = await startIntegration({
-    editor: CORE_EDITOR,
+    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
@@ -145,7 +145,7 @@ test('each task runs in its own worker session: the window closes with the task,
 
 test('a worker refused by its provider mid-task loses the task to the other worker of its tier', async () => {
   const app = await startIntegration({
-    editor: CORE_EDITOR,
+    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT, CF_TEST_QUOTA_OUT: 'worker' },
   })
   try {
@@ -196,7 +196,7 @@ test('a worker refused by its provider mid-task loses the task to the other work
 
 test('with human approval required, the brief and the result each wait for the human before they move', async () => {
   const app = await startIntegration({
-    editor: CORE_EDITOR,
+    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
@@ -241,7 +241,7 @@ test('with human approval required, the brief and the result each wait for the h
 
 test("the human opens a finished session's window on its own conversation, and closing it ends the process", async () => {
   const app = await startIntegration({
-    editor: CORE_EDITOR,
+    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {

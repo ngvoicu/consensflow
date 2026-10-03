@@ -10,7 +10,7 @@ import { passLoop } from '../src/core/daemon.js'
 import { openLedger } from '../src/ledger/index.js'
 import { fakeNodeExecutable } from './helpers.mjs'
 
-const EDITOR = fileURLToPath(new URL('./integration/core-editor.mjs', import.meta.url))
+const DAEMON = fileURLToPath(new URL('./integration/core-daemon.mjs', import.meta.url))
 const BUNDLE_BIN = fileURLToPath(new URL('../bin', import.meta.url))
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -165,7 +165,7 @@ describe('the daemon and its log', () => {
     }, async () => {
       const home = await mkdtemp(path.join(os.tmpdir(), 'cf-daemon-'))
       try {
-        const child = spawn(process.execPath, [EDITOR], {
+        const child = spawn(process.execPath, [DAEMON], {
           env: {
             ...process.env,
             HOME: home,
@@ -202,7 +202,7 @@ describe('the daemon and its log', () => {
     try {
       await mkdir(launch, { recursive: true })
       await writeFile(path.join(launch, 'settings.json'), '{}\n')
-      const child = spawn(process.execPath, [EDITOR], {
+      const child = spawn(process.execPath, [DAEMON], {
         env: {
           ...process.env,
           HOME: home,
@@ -240,7 +240,7 @@ describe('the daemon and its log', () => {
     const broken = '{"schemaVersion": 1, "agents": [{"id": "mine", "kind": "codex"},]}\n'
     try {
       await writeFile(file, broken)
-      const child = spawn(process.execPath, [EDITOR], {
+      const child = spawn(process.execPath, [DAEMON], {
         env: {
           ...process.env,
           HOME: home,
@@ -317,7 +317,7 @@ async function daemonOverItsBridge(t, { agents = [], preload = null } = {}) {
   }
   child = spawn(
     process.execPath,
-    [...(preload === null ? [] : ['--import', pathToFileURL(preload).href]), EDITOR],
+    [...(preload === null ? [] : ['--import', pathToFileURL(preload).href]), DAEMON],
     { env, stdio: ['pipe', 'pipe', 'pipe'] },
   )
   exited = new Promise((resolve) => child.once('exit', resolve))
@@ -406,7 +406,7 @@ describe('the daemon over its bridge', () => {
     assert.equal(opened.ok, true, JSON.stringify(opened))
     const open = await d.until(
       () => d.frames.find((frame) => frame.kind === 'req' && frame.op === 'pane.open'),
-      'opened the lead',
+      'opened the chief',
     )
     assert.equal(open.body.id, `p${opened.project.id}-chief`)
     const { env } = open.body
@@ -427,7 +427,7 @@ describe('the daemon over its bridge', () => {
       ],
     )
     assert.match(env.CONSENSFLOW_TOKEN, /^\S+$/)
-    // The lead's role text: its staff with their roles and tiers, and the cf of this window.
+    // The chief's role text: its staff with their roles and tiers, and the cf of this window.
     const { argv } = open.body
     const role = await readFile(argv[argv.indexOf('--append-system-prompt-file') + 1], 'utf8')
     assert.match(role, /^\| mybuilder \| worker, reviewer \| Standard work \|$/m)

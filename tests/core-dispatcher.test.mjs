@@ -319,7 +319,7 @@ describe('the dispatcher', () => {
     })
   })
 
-  it('opens a project whose lead runs on its saved agent, and none whose lead names no agent or one not among the agents', async () => {
+  it('opens a project whose chief runs on its saved agent, and none whose chief names no agent or one not among the agents', async () => {
     await setup(
       async (context) => {
         await assert.rejects(
@@ -330,7 +330,7 @@ describe('the dispatcher', () => {
           }),
           {
             message:
-              'pick one of your saved agents for the lead: its harness, model and effort come with it',
+              'pick one of your saved agents for the chief: its harness, model and effort come with it',
           },
         )
         await assert.rejects(
@@ -343,8 +343,8 @@ describe('the dispatcher', () => {
         )
         assert.deepEqual(context.ledger.projects(), [], 'nothing was opened')
         const { project } = await withStaff(context)
-        const lead = project.participants.find((p) => p.handle === 'chief')
-        assert.deepEqual([lead.harness, lead.agent], ['claude-code', 'apollo'])
+        const chief = project.participants.find((p) => p.handle === 'chief')
+        assert.deepEqual([chief.harness, chief.agent], ['claude-code', 'apollo'])
         assert.equal(context.adapter.prepared[0].agent.model, 'claude-opus-5', "its agent's model")
       },
       {
@@ -1800,7 +1800,7 @@ describe('the dispatcher assigns open tasks', () => {
       }
       await after.pass()
       assert.ok(!stepped.includes(session.id), 'the idle session is not stepped')
-      assert.ok(stepped.includes(context.ledger.project(1).participants[1].id), 'the lead is')
+      assert.ok(stepped.includes(context.ledger.project(1).participants[1].id), 'the chief is')
       context.ledger.note(1, { to: session.handle, body: 'One more thing' })
       await after.pass()
       assert.ok(stepped.includes(session.id), 'a message on its way makes it worth a step')
@@ -2622,11 +2622,11 @@ describe('a participant that leaves', () => {
     })
   })
 
-  it('keeps the lead of a project created while a deleted one still closes its windows', async () => {
+  it('keeps the chief of a project created while a deleted one still closes its windows', async () => {
     await setup(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
-      // The old lead takes a paste its harness holds: its window closes once that is over.
+      // The old chief takes a paste its harness holds: its window closes once that is over.
       let release
       const held = new Promise((resolve) => {
         release = resolve
@@ -2645,16 +2645,16 @@ describe('a participant that leaves', () => {
         name: 'api',
         chief: { harness: 'claude-code', agent: 'apollo' },
       })
-      const lead = fresh.participants.find((participant) => participant.role === 'chief')
+      const chief = fresh.participants.find((participant) => participant.role === 'chief')
       release()
       await closing
       await deleting
       await flush()
       const window = context.host.last('chief')
       assert.deepEqual(
-        context.dispatcher.pane(lead.id),
+        context.dispatcher.pane(chief.id),
         { id: window.id, generation: window.generation },
-        'its lead is known',
+        'its chief is known',
       )
       assert.ok(
         !context.host.killed.some((pane) => pane.generation === window.generation),
@@ -3106,11 +3106,11 @@ const withCodex = (fn, options = {}) => {
 }
 const chiefOf = (context, project) =>
   context.ledger.project(project.id).participants.find((p) => p.handle === 'chief')
-/** The notes that hand the lead over, newest first. */
+/** The handoffs, newest first. */
 const handoffsOf = (context, project) =>
   context.ledger
     .inbox(chiefOf(context, project).id)
-    .filter((m) => m.body.startsWith('You are the lead now'))
+    .filter((m) => m.body.startsWith('You are the chief now'))
 /**
  * The human closes and deletes a project while something of it waits, and
  * opens another (with these workers), whose ids are its own: the ledger
@@ -3137,8 +3137,8 @@ async function replaceProject(context, old, workers = []) {
   return { fresh, gone }
 }
 
-describe('switching the lead to another agent', () => {
-  it('hands the lead over: the old window closes, the project stays open, the new one opens with the handoff, and what was queued follows it', async () => {
+describe('switching the chief to another agent', () => {
+  it('hands over to the new chief: the old window closes, the project stays open, the new one opens with the handoff, and what was queued follows it', async () => {
     await withCodex(async (context) => {
       const { codex } = context
       const { project, id } = await withStaff(context)
@@ -3167,22 +3167,25 @@ describe('switching the lead to another agent', () => {
       )
       assert.match(
         prepared.message,
-        /^\[ConsensFlow m-\d+ · note from ConsensFlow\]\nYou are the lead now\. The human switched this project's lead from Claude Code \(apollo\) to you, Codex \(astraeus\)\./,
+        /^\[ConsensFlow m-\d+ · note from ConsensFlow\]\nYou are the chief now\. The human switched this project's chief from Claude Code \(apollo\) to you, Codex \(astraeus\)\./,
       )
       assert.match(prepared.message, /cut off in the middle of a turn/)
-      assert.match(prepared.message, /The human's last message to the lead: "The codeword is tern"/)
+      assert.match(
+        prepared.message,
+        /The human's last message to the chief: "The codeword is tern"/,
+      )
       assert.equal(context.ledger.message(ready.id).state, 'queued', 'the handoff goes first')
 
-      // The new lead takes the handoff and answers it; then its queue goes on.
+      // The new chief takes the handoff and answers it; then its queue goes on.
       await context.dispatcher.pass()
       assert.equal(context.dispatcher.activity(id('chief')).state, 'working')
       codex.answer('chief', 'I have taken over; next is the parser.')
       await context.dispatcher.pass()
       assert.match(codex.agent('chief').items.at(-1).text, /note from @zeus\]\nReady/)
       assert.deepEqual(
-        context.ledger.leadHistory(project.id).map((c) => c.harness),
+        context.ledger.chiefHistory(project.id).map((c) => c.harness),
         ['claude-code'],
-        "the old lead's words are history",
+        "the old chief's words are history",
       )
     })
   })
@@ -3217,7 +3220,7 @@ describe('switching the lead to another agent', () => {
     })
   })
 
-  it('lets a lead at work finish its turn first, and gives it nothing else meanwhile', async () => {
+  it('lets a chief at work finish its turn first, and gives it nothing else meanwhile', async () => {
     await withCodex(async (context) => {
       const { project } = await withStaff(context)
       await context.dispatcher.pass()
@@ -3237,13 +3240,13 @@ describe('switching the lead to another agent', () => {
       assert.equal(
         context.ledger.message(ready.id).state,
         'queued',
-        'Ready waited for the new lead',
+        'Ready waited for the new chief',
       )
       assert.ok(!context.adapter.agent('chief').items.some((i) => i.text.includes('Ready')))
     })
   })
 
-  it('first asks the lead where things stand, when the human wants that, and switches once it has answered', async () => {
+  it('first asks the chief where things stand, when the human wants that, and switches once it has answered', async () => {
     await withCodex(async (context) => {
       const { project } = await withStaff(context)
       await context.dispatcher.pass()
@@ -3256,7 +3259,7 @@ describe('switching the lead to another agent', () => {
       const asked = context.adapter.agent('chief').items.at(-1).text
       assert.match(
         asked,
-        /moving this project's lead to codex \(astraeus\) once you answer\. Write down where things stand/,
+        /moving this project's chief to codex \(astraeus\) once you answer\. Write down where things stand/,
       )
       await context.dispatcher.pass()
       assert.equal(chiefOf(context, project).harness, 'claude-code', 'it has not answered yet')
@@ -3265,14 +3268,14 @@ describe('switching the lead to another agent', () => {
       await context.dispatcher.pass()
       assert.equal(chiefOf(context, project).harness, 'codex')
       const words = context.ledger
-        .leadHistory(project.id)
+        .chiefHistory(project.id)
         .at(-1)
         .items.map((i) => i.text)
       assert.ok(words.includes('Where things stand: the parser is half done.'))
     })
   })
 
-  it('never gives the new lead the note that asked the old one where things stand', async () => {
+  it('never gives the new chief the note that asked the old one where things stand', async () => {
     await withCodex(async (context) => {
       const { codex } = context
       const { project } = await withStaff(context)
@@ -3282,7 +3285,7 @@ describe('switching the lead to another agent', () => {
         context.ledger
           .inbox(chiefOf(context, project).id)
           .filter((m) => m.body.includes('Write down where things stand'))[n]
-      // Asked twice while the lead works: the second ask replaces the first.
+      // Asked twice while the chief works: the second ask replaces the first.
       await context.dispatcher.switchChief(project.id, {
         harness: 'codex',
         agent: 'astraeus',
@@ -3298,7 +3301,7 @@ describe('switching the lead to another agent', () => {
       })
       assert.equal(context.ledger.message(first.id).state, 'cancelled', 'replaced, never sent')
       await context.dispatcher.pass()
-      // The human does not wait for the answer: Switch lead, now.
+      // The human does not wait for the answer: Switch chief, now.
       await context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       assert.equal(chiefOf(context, project).harness, 'codex')
       assert.equal(context.ledger.message(asking(0).id).state, 'cancelled')
@@ -3308,12 +3311,12 @@ describe('switching the lead to another agent', () => {
       await context.dispatcher.pass()
       assert.ok(
         !codex.agent('chief').items.some((i) => i.text.includes('Write down where things stand')),
-        'the new lead never saw it',
+        'the new chief never saw it',
       )
     })
   })
 
-  it('switches a lead out of quota at once, and the new lead is not out', async () => {
+  it('switches a chief out of quota at once, and the new chief is not out', async () => {
     await withCodex(async (context) => {
       const { project, id } = await withStaff(context)
       await context.dispatcher.pass()
@@ -3325,14 +3328,14 @@ describe('switching the lead to another agent', () => {
         agent: 'astraeus',
         when: 'turn',
       })
-      assert.equal(chiefOf(context, project).harness, 'codex', 'an out lead has no turn to finish')
+      assert.equal(chiefOf(context, project).harness, 'codex', 'an out chief has no turn to finish')
       assert.equal(chiefOf(context, project).outUntil, null)
       await context.dispatcher.pass()
       assert.notEqual(context.dispatcher.activity(id('chief')).state, 'out')
     })
   })
 
-  it('replaces a handoff still on its way, and Resume of a closed project brings the lead back with the handoff it had not shown', async () => {
+  it('replaces a handoff still on its way, and Resume of a closed project brings the chief back with the handoff it had not shown', async () => {
     await withCodex(async (context) => {
       const { project, id } = await withStaff(context)
       await context.dispatcher.pass()
@@ -3343,7 +3346,7 @@ describe('switching the lead to another agent', () => {
       context.codex.agent('chief').items = []
       const first = context.ledger
         .inbox(id('chief'))
-        .find((m) => m.body.startsWith('You are the lead now'))
+        .find((m) => m.body.startsWith('You are the chief now'))
       await context.dispatcher.switchChief(project.id, { harness: 'claude-code', agent: 'apollo' })
       assert.equal(
         context.ledger.message(first.id).state,
@@ -3352,21 +3355,56 @@ describe('switching the lead to another agent', () => {
       )
       const handoffs = context.ledger
         .inbox(id('chief'))
-        .filter((m) => m.body.startsWith('You are the lead now') && m.state !== 'cancelled')
+        .filter((m) => m.body.startsWith('You are the chief now') && m.state !== 'cancelled')
       assert.equal(handoffs.length, 1)
       assert.match(handoffs[0].body, /from Codex \(astraeus\) to you, Claude Code \(apollo\)\./)
 
-      // Closed before any look saw the new lead show it: the handoff waits for Resume.
+      // Closed before any look saw the new chief show it: the handoff waits for Resume.
       await context.dispatcher.closeProject(project.id)
       await context.dispatcher.resumeProject(project.id)
       assert.match(
         context.adapter.prepared.at(-1).message,
-        /You are the lead now\. The human switched this project's lead from Codex \(astraeus\) to you, Claude Code \(apollo\)\./,
+        /You are the chief now\. The human switched this project's chief from Codex \(astraeus\) to you, Claude Code \(apollo\)\./,
       )
     })
   })
 
-  it('switches no lead of a project it does not know, and says so', async () => {
+  it('takes a handoff titled for the lead, as a ledger from before 2026-10-03 holds it, as the handoff: it goes first, no other is written, and a switch replaces it', async () => {
+    await withCodex(async (context) => {
+      const { project } = await withStaff(context)
+      await context.dispatcher.pass()
+      context.adapter.answer('chief', 'Hello')
+      await context.dispatcher.pass()
+      // The build before switched the chief and wrote its handoff, and the
+      // project closed before the new window showed it.
+      await context.dispatcher.closeProject(project.id)
+      context.ledger.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
+      const old = context.ledger.note(project.id, {
+        to: 'chief',
+        body: "You are the lead now. The human switched this project's lead from Claude Code (apollo) to you, Codex (astraeus).",
+      })
+
+      await context.dispatcher.resumeProject(project.id)
+      assert.match(
+        context.codex.prepared.at(-1).message,
+        /\nYou are the lead now\./,
+        'it goes first',
+      )
+      assert.deepEqual(handoffsOf(context, project), [], 'no other is written')
+
+      // The window has not shown it yet when the human switches again.
+      context.codex.agent('chief').items = []
+      await context.dispatcher.switchChief(project.id, { harness: 'claude-code', agent: 'apollo' })
+      assert.equal(context.ledger.message(old.id).state, 'cancelled', 'that handoff was for Codex')
+      assert.equal(handoffsOf(context, project).length, 1)
+      assert.match(
+        context.adapter.prepared.at(-1).message,
+        /You are the chief now\. The human switched this project's chief from Codex \(astraeus\) to you, Claude Code \(apollo\)\./,
+      )
+    })
+  })
+
+  it('switches no chief of a project it does not know, and says so', async () => {
     await withCodex(async (context) => {
       await assert.rejects(
         context.dispatcher.switchChief(42, { harness: 'codex', agent: 'astraeus' }),
@@ -3377,7 +3415,7 @@ describe('switching the lead to another agent', () => {
     })
   })
 
-  it("switches no lead to a harness's own default model: it names a saved agent", async () => {
+  it("switches no chief to a harness's own default model: it names a saved agent", async () => {
     await withCodex(async (context) => {
       const { project, id } = await withStaff(context)
       await context.dispatcher.pass()
@@ -3385,7 +3423,7 @@ describe('switching the lead to another agent', () => {
       for (const when of ['now', 'turn']) {
         await assert.rejects(
           context.dispatcher.switchChief(project.id, { harness: 'codex', when }),
-          /pick one of your saved agents for the lead/,
+          /pick one of your saved agents for the chief/,
         )
       }
       assert.deepEqual(
@@ -3397,7 +3435,7 @@ describe('switching the lead to another agent', () => {
     })
   })
 
-  it('opens no project on an image agent, nor switches a lead to one: an image agent only designs', async () => {
+  it('opens no project on an image agent, nor switches a chief to one: an image agent only designs', async () => {
     const designing = {
       message: 'pygmalion is an image agent, which can only be an image designer',
     }
@@ -3445,9 +3483,9 @@ describe('switching the lead to another agent', () => {
     )
   })
 
-  it("keeps a lead on its harness's own default model as it is, until Switch lead moves it to an agent", async () => {
+  it("keeps a chief on its harness's own default model as it is, until Switch chief moves it to an agent", async () => {
     await withCodex(async (context) => {
-      // Opened before a lead was always a saved agent: its record names none.
+      // Opened before a chief was always a saved agent: its record names none.
       const project = context.ledger.createProject({
         directory: '/work/app',
         name: 'app',
@@ -3466,12 +3504,12 @@ describe('switching the lead to another agent', () => {
       )
       assert.match(
         context.codex.prepared.at(-1).message,
-        /The human switched this project's lead from Claude Code to you, Codex \(astraeus\)\./,
+        /The human switched this project's chief from Claude Code to you, Codex \(astraeus\)\./,
       )
     })
   })
 
-  it('switches no lead of a closed project', async () => {
+  it('switches no chief of a closed project', async () => {
     await withCodex(async (context) => {
       const { project } = await withStaff(context)
       await context.dispatcher.closeProject(project.id)
@@ -3484,7 +3522,7 @@ describe('switching the lead to another agent', () => {
     })
   })
 
-  it('keeps a lead whose agent was deleted closed, tells the human, and holds what it was to receive', async () => {
+  it('keeps a chief whose agent was deleted closed, tells the human, and holds what it was to receive', async () => {
     const gone = new Set()
     await withCodex(
       async (context) => {
@@ -3505,7 +3543,7 @@ describe('switching the lead to another agent', () => {
           .find((m) => m.body.includes('no longer among your agents'))
         assert.match(
           told.body,
-          /The lead runs on astraeus, which is no longer among your agents: add it back under Agents, or switch the lead\./,
+          /The chief runs on astraeus, which is no longer among your agents: add it back under Agents, or switch the chief\./,
         )
         await context.dispatcher.pass()
         assert.equal(context.host.opened.length, opened, 'and no pass tries again')
@@ -3519,7 +3557,7 @@ describe('switching the lead to another agent', () => {
     )
   })
 
-  it("never closes the new lead's window for taking long to show its handoff", async () => {
+  it("never closes the new chief's window for taking long to show its handoff", async () => {
     await withCodex(async (context) => {
       const { project } = await withStaff(context)
       await context.dispatcher.pass()
@@ -3529,12 +3567,12 @@ describe('switching the lead to another agent', () => {
       context.codex.agent('chief').items = []
       context.clock.advance(10 * 120_000)
       await context.dispatcher.pass()
-      assert.equal(context.host.killed.length, 1, "only the old lead's window was closed")
+      assert.equal(context.host.killed.length, 1, "only the old chief's window was closed")
       assert.equal(context.ledger.project(project.id).state, 'open')
     })
   })
 
-  it('switches a lead that had a message on its way when the daemon stopped', async () => {
+  it('switches a chief that had a message on its way when the daemon stopped', async () => {
     await withCodex(async (context) => {
       const { project } = await withStaff(context)
       await context.dispatcher.pass()
@@ -3551,20 +3589,20 @@ describe('switching the lead to another agent', () => {
 
       await after.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       assert.equal(chiefOf(context, project).harness, 'codex')
-      assert.match(context.codex.prepared.at(-1).message, /You are the lead now\./)
+      assert.match(context.codex.prepared.at(-1).message, /You are the chief now\./)
       await after.pass()
       context.codex.answer('chief', 'Taken over.')
       await after.pass()
       await after.pass()
-      assert.equal(context.ledger.message(one.id).state, 'delivered', 'it follows the new lead')
+      assert.equal(context.ledger.message(one.id).state, 'delivered', 'it follows the new chief')
     })
   })
 
-  it('switches nothing once its project is deleted while the switch waits for the old lead, nor a project created meanwhile', async () => {
+  it('switches nothing once its project is deleted while the switch waits for the old chief, nor a project created meanwhile', async () => {
     await withCodex(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
-      // The old lead takes a paste its harness holds; the switch waits for it.
+      // The old chief takes a paste its harness holds; the switch waits for it.
       let release
       const held = new Promise((resolve) => {
         release = resolve
@@ -3584,21 +3622,21 @@ describe('switching the lead to another agent', () => {
           (cause) => cause.message,
         )
       const { fresh, gone } = await replaceProject(context, old)
-      const lead = chiefOf(context, fresh)
+      const chief = chiefOf(context, fresh)
       const window = context.host.last('chief')
       release()
       await gone
       await flush()
       assert.deepEqual(
-        context.ledger.inbox(lead.id).map((m) => m.body),
+        context.ledger.inbox(chief.id).map((m) => m.body),
         [],
-        'the new lead is asked nothing',
+        'the new chief is asked nothing',
       )
-      assert.equal(context.dispatcher.pendingSwitch(lead.id), null, 'nothing waits to switch it')
+      assert.equal(context.dispatcher.pendingSwitch(chief.id), null, 'nothing waits to switch it')
       assert.deepEqual(
         [chiefOf(context, fresh).harness, context.codex.prepared.length],
         ['claude-code', 0],
-        'the new lead is not switched',
+        'the new chief is not switched',
       )
       assert.ok(
         !context.host.killed.some((pane) => pane.generation === window.generation),
@@ -3608,7 +3646,7 @@ describe('switching the lead to another agent', () => {
     })
   })
 
-  it("hands nothing to an old lead whose switch waited for its turn's end once its project is deleted, nor switches a project created meanwhile", async () => {
+  it("hands nothing to an old chief whose switch waited for its turn's end once its project is deleted, nor switches a project created meanwhile", async () => {
     await withCodex(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
@@ -3643,20 +3681,20 @@ describe('switching the lead to another agent', () => {
       await looking
       await gone
       await flush()
-      assert.equal(context.ledger.message(welcome.id).state, 'queued', 'it waits for the new lead')
+      assert.equal(context.ledger.message(welcome.id).state, 'queued', 'it waits for the new chief')
       assert.deepEqual(
         [chiefOf(context, fresh).harness, context.codex.prepared.length],
         ['claude-code', 0],
-        'the new lead is not switched',
+        'the new chief is not switched',
       )
     })
   })
 
-  it("copies and confirms nothing of the old lead's last look once its project is deleted, nor switches a project created meanwhile", async () => {
+  it("copies and confirms nothing of the old chief's last look once its project is deleted, nor switches a project created meanwhile", async () => {
     await withCodex(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
-      // A note is on its way to the old lead, and the human told it something
+      // A note is on its way to the old chief, and the human told it something
       // since the last look: the switch's last look, which shows both, waits
       // on its harness.
       context.ledger.note(old.id, { from: 'zeus', to: 'chief', body: 'Parser done' })
@@ -3684,19 +3722,19 @@ describe('switching the lead to another agent', () => {
       release()
       await gone
       await flush()
-      const before = context.ledger.leadHistory(fresh.id).flatMap((c) => c.items)
+      const before = context.ledger.chiefHistory(fresh.id).flatMap((c) => c.items)
       assert.deepEqual(
         [
           context.ledger.copiedItemWith(chiefOf(context, fresh).id, told),
           before.filter((copied) => copied.text === told).length,
         ],
         [null, 0],
-        "the new lead's conversations, now or before, have nothing of the old window",
+        "the new chief's conversations, now or before, have nothing of the old window",
       )
       assert.deepEqual(
         [chiefOf(context, fresh).harness, context.codex.prepared.length],
         ['claude-code', 0],
-        'the new lead is not switched',
+        'the new chief is not switched',
       )
       assert.equal(
         await switched,
@@ -3706,11 +3744,11 @@ describe('switching the lead to another agent', () => {
     })
   })
 
-  it("switches nothing once its project is deleted while the old lead's window closes, nor a project created meanwhile", async () => {
+  it("switches nothing once its project is deleted while the old chief's window closes, nor a project created meanwhile", async () => {
     await withCodex(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
-      // The old lead's window takes its time to close.
+      // The old chief's window takes its time to close.
       const window = context.host.last('chief')
       let release
       const held = new Promise((resolve) => {
@@ -3735,24 +3773,24 @@ describe('switching the lead to another agent', () => {
       assert.deepEqual(
         [chiefOf(context, fresh).harness, context.codex.prepared.length],
         ['claude-code', 0],
-        'the new lead is not switched',
+        'the new chief is not switched',
       )
       assert.equal(await switched, `no project ${old.id}`, 'the switch says its project is gone')
     })
   })
 
-  it("switches nothing once its project is deleted while the old lead's window closes after its turn, nor a project created meanwhile", async () => {
+  it("switches nothing once its project is deleted while the old chief's window closes after its turn, nor a project created meanwhile", async () => {
     await withCodex(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
-      // The lead is at work, so the switch waits for the end of its turn.
+      // The chief is at work, so the switch waits for the end of its turn.
       context.adapter.busy('chief')
       await context.dispatcher.switchChief(old.id, {
         harness: 'codex',
         agent: 'astraeus',
         when: 'turn',
       })
-      // The turn ends, and the step that switches the lead closes its old
+      // The turn ends, and the step that switches the chief closes its old
       // window, which takes its time.
       context.adapter.answer('chief', 'Done with that')
       const window = context.host.last('chief')
@@ -3769,16 +3807,16 @@ describe('switching the lead to another agent', () => {
       await flush()
       const { fresh, gone } = await replaceProject(context, old)
       release()
-      // The step stops there, and fails nothing: the deleted project's lead
+      // The step stops there, and fails nothing: the deleted project's chief
       // has nothing left to switch.
       await stepping
       await gone
       await flush()
-      const lead = chiefOf(context, fresh)
+      const chief = chiefOf(context, fresh)
       assert.deepEqual(
-        [lead.harness, context.codex.prepared.length, context.dispatcher.pendingSwitch(lead.id)],
+        [chief.harness, context.codex.prepared.length, context.dispatcher.pendingSwitch(chief.id)],
         ['claude-code', 0, null],
-        'the new lead is not switched, and nothing waits to switch it',
+        'the new chief is not switched, and nothing waits to switch it',
       )
     })
   })
@@ -3846,11 +3884,11 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it("copies and delivers nothing once the lead's project is deleted while its window is looked at, nor for a project created meanwhile", async () => {
+  it("copies and delivers nothing once the chief's project is deleted while its window is looked at, nor for a project created meanwhile", async () => {
     await setup(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
-      // The human told the old lead something since the last look, which waits on its harness.
+      // The human told the old chief something since the last look, which waits on its harness.
       const told = 'The codeword is tern'
       context.adapter.agent('chief').items.push(item('user', told))
       const release = hold(
@@ -3868,7 +3906,7 @@ describe('work in flight when its participant is forgotten', () => {
       assert.equal(
         context.ledger.copiedItemWith(chiefOf(context, fresh).id, told),
         null,
-        "the new lead's conversation has nothing of the old window",
+        "the new chief's conversation has nothing of the old window",
       )
       assert.equal(
         context.ledger.message(welcome.id).state,
@@ -3878,7 +3916,7 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it("says nothing once the lead's project is deleted while its window's look fails, of it or a project created meanwhile", async () => {
+  it("says nothing once the chief's project is deleted while its window's look fails, of it or a project created meanwhile", async () => {
     const entries = []
     await setup(
       async (context) => {
@@ -3900,7 +3938,7 @@ describe('work in flight when its participant is forgotten', () => {
         assert.deepEqual(
           entries.filter((entry) => entry.kind === 'window.activity' && entry.state === 'unknown'),
           [],
-          "no line says the old lead's window, or the new lead's, could not be read",
+          "no line says the old chief's window, or the new chief's, could not be read",
         )
       },
       { trace: (entry) => entries.push(entry) },
@@ -3954,7 +3992,7 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it('opens no window for a lead whose project was deleted while its launch was prepared', async () => {
+  it('opens no window for a chief whose project was deleted while its launch was prepared', async () => {
     await setup(async (context) => {
       const release = hold(
         context.adapter,
@@ -3975,7 +4013,7 @@ describe('work in flight when its participant is forgotten', () => {
       assert.equal(
         context.ledger.currentConversation(chiefOf(context, fresh).id).id,
         own.id,
-        'the new lead keeps its conversation',
+        'the new chief keeps its conversation',
       )
     })
   })
@@ -4006,7 +4044,7 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it('starts no conversation for a lead whose project is deleted while its window opens, nor for a project created meanwhile, and that window closes', async () => {
+  it('starts no conversation for a chief whose project is deleted while its window opens, nor for a project created meanwhile, and that window closes', async () => {
     await setup(async (context) => {
       const release = hold(context.host, 'open', (body) => body.cwd === '/work/app')
       const { project: old } = await withStaff(context)
@@ -4018,7 +4056,7 @@ describe('work in flight when its participant is forgotten', () => {
       assert.equal(
         context.ledger.currentConversation(chiefOf(context, fresh).id).id,
         own.id,
-        'the new lead keeps its conversation',
+        'the new chief keeps its conversation',
       )
       const window = context.host.opened.find((body) => body.cwd === '/work/app')
       assert.ok(
@@ -4028,7 +4066,7 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it("kills no window of a deleted project's lead that exited before its open was answered", async () => {
+  it("kills no window of a deleted project's chief that exited before its open was answered", async () => {
     await setup(async (context) => {
       const open = context.host.open
       const release = hold(
@@ -4055,9 +4093,9 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it("binds no conversation, of a deleted project's lead or of a project created meanwhile, to the thread the old lead's window named", async () => {
+  it("binds no conversation, of a deleted project's chief or of a project created meanwhile, to the thread the old chief's window named", async () => {
     await setup(async (context) => {
-      // The old lead's window takes long to come up, then names its thread.
+      // The old chief's window takes long to come up, then names its thread.
       let calls = 0
       const release = hold(
         context.adapter,
@@ -4074,16 +4112,16 @@ describe('work in flight when its participant is forgotten', () => {
       assert.equal(
         context.ledger.currentConversation(chiefOf(context, fresh).id).nativeSession,
         own.nativeSession,
-        "the new lead's conversation keeps its own thread",
+        "the new chief's conversation keeps its own thread",
       )
     })
   })
 
-  it("hands nothing to the old lead's window that was getting ready for a paste once its project is deleted, nor anything of a project created meanwhile", async () => {
+  it("hands nothing to the old chief's window that was getting ready for a paste once its project is deleted, nor anything of a project created meanwhile", async () => {
     await setup(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
-      // The old lead's window takes its time to be ready for a paste.
+      // The old chief's window takes its time to be ready for a paste.
       context.adapter.ready = async () => true
       const release = hold(
         context.adapter,
@@ -4106,17 +4144,17 @@ describe('work in flight when its participant is forgotten', () => {
     })
   })
 
-  it("settles nothing by what the old lead's harness did with a paste once its project is deleted, and a project created meanwhile gets its message once", async () => {
+  it("settles nothing by what the old chief's harness did with a paste once its project is deleted, and a project created meanwhile gets its message once", async () => {
     await setup(async (context) => {
       const { project: old } = await withStaff(context)
       await context.dispatcher.pass()
-      // The old lead's harness takes long to refuse a paste.
+      // The old chief's harness takes long to refuse a paste.
       const before = context.adapter.agent('chief')
       const release = hold(context.adapter, 'deliver', looksAt(before.launchId))
       const refused = context.ledger.note(old.id, { from: 'zeus', to: 'chief', body: 'Refused' })
       await context.dispatcher.pass()
       const { fresh, gone } = await replaceProject(context, old)
-      // Meanwhile the new lead is handed its first message.
+      // Meanwhile the new chief is handed its first message.
       const welcome = context.ledger.note(fresh.id, { to: 'chief', body: 'Welcome' })
       assert.notEqual(welcome.id, refused.id, "the ledger never gives the old message's id again")
       await context.dispatcher.pass()
@@ -4179,7 +4217,7 @@ describe('work in flight when its participant is forgotten', () => {
       async (context) => {
         const { project: old } = await withStaff(context)
         await context.dispatcher.pass()
-        // The old lead takes a paste its harness holds: its window closes once that is over.
+        // The old chief takes a paste its harness holds: its window closes once that is over.
         const release = hold(
           context.adapter,
           'deliver',
@@ -4188,7 +4226,7 @@ describe('work in flight when its participant is forgotten', () => {
         context.ledger.note(old.id, { from: 'zeus', to: 'chief', body: 'Held' })
         await context.dispatcher.pass()
         const { fresh, gone } = await replaceProject(context, old)
-        // The new lead's window is looked at meanwhile, and the trace says so.
+        // The new chief's window is looked at meanwhile, and the trace says so.
         await context.dispatcher.pass()
         release()
         await gone
@@ -4197,7 +4235,7 @@ describe('work in flight when its participant is forgotten', () => {
             .filter((line) => line.kind === 'window.activity' && line.project === fresh.id)
             .map((line) => line.state),
           ['idle'],
-          "the new lead's line stays",
+          "the new chief's line stays",
         )
         assert.deepEqual(
           lines.filter((line) => line.project === old.id),
@@ -4210,8 +4248,8 @@ describe('work in flight when its participant is forgotten', () => {
   })
 })
 
-describe('a lead whose window does not come up', () => {
-  /** A project whose Claude lead has said something, so a switch has a history to hand over. */
+describe('a chief whose window does not come up', () => {
+  /** A project whose Claude chief has said something, so a switch has a history to hand over. */
   async function spoken(context) {
     const fixture = await withStaff(context)
     await context.dispatcher.pass()
@@ -4224,7 +4262,7 @@ describe('a lead whose window does not come up', () => {
       .inbox(context.ledger.project(project.id).participants.find((p) => p.role === 'human').id)
       .map((m) => m.body)
 
-  it('gives the new lead its handoff again when its first window closes before showing it', async () => {
+  it('gives the new chief its handoff again when its first window closes before showing it', async () => {
     await withCodex(async (context) => {
       const { project } = await spoken(context)
       await context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
@@ -4242,7 +4280,7 @@ describe('a lead whose window does not come up', () => {
       const launch = context.codex.prepared.at(-1)
       assert.match(
         launch.message,
-        /^\[ConsensFlow m-\d+ · note from ConsensFlow\]\nYou are the lead now\./,
+        /^\[ConsensFlow m-\d+ · note from ConsensFlow\]\nYou are the chief now\./,
       )
       assert.deepEqual(
         handoffsOf(context, project).map((m) => [m.id, m.state]),
@@ -4252,7 +4290,7 @@ describe('a lead whose window does not come up', () => {
     })
   })
 
-  it('keeps the project open when the new lead cannot take its handoff, and opens it again with it', async () => {
+  it('keeps the project open when the new chief cannot take its handoff, and opens it again with it', async () => {
     await withCodex(async (context) => {
       const { codex } = context
       const { project, id } = await spoken(context)
@@ -4267,13 +4305,13 @@ describe('a lead whose window does not come up', () => {
       const killed = context.host.killed.length
       await context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       assert.equal(context.ledger.project(project.id).state, 'open', 'the staff keeps working')
-      assert.equal(context.host.killed.length, killed + 2, 'the old lead, then the new window')
+      assert.equal(context.host.killed.length, killed + 2, 'the old chief, then the new window')
       assert.equal(context.dispatcher.pane(id('chief')), null)
       assert.notEqual(context.dispatcher.pane(id('zeus')), null)
       const [handoff] = handoffsOf(context, project)
       assert.deepEqual([handoff.state, handoff.attempts], ['queued', 0])
       assert.deepEqual(toHuman(context, project), [
-        'The lead could not start: the window could not take its first message: the Codex broker never named the thread it opened. What comes for the lead waits for it, and ConsensFlow tries again; you may also switch the lead.',
+        'The chief could not start: the window could not take its first message: the Codex broker never named the thread it opened. What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief.',
       ])
 
       await context.dispatcher.pass()
@@ -4281,12 +4319,12 @@ describe('a lead whose window does not come up', () => {
       context.clock.advance(5_000)
       await context.dispatcher.pass()
       assert.equal(codex.prepared.length, 2)
-      assert.match(codex.prepared.at(-1).message, /You are the lead now\./)
+      assert.match(codex.prepared.at(-1).message, /You are the chief now\./)
       assert.equal(handoffsOf(context, project).length, 1)
     })
   })
 
-  it('a lead whose launch keeps failing: its handoff waits, no other is written, it is tried ever more slowly, and the human hears once', async () => {
+  it('a chief whose launch keeps failing: its handoff waits, no other is written, it is tried ever more slowly, and the human hears once', async () => {
     await withCodex(async (context) => {
       const { codex } = context
       const { project } = await spoken(context)
@@ -4325,12 +4363,12 @@ describe('a lead whose window does not come up', () => {
       codex.prepare = prepare
       context.clock.advance(40_000)
       await context.dispatcher.pass()
-      assert.match(codex.prepared.at(-1).message, /You are the lead now\./)
+      assert.match(codex.prepared.at(-1).message, /You are the chief now\./)
       assert.equal(toHuman(context, project).length, 1)
     })
   })
 
-  it('notices a lead window that exits before its open is answered', async () => {
+  it('notices a chief window that exits before its open is answered', async () => {
     await withCodex(async (context) => {
       const { project, id } = await spoken(context)
       const open = context.host.open.bind(context.host)
@@ -4349,17 +4387,17 @@ describe('a lead whose window does not come up', () => {
       assert.equal(
         context.ledger.project(project.id).state,
         'suspended',
-        'the lead went, as it would have later',
+        'the chief went, as it would have later',
       )
       assert.equal(handoffsOf(context, project)[0].state, 'queued', 'its handoff waits')
 
       await context.dispatcher.resumeProject(project.id)
       assert.notEqual(context.dispatcher.pane(id('chief')), null)
-      assert.match(context.codex.prepared.at(-1).message, /You are the lead now\./)
+      assert.match(context.codex.prepared.at(-1).message, /You are the chief now\./)
     })
   })
 
-  it('keeps what was queued for a first lead whose window does not open', async () => {
+  it('keeps what was queued for a first chief whose window does not open', async () => {
     await setup(async (context) => {
       const { project } = await withStaff(context)
       await context.dispatcher.pass()
@@ -4368,7 +4406,7 @@ describe('a lead whose window does not come up', () => {
       await context.dispatcher.resumeProject(project.id)
       assert.match(
         toHuman(context, project)[0],
-        /^The lead could not start: the window did not open: refused by the test\./,
+        /^The chief could not start: the window did not open: refused by the test\./,
       )
       const result = context.ledger.note(project.id, {
         from: 'zeus',
@@ -4462,7 +4500,7 @@ describe('a window that takes long', () => {
     })
   })
 
-  it('answers New project, Switch lead, Resume and a session’s Open once the ledger has the change; the window opens after', async () => {
+  it('answers New project, Switch chief, Resume and a session’s Open once the ledger has the change; the window opens after', async () => {
     await withCodex(async (context) => {
       const { host, codex } = context
       let opened = holdOpens(host)
@@ -4475,7 +4513,7 @@ describe('a window that takes long', () => {
         }),
       )
       assert.equal(project.state, 'open')
-      assert.equal(host.opened.length, 0, 'its lead is still opening')
+      assert.equal(host.opened.length, 0, 'its chief is still opening')
       await opened()
       const chief = chiefOf(context, project).id
       assert.notEqual(context.dispatcher.pane(chief), null)
@@ -4488,9 +4526,9 @@ describe('a window that takes long', () => {
         context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' }),
       )
       assert.equal(chiefOf(context, project).harness, 'codex')
-      assert.equal(context.dispatcher.pane(chief), null, 'the new lead is still opening')
+      assert.equal(context.dispatcher.pane(chief), null, 'the new chief is still opening')
       await opened()
-      assert.match(codex.prepared.at(-1).message, /You are the lead now\./)
+      assert.match(codex.prepared.at(-1).message, /You are the chief now\./)
       assert.notEqual(context.dispatcher.pane(chief), null)
 
       await context.dispatcher.closeProject(project.id)
@@ -4552,7 +4590,7 @@ describe('a window that takes long', () => {
     })
   })
 
-  it('opens the lead again when the human resumes a project that is still closing', async () => {
+  it('opens the chief again when the human resumes a project that is still closing', async () => {
     await setup(async (context) => {
       const { project, id } = await withStaff(context)
       await context.dispatcher.pass()
@@ -4629,7 +4667,7 @@ describe('a window the human switches to another conversation', () => {
       const cleared = context.ledger.currentConversation(id('chief'))
       assert.deepEqual([cleared.nativeSession, cleared.harness], ['native-cleared', 'claude-code'])
       assert.equal(
-        context.ledger.leadHistory(project.id).find((c) => c.id === first.id).items.length,
+        context.ledger.chiefHistory(project.id).find((c) => c.id === first.id).items.length,
         1,
         'the first conversation ended with its copy',
       )
@@ -4787,7 +4825,7 @@ describe('a harness ConsensFlow has no adapter for', () => {
     })
   })
 
-  it('opens no project, member or lead on it', async () => {
+  it('opens no project, member or chief on it', async () => {
     await setup(async (context) => {
       await assert.rejects(
         context.dispatcher.openProject({

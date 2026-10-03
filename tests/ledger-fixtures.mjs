@@ -81,7 +81,7 @@ export function staff(ledger) {
  * taken back from it, then held in one of diana's, T-2 needing it, a
  * question and its answer, an urgent tell that reached diana's window, a
  * note, a conversation bound to its native session with a transcript, the
- * lead switched once, and their events. Returns its ids by table.
+ * chief switched once, and their events. Returns its ids by table.
  */
 export function busyProject(ledger, directory) {
   const project = ledger.createProject({

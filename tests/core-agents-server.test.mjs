@@ -12,7 +12,7 @@ import { listAgents, rosterPath } from '../src/roster.js'
 import { fakeExecutable, tempEnv } from './helpers.mjs'
 
 /**
- * The human's agents screens on the new core (TEST-BDC-24): the agents (the
+ * The human's agents screens the daemon serves (TEST-BDC-24): the agents (the
  * catalog and the saved agents as one list) and the harness diagnostics,
  * served by the same server the agents' API runs on, behind the UI token the
  * app checks. Carried over from the old daemon's tests.
@@ -23,7 +23,7 @@ function stubCli(t, name) {
   fakeExecutable(file)
 }
 
-describe('the agents screens on the new core', () => {
+describe('the agents screens the daemon serves', () => {
   const t = tempEnv()
   const token = 'ui-token-for-the-tests'
   let dir

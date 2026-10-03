@@ -53,8 +53,8 @@ async function run({ scenario, chief, staff }, build, log) {
   const args = ['run', 'windows', '--', '--host', values.host, ...(build ? ['--build'] : [])]
   args.push('--', 'npm', 'run', 'eval', '--', '--scenario', scenario, '--chief', chief)
   args.push('--staff', staff, '--timeout-min', '30')
-  // A lead switch goes to the staff's harness.
-  if (scenario === 'lead-switch') args.push('--switch-to', staff)
+  // A chief switch goes to the staff's harness.
+  if (scenario === 'chief-switch') args.push('--switch-to', staff)
   if (chief === 'claude' && values['claude-model']) args.push('--model', values['claude-model'])
   const out = createWriteStream(log)
   const child = spawn('npm', args, { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -81,11 +81,11 @@ let build = values.build
 for (const scenario of values.scenario) {
   for (const pair of pairs) {
     const name = `${scenario} ${pair.chief}:${pair.staff}`
-    if (scenario === 'lead-switch' && pair.chief === pair.staff) {
+    if (scenario === 'chief-switch' && pair.chief === pair.staff) {
       results.push({
         name,
         ok: true,
-        line: 'skipped: a lead switch needs another harness on the staff',
+        line: 'skipped: a chief switch needs another harness on the staff',
       })
       continue
     }
