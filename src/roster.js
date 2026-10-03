@@ -1,14 +1,4 @@
-import {
-  cpSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { AGENT_PRESETS, agentProfile, validateWorkTier } from '../hosts/lib/presets.js'
@@ -70,40 +60,6 @@ const HARNESS_TO_KIND = {
  */
 export function configRoot(env) {
   return rosterHome(env)
-}
-
-/**
- * Where the state lived before the roots were merged (2026-08-22): every
- * start still looks there once, through `migrateStateRoot`, for a machine
- * coming from an older version.
- */
-function legacyConfigRoot(env) {
-  const xdg = env?.XDG_CONFIG_HOME
-  const base =
-    typeof xdg === 'string' && xdg.length > 0 ? xdg : join(env?.HOME ?? homedir(), '.config')
-  return join(base, 'consensflow')
-}
-
-/** Import legacy app data without changing anything outside the private home. */
-export function migrateStateRoot(env) {
-  const from = legacyConfigRoot(env)
-  const to = configRoot(env)
-  if (from === to || !existsSync(from) || existsSync(join(to, 'mode.json'))) return null
-  if (lstatSync(from).isSymbolicLink()) return null
-  mkdirSync(to, { recursive: true })
-  const copied = []
-  for (const name of readdirSync(from)) {
-    const target = join(to, name)
-    if (existsSync(target)) continue
-    cpSync(join(from, name), target, {
-      recursive: true,
-      force: false,
-      // Imported symlinks could make later private writes escape the home.
-      filter: (source) => !lstatSync(source).isSymbolicLink(),
-    })
-    if (existsSync(target)) copied.push(name)
-  }
-  return copied.length > 0 ? { from, to, copied } : null
 }
 
 /**

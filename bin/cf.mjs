@@ -9,14 +9,7 @@ import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { detectHarnesses } from '../src/harnesses.js'
 import { staleClaudeHooks } from '../src/host-payloads.js'
 import { prepareApp } from '../src/install.js'
-import {
-  addAgent,
-  configRoot,
-  editAgent,
-  listAgents,
-  migrateStateRoot,
-  removeAgent,
-} from '../src/roster.js'
+import { addAgent, configRoot, editAgent, listAgents, removeAgent } from '../src/roster.js'
 import { terminalRuntime } from '../src/terminal.js'
 
 // `cf … | head` closes our stdout mid-stream; dying with an EPIPE stack for
@@ -262,12 +255,6 @@ async function main() {
     })
     return
   }
-
-  // A machine set up before the roots were merged keeps its state — it just
-  // moves into the one directory, once, and silently: `cf --version` and
-  // `--json` are machine output, and a relocation the user cannot act on is
-  // not news. `cf doctor` says where things live.
-  migrateStateRoot(env)
 
   if (command === undefined || command === 'help' || command === '--help') {
     out(USAGE)
