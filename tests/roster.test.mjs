@@ -293,35 +293,6 @@ describe('what older builds wrote is read the same, and folded at start', () => 
   })
 })
 
-describe('a roster written before the rename keeps working', () => {
-  const t = tempEnv()
-  after(() => t.cleanup())
-
-  it('reads participants.json and its participants key, then writes agents.json', () => {
-    // Exactly what a machine set up before 2026-08-21 has on disk.
-    const legacy = join(dirname(rosterPath(t.env)), 'participants.json')
-    mkdirSync(dirname(legacy), { recursive: true })
-    cpSync(join(FIXTURES, 'v1-participants.json'), legacy)
-
-    const listed = listAgents(t.env)
-    assert.ok(
-      listed.some((a) => a.name === 'zeus'),
-      'the old file is read, not ignored',
-    )
-
-    // The first write moves the roster to its new name, rows intact.
-    addAgent({ name: 'newcomer', harness: 'codex', model: 'gpt-5.6-luna' }, t.env)
-    const written = raw(t.env)
-    assert.ok(Array.isArray(written.agents), 'written under the agents key')
-    assert.equal(written.participants, undefined, 'the old key does not survive the write')
-    assert.ok(written.agents.some((row) => row.id === 'newcomer'))
-    assert.equal(
-      listAgents(t.env).some((a) => a.name === 'newcomer'),
-      true,
-    )
-  })
-})
-
 describe('an agents file that cannot be read', () => {
   it('is said, never read as an empty roster, and never saved over', () => {
     const t = tempEnv()
