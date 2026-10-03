@@ -7,6 +7,7 @@ import {
   codexIsolation,
   HARNESSES,
   lastLines,
+  liveEnvironment,
   realOnPath,
   staffFor,
   terminalAnswer,
@@ -104,6 +105,25 @@ describe('an eval run’s plan', () => {
       ),
       'C:\\Users\\a\\.local\\bin\\claude.exe',
     )
+  })
+
+  it("gives a live run's windows the user's own home, and on Windows what its programs need", () => {
+    const env = {
+      USER: 'u',
+      PATH: 'C:\\Windows;C:\\tools',
+      SystemRoot: 'C:\\Windows',
+      APPDATA: 'A',
+    }
+    const mac = liveEnvironment({ home: '/h', bin: '/h/bin', env, platform: 'darwin' })
+    assert.equal(mac.PATH.split(':')[0], '/h/bin')
+    assert.ok(mac.PATH.split(':').includes('/h/.local/bin'))
+    assert.equal(mac.SystemRoot, undefined)
+    // Null removes the test pane host's sandbox default, so Claude keeps its own config.
+    assert.equal(mac.CLAUDE_CONFIG_DIR, null)
+    const windows = liveEnvironment({ home: 'C:\\Users\\u', env, platform: 'win32' })
+    assert.equal(windows.PATH, 'C:\\Windows;C:\\tools')
+    assert.deepEqual([windows.SystemRoot, windows.APPDATA], ['C:\\Windows', 'A'])
+    assert.equal(windows.ComSpec, undefined, 'only what the machine has')
   })
 
   it('switches off every Codex MCP server with a harmless, disabled definition', () => {

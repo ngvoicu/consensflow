@@ -16,6 +16,7 @@
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { chmodSync, cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -33,6 +34,7 @@ import {
   codexIsolation,
   HARNESSES,
   lastLines,
+  liveEnvironment,
   realOnPath,
   staffFor,
   terminalAnswer,
@@ -40,7 +42,8 @@ import {
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const EDITOR = join(HERE, '..', 'tests', 'live', 'core-live-editor.mjs')
-const H = process.env.HOME
+// A Windows terminal names no HOME; the user's profile is the home there.
+const H = process.env.HOME ?? homedir()
 // One fixed workspace, trusted once per run: Claude asks about an unknown folder.
 const WORKSPACE = join(H, '.consensflow-candidate', 'evals', 'workspace')
 const REPORTS = join(HERE, 'reports')
@@ -218,67 +221,8 @@ if (realCodex !== null) {
   )
 }
 
-/**
- * What a Windows program needs from its environment besides PATH: the
- * system's folders, the user's, and where Devin keeps its settings and
- * sessions (APPDATA).
- */
-const WINDOWS_ENV = [
-  'SystemRoot',
-  'SystemDrive',
-  'windir',
-  'ComSpec',
-  'PATHEXT',
-  'USERPROFILE',
-  'USERNAME',
-  'APPDATA',
-  'LOCALAPPDATA',
-  'TEMP',
-  'TMP',
-  'ProgramData',
-  'ProgramFiles',
-  'ProgramFiles(x86)',
-  'CommonProgramFiles',
-  'HOMEDRIVE',
-  'HOMEPATH',
-  'NUMBER_OF_PROCESSORS',
-  'PROCESSOR_ARCHITECTURE',
-  'OS',
-]
-
 const ENV = {
-  HOME: H,
-  USER: process.env.USER,
-  LOGNAME: process.env.USER,
-  LANG: 'en_US.UTF-8',
-  TERM: 'xterm-256color',
-  PATH: WINDOWS
-    ? [ISOLATED_BIN, process.env.PATH ?? ''].join(';')
-    : [
-        ISOLATED_BIN,
-        join(H, '.local', 'bin'),
-        join(H, '.opencode', 'bin'),
-        join(H, '.codex', 'bin'),
-        join(H, '.pi', 'bin'),
-        '/opt/homebrew/bin',
-        '/usr/bin',
-        '/bin',
-        '/usr/sbin',
-        '/sbin',
-      ].join(':'),
-  ...(WINDOWS
-    ? Object.fromEntries(
-        WINDOWS_ENV.filter((name) => process.env[name] !== undefined).map((name) => [
-          name,
-          process.env[name],
-        ]),
-      )
-    : {}),
-  // Unset on purpose (null removes the harness's sandbox default): with it set,
-  // Claude finds no completed onboarding and opens on the first-run dialog.
-  CLAUDE_CONFIG_DIR: null,
-  CODEX_HOME: join(H, '.codex'),
-  XDG_CONFIG_HOME: join(H, '.config'),
+  ...liveEnvironment({ home: H, bin: ISOLATED_BIN }),
   ...(values.arm === 'nocard'
     ? { CONSENSFLOW_EVAL_CHIEF_CARD: join(HERE, 'fixtures', 'no-card.md') }
     : {}),

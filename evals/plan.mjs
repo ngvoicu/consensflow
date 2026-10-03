@@ -1,4 +1,5 @@
 import { statSync } from 'node:fs'
+import { join } from 'node:path'
 import { questionSentences } from './measure.mjs'
 
 /**
@@ -129,6 +130,82 @@ export function terminalAnswer(scenario, text) {
     (question) => answers.find(({ match }) => match.test(question))?.text ?? scenario.fallback,
   )
   return [...new Set(replies)].join(' ')
+}
+
+/**
+ * What a Windows program needs from its environment besides PATH: the
+ * system's folders, the user's, and where Devin keeps its settings and
+ * sessions (APPDATA).
+ */
+const WINDOWS_ENV = [
+  'SystemRoot',
+  'SystemDrive',
+  'windir',
+  'ComSpec',
+  'PATHEXT',
+  'USERPROFILE',
+  'USERNAME',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'TEMP',
+  'TMP',
+  'ProgramData',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+  'CommonProgramFiles',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'NUMBER_OF_PROCESSORS',
+  'PROCESSOR_ARCHITECTURE',
+  'OS',
+]
+
+/**
+ * The environment of a live run's windows, real harnesses on the user's own
+ * home and logins: never this shell's session identity, and none of the test
+ * pane host's sandbox (a null removes its default; with CLAUDE_CONFIG_DIR
+ * set, Claude finds no completed onboarding and opens on its first-run
+ * dialog). `bin`, when given, comes first on PATH: the eval's wrappers.
+ */
+export function liveEnvironment({
+  home,
+  bin = null,
+  env = process.env,
+  platform = process.platform,
+}) {
+  const windows = platform === 'win32'
+  const path = windows
+    ? [bin, env.PATH ?? ''].filter(Boolean).join(';')
+    : [
+        bin,
+        join(home, '.local', 'bin'),
+        join(home, '.opencode', 'bin'),
+        join(home, '.codex', 'bin'),
+        join(home, '.pi', 'bin'),
+        '/opt/homebrew/bin',
+        '/usr/bin',
+        '/bin',
+        '/usr/sbin',
+        '/sbin',
+      ]
+        .filter(Boolean)
+        .join(':')
+  return {
+    HOME: home,
+    USER: env.USER,
+    LOGNAME: env.USER,
+    LANG: 'en_US.UTF-8',
+    TERM: 'xterm-256color',
+    PATH: path,
+    ...(windows
+      ? Object.fromEntries(
+          WINDOWS_ENV.filter((name) => env[name] !== undefined).map((name) => [name, env[name]]),
+        )
+      : {}),
+    CLAUDE_CONFIG_DIR: null,
+    CODEX_HOME: join(home, '.codex'),
+    XDG_CONFIG_HOME: join(home, '.config'),
+  }
 }
 
 /**
