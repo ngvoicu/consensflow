@@ -54,7 +54,7 @@ describe('role instructions for each window the daemon opens', () => {
         assert.match(text, /^## Your commands$/m, 'the command card comes first')
         assert.ok(text.indexOf('## Your commands') < text.indexOf('## What you do'), 'card first')
         assert.match(text, /## Reviews\n\nNothing is reviewed unless you ask\./)
-        assert.match(text, /When the human changes the\s+staff, ConsensFlow tells you in a note/)
+        assert.match(text, /`cf staff` shows them as they are now/)
         assert.match(
           text,
           /A tier nobody on the staff holds\s+goes to the nearest one somebody does/,
@@ -138,11 +138,13 @@ describe('role instructions for each window the daemon opens', () => {
     }
   })
 
-  it('promises the chief a note when the staff changes', () => {
+  it('tells the chief the staff may change and where to read it now, with no note sent', () => {
+    const text = roleInstructions('chief', [zeus])
     assert.match(
-      roleInstructions('chief', [zeus]),
-      /When the human changes the\s+staff, ConsensFlow tells you in a note with the new list\./,
+      text,
+      /the human may change them\s+while you work, and `cf staff` shows them as they are now\./,
     )
+    assert.doesNotMatch(text, /tells you in a note/)
   })
 
   it('says so when the staff is empty', () => {

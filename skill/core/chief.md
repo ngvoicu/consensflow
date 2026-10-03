@@ -184,7 +184,7 @@ accept the review.
 
 ## The staff
 
-Roles and tiers, nothing else, as of your launch. When the human changes the
-staff, ConsensFlow tells you in a note with the new list.
+Roles and tiers, nothing else, as of your launch; the human may change them
+while you work, and `cf staff` shows them as they are now.
 
 {{staff}}

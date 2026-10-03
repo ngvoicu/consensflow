@@ -2,9 +2,7 @@ import { basename } from 'node:path'
 import { missingHarnesses, offerable } from '../harnesses.js'
 import { fitsRole, RESUME_WORDS } from '../ledger/index.js'
 import { agentRow, harnessForKind, listAgents } from '../roster.js'
-import { teamTable } from '../skill.js'
 import { requireChiefAgent, requireOpen } from './dispatcher.js'
-import { staffOf } from './roles.js'
 
 /**
  * What the board page may ask of the daemon: each operation is the human
@@ -74,13 +72,11 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       const member = membership(agent, env)
       dispatcher.requireAdapter(member.harness)
       const added = ledger.addMember(project, { roles, ...member })
-      tellChiefOfStaff(ledger, project)
       return { member: added }
     }),
 
     'member.roles': change(async ({ project, agent, roles }) => {
       const member = ledger.setRoles(project, agent, roles)
-      tellChiefOfStaff(ledger, project)
       return { member }
     }),
 
@@ -98,7 +94,6 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
 
     'member.remove': change(async ({ project, agent }) => {
       const removed = await dispatcher.removeMember(project, agent)
-      tellChiefOfStaff(ledger, project)
       return removed
     }),
 
@@ -211,22 +206,6 @@ function membership(agent, env, agents = listAgents(env)) {
     designer: row.designer === true,
     tier: saved.profile.workTier,
   }
-}
-
-/**
- * The chief hears of a change to the staff while its window runs, launched as
- * it was knowing the staff then: one note, which a later change replaces
- * while it still waits. A chief not yet started reads the staff at launch.
- */
-function tellChiefOfStaff(ledger, projectId) {
-  const project = ledger.project(projectId)
-  const chief = project.participants.find((participant) => participant.handle === 'chief')
-  if (chief === undefined || ledger.currentConversation(chief.id) === null) return
-  ledger.freshNote(projectId, {
-    to: 'chief',
-    heading: 'The human changed the staff; it is now:',
-    body: `\n\n${teamTable(staffOf(project))}`,
-  })
 }
 
 /** A chief as the dispatcher takes it: the saved agent named, and the harness it runs on. */

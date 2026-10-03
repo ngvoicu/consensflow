@@ -251,9 +251,6 @@ class Ledger {
   note(projectId, request) {
     return messages.note(this.#store, projectId, request)
   }
-  freshNote(projectId, request) {
-    return messages.freshNote(this.#store, projectId, request)
-  }
   ask(projectId, request) {
     return messages.ask(this.#store, projectId, request)
   }

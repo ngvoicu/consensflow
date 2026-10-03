@@ -255,28 +255,18 @@ describe('the page protocol of the daemon', () => {
     })
   })
 
-  it('tells a running chief of a change to the staff, in one note the next change replaces', async () => {
+  it('sends a running chief nothing when the staff changes: a note would start it working', async () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
         agent: 'leto',
       })
       const chief = () => ledger.project(project.id).participants.find((p) => p.handle === 'chief')
-      // A chief not yet started reads the staff in its role text: no note.
-      await operations['member.add']({ project: project.id, agent: 'zeus' })
-      assert.deepEqual(ledger.pending(chief().id), [])
       ledger.startConversation(chief().id, { harness: 'claude-code' })
-      await operations['member.add']({ project: project.id, agent: 'diana', roles: ['reviewer'] })
+      await operations['member.add']({ project: project.id, agent: 'zeus' })
+      await operations['member.roles']({ project: project.id, agent: 'zeus', roles: ['reviewer'] })
       await operations['member.remove']({ project: project.id, agent: 'zeus' })
-      const notes = ledger.pending(chief().id)
-      assert.equal(notes.length, 1, 'one note: the newest')
-      assert.equal(notes[0].kind, 'note')
-      assert.match(
-        notes[0].body,
-        /^The human changed the staff; it is now:\n\n\| Member \| Roles \| Work tier \|/,
-      )
-      assert.match(notes[0].body, /\| diana \| reviewer \|/)
-      assert.doesNotMatch(notes[0].body, /\| zeus \|/)
+      assert.deepEqual(ledger.pending(chief().id), [])
     })
   })
 

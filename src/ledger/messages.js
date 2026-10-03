@@ -23,25 +23,6 @@ export function note(store, projectId, { from, to, body, task }) {
 }
 
 /**
- * ConsensFlow's note that stands for the latest of its kind: one under the
- * same `heading` still waiting for its reader is withdrawn for it, so a
- * reader who was busy reads the newest once, not every one before it.
- */
-export function freshNote(store, projectId, { to, heading, body }) {
-  return store.write(() => {
-    const waiting = store.db
-      .prepare(
-        `SELECT m.id FROM message m JOIN participant r ON r.id = m.recipient_id
-         WHERE m.project_id = ? AND r.handle = ? AND r.left_at IS NULL AND m.kind = 'note'
-           AND m.sender_id IS NULL AND m.state = 'queued' AND substr(m.body, 1, length(?)) = ?`,
-      )
-      .all(projectId, to, heading, heading)
-    for (const { id } of waiting) withdraw(store, id, 'a newer note took its place')
-    return send(store, projectId, { to, body: `${heading}${body}`, kind: 'note' })
-  })
-}
-
-/**
  * A question for a coordinator; the asker's task waits for the answer. The
  * human is never asked on the board: the chief asks them in its own terminal,
  * where they work with it. With `questions`, the question carries options as a harness's own
