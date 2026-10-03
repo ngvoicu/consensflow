@@ -1,5 +1,5 @@
 import { statSync } from 'node:fs'
-import { join } from 'node:path'
+import { posix, win32 } from 'node:path'
 import { questionSentences } from './measure.mjs'
 
 /**
@@ -174,6 +174,8 @@ export function liveEnvironment({
   platform = process.platform,
 }) {
   const windows = platform === 'win32'
+  // The platform's own separator, whichever machine computes it.
+  const { join } = windows ? win32 : posix
   const path = windows
     ? [bin, env.PATH ?? ''].filter(Boolean).join(';')
     : [

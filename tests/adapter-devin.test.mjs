@@ -5,6 +5,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { devinAdapter, devinRoleText } from '../src/adapters/devin.js'
 import { SHOWS_ANOTHER } from '../src/adapters/shared.js'
+import { consoleText } from '../src/console-text.js'
 import { fakeExecutable, fakeNodeExecutable } from './helpers.mjs'
 
 /**
@@ -200,7 +201,12 @@ console.log('devin ${version}')
         host,
         text: 'half \ud83d of it, \u001b[31mred\u001b[0m and 50%\r60%',
       })
-      assert.equal(requests.at(-1)[1].body, 'half  of it, ␛[31mred␛[0m and 50%␍60%')
+      // On a Windows machine every window is Windows': there it goes in ASCII.
+      const shown = 'half  of it, ␛[31mred␛[0m and 50%␍60%'
+      assert.equal(
+        requests.at(-1)[1].body,
+        process.platform === 'win32' ? consoleText(shown) : shown,
+      )
       // On Windows the console drops a paste's non-ASCII marks: they go in ASCII.
       await devinAdapter({ env: { ...env, OS: 'Windows_NT' } }).deliver({
         launch,
@@ -220,10 +226,11 @@ console.log('devin ${version}')
 
   it('tells Devin on Windows to name files the way its file tools write them, and nowhere else', () => {
     const role = '# ConsensFlow worker\n\nRole text.'
-    assert.equal(devinRoleText(role, { HOME: '/h' }), role)
     const windows = devinRoleText(role, { OS: 'Windows_NT' })
     assert.ok(windows.startsWith(role))
     assert.match(windows, /never \/c\/… paths/)
+    // A Windows machine is Windows whatever its environment says.
+    assert.equal(devinRoleText(role, { HOME: '/h' }), process.platform === 'win32' ? windows : role)
   })
 
   it('reads a wire log that was replaced from its start, with nothing of the old one carried', async () => {

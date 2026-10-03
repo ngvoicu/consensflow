@@ -5,6 +5,7 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, it } from 'node:test'
 import { askingTurnEnd, bareMetrics, findSession } from '../evals/bare.mjs'
+import { devinFolders } from '../src/harnesses.js'
 
 const WORKSPACE = '/evals/workspace'
 
@@ -65,7 +66,8 @@ describe("finding a bare harness's session in its own store", () => {
 
   it('Devin: the newest session in the workspace, its times in seconds', async () => {
     await withHome(async (home) => {
-      const dir = path.join(home, '.local', 'share', 'devin', 'cli')
+      // Where the app reads Devin's store on this platform.
+      const dir = path.join(devinFolders({ HOME: home }).data, 'cli')
       await mkdir(dir, { recursive: true })
       const db = new DatabaseSync(path.join(dir, 'sessions.db'))
       db.exec('CREATE TABLE sessions (id TEXT, working_directory TEXT, created_at INTEGER)')

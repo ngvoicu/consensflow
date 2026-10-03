@@ -338,6 +338,7 @@ fn validate_open_request(request: &OpenRequest) -> Result<PaneKey, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::arbiter::EnterTiming;
     #[cfg(unix)]
     use std::sync::mpsc;

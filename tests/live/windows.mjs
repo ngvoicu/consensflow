@@ -12,7 +12,10 @@
  *   npm run windows -- --host <ssh host> -- npm run eval -- --scenario round-trip --chief devin --staff devin
  *
  * --build installs the packages and builds the page and the pane host first:
- * on a fresh machine, and after any change to the Rust. The machine needs an
+ * on a fresh machine, and after any change to the Rust. --in runs the
+ * command in a folder of the copy (cargo reads app/src-tauri/.cargo there).
+ *
+ *   npm run windows -- --host <ssh host> --in app/src-tauri -- cargo test --features test-helper The machine needs an
  * OpenSSH server, Node, Rust, and Windows' own tar.exe; the folder is
  * %USERPROFILE%\consensflow-build unless --dir names another under it. Run
  * one at a time: a live run's windows are the machine's.
@@ -31,12 +34,16 @@ const { values, positionals } = parseArgs({
     host: { type: 'string' },
     build: { type: 'boolean', default: false },
     dir: { type: 'string', default: 'consensflow-build' },
+    in: { type: 'string', default: '.' },
   },
 })
 if (!values.host || positionals.length === 0) {
   throw new Error('usage: npm run windows -- --host <ssh host> [--build] -- <command>')
 }
 if (!/^[\w.-]+$/.test(values.dir)) throw new Error(`--dir is a folder name: ${values.dir}`)
+if (!/^[\w./-]+$/.test(values.in) || values.in.split('/').includes('..')) {
+  throw new Error(`--in is a folder of the copy: ${values.in}`)
+}
 
 /** The list of what went over, kept beside it there, so the next run knows what left the tree. */
 const SYNCED = '.synced-files'
@@ -121,6 +128,7 @@ foreach ($step in @(${steps.map((step) => `'${step}'`).join(', ')})) {
   cmd /c "$step 2>&1"
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
+Set-Location (Join-Path $dir '${values.in}')
 $run = Join-Path $dir '.windows-run.cmd'
 [IO.File]::WriteAllText($run, "@echo off\r\n" + '${command.replace(/'/g, "''")}' + "\r\n")
 cmd /c "$run 2>&1"
