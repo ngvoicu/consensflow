@@ -90,6 +90,17 @@ describe('an eval run’s plan', () => {
       '/opt/homebrew/bin/codex',
     )
     assert.throws(() => realOnPath('claude', '/usr/bin', () => false), /claude is not on PATH/)
+    // Windows: semicolons, and the command's own extension.
+    const windows = new Set(['C:\\Users\\a\\.local\\bin\\claude.exe'])
+    assert.equal(
+      realOnPath(
+        'claude',
+        'C:\\Users\\a\\.consensflow-candidate\\evals\\bin;C:\\Users\\a\\.local\\bin\\',
+        (f) => windows.has(f),
+        'win32',
+      ),
+      'C:\\Users\\a\\.local\\bin\\claude.exe',
+    )
   })
 
   it('switches off every Codex MCP server with a harmless, disabled definition', () => {

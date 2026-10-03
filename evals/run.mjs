@@ -107,7 +107,17 @@ const lead = {
  * computer-use servers the same day. A scripted run must reach none of them.
  */
 const ISOLATED_BIN = join(H, '.consensflow-candidate', 'evals', 'bin')
+const WINDOWS = process.platform === 'win32'
 const wrapper = (name, real, flags) => {
+  if (WINDOWS) {
+    // cmd's own: the real program with these flags, then every argument it was given.
+    const args = [real, ...flags].map((arg) => `"${arg.replace(/"/g, '\\"')}"`).join(' ')
+    writeFileSync(
+      join(ISOLATED_BIN, `${name}.cmd`),
+      `@echo off\r\nREM Written by evals/run.mjs: eval windows reach no MCP server and no browser.\r\n${args} %*\r\n`,
+    )
+    return
+  }
   const file = join(ISOLATED_BIN, name)
   const args = [real, ...flags].map((arg) => JSON.stringify(arg)).join(' ')
   writeFileSync(
@@ -116,15 +126,21 @@ const wrapper = (name, real, flags) => {
   )
   chmodSync(file, 0o755)
 }
+/** Whether a harness has a window in this run, as the chief or on the staff. */
+const inRun = (name) => chief === name || staffHarnesses.includes(name)
 // Fresh each run: a wrapper written for another chief must not outlive its run.
 rmSync(ISOLATED_BIN, { recursive: true, force: true })
 mkdirSync(ISOLATED_BIN, { recursive: true })
 // The chief's effort goes first; a member's own, later on its command line, wins.
-wrapper('claude', realOnPath('claude', process.env.PATH ?? ''), [
-  '--strict-mcp-config',
-  '--no-chrome',
-  ...(chief === 'claude' ? ['--effort', values.effort] : []),
-])
+if (inRun('claude')) {
+  wrapper('claude', realOnPath('claude', process.env.PATH ?? ''), [
+    '--strict-mcp-config',
+    '--no-chrome',
+    ...(chief === 'claude' ? ['--effort', values.effort] : []),
+  ])
+}
+if (chief === 'pi' && WINDOWS)
+  throw new Error("the Pi chief's wrapper is sh: run Pi chiefs on the Mac")
 if (chief === 'pi') {
   // The chief's model and thinking level, for a window only (Pi's own
   // subcommands take neither) and only where the window names none: a
@@ -149,7 +165,7 @@ if (chief === 'pi') {
   )
   chmodSync(file, 0o755)
 }
-const realCodex = realOnPath('codex', process.env.PATH ?? '')
+const realCodex = inRun('codex') ? realOnPath('codex', process.env.PATH ?? '') : null
 // Codex also opens on an update prompt whenever a newer release exists
 // (seen 2026-09-26 with 0.157.0 out), and a chief started without a first
 // message waits on it for good: the eval turns the startup check off.
@@ -158,21 +174,54 @@ const realCodex = realOnPath('codex', process.env.PATH ?? '')
 // variables for Codex's commands and isolates members; the eval adds only
 // what is eval-only: the chief isolated too, and the model.
 const codexModel = chief === 'codex' ? chiefSetup.model : HARNESSES.codex.model
-wrapper(
-  'codex',
-  realCodex,
-  ['-c', `model=${JSON.stringify(codexModel)}`]
-    .concat(
-      chief === 'codex' ? ['-c', `model_reasoning_effort=${JSON.stringify(values.effort)}`] : [],
-    )
-    .concat(
-      codexIsolation(
-        JSON.parse(
-          execFileSync(realCodex, ['mcp', 'list', '--json'], { encoding: 'utf8', timeout: 30_000 }),
+if (realCodex !== null) {
+  wrapper(
+    'codex',
+    realCodex,
+    ['-c', `model=${JSON.stringify(codexModel)}`]
+      .concat(
+        chief === 'codex' ? ['-c', `model_reasoning_effort=${JSON.stringify(values.effort)}`] : [],
+      )
+      .concat(
+        codexIsolation(
+          JSON.parse(
+            execFileSync(realCodex, ['mcp', 'list', '--json'], {
+              encoding: 'utf8',
+              timeout: 30_000,
+            }),
+          ),
         ),
       ),
-    ),
-)
+  )
+}
+
+/**
+ * What a Windows program needs from its environment besides PATH: the
+ * system's folders, the user's, and where Devin keeps its settings and
+ * sessions (APPDATA).
+ */
+const WINDOWS_ENV = [
+  'SystemRoot',
+  'SystemDrive',
+  'windir',
+  'ComSpec',
+  'PATHEXT',
+  'USERPROFILE',
+  'USERNAME',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'TEMP',
+  'TMP',
+  'ProgramData',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+  'CommonProgramFiles',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'NUMBER_OF_PROCESSORS',
+  'PROCESSOR_ARCHITECTURE',
+  'OS',
+]
 
 const ENV = {
   HOME: H,
@@ -180,18 +229,28 @@ const ENV = {
   LOGNAME: process.env.USER,
   LANG: 'en_US.UTF-8',
   TERM: 'xterm-256color',
-  PATH: [
-    ISOLATED_BIN,
-    join(H, '.local', 'bin'),
-    join(H, '.opencode', 'bin'),
-    join(H, '.codex', 'bin'),
-    join(H, '.pi', 'bin'),
-    '/opt/homebrew/bin',
-    '/usr/bin',
-    '/bin',
-    '/usr/sbin',
-    '/sbin',
-  ].join(':'),
+  PATH: WINDOWS
+    ? [ISOLATED_BIN, process.env.PATH ?? ''].join(';')
+    : [
+        ISOLATED_BIN,
+        join(H, '.local', 'bin'),
+        join(H, '.opencode', 'bin'),
+        join(H, '.codex', 'bin'),
+        join(H, '.pi', 'bin'),
+        '/opt/homebrew/bin',
+        '/usr/bin',
+        '/bin',
+        '/usr/sbin',
+        '/sbin',
+      ].join(':'),
+  ...(WINDOWS
+    ? Object.fromEntries(
+        WINDOWS_ENV.filter((name) => process.env[name] !== undefined).map((name) => [
+          name,
+          process.env[name],
+        ]),
+      )
+    : {}),
   // Unset on purpose (null removes the harness's sandbox default): with it set,
   // Claude finds no completed onboarding and opens on the first-run dialog.
   CLAUDE_CONFIG_DIR: null,

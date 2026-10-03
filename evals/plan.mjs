@@ -135,15 +135,26 @@ export function terminalAnswer(scenario, text) {
  * The real `name` (claude, codex) on this PATH, skipping the eval's own
  * wrapper directory, so a wrapper can exec it by absolute path.
  */
-export function realOnPath(name, pathVariable, exists = defaultExists) {
-  for (const dir of pathVariable.split(':')) {
-    if (dir === '' || dir.endsWith('/evals/bin')) continue
+export function realOnPath(
+  name,
+  pathVariable,
+  exists = defaultExists,
+  platform = process.platform,
+) {
+  // Windows lists PATH with semicolons, and a command is a file with its kind's extension.
+  const windows = platform === 'win32'
+  const files = windows ? [`${name}.exe`, `${name}.cmd`] : [name]
+  for (const dir of pathVariable.split(windows ? ';' : ':')) {
+    const plain = dir.replace(/\\/g, '/').replace(/\/$/, '')
+    if (plain === '' || plain.endsWith('/evals/bin')) continue
     // A terminal app's shims come first on PATH inside its panes (cmux has its
     // own claude) and start nothing outside it: an eval window on one printed
     // nothing for five minutes (2026-10-01).
-    if (dir.includes('/cmux-cli-shims/') || dir.includes('/cmux.app/')) continue
-    const candidate = `${dir.replace(/\/$/, '')}/${name}`
-    if (exists(candidate)) return candidate
+    if (plain.includes('/cmux-cli-shims/') || plain.includes('/cmux.app/')) continue
+    for (const file of files) {
+      const candidate = windows ? `${dir.replace(/[\\/]$/, '')}\\${file}` : `${plain}/${file}`
+      if (exists(candidate)) return candidate
+    }
   }
   throw new Error(`${name} is not on PATH`)
 }
