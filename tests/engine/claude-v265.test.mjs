@@ -32,7 +32,7 @@ test('Claude 2.1.265 native direct and tool turns settle at their root finalizer
     assert.equal(result.unknown, undefined, result.reason)
     assert.equal(result.version, undefined)
     assert.equal(result.items.at(-1).text, text)
-    assert.equal(result.items.at(-1).settled, true)
+    assert.equal(result.items.at(-1).complete, true)
     assert.equal(result.settlement.state, 'settled')
   }
 })
