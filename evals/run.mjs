@@ -30,8 +30,7 @@ import { trustForClaude } from '../tests/live/trust-claude.mjs'
 import { askingTurnEnd, bareMetrics, findSession } from './bare.mjs'
 import {
   changed,
-  chiefTurnEnd,
-  countQuestions,
+  chiefOpenQuestion,
   devinChiefQuestions,
   measure,
   mechanics,
@@ -458,16 +457,16 @@ async function run(index) {
         lastChange = Date.now()
         continue
       }
-      // A chief that ended its turn asking in its terminal hears the owner
-      // there: its questions answered from the scenario's answers, once per
-      // turn, the same way in every arm.
+      // A chief that asked in its terminal hears the owner there once the
+      // board is quiet: its newest question since the owner last typed
+      // answered from the scenario's answers, once, the same way in every arm.
       if (
         !busy &&
         terminalReplies < MAX_TERMINAL_REPLIES &&
         Date.now() - lastChange > FOLLOW_UP_AFTER_MS
       ) {
-        const end = chiefTurnEnd(file)
-        if (end !== undefined && !repliedTo.has(end.id) && countQuestions(end.text) > 0) {
+        const end = chiefOpenQuestion(file)
+        if (end !== undefined && !repliedTo.has(end.id)) {
           repliedTo.add(end.id)
           terminalReplies += 1
           const reply = terminalAnswer(scenario, end.text)

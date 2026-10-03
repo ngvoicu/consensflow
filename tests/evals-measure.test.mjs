@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { describe, it } from 'node:test'
 import {
   changed,
-  chiefTurnEnd,
+  chiefOpenQuestion,
   countQuestions,
   devinChiefQuestions,
   measure,
@@ -609,8 +609,8 @@ describe('the question trip', () => {
   })
 })
 
-describe("reading the chief's last turn while the daemon runs", () => {
-  it('reads it from a copy: the running ledger holds its file exclusively', async () => {
+describe("the chief's open question, read while the daemon runs", () => {
+  it('is its newest asking turn end since the owner typed, read from a copy of the ledger', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-turn-'))
     const file = path.join(dir, 'consensflow.db')
     const ledger = openLedger(file)
@@ -618,17 +618,34 @@ describe("reading the chief's last turn while the daemon runs", () => {
       const project = ledger.createProject({
         directory: '/work/site',
         name: 'site',
-        chief: { harness: 'claude-code' },
+        chief: { harness: 'codex' },
       })
       const chief = ledger.project(project.id).participants.find((p) => p.role === 'chief')
-      assert.equal(chiefTurnEnd(file), undefined, 'no turn yet')
-      const conversation = ledger.startConversation(chief.id, { harness: 'claude-code' })
-      ledger.copyTranscript(conversation.id, [
-        { id: 'a1', role: 'assistant', text: 'Reading?', complete: false, at: null },
-        { id: 'a2', role: 'assistant', text: 'Keep the old document?', complete: true, at: null },
-      ])
+      assert.equal(chiefOpenQuestion(file), undefined, 'no turn yet')
+      const conversation = ledger.startConversation(chief.id, { harness: 'codex' })
+      const said = (id, role, text, complete = true) => ({ id, role, text, complete, at: null })
+      // The chief asks while its tasks run; a result arrives, and its next
+      // turn asks nothing: the question is still open.
+      const record = [
+        said('u1', 'user', 'Put three tasks on the board, then ask me the report name.'),
+        said('a1', 'assistant', 'Reading?', false),
+        said('a2', 'assistant', 'Tasks are out. What is the final report called?'),
+        said('u2', 'user', '[ConsensFlow m-7 · T-1 · result from @worker]\nDone.'),
+        said('a3', 'assistant', 'T-1 is in; waiting for the rest.'),
+      ]
+      ledger.copyTranscript(conversation.id, record)
       // The ledger is still open, as the daemon's is during a run.
-      assert.deepEqual({ ...chiefTurnEnd(file) }, { id: 'a2', text: 'Keep the old document?' })
+      assert.deepEqual(
+        { ...chiefOpenQuestion(file) },
+        { id: 'a2', text: 'Tasks are out. What is the final report called?' },
+      )
+      // The daemon copies the whole record each time, and keeps what is new.
+      record.push(
+        said('u3', 'user', 'DELTA-5530.'),
+        said('a4', 'assistant', 'Noted; the note is sent.'),
+      )
+      ledger.copyTranscript(conversation.id, record)
+      assert.equal(chiefOpenQuestion(file), undefined, 'the owner answered')
     } finally {
       ledger.close()
       await rm(dir, { recursive: true, force: true })

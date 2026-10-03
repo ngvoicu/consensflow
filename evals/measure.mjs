@@ -424,18 +424,30 @@ export function chiefWordsNow(file) {
   )
 }
 
-export function chiefTurnEnd(file) {
-  return onCopy(file, (db) =>
-    db
+/**
+ * The chief's newest words that ended a turn with a question since the owner
+ * last typed into its window (ConsensFlow's own messages carry their header),
+ * or undefined. A question asked while its tasks ran stays open through
+ * later turns that ask nothing: a Codex chief asked the owner one, then
+ * waited for the answer to write its note (Windows, 2026-10-03).
+ */
+export function chiefOpenQuestion(file) {
+  return onCopy(file, (db) => {
+    let open
+    for (const item of db
       .prepare(
-        `SELECT t.item_id AS id, t.text FROM transcript t
+        `SELECT t.item_id AS id, t.role, t.text, t.complete FROM transcript t
          JOIN conversation c ON c.id = t.conversation_id
          JOIN participant p ON p.id = c.participant_id
-         WHERE p.role = 'chief' AND t.role = 'assistant' AND t.complete = 1
-         ORDER BY t.conversation_id DESC, t.seq DESC LIMIT 1`,
+         WHERE p.role = 'chief' ORDER BY t.conversation_id, t.seq`,
       )
-      .get(),
-  )
+      .all()) {
+      if (item.role === 'user' && !item.text.startsWith('[ConsensFlow m-')) open = undefined
+      else if (item.role === 'assistant' && item.complete === 1 && countQuestions(item.text) > 0)
+        open = { id: item.id, text: item.text }
+    }
+    return open
+  })
 }
 
 /**
