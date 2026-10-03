@@ -20,7 +20,8 @@ export const HARNESSES = {
   // OpenRouter only since 2026-09-28: OpenCode Go is out of ConsensFlow.
   pi: { kind: 'pi', model: 'openrouter/deepseek/deepseek-v4.1-flash' },
   opencode: { kind: 'opencode', model: 'openrouter/deepseek/deepseek-v4.1-flash' },
-  devin: { kind: 'devin', model: 'swe-1-6-slow' },
+  // SWE-1.6 Slow, the free plan's, is not on Devin Pro (2026-10-03); SWE-2 is free there.
+  devin: { kind: 'devin', model: 'swe-2-medium' },
 }
 
 /** The roles a staff harness fills; two workers, so parallel work has somewhere to run. */
