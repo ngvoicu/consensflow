@@ -2,19 +2,115 @@
  * What a harness's own record says about its quota, in the dispatcher's
  * terms: `{state, usedPercent?, resetsAt?}`, or null when the record says
  * nothing. Codex reports its usage ahead of time; Claude Code, OpenCode, Pi
- * and Devin only say so once a request is refused (a 429), so for them the
+ * and Devin only say so once a request is refused (a 429, or a 402 for spent
+ * credit), so for them the
  * daemon learns at the first refusal. OpenCode says it only in its window's
  * live status, never in its store, since it waits to retry the request.
  */
 
 const LOW_PERCENT = 95
-const UNITS = { second: 1_000, minute: 60_000, hour: 3_600_000, day: 86_400_000 }
+/** A reset's units by their first letter: "2 days", "3hr 4min", "35 minutes", "4h 30m". */
+const UNIT_MS = { w: 604_800_000, d: 86_400_000, h: 3_600_000, m: 60_000, s: 1_000 }
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 
-/** "Resets in 3 days", "reset in 35 minutes": the time that names, from `atMs`; null otherwise. */
-function relativeReset(text, atMs) {
-  const match = /resets?\s+in\s+(\d+)\s*(second|minute|hour|day)s?/i.exec(String(text ?? ''))
-  if (match === null || !Number.isFinite(atMs)) return null
-  return new Date(atMs + Number(match[1]) * UNITS[match[2].toLowerCase()]).toISOString()
+/** "Resets in 3 days", "Resets in 3hr 4min": the time that names, from `atMs`; null otherwise. */
+function resetIn(text, atMs) {
+  const span = /resets?\s+in\s+((?:\d+\s*[a-z]+[\s,]*(?:and\s+)?)+)/i.exec(text)
+  if (span === null) return null
+  let ms = 0
+  for (const [, count, unit] of span[1].matchAll(/(\d+)\s*([a-z]+)/gi)) {
+    const each = UNIT_MS[unit[0].toLowerCase()]
+    if (each === undefined) return null
+    ms += Number(count) * each
+  }
+  return new Date(atMs + ms).toISOString()
+}
+
+/** The instant a wall clock in `timeZone` reads that time; Date.UTC's overflow carries a day past the month's end. */
+function zonedTime(year, month, day, hour, minute, timeZone) {
+  const wanted = Date.UTC(year, month, day, hour, minute)
+  const shown = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+  })
+  let instant = wanted
+  // Twice: once for the zone's offset, once more if that guess crossed a change of it.
+  for (let pass = 0; pass < 2; pass += 1) {
+    const part = Object.fromEntries(
+      shown.formatToParts(instant).map(({ type, value }) => [type, Number(value)]),
+    )
+    instant += wanted - Date.UTC(part.year, part.month - 1, part.day, part.hour, part.minute)
+  }
+  return instant
+}
+
+/**
+ * Claude's own words, "resets 7:30pm (Europe/Bucharest)" or "resets Sep 29
+ * at 11am (Europe/Bucharest)": the next time that wall clock reads so, after
+ * `atMs`, in the zone it names (this machine's when it names none); null
+ * when the words are not of that shape or the zone is unknown.
+ */
+function resetAt(text, atMs) {
+  const match =
+    /resets?\s+(?:([a-z]{3})[a-z]*\s+(\d{1,2})\s+at\s+)?(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b(?:\s*\(([^)]+)\))?/i.exec(
+      text,
+    )
+  if (match === null) return null
+  const [, monthName, dayOfMonth, hourText, minuteText, meridiem, zone] = match
+  const hour = (Number(hourText) % 12) + (meridiem.toLowerCase() === 'pm' ? 12 : 0)
+  const minute = Number(minuteText ?? 0)
+  try {
+    const timeZone = zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+    const today = Object.fromEntries(
+      new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: 'numeric', day: 'numeric' })
+        .formatToParts(atMs)
+        .map(({ type, value }) => [type, Number(value)]),
+    )
+    if (monthName !== undefined) {
+      const month = MONTHS.indexOf(monthName.toLowerCase())
+      if (month === -1) return null
+      let at = zonedTime(today.year, month, Number(dayOfMonth), hour, minute, timeZone)
+      // A date gone by more than a day is next year's.
+      if (at < atMs - UNIT_MS.d) at = zonedTime(today.year + 1, month, Number(dayOfMonth), hour, minute, timeZone)
+      return new Date(at).toISOString()
+    }
+    let at = zonedTime(today.year, today.month - 1, today.day, hour, minute, timeZone)
+    if (at <= atMs) at = zonedTime(today.year, today.month - 1, today.day + 1, hour, minute, timeZone)
+    return new Date(at).toISOString()
+  } catch {
+    return null
+  }
+}
+
+/** When a refusal says the quota comes back, from `atMs`: in a span, or at a time; null when it does not say. */
+function namedReset(text, atMs) {
+  if (!Number.isFinite(atMs)) return null
+  const words = String(text ?? '')
+  return resetIn(words, atMs) ?? resetAt(words, atMs)
+}
+
+/**
+ * The statuses that mean an account takes no more for now: a rate or usage
+ * limit (429), or its credit spent (402, OpenRouter's "requires more
+ * credits").
+ */
+const QUOTA_STATUSES = new Set([402, 429])
+
+/** Whether a provider's status is a refusal for quota. */
+export const quotaStatus = (status) => QUOTA_STATUSES.has(Number(status))
+
+/**
+ * Whether a provider's error text opens on a quota status: "429: …", or
+ * "OpenAI API error (429): …", Pi's two shapes (seen on Pi, 2026-09).
+ */
+export function refusedForQuota(text) {
+  const match = /^(?:[^(:\n]*\()?(\d{3})\b/.exec(String(text ?? ''))
+  return match !== null && quotaStatus(match[1])
 }
 
 /**
@@ -26,7 +122,7 @@ export function exhaustedQuota(text, atMs) {
   return {
     state: 'exhausted',
     at: Number.isFinite(atMs) ? new Date(atMs).toISOString() : null,
-    resetsAt: relativeReset(text, atMs),
+    resetsAt: namedReset(text, atMs),
   }
 }
 

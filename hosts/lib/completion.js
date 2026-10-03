@@ -13,7 +13,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { devinFolders, opencodeStores, piSessionDir } from '../../src/harnesses.js'
-import { codexQuota, exhaustedQuota } from './quota.js'
+import { codexQuota, exhaustedQuota, quotaStatus, refusedForQuota } from './quota.js'
 
 /** What a harness's own record of a conversation says, read whole. */
 export async function answers(kind, sessionId, env, options = {}) {
@@ -1438,7 +1438,7 @@ function piParser(sessionId) {
       turnOpen = true
       failed = true
       failure = String(message.errorMessage ?? 'provider error')
-      if (/^429\b/.test(failure)) {
+      if (refusedForQuota(failure)) {
         quota = exhaustedQuota(failure, Number(message.timestamp))
       }
       terminal = { complete: false, item }
@@ -1798,7 +1798,7 @@ function opencodeAnswer(read, data) {
     if (isFailure) {
       result.failed = true
       result.failure = String(message.error?.data?.message ?? visibleText(message.error))
-      if (message.error?.data?.statusCode === 429) {
+      if (quotaStatus(message.error?.data?.statusCode)) {
         result.quota = exhaustedQuota(result.failure, Number(message.time?.completed ?? at))
       }
     }

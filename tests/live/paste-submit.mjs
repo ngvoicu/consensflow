@@ -38,6 +38,7 @@ import {
 import { answers } from '../../hosts/lib/completion.js'
 import { interactiveStart } from '../../hosts/lib/windows.js'
 import { consoleText, recordState, windowText } from '../../src/adapters/shared.js'
+import { prepareClaudeSettings } from '../../src/claude-install.js'
 import { onWindows, paneArgv, runnable } from '../../src/harnesses.js'
 import { startIntegration } from '../integration/harness.mjs'
 import { trustForClaude } from './trust-claude.mjs'
@@ -99,9 +100,20 @@ const lastLines = (text) =>
     .slice(-8)
     .join(' ⏎ ')
 
-/** The extra flags a scripted window needs: no MCP servers, connectors or browser. */
-function isolation(name, executable) {
-  if (name === 'claude') return ['--strict-mcp-config', '--no-chrome']
+/**
+ * The extra flags a scripted window needs: no MCP servers, connectors or
+ * browser; and Claude's settings file as the app writes it for each launch,
+ * which skips the full-permission warning (here, its home is the folder's own).
+ */
+async function isolation(name, executable) {
+  if (name === 'claude') {
+    const home = { ...RECORD_ENV, CONSENSFLOW_HOME: join(WORKSPACE, '.consensflow') }
+    return [
+      ...(await prepareClaudeSettings(home, 'paste', { boardQuestions: false })),
+      '--strict-mcp-config',
+      '--no-chrome',
+    ]
+  }
   if (name !== 'codex') return []
   const list = runnable(executable, ['mcp', 'list', '--json'])
   return [
@@ -146,7 +158,7 @@ try {
     const opened = await app.request('pane.open', {
       ...pane,
       cwd: WORKSPACE,
-      argv: paneArgv([executable, ...start.args, ...isolation(name, executable)], ENV),
+      argv: paneArgv([executable, ...(await isolation(name, executable)), ...start.args], ENV),
       env: start.env,
       dropEnv: start.dropEnv,
       size: { rows: 40, cols: 120 },

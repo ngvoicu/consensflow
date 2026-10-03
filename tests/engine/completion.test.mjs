@@ -1554,6 +1554,18 @@ test('quota/pi: a 429 names its reset in the message; a later stop clears it', a
     return cut
   })
   assert.equal((await answers('pi', session, other.env)).quota, null, 'a 500 is not quota')
+  const named = await stage((records) => {
+    const cut = upToError(records)
+    cut.at(-1).message.errorMessage =
+      'OpenAI API error (429): {"type":"GoUsageLimitError","message":"Weekly usage limit reached. Resets in 2 days."}'
+    cut.at(-1).message.timestamp = Date.parse('2026-09-19T10:00:00.000Z')
+    return cut
+  })
+  assert.deepEqual(
+    (await answers('pi', session, named.env)).quota,
+    { state: 'exhausted', at: '2026-09-19T10:00:00.000Z', resetsAt: '2026-09-21T10:00:00.000Z' },
+    "Pi's other shape of a 429",
+  )
   const retried = await stage((records) => records)
   assert.equal(
     (await answers('pi', session, retried.env)).quota,
@@ -1590,6 +1602,22 @@ test('quota/opencode: a 429 on the message is exhaustion; a completed turn after
     at: new Date(completedAt).toISOString(),
     resetsAt: new Date(completedAt + 86_400_000).toISOString(),
   })
+  const spent = await answers(
+    'opencode',
+    sessionId,
+    await stageOpencode('opencode/completion-window.json', {
+      snapshot: 'after',
+      mutate: ({ messages }) => {
+        const data = JSON.parse(messages[0].data)
+        data.error = {
+          name: 'APIError',
+          data: { message: 'This request requires more credits.', statusCode: 402 },
+        }
+        messages[0].data = JSON.stringify(data)
+      },
+    }),
+  )
+  assert.equal(spent.quota?.state, 'exhausted', "OpenRouter's spent credit is quota too")
   const fine = await answers(
     'opencode',
     sessionId,
