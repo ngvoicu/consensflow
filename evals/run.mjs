@@ -23,6 +23,7 @@ import { answers } from '../hosts/lib/completion.js'
 import { interactiveStart } from '../hosts/lib/windows.js'
 import { recordState } from '../src/adapters/shared.js'
 import { startIntegration } from '../tests/integration/harness.mjs'
+import { trustForClaude } from '../tests/live/trust-claude.mjs'
 import { askingTurnEnd, bareMetrics, findSession } from './bare.mjs'
 import { changed, chiefTurnEnd, countQuestions, measure, mechanics, verdict } from './measure.mjs'
 import {
@@ -38,7 +39,6 @@ import {
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const EDITOR = join(HERE, '..', 'tests', 'live', 'core-live-editor.mjs')
-const TRUST = join(HERE, '..', 'tests', 'live', 'trust-claude-folder.py')
 const H = process.env.HOME
 // One fixed workspace, trusted once per run: Claude asks about an unknown folder.
 const WORKSPACE = join(H, '.consensflow-candidate', 'evals', 'workspace')
@@ -303,17 +303,20 @@ function freshWorkspace() {
     force: true,
   })
   cpSync(join(HERE, 'fixtures', scenario.fixture), WORKSPACE, { recursive: true })
-  if (chief === 'claude' || staffHarnesses.includes('claude')) {
-    process.stdout.write(
-      `trust: ${execFileSync('python3', [TRUST, WORKSPACE], { encoding: 'utf8', env: { ...process.env, HOME: H } }).trim()}\n`,
-    )
-  }
+}
+
+/** The fresh workspace trusted for Claude, in a pane of the run's own host, when Claude is in the run. */
+async function trustWorkspace(app) {
+  if (!inRun('claude')) return
+  const trust = await trustForClaude(app, WORKSPACE, realOnPath('claude', process.env.PATH ?? ''))
+  process.stdout.write(`trust: ${trust}\n`)
 }
 
 async function run(index) {
   const started = Date.now()
   freshWorkspace()
   const app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
+  await trustWorkspace(app)
   const log = []
   const note = (line) => {
     const at = Math.round((Date.now() - started) / 1000)
@@ -597,6 +600,7 @@ async function runBare(index) {
   const started = Date.now()
   freshWorkspace()
   const app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
+  await trustWorkspace(app)
   const log = []
   const note = (line) => {
     const at = Math.round((Date.now() - started) / 1000)

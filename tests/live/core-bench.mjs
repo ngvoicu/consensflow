@@ -18,11 +18,11 @@
  *
  *   npm run bench:core [-- [--chief claude|opencode] opencode pi devin claude codex]
  */
-import { execFileSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startIntegration } from '../integration/harness.mjs'
+import { trustForClaude } from './trust-claude.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const EDITOR = join(HERE, 'core-live-editor.mjs')
@@ -131,9 +131,6 @@ const BRIEF =
   'nothing more. When a ConsensFlow message arrives, reply with one line that names it ' +
   'and run no tools unless the message tells you to run a command.\n'
 for (const name of ['AGENTS.md', 'CLAUDE.md']) writeFileSync(join(WORKSPACE, name), BRIEF)
-process.stdout.write(
-  `trust: ${execFileSync('python3', [join(HERE, 'trust-claude-folder.py'), WORKSPACE], { encoding: 'utf8' }).trim()}\n`,
-)
 
 const writeRoster = (home) =>
   writeFileSync(
@@ -154,6 +151,9 @@ const writeRoster = (home) =>
   )
 
 let app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
+process.stdout.write(
+  `trust: ${await trustForClaude(app, WORKSPACE, join(H, '.local', 'bin', 'claude'))}\n`,
+)
 const root = app.root
 try {
   writeRoster(app.env.CONSENSFLOW_HOME)
