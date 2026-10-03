@@ -438,14 +438,27 @@ export class Windows {
   /**
    * A session's window closes with its task; its conversation stays until the
    * session ends (the ledger ends both together), so a follow-up given with
-   * `--after` comes back on the same conversation. A window already closing
-   * had its kill.
+   * `--after` comes back on the same conversation. Says whether the window
+   * goes: one already closing had its kill, and one whose kill the pane host
+   * refused stays open, not closing, for the next close to try again.
    */
   async retire(runtime) {
-    if (runtime.window.retiring) return
+    if (runtime.window.retiring) return true
     runtime.window.retiring = true
-    await this.#host.kill(runtime.window.pane).catch(() => {})
+    const killed = await this.#kill(runtime, runtime.window.pane)
+    if (!killed) runtime.window.retiring = false
     this.#changed()
+    return killed
+  }
+
+  /** Kills a window; says whether the pane host took the kill, and traces why not. */
+  async #kill(runtime, pane) {
+    const reply = await this.#host
+      .kill(pane)
+      .catch((cause) => ({ ok: false, error: cause.message }))
+    if (reply?.ok === true) return true
+    this.#traceWindow(runtime, 'window.kill_failed', { error: reply?.error ?? null })
+    return false
   }
 
   /**
@@ -471,18 +484,21 @@ export class Windows {
    * chief that could not take its first message): the exit settles what the
    * window was doing, as any exit does, but a chief's does not close its
    * project. It is the dispatcher's whether its event came already or comes
-   * later. A window already going with its work had its kill.
+   * later. A window already going with its work had its kill. Says whether
+   * the window goes: one whose kill the pane host refused stays as it was,
+   * and no exit is made up for it.
    */
   async closeOwn(runtime, pane) {
     runtime.window.ownExit = true
     try {
-      if (!runtime.window.retiring) await this.#host.kill(pane).catch(() => {})
+      if (!runtime.window.retiring && !(await this.#kill(runtime, pane))) return false
       if (
         runtime.window.pane?.id === pane.id &&
         runtime.window.pane.generation === pane.generation
       ) {
         await this.#paneExited(pane)
       }
+      return true
     } finally {
       runtime.window.ownExit = false
     }

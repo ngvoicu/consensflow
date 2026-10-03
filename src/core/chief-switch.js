@@ -112,7 +112,13 @@ export class ChiefSwitch {
       runtime.delivery.delivering = null
       if (delivering !== null)
         this.#deliveries.giveBack(delivering, 'the chief was switched before it arrived')
-      await this.#windows.closeOwn(runtime, pane)
+      if (!(await this.#windows.closeOwn(runtime, pane))) {
+        // The old window would not close: the switch waits, as one asked
+        // for after a turn does, and the chief's next step tries it again.
+        runtime.pendingSwitch = { harness, agent, note: asked }
+        this.#changed()
+        return
+      }
     }
     if (this.#forgotten(runtime)) return
     // A handoff still on its way is an earlier switch's: this one writes its

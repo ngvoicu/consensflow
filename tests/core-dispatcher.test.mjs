@@ -155,6 +155,8 @@ function fakeHost() {
     killed: [],
     requests: [],
     refuse: false,
+    // A kill the pane host refuses: the window stays, and no exit comes.
+    refuseKills: false,
     hold: null,
     holdExits: false,
     async request(op, body) {
@@ -173,6 +175,7 @@ function fakeHost() {
     },
     async kill(pane) {
       host.killed.push(pane)
+      if (host.refuseKills) return { ok: false, error: 'refused by the test' }
       // A killed process is gone before the next pass, so its exit lands at
       // once; a test that wants the gap between the two holds it and sends it.
       if (!host.holdExits) {
@@ -1460,6 +1463,38 @@ describe('the dispatcher', () => {
     })
   })
 
+  it('names the window that would not close when a project closes, and closes it on the next Close', async () => {
+    const entries = []
+    await setup(
+      async (context) => {
+        const { project, id } = await withStaff(context)
+        await context.dispatcher.pass()
+        const chief = context.host.last('chief')
+        context.host.refuseKills = true
+        await assert.rejects(
+          context.dispatcher.closeProject(project.id),
+          /^Error: @chief's window would not close: resume the project and close it again$/,
+        )
+        assert.equal(context.ledger.project(project.id).state, 'suspended')
+        assert.deepEqual(context.dispatcher.pane(id('chief')), {
+          id: chief.id,
+          generation: chief.generation,
+        })
+        assert.deepEqual(
+          entries
+            .filter((entry) => entry.kind === 'window.kill_failed')
+            .map((entry) => [entry.participant, entry.error]),
+          [['chief', 'refused by the test']],
+        )
+        context.host.refuseKills = false
+        await context.dispatcher.closeProject(project.id)
+        assert.equal(context.dispatcher.pane(id('chief')), null, 'no exit was made up before')
+        assert.equal(context.host.killed.length, 2)
+      },
+      { trace: (entry) => entries.push(entry) },
+    )
+  })
+
   it('deletes a closed project for good, refuses an open one, and leaves one line in the trace', async () => {
     const entries = []
     const forgotten = []
@@ -1848,6 +1883,27 @@ describe('the dispatcher assigns open tasks', () => {
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.match(task(1).assignee, /^diana-/)
+    })
+  })
+
+  it('keeps a task with its window when the window would not stop, and reassigns it once it does', async () => {
+    await setup(async (context) => {
+      const { open, task } = await withTiers(context)
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const holder = task(1).assignee
+      context.host.refuseKills = true
+      await assert.rejects(
+        context.dispatcher.reassignTask(1, 1),
+        new RegExp(`@${holder}'s window could not be stopped, so T-1 stays with it: try again`),
+      )
+      assert.deepEqual([task(1).state, task(1).assignee], ['working', holder])
+      // The refusal left no close in progress: asked again, the window is killed again.
+      context.host.refuseKills = false
+      await context.dispatcher.reassignTask(1, 1)
+      assert.equal(context.host.killed.length, 2)
+      assert.deepEqual([task(1).state, task(1).assignee], ['open', null])
     })
   })
 
@@ -2468,6 +2524,25 @@ describe('one task per member session', () => {
       await closing
       const pane = context.host.last('zeus-amber-pine')
       assert.deepEqual(context.host.killed.at(-1), { id: pane.id, generation: pane.generation })
+    })
+  })
+
+  it('says so when a window the human closes would not close, and keeps it open until it does', async () => {
+    await setup(async (context) => {
+      const { project } = await finished(context)
+      await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
+      const killed = context.host.killed.length
+      context.host.refuseKills = true
+      await assert.rejects(
+        context.dispatcher.closeWindow(project.id, 'zeus-amber-pine'),
+        /@zeus-amber-pine's window could not be closed: try again/,
+      )
+      context.host.refuseKills = false
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(context.host.killed.length, killed + 1, "still the human's: no pass closes it")
+      await context.dispatcher.closeWindow(project.id, 'zeus-amber-pine')
+      assert.equal(context.host.killed.length, killed + 2, 'killed again, not taken as closing')
     })
   })
 
@@ -3262,6 +3337,29 @@ describe('switching the chief to another agent', () => {
         [context.ledger.message(lost.id).state, context.ledger.message(lost.id).attempts],
         ['queued', 0],
         'the window went before it could land: its attempt comes back',
+      )
+    })
+  })
+
+  it('keeps the chief whose window would not close for a switch, and switches after its turn', async () => {
+    await withCodex(async (context) => {
+      const { project, id } = await withStaff(context)
+      await context.dispatcher.pass()
+      context.host.refuseKills = true
+      await assert.rejects(
+        context.dispatcher.switchChief(project.id, { harness: 'codex', agent: 'astraeus' }),
+        /the chief's window would not close: the switch waits, and is tried again after its turn/,
+      )
+      assert.equal(chiefOf(context, project).harness, 'claude-code')
+      assert.deepEqual(context.dispatcher.pendingSwitch(id('chief')), {
+        harness: 'codex',
+        agent: 'astraeus',
+      })
+      context.host.refuseKills = false
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        [chiefOf(context, project).harness, chiefOf(context, project).agent],
+        ['codex', 'astraeus'],
       )
     })
   })

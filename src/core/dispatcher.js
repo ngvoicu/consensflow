@@ -286,8 +286,12 @@ export class Dispatcher {
    */
   async closeProject(projectId) {
     const project = this.#ledger.setProjectState(projectId, 'suspended')
-    await this.#closeWindows(project.participants)
+    const kept = await this.#closeWindows(project.participants)
     this.#changed()
+    if (kept.length > 0) {
+      const windows = kept.map((handle) => `@${handle}'s window`).join(', ')
+      throw new Error(`${windows} would not close: resume the project and close it again`)
+    }
     return this.#ledger.project(projectId)
   }
 
@@ -298,22 +302,24 @@ export class Dispatcher {
    * and each exit is the dispatcher's own, so a chief's never closes a
    * project resumed meanwhile. What closes is the window of the record
    * waited on, forgotten meanwhile or not: no record is made again for a
-   * participant that left.
+   * participant that left. Answers the handles whose windows would not close.
    */
   async #closeWindows(participants) {
-    await Promise.all(
+    const kept = await Promise.all(
       participants.map((participant) => {
         const runtime = this.#runtimeOf(participant.id)
         return this.#exclusive(
           participant.id,
-          async () => {
-            if (runtime.window.pane !== null)
-              await this.#windows.closeOwn(runtime, runtime.window.pane)
-          },
+          async () =>
+            runtime.window.pane === null ||
+            (await this.#windows.closeOwn(runtime, runtime.window.pane))
+              ? null
+              : participant.handle,
           { wait: true },
         )
       }),
     )
+    return kept.filter((handle) => handle !== null)
   }
 
   /**
@@ -362,7 +368,8 @@ export class Dispatcher {
   /**
    * The human gives a task in a window to another member of its tier. Its
    * window is stopped first, even one the human opened, and the task leaves
-   * it only then: no two windows ever work on one task.
+   * it only then: no two windows ever work on one task. A window that would
+   * not stop keeps the task, and the human is told.
    */
   async reassignTask(projectId, number) {
     this.#ledger.checkRelease(projectId, number)
@@ -381,8 +388,14 @@ export class Dispatcher {
       holder.id,
       async () => {
         const runtime = this.#runtimeOf(holder.id)
+        const { pinned } = runtime.window
         runtime.window.pinned = false
-        if (runtime.window.pane !== null) await this.#windows.retire(runtime)
+        if (runtime.window.pane !== null && !(await this.#windows.retire(runtime))) {
+          runtime.window.pinned = pinned
+          throw new Error(
+            `@${assignee}'s window could not be stopped, so T-${number} stays with it: try again`,
+          )
+        }
         return release()
       },
       { wait: true },
@@ -392,7 +405,8 @@ export class Dispatcher {
   /**
    * The human closes a session's window; work in it pauses, as any lost
    * window's does. A window still opening is closed once it has opened, not
-   * left open behind an answer that said it was closed.
+   * left open behind an answer that said it was closed; one that would not
+   * close stays as it was, and the human is told.
    */
   async closeWindow(projectId, handle) {
     const { participant } = this.#sessionOf(projectId, handle)
@@ -400,8 +414,12 @@ export class Dispatcher {
       participant.id,
       async () => {
         const runtime = this.#runtimeOf(participant.id)
+        const { pinned } = runtime.window
         runtime.window.pinned = false
-        if (runtime.window.pane !== null) await this.#windows.retire(runtime)
+        if (runtime.window.pane !== null && !(await this.#windows.retire(runtime))) {
+          runtime.window.pinned = pinned
+          throw new Error(`@${handle}'s window could not be closed: try again`)
+        }
       },
       { wait: true },
     )
@@ -758,6 +776,11 @@ export class Dispatcher {
         await this.#chiefSwitch.performSwitch(project, chief, runtime, { harness, agent })
         // One deleted while the old window was looked at or closed stopped the switch there.
         if (this.#forgotten(runtime)) throw new Error(`no project ${projectId}`)
+        if (runtime.pendingSwitch !== null) {
+          throw new Error(
+            "the chief's window would not close: the switch waits, and is tried again after its turn",
+          )
+        }
       },
       { wait: true },
     )
