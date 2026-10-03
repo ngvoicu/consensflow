@@ -82,14 +82,17 @@ describe('an eval run’s plan', () => {
     const path =
       '/tmp/T/cmux-cli-shims/8BB3:/Applications/cmux.app/Contents/Resources/bin:/h/.consensflow-candidate/evals/bin:/h/.local/bin:/opt/homebrew/bin'
     assert.equal(
-      realOnPath('claude', path, (f) => present.has(f)),
+      realOnPath('claude', path, (f) => present.has(f), 'darwin'),
       '/h/.local/bin/claude',
     )
     assert.equal(
-      realOnPath('codex', path, (f) => present.has(f)),
+      realOnPath('codex', path, (f) => present.has(f), 'darwin'),
       '/opt/homebrew/bin/codex',
     )
-    assert.throws(() => realOnPath('claude', '/usr/bin', () => false), /claude is not on PATH/)
+    assert.throws(
+      () => realOnPath('claude', '/usr/bin', () => false, 'darwin'),
+      /claude is not on PATH/,
+    )
     // Windows: semicolons, and the command's own extension.
     const windows = new Set(['C:\\Users\\a\\.local\\bin\\claude.exe'])
     assert.equal(

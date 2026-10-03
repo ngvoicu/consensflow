@@ -39,7 +39,15 @@ export async function trustForClaude(app, folder, claude, { env = {}, timeoutMs 
         return answered ? 'trusted' : 'already trusted'
       }
     }
-    return answered ? 'trusted, its prompt not seen' : 'no prompt seen'
+    // What the window showed instead, so a run that stops here explains itself.
+    const shown = app
+      .output(pane.id)
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(-6)
+      .join(' ⏎ ')
+    return `${answered ? 'trusted, its prompt not seen' : 'no prompt seen'}; its screen: ${shown}`
   } finally {
     await app.request('pane.kill', pane).catch(() => {})
   }
