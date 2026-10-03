@@ -28,6 +28,17 @@ import { eventTrace } from './trace.js'
  */
 
 const BUNDLE_BIN = fileURLToPath(new URL('../../bin', import.meta.url))
+/**
+ * The `cf` a window's role text names. On Windows it is bin/cf.exe, built by
+ * app/scripts/prepare-sidecar.mjs: a `.cmd` runs through cmd.exe, which ends
+ * a command at its first line break, so a question of many lines reached the
+ * chief as its first. Its path has forward slashes, which Git Bash keeps
+ * where it drops backslashes, and PowerShell reads alike.
+ */
+const PANE_CF =
+  process.platform === 'win32'
+    ? join(BUNDLE_BIN, 'cf.exe').replaceAll('\\', '/')
+    : join(BUNDLE_BIN, 'cf')
 const PASS_MS = 1000
 const STATE_EVENT_MS = 100
 /** A pass this long is worth a line in the log. */
@@ -142,9 +153,7 @@ export async function startDaemon(
     credentials,
     roster: (agent) => agentRow(agent, env) ?? null,
     roles: (participant, project) =>
-      roleInstructions(participant.role, staffOf(project), {
-        cf: join(BUNDLE_BIN, process.platform === 'win32' ? 'cf.cmd' : 'cf'),
-      }),
+      roleInstructions(participant.role, staffOf(project), { cf: PANE_CF }),
     trace,
     log,
     launchFiles: { forget: (launch) => forgetLaunch(home, launch) },

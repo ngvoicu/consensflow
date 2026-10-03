@@ -99,6 +99,22 @@ function verify(archive, expected) {
   )
 }
 
+/**
+ * A pane's `cf` on Windows is bin/cf.exe (app/cf-launcher): a `.cmd` runs
+ * through cmd.exe, which ends a command at its first line break, so a
+ * question or brief of many lines arrived cut. Built here into bin/, which
+ * the CLI resources carry and a run from this checkout uses.
+ */
+function buildLauncher() {
+  const crate = join(APP, 'cf-launcher')
+  execFileSync(
+    'cargo',
+    ['build', '--release', '--locked', '--manifest-path', join(crate, 'Cargo.toml')],
+    { stdio: 'inherit' },
+  )
+  cpSync(join(crate, 'target', 'release', 'cf.exe'), join(REPO, 'bin', 'cf.exe'))
+}
+
 function copyCli() {
   rmSync(RESOURCES, { recursive: true, force: true })
   mkdirSync(RESOURCES, { recursive: true })
@@ -124,6 +140,7 @@ mkdirSync(BINARIES, { recursive: true })
 const sidecar = join(BINARIES, `node-${triple}${WINDOWS ? '.exe' : ''}`)
 cpSync(node, sidecar)
 if (!WINDOWS) execFileSync('chmod', ['+x', sidecar])
+if (WINDOWS) buildLauncher()
 const version = copyCli()
 
 process.stdout.write(`sidecar: ${sidecar}\n`)

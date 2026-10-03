@@ -431,7 +431,11 @@ describe('the daemon over its bridge', () => {
     const { argv } = open.body
     const role = await readFile(argv[argv.indexOf('--append-system-prompt-file') + 1], 'utf8')
     assert.match(role, /^\| mybuilder \| worker, reviewer \| Standard work \|$/m)
-    const cf = path.join(BUNDLE_BIN, process.platform === 'win32' ? 'cf.cmd' : 'cf')
+    // On Windows, cf.exe, its path in forward slashes: Git Bash drops backslashes.
+    const cf =
+      process.platform === 'win32'
+        ? `${BUNDLE_BIN.replaceAll('\\', '/')}/cf.exe`
+        : path.join(BUNDLE_BIN, 'cf')
     assert.ok(role.includes(`Here \`cf\` is ${cf}.`), role.slice(-600))
   })
 

@@ -100,7 +100,11 @@ jobs:
           # Bounded: this step runs inside every release.
           [void]$app.WaitForExit(30000)
           if ($outcome -ne 'up') { exit 1 }
-          "the portable exe unpacked $runtime and its daemon came up on that Node"
+          # A pane's `cf`: the runtime's cf.exe runs the CLI beside it on the runtime's Node.
+          $env:CONSENSFLOW_NODE = Join-Path $runtime 'node.exe'
+          $said = & (Join-Path $runtime 'cli\bin\cf.exe') --version
+          if ($said -ne $version) { "the runtime's cf.exe said '$said', not $version"; exit 1 }
+          "the portable exe unpacked $runtime, its daemon came up on that Node, and its cf.exe runs the CLI"
           exit 0
 
       - uses: actions/upload-artifact@v7

@@ -24,7 +24,7 @@ function release(dir, { missing = [] } = {}) {
     'ConsensFlow.exe': 'app',
     'consensflow-bridge.exe': 'bridge',
     'node.exe': 'node',
-    'cli/bin/cf.cmd': 'cf',
+    'cli/bin/cf.exe': 'cf',
     'cli/src/core/cli.js': 'cli',
     'app.pdb': 'debug',
     'deps/app.d': 'dep',
@@ -68,33 +68,31 @@ describe('the portable Windows exe', () => {
         .split(/\r?\n/) // Windows' tar ends its lines with CRLF
         .filter((line) => line !== '' && !line.endsWith('/'))
         .sort()
-      assert.deepEqual(listed, ['cli/bin/cf.cmd', 'cli/src/core/cli.js', 'node.exe'])
+      assert.deepEqual(listed, ['cli/bin/cf.exe', 'cli/src/core/cli.js', 'node.exe'])
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
   it('refuses a release folder missing a piece, and names the build that makes it', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cf-portable-'))
-    try {
-      release(join(dir, 'release'), { missing: ['node.exe'] })
-      const run = spawnSync(
-        process.execPath,
-        [
-          SCRIPT,
-          '--release',
-          join(dir, 'release'),
-          '--out',
-          join(dir, 'out'),
-          '--version',
-          '1.0.0',
-        ],
-        { encoding: 'utf8' },
-      )
-      assert.equal(run.status, 1)
-      assert.match(run.stderr, /node\.exe is missing .*npm --prefix app run build/)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+    for (const piece of ['node.exe', 'cli/bin/cf.exe']) refusesWithout(piece)
   })
 })
+
+/** The portable build of a release folder without `piece`: refused, naming it. */
+function refusesWithout(piece) {
+  const dir = mkdtempSync(join(tmpdir(), 'cf-portable-'))
+  try {
+    release(join(dir, 'release'), { missing: [piece] })
+    const run = spawnSync(
+      process.execPath,
+      [SCRIPT, '--release', join(dir, 'release'), '--out', join(dir, 'out'), '--version', '1.0.0'],
+      { encoding: 'utf8' },
+    )
+    assert.equal(run.status, 1)
+    assert.match(run.stderr, /is missing .*npm --prefix app run build/)
+    assert.ok(run.stderr.includes(join(...piece.split('/'))), run.stderr)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}

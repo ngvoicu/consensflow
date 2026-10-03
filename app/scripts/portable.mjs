@@ -34,7 +34,8 @@ const version =
   values.version ??
   JSON.parse(readFileSync(join(APP, 'src-tauri', 'tauri.conf.json'), 'utf8')).version
 
-for (const name of ['ConsensFlow.exe', 'node.exe', 'cli']) {
+// cli\bin\cf.exe is a pane's `cf`: without it a window has none in PowerShell.
+for (const name of ['ConsensFlow.exe', 'node.exe', 'cli', join('cli', 'bin', 'cf.exe')]) {
   if (!existsSync(join(values.release, name))) {
     console.error(
       `portable: ${name} is missing from ${values.release}; build first with npm --prefix app run build`,
