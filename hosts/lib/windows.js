@@ -140,7 +140,7 @@ function modelAndEffort({ kind, model, effort, thinking }) {
     case 'devin':
       // Devin writes the level into the id (claude-opus-5-5-max): an agent
       // names the family and its effort, joined here. No model is Devin's own
-      // setting, which a lead from before every lead had an agent still runs on.
+      // setting, which a chief from before every chief had an agent still runs on.
       return model ? ['--model', effort ? `${model}-${effort}` : model] : []
     case 'opencode':
       return model ? ['--model', model] : []

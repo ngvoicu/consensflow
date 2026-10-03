@@ -17,7 +17,7 @@ import { startIntegration } from '../integration/harness.mjs'
  * (tasks per wave per project).
  */
 
-const CORE_EDITOR = fileURLToPath(new URL('../integration/core-editor.mjs', import.meta.url))
+const DAEMON = fileURLToPath(new URL('../integration/core-daemon.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('../integration/fake-agent.mjs', import.meta.url))
 const ENABLED = process.env.CONSENSFLOW_LOAD === '1'
 const PROJECTS = Number(process.env.CONSENSFLOW_LOAD_PROJECTS ?? 3)
@@ -39,7 +39,7 @@ test('the daemon stays up, delivers every task and logs nothing wrong while seve
   skip: ENABLED ? false : 'set CONSENSFLOW_LOAD=1 (npm run load)',
 }, async () => {
   const app = await startIntegration({
-    editor: CORE_EDITOR,
+    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
@@ -48,7 +48,7 @@ test('the daemon stays up, delivers every task and logs nothing wrong while seve
       join(app.env.CONSENSFLOW_HOME, 'agents.json'),
       `${JSON.stringify({
         schemaVersion: 1,
-        agents: ['lead', ...workers].map((id) => ({ id, kind: 'claude-code', model: 'fake' })),
+        agents: ['chief', ...workers].map((id) => ({ id, kind: 'claude-code', model: 'fake' })),
       })}\n`,
     )
     const projects = []
@@ -57,7 +57,7 @@ test('the daemon stays up, delivers every task and logs nothing wrong while seve
       mkdirSync(directory, { recursive: true })
       const opened = await app.requestNode('project.open', {
         directory,
-        agent: 'lead',
+        agent: 'chief',
         staff: workers.map((agent) => ({ agent, roles: ['worker'] })),
       })
       assert.equal(opened.ok, true, JSON.stringify(opened))
@@ -117,7 +117,7 @@ test('the daemon stays up, delivers every task and logs nothing wrong while seve
     polling = false
     await poller
 
-    assert.equal(app.uiExited(), false, 'the daemon is still running')
+    assert.equal(app.daemonExited(), false, 'the daemon is still running')
     assert.deepEqual(pollFailures, [], 'every poll was answered')
     for (const { id } of projects) {
       const tasks = (await board(id)).lanes.flatMap((lane) => lane.tasks)
@@ -137,7 +137,7 @@ test('the daemon stays up, delivers every task and logs nothing wrong while seve
       [],
       'no error and no slow pass under load',
     )
-    const rss = residentMb(app.uiPid())
+    const rss = residentMb(app.daemonPid())
     assert.ok(rss < RSS_LIMIT_MB, `the daemon is ${rss} MB, past ${RSS_LIMIT_MB}`)
     console.log(
       `load: ${PROJECTS} projects × ${WAVES} waves × ${TASKS} tasks = ${PROJECTS * WAVES * TASKS} tasks in ${seconds} s, ${polls} board polls, daemon at ${rss} MB`,

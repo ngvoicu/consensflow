@@ -20,7 +20,7 @@ describe('deleting a project', () => {
         name: 'other',
         chief: { harness: 'pi' },
       })
-      const leadId = id('chief')
+      const chiefId = id('chief')
       assert.throws(() => ledger.deleteProject(project.id), { code: 'project-open' })
       ledger.setProjectState(project.id, 'suspended')
       const gone = ledger.deleteProject(project.id)
@@ -48,7 +48,7 @@ describe('deleting a project', () => {
       assert.equal(ledger.events(other.id).length > 0, true)
       assert.deepEqual(ledger.events(project.id), [], 'nothing of it is left')
       assert.equal(ledger.task(project.id, 1), null)
-      assert.equal(ledger.inbox(leadId).length, 0, 'its messages went with it')
+      assert.equal(ledger.inbox(chiefId).length, 0, 'its messages went with it')
     })
   })
 
@@ -100,7 +100,7 @@ describe('projects and participants', () => {
     })
   })
 
-  it('starts a project whose lead runs on the saved agent it is given, and refuses what is no agent id', async () => {
+  it('starts a project whose chief runs on the saved agent it is given, and refuses what is no agent id', async () => {
     await withLedger((ledger) => {
       const project = ledger.createProject({
         directory: '/work/app',

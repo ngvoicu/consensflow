@@ -1,6 +1,6 @@
 import { askTheBoard, refusalReason } from '../../hosts/lib/question-door.js'
 
-/** `cf` inside a window the new core opened: the agents' commands (`USAGE` lists them). */
+/** `cf` inside a window the daemon opened: the agents' commands (`USAGE` lists them). */
 export const USAGE = `cf inside a ConsensFlow window: the board's commands.
 
   cf task add --tier <critical|complex|standard|light> "…"
@@ -37,8 +37,8 @@ export const USAGE = `cf inside a ConsensFlow window: the board's commands.
   cf staff                           the members: roles and tiers
   cf whoami                         your project, role and current task
   cf history [--page 2] [--find "…"] [--tools]
-                                    the chief's: what the human and the leads before you
-                                    said, newest page first (after the lead was switched)
+                                    the chief's: what the human and the chiefs before you
+                                    said, newest page first (after the chief was switched)
 
 Any "…" can be - to read the text from standard input, as written:
   cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)

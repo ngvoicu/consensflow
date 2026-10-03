@@ -21,7 +21,7 @@ import {
 } from './shared.js'
 
 /**
- * Devin, for the new core. Each launch runs on a config of our own (the
+ * Devin, for the daemon. Each launch runs on a config of our own (the
  * owner's, plus a hook that gives a session its role instructions),
  * in full-permission mode, with the first message in a prompt file. Devin
  * names its session itself; its own wire log for this launch says which one

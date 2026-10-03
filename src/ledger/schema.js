@@ -410,7 +410,7 @@ export const MIGRATIONS = [
   `,
   // What was read out of the event log is kept in rows (2026-10-03), the log
   // being a trace: when a task was last paused, since which a tell that
-  // reached its window counts; and the lead the chief was last switched from,
+  // reached its window counts; and what the chief was last switched from,
   // with whether its turn was cut, for the handoff. Each is filled from the
   // events the ledger already holds, so a running project keeps its answers.
   `
@@ -451,6 +451,12 @@ export const MIGRATIONS = [
         ELSE native_session
       END
   WHERE harness = 'image';
+  `,
+  // The role has one name, the chief (2026-10-03): its reads of its history
+  // are logged as `chief.history.read`, and a ledger from before then logged
+  // them as the lead's.
+  `
+  UPDATE event SET kind = 'chief.history.read' WHERE kind = 'lead.history.read';
   `,
 ]
 

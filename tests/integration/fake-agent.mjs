@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * A stand-in for the `claude` CLI in the new core's integration tests. It
+ * A stand-in for the `claude` CLI in the integration tests. It
  * speaks Claude's launch arguments, writes Claude's transcript records and its
  * live `sessions/<pid>.json` status, and reads its terminal raw, the way a real
  * TUI does: a bracketed paste followed by Enter is one message.

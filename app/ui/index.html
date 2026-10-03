@@ -71,7 +71,7 @@
   <dialog id="delete-tasks-dialog" class="settings" aria-labelledby="delete-tasks-title">
     <form class="dialog-form" method="dialog">
       <h2 id="delete-tasks-title">Delete these tasks?</h2>
-      <p class="dialog-help">A deleted task leaves the board and cf task list for good. The ledger keeps it: the lead can still read it, its brief, result and thread, with cf task get. This cannot be undone.</p>
+      <p class="dialog-help">A deleted task leaves the board and cf task list for good. The ledger keeps it: the chief can still read it, its brief, result and thread, with cf task get. This cannot be undone.</p>
       <ul class="dialog-kept" id="delete-tasks-kept" aria-label="Kept on the board" hidden></ul>
       <div class="dialog-actions">
         <button class="quiet-button" type="submit" value="keep">Keep</button>
@@ -107,8 +107,8 @@
     <form class="dialog-form">
       <h2 id="new-project-title">New project</h2>
       <label>Project folder<input name="directory" readonly></label>
-      <label>The lead runs on
-        <select name="lead" required></select>
+      <label>The chief runs on
+        <select name="chief" required></select>
       </label>
       <fieldset class="staff-pick">
         <legend>The staff</legend>
@@ -134,19 +134,19 @@
     </form>
   </dialog>
 
-  <dialog id="switch-lead-dialog" aria-labelledby="switch-lead-title">
+  <dialog id="switch-chief-dialog" aria-labelledby="switch-chief-title">
     <form class="dialog-form">
-      <h2 id="switch-lead-title">Switch the lead</h2>
-      <p class="dialog-help">The lead goes on in a new window on the saved agent you pick, with its harness, model and effort. Its first message hands it the lead: what you and the leads before it said, and what waits on the board. The staff keeps working.</p>
-      <label>The lead runs on
-        <select name="lead" required></select>
+      <h2 id="switch-chief-title">Switch the chief</h2>
+      <p class="dialog-help">The chief goes on in a new window on the saved agent you pick, with its harness, model and effort. Its first message is the handoff: what you and the chiefs before it said, and what waits on the board. The staff keeps working.</p>
+      <label>The chief runs on
+        <select name="chief" required></select>
       </label>
       <fieldset>
-        <legend>If the lead is in the middle of a turn</legend>
+        <legend>If the chief is in the middle of a turn</legend>
         <label class="check"><input type="radio" name="when" value="turn" checked>Let it finish its turn, then switch</label>
         <label class="check"><input type="radio" name="when" value="now">Switch now, cutting its turn off</label>
       </fieldset>
-      <label class="check"><input type="checkbox" name="note">First ask the lead to write down where things stand</label>
+      <label class="check"><input type="checkbox" name="note">First ask the chief to write down where things stand</label>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Cancel</button>
         <button class="primary-button" type="submit">Switch</button>

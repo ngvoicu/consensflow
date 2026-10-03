@@ -1,7 +1,7 @@
 {
   "name": "consensflow",
   "version": "3.0.0-alpha.68",
-  "description": "Native terminal workspace for a lead, named workers and a project manager.",
+  "description": "Native terminal workspace for a Chief of Staff, named workers and a project manager.",
   "license": "MIT",
   "type": "module",
   "engines": {

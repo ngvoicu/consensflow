@@ -7,7 +7,7 @@ import { agentsServer } from './agents-server.mjs'
 import { serveUi } from './serve-ui.mjs'
 
 /**
- * The board page of the new core (TEST-BDC-13), against a stand-in for the app:
+ * The board page (TEST-BDC-13), against a stand-in for the app:
  * `core_request` answers from an in-page model and records every call, the way
  * the Rust app forwards the page's requests to the core.
  */
@@ -135,7 +135,7 @@ function model() {
         hidden: true,
       },
       // The image agent, a Codex agent that designs: an image designer, and nothing else,
-      // never the lead.
+      // never the chief.
       {
         name: 'pygmalion',
         harness: 'codex',
@@ -419,8 +419,8 @@ const calls = (page, operation) =>
     operation,
   )
 
-/** What a lead pick list offers: each harness group's agents, and whether each is disabled. */
-const leadGroups = (select) =>
+/** What a chief pick list offers: each harness group's agents, and whether each is disabled. */
+const chiefGroups = (select) =>
   select
     .locator('optgroup')
     .evaluateAll((all) =>
@@ -456,7 +456,7 @@ test('draws the kanban: a row per participant, a column per state, and cards tha
   const zeus = table.locator('tr[data-handle="zeus"]')
   await expect(zeus.getByTestId('lamp')).toHaveAttribute('data-state', 'waiting')
   await expect(zeus.locator('.row-status')).toHaveText('Waiting: permission to run a command')
-  // The lead's row holds its tasks; what it is doing is on its card in the dock.
+  // The chief's row holds its tasks; what it is doing is on its card in the dock.
   const chief = table.locator('tr[data-handle="chief"]')
   await expect(chief.locator('.row-status')).toHaveCount(0)
   await expect(
@@ -728,7 +728,7 @@ test("shows a task waiting for a member in its requester's backlog, with the tie
   )
 })
 
-test("draws the lead's row only while a task is on it: its own, or one it asked for that waits for a member", async ({
+test("draws the chief's row only while a task is on it: its own, or one it asked for that waits for a member", async ({
   page,
 }) => {
   const data = model()
@@ -738,7 +738,7 @@ test("draws the lead's row only while a task is on it: its own, or one it asked 
   const row = page.locator('tr[data-handle="chief"]')
   await expect(page.locator('tr[data-handle="zeus"]')).toHaveCount(1)
   await expect(row).toHaveCount(0)
-  /** The lead's own tasks, as `tasks` has them. */
+  /** The chief's own tasks, as `tasks` has them. */
   const own = (tasks) =>
     changed(
       page,
@@ -768,7 +768,7 @@ test("draws the lead's row only while a task is on it: its own, or one it asked 
   await expect(row.locator('td[data-state="open"] button.card[data-task="8"]')).toHaveCount(1)
 })
 
-test("says the effort an agent runs at, after its model: on a member's row, a session's, and the lead's card", async ({
+test("says the effort an agent runs at, after its model: on a member's row, a session's, and the chief's card", async ({
   page,
 }) => {
   const data = model()
@@ -1356,7 +1356,7 @@ test('deletes a finished task from its drawer once the human confirms, and close
   await drawer.getByRole('button', { name: 'Delete task' }).click()
   const dialog = page.getByRole('dialog', { name: 'Delete T-5?' })
   await expect(dialog.locator('.dialog-help')).toHaveText(
-    'A deleted task leaves the board and cf task list for good. The ledger keeps it: the lead can still read it, its brief, result and thread, with cf task get. This cannot be undone.',
+    'A deleted task leaves the board and cf task list for good. The ledger keeps it: the chief can still read it, its brief, result and thread, with cf task get. This cannot be undone.',
   )
   await expect(dialog.getByRole('list', { name: 'Kept on the board' })).toBeHidden()
   await dialog.getByRole('button', { name: 'Keep' }).click()
@@ -1525,14 +1525,14 @@ test('says so on the board when the project has no members yet', async ({ page }
   await expect(table.locator('tr.board-empty')).toHaveCount(0)
 })
 
-test('takes a lead switched to a saved agent for no member: the board says it has none, and that agent joins the staff', async ({
+test('takes a chief switched to a saved agent for no member: the board says it has none, and that agent joins the staff', async ({
   page,
 }) => {
   const data = model()
   const board = data.boards[1]
   board.lanes = board.lanes.filter((lane) => ['human', 'chief'].includes(lane.participant.role))
   board.open = []
-  // Switch lead to a saved agent: the chief runs on hera now.
+  // Switch chief to a saved agent: the chief runs on hera now.
   Object.assign(board.lanes[1].participant, { agent: 'hera', harness: 'codex' })
   await open(page, data)
   await expect(page.locator('tr.board-empty')).toHaveText(
@@ -1817,7 +1817,7 @@ test('a member whose agent is gone says so on the board and in the staff, with R
   await expect(member.getByRole('button', { name: 'Remove Worker @diana' })).toBeVisible()
 })
 
-test("says on the lead's card in the dock what the lead is doing and runs on, and switches it from there", async ({
+test("says on the chief's card in the dock what the chief is doing and runs on, and switches it from there", async ({
   page,
 }) => {
   const data = model()
@@ -1831,22 +1831,22 @@ test("says on the lead's card in the dock what the lead is doing and runs on, an
   await expect(card.locator('.terminal-meta')).toHaveText('codex · gpt-6-astra · max')
   // Out of quota, it says until when, whatever its window does.
   await changed(page, () => {
-    const lead = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
-    lead.participant.outUntil = new Date(Date.now() + 90 * 60_000).toISOString()
+    const chief = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+    chief.participant.outUntil = new Date(Date.now() + 90 * 60_000).toISOString()
   })
   await expect(card.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
   await expect(card.locator('.terminal-status')).toHaveText(/^Out of quota until \d\d:\d\d$/)
   await expect(card.locator('.terminal-status')).toHaveAttribute('data-state', 'out')
-  // Switch lead is on the card: none on the board, though the lead's row is there for its tasks.
+  // Switch chief is on the card: none on the board, though the chief's row is there for its tasks.
   await expect(page.locator('tr[data-handle="chief"]')).toHaveCount(1)
   const board = page.getByRole('region', { name: 'Board' })
-  const switchLead = { name: 'Switch the lead to another agent' }
-  await expect(board.getByRole('button', switchLead)).toHaveCount(0)
-  await card.getByRole('button', switchLead).click()
-  const dialog = page.getByRole('dialog', { name: 'Switch the lead' })
+  const switchChief = { name: 'Switch the chief to another agent' }
+  await expect(board.getByRole('button', switchChief)).toHaveCount(0)
+  await card.getByRole('button', switchChief).click()
+  const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
   await expect(dialog).toBeVisible()
-  // What the lead runs on now is no switch.
-  expect(await leadGroups(dialog.getByLabel('The lead runs on'))).toContainEqual([
+  // What the chief runs on now is no switch.
+  expect(await chiefGroups(dialog.getByLabel('The chief runs on'))).toContainEqual([
     'Codex',
     [
       ['diana', false],
@@ -1855,24 +1855,24 @@ test("says on the lead's card in the dock what the lead is doing and runs on, an
   ])
 })
 
-test("keeps the lead's card in the dock while its window is down: its agent gone, it says so, and Switch lead is the way on", async ({
+test("keeps the chief's card in the dock while its window is down: its agent gone, it says so, and Switch chief is the way on", async ({
   page,
 }) => {
   const data = model()
   const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
   Object.assign(chief.participant, { agent: 'astraeus', harness: 'codex' })
-  // A lead whose agent is gone has no window: it does not open without one.
+  // A chief whose agent is gone has no window: it does not open without one.
   Object.assign(chief, { agentMissing: true, activity: { state: 'closed' }, pane: null })
   await open(page, data)
   const card = page.locator('#stage .terminal-card[data-handle="chief"]')
   const status = card.locator('.terminal-status')
   await expect(status).toHaveText(
-    'No agent named astraeus any more: define one under Agents, or switch the lead',
+    'No agent named astraeus any more: define one under Agents, or switch the chief',
   )
   await expect(status).toHaveAttribute('data-state', 'missing')
   await expect(card.locator('.terminal-host')).toHaveCount(0)
-  await card.getByRole('button', { name: 'Switch the lead to another agent' }).click()
-  await expect(page.getByRole('dialog', { name: 'Switch the lead' })).toBeVisible()
+  await card.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  await expect(page.getByRole('dialog', { name: 'Switch the chief' })).toBeVisible()
 })
 
 test('a terminal and a board too narrow for its columns keep a visible scrollbar', async ({
@@ -2460,26 +2460,26 @@ test('starts a project with human approval required, and posts the checkbox with
   const gate = dialog.getByLabel('Human approval required', { exact: false })
   await expect(gate).not.toBeChecked()
   await gate.check()
-  await dialog.getByLabel('The lead runs on').selectOption('zeus')
+  await dialog.getByLabel('The chief runs on').selectOption('zeus')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
     .toEqual([{ directory: '/work/fresh', agent: 'zeus', gate: true, staff: [] }])
 })
 
-test('starts no project until its lead is picked: a lead runs on a saved agent, never on a default', async ({
+test('starts no project until its chief is picked: a chief runs on a saved agent, never on a default', async ({
   page,
 }) => {
   await open(page)
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
-  const lead = dialog.getByLabel('The lead runs on')
-  await expect(lead).toHaveValue('')
-  await expect(lead.locator('option').first()).toHaveText('Pick an agent')
+  const chief = dialog.getByLabel('The chief runs on')
+  await expect(chief).toHaveValue('')
+  await expect(chief.locator('option').first()).toHaveText('Pick an agent')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect(dialog).toBeVisible()
   expect(await calls(page, 'project.open')).toEqual([])
-  await lead.selectOption('hera')
+  await chief.selectOption('hera')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
@@ -2487,7 +2487,7 @@ test('starts no project until its lead is picked: a lead runs on a saved agent, 
   await expect(dialog).toBeHidden()
 })
 
-test("offers a new project's lead only the agents on a harness installed here, harness by harness", async ({
+test("offers a new project's chief only the agents on a harness installed here, harness by harness", async ({
   page,
 }) => {
   const data = model()
@@ -2505,8 +2505,8 @@ test("offers a new project's lead only the agents on a harness installed here, h
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
   // Claude Code and Devin are not installed here, and Pi's one agent is hidden; pygmalion
-  // is a Codex agent, but an image agent leads nothing.
-  expect(await leadGroups(dialog.getByLabel('The lead runs on'))).toEqual([
+  // is a Codex agent, but an image agent is never the chief.
+  expect(await chiefGroups(dialog.getByLabel('The chief runs on'))).toEqual([
     [
       'Codex',
       [
@@ -2988,9 +2988,9 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
   ]) {
     await expect(board.getByRole('button', { name })).toHaveCount(0)
   }
-  // Nor is the lead switched from anywhere: its card in the dock went with its window.
-  const switchLead = page.getByRole('button', { name: 'Switch the lead to another agent' })
-  await expect(switchLead).toHaveCount(0)
+  // Nor is the chief switched from anywhere: its card in the dock went with its window.
+  const switchChief = page.getByRole('button', { name: 'Switch the chief to another agent' })
+  await expect(switchChief).toHaveCount(0)
   await banner.getByRole('button', { name: 'Resume project' }).focus()
   const reached = []
   for (let press = 0; press < 3; press += 1) {
@@ -3226,7 +3226,7 @@ test('folds the panels for this page when the browser keeps no storage', async (
   await expect(board).toBeVisible()
 })
 
-test('starts a project in a chosen folder with the chosen lead, the staff ticked from the last one', async ({
+test('starts a project in a chosen folder with the chosen chief, the staff ticked from the last one', async ({
   page,
 }) => {
   const data = model()
@@ -3248,7 +3248,7 @@ test('starts a project in a chosen folder with the chosen lead, the staff ticked
     /zeus.*Reviewer/,
   ])
   await expect(dialog.getByLabel('Second review of')).toHaveCount(0)
-  await dialog.getByLabel('The lead runs on').selectOption('athena')
+  await dialog.getByLabel('The chief runs on').selectOption('athena')
   await dialog.locator('[name="pickRole"]').selectOption('advisor')
   await expect(dialog.locator('[name="pickAgent"]').locator('option')).toHaveText([
     'hera · gpt-6-astra · codex · max',
@@ -3452,7 +3452,7 @@ test('starts a project while the board shown is on its way, and its windows go o
   })
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
-  await dialog.getByLabel('The lead runs on').selectOption('zeus')
+  await dialog.getByLabel('The chief runs on').selectOption('zeus')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect(page.locator('#project-title')).toHaveText('new')
   await page.evaluate(() => {
@@ -3608,10 +3608,10 @@ test("takes a closed window's card out of the dock: its lane says so and opens i
   await expect
     .poll(() => calls(page, 'session.open'))
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
-  // The chief's window opens and closes with the project: its card has no Open, only Switch lead.
+  // The chief's window opens and closes with the project: its card has no Open, only Switch chief.
   await expect
     .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
-    .toEqual(['Switch lead'])
+    .toEqual(['Switch chief'])
 })
 
 /**
@@ -3696,11 +3696,11 @@ test("keeps a session's terminal out of the dock until the human shows it, and t
     reviewer.getByRole('button', { name: "Show @zeus · brisk-birch's terminal" }),
   ).toBeVisible()
   // The chief's terminal has nothing to show or hide, on its row or its card:
-  // its row has no tools, and its card switches the lead.
+  // its row has no tools, and its card switches the chief.
   await expect(page.locator('tr[data-handle="chief"] .row-head button')).toHaveCount(0)
   await expect
     .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
-    .toEqual(['Switch lead'])
+    .toEqual(['Switch chief'])
   // Out of the dock, a session's window is fed all the same: what it prints
   // is taken and acknowledged, so it never waits for a reader.
   expect(await page.evaluate(() => window.__emulators.length)).toBe(3)
@@ -3929,7 +3929,7 @@ test("forgets on a reload which terminals were shown: the dock starts again with
   ).toBeVisible()
 })
 
-test("keeps the lead's card first in the dock while its window is down and a session works on, its terminal once it is up", async ({
+test("keeps the chief's card first in the dock while its window is down and a session works on, its terminal once it is up", async ({
   page,
 }) => {
   const data = atWork()
@@ -3938,14 +3938,16 @@ test("keeps the lead's card first in the dock while its window is down and a ses
   await open(page, data)
   const card = page.locator('#stage .terminal-card[data-handle="chief"]')
   await expect(card.locator('.terminal-status')).toHaveText('Starting')
-  await expect(card.getByRole('button', { name: 'Switch the lead to another agent' })).toBeVisible()
+  await expect(
+    card.getByRole('button', { name: 'Switch the chief to another agent' }),
+  ).toBeVisible()
   await expect(page.locator('#stage .stage-empty')).toHaveCount(0)
   await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
-  // Its window up, the lead's card holds its terminal, where the card without one was.
+  // Its window up, the chief's card holds its terminal, where the card without one was.
   await changed(page, () => {
-    const lead = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
-    Object.assign(lead, { activity: { state: 'idle' }, pane: { id: 'p1-chief', generation: 6 } })
+    const chief = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+    Object.assign(chief, { activity: { state: 'idle' }, pane: { id: 'p1-chief', generation: 6 } })
   })
   await expect(card.locator('.terminal-host')).toHaveCount(1)
   await expect(card.locator('.terminal-status')).toHaveText('Idle')
@@ -4265,24 +4267,24 @@ test("gives a member's heading row no buttons, and a closed session's row no Tra
   await expect(page.getByRole('complementary', { name: 'Task T-3' })).toBeVisible()
 })
 
-test('switches the lead from its card to a saved agent on a harness installed here, after its turn or now', async ({
+test('switches the chief from its card to a saved agent on a harness installed here, after its turn or now', async ({
   page,
 }) => {
   const data = model()
   data.missing = ['devin']
-  // The lead runs on zeus: what it runs on now is no switch.
+  // The chief runs on zeus: what it runs on now is no switch.
   data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').participant.agent =
     'zeus'
   await open(page, data)
-  await page.getByRole('button', { name: 'Switch the lead to another agent' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Switch the lead' })
+  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
   await expect(dialog).toBeVisible()
-  const select = dialog.getByLabel('The lead runs on')
+  const select = dialog.getByLabel('The chief runs on')
   // An agent is picked, never a default: nothing is chosen yet.
   await expect(select).toHaveValue('')
   await expect(select.locator('option').first()).toHaveText('Pick an agent')
   // Devin is not installed here, and a hidden agent (Pi's one) is never on offer.
-  expect(await leadGroups(select)).toEqual([
+  expect(await chiefGroups(select)).toEqual([
     ['Claude Code', [['zeus', true]]],
     [
       'Codex',
@@ -4295,7 +4297,7 @@ test('switches the lead from its card to a saved agent on a harness installed he
   ])
   await select.selectOption('hera')
   await dialog.getByLabel('Switch now, cutting its turn off').check()
-  await dialog.getByLabel('First ask the lead to write down where things stand').check()
+  await dialog.getByLabel('First ask the chief to write down where things stand').check()
   await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
   await expect
     .poll(() => calls(page, 'chief.switch'))
@@ -4303,29 +4305,29 @@ test('switches the lead from its card to a saved agent on a harness installed he
   await expect(dialog).toBeHidden()
 })
 
-test('opens Switch lead letting the lead finish its turn, whatever was picked last time', async ({
+test('opens Switch chief letting the chief finish its turn, whatever was picked last time', async ({
   page,
 }) => {
   await open(page)
-  const switchLead = page.getByRole('button', {
-    name: 'Switch the lead to another agent',
+  const switchChief = page.getByRole('button', {
+    name: 'Switch the chief to another agent',
   })
-  const dialog = page.getByRole('dialog', { name: 'Switch the lead' })
-  await switchLead.click()
-  await dialog.getByLabel('The lead runs on').selectOption('diana')
+  const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
+  await switchChief.click()
+  await dialog.getByLabel('The chief runs on').selectOption('diana')
   await dialog.getByLabel('Switch now, cutting its turn off').check()
-  await dialog.getByLabel('First ask the lead to write down where things stand').check()
+  await dialog.getByLabel('First ask the chief to write down where things stand').check()
   await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
   await expect(dialog).toBeHidden()
-  await switchLead.click()
-  await expect(dialog.getByLabel('The lead runs on')).toHaveValue('')
+  await switchChief.click()
+  await expect(dialog.getByLabel('The chief runs on')).toHaveValue('')
   await expect(dialog.getByLabel('Let it finish its turn, then switch')).toBeChecked()
   await expect(
-    dialog.getByLabel('First ask the lead to write down where things stand'),
+    dialog.getByLabel('First ask the chief to write down where things stand'),
   ).not.toBeChecked()
 })
 
-test("the lead's card says when a switch waits for its turn", async ({ page }) => {
+test("the chief's card says when a switch waits for its turn", async ({ page }) => {
   const data = model()
   data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').switching = {
     harness: 'codex',
@@ -4334,19 +4336,19 @@ test("the lead's card says when a switch waits for its turn", async ({ page }) =
   await open(page, data)
   await expect(
     page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status'),
-  ).toHaveText('Switching the lead to hera after this turn')
+  ).toHaveText('Switching the chief to hera after this turn')
   await expect(page.locator('.row-status[data-state="switching"]')).toHaveCount(0)
 })
 
-test("offers a lead still on its harness's own default every saved agent, and moves it to one", async ({
+test("offers a chief still on its harness's own default every saved agent, and moves it to one", async ({
   page,
 }) => {
-  // A project opened before leads were agents: its lead names none.
+  // A project opened before chiefs were agents: its chief names none.
   await open(page)
-  await page.getByRole('button', { name: 'Switch the lead to another agent' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Switch the lead' })
-  const select = dialog.getByLabel('The lead runs on')
-  const disabled = (await leadGroups(select)).flatMap(([, options]) =>
+  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
+  const select = dialog.getByLabel('The chief runs on')
+  const disabled = (await chiefGroups(select)).flatMap(([, options]) =>
     options.filter(([, off]) => off),
   )
   expect(disabled).toEqual([])
@@ -4357,17 +4359,17 @@ test("offers a lead still on its harness's own default every saved agent, and mo
     .toEqual([{ project: 1, agent: 'zeus', when: 'turn', note: false }])
 })
 
-test('refuses Switch lead when no harness is installed here, and says where to get one', async ({
+test('refuses Switch chief when no harness is installed here, and says where to get one', async ({
   page,
 }) => {
   const data = model()
   data.missing = ['claude', 'codex', 'opencode', 'pi', 'devin']
   await open(page, data)
-  await page.getByRole('button', { name: 'Switch the lead to another agent' }).click()
+  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
   await expect(page.locator('#status')).toHaveText(
     'No harness is installed here: install one from Agents, Harnesses.',
   )
-  await expect(page.getByRole('dialog', { name: 'Switch the lead' })).toBeHidden()
+  await expect(page.getByRole('dialog', { name: 'Switch the chief' })).toBeHidden()
 })
 
 test('opens a task only over its own project, and every redraw after still draws', async ({
@@ -4445,24 +4447,24 @@ test("acts on the project a control was drawn for, while another one's board is 
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
 })
 
-test('switches the lead only of the project it was asked for', async ({ page }) => {
+test('switches the chief only of the project it was asked for', async ({ page }) => {
   await open(page, twoOpen())
   // The agents come slowly; the human chooses foundry before the dialog is up.
   await page.evaluate(() => {
     window.__delay['agents.list'] = 300
   })
-  await page.getByRole('button', { name: 'Switch the lead to another agent' }).click()
+  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
   await chooseProject(page, 'foundry')
   await expect(page.locator('#project-title')).toHaveText('foundry')
   await page.waitForTimeout(500)
-  await expect(page.getByRole('dialog', { name: 'Switch the lead' })).toBeHidden()
-  // Asked for again on foundry's own lead card, it switches foundry's lead.
+  await expect(page.getByRole('dialog', { name: 'Switch the chief' })).toBeHidden()
+  // Asked for again on foundry's own chief card, it switches foundry's chief.
   await page.evaluate(() => {
     window.__delay = {}
   })
-  await page.getByRole('button', { name: 'Switch the lead to another agent' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Switch the lead' })
-  await dialog.getByLabel('The lead runs on').selectOption('diana')
+  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
+  await dialog.getByLabel('The chief runs on').selectOption('diana')
   await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
   await expect
     .poll(() => calls(page, 'chief.switch'))

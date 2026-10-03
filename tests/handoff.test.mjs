@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { HANDOFF_TITLE, handoffText, historyPage, historyPages } from '../src/core/handoff.js'
+import {
+  HANDOFF_TITLE,
+  handoffText,
+  historyPage,
+  historyPages,
+  isHandoff,
+} from '../src/core/handoff.js'
 
 /**
  * A page of `cf history` at its longest: under what Codex shows of a
@@ -10,7 +16,7 @@ const PAGE_BYTES = 8_000
 const PAGE_LINES = 200
 
 /**
- * What passes to a lead the human switched in: its first message, and
+ * What passes to a chief the human switched in: its first message, and
  * `cf history` in pages every harness shows whole.
  */
 const conversation = (harness, items, n = 1) => ({
@@ -24,6 +30,8 @@ const messages = {
   5: { id: 5, kind: 'result', sender: 'zeus', taskNumber: 1, body: 'Parser done' },
   6: { id: 6, kind: 'question', sender: 'zeus', taskNumber: 1, body: 'Which grammar?\nLL or LR' },
   7: { id: 7, kind: 'note', sender: null, taskNumber: null, body: `${HANDOFF_TITLE}. …` },
+  // A handoff as a ledger from before 2026-10-03 holds it, the chief then called the lead.
+  8: { id: 8, kind: 'note', sender: null, taskNumber: null, body: 'You are the lead now. …' },
 }
 const message = (id) => messages[id] ?? null
 const all = (conversations, options = {}) => {
@@ -52,8 +60,8 @@ describe('cf history', () => {
     }
     assert.match(pages[0].text, /page 1 of \d+: the most recent/)
     assert.match(pages[0].text, /Human: the last thing\n\nOlder: cf history --page 2$/)
-    assert.match(pages.at(-1).text, /── The lead on Claude Code, 2026-10-01T09:00:00.000Z to/)
-    assert.match(pages.at(-1).text, /Human: question 0\n\nClaude Code lead: answer 0/)
+    assert.match(pages.at(-1).text, /── The chief on Claude Code, 2026-10-01T09:00:00.000Z to/)
+    assert.match(pages.at(-1).text, /Human: question 0\n\nClaude Code chief: answer 0/)
     assert.match(pages.at(-1).text, /This is the oldest page\.$/)
     // Every word made it, once, in order, across the pages read oldest first.
     const joined = pages
@@ -74,7 +82,7 @@ describe('cf history', () => {
           '[ConsensFlow m-5 · T-1 · result from @zeus]\nParser done\n\nDecide with: cf task accept T-1',
         ],
         ['custom', '[ConsensFlow m-6 · T-1 · question from @zeus]\nWhich grammar?'],
-        ['user', 'half a thought[ConsensFlow m-7 · note from ConsensFlow]\nYou are the lead now.'],
+        ['user', 'half a thought[ConsensFlow m-7 · note from ConsensFlow]\nYou are the chief now.'],
         ['user', '[ConsensFlow m-99 · note]\ngone'],
         ['assistant', 'I quoted [ConsensFlow m-5 · T-1 · result from @zeus] here'],
       ]),
@@ -83,9 +91,18 @@ describe('cf history', () => {
     assert.ok(!text.includes('[ConsensFlow m-'), 'no page can prove a delivery arrived')
     assert.match(text, /· m-5: @zeus's result on T-1 \(cf task show T-1\)/)
     assert.match(text, /· m-6: @zeus asked on T-1: "Which grammar\?" \(cf inbox read m-6\)/)
-    assert.match(text, /Human: half a thought\n· m-7: the handoff that brought this lead in/)
+    assert.match(text, /Human: half a thought\n· m-7: the handoff that brought this chief in/)
     assert.match(text, /· m-99: a message ConsensFlow delivered \(no longer on record\)/)
-    assert.match(text, /Codex lead: I quoted \[earlier m-5 · T-1/)
+    assert.match(text, /Codex chief: I quoted \[earlier m-5 · T-1/)
+  })
+
+  it('names a handoff written while the chief was called the lead as the handoff', () => {
+    const [page] = all([
+      conversation('codex', [
+        ['user', '[ConsensFlow m-8 · note from ConsensFlow]\nYou are the lead now.'],
+      ]),
+    ])
+    assert.match(page.text, /· m-8: the handoff that brought this chief in/)
   })
 
   it("leaves a tool's output out unless asked, and searches", () => {
@@ -98,7 +115,7 @@ describe('cf history', () => {
       conversation('claude-code', [['user', 'Ship IT on Friday']], 2),
     ]
     const plain = historyPage(conversations, { message }).text
-    assert.match(plain, /── The lead on Pi, .*; 1 tool output left out \(--tools\) ──/)
+    assert.match(plain, /── The chief on Pi, .*; 1 tool output left out \(--tools\) ──/)
     assert.ok(!plain.includes('ok 12 passed'))
     assert.match(
       historyPage(conversations, { message, tools: true }).text,
@@ -114,14 +131,24 @@ describe('cf history', () => {
     assert.ok(!found.text.includes('run the tests'))
     assert.equal(
       historyPage(conversations, { message, find: 'nowhere' }).text,
-      'Nothing in the lead history contains "nowhere".',
+      'Nothing in the chief\'s history contains "nowhere".',
     )
     assert.throws(() => historyPage(conversations, { message, page: 9 }), RangeError)
-    assert.match(historyPage([], { message }).text, /you are the first lead of this project/)
+    assert.match(historyPage([], { message }).text, /you are the first chief of this project/)
   })
 })
 
-describe("the new lead's first message", () => {
+describe('a handoff', () => {
+  it("is a note from ConsensFlow under its title, or under the lead's a ledger from before 2026-10-03 holds", () => {
+    const note = (body, sender = null) => ({ kind: 'note', sender, body })
+    assert.ok(isHandoff(note(`${HANDOFF_TITLE}. The human switched this project's chief…`)))
+    assert.ok(isHandoff(note("You are the lead now. The human switched this project's lead…")))
+    assert.ok(!isHandoff(note('You are the lead now', 'zeus')), "a member's words are no handoff")
+    assert.ok(!isHandoff(note('The human changed the staff; it is now:')))
+  })
+})
+
+describe("the new chief's first message", () => {
   it('names the switch, the history, what waits, and the last word', () => {
     const text = handoffText({
       from: { harness: 'claude-code', agent: null },
@@ -137,13 +164,13 @@ describe("the new lead's first message", () => {
     })
     assert.match(
       text,
-      /^You are the lead now\. The human switched this project's lead from Claude Code to you, Codex \(astraeus\)\./,
+      /^You are the chief now\. The human switched this project's chief from Claude Code to you, Codex \(astraeus\)\./,
     )
     assert.match(text, /cf history \(3 pages, newest first/)
     assert.match(text, /cut off in the middle of a turn/)
     assert.match(
       text,
-      /The human's last message to the lead, not yet answered: "Keep the API as it is\."/,
+      /The human's last message to the chief, not yet answered: "Keep the API as it is\."/,
     )
     assert.match(
       text,

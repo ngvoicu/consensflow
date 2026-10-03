@@ -108,7 +108,7 @@ function age(iso, now = Date.now()) {
 
 /**
  * A member of the staff, as the ledger counts one: the lane of an agent of
- * its own, neither one of its sessions nor the lead, which runs on a saved
+ * its own, neither one of its sessions nor the chief, which runs on a saved
  * agent too.
  */
 export const isMember = (participant) =>
@@ -131,7 +131,7 @@ const rowTasks = (lane, board) =>
  * followed by that role's sessions and holding that role's cards, so a worker
  * and a reviewer read as two things; everything else in lane order. The human
  * has no row: nothing assigns them a task, and what is for them is in For you.
- * The lead has one only while a task is on it, its own or one it asked for:
+ * The chief has one only while a task is on it, its own or one it asked for:
  * what it is doing is on its card in the dock.
  */
 function boardRows(board) {
@@ -237,7 +237,7 @@ const resting = (participant, activity) =>
 /**
  * A session's row says whose window it is; the member's row says what it
  * is. Each says what its agent runs: its model, and its effort when it has
- * one, as the staff dialog does; so does the lead's card in the dock.
+ * one, as the staff dialog does; so does the chief's card in the dock.
  */
 export const identity = (participant, agent) =>
   (participant.member
@@ -259,8 +259,8 @@ export const identity = (participant, agent) =>
     .join(' · ')
 
 /**
- * What a row, or the lead's card in the dock, says its participant is
- * doing, and the state that colours it: an agent gone, a lead being
+ * What a row, or the chief's card in the dock, says its participant is
+ * doing, and the state that colours it: an agent gone, a chief being
  * switched or a member out of quota say so before anything its window
  * does. A member with no terminal open says nothing (null): its row has no
  * status line.
@@ -270,7 +270,7 @@ export function laneStatus(lane, board, now) {
   if (lane.agentMissing) {
     const remedy =
       participant.role === 'chief'
-        ? 'switch the lead'
+        ? 'switch the chief'
         : `remove @${participant.handle} from the staff`
     return [
       'missing',
@@ -278,7 +278,7 @@ export function laneStatus(lane, board, now) {
     ]
   }
   if (lane.switching) {
-    return ['switching', `Switching the lead to ${lane.switching.agent} after this turn`]
+    return ['switching', `Switching the chief to ${lane.switching.agent} after this turn`]
   }
   if (outOfQuota(participant, now)) {
     return ['out', `Out of quota until ${clock(participant.outUntil)}`]
@@ -621,8 +621,8 @@ export class BoardView {
     const title = element('div', 'row-title')
     title.append(lamp(lane, now), element('span', 'row-name', laneName(participant)))
     head.append(title)
-    // The lead's row only holds its tasks: what it is doing, what it runs on
-    // and Switch lead are on its card in the dock.
+    // The chief's row only holds its tasks: what it is doing, what it runs on
+    // and Switch chief are on its card in the dock.
     if (participant.role === 'chief') return head
     head.append(element('span', 'row-meta', identity(participant, agent)))
     const said = laneStatus(lane, board, now)

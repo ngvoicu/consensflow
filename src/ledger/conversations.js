@@ -6,13 +6,13 @@ import { conversationView, MESSAGE_SELECT, messageView, TASK_SELECT, taskView } 
  * Conversations: each participant's native conversations, one current at a
  * time and followed when the human switches its window to another; the copy
  * ConsensFlow keeps of each, item by item; and the chief's across a Switch
- * lead, with what a lead that takes over reads (its history, its open work).
+ * chief, with what a chief that takes over reads (its history, its open work).
  */
 
 /**
  * The most of one tool's output that is copied: it can run to megabytes, and
  * the tool can be run again. Words are copied whole (the human's, an agent's,
- * ConsensFlow's): a lead switched in reads them in `cf history`.
+ * ConsensFlow's): a chief switched in reads them in `cf history`.
  */
 export const TRANSCRIPT_ITEM_MAX = 64_000
 const TRANSCRIPT_ROLES = ['user', 'assistant', 'tool', 'custom']
@@ -183,12 +183,12 @@ function partOf(store, taskId, participantId) {
 }
 
 /**
- * What the lead said and was told before its current conversation: every
+ * What the chief said and was told before its current conversation: every
  * earlier conversation of the chief, oldest first, with the harness it ran
- * on and its copied items in order. `cf history` pages it for a lead the
+ * on and its copied items in order. `cf history` pages it for a chief the
  * human switched in.
  */
-export function leadHistory(store, projectId) {
+export function chiefHistory(store, projectId) {
   const chief = store.participantByHandle(projectId, 'chief')
   const items = store.db.prepare(
     'SELECT item_id, role, text, complete, at FROM transcript WHERE conversation_id = ? ORDER BY seq',
@@ -211,11 +211,11 @@ export function leadHistory(store, projectId) {
 }
 
 /**
- * What waits on the chief now, for a lead that takes over: members'
+ * What waits on the chief now, for a chief that takes over: members'
  * questions to it without an answer, results it has not decided on, and its
  * own unfinished tasks.
  */
-export function leadOpenWork(store, projectId) {
+export function chiefOpenWork(store, projectId) {
   const chief = store.participantByHandle(projectId, 'chief')
   return {
     questions: store.db
@@ -250,13 +250,13 @@ export function leadOpenWork(store, projectId) {
 }
 
 /**
- * The human's Switch lead: the chief runs on the saved `agent` (its model
+ * The human's Switch chief: the chief runs on the saved `agent` (its model
  * and effort) on `harness` from now on, never on a harness's own default.
  * Its conversation ends here: a conversation belongs to one harness, and
  * every switch starts a fresh one that reads the history. What it was out
  * of quota for was the old harness's account, so that clears. The window is
- * the caller's to close before and open after. The chief keeps the lead it
- * was switched from, and `cut`, that the old lead was stopped in the middle
+ * the caller's to close before and open after. The chief keeps what it was
+ * switched from, and `cut`, that the old chief was stopped in the middle
  * of a turn, for the handoff to say.
  */
 export function switchChief(store, projectId, { harness, agent, cut = false }) {
@@ -283,16 +283,16 @@ export function switchChief(store, projectId, { harness, agent, cut = false }) {
   })
 }
 
-/** The lead read its history (`cf history`): which page, or what it searched for. */
+/** The chief read its history (`cf history`): which page, or what it searched for. */
 export function historyRead(store, projectId, { page, find = null, tools = false }) {
   return store.write(() => {
     store.projectRow(projectId)
-    store.log(projectId, 'lead.history.read', { page, find, tools })
+    store.log(projectId, 'chief.history.read', { page, find, tools })
   })
 }
 
 /**
- * The project's latest Switch lead: the lead the chief was switched from
+ * The project's latest Switch chief: what the chief was switched from
  * (its harness and agent) and whether its turn was cut; null before any.
  */
 export function lastSwitch(store, projectId) {

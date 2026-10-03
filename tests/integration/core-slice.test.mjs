@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { startIntegration } from './harness.mjs'
 
 /**
- * The new core end to end (TEST-BDC-09 through the real pane host): its daemon,
+ * ConsensFlow end to end (TEST-BDC-09 through the real pane host): the daemon,
  * the real Rust headless bridge and PTYs, and fake Claude agents in them. The
  * human gives the chief a task on the board; the chief hands part of it to a
  * worker's tier with `cf task add`; the core picks the worker and opens its window with the task,
@@ -15,25 +15,25 @@ import { startIntegration } from './harness.mjs'
  * window, where the chief's own transcript shows it arrived.
  */
 
-const CORE_EDITOR = fileURLToPath(new URL('./core-editor.mjs', import.meta.url))
+const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
 const CF = fileURLToPath(new URL('../../bin/cf.mjs', import.meta.url))
 
 test('a chief hands a task to a worker through the board and the result lands in its window', async () => {
   const app = await startIntegration({
-    editor: CORE_EDITOR,
+    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
     const opened = await app.requestNode('project.open', {
       directory: app.workspace,
-      agent: 'lead',
+      agent: 'chief',
     })
     assert.equal(opened.ok, true, JSON.stringify(opened))
     const project = opened.project.id
     const added = await app.requestNode('member.add', { project, agent: 'worker' })
     assert.equal(added.ok, true, JSON.stringify(added))
-    const leadFrame = await app.openFrame(`p${project}-chief`)
+    const chiefFrame = await app.openFrame(`p${project}-chief`)
 
     await app.tell(project, `DISPATCH --tier ${added.member.tier} Reply with exactly: WORKER_OK`)
 
@@ -74,9 +74,9 @@ test('a chief hands a task to a worker through the board and the result lands in
     assert.ok(events.some((e) => e.kind === 'task.state' && e.data.to === 'done'))
     assert.ok(events.some((e) => e.kind === 'window.activity' && e.participant === 'chief'))
     // The chief's native session is the `--session-id` its window was launched with.
-    const leadSession = leadFrame.argv[leadFrame.argv.indexOf('--session-id') + 1]
+    const chiefSession = chiefFrame.argv[chiefFrame.argv.indexOf('--session-id') + 1]
     assert.match(
-      app.transcript(leadSession),
+      app.transcript(chiefSession),
       new RegExp(`\\[ConsensFlow m-${result.id} · T-1 · result from @worker-[a-z]+-[a-z]+\\]`),
     )
   } finally {
@@ -86,13 +86,13 @@ test('a chief hands a task to a worker through the board and the result lands in
 
 test('a chief with unsent text in its terminal still gets its result, behind that text', async () => {
   const app = await startIntegration({
-    editor: CORE_EDITOR,
+    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
     const opened = await app.requestNode('project.open', {
       directory: app.workspace,
-      agent: 'lead',
+      agent: 'chief',
     })
     const project = opened.project.id
     const { member } = await app.requestNode('member.add', { project, agent: 'worker' })
@@ -136,13 +136,13 @@ test('a chief with unsent text in its terminal still gets its result, behind tha
 
 test('one member runs two tasks at once, each in a session and window of its own', async () => {
   const app = await startIntegration({
-    editor: CORE_EDITOR,
+    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
     const opened = await app.requestNode('project.open', {
       directory: app.workspace,
-      agent: 'lead',
+      agent: 'chief',
     })
     assert.equal(opened.ok, true, JSON.stringify(opened))
     const project = opened.project.id
@@ -174,27 +174,27 @@ test('one member runs two tasks at once, each in a session and window of its own
   }
 })
 
-test('switching the lead opens a fresh window that is handed the lead and reads what the old one was told', async () => {
+test('switching the chief opens a fresh window that gets the handoff and reads what the old one was told', async () => {
   const app = await startIntegration({
-    editor: CORE_EDITOR,
+    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
     const opened = await app.requestNode('project.open', {
       directory: app.workspace,
-      agent: 'lead',
+      agent: 'chief',
     })
     const project = opened.project.id
-    const leads = () => app.openFrames.filter((frame) => frame.id === `p${project}-chief`)
+    const chiefs = () => app.openFrames.filter((frame) => frame.id === `p${project}-chief`)
     const sessionOf = (frame) => frame.argv[frame.argv.indexOf('--session-id') + 1]
     const first = await app.openFrame(`p${project}-chief`)
     const modelOf = (frame) => frame.argv[frame.argv.indexOf('--model') + 1]
-    assert.equal(modelOf(first), 'fake-lead', "the first lead runs on its agent's model")
+    assert.equal(modelOf(first), 'fake-chief', "the first chief runs on its agent's model")
     await app.waitFor(async () => {
       const { board } = await app.requestNode('board.get', { project })
       return board.lanes.find((l) => l.participant.handle === 'chief').activity.state === 'idle'
     })
-    // The human tells the first lead something only it knows.
+    // The human tells the first chief something only it knows.
     const typed = await app.requestRust('pane.input', {
       id: first.id,
       generation: first.generation,
@@ -205,18 +205,18 @@ test('switching the lead opens a fresh window that is handed the lead and reads 
 
     const switched = await app.requestNode('chief.switch', { project, agent: 'worker' })
     assert.equal(switched.ok, true, JSON.stringify(switched))
-    await app.waitFor(() => leads().length === 2)
-    const second = leads()[1]
+    await app.waitFor(() => chiefs().length === 2)
+    const second = chiefs()[1]
     assert.notEqual(sessionOf(second), sessionOf(first), 'every switch starts fresh')
     assert.equal(modelOf(second), 'fake', "the agent's model")
     await app.waitFor(
-      () => app.transcript(sessionOf(second)).includes('You are the lead now'),
+      () => app.transcript(sessionOf(second)).includes('You are the chief now'),
       30_000,
     )
     const { board } = await app.requestNode('board.get', { project })
     assert.equal(board.project.state, 'open', 'a switch is not a close')
 
-    // The new lead reads, with its own token, what the human told the old one.
+    // The new chief reads, with its own token, what the human told the old one.
     const history = execFileSync(process.execPath, [CF, 'history'], {
       env: {
         ...app.env,
@@ -226,7 +226,7 @@ test('switching the lead opens a fresh window that is handed the lead and reads 
       encoding: 'utf8',
     })
     assert.match(history, /Human: Reply with exactly: TERN-7314/)
-    assert.match(history, /Claude Code lead: TERN-7314/)
+    assert.match(history, /Claude Code chief: TERN-7314/)
     assert.ok(!history.includes('[ConsensFlow m-'), 'no page can prove a delivery arrived')
   } finally {
     await app.close()

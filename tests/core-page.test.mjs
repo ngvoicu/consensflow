@@ -9,7 +9,7 @@ import { openLedger } from '../src/ledger/index.js'
 import { addAgent, removeAgent } from '../src/roster.js'
 
 /**
- * What the board page may ask of the new core (TEST-BDC-13's data side): each
+ * What the board page may ask of the daemon (TEST-BDC-13's data side): each
  * operation is the human acting on the ledger or the dispatcher, and every
  * change wakes the dispatcher.
  */
@@ -105,7 +105,7 @@ async function withPage(fn) {
   }
 }
 
-describe('the page protocol of the new core', () => {
+describe('the page protocol of the daemon', () => {
   it('is exactly what the app forwards: the Rust allow-list names every operation', async () => {
     const source = await readFile(
       new URL('../app/src-tauri/src/commands.rs', import.meta.url),
@@ -118,7 +118,7 @@ describe('the page protocol of the new core', () => {
     })
   })
 
-  it('switches the lead to a saved agent on its own harness, never to a harness on its own, and to nothing not installed here', async () => {
+  it('switches the chief to a saved agent on its own harness, never to a harness on its own, and to nothing not installed here', async () => {
     await withPage(async ({ operations, dispatcher, env }) => {
       // Codex and Claude Code are installed here: their commands are on PATH.
       const bin = path.join(env.HOME, 'bin')
@@ -142,10 +142,10 @@ describe('the page protocol of the new core', () => {
         [project.id, { harness: 'codex', agent: 'diana', when: 'turn', note: true }],
         [project.id, { harness: 'claude-code', agent: 'zeus', when: 'now', note: false }],
       ])
-      // A harness on its own default model is no lead: the human picks an agent.
+      // A harness on its own default model is no chief: the human picks an agent.
       await assert.rejects(operations['chief.switch']({ project: project.id, harness: 'codex' }), {
         message:
-          'pick one of your saved agents for the lead: its harness, model and effort come with it',
+          'pick one of your saved agents for the chief: its harness, model and effort come with it',
       })
       await assert.rejects(
         operations['chief.switch']({ project: project.id, agent: 'diana', when: 'later' }),
@@ -165,7 +165,7 @@ describe('the page protocol of the new core', () => {
     })
   })
 
-  it('opens a project whose lead runs on a saved agent, and none without one: it says what to pick', async () => {
+  it('opens a project whose chief runs on a saved agent, and none without one: it says what to pick', async () => {
     await withPage(async ({ ledger, operations, opened }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
@@ -173,12 +173,12 @@ describe('the page protocol of the new core', () => {
       })
       const chief = project.participants.find((p) => p.handle === 'chief')
       assert.deepEqual([chief.harness, chief.agent], ['codex', 'diana'])
-      // A harness on its own default model is no lead.
+      // A harness on its own default model is no chief.
       await assert.rejects(
         operations['project.open']({ directory: '/work/api', harness: 'claude-code' }),
         {
           message:
-            'pick one of your saved agents for the lead: its harness, model and effort come with it',
+            'pick one of your saved agents for the chief: its harness, model and effort come with it',
         },
       )
       await assert.rejects(
@@ -255,20 +255,20 @@ describe('the page protocol of the new core', () => {
     })
   })
 
-  it('tells a running lead of a change to the staff, in one note the next change replaces', async () => {
+  it('tells a running chief of a change to the staff, in one note the next change replaces', async () => {
     await withPage(async ({ ledger, operations }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
         agent: 'leto',
       })
-      const lead = () => ledger.project(project.id).participants.find((p) => p.handle === 'chief')
-      // A lead not yet started reads the staff in its role text: no note.
+      const chief = () => ledger.project(project.id).participants.find((p) => p.handle === 'chief')
+      // A chief not yet started reads the staff in its role text: no note.
       await operations['member.add']({ project: project.id, agent: 'zeus' })
-      assert.deepEqual(ledger.pending(lead().id), [])
-      ledger.startConversation(lead().id, { harness: 'claude-code' })
+      assert.deepEqual(ledger.pending(chief().id), [])
+      ledger.startConversation(chief().id, { harness: 'claude-code' })
       await operations['member.add']({ project: project.id, agent: 'diana', roles: ['reviewer'] })
       await operations['member.remove']({ project: project.id, agent: 'zeus' })
-      const notes = ledger.pending(lead().id)
+      const notes = ledger.pending(chief().id)
       assert.equal(notes.length, 1, 'one note: the newest')
       assert.equal(notes[0].kind, 'note')
       assert.match(

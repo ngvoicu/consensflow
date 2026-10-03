@@ -21,7 +21,7 @@ harnesses named logged in on this machine, and your word for the spend.
 
 Everything is real but the human. The daemon, the pane host and the harnesses
 are the ones the app uses (the live bench's shape). `--chief` names the
-chief's harness (claude, codex, pi, opencode, devin), saved as the lead's
+chief's harness (claude, codex, pi, opencode, devin), saved as the chief's
 agent with its model and effort. Every chief but
 Devin takes its model from `--model`; unless given, Claude Code runs Opus,
 Codex its cheap model, and Pi and OpenCode DeepSeek V4 Pro
@@ -120,10 +120,10 @@ a score).
   two things first, not where: the file's name, and which language first.
   Expected: asked in the terminal, nothing on the board, no `cf ask`, the
   work on the board, and the page made under the name the owner gave.
-- `lead-switch`: the owner tells the lead a codeword and a decision, pastes
+- `chief-switch`: the owner tells the chief a codeword and a decision, pastes
   notes long enough to push both off the first page of `cf history`, then
-  switches the lead to the staff's harness (`--switch-to`) and asks the new
-  lead. Expected: one switch to another harness, `cf history` read, the
+  switches the chief to the staff's harness (`--switch-to`) and asks the new
+  chief. Expected: one switch to another harness, `cf history` read, the
   codeword and the day named, nothing put on the board.
 
 `--arm` compares a chief with its card (`card`, the default), with a

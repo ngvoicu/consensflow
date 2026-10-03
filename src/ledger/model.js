@@ -96,7 +96,7 @@ export function requireRoles(roles) {
 }
 
 /**
- * A saved agent's id, as the roster names it: what a lead runs on, and what
+ * A saved agent's id, as the roster names it: what a chief runs on, and what
  * a member is. A member's id is its handle too, so it is never one of the
  * handles in `taken`.
  */
@@ -110,7 +110,7 @@ export function requireAgentId(agent, taken = []) {
 /**
  * Whether a role fits an agent, by its designer flag: an image designer is
  * an image agent (a Codex agent that designs), and an image agent is
- * nothing else, the lead included.
+ * nothing else, the chief included.
  */
 export const fitsRole = (designer, role) => (role === 'designer') === designer
 

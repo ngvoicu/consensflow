@@ -3,7 +3,7 @@ import { isMember } from './board.js'
 
 /**
  * The dialogs that say who works on a project: New project (its folder, the
- * saved agent its lead runs on, its first staff), Switch lead and the
+ * saved agent its chief runs on, its first staff), Switch chief and the
  * project staff. Each keeps what it is in the middle of to itself, and reads
  * the page's board and saved agents as they are when it draws or acts; what
  * it changes on the page goes back through the page's callbacks. A dialog
@@ -43,7 +43,7 @@ const runsLabel = (agent, tier = agent.profile?.workTier) =>
 /**
  * Whether an agent may take a role, by its designer flag: an image designer
  * is an image agent (a Codex agent that designs), and an image agent is
- * nothing else, the lead included. The core's `fitsRole`, which this page
+ * nothing else, the chief included. The core's `fitsRole`, which this page
  * cannot import.
  */
 const fits = (agent, role) => (role === 'designer') === (agent.designer === true)
@@ -152,7 +152,7 @@ function nobodyRow(text) {
   return row
 }
 
-/** The harnesses a lead runs in, as the human knows them, in the order their agents are offered. */
+/** The harnesses a chief runs in, as the human knows them, in the order their agents are offered. */
 const HARNESS_NAMES = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
@@ -167,14 +167,14 @@ const harnessOf = (kind) => (kind === 'claude-code' ? 'claude' : kind)
 const NO_HARNESS = 'No harness is installed here: install one from Agents, Harnesses.'
 
 /**
- * Fills a lead's pick list: the saved agents a lead may run on (no image
- * agent), harness by harness for each harness a lead runs in that is
- * installed here, by name, after an empty choice that asks for one. A lead
+ * Fills a chief's pick list: the saved agents a chief may run on (no image
+ * agent), harness by harness for each harness a chief runs in that is
+ * installed here, by name, after an empty choice that asks for one. A chief
  * runs on an agent the human picks, never on a harness's own default; the
  * agent it runs on now (`current`) is no switch. With no harness installed
  * here it refuses, and says where to get one.
  */
-function fillLeads(select, agents, missing, current = null) {
+function fillChiefs(select, agents, missing, current = null) {
   const installed = Object.entries(HARNESS_NAMES).filter(
     ([kind]) => !missing.includes(harnessOf(kind)),
   )
@@ -200,7 +200,7 @@ function fillLeads(select, agents, missing, current = null) {
 }
 
 /**
- * New project, on the folder the human picked: the saved agent its lead runs
+ * New project, on the folder the human picked: the saved agent its chief runs
  * on, among those on a harness installed here, the staff (the last
  * project's picked already) and the approval setting.
  */
@@ -236,7 +236,7 @@ export class NewProjectDialog {
     form.addEventListener('submit', (event) => {
       event.preventDefault()
       const directory = form.elements.directory.value
-      const agent = form.elements.lead.value
+      const agent = form.elements.chief.value
       const gate = form.elements.gate.checked
       const staff = this.#pickedStaff()
       dialog.close()
@@ -254,7 +254,7 @@ export class NewProjectDialog {
       this.#page.core('agents.list'),
       this.#page.core('staff.last'),
     ])
-    fillLeads(this.#form.elements.lead, agents, missing)
+    fillChiefs(this.#form.elements.chief, agents, missing)
     this.#page.onAgents(agents)
     this.#pickLast(staff)
     this.#form.elements.directory.value = directory
@@ -329,15 +329,15 @@ export class NewProjectDialog {
 }
 
 /**
- * Switch the lead: the chief goes on in a new window on another saved agent,
- * with its harness, model and effort, and the core hands it the lead (the
- * dispatcher's switchChief).
+ * Switch the chief: the chief goes on in a new window on another saved agent,
+ * with its harness, model and effort, and the core hands the work over to it
+ * (the dispatcher's switchChief).
  */
-export class SwitchLeadDialog {
+export class SwitchChiefDialog {
   #dialog
   #form
   #page
-  /** The project whose lead the dialog switches: the one it was opened for. */
+  /** The project whose chief the dialog switches: the one it was opened for. */
   #project = null
 
   /**
@@ -352,7 +352,7 @@ export class SwitchLeadDialog {
     const form = this.#form
     form.addEventListener('submit', (event) => {
       event.preventDefault()
-      const agent = form.elements.lead.value
+      const agent = form.elements.chief.value
       const when = form.elements.when.value
       const askFirst = form.elements.note.checked
       const project = this.#project
@@ -375,9 +375,9 @@ export class SwitchLeadDialog {
     // Asked for in a project the human has left since: it stays shut.
     if (this.#page.selected() !== chief.projectId) return
     const form = this.#form
-    // A lead from before leads were agents runs on its harness's default: every agent is a switch.
-    fillLeads(form.elements.lead, agents, missing, chief.agent)
-    // Each switch starts from the gentle one: the lead finishes its turn, unasked.
+    // A chief from before chiefs were agents runs on its harness's default: every agent is a switch.
+    fillChiefs(form.elements.chief, agents, missing, chief.agent)
+    // Each switch starts from the gentle one: the chief finishes its turn, unasked.
     form.elements.when.value = 'turn'
     form.elements.note.checked = false
     this.#project = chief.projectId
@@ -431,7 +431,7 @@ export class StaffDialog {
       const agent = this.#form.elements.agent.value
       if (!agent) return
       const { project, lanes } = page.board()
-      // Already on the staff: the lead runs on an agent too, but is no member.
+      // Already on the staff: the chief runs on an agent too, but is no member.
       const member = lanes
         .map((lane) => lane.participant)
         .find((participant) => isMember(participant) && participant.agent === agent)

@@ -346,7 +346,7 @@ it("offers Devin's SWE-1.6 by name, plain and slow, and no agent on Devin's own 
     assert.equal(entry.profile.modelLabel, label, name)
     assert.equal(entry.profile.routeLabel, 'Devin account', name)
   }
-  // No model at all is a lead from before every lead had an agent: Devin's own setting.
+  // No model at all is a chief from before every chief had an agent: Devin's own setting.
   assert.equal(agentProfile({ harness: 'devin' }).modelLabel, 'Devin configured model')
   // The levels Devin writes into its model ids (claude-opus-5-5-max), for
   // an agent that names a family that has them.

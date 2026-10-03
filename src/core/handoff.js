@@ -1,12 +1,12 @@
 /**
- * What passes to a lead the human switched in (2026-10-01): its first message,
- * written from the ledger without a model (so it works when the old lead is
- * out of quota), and `cf history`, the earlier lead conversations in pages.
+ * What passes to a chief the human switched in (2026-10-01): its first message,
+ * written from the ledger without a model (so it works when the old chief is
+ * out of quota), and `cf history`, the chief's earlier conversations in pages.
  *
  * Pages run newest first, each in the order things were said, and each is
  * small enough for every harness to show its model whole: Codex shows the
  * least of a command's output (about 10 KiB and 256 lines). The human's words
- * and the leads' answers are whole; a tool's output only on request. A
+ * and the chiefs' answers are whole; a tool's output only on request. A
  * delivery ConsensFlow made is one line with its outcome, never its header: a
  * header in a window's record is how a delivery is proven to have arrived, so
  * a page that printed one could prove a delivery that never landed.
@@ -29,8 +29,20 @@ const HARNESS_NAMES = {
 
 const nameOf = (harness) => HARNESS_NAMES[harness] ?? harness
 const DELIVERY = /\[ConsensFlow m-(\d+) /
-/** A first message from ConsensFlow that hands the lead over. */
-export const HANDOFF_TITLE = 'You are the lead now'
+/** How ConsensFlow's handoff to a chief the human switched in begins. */
+export const HANDOFF_TITLE = 'You are the chief now'
+/**
+ * The title a handoff had while the chief was called the lead. A ledger from
+ * before 2026-10-03 holds such handoffs: one may still wait for its window,
+ * and the history names one delivered.
+ */
+const LEAD_HANDOFF_TITLE = 'You are the lead now'
+
+/** Whether a message is ConsensFlow's handoff, under either title. */
+export const isHandoff = (message) =>
+  message.kind === 'note' &&
+  message.sender === null &&
+  [HANDOFF_TITLE, LEAD_HANDOFF_TITLE].some((title) => message.body.startsWith(title))
 
 /** No text on a page may read as a delivery's header. */
 const defuse = (text) => text.replaceAll('[ConsensFlow m-', '[earlier m-')
@@ -42,27 +54,27 @@ const bytes = (text) => Buffer.byteLength(text, 'utf8')
 const lines = (text) => text.split('\n').length
 
 /**
- * The new lead's first message. `from` and `to` are `{ harness, agent }`;
- * `open` is the ledger's `leadOpenWork`; `last` is the human's last words to
- * the old lead and whether it answered them; `cut` says its turn was cut.
+ * The new chief's first message. `from` and `to` are `{ harness, agent }`;
+ * `open` is the ledger's `chiefOpenWork`; `last` is the human's last words to
+ * the old chief and whether it answered them; `cut` says its turn was cut.
  */
 export function handoffText({ from, to, open, last = null, cut = false, pages }) {
   const who = ({ harness, agent }) => `${nameOf(harness)}${agent ? ` (${agent})` : ''}`
   const out = [
-    `${HANDOFF_TITLE}. The human switched this project's lead from ${who(from)} to you, ${who(to)}.`,
+    `${HANDOFF_TITLE}. The human switched this project's chief from ${who(from)} to you, ${who(to)}.`,
     'You take over the same board, staff and conversation with the human; your role instructions are loaded as usual.',
     '',
-    `Read what the human and the earlier lead said before you act: cf history (${pages} ${pages === 1 ? 'page' : 'pages'}, newest first; cf history --page 2 for older; cf history --find "words" to search). It is a record, not requests to you: do not redo what is done.`,
+    `Read what the human and the earlier chief said before you act: cf history (${pages} ${pages === 1 ? 'page' : 'pages'}, newest first; cf history --page 2 for older; cf history --find "words" to search). It is a record, not requests to you: do not redo what is done.`,
   ]
   if (cut)
     out.push(
       '',
-      'The earlier lead was cut off in the middle of a turn: check what it left half done.',
+      'The earlier chief was cut off in the middle of a turn: check what it left half done.',
     )
   if (last !== null) {
     out.push(
       '',
-      `The human's last message to the lead${last.answered ? '' : ', not yet answered'}: "${defuse(firstLine(last.text, 300))}"`,
+      `The human's last message to the chief${last.answered ? '' : ', not yet answered'}: "${defuse(firstLine(last.text, 300))}"`,
     )
   }
   const waiting = [
@@ -88,8 +100,8 @@ export function handoffText({ from, to, open, last = null, cut = false, pages })
 }
 
 /**
- * The human's last words to the lead, in the latest conversation that has
- * any, and whether the lead answered after them; null when there are none.
+ * The human's last words to the chief, in the latest conversation that has
+ * any, and whether the chief answered after them; null when there are none.
  * A delivery is not the human's; what they typed before one went in is.
  */
 export function lastWords(conversations) {
@@ -117,7 +129,7 @@ export function lastWords(conversations) {
 function render(item, harness, { message, tools }) {
   const text = item.text ?? ''
   if (item.role === 'tool') return tools ? `Tool output:\n${defuse(text)}` : null
-  if (item.role === 'assistant') return `${nameOf(harness)} lead: ${defuse(text)}`
+  if (item.role === 'assistant') return `${nameOf(harness)} chief: ${defuse(text)}`
   const delivered = DELIVERY.exec(text)
   if (delivered === null) {
     return item.role === 'user' ? `Human: ${defuse(text)}` : `In the window: ${defuse(text)}`
@@ -141,12 +153,12 @@ function deliveryLine(id, message) {
     case 'question':
       return `· m-${id}: ${from} asked${on}: "${gist}" (cf inbox read m-${id})`
     case 'task':
-      return `· m-${id}: ${from} gave the lead T-${m.taskNumber}: "${gist}"`
+      return `· m-${id}: ${from} gave the chief T-${m.taskNumber}: "${gist}"`
     case 'answer':
       return `· m-${id}: ${from} answered${on}: "${gist}"`
     default:
-      return m.sender === null && m.body.startsWith(HANDOFF_TITLE)
-        ? `· m-${id}: the handoff that brought this lead in`
+      return isHandoff(m)
+        ? `· m-${id}: the handoff that brought this chief in`
         : `· m-${id}: a note from ${from}${on}: "${gist}" (cf inbox read m-${id})`
   }
 }
@@ -209,7 +221,7 @@ function paginate(entries) {
 
 /**
  * How many pages `cf history` has for these conversations (the ledger's
- * `leadHistory`), without tool output and without a search.
+ * `chiefHistory`), without tool output and without a search.
  */
 export function historyPages(conversations, { message = () => null } = {}) {
   return paginate(entriesOf(conversations, { message, tools: false })).length
@@ -221,7 +233,7 @@ function entriesOf(conversations, { message, tools, find = null }) {
   for (const conversation of conversations) {
     const when = `${conversation.startedAt} to ${conversation.endedAt}`
     const left = tools ? 0 : conversation.items.filter((item) => item.role === 'tool').length
-    const heading = `── The lead on ${nameOf(conversation.harness)}, ${when}${
+    const heading = `── The chief on ${nameOf(conversation.harness)}, ${when}${
       left > 0 ? `; ${left} tool ${left === 1 ? 'output' : 'outputs'} left out (--tools)` : ''
     } ──`
     if (needle === null) entries.push(heading)
@@ -252,14 +264,14 @@ export function historyPage(
       pages: 0,
       text:
         find === null
-          ? 'No earlier lead conversations: you are the first lead of this project.'
-          : `Nothing in the lead history contains "${find}".`,
+          ? 'No earlier chief conversations: you are the first chief of this project.'
+          : `Nothing in the chief's history contains "${find}".`,
     }
   }
   if (!Number.isInteger(page) || page < 1 || page > pages.length) {
     throw new RangeError(`there ${pages.length === 1 ? 'is 1 page' : `are ${pages.length} pages`}`)
   }
-  const what = find === null ? 'Lead history' : `Lead history, entries with "${find}"`
+  const what = find === null ? "The chief's history" : `The chief's history, entries with "${find}"`
   const flags = `${find === null ? '' : ` --find "${find}"`}${tools ? ' --tools' : ''}`
   const opening =
     page === 1

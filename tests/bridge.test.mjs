@@ -897,7 +897,7 @@ describe('cf ui --json --no-open speaks the bridge after its handle line', () =>
       child.stdin.end()
       const code = await new Promise((resolve, reject) => {
         child.once('exit', resolve)
-        setTimeout(() => reject(new Error('the editor kept serving')), 10_000)
+        setTimeout(() => reject(new Error('the daemon kept serving')), 10_000)
       })
       assert.equal(code, 0)
     } finally {

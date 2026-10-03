@@ -1,6 +1,6 @@
 import { fitsRole } from '../ledger/index.js'
+import { ChiefSwitch } from './chief-switch.js'
 import { Deliveries } from './deliveries.js'
-import { LeadSwitch } from './lead-switch.js'
 import { Scheduler } from './scheduler.js'
 import { Transcripts } from './transcripts.js'
 import { Windows } from './windows.js'
@@ -48,7 +48,7 @@ import { Windows } from './windows.js'
  *   that comes back, under its own id again, starts clean; its window closes
  *   once its step in progress ends, and that exit fails nothing: a member's
  *   open tasks were cancelled when it left. Work on it that was waiting
- *   meanwhile (a step, a launch, a delivery, an Open, a Switch lead, a
+ *   meanwhile (a step, a launch, a delivery, an Open, a Switch chief, a
  *   removal) does nothing more by its ids. The ledger never gives an id
  *   twice: those ids name rows gone with their project, which the work
  *   would fail on, or a member that may be back on the staff.
@@ -75,7 +75,7 @@ import { Windows } from './windows.js'
  * orchestrates has an owner each, beside it: who takes which task and who
  * is out of quota (`scheduler.js`), each window's launch, looks and close
  * (`windows.js`), what goes into a window and what comes back out
- * (`deliveries.js`), the human's Switch lead (`lead-switch.js`), and the copy
+ * (`deliveries.js`), the human's Switch chief (`chief-switch.js`), and the copy
  * of each window's conversation (`transcripts.js`).
  *
  * Harness specifics live in the adapters (`src/adapters/`); the pane host is
@@ -89,13 +89,13 @@ export function requireOpen(project) {
 }
 
 /**
- * A lead runs on one of the human's saved agents, never on a harness's own
+ * A chief runs on one of the human's saved agents, never on a harness's own
  * default model: asked for without one, the core says what to pick.
  */
-export function requireLeadAgent(agent) {
+export function requireChiefAgent(agent) {
   if (typeof agent !== 'string' || agent.length === 0) {
     throw new Error(
-      'pick one of your saved agents for the lead: its harness, model and effort come with it',
+      'pick one of your saved agents for the chief: its harness, model and effort come with it',
     )
   }
   return agent
@@ -124,8 +124,8 @@ export class Dispatcher {
   #transcripts
   /** Each window's launch, looks and close (`windows.js`). */
   #windows
-  /** The human's Switch lead, and the handoff a new lead starts with (`lead-switch.js`). */
-  #lead
+  /** The human's Switch chief, and the handoff a new chief starts with (`chief-switch.js`). */
+  #chiefSwitch
   #runtime = new Map()
   /** The records of participants forgotten while their window was still open, until it exits. */
   #leaving = new Set()
@@ -187,17 +187,17 @@ export class Dispatcher {
       launchFiles,
       deliveries: this.#deliveries,
       scheduler: this.#scheduler,
-      leadFirst: (project, chief, conversation, message) =>
-        this.#lead.leadFirst(project, chief, conversation, message),
-      leadWithoutAgent: (project, chief, delivering) =>
-        this.#lead.leadWithoutAgent(project, chief, delivering),
+      chiefFirst: (project, chief, conversation, message) =>
+        this.#chiefSwitch.chiefFirst(project, chief, conversation, message),
+      chiefWithoutAgent: (project, chief, delivering) =>
+        this.#chiefSwitch.chiefWithoutAgent(project, chief, delivering),
       paneExited: (pane) => this.paneExited(pane),
       traceWindow: (runtime, kind, details) => this.#traceWindow(runtime, kind, details),
       forgotten: (runtime) => this.#forgotten(runtime),
       now: () => this.#now(),
       changed: () => this.#changed(),
     })
-    this.#lead = new LeadSwitch({
+    this.#chiefSwitch = new ChiefSwitch({
       ledger,
       windows: this.#windows,
       deliveries: this.#deliveries,
@@ -219,7 +219,7 @@ export class Dispatcher {
     return this.#runtime.get(participantId)?.window.activity ?? { state: 'closed' }
   }
 
-  /** The Switch lead waiting for this lead's turn to end, `{harness, agent}`, or null. */
+  /** The Switch chief waiting for this chief's turn to end, `{harness, agent}`, or null. */
   pendingSwitch(participantId) {
     const pending = this.#runtime.get(participantId)?.pendingSwitch ?? null
     return pending === null ? null : { harness: pending.harness, agent: pending.agent }
@@ -236,11 +236,11 @@ export class Dispatcher {
   }
 
   /**
-   * The lead asked for: one of the human's saved agents, on its harness,
+   * The chief asked for: one of the human's saved agents, on its harness,
    * whose windows ConsensFlow opens, and no image agent: it only designs.
    */
-  #requireLead({ harness, agent }) {
-    requireLeadAgent(agent)
+  #requireChief({ harness, agent }) {
+    requireChiefAgent(agent)
     this.requireAdapter(harness)
     const saved = this.#roster(agent)
     if (saved === null) throw new Error(`${agent} is not among your agents`)
@@ -255,7 +255,7 @@ export class Dispatcher {
    * answer (see `#openSoon`).
    */
   async openProject({ directory, name, chief = {}, staff = [], gate }) {
-    this.#requireLead(chief)
+    this.#requireChief(chief)
     for (const member of staff) this.requireAdapter(member.harness)
     const project = this.#ledger.createProject({
       directory,
@@ -264,8 +264,7 @@ export class Dispatcher {
       staff,
       ...(gate === undefined ? {} : { gate }),
     })
-    const lead = project.participants.find((participant) => participant.handle === 'chief')
-    this.#openSoon(lead.id)
+    this.#openSoon(project.participants.find((participant) => participant.handle === 'chief').id)
     return this.#ledger.project(project.id)
   }
 
@@ -273,7 +272,7 @@ export class Dispatcher {
   async resumeProject(projectId) {
     const project = this.#ledger.setProjectState(projectId, 'open')
     const chief = project.participants.find((participant) => participant.role === 'chief')
-    // The human asks for the lead now: a lead that failed before is tried at once.
+    // The human asks for the chief now: a chief that failed before is tried at once.
     this.#runtimeOf(chief.id).window.relaunch = null
     this.#openSoon(chief.id)
     this.#changed()
@@ -295,8 +294,8 @@ export class Dispatcher {
   /**
    * Closes these participants' windows, each once its step in progress is
    * over, so a window still opening is closed too. Each takes its place at
-   * once, so a Resume that follows opens the lead after its window went;
-   * and each exit is the dispatcher's own, so a lead's never closes a
+   * once, so a Resume that follows opens the chief after its window went;
+   * and each exit is the dispatcher's own, so a chief's never closes a
    * project resumed meanwhile. What closes is the window of the record
    * waited on, forgotten meanwhile or not: no record is made again for a
    * participant that left.
@@ -562,12 +561,12 @@ export class Dispatcher {
     const participant = project.participants.find((p) => p.id === participantId)
     if (delivering !== null) {
       const because = `@${participant.handle}'s window closed`
-      // A lead's first message (a handoff, most often) waits for its next window.
+      // A chief's first message (a handoff, most often) waits for its next window.
       if (delivering.chief) this.#deliveries.giveBack(delivering, because)
       else this.#deliveries.settleFailure(delivering, because, { retry: !delivering.launch })
     }
     if (participant.role === 'chief') {
-      // The lead's own exit (the human's /exit, a crash) closes the project
+      // The chief's own exit (the human's /exit, a crash) closes the project
       // as Close does: no member's window goes on unseen.
       if (project.state === 'open' && !runtime.window.ownExit) {
         this.#ledger.setProjectState(project.id, 'suspended')
@@ -600,9 +599,9 @@ export class Dispatcher {
     const runtime = this.#runtimeOf(participant.id)
     if (runtime.window.pane !== null) return this.#stepOpen(project, participant, runtime)
     if (project.state !== 'open') return
-    // A lead whose agent is gone stays closed: its launch told the human, who switches it.
+    // A chief whose agent is gone stays closed: its launch told the human, who switches it.
     if (participant.role === 'chief' && this.#scheduler.agentGone(participant)) return
-    // A lead whose window keeps failing to start is tried again ever more slowly.
+    // A chief whose window keeps failing to start is tried again ever more slowly.
     if (runtime.window.relaunch !== null && runtime.window.relaunch.at > this.#now()) return
     const next = this.#ledger.nextDelivery(participant.id)
     if (next !== null) {
@@ -680,9 +679,9 @@ export class Dispatcher {
       return
     }
     if (out) {
-      // A lead out of quota has no turn to finish: the switch the human asked for goes now.
+      // A chief out of quota has no turn to finish: the switch the human asked for goes now.
       if (runtime.pendingSwitch !== null) {
-        await this.#lead.performSwitch(project, participant, runtime, runtime.pendingSwitch)
+        await this.#chiefSwitch.performSwitch(project, participant, runtime, runtime.pendingSwitch)
         return
       }
       this.#windows.setActivity(runtime, {
@@ -709,7 +708,7 @@ export class Dispatcher {
     const idle =
       runtime.delivery.delivering === null && observed.settled && !observed.waiting && !drawing
     if (runtime.pendingSwitch !== null) {
-      await this.#lead.awaitSwitch(project, participant, runtime, observed, idle)
+      await this.#chiefSwitch.awaitSwitch(project, participant, runtime, observed, idle)
       return
     }
     if (idle) {
@@ -719,23 +718,23 @@ export class Dispatcher {
   }
 
   /**
-   * The human's Switch lead: the chief goes on in a fresh window on the
+   * The human's Switch chief: the chief goes on in a fresh window on the
    * saved `agent` (its model and effort) on `harness`, and the window's
-   * first message hands it the lead (`lead-switch.js`).
-   * `when: 'turn'` lets a lead at work finish its turn; `note` first asks it
+   * first message is the handoff (`chief-switch.js`).
+   * `when: 'turn'` lets a chief at work finish its turn; `note` first asks it
    * to write down where things stand, and switches once it has answered. A
-   * lead with no window, or out of quota, switches at once. A project deleted
+   * chief with no window, or out of quota, switches at once. A project deleted
    * while the switch waits is gone for it, and nothing of it is switched.
    */
   async switchChief(projectId, { harness, agent, when = 'now', note = false }) {
-    this.#requireLead({ harness, agent })
+    this.#requireChief({ harness, agent })
     const project = this.#knownProject(projectId)
     const chief = project.participants.find((participant) => participant.role === 'chief')
     const runtime = this.#runtimeOf(chief.id)
     await this.#exclusive(
       chief.id,
       async () => {
-        // Asked of the project as it is once the lead's step in progress is
+        // Asked of the project as it is once the chief's step in progress is
         // over: one deleted meanwhile is no project now.
         requireOpen(this.#knownProject(projectId))
         if (
@@ -743,10 +742,10 @@ export class Dispatcher {
           !this.#scheduler.isOut(chief) &&
           (when === 'turn' || note)
         ) {
-          this.#lead.afterTurn(projectId, runtime, { harness, agent, note })
+          this.#chiefSwitch.afterTurn(projectId, runtime, { harness, agent, note })
           return
         }
-        await this.#lead.performSwitch(project, chief, runtime, { harness, agent })
+        await this.#chiefSwitch.performSwitch(project, chief, runtime, { harness, agent })
         // One deleted while the old window was looked at or closed stopped the switch there.
         if (this.#forgotten(runtime)) throw new Error(`no project ${projectId}`)
       },
@@ -852,8 +851,8 @@ export class Dispatcher {
    * The dispatcher's record of a participant's window, made the first time
    * it is asked for. Each part has one owner: the window itself
    * (`windows.js`), what is on its way into it (`deliveries.js`), what its
-   * harness said of its quota (`scheduler.js`), a Switch lead waiting for the
-   * lead's turn to end (`lead-switch.js`), and how much of its conversation
+   * harness said of its quota (`scheduler.js`), a Switch chief waiting for the
+   * chief's turn to end (`chief-switch.js`), and how much of its conversation
    * is copied (`transcripts.js`). `running` and `acting` are whoever holds
    * the participant now (`#exclusive`, `#act`).
    */

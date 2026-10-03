@@ -16,7 +16,7 @@ import {
 } from './shared.js'
 
 /**
- * Pi, for the new core. Pi takes the session name we give it (`--session-id`
+ * Pi, for the daemon. Pi takes the session name we give it (`--session-id`
  * creates it the first time and resumes it after) and the first message as
  * its last argument. ConsensFlow's extension runs inside Pi: a message is a
  * file in its inbox, which it hands to Pi only when Pi is idle and the human's

@@ -17,7 +17,7 @@ import { roleInstructions, staffOf } from './roles.js'
 import { eventTrace } from './trace.js'
 
 /**
- * The new core's daemon: the one process that owns ConsensFlow's state.
+ * The daemon: the one process that owns ConsensFlow's state.
  *
  * It opens the ledger (whose lock refuses a second daemon on the same home),
  * marks the projects that were open for a resume, starts the agents' API,

@@ -1,5 +1,5 @@
 /**
- * The page's half of the packaged smoke (TEST-PANE-45, on the new core).
+ * The page's half of the packaged smoke (TEST-PANE-45).
  *
  * This module is only ever imported when Rust put `__CONSENSFLOW_SELFTEST__`
  * on the window, which it only does when the app was started with

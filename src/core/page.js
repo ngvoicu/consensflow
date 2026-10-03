@@ -3,11 +3,11 @@ import { missingHarnesses, offerable } from '../harnesses.js'
 import { fitsRole, RESUME_WORDS } from '../ledger/index.js'
 import { agentRow, harnessForKind, listAgents } from '../roster.js'
 import { teamTable } from '../skill.js'
-import { requireLeadAgent, requireOpen } from './dispatcher.js'
+import { requireChiefAgent, requireOpen } from './dispatcher.js'
 import { staffOf } from './roles.js'
 
 /**
- * What the board page may ask of the new core: each operation is the human
+ * What the board page may ask of the daemon: each operation is the human
  * acting on the ledger or the dispatcher. The Rust app forwards exactly these
  * names (`core_request` in `app/src-tauri/src/commands.rs`), and every change
  * wakes the dispatcher so it happens in the panes at once.
@@ -21,13 +21,13 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
   return {
     'projects.list': async () => ({ projects: ledger.projects() }),
 
-    // The lead on the saved agent given; the staff given, as the roster has
+    // The chief on the saved agent given; the staff given, as the roster has
     // those agents now, else the last staff.
     'project.open': change(async ({ directory, name, agent, gate, staff }) => ({
       project: await dispatcher.openProject({
         directory,
         name: name ?? basename(directory),
-        chief: lead(agent, env),
+        chief: chiefOn(agent, env),
         gate,
         staff:
           staff === undefined
@@ -56,12 +56,12 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
 
     'staff.last': async () => ({ staff: lastStaffNow(ledger, env) }),
 
-    // The human's Switch lead: a saved agent (its harness, model and effort)
-    // on a harness installed here. `when: 'turn'` lets a lead at work finish
+    // The human's Switch chief: a saved agent (its harness, model and effort)
+    // on a harness installed here. `when: 'turn'` lets a chief at work finish
     // its turn; `note` first asks it where things stand.
     'chief.switch': change(async ({ project, agent, when = 'now', note = false }) => {
       if (!['now', 'turn'].includes(when)) throw new Error('when is now or turn')
-      const target = lead(agent, env)
+      const target = chiefOn(agent, env)
       if (missingHarnesses(env).includes(harnessForKind(target.harness))) {
         throw new Error(`${target.harness} is not installed here`)
       }
@@ -74,13 +74,13 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       const member = membership(agent, env)
       dispatcher.requireAdapter(member.harness)
       const added = ledger.addMember(project, { roles, ...member })
-      tellLeadOfStaff(ledger, project)
+      tellChiefOfStaff(ledger, project)
       return { member: added }
     }),
 
     'member.roles': change(async ({ project, agent, roles }) => {
       const member = ledger.setRoles(project, agent, roles)
-      tellLeadOfStaff(ledger, project)
+      tellChiefOfStaff(ledger, project)
       return { member }
     }),
 
@@ -98,7 +98,7 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
 
     'member.remove': change(async ({ project, agent }) => {
       const removed = await dispatcher.removeMember(project, agent)
-      tellLeadOfStaff(ledger, project)
+      tellChiefOfStaff(ledger, project)
       return removed
     }),
 
@@ -117,7 +117,7 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
               agentGone(lane.participant.agent, env),
             activity: dispatcher.activity(lane.participant.id),
             pane: dispatcher.pane(lane.participant.id),
-            // A Switch lead that waits for the lead's turn to end.
+            // A Switch chief that waits for the chief's turn to end.
             switching: dispatcher.pendingSwitch(lane.participant.id),
           })),
         },
@@ -213,16 +213,15 @@ function membership(agent, env, agents = listAgents(env)) {
   }
 }
 
-/** A lead as the dispatcher takes it: the saved agent named, and the harness it runs on. */
 /**
- * The lead hears of a change to the staff while its window runs, launched as
+ * The chief hears of a change to the staff while its window runs, launched as
  * it was knowing the staff then: one note, which a later change replaces
- * while it still waits. A lead not yet started reads the staff at launch.
+ * while it still waits. A chief not yet started reads the staff at launch.
  */
-function tellLeadOfStaff(ledger, projectId) {
+function tellChiefOfStaff(ledger, projectId) {
   const project = ledger.project(projectId)
-  const lead = project.participants.find((participant) => participant.handle === 'chief')
-  if (lead === undefined || ledger.currentConversation(lead.id) === null) return
+  const chief = project.participants.find((participant) => participant.handle === 'chief')
+  if (chief === undefined || ledger.currentConversation(chief.id) === null) return
   ledger.freshNote(projectId, {
     to: 'chief',
     heading: 'The human changed the staff; it is now:',
@@ -230,8 +229,9 @@ function tellLeadOfStaff(ledger, projectId) {
   })
 }
 
-function lead(agent, env) {
-  const { harness } = membership(requireLeadAgent(agent), env)
+/** A chief as the dispatcher takes it: the saved agent named, and the harness it runs on. */
+function chiefOn(agent, env) {
+  const { harness } = membership(requireChiefAgent(agent), env)
   return { harness, agent }
 }
 

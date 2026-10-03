@@ -208,7 +208,7 @@ async fn task_operation<R: Runtime>(
     .await
 }
 
-/// What the board page may ask the new core. The page names the operation and
+/// What the board page may ask the daemon. The page names the operation and
 /// its body; anything else is refused here, before it reaches the daemon.
 const CORE_OPERATIONS: &[&str] = &[
     "projects.list",
@@ -314,7 +314,7 @@ fn agents_url(roster: &RosterHandle, page: &str) -> Result<tauri::Url, String> {
         return Err(format!("no agents screen {page:?}"));
     }
     let mut url = tauri::Url::parse(&roster.url)
-        .map_err(|error| format!("the editor handle is not an address: {error}"))?;
+        .map_err(|error| format!("the daemon's handle is not an address: {error}"))?;
     url.set_path(&format!("/{page}"));
     url.query_pairs_mut()
         .clear()

@@ -41,7 +41,7 @@ import {
 } from './plan.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const EDITOR = join(HERE, '..', 'tests', 'live', 'core-live-editor.mjs')
+const DAEMON = join(HERE, '..', 'tests', 'live', 'core-live-daemon.mjs')
 // A Windows terminal names no HOME; the user's profile is the home there.
 const H = process.env.HOME ?? homedir()
 // One fixed workspace, trusted once per run: Claude asks about an unknown folder.
@@ -63,7 +63,7 @@ const { values } = parseArgs({
     // card: ConsensFlow's chief card. nocard: ConsensFlow with a one-line
     // card that names no board. bare: the harness alone, no ConsensFlow.
     arm: { type: 'string', default: 'card' },
-    // A scenario's { switch: true } step moves the lead to this harness, on
+    // A scenario's { switch: true } step moves the chief to this harness, on
     // its staff agent's model (so the harness must be in --staff).
     'switch-to': { type: 'string' },
   },
@@ -78,7 +78,7 @@ if ((scenario.followUps ?? []).some((step) => step?.switch === true)) {
   const target = values['switch-to']
   if (target === undefined || !staffHarnesses.includes(target) || target === chief) {
     throw new Error(
-      `${scenario.id} switches the lead: --switch-to names a --staff harness other than the chief's`,
+      `${scenario.id} switches the chief: --switch-to names a --staff harness other than the chief's`,
     )
   }
 }
@@ -92,9 +92,9 @@ const { agents, staff } = staffFor(
 /** The chief's effort as it reached the chief: null where its harness has no switch for it. */
 const chiefEffort = ['claude', 'codex', 'pi'].includes(chief) ? values.effort : null
 const chiefSetup = chiefEnvironment(chief, values.model)
-/** The lead's agent, which the core opens no project without: the chief's harness, model and effort. */
-const lead = {
-  id: `eval-${chief}-lead`,
+/** The chief's agent, which the core opens no project without: the chief's harness, model and effort. */
+const chiefAgent = {
+  id: `eval-${chief}-chief`,
   kind: HARNESSES[chief].kind,
   model: chiefSetup.model,
   workTier: 'standard',
@@ -282,7 +282,7 @@ async function trustWorkspace(app) {
 async function run(index) {
   const started = Date.now()
   freshWorkspace()
-  const app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
+  const app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV })
   await trustWorkspace(app)
   const log = []
   const note = (line) => {
@@ -304,12 +304,12 @@ async function run(index) {
   try {
     writeFileSync(
       join(app.env.CONSENSFLOW_HOME, 'agents.json'),
-      `${JSON.stringify({ schemaVersion: 1, agents: [lead, ...agents] }, null, 2)}\n`,
+      `${JSON.stringify({ schemaVersion: 1, agents: [chiefAgent, ...agents] }, null, 2)}\n`,
     )
     file = join(app.env.CONSENSFLOW_HOME, 'consensflow.db')
     const opened = await app.requestNode('project.open', {
       directory: WORKSPACE,
-      agent: lead.id,
+      agent: chiefAgent.id,
       staff,
       ...(values.gate ? { gate: true } : {}),
     })
@@ -450,18 +450,18 @@ async function run(index) {
       if (followUps.length > 0 && !busy && Date.now() - lastChange > FOLLOW_UP_AFTER_MS) {
         const next = followUps.shift()
         if (next.switch === true) {
-          // The owner switches the lead from the chief's card; the new window
+          // The owner switches the chief from its card; the new window
           // takes the handoff first, then the owner goes on in it.
           const agent = `eval-${values['switch-to']}-worker`
           const before = pane.generation
-          note(`the owner switches the lead to ${values['switch-to']} (${agent})`)
+          note(`the owner switches the chief to ${values['switch-to']} (${agent})`)
           const reply = await app.requestNode('chief.switch', { project, agent, when: 'turn' })
           if (reply?.ok === false) throw new Error(`chief.switch: ${JSON.stringify(reply)}`)
           await waitForChief(
-            "the new lead's window",
+            "the new chief's window",
             async () => {
-              const lead = (await chiefLane())?.pane
-              return lead !== null && lead !== undefined && lead.generation !== before
+              const current = (await chiefLane())?.pane
+              return current !== null && current !== undefined && current.generation !== before
             },
             240_000,
           )
@@ -574,7 +574,7 @@ const RECORD_ENV = Object.fromEntries(Object.entries(ENV).filter(([, value]) => 
 async function runBare(index) {
   const started = Date.now()
   freshWorkspace()
-  const app = await startIntegration({ editor: EDITOR, fakeEnv: ENV })
+  const app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV })
   await trustWorkspace(app)
   const log = []
   const note = (line) => {

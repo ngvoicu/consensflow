@@ -160,7 +160,7 @@ export class Deliveries {
     const { delivering } = runtime.delivery
     const waited = this.#now() - delivering.since
     if (delivering.launch) {
-      // The lead's window is the human's: however long it takes to show its
+      // The chief's window is the human's: however long it takes to show its
       // first message (the handoff), it is never closed for that.
       if (delivering.chief || waited <= this.#launchTimeoutMs) return
       runtime.delivery.delivering = null

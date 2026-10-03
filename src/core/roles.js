@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { teamTable, workTierList } from '../skill.js'
 
 /**
- * The instructions each window of the new core starts with, one text per role.
+ * The instructions each window the daemon opens starts with, one text per role.
  * The chief's is `skill/core/chief.md`, with the work tiers and the staff it
  * has filled in. Every member's is the shared text of `skill/core/staff.md`
  * with the role's own parts, so a rule all members keep is written once.
@@ -10,7 +10,7 @@ import { teamTable, workTierList } from '../skill.js'
 const MEMBERS = ['advisor', 'worker', 'reviewer', 'designer']
 const text = (name) => readFileSync(new URL(`../../skill/core/${name}.md`, import.meta.url), 'utf8')
 
-/** A project's staff as its lead reads it: each member's name, roles and tier, sessions left out. */
+/** A project's staff as its chief reads it: each member's name, roles and tier, sessions left out. */
 export function staffOf(project) {
   return project.participants
     .filter(
