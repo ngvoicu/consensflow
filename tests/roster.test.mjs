@@ -6,7 +6,6 @@ import {
   readdirSync,
   readFileSync,
   statSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -15,10 +14,8 @@ import { AGENT_PRESETS } from '../hosts/lib/presets.js'
 import {
   addAgent,
   agentRow,
-  configRoot,
   editAgent,
   listAgents,
-  migrateStateRoot,
   normalizeRoster,
   preferences,
   removeAgent,
@@ -294,59 +291,6 @@ describe('what older builds wrote is read the same, and folded at start', () => 
       fresh.cleanup()
     }
   })
-})
-
-describe('a roster written before the rename keeps working', () => {
-  const t = tempEnv()
-  after(() => t.cleanup())
-
-  it('reads participants.json and its participants key, then writes agents.json', () => {
-    // Exactly what a machine set up before 2026-08-21 has on disk.
-    const legacy = join(dirname(rosterPath(t.env)), 'participants.json')
-    mkdirSync(dirname(legacy), { recursive: true })
-    cpSync(join(FIXTURES, 'v1-participants.json'), legacy)
-
-    const listed = listAgents(t.env)
-    assert.ok(
-      listed.some((a) => a.name === 'zeus'),
-      'the old file is read, not ignored',
-    )
-
-    // The first write moves the roster to its new name, rows intact.
-    addAgent({ name: 'newcomer', harness: 'codex', model: 'gpt-5.6-luna' }, t.env)
-    const written = raw(t.env)
-    assert.ok(Array.isArray(written.agents), 'written under the agents key')
-    assert.equal(written.participants, undefined, 'the old key does not survive the write')
-    assert.ok(written.agents.some((row) => row.id === 'newcomer'))
-    assert.equal(
-      listAgents(t.env).some((a) => a.name === 'newcomer'),
-      true,
-    )
-  })
-})
-
-it('legacy import brings the old state in, and never a link that could redirect a future write outside the home', () => {
-  const t = tempEnv()
-  try {
-    // Where the state lived before the roots were merged.
-    const legacy = join(t.env.XDG_CONFIG_HOME, 'consensflow')
-    mkdirSync(legacy, { recursive: true })
-    const outside = join(t.root, 'outside.json')
-    writeFileSync(outside, 'preserve')
-    symlinkSync(outside, join(legacy, 'hosts.json'))
-    writeFileSync(join(legacy, 'mode.json'), JSON.stringify({ mode: 'claude' }))
-    assert.deepEqual(migrateStateRoot(t.env), {
-      from: legacy,
-      to: configRoot(t.env),
-      copied: ['mode.json'],
-    })
-    assert.equal(readFileSync(join(configRoot(t.env), 'mode.json'), 'utf8'), '{"mode":"claude"}')
-    assert.equal(existsSync(join(configRoot(t.env), 'hosts.json')), false)
-    assert.equal(readFileSync(outside, 'utf8'), 'preserve')
-    assert.equal(readFileSync(join(legacy, 'hosts.json'), 'utf8'), 'preserve')
-  } finally {
-    t.cleanup()
-  }
 })
 
 describe('an agents file that cannot be read', () => {

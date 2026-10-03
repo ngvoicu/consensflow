@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
+import path from 'node:path'
 import { describe, it } from 'node:test'
-import { PAGE_BYTES, TRANSCRIPT_ITEM_MAX } from '../src/ledger/index.js'
-import { deliver, staff, withLedger } from './ledger-fixtures.mjs'
+import { openLedger, PAGE_BYTES, TRANSCRIPT_ITEM_MAX } from '../src/ledger/index.js'
+import { clock, deliver, dropTrace, names, staff, withDir, withLedger } from './ledger-fixtures.mjs'
 
 /** Conversations, their copy, and the lead's across a switch (src/ledger/conversations.js). */
 
@@ -84,6 +85,7 @@ describe('switching the lead', () => {
       ledger.bindConversation(first.id, 'claude-session')
       ledger.markOut(id('chief'), { until: '2026-10-02T00:00:00.000Z', reason: 'out' })
       const before = ledger.project(project.id).participants.find((p) => p.handle === 'chief')
+      assert.equal(ledger.lastSwitch(project.id), null, 'no switch yet')
 
       ledger.switchChief(project.id, { harness: 'codex', agent: 'astraeus' })
       const chief = ledger.project(project.id).participants.find((p) => p.handle === 'chief')
@@ -99,10 +101,14 @@ describe('switching the lead', () => {
         to: { harness: 'codex', agent: 'astraeus' },
         cut: false,
       })
-      assert.deepEqual(ledger.lastSwitch(project.id), switched.at(-1).data)
+      assert.deepEqual(ledger.lastSwitch(project.id), {
+        from: { harness: 'claude-code', agent: null },
+        cut: false,
+      })
 
       ledger.switchChief(project.id, { harness: 'pi', agent: 'leto', cut: true })
-      assert.equal(ledger.lastSwitch(project.id).cut, true, 'the old lead was cut mid-turn')
+      const last = { from: { harness: 'codex', agent: 'astraeus' }, cut: true }
+      assert.deepEqual(ledger.lastSwitch(project.id), last, 'the old lead was cut mid-turn')
       const back = ledger.project(project.id).participants.find((p) => p.handle === 'chief')
       assert.deepEqual([back.harness, back.agent], ['pi', 'leto'])
       for (const harness of ['kimi', 'image', 'nope']) {
@@ -116,7 +122,27 @@ describe('switching the lead', () => {
           code: 'invalid-agent',
         })
       }
-      assert.equal(ledger.lastSwitch(project.id).to.agent, 'leto', 'nothing refused was logged')
+      assert.deepEqual(ledger.lastSwitch(project.id), last, 'nothing refused was recorded')
+    })
+  })
+
+  it('knows what the lead was switched from out of the chief, not out of the event log', async () => {
+    await withDir(async (dir) => {
+      const file = path.join(dir, 'consensflow.db')
+      const before = openLedger(file, { now: clock(), names: names() })
+      const { project } = staff(before)
+      before.switchChief(project.id, { harness: 'codex', agent: 'astraeus', cut: true })
+      before.close()
+      dropTrace(file)
+      const ledger = openLedger(file)
+      try {
+        assert.deepEqual(ledger.lastSwitch(project.id), {
+          from: { harness: 'claude-code', agent: null },
+          cut: true,
+        })
+      } finally {
+        ledger.close()
+      }
     })
   })
 

@@ -162,23 +162,6 @@ describe('role files belong to pane launch, not CLI administration', () => {
 })
 
 describe('the standalone switch-over (TEST-PANE-47)', () => {
-  it('doctor reports a legacy mode file once without treating it as configuration', async () => {
-    const t = tempEnv()
-    try {
-      mkdirSync(t.env.CONSENSFLOW_HOME, { recursive: true })
-      const path = join(t.env.CONSENSFLOW_HOME, 'mode.json')
-      const original = JSON.stringify({ mode: 'claude' })
-      writeFileSync(path, original)
-      const result = await cf(['doctor'], t.env)
-      assert.equal(result.code, 0, result.stderr)
-      assert.equal((result.stdout.match(/mode\.json/g) ?? []).length, 1)
-      assert.match(result.stdout, /ignored.*remov|remov.*ignored/i)
-      assert.doesNotMatch(result.stdout, /^mode:/m)
-      assert.equal(readFileSync(path, 'utf8'), original)
-    } finally {
-      t.cleanup()
-    }
-  })
   it('removes direct conversation writes and terminal-window discovery from cf', () => {
     const source = readFileSync(CF, 'utf8')
     assert.doesNotMatch(source, /\bsaveThread\b|liveWindowElsewhere|CMUX_SURFACE_ID|cmux tree/)

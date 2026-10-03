@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** App-scoped conversation commands, saved roster administration and runtime diagnostics. */
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -9,14 +9,7 @@ import { CATALOG, catalogEntry } from '../src/catalog.js'
 import { detectHarnesses } from '../src/harnesses.js'
 import { staleClaudeHooks } from '../src/host-payloads.js'
 import { prepareApp } from '../src/install.js'
-import {
-  addAgent,
-  configRoot,
-  editAgent,
-  listAgents,
-  migrateStateRoot,
-  removeAgent,
-} from '../src/roster.js'
+import { addAgent, configRoot, editAgent, listAgents, removeAgent } from '../src/roster.js'
 import { terminalRuntime } from '../src/terminal.js'
 
 // `cf … | head` closes our stdout mid-stream; dying with an EPIPE stack for
@@ -214,9 +207,6 @@ function doctor() {
   out(
     `harnesses:    ${harnesses.length > 0 ? harnesses.map((a) => a.id).join(', ') : 'none on PATH'}`,
   )
-  if (existsSync(join(configRoot(env), 'mode.json'))) {
-    out('legacy:       mode.json is ignored and can be removed')
-  }
   out(`agents:       ${listAgents(env).length}`)
   out('roles:        bundled chief, worker, reviewer and advisor; prepared when a window launches')
 
@@ -262,12 +252,6 @@ async function main() {
     })
     return
   }
-
-  // A machine set up before the roots were merged keeps its state — it just
-  // moves into the one directory, once, and silently: `cf --version` and
-  // `--json` are machine output, and a relocation the user cannot act on is
-  // not news. `cf doctor` says where things live.
-  migrateStateRoot(env)
 
   if (command === undefined || command === 'help' || command === '--help') {
     out(USAGE)

@@ -262,8 +262,9 @@ export function leadOpenWork(store, projectId) {
  * Its conversation ends here: a conversation belongs to one harness, and
  * every switch starts a fresh one that reads the history. What it was out
  * of quota for was the old harness's account, so that clears. The window is
- * the caller's to close before and open after; `cut` records that the old
- * lead was stopped in the middle of a turn, for the handoff to say.
+ * the caller's to close before and open after. The chief keeps the lead it
+ * was switched from, and `cut`, that the old lead was stopped in the middle
+ * of a turn, for the handoff to say.
  */
 export function switchChief(store, projectId, { harness, agent, cut = false }) {
   requireChiefHarness(harness)
@@ -271,8 +272,12 @@ export function switchChief(store, projectId, { harness, agent, cut = false }) {
   return store.write(() => {
     const chief = store.participantByHandle(projectId, 'chief')
     store.db
-      .prepare('UPDATE participant SET harness = ?, agent = ?, out_until = NULL WHERE id = ?')
-      .run(harness, agent, chief.id)
+      .prepare(
+        `UPDATE participant SET harness = ?, agent = ?, out_until = NULL,
+           switched_from_harness = ?, switched_from_agent = ?, switched_from_cut = ?
+         WHERE id = ?`,
+      )
+      .run(harness, agent, chief.harness, chief.agent, cut === true ? 1 : 0, chief.id)
     store.db
       .prepare('UPDATE conversation SET ended_at = ? WHERE participant_id = ? AND ended_at IS NULL')
       .run(store.at(), chief.id)
@@ -293,15 +298,17 @@ export function historyRead(store, projectId, { page, find = null, tools = false
   })
 }
 
-/** The project's latest Switch lead, as `switchChief` logged it, or null. */
+/**
+ * The project's latest Switch lead: the lead the chief was switched from
+ * (its harness and agent) and whether its turn was cut; null before any.
+ */
 export function lastSwitch(store, projectId) {
-  const row = store.db
-    .prepare(
-      `SELECT data FROM event WHERE project_id = ? AND kind = 'chief.switched'
-       ORDER BY id DESC LIMIT 1`,
-    )
-    .get(projectId)
-  return row === undefined ? null : JSON.parse(row.data)
+  const chief = store.participantByHandle(projectId, 'chief')
+  if (chief.switched_from_harness === null) return null
+  return {
+    from: { harness: chief.switched_from_harness, agent: chief.switched_from_agent },
+    cut: chief.switched_from_cut === 1,
+  }
 }
 
 export function endConversation(store, conversationId) {

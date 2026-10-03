@@ -408,6 +408,31 @@ export const MIGRATIONS = [
   `
   ALTER TABLE task ADD COLUMN deleted_at TEXT;
   `,
+  // What was read out of the event log is kept in rows (2026-10-03), the log
+  // being a trace: when a task was last paused, since which a tell that
+  // reached its window counts; and the lead the chief was last switched from,
+  // with whether its turn was cut, for the handoff. Each is filled from the
+  // events the ledger already holds, so a running project keeps its answers.
+  `
+  ALTER TABLE task ADD COLUMN paused_at TEXT;
+  ALTER TABLE participant ADD COLUMN switched_from_harness TEXT;
+  ALTER TABLE participant ADD COLUMN switched_from_agent TEXT;
+  ALTER TABLE participant ADD COLUMN switched_from_cut INTEGER NOT NULL DEFAULT 0;
+  UPDATE task SET paused_at = (
+    SELECT MAX(e.at) FROM event e
+    WHERE e.project_id = task.project_id AND e.kind = 'task.state'
+      AND json_extract(e.data, '$.task') = task.number
+      AND json_extract(e.data, '$.to') = 'paused'
+  );
+  UPDATE participant
+  SET switched_from_harness = json_extract(e.data, '$.from.harness'),
+      switched_from_agent = json_extract(e.data, '$.from.agent'),
+      switched_from_cut = json_extract(e.data, '$.cut')
+  FROM event e
+  WHERE participant.role = 'chief'
+    AND e.id = (SELECT MAX(id) FROM event
+                WHERE project_id = participant.project_id AND kind = 'chief.switched');
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

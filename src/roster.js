@@ -1,14 +1,4 @@
-import {
-  cpSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { AGENT_PRESETS, agentProfile, validateWorkTier } from '../hosts/lib/presets.js'
@@ -73,40 +63,6 @@ export function configRoot(env) {
 }
 
 /**
- * Where the state lived before the roots were merged (2026-08-22): every
- * start still looks there once, through `migrateStateRoot`, for a machine
- * coming from an older version.
- */
-function legacyConfigRoot(env) {
-  const xdg = env?.XDG_CONFIG_HOME
-  const base =
-    typeof xdg === 'string' && xdg.length > 0 ? xdg : join(env?.HOME ?? homedir(), '.config')
-  return join(base, 'consensflow')
-}
-
-/** Import legacy app data without changing anything outside the private home. */
-export function migrateStateRoot(env) {
-  const from = legacyConfigRoot(env)
-  const to = configRoot(env)
-  if (from === to || !existsSync(from) || existsSync(join(to, 'mode.json'))) return null
-  if (lstatSync(from).isSymbolicLink()) return null
-  mkdirSync(to, { recursive: true })
-  const copied = []
-  for (const name of readdirSync(from)) {
-    const target = join(to, name)
-    if (existsSync(target)) continue
-    cpSync(join(from, name), target, {
-      recursive: true,
-      force: false,
-      // Imported symlinks could make later private writes escape the home.
-      filter: (source) => !lstatSync(source).isSymbolicLink(),
-    })
-    if (existsSync(target)) copied.push(name)
-  }
-  return copied.length > 0 ? { from, to, copied } : null
-}
-
-/**
  * The roster, in the one place both halves look.
  *
  * `CONSENSFLOW_HOME` used to mean two different directories: the manager read
@@ -133,40 +89,29 @@ export function rosterPath(env) {
 }
 
 /**
- * What the roster was called before the vocabulary settled (2026-08-21):
- * `participants.json`, with a `participants` key. A machine that has one keeps
- * working — it is read as-is, and the next write lands in the new file.
- */
-function legacyRosterPath(env) {
-  return join(rosterHome(env), 'participants.json')
-}
-
-/**
  * The file as the human left it, or undefined when there is none. Only a
  * missing file is an empty roster: one that cannot be read or parsed (a hand
  * edit's trailing comma) is said to whoever reads it, and nothing is saved
  * over it, since the next write would have erased every agent in it.
  */
 function readRoster(env) {
-  for (const path of [rosterPath(env), legacyRosterPath(env)]) {
-    let text
-    try {
-      text = readFileSync(path, 'utf8')
-    } catch (error) {
-      if (error.code === 'ENOENT') continue
-      throw unreadable(path, `cannot be read (${error.code ?? error.message})`)
-    }
-    let parsed
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      throw unreadable(path, 'is not valid JSON')
-    }
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
-      throw unreadable(path, 'is not an agents file')
-    return parsed
+  const path = rosterPath(env)
+  let text
+  try {
+    text = readFileSync(path, 'utf8')
+  } catch (error) {
+    if (error.code === 'ENOENT') return undefined
+    throw unreadable(path, `cannot be read (${error.code ?? error.message})`)
   }
-  return undefined
+  let parsed
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw unreadable(path, 'is not valid JSON')
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
+    throw unreadable(path, 'is not an agents file')
+  return parsed
 }
 
 const unreadable = (path, why) =>
@@ -177,15 +122,13 @@ const unreadable = (path, why) =>
 function loadDocument(env) {
   const parsed = readRoster(env)
   if (parsed === undefined) return { schemaVersion: 1, agents: [] }
-  const rows = Array.isArray(parsed.agents)
-    ? parsed.agents
-    : Array.isArray(parsed.participants)
-      ? parsed.participants
-      : []
-  // The old key is dropped on the way out; everything else the file carried is
-  // preserved, because rows and fields we do not understand are not ours.
-  const { participants: _legacy, ...rest } = parsed
-  return { ...rest, schemaVersion: parsed.schemaVersion ?? 1, agents: rows }
+  // Everything else the file carried is preserved, because rows and fields
+  // we do not understand are not ours.
+  return {
+    ...parsed,
+    schemaVersion: parsed.schemaVersion ?? 1,
+    agents: Array.isArray(parsed.agents) ? parsed.agents : [],
+  }
 }
 
 /** Display data older builds wrote into the file; recomputed on read now, never stored again. */

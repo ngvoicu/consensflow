@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { openLedger } from '../src/ledger/index.js'
 
 /**
@@ -76,10 +77,11 @@ export function staff(ledger) {
 }
 
 /**
- * A project with a row in every table: T-1 taken back from a session of
- * zeus and held in one of diana's, T-2 needing it, a question and its
- * answer, an urgent tell, a note, a conversation bound to its native
- * session with a transcript, and their events. Returns its ids by table.
+ * A project with a row in every table: T-1 paused in a session of zeus and
+ * taken back from it, then held in one of diana's, T-2 needing it, a
+ * question and its answer, an urgent tell that reached diana's window, a
+ * note, a conversation bound to its native session with a transcript, the
+ * lead switched once, and their events. Returns its ids by table.
  */
 export function busyProject(ledger, directory) {
   const project = ledger.createProject({
@@ -112,17 +114,20 @@ export function busyProject(ledger, directory) {
     body: 'Which grammar?',
   })
   ledger.answer(question.id, { from: question.recipientId, body: 'The small one' })
+  ledger.pauseTask(project.id, 1, { by: 'chief' })
   ledger.releaseTask(project.id, 1, { because: 'ran out of quota' })
   const second = ledger.assignTask(project.id, 1, diana.id)
   deliver(ledger, second.message)
   ledger.holdTask(project.id, 1, { until: '2026-09-20T10:00:00.000Z', because: 'out of quota' })
-  ledger.ask(project.id, {
+  const tell = ledger.ask(project.id, {
     from: 'chief',
     to: second.task.assignee,
     task: 1,
     body: 'Where are you?',
     urgent: true,
   })
+  deliver(ledger, tell)
+  ledger.switchChief(project.id, { harness: 'codex', agent: 'astraeus', cut: true })
   const note = ledger.note(project.id, { from: 'chief', to: 'human', body: 'T-1 waits' })
   return {
     project: [project.id],
@@ -132,6 +137,16 @@ export function busyProject(ledger, directory) {
     message: [...ledger.task(project.id, 1).messages, note].map((message) => message.id),
     event: ledger.events(project.id).map((event) => event.id),
   }
+}
+
+/**
+ * Empties the event log of a closed ledger file, by hand. The log is a
+ * trace: nothing the ledger answers may depend on it.
+ */
+export function dropTrace(file) {
+  const db = new DatabaseSync(file)
+  db.exec('DELETE FROM event')
+  db.close()
 }
 
 /** The id of a session (or any participant) by handle. */

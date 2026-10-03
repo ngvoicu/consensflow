@@ -62,12 +62,17 @@ const schemaAt = (dir, version) =>
 /**
  * A ledger as a build of schema `version` left it: made by its first
  * migrations, in WAL mode like every ledger, holding the rows the ledger's
- * own operations write for two busy projects, ids and all, in the columns
- * that schema has.
+ * own operations write for a quiet project and two busy ones, ids and all,
+ * in the columns that schema has.
  */
 function ledgerAt(dir, version) {
   const source = path.join(dir, 'source.db')
   const ledger = openLedger(source, { now: clock(), names: names() })
+  ledger.createProject({
+    directory: '/work/quiet',
+    name: 'quiet',
+    chief: { harness: 'pi', agent: 'leto' },
+  })
   busyProject(ledger, '/work/app')
   busyProject(ledger, '/work/site')
   ledger.close()
@@ -321,23 +326,20 @@ describe('schema 7: a task deleted from the board keeps its row', () => {
     await withDir(async (dir) => {
       const file = ledgerAt(dir, 6)
       const before = contents(file)
-      const fresh = path.join(dir, 'fresh.db')
-      openLedger(fresh).close()
 
-      openLedger(file).close()
-      const after = contents(file)
-      assert.equal(after.version, SCHEMA_VERSION)
+      const after = contents(migratedTo(file, 7))
+      assert.equal(after.version, 7)
       assert.deepEqual(
         after.rows,
         { ...before.rows, task: before.rows.task.map((row) => ({ ...row, deleted_at: null })) },
         'every row, with its id and references; every task still on the board',
       )
-      assert.deepEqual(after.schema, contents(fresh).schema, "the schema is a fresh ledger's")
+      assert.deepEqual(after.schema, schemaAt(dir, 7), "the schema is a fresh schema-7 ledger's")
 
       // Its tasks, once finished, leave the board as a new ledger's do.
       const ledger = openLedger(file, { now: clock(), names: names() })
       try {
-        const [app] = ledger.projects()
+        const app = ledger.projects().find((project) => project.name === 'app')
         const lanes = () =>
           ledger
             .board(app.id)
@@ -365,6 +367,111 @@ describe('schema 7: a task deleted from the board keeps its row', () => {
       assert.throws(() => migrate(db, MIGRATIONS.slice(0, 6)), {
         code: 'ledger-newer',
         message: `this home was written by a newer ConsensFlow (schema ${SCHEMA_VERSION}; this build knows 6)`,
+      })
+      db.close()
+      assert.deepEqual(contents(file), before, 'and left as it was')
+    })
+  })
+})
+
+describe("schema 8: a task's last pause and the chief's last switch are kept in their rows", () => {
+  it('adds to the schema 7 had when a task was last paused and what the chief was last switched from, and nothing else', async () => {
+    await withDir(async (dir) => {
+      const [before, after] = [7, 8].map((version) => schemaAt(dir, version))
+      const sql = (schema, name) => schema.find((row) => row.name === name).sql
+      assert.equal(
+        sql(after, 'task'),
+        sql(before, 'task').replace('deleted_at TEXT,', 'deleted_at TEXT, paused_at TEXT,'),
+      )
+      assert.equal(
+        sql(after, 'participant'),
+        sql(before, 'participant').replace(
+          'left_at TEXT,',
+          'left_at TEXT, switched_from_harness TEXT, switched_from_agent TEXT, switched_from_cut INTEGER NOT NULL DEFAULT 0,',
+        ),
+      )
+      const others = (schema) =>
+        schema.filter((row) => row.name !== 'task' && row.name !== 'participant')
+      assert.deepEqual(others(after), others(before), 'nothing else differs')
+    })
+  })
+
+  it('migrates a schema-7 ledger with every row as it was, each filled with what its events said', async () => {
+    await withDir(async (dir) => {
+      const file = ledgerAt(dir, 7)
+      const before = contents(file)
+      const events = before.rows.event.map((row) => ({ ...row, data: JSON.parse(row.data) }))
+      const pauses = events.filter((e) => e.kind === 'task.state' && e.data.to === 'paused')
+      assert.equal(pauses.length, 4, 'T-1 was paused twice in each busy project: the later counts')
+      const lastPaused = (task) =>
+        pauses
+          .filter((e) => e.project_id === task.project_id && e.data.task === task.number)
+          .map((e) => e.at)
+          .sort()
+          .at(-1) ?? null
+      const lastSwitch = (participant) =>
+        participant.role === 'chief'
+          ? events.findLast(
+              (e) => e.project_id === participant.project_id && e.kind === 'chief.switched',
+            )?.data
+          : undefined
+
+      const after = contents(migratedTo(file, 8))
+      assert.equal(after.version, 8)
+      assert.deepEqual(
+        after.rows,
+        {
+          ...before.rows,
+          task: before.rows.task.map((row) => ({ ...row, paused_at: lastPaused(row) })),
+          participant: before.rows.participant.map((row) => {
+            const switched = lastSwitch(row)
+            return {
+              ...row,
+              switched_from_harness: switched?.from.harness ?? null,
+              switched_from_agent: switched?.from.agent ?? null,
+              switched_from_cut: switched?.cut ? 1 : 0,
+            }
+          }),
+        },
+        'every row as it was; the new columns say what the event log said',
+      )
+      assert.deepEqual(after.schema, schemaAt(dir, 8), "the schema is a fresh schema-8 ledger's")
+
+      // A running project keeps its answers.
+      const ledger = openLedger(file)
+      try {
+        const [quiet, ...busy] = ledger.projects()
+        assert.equal(ledger.lastSwitch(quiet.id), null, 'its lead was never switched')
+        for (const project of busy) {
+          assert.deepEqual(ledger.lastSwitch(project.id), {
+            from: { harness: 'claude-code', agent: null },
+            cut: true,
+          })
+          const held = ledger.task(project.id, 1)
+          const window = project.participants.find((p) => p.handle === held.assignee)
+          assert.equal(
+            ledger.toldSincePaused(window.id, held.id),
+            true,
+            "the chief's tell reached the window since its last pause",
+          )
+        }
+      } finally {
+        ledger.close()
+      }
+    })
+  })
+
+  it('is refused by a build that knows only schema 7', async () => {
+    await withDir(async (dir) => {
+      const file = path.join(dir, 'consensflow.db')
+      const ledger = openLedger(file, { now: clock(), names: names() })
+      busyProject(ledger, '/work/app')
+      ledger.close()
+      const before = contents(file)
+      const db = new DatabaseSync(file)
+      assert.throws(() => migrate(db, MIGRATIONS.slice(0, 7)), {
+        code: 'ledger-newer',
+        message: `this home was written by a newer ConsensFlow (schema ${SCHEMA_VERSION}; this build knows 7)`,
       })
       db.close()
       assert.deepEqual(contents(file), before, 'and left as it was')
