@@ -195,14 +195,22 @@ function agentGone(agent, env) {
   }
 }
 
-/** A saved agent as the staff records it: its harness, and its tier as the roster has it now. */
+/**
+ * A saved agent as the staff records it: its harness, whether it is an image
+ * agent, and its tier as the roster has it now.
+ */
 function membership(agent, env, agents = listAgents(env)) {
   const row = agentRow(agent, env)
   const saved = agents.find((candidate) => candidate.name === agent)
   if (row === undefined || saved === undefined) {
     throw new Error(`no agent named ${agent} in your agents`)
   }
-  return { agent, harness: row.kind, tier: saved.profile.workTier }
+  return {
+    agent,
+    harness: row.kind,
+    designer: row.designer === true,
+    tier: saved.profile.workTier,
+  }
 }
 
 /** A lead as the dispatcher takes it: the saved agent named, and the harness it runs on. */
@@ -240,7 +248,7 @@ function lastStaffNow(ledger, env) {
     .filter(({ agent }) => agents.some((candidate) => candidate.name === agent))
     .map(({ agent, roles }) => {
       const member = membership(agent, env, agents)
-      return { ...member, roles: roles.filter((role) => fitsRole(member.harness, role)) }
+      return { ...member, roles: roles.filter((role) => fitsRole(member.designer, role)) }
     })
     .filter(({ roles }) => roles.length > 0)
 }

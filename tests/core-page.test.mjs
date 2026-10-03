@@ -319,8 +319,20 @@ describe('the page protocol of the new core', () => {
       const diana = agents.find((a) => a.name === 'diana')
       // zeus is the human's own opencode agent now; diana is the catalog's, as it has her.
       assert.deepEqual(opened[1].staff, [
-        { roles: ['worker'], agent: 'zeus', harness: 'opencode', tier: zeus.profile.workTier },
-        { roles: ['reviewer'], agent: 'diana', harness: 'codex', tier: diana.profile.workTier },
+        {
+          roles: ['worker'],
+          agent: 'zeus',
+          harness: 'opencode',
+          designer: false,
+          tier: zeus.profile.workTier,
+        },
+        {
+          roles: ['reviewer'],
+          agent: 'diana',
+          harness: 'codex',
+          designer: false,
+          tier: diana.profile.workTier,
+        },
       ])
       assert.ok(zeus.profile.workTier, 'an agent always has a tier')
       assert.deepEqual(
@@ -339,6 +351,11 @@ describe('the page protocol of the new core', () => {
       await assert.rejects(
         operations['member.add']({ project: project.id, agent: 'zeus', roles: ['designer'] }),
         { message: 'only an image agent can be an image designer, and zeus is not one' },
+      )
+      // Codex alone is no image agent: the designer flag is.
+      await assert.rejects(
+        operations['member.add']({ project: project.id, agent: 'diana', roles: ['designer'] }),
+        { message: 'only an image agent can be an image designer, and diana is not one' },
       )
       await assert.rejects(
         operations['member.add']({ project: project.id, agent: 'pygmalion', roles: ['worker'] }),
@@ -362,10 +379,10 @@ describe('the page protocol of the new core', () => {
         ledger
           .project(project.id)
           .participants.slice(2)
-          .map((p) => [p.handle, p.roles]),
+          .map((p) => [p.handle, p.roles, p.harness, p.designer]),
         [
-          ['pygmalion', ['designer']],
-          ['zeus', ['worker']],
+          ['pygmalion', ['designer'], 'codex', true],
+          ['zeus', ['worker'], 'claude-code', false],
         ],
       )
     })
@@ -373,7 +390,7 @@ describe('the page protocol of the new core', () => {
 
   it('starts a new project from the last staff in the roles its agents fit, and no other', async () => {
     await withPage(async ({ dispatcher, env, opened }) => {
-      addAgent({ name: 'iris', harness: 'image', model: 'codex-image' }, env)
+      addAgent({ name: 'iris', harness: 'codex', designer: true, model: 'codex-image' }, env)
       // The last staff, from before an image designer had to be an image agent.
       const lastStaff = () => [
         { agent: 'zeus', roles: ['worker', 'designer'] },

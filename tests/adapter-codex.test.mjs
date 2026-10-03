@@ -141,6 +141,36 @@ describe('the Codex adapter', () => {
     })
   })
 
+  it("opens an image agent's window on Codex's own model, whose image tool draws: no model or effort of its agent", async () => {
+    await withHome(async ({ env, executable }) => {
+      const thread = '0f8fad5b-d9cb-469f-a165-70867728950e'
+      const designer = { model: 'codex-image', effort: 'high', designer: true }
+      const fresh = await codexAdapter({ env }).prepare(request({ agent: designer }))
+      assert.deepEqual(withoutRole(fresh.argv).slice(2), [
+        executable,
+        '--enable',
+        'default_mode_request_user_input',
+        '-c',
+        'suppress_unstable_features_warning=true',
+        '-c',
+        'check_for_update_on_startup=false',
+        '-c',
+        'allow_login_shell=false',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '[ConsensFlow m-1 · T-1 · task from @chief]\nWrite the parser',
+      ])
+      const resumed = await codexAdapter({ env }).prepare(
+        request({ agent: designer, resume: thread, message: null }),
+      )
+      assert.deepEqual(withoutRole(resumed.argv).slice(-3), [
+        'resume',
+        thread,
+        '--dangerously-bypass-approvals-and-sandbox',
+      ])
+      assert.deepEqual(fresh.dropEnv, ['OPENAI_API_KEY'])
+    })
+  })
+
   it('learns the thread from its broker', async () => {
     await withHome(async ({ env }) => {
       const thread = '0f8fad5b-d9cb-469f-a165-70867728950e'

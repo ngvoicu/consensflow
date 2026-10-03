@@ -88,7 +88,7 @@ describe('projects and participants', () => {
           ['chief', 'chief', 'claude-code'],
         ],
       )
-      // A chief runs where a Switch lead could take it: a harness with a terminal.
+      // A chief runs on a harness the ledger knows; `image` is none since an image agent is Codex's.
       for (const harness of ['kimi', 'image', 'nope', undefined]) {
         assert.throws(
           () => ledger.createProject({ directory: '/work/site', name: 'site', chief: { harness } }),
@@ -268,12 +268,18 @@ describe('projects and participants', () => {
   it('reuses the previous project staff for the next project', async () => {
     await withLedger((ledger) => {
       const { project } = staff(ledger)
-      const iris = { agent: 'iris', harness: 'image', role: 'designer', tier: 'standard' }
+      const iris = {
+        agent: 'iris',
+        harness: 'codex',
+        designer: true,
+        role: 'designer',
+        tier: 'standard',
+      }
       ledger.addMember(project.id, iris)
       assert.deepEqual(ledger.lastStaff(), [
         { agent: 'zeus', harness: 'claude-code', role: 'worker', roles: ['worker'] },
         { agent: 'diana', harness: 'codex', role: 'worker', roles: ['worker'] },
-        { agent: 'iris', harness: 'image', role: 'designer', roles: ['designer'] },
+        { agent: 'iris', harness: 'codex', role: 'designer', roles: ['designer'] },
       ])
       // A project whose staff is its image designer alone is the last staff too.
       ledger.createProject({

@@ -155,7 +155,8 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
       )
       ledger.addMember(project.id, {
         agent: 'pygmalion',
-        harness: 'image',
+        harness: 'codex',
+        designer: true,
         role: 'designer',
         tier: 'light',
       })
@@ -175,6 +176,12 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
         ['pygmalion'],
       )
       const { message } = ledger.assignTask(project.id, task.number, id('pygmalion'))
+      const session = ledger.project(project.id).participants.find((p) => p.member === 'pygmalion')
+      assert.deepEqual(
+        [session.harness, session.designer],
+        ['codex', true],
+        'its session draws on Codex as it does',
+      )
       deliver(ledger, message)
       const done = ledger.recordResult(project.id, task.number, {
         body: '/work/app/images/logo.png',

@@ -87,7 +87,6 @@ function interactiveWindow(agent, sessionId, seed, resume) {
         dropEnv: [],
       }
     case 'codex':
-    case 'image':
       // `codex [PROMPT]` opens the real window seeded with that prompt; it
       // announces no id, so the broker names the thread once Codex starts it.
       return {
@@ -126,11 +125,7 @@ function interactiveWindow(agent, sessionId, seed, resume) {
   }
 }
 
-/**
- * The flags that put a window on its agent's model and effort. An image agent
- * is Codex on its own default model: its image tool draws, whatever reasoning
- * model answers.
- */
+/** The flags that put a window on its agent's model and effort. */
 function modelAndEffort({ kind, model, effort, thinking }) {
   switch (kind) {
     case 'claude-code':

@@ -111,6 +111,7 @@ describe('switching the lead', () => {
       assert.deepEqual(ledger.lastSwitch(project.id), last, 'the old lead was cut mid-turn')
       const back = ledger.project(project.id).participants.find((p) => p.handle === 'chief')
       assert.deepEqual([back.harness, back.agent], ['pi', 'leto'])
+      // `image` is no harness: an image agent is Codex's.
       for (const harness of ['kimi', 'image', 'nope']) {
         assert.throws(() => ledger.switchChief(project.id, { harness, agent: 'leto' }), {
           code: 'invalid-harness',

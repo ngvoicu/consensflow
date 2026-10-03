@@ -1,8 +1,8 @@
 import {
   LedgerError,
   requireAgentId,
-  requireChiefHarness,
   requireGate,
+  requireHarness,
   requireMember,
   requireText,
 } from './model.js'
@@ -23,7 +23,7 @@ import { PARTICIPANT_SELECT, participantView } from './views.js'
 export function createProject(store, { directory, name, chief, staff = [], gate = false }) {
   requireText(directory, 'directory', 4096)
   requireText(name, 'name', 100)
-  requireChiefHarness(chief?.harness)
+  requireHarness(chief?.harness)
   const lead = chief.agent ?? null
   if (lead !== null) requireAgentId(lead)
   requireGate(gate)
@@ -43,8 +43,8 @@ export function createProject(store, { directory, name, chief, staff = [], gate 
       agent: lead,
       harness: chief.harness,
     })
-    for (const { agent, harness, roles, tier } of members) {
-      addParticipant(store, id, { handle: agent, roles, agent, harness, tier })
+    for (const { agent, harness, designer, roles, tier } of members) {
+      addParticipant(store, id, { handle: agent, roles, agent, harness, designer, tier })
     }
     store.log(id, 'project.created', { name, directory })
     return project(store, id)
@@ -188,7 +188,7 @@ export function events(store, projectId, { after = 0, limit = 500 } = {}) {
 export function addParticipant(
   store,
   projectId,
-  { handle, role, roles = [], agent, harness, tier = null },
+  { handle, role, roles = [], agent, harness, designer = false, tier = null },
 ) {
   role ??= roles[0]
   store.projectRow(projectId)
@@ -200,10 +200,20 @@ export function addParticipant(
   }
   const { lastInsertRowid: id } = store.db
     .prepare(
-      `INSERT INTO participant (project_id, handle, role, roles, agent, harness, tier, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO participant (project_id, handle, role, roles, agent, harness, designer, tier, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(projectId, handle, role, JSON.stringify(roles), agent, harness, tier, store.at())
+    .run(
+      projectId,
+      handle,
+      role,
+      JSON.stringify(roles),
+      agent,
+      harness,
+      designer ? 1 : 0,
+      tier,
+      store.at(),
+    )
   if (role !== 'human' && role !== 'chief') {
     store.log(projectId, 'member.added', { handle, role, roles, harness })
   }

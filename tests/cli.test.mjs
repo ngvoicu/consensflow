@@ -67,6 +67,30 @@ describe('cf manages the roster', () => {
     assert.doesNotMatch((await cf(['agent', 'list'], t.env)).stdout, /mine/)
   })
 
+  it('adds an image agent: a Codex agent that designs, on no other harness', async () => {
+    const added = await cf(
+      ['agent', 'add', 'my-draw', '--harness', 'codex', '--model', 'codex-image', '--designer'],
+      t.env,
+    )
+    assert.equal(added.code, 0, added.stderr)
+    const listed = JSON.parse((await cf(['agent', 'list', '--json'], t.env)).stdout)
+    const draw = listed.agents.find((p) => p.name === 'my-draw')
+    assert.deepEqual(
+      [draw.harness, draw.designer, draw.profile.modelLabel],
+      ['codex', true, 'Codex Images'],
+    )
+    const elsewhere = await cf(
+      ['agent', 'add', 'pi-draw', '--harness', 'pi', '--model', 'x', '--designer'],
+      t.env,
+    )
+    assert.equal(elsewhere.code, 1)
+    assert.match(elsewhere.stderr, /an image agent is a Codex agent/)
+    // `image` is no harness of its own any more.
+    const old = await cf(['agent', 'add', 'old-draw', '--harness', 'image', '--model', 'x'], t.env)
+    assert.match(old.stderr, /unknown harness "image"/)
+    await cf(['agent', 'remove', 'my-draw'], t.env)
+  })
+
   it('refuses a flag it would ignore, and writes nothing for it', async () => {
     for (const flag of [['--dry-run'], ['--from', 'x'], ['--presets', 'x']]) {
       const out = await cf(

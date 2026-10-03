@@ -35,6 +35,7 @@ export const participantView = (row) => ({
   role: row.role,
   agent: row.agent,
   harness: row.harness,
+  designer: row.designer === 1,
   createdAt: row.created_at,
   leftAt: row.left_at,
   tier: row.tier,

@@ -31,6 +31,7 @@ const participant = (id, handle, role, extra = {}) => ({
   roles: [role],
   agent: MEMBER.includes(role) ? handle : null,
   harness: role === 'human' ? null : 'claude-code',
+  designer: false,
   tier: MEMBER.includes(role) ? 'standard' : null,
   outUntil: null,
   memberId: null,
@@ -133,10 +134,12 @@ function model() {
         profile: { workTier: 'complex' },
         hidden: true,
       },
-      // The image agent: an image designer, and nothing else.
+      // The image agent, a Codex agent that designs: an image designer, and nothing else,
+      // never the lead.
       {
         name: 'pygmalion',
-        harness: 'image',
+        harness: 'codex',
+        designer: true,
         model: 'codex-image',
         profile: { workTier: 'light' },
       },
@@ -2316,7 +2319,8 @@ test('says why no image designer is on offer: Codex, which image agents run thro
         role: 'designer',
         roles: ['designer'],
         agent: 'pygmalion',
-        harness: 'image',
+        harness: 'codex',
+        designer: true,
         tier: 'light',
       },
       tasks: [],
@@ -2500,7 +2504,8 @@ test("offers a new project's lead only the agents on a harness installed here, h
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
-  // Claude Code and Devin are not installed here, and Pi's one agent is hidden.
+  // Claude Code and Devin are not installed here, and Pi's one agent is hidden; pygmalion
+  // is a Codex agent, but an image agent leads nothing.
   expect(await leadGroups(dialog.getByLabel('The lead runs on'))).toEqual([
     [
       'Codex',
@@ -2861,7 +2866,12 @@ test('shows an image designer between tasks as any member: no status line until 
 }) => {
   const data = model()
   // An image designer has no tier; its tasks run in sessions like any member's.
-  const iris = participant(8, 'iris', 'designer', { agent: 'iris', harness: 'image', tier: null })
+  const iris = participant(8, 'iris', 'designer', {
+    agent: 'iris',
+    harness: 'codex',
+    designer: true,
+    tier: null,
+  })
   data.boards[1].lanes.push({
     participant: iris,
     tasks: [],

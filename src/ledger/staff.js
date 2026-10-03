@@ -23,9 +23,13 @@ import { PARTICIPANT_SELECT, participantView } from './views.js'
 
 const HOLDS_WORK = `SELECT 1 FROM task WHERE assignee_id = ? AND state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})`
 
-/** A member joins the staff, or rejoins it in the roles, harness and tier given now. */
-export function addMember(store, projectId, { agent, harness, role, roles, tier }) {
-  roles = requireMember({ agent, harness, role, roles, tier })
+/** A member joins the staff, or rejoins it in the roles, harness, designer flag and tier given now. */
+export function addMember(
+  store,
+  projectId,
+  { agent, harness, designer = false, role, roles, tier },
+) {
+  roles = requireMember({ agent, harness, designer, role, roles, tier })
   return store.write(() => {
     const left = store.db
       .prepare(
@@ -33,14 +37,22 @@ export function addMember(store, projectId, { agent, harness, role, roles, tier 
       )
       .get(projectId, agent)
     if (left === undefined) {
-      return addParticipant(store, projectId, { handle: agent, roles, agent, harness, tier })
+      return addParticipant(store, projectId, {
+        handle: agent,
+        roles,
+        agent,
+        harness,
+        designer,
+        tier,
+      })
     }
     store.db
       .prepare(
-        `UPDATE participant SET role = ?, roles = ?, harness = ?, tier = ?, left_at = NULL
+        `UPDATE participant SET role = ?, roles = ?, harness = ?, designer = ?, tier = ?,
+           left_at = NULL
          WHERE id = ?`,
       )
-      .run(roles[0], JSON.stringify(roles), harness, tier, left.id)
+      .run(roles[0], JSON.stringify(roles), harness, designer ? 1 : 0, tier, left.id)
     store.log(projectId, 'member.added', { handle: agent, roles, harness, rejoined: true })
     return participantView(store.participantRow(left.id))
   })
@@ -104,7 +116,7 @@ export function setRoles(store, projectId, handle, roles) {
     const held = JSON.parse(member.roles)
     requireFittingRoles(
       member.agent,
-      member.harness,
+      member.designer === 1,
       roles.filter((role) => !held.includes(role)),
     )
     store.db
@@ -251,8 +263,8 @@ export function members(store, projectId, role) {
 
 /**
  * A member's new session: its own participant, named after the member,
- * with the member's agent, harness and tier and the role its task needs.
- * It starts from nothing and ends with its work (CORE-19).
+ * with the member's agent, harness, designer flag and tier and the role its
+ * task needs. It starts from nothing and ends with its work (CORE-19).
  */
 export function startSession(store, projectId, member, role) {
   const free = (handle) =>
@@ -270,8 +282,8 @@ export function startSession(store, projectId, member, role) {
   for (let number = 2; !free(handle); number += 1) handle = `${member.handle}-${name}-${number}`
   const { lastInsertRowid: id } = store.db
     .prepare(
-      `INSERT INTO participant (project_id, handle, role, roles, agent, harness, tier, member_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO participant (project_id, handle, role, roles, agent, harness, designer, tier, member_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       projectId,
@@ -280,6 +292,7 @@ export function startSession(store, projectId, member, role) {
       member.roles,
       member.agent,
       member.harness,
+      member.designer,
       member.tier,
       member.id,
       store.at(),

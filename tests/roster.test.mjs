@@ -75,10 +75,16 @@ describe('the roster is the catalog plus what is the human’s own', () => {
     assert.equal(agents.mani.harness, 'opencode')
   })
 
-  it('lists an image agent as a harness it runs, not as an oddity', () => {
+  it('reads the image agent a v1 file saved on the `image` harness as the catalog has it: Codex, designing', () => {
     const pygmalion = byName(t.env).pygmalion
-    assert.equal(pygmalion.harness, 'image')
-    assert.equal(pygmalion.unsupported, undefined, 'cf run spawns it like any other')
+    assert.deepEqual(
+      [pygmalion.harness, pygmalion.designer, pygmalion.model, pygmalion.unsupported],
+      ['codex', true, 'codex-image', undefined],
+    )
+    assert.deepEqual(
+      [agentRow('pygmalion', t.env).kind, agentRow('pygmalion', t.env).designer],
+      ['codex', true],
+    )
   })
 })
 
@@ -169,10 +175,40 @@ describe('agents defined by hand are stored in full, v1-shaped', () => {
       [pi.thinking, pi.effort, byName(t.env)['my-pi'].effort],
       ['high', undefined, 'high'],
     )
-    // An image agent has no effort to edit, plainly.
-    addAgent({ name: 'my-image', harness: 'image', model: 'codex-image' }, t.env)
+    // An image agent is a Codex agent with the designer flag, and has no effort to edit, plainly.
+    assert.throws(
+      () => addAgent({ name: 'my-image', harness: 'image', model: 'codex-image' }, t.env),
+      /unknown harness "image"/,
+    )
+    assert.throws(
+      () => addAgent({ name: 'my-image', harness: 'pi', designer: true, model: 'x' }, t.env),
+      /an image agent is a Codex agent/,
+    )
+    assert.throws(
+      () => addAgent({ name: 'my-image', harness: 'codex', designer: 'yes', model: 'x' }, t.env),
+      /an image agent \(designer true\) or not/,
+    )
+    const image = addAgent(
+      { name: 'my-image', harness: 'codex', designer: true, model: 'codex-image' },
+      t.env,
+    )
+    assert.deepEqual(
+      [image.harness, image.designer, image.profile.modelLabel],
+      ['codex', true, 'Codex Images'],
+    )
+    assert.deepEqual(Object.keys(raw(t.env).agents.find((p) => p.id === 'my-image')).sort(), [
+      'createdAt',
+      'designer',
+      'id',
+      'kind',
+      'model',
+      'name',
+      'updatedAt',
+    ])
     assert.throws(() => editAgent('my-image', { effort: 'high' }, t.env), /no effort level/)
     editAgent('my-image', { description: 'still editable' }, t.env)
+    // No other Codex agent designs.
+    assert.equal(byName(t.env)['freya-2']?.designer, undefined)
   })
 
   it('edits and removes a custom agent in place', () => {
@@ -262,6 +298,14 @@ describe('what older builds wrote is read the same, and folded at start', () => 
           effort: 'low',
           skillsPolicy: 'default',
         },
+        // The human's own image agent, from when `image` was a harness of its own.
+        {
+          id: 'my-draw',
+          name: 'My-draw',
+          kind: 'image',
+          model: 'gpt-image-2',
+          description: 'My drawings',
+        },
       ],
     })
     writeFileSync(rosterPath(t.env), original)
@@ -270,16 +314,51 @@ describe('what older builds wrote is read the same, and folded at start', () => 
       [agents.gefjon.custom, agents.apollo.effort, agents.mine.custom],
       [undefined, 'xhigh', true],
     )
+    assert.deepEqual(
+      [
+        agents['my-draw'].harness,
+        agents['my-draw'].designer,
+        agents['my-draw'].custom,
+        agents['my-draw'].profile.modelLabel,
+      ],
+      ['codex', true, true, 'Codex Images'],
+      'an image agent on the `image` harness reads as the Codex agent that designs it is now',
+    )
+    assert.equal(agentRow('my-draw', t.env).kind, 'codex')
     assert.equal(readFileSync(rosterPath(t.env), 'utf8'), original, 'a read writes nothing')
   })
 
-  it('normalizing keeps only the human’s own agents, drops stored display data, and is idempotent', () => {
+  it('normalizing keeps only the human’s own agents, drops stored display data, makes an image agent a designing Codex one, and is idempotent', () => {
     assert.equal(normalizeRoster(t.env), true)
-    assert.deepEqual(
-      raw(t.env).agents.map((row) => [row.id, Object.keys(row).sort()]),
-      [['mine', ['effort', 'id', 'kind', 'model', 'name']]],
-    )
+    assert.deepEqual(raw(t.env).agents, [
+      { id: 'mine', name: 'Mine', kind: 'codex', model: 'gpt-6-astra', effort: 'low' },
+      {
+        id: 'my-draw',
+        name: 'My-draw',
+        kind: 'codex',
+        model: 'gpt-image-2',
+        description: 'My drawings',
+        designer: true,
+      },
+    ])
     assert.equal(normalizeRoster(t.env), false)
+  })
+
+  it('normalizing writes an image agent of its own the same way, though nothing else in the file is old', () => {
+    const fresh = tempEnv()
+    try {
+      const draw = { id: 'my-draw', name: 'My-draw', kind: 'image', model: 'codex-image' }
+      mkdirSync(dirname(rosterPath(fresh.env)), { recursive: true })
+      writeFileSync(
+        rosterPath(fresh.env),
+        `${JSON.stringify({ schemaVersion: 1, agents: [draw] })}\n`,
+      )
+      assert.equal(normalizeRoster(fresh.env), true)
+      assert.deepEqual(raw(fresh.env).agents, [{ ...draw, kind: 'codex', designer: true }])
+      assert.equal(normalizeRoster(fresh.env), false)
+    } finally {
+      fresh.cleanup()
+    }
   })
 
   it('normalizing a home with no roster writes nothing', () => {

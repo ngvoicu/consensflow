@@ -460,7 +460,8 @@ test('model capability order takes precedence over agent names and reasoning eff
     page,
     ordered.map(([model, effort], index) => ({
       name: names[index],
-      harness: model === 'codex-image' ? 'image' : 'codex',
+      harness: 'codex',
+      ...(model === 'codex-image' ? { designer: true } : {}),
       model,
       ...(effort ? { effort } : {}),
     })),
@@ -471,7 +472,7 @@ test('model capability order takes precedence over agent names and reasoning eff
       await fixture.second.getByLabel('Group by').selectOption(group)
       await expect(fixture.second.locator('.callsign')).toHaveText(names)
     }
-    // The image agent runs through Codex and groups with it: one Codex group, in capability order.
+    // The image agent is a Codex agent and groups with it: one Codex group, in capability order.
     await fixture.second.getByLabel('Group by').selectOption('harness')
     await expect(fixture.second.locator('.callsign')).toHaveText(names)
     for (const group of ['none', 'model-reasoning', 'harness']) {
@@ -503,7 +504,7 @@ test('every row shows its tier and route; an edit to your own agent moves its ti
 }) => {
   const fixture = await catalogPage(page, [
     { name: 'custom', harness: 'codex', model: 'gpt-6-astra', effort: 'medium' },
-    { name: 'draw', harness: 'image', model: 'codex-image' },
+    { name: 'draw', harness: 'codex', designer: true, model: 'codex-image' },
   ])
   try {
     const maia = member(page, 'maia')
@@ -584,7 +585,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     { name: 'peer-one', harness: 'pi', model: 'openai-codex/gpt-6-astra', effort: 'xhigh' },
     { name: 'quick-one', harness: 'pi', model: 'openai-codex/gpt-6-astra', effort: 'low' },
     { name: 'custom', harness: 'claude', model: '<custom-model>', effort: 'unusual' },
-    { name: 'draw', harness: 'image', model: 'gpt-image-2' },
+    { name: 'draw', harness: 'codex', designer: true, model: 'gpt-image-2' },
     { name: 'default-one', harness: 'claude', model: 'claude-opus-5-5' },
     { name: 'off-one', harness: 'codex', model: 'gpt-6-astra', effort: 'off' },
     { name: 'minimal-one', harness: 'codex', model: 'gpt-6-astra', effort: 'minimal' },
@@ -728,10 +729,8 @@ test('shared model cards default to every model and reasoning across all harness
   try {
     const expected = new Map()
     for (const p of entries) {
-      const key = [
-        p.profile.modelKey,
-        p.harness === 'image' ? 'not-applicable' : p.effort || 'default',
-      ].join('|')
+      const effort = p.designer ? 'not-applicable' : p.effort || 'default'
+      const key = [p.profile.modelKey, effort].join('|')
       if (!expected.has(key)) expected.set(key, [])
       expected.get(key).push(p.name)
     }
@@ -958,7 +957,13 @@ test('image agents keep the Codex route and offer only their tier for editing', 
   page,
 }) => {
   const fixture = await catalogPage(page, [
-    { name: 'old-image', harness: 'image', model: 'gpt-image-2', description: 'My image notes' },
+    {
+      name: 'old-image',
+      harness: 'codex',
+      designer: true,
+      model: 'gpt-image-2',
+      description: 'My image notes',
+    },
   ])
   const { second } = fixture
   try {
@@ -973,15 +978,41 @@ test('image agents keep the Codex route and offer only their tier for editing', 
     await expect(member(page, 'pygmalion')).toContainText('Codex Images')
     await expect(member(page, 'pygmalion')).not.toContainText(/gpt-image-2|Sunburst|Flare/)
     const form = second.locator('#add')
-    await form.locator('[name=harness]').selectOption('image')
+    const image = form.getByLabel('Image agent')
+    // An image agent is a Codex agent with the designer flag: no harness of its own.
+    await expect(form.locator('[name=harness] option')).toHaveText([
+      'claude',
+      'codex',
+      'pi',
+      'opencode',
+      'devin',
+    ])
+    await expect(image).toBeHidden()
+    await form.locator('[name=harness]').selectOption('codex')
+    await form.locator('[name=model]').fill('gpt-6-astra')
+    await image.check()
     await expect(form.locator('[name=model]')).toBeHidden()
     await expect(form.locator('[name=effort]')).toBeHidden()
     await form.locator('[name=name]').fill('my-image')
     await form.getByRole('button', { name: 'Add agent' }).click()
     await expect(member(second, 'my-image')).toContainText('Codex Images')
+    expect(listAgents(fixture.t.env).find((agent) => agent.name === 'my-image')).toMatchObject({
+      harness: 'codex',
+      designer: true,
+      model: 'codex-image',
+    })
     await form.locator('[name=harness]').selectOption('codex')
+    await expect(image).not.toBeChecked()
+    await image.check()
+    await image.uncheck()
     await expect(form.locator('[name=model]')).toBeVisible()
     await expect(form.locator('[name=effort]')).toBeVisible()
+    // Ticked for Codex, it goes with Codex: another harness has no image agent.
+    await image.check()
+    await form.locator('[name=harness]').selectOption('pi')
+    await expect(image).toBeHidden()
+    await expect(image).not.toBeChecked()
+    await expect(form.locator('[name=model]')).toBeVisible()
   } finally {
     await fixture.close()
   }

@@ -12,15 +12,14 @@ import { AGENT_PRESETS, agentProfile, validateWorkTier } from '../hosts/lib/pres
  * daemon start. Reads map native kind/thinking fields to the app's
  * harness/effort view.
  *
+ * An image agent is a Codex agent with the designer flag (`designer: true`):
+ * its window is Codex on its own default model, whose image tool draws.
+ *
  * Every function takes the environment explicitly — nothing reads
  * process.env — so tests run against throwaway homes.
  */
 
-// `image` is a harness in the sense that matters here: it is what runs the
-// agent. There is no CLI behind it — image generation is reached through the Codex
-// login — but the roster, the catalog and `cf run` treat it like any other, so
-// @pygmalion works wherever the rest do.
-export const HARNESSES = ['claude', 'codex', 'pi', 'opencode', 'devin', 'image']
+export const HARNESSES = ['claude', 'codex', 'pi', 'opencode', 'devin']
 
 const NAME_PATTERN = /^[a-z][a-z0-9-]*$/
 const KIND_TO_HARNESS = {
@@ -29,7 +28,6 @@ const KIND_TO_HARNESS = {
   pi: 'pi',
   opencode: 'opencode',
   devin: 'devin',
-  image: 'image',
 }
 /**
  * The CLI behind a kind. `src/harnesses.js` is keyed by the CLI's own name
@@ -46,7 +44,6 @@ const HARNESS_TO_KIND = {
   pi: 'pi',
   opencode: 'opencode',
   devin: 'devin',
-  image: 'image',
 }
 
 /**
@@ -119,7 +116,8 @@ const unreadable = (path, why) =>
     `Your agents file ${path} ${why}: fix it or move it away. ConsensFlow left it as it is.`,
   )
 
-function loadDocument(env) {
+/** The file as it is stored, with the version and the list an older one left out. */
+function storedDocument(env) {
   const parsed = readRoster(env)
   if (parsed === undefined) return { schemaVersion: 1, agents: [] }
   // Everything else the file carried is preserved, because rows and fields
@@ -129,6 +127,19 @@ function loadDocument(env) {
     schemaVersion: parsed.schemaVersion ?? 1,
     agents: Array.isArray(parsed.agents) ? parsed.agents : [],
   }
+}
+
+/**
+ * The file in the shape this build reads and writes. An image agent an
+ * older build saved on a harness of its own (`image`, until 2026-10-03) is
+ * the Codex agent with the designer flag it is now.
+ */
+function loadDocument(env) {
+  const document = storedDocument(env)
+  document.agents = document.agents.map((row) =>
+    row.kind === 'image' ? { ...row, kind: 'codex', designer: true } : row,
+  )
+  return document
 }
 
 /** Display data older builds wrote into the file; recomputed on read now, never stored again. */
@@ -160,6 +171,7 @@ function catalogRow(preset) {
     id: preset.id,
     name: preset.name,
     kind: preset.kind,
+    ...(preset.designer ? { designer: true } : {}),
     model: preset.model,
     ...(effort ? { [effortKey(preset.kind)]: effort } : {}),
     // The one-line label is what a roster row calls itself; the preset's
@@ -202,6 +214,7 @@ function toView(row) {
   return {
     name: row.id,
     harness: harness ?? row.kind,
+    ...(row.designer === true ? { designer: true } : {}),
     model: row.model,
     ...(row.workTier == null ? {} : { workTier: row.workTier }),
     ...(effortOf(row) ? { effort: effortOf(row) } : {}),
@@ -261,10 +274,11 @@ export function listAgents(env) {
 /**
  * Folds what older builds wrote into the shape the file keeps now: a copy
  * of a catalog entry goes (the catalog has it), and so does stored display
- * data. Says whether the file changed.
+ * data; an image agent on the `image` harness is a Codex agent that designs.
+ * Says whether the file changed.
  */
 export function normalizeRoster(env) {
-  const before = JSON.stringify(loadDocument(env))
+  const before = JSON.stringify(storedDocument(env))
   const document = loadDocument(env)
   document.agents = document.agents.filter((row) => {
     for (const field of STALE_FIELDS) delete row[field]
@@ -289,6 +303,12 @@ function validateAdd(input) {
       `unknown harness ${JSON.stringify(input.harness)}; expected ${HARNESSES.join(', ')}`,
     )
   }
+  if (input.designer !== undefined && typeof input.designer !== 'boolean') {
+    throw new Error('an agent is an image agent (designer true) or not (false)')
+  }
+  if (input.designer === true && input.harness !== 'codex') {
+    throw new Error("an image agent is a Codex agent: Codex's image tool draws")
+  }
   if (typeof input.model !== 'string' || input.model.length === 0) {
     throw new Error('an agent needs a model (any identifier its harness accepts)')
   }
@@ -309,6 +329,7 @@ export function addAgent(input, env) {
     // The display name cc shows; capitalized to match its convention.
     name: input.name.charAt(0).toUpperCase() + input.name.slice(1),
     kind: HARNESS_TO_KIND[input.harness],
+    ...(input.designer === true ? { designer: true } : {}),
     createdAt: now,
     updatedAt: now,
     model: input.model,
@@ -343,15 +364,14 @@ function applyPatch(row, patch) {
   }
 }
 
-function refuseEffortEdit(name, kind) {
-  const supported = KIND_TO_HARNESS[kind] !== undefined
+function refuseEffortEdit(name, row) {
   // Two different refusals that used to be one: a kind this build cannot run
-  // at all, and `image`, which it runs but which has no effort to set —
-  // the image route takes a prompt, not a thinking level.
+  // at all, and an image agent, which it runs but which has no effort to
+  // set — its window is Codex on its own default model, whose image tool draws.
   throw new Error(
-    supported
+    row.designer === true
       ? `${name} is an image agent: it has no effort level — only its model and description can be edited`
-      : `${name} is a ${kind} agent, which this build does not run; only its model and description can be edited here`,
+      : `${name} is a ${row.kind} agent, which this build does not run; only its model and description can be edited here`,
   )
 }
 
@@ -369,9 +389,9 @@ export function editAgent(name, patch, env) {
   if (stored === undefined) throw new Error(`no agent named ${name}`)
   if (
     patch.effort !== undefined &&
-    (KIND_TO_HARNESS[stored.kind] === undefined || stored.kind === 'image')
+    (KIND_TO_HARNESS[stored.kind] === undefined || stored.designer === true)
   ) {
-    refuseEffortEdit(name, stored.kind)
+    refuseEffortEdit(name, stored)
   }
   applyPatch(stored, patch)
   stored.updatedAt = new Date().toISOString()

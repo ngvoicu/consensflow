@@ -25,7 +25,7 @@ const TIER_LABEL = {
   light: 'Light work',
 }
 /** The harnesses in the order agents of one tier are listed. */
-const HARNESS_ORDER = ['claude', 'codex', 'opencode', 'pi', 'devin', 'image']
+const HARNESS_ORDER = ['claude', 'codex', 'opencode', 'pi', 'devin']
 const TIERS = Object.keys(TIER_LABEL)
 const rank = (list, value) => (list.includes(value) ? list.indexOf(value) : list.length)
 /** A staff reads by role, in the order the picker offers them, then by tier, the most critical first, then by name. */
@@ -38,18 +38,15 @@ const byRoleAndTier = (a, b) =>
  * tier a task finds it by, effort included when it has one.
  */
 const runsLabel = (agent, tier = agent.profile?.workTier) =>
-  [
-    agent.model ?? 'model unknown',
-    // An image agent runs through Codex: Codex is its harness to the human.
-    agent.harness === 'image' ? 'codex' : agent.harness,
-    agent.effort,
-    tier,
-  ]
-    .filter(Boolean)
-    .join(' · ')
+  [agent.model ?? 'model unknown', agent.harness, agent.effort, tier].filter(Boolean).join(' · ')
 
-/** Whether an agent may take a role: an image designer is an image agent, and an image agent is nothing else. */
-const fits = (agent, role) => (role === 'designer') === (agent.harness === 'image')
+/**
+ * Whether an agent may take a role, by its designer flag: an image designer
+ * is an image agent (a Codex agent that designs), and an image agent is
+ * nothing else, the lead included. The core's `fitsRole`, which this page
+ * cannot import.
+ */
+const fits = (agent, role) => (role === 'designer') === (agent.designer === true)
 
 /** Why a role's pick list is empty: no agent saved, no image agent here, or each that fits holds it. */
 function emptyHint(role, saved, fitting) {
@@ -170,12 +167,12 @@ const harnessOf = (kind) => (kind === 'claude-code' ? 'claude' : kind)
 const NO_HARNESS = 'No harness is installed here: install one from Agents, Harnesses.'
 
 /**
- * Fills a lead's pick list: the saved agents a lead may run on, harness by
- * harness for each harness a lead runs in that is installed here, by name,
- * after an empty choice that asks for one. A lead runs on an agent the human
- * picks, never on a harness's own default; the agent it runs on now
- * (`current`) is no switch. With no harness installed here it refuses, and
- * says where to get one.
+ * Fills a lead's pick list: the saved agents a lead may run on (no image
+ * agent), harness by harness for each harness a lead runs in that is
+ * installed here, by name, after an empty choice that asks for one. A lead
+ * runs on an agent the human picks, never on a harness's own default; the
+ * agent it runs on now (`current`) is no switch. With no harness installed
+ * here it refuses, and says where to get one.
  */
 function fillLeads(select, agents, missing, current = null) {
   const installed = Object.entries(HARNESS_NAMES).filter(
@@ -186,7 +183,7 @@ function fillLeads(select, agents, missing, current = null) {
   ask.disabled = true
   const groups = installed.flatMap(([kind, label]) => {
     const runsHere = agents
-      .filter((agent) => !agent.hidden && agent.harness === harnessOf(kind))
+      .filter((agent) => !agent.hidden && agent.harness === harnessOf(kind) && fits(agent, 'chief'))
       .sort((a, b) => a.name.localeCompare(b.name))
     if (runsHere.length === 0) return []
     const group = element('optgroup')

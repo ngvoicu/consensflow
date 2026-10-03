@@ -4,9 +4,7 @@
  * checks that refuse anything else with a `LedgerError`, whose code is stable.
  */
 
-export const HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin', 'image']
-/** Where a project's chief runs: a harness with a terminal the human works in. */
-export const CHIEF_HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin']
+export const HARNESSES = ['claude-code', 'codex', 'opencode', 'pi', 'devin']
 export const MEMBER_ROLES = ['worker', 'advisor', 'reviewer', 'designer']
 /** Who hands out work and hears when the staff changes: the human and the chief. */
 const COORDINATOR_HANDLES = ['human', 'chief']
@@ -46,17 +44,6 @@ export function requireText(value, field, max) {
 export function requireHarness(harness) {
   if (!HARNESSES.includes(harness)) {
     throw new LedgerError('invalid-harness', `unknown harness ${JSON.stringify(harness)}`)
-  }
-  return harness
-}
-
-/** A chief's harness: one of CHIEF_HARNESSES, when the project starts and at every Switch lead. */
-export function requireChiefHarness(harness) {
-  if (!CHIEF_HARNESSES.includes(harness)) {
-    throw new LedgerError(
-      'invalid-harness',
-      `a chief runs on ${CHIEF_HARNESSES.join(', ')}, not ${JSON.stringify(harness)}`,
-    )
   }
   return harness
 }
@@ -120,26 +107,33 @@ export function requireAgentId(agent, taken = []) {
   return agent
 }
 
-/** Whether a role fits an agent's harness: an image designer is an image agent, and an image agent is nothing else. */
-export const fitsRole = (harness, role) => (role === 'designer') === (harness === 'image')
+/**
+ * Whether a role fits an agent, by its designer flag: an image designer is
+ * an image agent (a Codex agent that designs), and an image agent is
+ * nothing else, the lead included.
+ */
+export const fitsRole = (designer, role) => (role === 'designer') === designer
 
-/** Refuses roles that do not fit `agent`, on `harness` (see `fitsRole`), saying which way. */
-export function requireFittingRoles(agent, harness, roles) {
-  if (roles.every((role) => fitsRole(harness, role))) return
+/** Refuses roles that do not fit `agent`, a designer or not (see `fitsRole`), saying which way. */
+export function requireFittingRoles(agent, designer, roles) {
+  if (roles.every((role) => fitsRole(designer, role))) return
   throw new LedgerError(
     'invalid-role',
-    harness === 'image'
+    designer
       ? `${agent} is an image agent, which can only be an image designer`
       : `only an image agent can be an image designer, and ${agent} is not one`,
   )
 }
 
 /** Validates a member and returns its roles, normalized. */
-export function requireMember({ agent, harness, role, roles, tier }) {
+export function requireMember({ agent, harness, designer = false, role, roles, tier }) {
   const set = requireRoles(roles ?? (role === undefined ? [] : [role]))
   requireAgentId(agent, COORDINATOR_HANDLES)
   requireHarness(harness)
-  requireFittingRoles(agent, harness, set)
+  if (typeof designer !== 'boolean') {
+    throw new LedgerError('invalid-designer', 'an agent is an image agent (true) or not (false)')
+  }
+  requireFittingRoles(agent, designer, set)
   requireTier(tier)
   return set
 }

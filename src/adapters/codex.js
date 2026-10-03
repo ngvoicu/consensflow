@@ -93,7 +93,6 @@ function mcpIsolation(servers) {
 
 export function codexAdapter({
   env,
-  harness = 'codex',
   send = sendCodex,
   sessionState = brokerState,
   mcpServers = codexMcpServers,
@@ -102,7 +101,7 @@ export function codexAdapter({
   discoverForMs = 60_000,
 }) {
   return {
-    harness,
+    harness: 'codex',
 
     async prepare({ launchId, role, directory, resume, message, agent, instructions }) {
       const executable = executableFor('codex', env)
@@ -122,7 +121,12 @@ export function codexAdapter({
       })
       // The chief works with the human and keeps the human's connectors.
       const isolation = role === 'chief' ? [] : mcpIsolation(await mcpServers(executable, env))
-      const identity = { kind: harness, model: agent?.model, effort: agent?.effort }
+      // An image agent's window is Codex on its own default model, whose
+      // image tool draws: it names no model or effort of its own.
+      const identity =
+        agent?.designer === true
+          ? { kind: 'codex' }
+          : { kind: 'codex', model: agent?.model, effort: agent?.effort }
       const runner =
         resume === null
           ? interactiveStart(identity, null, windowText(message))
