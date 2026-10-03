@@ -171,15 +171,13 @@ function catalogRow(preset) {
 
 /**
  * The catalog entry a stored row is a copy of, if it is one: by the
- * provenance it carries, else by a matching name and harness (a copy an
- * older build saved). A custom row that took a catalog name on another
- * harness is its own agent, and hides the entry.
+ * provenance it carries, as every copy has since 2026-08-21. A row without
+ * it is the human's own agent, even one whose name a later catalog took, on
+ * any harness: it hides that entry, and is never folded away as a copy.
  */
 function entryOf(row) {
   const byPreset = row.preset === undefined ? undefined : CATALOG_BY_PRESET.get(row.preset)
-  if (byPreset !== undefined && byPreset.id === row.id) return byPreset
-  const byId = CATALOG_BY_ID.get(row.id)
-  return byId !== undefined && byId.kind === row.kind ? byId : undefined
+  return byPreset !== undefined && byPreset.id === row.id ? byPreset : undefined
 }
 
 /**

@@ -368,3 +368,29 @@ describe('the roster keeps what the human chose about it', () => {
     }
   })
 })
+
+describe("the human's own agent and a catalog that takes its name later", () => {
+  it('keeps the agent, on its own harness too, and hides the catalog entry', () => {
+    const t = tempEnv()
+    try {
+      // Saved by hand before a release added hapi, Devin's SWE-1.6, to the catalog.
+      const mine = { id: 'hapi', kind: 'devin', model: 'swe-2', effort: 'high' }
+      mkdirSync(dirname(rosterPath(t.env)), { recursive: true })
+      writeFileSync(rosterPath(t.env), `${JSON.stringify({ schemaVersion: 1, agents: [mine] })}\n`)
+      normalizeRoster(t.env)
+      assert.deepEqual(
+        JSON.parse(readFileSync(rosterPath(t.env), 'utf8')).agents,
+        [mine],
+        'the file keeps it',
+      )
+      const hapi = listAgents(t.env).filter((agent) => agent.name === 'hapi')
+      assert.deepEqual(
+        hapi.map((agent) => [agent.model, agent.custom === true]),
+        [['swe-2', true]],
+        "one hapi: the human's",
+      )
+    } finally {
+      t.cleanup()
+    }
+  })
+})

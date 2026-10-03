@@ -21,9 +21,16 @@ async function withPage(fn) {
     path.join(env.CONSENSFLOW_HOME, 'agents.json'),
     `${JSON.stringify({
       schemaVersion: 1,
+      // Copies of two catalog entries, with the provenance every copy carries.
       agents: [
-        { id: 'zeus', kind: 'claude-code', model: 'claude-sonnet-5', effort: 'high' },
-        { id: 'diana', kind: 'codex', model: 'gpt-5.6-luna' },
+        {
+          id: 'zeus',
+          preset: 'zeus',
+          kind: 'claude-code',
+          model: 'claude-sonnet-5',
+          effort: 'high',
+        },
+        { id: 'diana', preset: 'diana', kind: 'codex', model: 'gpt-5.6-luna' },
       ],
     })}\n`,
   )
