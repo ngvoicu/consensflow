@@ -186,7 +186,7 @@ export class Dispatcher {
 
   /** What a participant's window is doing: starting, working, idle, waiting (with why), closed. */
   activity(participantId) {
-    return this.#runtime.get(participantId)?.activity ?? { state: 'closed' }
+    return this.#runtime.get(participantId)?.window.activity ?? { state: 'closed' }
   }
 
   /** The Switch lead waiting for this lead's turn to end, `{harness, agent}`, or null. */
@@ -197,7 +197,7 @@ export class Dispatcher {
 
   /** The live window of a participant, `{id, generation}`, or null. */
   pane(participantId) {
-    return this.#runtime.get(participantId)?.pane ?? null
+    return this.#runtime.get(participantId)?.window.pane ?? null
   }
 
   /** Refuses a harness ConsensFlow has no adapter for: none of its windows could open. */
@@ -242,7 +242,7 @@ export class Dispatcher {
     const project = this.#ledger.setProjectState(projectId, 'open')
     const chief = project.participants.find((participant) => participant.role === 'chief')
     // The human asks for the lead now: a lead that failed before is tried at once.
-    this.#runtimeOf(chief.id).relaunch = null
+    this.#runtimeOf(chief.id).window.relaunch = null
     this.#openSoon(chief.id)
     this.#changed()
     return this.#ledger.project(projectId)
@@ -276,7 +276,7 @@ export class Dispatcher {
         return this.#exclusive(
           participant.id,
           async () => {
-            if (runtime.pane !== null) await this.#closeOwn(runtime, runtime.pane)
+            if (runtime.window.pane !== null) await this.#closeOwn(runtime, runtime.window.pane)
           },
           { wait: true },
         )
@@ -307,7 +307,7 @@ export class Dispatcher {
     while (runtime.running !== null || runtime.acting !== null) {
       await (runtime.running ?? runtime.acting).catch(() => {})
     }
-    if (runtime.pane === null) this.#leaving.delete(runtime)
+    if (runtime.window.pane === null) this.#leaving.delete(runtime)
     else await this.#retire(runtime)
   }
 
@@ -321,7 +321,7 @@ export class Dispatcher {
   async openWindow(projectId, handle) {
     const { project, participant } = this.#sessionOf(projectId, handle)
     requireOpen(project)
-    this.#runtimeOf(participant.id).pinned = true
+    this.#runtimeOf(participant.id).window.pinned = true
     this.#openSoon(participant.id)
     this.#changed()
     return this.#ledger.project(projectId)
@@ -349,8 +349,8 @@ export class Dispatcher {
       holder.id,
       async () => {
         const runtime = this.#runtimeOf(holder.id)
-        runtime.pinned = false
-        if (runtime.pane !== null) await this.#retire(runtime)
+        runtime.window.pinned = false
+        if (runtime.window.pane !== null) await this.#retire(runtime)
         return release()
       },
       { wait: true },
@@ -361,8 +361,8 @@ export class Dispatcher {
   async closeWindow(projectId, handle) {
     const { participant } = this.#sessionOf(projectId, handle)
     const runtime = this.#runtimeOf(participant.id)
-    runtime.pinned = false
-    if (runtime.pane !== null) await this.#retire(runtime)
+    runtime.window.pinned = false
+    if (runtime.window.pane !== null) await this.#retire(runtime)
     return this.#ledger.project(projectId)
   }
 
@@ -538,7 +538,7 @@ export class Dispatcher {
         const idle =
           participant.memberId !== null &&
           !working.has(participant.id) &&
-          (this.#runtime.get(participant.id)?.pane ?? null) === null
+          (this.#runtime.get(participant.id)?.window.pane ?? null) === null
         if (idle) continue
         steps.push(this.#exclusive(participant.id, () => this.#step(project, participant)))
       }
@@ -550,27 +550,27 @@ export class Dispatcher {
   async paneExited({ id, generation }) {
     const ended = (pane) => pane?.id === id && pane.generation === generation
     const runtime = [...this.#runtime.values(), ...this.#leaving].find(
-      (candidate) => ended(candidate.pane) || ended(candidate.opening?.pane),
+      (candidate) => ended(candidate.window.pane) || ended(candidate.window.opening?.pane),
     )
     if (runtime === undefined) return
     // Still opening: its launch takes the exit once it has the window.
-    if (!ended(runtime.pane)) {
-      runtime.opening.exited = true
+    if (!ended(runtime.window.pane)) {
+      runtime.window.opening.exited = true
       return
     }
-    this.#credentials.revoke(runtime.token)
-    const delivering = runtime.delivering
+    this.#credentials.revoke(runtime.window.token)
+    const delivering = runtime.delivery.delivering
     // The window's files in the home go with it.
-    this.#launchFiles.forget(runtime.launchId)
-    Object.assign(runtime, {
+    this.#launchFiles.forget(runtime.window.launchId)
+    Object.assign(runtime.window, {
       pane: null,
       launch: null,
       launchId: null,
       token: null,
-      delivering: null,
       retiring: false,
       activity: { state: 'closed' },
     })
+    runtime.delivery.delivering = null
     // A participant that left is forgotten already: its window's exit settles nothing more.
     if (this.#leaving.delete(runtime)) return
     const participantId = runtime.id
@@ -586,7 +586,7 @@ export class Dispatcher {
     if (participant.role === 'chief') {
       // The lead's own exit (the human's /exit, a crash) closes the project
       // as Close does: no member's window goes on unseen.
-      if (project.state === 'open' && !runtime.ownExit) {
+      if (project.state === 'open' && !runtime.window.ownExit) {
         this.#ledger.setProjectState(project.id, 'suspended')
         await this.#closeWindows(project.participants.filter((p) => p.id !== participantId))
       }
@@ -613,9 +613,9 @@ export class Dispatcher {
 
   /** One look at a window: what its harness's record shows now. */
   #observe(participant, runtime) {
-    return runtime.adapter.observe({
-      launch: runtime.launch,
-      pane: runtime.pane,
+    return runtime.window.adapter.observe({
+      launch: runtime.window.launch,
+      pane: runtime.window.pane,
       conversation: this.#ledger.currentConversation(participant.id),
       host: this.#host,
     })
@@ -627,11 +627,13 @@ export class Dispatcher {
    * cannot tell is taken as drawn.
    */
   async #drawn(runtime) {
-    if (runtime.drawn) return true
-    const snapshot = await this.#host.request('pane.snapshot', runtime.pane).catch(() => null)
+    if (runtime.window.drawn) return true
+    const snapshot = await this.#host
+      .request('pane.snapshot', runtime.window.pane)
+      .catch(() => null)
     const quiet = snapshot?.outputQuietMs
     if (quiet === undefined || (quiet !== null && quiet >= DRAWN_QUIET_MS)) {
-      runtime.drawn = true
+      runtime.window.drawn = true
       return true
     }
     return false
@@ -641,12 +643,12 @@ export class Dispatcher {
 
   async #step(project, participant) {
     const runtime = this.#runtimeOf(participant.id)
-    if (runtime.pane !== null) return this.#stepOpen(project, participant, runtime)
+    if (runtime.window.pane !== null) return this.#stepOpen(project, participant, runtime)
     if (project.state !== 'open') return
     // A lead whose agent is gone stays closed: its launch told the human, who switches it.
     if (participant.role === 'chief' && this.#agentGone(participant)) return
     // A lead whose window keeps failing to start is tried again ever more slowly.
-    if (runtime.relaunch !== null && runtime.relaunch.at > this.#now()) return
+    if (runtime.window.relaunch !== null && runtime.window.relaunch.at > this.#now()) return
     const next = this.#ledger.nextDelivery(participant.id)
     if (next !== null) {
       this.#act(runtime, () => this.#launch(project, participant, next))
@@ -666,7 +668,7 @@ export class Dispatcher {
   }
 
   async #stepOpen(project, participant, runtime) {
-    if (runtime.retiring) return
+    if (runtime.window.retiring) return
     // A participant forgotten while the step waits (it left, or its project
     // was deleted) is done with: nothing the look found is written, and
     // nothing more is done by its ids, which name rows gone with its project
@@ -689,10 +691,10 @@ export class Dispatcher {
     // record from the start) holds its messages, and is starting while it
     // draws its screen or until it names its first conversation.
     const unnamed = observed.unnamed === true
-    if (!unnamed) runtime.named = true
+    if (!unnamed) runtime.window.named = true
     const drawing = (observed.items.length === 0 || unnamed) && !(await this.#drawn(runtime))
     if (this.#forgotten(runtime)) return
-    const starting = drawing || (unnamed && !runtime.named)
+    const starting = drawing || (unnamed && !runtime.window.named)
     // An out member's window says so, and nothing else, until the reset.
     if (!this.#isOut(owner)) {
       this.#setActivity(
@@ -710,13 +712,13 @@ export class Dispatcher {
     // The human switched the window to another conversation: this look was
     // the old one's last, and nothing is delivered on it.
     if (observed.switched !== undefined) {
-      if (runtime.delivering !== null) this.#confirmArrival(runtime, observed)
+      if (runtime.delivery.delivering !== null) this.#confirmArrival(runtime, observed)
       this.#follow(participant, runtime, observed.switched.nativeSession)
       return
     }
     if (observed.quota !== undefined) this.#recordQuota(runtime, owner, observed.quota)
     const out = this.#isOut(owner)
-    if (!out && this.#freshRefusal(owner, runtime.quota)) {
+    if (!out && this.#freshRefusal(owner, runtime.quota.reported)) {
       await this.#outOfQuota(project, participant, runtime, owner)
       return
     }
@@ -738,16 +740,17 @@ export class Dispatcher {
       }
       return
     }
-    if (runtime.delivering !== null) await this.#watchArrival(runtime, observed)
+    if (runtime.delivery.delivering !== null) await this.#watchArrival(runtime, observed)
     // A window that began to close in this step (a launch that timed out) is not acted on.
-    if (runtime.retiring) return
+    if (runtime.window.retiring) return
     if (participant.role !== 'chief') {
       await this.#interruptIfStopped(participant, runtime, observed)
       if (this.#forgotten(runtime)) return
       this.#collect(project, participant, observed)
       if (await this.#closeIfFree(runtime)) return
     }
-    const idle = runtime.delivering === null && observed.settled && !observed.waiting && !drawing
+    const idle =
+      runtime.delivery.delivering === null && observed.settled && !observed.waiting && !drawing
     if (runtime.pendingSwitch !== null) {
       await this.#awaitSwitch(project, participant, runtime, observed, idle)
       return
@@ -802,7 +805,7 @@ export class Dispatcher {
         // Asked of the project as it is once the lead's step in progress is
         // over: one deleted meanwhile is no project now.
         requireOpen(this.#knownProject(projectId))
-        if (runtime.pane !== null && !this.#isOut(chief) && (when === 'turn' || note)) {
+        if (runtime.window.pane !== null && !this.#isOut(chief) && (when === 'turn' || note)) {
           // A switch asked again replaces the one waiting, with a note not yet sent.
           const replaced = runtime.pendingSwitch?.note ?? null
           if (replaced !== null && this.#ledger.message(replaced).state === 'queued') {
@@ -844,17 +847,17 @@ export class Dispatcher {
     const asked = runtime.pendingSwitch?.note ?? null
     runtime.pendingSwitch = null
     let cut = false
-    const { pane } = runtime
+    const { pane } = runtime.window
     if (pane !== null) {
       const observed = await this.#observe(chief, runtime).catch(() => null)
       if (this.#forgotten(runtime)) return
       if (observed !== null) {
         this.#copyTranscript(chief, runtime, observed)
-        if (runtime.delivering !== null) this.#confirmArrival(runtime, observed)
+        if (runtime.delivery.delivering !== null) this.#confirmArrival(runtime, observed)
         cut = !observed.settled
       }
-      const { delivering } = runtime
-      runtime.delivering = null
+      const { delivering } = runtime.delivery
+      runtime.delivery.delivering = null
       if (delivering !== null) this.#giveBack(delivering, 'the lead was switched before it arrived')
       await this.#closeOwn(runtime, pane)
     }
@@ -869,14 +872,10 @@ export class Dispatcher {
       }
     }
     this.#ledger.switchChief(project.id, { harness, agent, cut })
-    Object.assign(runtime, {
-      quota: null,
-      lowUntil: null,
-      copied: null,
-      interrupted: null,
-      held: null,
-      relaunch: null,
-    })
+    Object.assign(runtime.quota, { reported: null, lowUntil: null })
+    runtime.copied = null
+    Object.assign(runtime.window, { interrupted: null, relaunch: null })
+    runtime.delivery.held = null
     this.#changed()
     const current = this.#ledger.project(project.id)
     if (current.state !== 'open') return
@@ -985,7 +984,7 @@ export class Dispatcher {
       harness: participant.harness,
       nativeSession,
     })
-    runtime.launch.nativeSession = nativeSession
+    runtime.window.launch.nativeSession = nativeSession
     runtime.copied = null
     this.#changed()
   }
@@ -1009,7 +1008,7 @@ export class Dispatcher {
       }
       return
     }
-    if (runtime.activity.state !== 'working') return
+    if (runtime.window.activity.state !== 'working') return
     const cancelled = this.#ledger.lastTask(participant.id)
     if (cancelled?.state !== 'cancelled') return
     const turn = observed.items.findLast((item) => item.role === 'user')
@@ -1027,20 +1026,22 @@ export class Dispatcher {
    * thinks: three rounds at most.
    */
   async #interrupt(runtime, taskId) {
-    const done = runtime.interrupted?.task === taskId ? runtime.interrupted : null
+    const done = runtime.window.interrupted?.task === taskId ? runtime.window.interrupted : null
     if (
       done !== null &&
-      (runtime.activity.state !== 'working' ||
+      (runtime.window.activity.state !== 'working' ||
         done.rounds >= INTERRUPT_ROUNDS ||
         this.#now() - done.at < INTERRUPT_AGAIN_MS)
     ) {
       return
     }
-    runtime.interrupted = { task: taskId, rounds: (done?.rounds ?? 0) + 1, at: this.#now() }
-    const presses = runtime.adapter.interrupt?.presses ?? 1
+    runtime.window.interrupted = { task: taskId, rounds: (done?.rounds ?? 0) + 1, at: this.#now() }
+    const presses = runtime.window.adapter.interrupt?.presses ?? 1
     for (let press = 0; press < presses; press += 1) {
       if (press > 0) await new Promise((resolve) => setTimeout(resolve, DOUBLE_PRESS_MS))
-      await this.#host.request('pane.input', { ...runtime.pane, bytes: [ESCAPE] }).catch(() => {})
+      await this.#host
+        .request('pane.input', { ...runtime.window.pane, bytes: [ESCAPE] })
+        .catch(() => {})
     }
   }
 
@@ -1051,9 +1052,9 @@ export class Dispatcher {
    * had its kill.
    */
   async #retire(runtime) {
-    if (runtime.retiring) return
-    runtime.retiring = true
-    await this.#host.kill(runtime.pane).catch(() => {})
+    if (runtime.window.retiring) return
+    runtime.window.retiring = true
+    await this.#host.kill(runtime.window.pane).catch(() => {})
     this.#changed()
   }
 
@@ -1064,9 +1065,9 @@ export class Dispatcher {
    */
   async #closeIfFree(runtime) {
     if (
-      runtime.pane === null ||
-      runtime.delivering !== null ||
-      runtime.pinned ||
+      runtime.window.pane === null ||
+      runtime.delivery.delivering !== null ||
+      runtime.window.pinned ||
       this.#ledger.holdsWork(runtime.id)
     ) {
       return false
@@ -1101,9 +1102,9 @@ export class Dispatcher {
    * is waited for no longer, and stays withdrawn whether it shows or not.
    */
   #confirmArrival(runtime, observed) {
-    const { delivering } = runtime
+    const { delivering } = runtime.delivery
     if (this.#ledger.message(delivering.messageId)?.state !== 'delivering') {
-      runtime.delivering = null
+      runtime.delivery.delivering = null
       return true
     }
     const arrived = observed.items.find(
@@ -1111,27 +1112,27 @@ export class Dispatcher {
     )
     if (arrived === undefined) return false
     this.#ledger.confirmDelivery(delivering.messageId, { item: arrived.id })
-    runtime.delivering = null
+    runtime.delivery.delivering = null
     this.#changed()
     return true
   }
 
   async #watchArrival(runtime, observed) {
     if (this.#confirmArrival(runtime, observed)) return
-    const { delivering } = runtime
+    const { delivering } = runtime.delivery
     const waited = this.#now() - delivering.since
     if (delivering.launch) {
       // The lead's window is the human's: however long it takes to show its
       // first message (the handoff), it is never closed for that.
       if (delivering.chief || waited <= this.#launchTimeoutMs) return
-      runtime.delivering = null
+      runtime.delivery.delivering = null
       const closing = this.#retire(runtime)
       this.#settleFailure(delivering, 'the window never showed its first message', { retry: false })
       await closing
       return
     }
     if (delivering.queued || waited <= this.#arrivalTimeoutMs) return
-    runtime.delivering = null
+    runtime.delivery.delivering = null
     // A paste the harness record never showed after the whole window did not
     // land: sending it again is how it reaches the reader, and the header
     // would show a late duplicate. (A message the harness queued itself waits
@@ -1183,10 +1184,10 @@ export class Dispatcher {
     // project was deleted) is handed nothing, and what its harness did with
     // the message settles nothing: its window goes with the record, and the
     // message may be gone with its project.
-    if (runtime.adapter.ready !== undefined) {
-      const ready = await runtime.adapter.ready({
-        launch: runtime.launch,
-        pane: runtime.pane,
+    if (runtime.window.adapter.ready !== undefined) {
+      const ready = await runtime.window.adapter.ready({
+        launch: runtime.window.launch,
+        pane: runtime.window.pane,
         host: this.#host,
       })
       if (this.#forgotten(runtime)) return
@@ -1195,8 +1196,8 @@ export class Dispatcher {
       if (this.#ledger.message(message.id)?.state !== 'queued') return
       if (ready !== true) {
         // Said once per message, so a wait is in the trace, not a mystery.
-        if (runtime.held !== message.id) {
-          runtime.held = message.id
+        if (runtime.delivery.held !== message.id) {
+          runtime.delivery.held = message.id
           this.#traceWindow(runtime, 'delivery.held', {
             message: message.id,
             reason: `the window is not ready for a paste: ${typeof ready === 'string' ? ready : 'a paste is on its way'}`,
@@ -1205,13 +1206,13 @@ export class Dispatcher {
         return
       }
     }
-    runtime.held = null
+    runtime.delivery.held = null
     this.#ledger.beginDelivery(message.id)
-    const { pane } = runtime
+    const { pane } = runtime.window
     let outcome
     try {
-      outcome = await runtime.adapter.deliver({
-        launch: runtime.launch,
+      outcome = await runtime.window.adapter.deliver({
+        launch: runtime.window.launch,
         pane,
         host: this.#host,
         text: deliveryText(message),
@@ -1238,13 +1239,13 @@ export class Dispatcher {
     }
     // A window that closed while its harness took the message had nothing
     // on its way to settle when it went: the message goes again.
-    if (runtime.pane !== pane) {
+    if (runtime.window.pane !== pane) {
       this.#settleFailure(delivering, 'its window closed while it was handed over', {
         retry: true,
       })
       return
     }
-    runtime.delivering = delivering
+    runtime.delivery.delivering = delivering
     this.#changed()
   }
 
@@ -1333,7 +1334,7 @@ export class Dispatcher {
     const pane = { id: `p${project.id}-${participant.handle}`, generation }
     // The host watches a window's process before it answers the open, so an
     // exit can come first, even in the same read: `paneExited` finds it here.
-    runtime.opening = { pane, exited: false }
+    runtime.window.opening = { pane, exited: false }
     const opened = await this.#host
       .open({
         ...pane,
@@ -1343,8 +1344,8 @@ export class Dispatcher {
         dropEnv: plan.dropEnv,
       })
       .catch((cause) => ({ ok: false, error: cause.message }))
-    const { exited } = runtime.opening
-    runtime.opening = null
+    const { exited } = runtime.window.opening
+    runtime.window.opening = null
     if (opened?.ok !== true) {
       this.#credentials.revoke(token)
       this.#launchFiles.forget(launchId)
@@ -1361,7 +1362,7 @@ export class Dispatcher {
     // find the harness's own status by it from its first look.
     if (opened.pid !== undefined) plan.launch.pid = opened.pid
     if (this.#forgotten(runtime)) {
-      Object.assign(runtime, { pane, launchId, token })
+      Object.assign(runtime.window, { pane, launchId, token })
       // One that exited before its open was answered has gone already.
       if (exited) await this.paneExited(pane)
       return
@@ -1376,17 +1377,17 @@ export class Dispatcher {
       if (plan.nativeSession !== null && plan.nativeSession !== undefined)
         this.#ledger.bindConversation(conversationId, plan.nativeSession)
     }
-    Object.assign(runtime, {
+    Object.assign(runtime.window, {
       adapter,
       pane,
       launch: plan.launch,
       launchId,
       token,
-      delivering,
       activity: { state: 'starting' },
       drawn: false,
       named: false,
     })
+    runtime.delivery.delivering = delivering
     // A window that exited before its open was answered goes as any exit does.
     if (exited) {
       await this.paneExited(pane)
@@ -1396,7 +1397,7 @@ export class Dispatcher {
       .started({ launch: plan.launch, pane, host: this.#host })
       .catch((cause) => ({ error: cause.message }))
     if (started.error !== undefined && delivering !== null) {
-      runtime.delivering = null
+      runtime.delivery.delivering = null
       // The lead's window goes without taking its project with it: the lead is tried again.
       if (participant.role === 'chief') await this.#closeOwn(runtime, pane)
       else this.#host.kill(pane).catch(() => {})
@@ -1410,7 +1411,7 @@ export class Dispatcher {
       return
     }
     if (this.#forgotten(runtime)) return
-    runtime.relaunch = null
+    runtime.window.relaunch = null
     if (started.nativeSession && started.nativeSession !== plan.nativeSession) {
       this.#ledger.bindConversation(conversationId, started.nativeSession)
     }
@@ -1457,8 +1458,8 @@ export class Dispatcher {
       return
     }
     if (delivering !== null) this.#giveBack(delivering, reason)
-    const failures = (runtime.relaunch?.failures ?? 0) + 1
-    runtime.relaunch = {
+    const failures = (runtime.window.relaunch?.failures ?? 0) + 1
+    runtime.window.relaunch = {
       failures,
       at: this.#now() + Math.min(RELAUNCH_MS * 2 ** (failures - 1), RELAUNCH_MAX_MS),
     }
@@ -1479,14 +1480,17 @@ export class Dispatcher {
    * later. A window already going with its work had its kill.
    */
   async #closeOwn(runtime, pane) {
-    runtime.ownExit = true
+    runtime.window.ownExit = true
     try {
-      if (!runtime.retiring) await this.#host.kill(pane).catch(() => {})
-      if (runtime.pane?.id === pane.id && runtime.pane.generation === pane.generation) {
+      if (!runtime.window.retiring) await this.#host.kill(pane).catch(() => {})
+      if (
+        runtime.window.pane?.id === pane.id &&
+        runtime.window.pane.generation === pane.generation
+      ) {
         await this.paneExited(pane)
       }
     } finally {
-      runtime.ownExit = false
+      runtime.window.ownExit = false
     }
   }
 
@@ -1554,7 +1558,7 @@ export class Dispatcher {
   }
 
   #isLow(member) {
-    const until = this.#runtime.get(member.id)?.lowUntil ?? null
+    const until = this.#runtime.get(member.id)?.quota.lowUntil ?? null
     return until !== null && Date.parse(until) > this.#now()
   }
 
@@ -1629,13 +1633,13 @@ export class Dispatcher {
 
   /** What a window's harness says of its quota, as of this look. */
   #recordQuota(runtime, owner, quota) {
-    runtime.quota = quota ?? null
+    runtime.quota.reported = quota ?? null
     // Low is soft: the current task continues, nothing new comes until the
     // reset it names (an hour when it names none). It outlives the window,
     // which closes with the task, so a low member is not asked again at once.
-    if (runtime.quota?.state === 'low') {
-      this.#runtimeOf(owner.id).lowUntil = this.#resetOf(runtime.quota)
-    } else if (runtime.quota !== null) this.#runtimeOf(owner.id).lowUntil = null
+    if (runtime.quota.reported?.state === 'low') {
+      this.#runtimeOf(owner.id).quota.lowUntil = this.#resetOf(runtime.quota.reported)
+    } else if (runtime.quota.reported !== null) this.#runtimeOf(owner.id).quota.lowUntil = null
   }
 
   /** When a quota resets: the time its harness names, or an hour from now. */
@@ -1652,12 +1656,12 @@ export class Dispatcher {
    * up again at the reset, beside whoever has it now.
    */
   async #outOfQuota(project, participant, runtime, owner) {
-    const until = this.#resetOf(runtime.quota)
+    const until = this.#resetOf(runtime.quota.reported)
     this.#setActivity(runtime, { state: 'out', reason: `out of quota until ${until}` })
     this.#ledger.markOut(owner.id, { until, reason: 'out of quota' })
-    if (runtime.delivering !== null) {
-      const { delivering } = runtime
-      runtime.delivering = null
+    if (runtime.delivery.delivering !== null) {
+      const { delivering } = runtime.delivery
+      runtime.delivery.delivering = null
       this.#settleFailure(delivering, 'the harness ran out of quota', { retry: true })
     }
     // Near the reset, or with nobody else to take it, a task keeps its window
@@ -1812,7 +1816,7 @@ export class Dispatcher {
       participantId,
       () => {
         const project = this.#projectOf(participantId)
-        if (runtime.pane !== null || project?.state !== 'open') return
+        if (runtime.window.pane !== null || project?.state !== 'open') return
         const participant = project.participants.find((p) => p.id === participantId)
         this.#act(runtime, () => this.#launch(project, participant, null))
       },
@@ -1820,34 +1824,41 @@ export class Dispatcher {
     ).catch((cause) => this.#writeDown(cause))
   }
 
-  /** The dispatcher's record of a participant's window, made the first time it is asked for. */
+  /**
+   * The dispatcher's record of a participant's window, made the first time
+   * it is asked for. Its parts are kept apart by what owns them: the window
+   * itself, what is on its way into it, what its harness said of its quota,
+   * a Switch lead waiting for the lead's turn to end, and how much of its
+   * conversation is copied. `running` and `acting` are whoever holds the
+   * participant now (`#exclusive`, `#act`).
+   */
   #runtimeOf(participantId) {
     let runtime = this.#runtime.get(participantId)
     if (runtime === undefined) {
       runtime = {
         id: participantId,
-        adapter: null,
-        pane: null,
-        opening: null,
-        launch: null,
-        launchId: null,
-        token: null,
-        delivering: null,
-        held: null,
-        quota: null,
-        lowUntil: null,
         running: null,
         acting: null,
-        retiring: false,
-        copied: null,
-        interrupted: null,
-        pinned: false,
+        window: {
+          adapter: null,
+          pane: null,
+          opening: null,
+          launch: null,
+          launchId: null,
+          token: null,
+          retiring: false,
+          ownExit: false,
+          pinned: false,
+          relaunch: null,
+          drawn: false,
+          named: false,
+          interrupted: null,
+          activity: { state: 'closed' },
+        },
+        delivery: { delivering: null, held: null },
+        quota: { reported: null, lowUntil: null },
         pendingSwitch: null,
-        ownExit: false,
-        relaunch: null,
-        drawn: false,
-        named: false,
-        activity: { state: 'closed' },
+        copied: null,
       }
       this.#runtime.set(participantId, runtime)
     }
@@ -1867,9 +1878,12 @@ export class Dispatcher {
   }
 
   #setActivity(runtime, activity) {
-    if (runtime.activity.state === activity.state && runtime.activity.reason === activity.reason)
+    if (
+      runtime.window.activity.state === activity.state &&
+      runtime.window.activity.reason === activity.reason
+    )
       return
-    runtime.activity = activity
+    runtime.window.activity = activity
     this.#traceWindow(runtime, 'window.activity', {
       state: activity.state,
       reason: activity.reason ?? null,
