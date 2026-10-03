@@ -1,10 +1,12 @@
 /**
  * Lossless completion extraction from each harness's native, read-only store.
  *
- * JSONL is consumed a record at a time. A final unterminated append may be
- * incomplete; malformed newline-terminated records fail closed. SQLite is
- * read under one transaction. Nothing in this module uses the bounded display
- * normaliser.
+ * A JSONL transcript is read on from where the previous look at it stopped,
+ * from the byte after its last whole line. What a look returns is what a
+ * reading of the whole transcript would: one that shrank or was replaced is
+ * read again from its start. A final unterminated append may be incomplete;
+ * malformed newline-terminated records fail closed. SQLite is read under one
+ * transaction. Nothing in this module uses the bounded display normaliser.
  */
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
@@ -12,87 +14,81 @@ import path from 'node:path'
 import { devinFolders, opencodeStores, piSessionDir } from '../../src/harnesses.js'
 import { codexQuota, exhaustedQuota } from './quota.js'
 
+/** What a harness's own record of a conversation says, read whole. */
 export async function answers(kind, sessionId, env, options = {}) {
   if (!sessionId) return { unknown: true, reason: 'missing session id' }
   if (env === null || typeof env !== 'object') {
     return { unknown: true, reason: 'missing explicit env argument' }
   }
-  try {
-    switch (kind) {
-      case 'codex':
-        return await codexAnswers(sessionId, env, options)
-      case 'claude-code':
-        return await claudeAnswers(sessionId, env, options)
-      case 'pi':
-        return await piAnswers(sessionId, env, options)
-      case 'opencode':
-        return await opencodeAnswers(sessionId, env, options)
-      case 'devin':
-        return await devinAnswers(sessionId, env)
-      default:
-        return { unknown: true, reason: `unknown kind: ${kind}` }
-    }
-  } catch (error) {
-    return { unknown: true, reason: `unreadable: ${describeError(error)}` }
-  }
+  const read = recordReader(kind, sessionId, env)
+  return read === null ? { unknown: true, reason: `unknown kind: ${kind}` } : read(options)
 }
 
 /**
- * `answers` for a caller that re-reads the same sessions every second (the
- * delivery watcher; the live chief's transcript reached 135 MB). Each JSONL
- * transcript is located once, and a file whose size and modification time
- * have not changed returns the previous result instead of being searched for
- * and parsed again. Calls with options, and harnesses read through a
- * database query, always read. Results are shared: callers must not mutate them.
+ * `answers` for a caller that looks at the same conversations every second
+ * (the delivery watcher; the live chief's transcript reached 135 MB). Each
+ * conversation keeps its reader, so a look reads only what its harness wrote
+ * since the last one, and a record that did not change returns the previous
+ * result. Looks at one conversation take turns: each reads on from where the
+ * one before stopped. Results are shared: callers must not mutate them.
  * A conversation nobody has asked about for `idleMs` (its window closed) is
  * forgotten, so a daemon that runs for weeks keeps only what it still reads.
  */
 export function cachedAnswers({ idleMs = 10 * 60_000, now = Date.now } = {}) {
   const known = new Map()
   let swept = now()
-  return async (kind, sessionId, env, options = {}) => {
+  return (kind, sessionId, env, options = {}) => {
     const at = now()
     if (at - swept >= idleMs) {
       swept = at
       for (const [key, entry] of known) if (at - entry.readAt >= idleMs) known.delete(key)
     }
-    if (
-      Object.keys(options).length > 0 ||
-      !['claude-code', 'codex', 'pi'].includes(kind) ||
-      !sessionId ||
-      env === null ||
-      typeof env !== 'object'
-    )
-      return answers(kind, sessionId, env, options)
     const key = `${kind}\n${sessionId}`
-    const previous = known.get(key)
-    let file = previous?.file ?? null
-    let stat = file === null ? null : await fs.stat(file).catch(() => null)
-    if (stat === null) {
-      file = await locateTranscript(kind, sessionId, env).catch(() => null)
-      stat = file === null ? null : await fs.stat(file).catch(() => null)
+    let entry = known.get(key)
+    if (entry === undefined) {
+      const read =
+        sessionId && env !== null && typeof env === 'object'
+          ? recordReader(kind, sessionId, env)
+          : null
+      if (read === null) return answers(kind, sessionId, env, options)
+      entry = { read, looked: Promise.resolve() }
+      known.set(key, entry)
     }
-    if (stat === null) {
-      known.delete(key)
-      return answers(kind, sessionId, env)
-    }
-    const stamp = `${stat.size}:${stat.mtimeMs}`
-    if (previous?.file === file && previous.stamp === stamp) {
-      previous.readAt = at
-      return previous.result
-    }
-    const result = await answers(kind, sessionId, env, { file })
-    known.set(key, { file, stamp, result, readAt: at })
-    return result
+    entry.readAt = at
+    const look = entry.looked.then(() => entry.read(options))
+    entry.looked = look
+    return look
   }
 }
 
-/** Where a JSONL harness keeps one session's transcript, or null. */
 /** Whether the harness has kept a record of the conversation at all. */
 export async function hasTranscript(kind, sessionId, env) {
   return (await locateTranscript(kind, sessionId, env)) !== null
 }
 
+/**
+ * A reader of one conversation's record: each call reads on from where the
+ * last stopped, and never throws (an unreadable record is an unknown answer).
+ * Null for a harness this module does not read.
+ */
+function recordReader(kind, sessionId, env) {
+  switch (kind) {
+    case 'codex':
+      return transcriptReader(kind, sessionId, env, codexParser, `codex rollout for ${sessionId}`)
+    case 'claude-code':
+      return transcriptReader(kind, sessionId, env, claudeParser, `claude session ${sessionId}`)
+    case 'pi':
+      return piReader(sessionId, env)
+    case 'opencode':
+      return opencodeReader(sessionId, env)
+    case 'devin':
+      return devinReader(sessionId, env)
+    default:
+      return null
+  }
+}
+
+/** Where a JSONL harness keeps one session's transcript, or null. */
 async function locateTranscript(kind, sessionId, env) {
   switch (kind) {
     case 'claude-code':
@@ -113,6 +109,7 @@ async function locateTranscript(kind, sessionId, env) {
 }
 
 const describeError = (error) => (error instanceof Error ? error.message : String(error))
+const unreadable = (error) => ({ unknown: true, reason: `unreadable: ${describeError(error)}` })
 const home = (env) => {
   const value = env.HOME ?? env.USERPROFILE
   if (typeof value !== 'string' || value.length === 0) throw new Error('missing home in env')
@@ -137,6 +134,18 @@ function resultBase() {
     quota: null,
     settlement: { state: 'unknown' },
   }
+}
+
+/**
+ * An item as a reading returns it: a copy, so that a later look, which may
+ * still settle or grow the item it was read from, never changes an earlier
+ * answer.
+ */
+function emit(item, settled = item.settled) {
+  const { id, role, text, complete, at, seq } = item
+  return item.commentary
+    ? { id, role, text, complete, settled, at, seq, commentary: true }
+    : { id, role, text, complete, settled, at, seq }
 }
 
 function nativeId(value, kind, seq) {
@@ -189,10 +198,6 @@ async function findFile(root, matches, depth = 6) {
   return null
 }
 
-/**
- * Stream JSONL without retaining the file. A syntactically incomplete tail
- * without a newline is the only malformed record tolerated.
- */
 function isJsonWhitespace(character) {
   return character === ' ' || character === '\t' || character === '\r' || character === '\n'
 }
@@ -347,52 +352,209 @@ function jsonPrefixState(source) {
   }
 }
 
-async function readJsonl(file, visit) {
-  const stream = createReadStream(file, { encoding: 'utf8' })
-  let buffer = ''
-  let recordIndex = 0
-  let count = 0
+// ================================================================= JSONL
 
-  const consume = (raw) => {
-    const text = raw.endsWith('\r') ? raw.slice(0, -1) : raw
-    if (isJsonBlank(text)) return
-    let record
-    try {
-      record = JSON.parse(text)
-    } catch {
-      throw new Error(`malformed JSONL at record ${recordIndex}`)
+const EMPTY = Buffer.alloc(0)
+/** How many bytes before where a look stopped the next look checks are unchanged. */
+const EDGE_BYTES = 1024
+/** Thrown by a parser that must have its transcript's records again, from the first. */
+const REREAD = Symbol('read the transcript again')
+
+/**
+ * Reads on in a JSONL file from where an earlier look stopped (`seen`; null
+ * reads from the start), handing each record found to `visit` with its place
+ * among the file's records, without holding the file. A line is a record
+ * once its newline is written. An unterminated last line that is already
+ * whole JSON is visited too, and remembered, so that the newline which ends
+ * it later adds nothing; one that is not whole yet waits for a later look,
+ * and one that never can be fails, as a malformed whole line does. Returns
+ * where the next look starts (`seen` itself when the file did not change),
+ * or null when the file is not the one read so far: another file took its
+ * place, or it no longer holds the bytes just before where the last look
+ * stopped (it shrank, or was written over).
+ */
+async function readOn(file, seen, visit) {
+  const handle = await fs.open(file, 'r')
+  try {
+    const { ino, size, mtimeMs } = await handle.stat()
+    if (seen !== null) {
+      if (ino !== seen.ino) return null
+      if (size === seen.size && mtimeMs === seen.mtimeMs) return seen
+      if (!(await holds(handle, seen.offset - seen.edge.length, seen.edge))) return null
+      if (!(await holds(handle, seen.offset, seen.tail))) return null
     }
-    visit(record, recordIndex)
-    recordIndex += 1
-    count += 1
-  }
-
-  for await (const chunk of stream) {
-    buffer += chunk
-    let newline = buffer.indexOf('\n')
-    while (newline !== -1) {
-      const line = buffer.slice(0, newline)
-      buffer = buffer.slice(newline + 1)
-      consume(line)
-      newline = buffer.indexOf('\n')
-    }
-  }
-
-  if (!isJsonBlank(buffer)) {
-    let record
-    try {
-      record = JSON.parse(buffer)
-    } catch {
-      if (jsonPrefixState(buffer) === 'incomplete') {
-        // A live writer may have left only the final, unterminated append.
-        return count
+    let offset = seen?.offset ?? 0
+    let tail = seen?.tail ?? EMPTY
+    let records = seen?.records ?? 0
+    // The line being read, in pieces; `visited` while it is the rest of `tail`'s line.
+    let pieces = []
+    let visited = tail.length > 0
+    let at = offset + tail.length
+    if (at < size) {
+      const stream = handle.createReadStream({ start: at, end: size - 1, autoClose: false })
+      for await (const chunk of stream) {
+        let start = 0
+        for (let newline = chunk.indexOf(10); newline !== -1; newline = chunk.indexOf(10, start)) {
+          pieces.push(chunk.subarray(start, newline))
+          const line = pieces.length === 1 ? pieces[0] : Buffer.concat(pieces)
+          pieces = []
+          if (visited) {
+            // A record visited whole may be followed by nothing but whitespace.
+            if (!isBlankBytes(line)) return null
+            visited = false
+            tail = EMPTY
+          } else records = consumeLine(line.toString('utf8'), records, visit)
+          offset = at + newline + 1
+          start = newline + 1
+        }
+        pieces.push(chunk.subarray(start))
+        at += chunk.length
       }
-      throw new Error(`malformed JSONL at record ${recordIndex}`)
     }
-    visit(record, recordIndex)
-    count += 1
+    const rest = Buffer.concat(pieces)
+    if (visited) {
+      if (!isBlankBytes(rest)) return null
+    } else if (!isBlankBytes(rest)) {
+      const text = rest.toString('utf8')
+      let record
+      try {
+        record = JSON.parse(text)
+      } catch {
+        // A live writer may have left only the final, unterminated append.
+        if (jsonPrefixState(text) !== 'incomplete') {
+          throw new Error(`malformed JSONL at record ${records}`)
+        }
+      }
+      if (record !== undefined) {
+        visit(record, records)
+        records += 1
+        tail = rest
+      }
+    }
+    const edge =
+      offset === seen?.offset
+        ? seen.edge
+        : await bytesAt(handle, Math.max(0, offset - EDGE_BYTES), offset)
+    return { ino, size: at, mtimeMs, offset, edge, tail, records }
+  } finally {
+    await handle.close()
   }
-  return count
+}
+
+/** One whole line: a record for `visit` at `index`, nothing when blank, a failure when malformed. */
+function consumeLine(raw, index, visit) {
+  const text = raw.endsWith('\r') ? raw.slice(0, -1) : raw
+  if (isJsonBlank(text)) return index
+  let record
+  try {
+    record = JSON.parse(text)
+  } catch {
+    throw new Error(`malformed JSONL at record ${index}`)
+  }
+  visit(record, index)
+  return index + 1
+}
+
+function isBlankBytes(bytes) {
+  for (const byte of bytes) {
+    if (byte !== 0x20 && byte !== 0x09 && byte !== 0x0d && byte !== 0x0a) return false
+  }
+  return true
+}
+
+async function bytesAt(handle, from, to) {
+  const bytes = Buffer.alloc(to - from)
+  const { bytesRead } = await handle.read(bytes, 0, bytes.length, from)
+  return bytes.subarray(0, bytesRead)
+}
+
+/** Whether the file still holds `bytes` at `at`. */
+async function holds(handle, at, bytes) {
+  if (bytes.length === 0) return true
+  return (await bytesAt(handle, at, at + bytes.length)).equals(bytes)
+}
+
+const sameFile = (left, right) =>
+  left.ino === right.ino && left.size === right.size && left.mtimeMs === right.mtimeMs
+
+/**
+ * A conversation's JSONL transcript, followed from look to look. `read()`
+ * locates it (again, once its file is gone), reads on from where the last
+ * look stopped into the state `parser` makes, and says whether it read
+ * anything; null when the harness keeps no transcript of the conversation.
+ * A transcript that is not the one read so far is read again from its
+ * start, into a fresh state. One that could not be read is not read again
+ * until it changes.
+ */
+function followedTranscript(kind, sessionId, env, parser) {
+  let file = null
+  let seen = null
+  let state = null
+  let broken = null
+  return {
+    async read() {
+      let stat = file === null ? null : await fs.stat(file).catch(() => null)
+      if (stat === null) {
+        const located = await locateTranscript(kind, sessionId, env)
+        if (located !== file) {
+          seen = null
+          state = null
+          broken = null
+        }
+        file = located
+        if (file === null) return null
+        stat = await fs.stat(file)
+      }
+      if (broken !== null && sameFile(broken.stat, stat)) throw broken.error
+      broken = null
+      for (;;) {
+        state ??= parser(sessionId)
+        let next = null
+        try {
+          next = await readOn(file, seen, state.visit)
+          if (next !== null) state.flush?.()
+        } catch (error) {
+          if (error !== REREAD) {
+            seen = null
+            state = null
+            broken = { stat, error }
+            throw error
+          }
+        }
+        if (next !== null) {
+          const changed = next !== seen
+          seen = next
+          return { file, state, changed }
+        }
+        seen = null
+        state = null
+      }
+    },
+  }
+}
+
+/**
+ * The reader of a harness whose answer is its transcript's alone (Codex,
+ * Claude Code): a look that read nothing new returns the previous answer.
+ */
+function transcriptReader(kind, sessionId, env, parser, missing) {
+  const transcript = followedTranscript(kind, sessionId, env, parser)
+  let answer = null
+  return async () => {
+    try {
+      const read = await transcript.read()
+      if (read === null) {
+        answer = null
+        // A thread with no transcript yet is unknown: missing history alone proves nothing.
+        return { unknown: true, reason: `unreadable: no ${missing}` }
+      }
+      if (read.changed || answer === null) answer = read.state.result()
+      return answer
+    } catch (error) {
+      answer = null
+      return unreadable(error)
+    }
+  }
 }
 
 function jsonlSeq(record, recordIndex) {
@@ -430,21 +592,18 @@ function codexTurn(turns, turnId) {
   return turn
 }
 
-async function codexAnswers(sessionId, env, options) {
-  const file = options.file ?? (await locateTranscript('codex', sessionId, env))
-  // A thread with no rollout yet is unknown: missing history alone proves nothing.
-  if (file === null)
-    return { unknown: true, reason: `unreadable: no codex rollout for ${sessionId}` }
-
-  const result = resultBase()
+function codexParser(sessionId) {
+  const list = []
   const items = new Map()
   const turns = new Map()
   const calls = new Map()
   const subagents = new Map()
   let currentTurnId = null
   let latestTurnId = null
+  let quota = null
+  let count = 0
 
-  const addItem = (id, role, text, complete, settled, at, seq, turnId) => {
+  const addItem = (id, role, text, complete, settled, at, seq) => {
     const stableId = nativeId(id, 'codex item', seq)
     const existing = items.get(stableId)
     if (existing) {
@@ -453,16 +612,16 @@ async function codexAnswers(sessionId, env, options) {
       existing.settled ||= settled
       existing.at = at
       existing.seq = seq
-      if (turnId) existing._turnId = turnId
       return existing
     }
-    const item = { id: stableId, role, text, complete, settled, at, seq, _turnId: turnId }
+    const item = { id: stableId, role, text, complete, settled, at, seq }
     items.set(stableId, item)
-    result.items.push(item)
+    list.push(item)
     return item
   }
 
-  const count = await readJsonl(file, (record, recordIndex) => {
+  const visit = (record, recordIndex) => {
+    count += 1
     const seq = jsonlSeq(record, recordIndex)
     const at = record.timestamp ?? seq
 
@@ -486,7 +645,6 @@ async function codexAnswers(sessionId, env, options) {
           payload.role === 'user',
           at,
           seq,
-          turnId,
         )
         if (payload.role === 'assistant' && turn && !turn.assistantIds.includes(item.id)) {
           turn.assistantIds.push(item.id)
@@ -507,7 +665,7 @@ async function codexAnswers(sessionId, env, options) {
         const callId = payload.call_id
         const ownerId = calls.get(callId) ?? turnId
         codexTurn(turns, ownerId)?.openTools.delete(callId)
-        addItem(payload.id, 'tool', visibleText(payload.output), true, true, at, seq, ownerId)
+        addItem(payload.id, 'tool', visibleText(payload.output), true, true, at, seq)
       }
       return
     }
@@ -518,7 +676,7 @@ async function codexAnswers(sessionId, env, options) {
     const turn = codexTurn(turns, turnId)
 
     if (payload.type === 'token_count') {
-      if (payload.rate_limits) result.quota = codexQuota(payload.rate_limits)
+      if (payload.rate_limits) quota = codexQuota(payload.rate_limits)
       return
     }
 
@@ -531,15 +689,10 @@ async function codexAnswers(sessionId, env, options) {
 
     if (payload.type === 'task_complete') {
       latestTurnId = payload.turn_id
-      const owner = codexTurn(turns, payload.turn_id)
-      owner.terminal = {
+      codexTurn(turns, payload.turn_id).terminal = {
         kind: payload.error ? 'error' : 'complete',
         error: payload.error ?? null,
         lastAgentMessage: payload.last_agent_message,
-      }
-      if (payload.error) {
-        result.failed = true
-        result.failure = payload.error.message ?? visibleText(payload.error)
       }
       return
     }
@@ -547,7 +700,6 @@ async function codexAnswers(sessionId, env, options) {
     if (payload.type === 'turn_aborted') {
       latestTurnId = payload.turn_id
       codexTurn(turns, payload.turn_id).terminal = { kind: 'cancelled' }
-      result.cancelled = true
       return
     }
 
@@ -560,7 +712,7 @@ async function codexAnswers(sessionId, env, options) {
 
     if (native.type === 'UserMessage' && payload.type === 'item_completed') {
       const text = contentText(native.content)
-      if (text.trim()) addItem(native.id, 'user', text, true, true, at, seq, turnId)
+      if (text.trim()) addItem(native.id, 'user', text, true, true, at, seq)
       return
     }
 
@@ -575,7 +727,6 @@ async function codexAnswers(sessionId, env, options) {
         false,
         at,
         seq,
-        turnId,
       )
       if (native.phase === 'final_answer') {
         item.text = text
@@ -598,7 +749,7 @@ async function codexAnswers(sessionId, env, options) {
         native.aggregated_output ??
         native.formatted_output ??
         `${native.stdout ?? ''}${native.stderr ?? ''}`
-      addItem(id, 'tool', String(output), true, true, at, seq, turnId)
+      addItem(id, 'tool', String(output), true, true, at, seq)
       return
     }
 
@@ -614,42 +765,45 @@ async function codexAnswers(sessionId, env, options) {
         subagents.delete(agentId)
       }
     }
-  })
+  }
 
-  if (count === 0) throw new Error(`empty codex rollout for ${sessionId}`)
-
-  for (const turn of turns.values()) {
-    if (turn.terminal?.kind !== 'complete') continue
-    const final = [...turn.assistantIds]
-      .reverse()
-      .map((id) => items.get(id))
-      .find((item) => item?.complete && item._nativeFinalText === turn.terminal.lastAgentMessage)
-    turn.validComplete = Boolean(final)
-    if (turn.validComplete && turn.openTools.size === 0 && turn.openSubagents.size === 0) {
-      final.settled = true
+  const result = () => {
+    if (count === 0) throw new Error(`empty codex rollout for ${sessionId}`)
+    // A turn's task_complete proves the answer it names, which settles once
+    // the turn's tools and sub-agents are done.
+    const proven = new Set()
+    const settled = new Set()
+    for (const turn of turns.values()) {
+      if (turn.terminal?.kind !== 'complete') continue
+      const final = [...turn.assistantIds]
+        .reverse()
+        .map((id) => items.get(id))
+        .find((item) => item?.complete && item._nativeFinalText === turn.terminal.lastAgentMessage)
+      if (!final) continue
+      proven.add(turn)
+      if (turn.openTools.size === 0 && turn.openSubagents.size === 0) settled.add(final)
     }
+
+    const answer = resultBase()
+    answer.items = list.map((item) => emit(item, item.settled || settled.has(item)))
+    const latest = latestTurnId ? turns.get(latestTurnId) : null
+    const activeTurn = Boolean(latest?.started && !latest.terminal)
+    answer.inFlight =
+      activeTurn || (latest ? latest.openTools.size + latest.openSubagents.size > 0 : false)
+    answer.cancelled = latest?.terminal?.kind === 'cancelled'
+    answer.failed = latest?.terminal?.kind === 'error'
+    answer.failure = answer.failed
+      ? (latest.terminal.error?.message ?? visibleText(latest.terminal.error))
+      : null
+    answer.quota = quota
+    // A task_complete whose final answer cannot be matched proves nothing.
+    if (answer.inFlight) answer.settlement = { state: 'in-flight' }
+    else if (latest?.terminal && (latest.terminal.kind !== 'complete' || proven.has(latest)))
+      answer.settlement = { state: 'settled' }
+    return answer
   }
 
-  const latest = latestTurnId ? turns.get(latestTurnId) : null
-  const activeTurn = Boolean(latest?.started && !latest.terminal)
-  result.inFlight =
-    activeTurn || (latest ? latest.openTools.size + latest.openSubagents.size > 0 : false)
-
-  result.cancelled = latest?.terminal?.kind === 'cancelled'
-  result.failed = latest?.terminal?.kind === 'error'
-  result.failure = result.failed
-    ? (latest.terminal.error?.message ?? visibleText(latest.terminal.error))
-    : null
-  // A task_complete whose final answer cannot be matched proves nothing.
-  if (result.inFlight) result.settlement = { state: 'in-flight' }
-  else if (latest?.terminal && (latest.terminal.kind !== 'complete' || latest.validComplete))
-    result.settlement = { state: 'settled' }
-
-  for (const item of result.items) {
-    delete item._nativeFinalText
-    delete item._turnId
-  }
-  return result
+  return { visit, result }
 }
 
 // =========================================================== claude-code
@@ -706,13 +860,8 @@ function isClaudeInterrupt(record) {
   )
 }
 
-async function claudeAnswers(sessionId, env, options = {}) {
-  const file = options.file ?? (await locateTranscript('claude-code', sessionId, env))
-  if (file === null) {
-    return { unknown: true, reason: `unreadable: no claude session ${sessionId}` }
-  }
-
-  const result = resultBase()
+function claudeParser(sessionId) {
+  const list = []
   const assistants = new Map()
   const toolItems = new Map()
   const openTools = new Set()
@@ -724,6 +873,11 @@ async function claudeAnswers(sessionId, env, options = {}) {
   let candidate = null
   let terminal = null
   let activeAssistantId = null
+  let cancelled = false
+  let failed = false
+  let failure = null
+  let quota = null
+  let count = 0
 
   const addAssistant = (id, at, seq) => {
     const stableId = nativeId(id, 'claude message', seq)
@@ -741,7 +895,7 @@ async function claudeAnswers(sessionId, env, options = {}) {
         _fragmentText: new Map(),
       }
       assistants.set(stableId, item)
-      result.items.push(item)
+      list.push(item)
     }
     item.at = at
     item.seq = seq
@@ -767,7 +921,7 @@ async function claudeAnswers(sessionId, env, options = {}) {
       seq,
     }
     toolItems.set(stableId, item)
-    result.items.push(item)
+    list.push(item)
   }
 
   const queuedTurns = () => queued.length + dequeued.length + popped.length
@@ -779,44 +933,60 @@ async function claudeAnswers(sessionId, env, options = {}) {
     hooks.size === 0
 
   const settleCandidate = () => {
-    if (!candidateCanSettle()) return false
+    if (!candidateCanSettle()) return
     const item = assistants.get(terminal.itemId)
     if (item) item.settled = true
-    return true
   }
 
-  // A single snapshot resolves ancestors flushed after their completed answer.
-  // Replay still uses physical positions: ancestry must never mint fresh delivery cursors.
-  const records = []
+  // Claude can flush a turn's user record and its ancestors after the answer
+  // they started, so whether a user record is such a late ancestor is decided
+  // from every record read, not only those before it. `parents` holds each
+  // record's place in the conversation's tree by uuid (null when two records
+  // claim one uuid); `watched` holds every uuid a decision looked up, since a
+  // record read later under one of them may decide it otherwise, and then the
+  // transcript is replayed from its start. Records of the latest read wait in
+  // `pending` until all of them are in `parents`.
   const parents = new Map()
-  const count = await readJsonl(file, (record) => {
-    records.push(record)
-    if (typeof record.uuid === 'string' && record.uuid) {
-      parents.set(record.uuid, parents.has(record.uuid) ? null : record)
-    }
-  })
+  const watched = new Set()
+  let pending = []
+  const lookup = (uuid) => {
+    if (typeof uuid === 'string' && uuid) watched.add(uuid)
+    return parents.get(uuid)
+  }
   const lateAncestor = (user) => {
     if (terminal?.provenance !== 'derived' || terminal.itemId !== candidate?.itemId) return false
-    const end = parents.get(terminal.uuid)
-    if (
-      end?.sessionId !== sessionId ||
-      end.isSidechain !== false ||
-      end.parentUuid !== candidate.uuid
-    )
-      return false
-    let record = parents.get(candidate.uuid)
+    const end = lookup(terminal.uuid)
+    if (!end?.own || !end.main || end.parentUuid !== candidate.uuid) return false
+    let record = lookup(candidate.uuid)
     const seen = new Set()
     while (record && !seen.has(record.uuid)) {
-      if (record.sessionId !== sessionId || record.isSidechain !== false) return false
+      if (!record.own || !record.main) return false
       if (record === user) return true
-      if (record.uuid !== candidate.uuid && record.type !== 'attachment') return false
+      if (record.uuid !== candidate.uuid && !record.attachment) return false
       seen.add(record.uuid)
-      record = parents.get(record.parentUuid)
+      record = lookup(record.parentUuid)
     }
     return false
   }
 
-  records.forEach((record, seq) => {
+  const visit = (record, index) => {
+    count += 1
+    let place = null
+    if (typeof record.uuid === 'string' && record.uuid) {
+      if (watched.has(record.uuid)) throw REREAD
+      place = {
+        uuid: record.uuid,
+        parentUuid: record.parentUuid,
+        own: record.sessionId === sessionId,
+        main: record.isSidechain === false,
+        attachment: record.type === 'attachment',
+      }
+      parents.set(record.uuid, parents.has(record.uuid) ? null : place)
+    }
+    pending.push({ record, place, seq: index })
+  }
+
+  const replay = (record, place, seq) => {
     const at = record.timestamp ?? seq
     if (
       record.type === 'attachment' &&
@@ -828,7 +998,7 @@ async function claudeAnswers(sessionId, env, options = {}) {
     ) {
       const text = record.attachment.content.filter((part) => typeof part === 'string').join('\n')
       if (text)
-        result.items.push({
+        list.push({
           id: nativeId(record.uuid, 'claude hook context', seq),
           role: 'custom',
           text,
@@ -874,11 +1044,11 @@ async function claudeAnswers(sessionId, env, options = {}) {
       turnOpen = true
       terminal = null
       if (record.isApiErrorMessage !== true) {
-        result.failed = false
-        result.failure = null
+        failed = false
+        failure = null
       }
       // The latest assistant record has the last word on quota.
-      result.quota = null
+      quota = null
       const item = addAssistant(message.id, at, seq)
       const text = claudeText(message.content)
       updateNativeFragment(item, nativeId(record.uuid, 'claude record', seq), text, '\n')
@@ -899,10 +1069,10 @@ async function claudeAnswers(sessionId, env, options = {}) {
         hooks.clear()
         candidate = null
         turnOpen = false
-        result.failed = true
-        result.failure = String(record.errorDetails ?? record.error ?? text)
+        failed = true
+        failure = String(record.errorDetails ?? record.error ?? text)
         if (record.apiErrorStatus === 429 || record.error === 'rate_limit') {
-          result.quota = exhaustedQuota(text, Date.parse(record.timestamp))
+          quota = exhaustedQuota(text, Date.parse(record.timestamp))
         }
         terminal = { provenance: 'native', itemId: item.id }
         return
@@ -925,7 +1095,7 @@ async function claudeAnswers(sessionId, env, options = {}) {
 
       const text = claudeText(content)
       if (isClaudeInterrupt(record)) {
-        result.items.push({
+        list.push({
           id: nativeId(record.uuid, 'claude user', seq),
           role: 'user',
           text,
@@ -934,7 +1104,7 @@ async function claudeAnswers(sessionId, env, options = {}) {
           at,
           seq,
         })
-        result.cancelled = true
+        cancelled = true
         turnOpen = false
         hooks.clear()
         terminal = { provenance: 'native' }
@@ -943,7 +1113,7 @@ async function claudeAnswers(sessionId, env, options = {}) {
       }
 
       if (!text.trim()) return
-      result.items.push({
+      list.push({
         id: nativeId(record.uuid, 'claude user', seq),
         role: 'user',
         text,
@@ -952,7 +1122,7 @@ async function claudeAnswers(sessionId, env, options = {}) {
         at,
         seq,
       })
-      if (lateAncestor(record)) return
+      if (lateAncestor(place)) return
       const poppedIndex = popped.findIndex((entry) => entry.content === text)
       if (poppedIndex !== -1) popped.splice(poppedIndex, 1)
       if (record.promptSource === 'queued' || dequeued.length > 0) {
@@ -965,16 +1135,16 @@ async function claudeAnswers(sessionId, env, options = {}) {
       openTools.clear()
       hooks.clear()
       activeAssistantId = null
-      result.cancelled = false
-      result.failed = false
-      result.failure = null
+      cancelled = false
+      failed = false
+      failure = null
       turnOpen = true
       candidate = null
       terminal = null
       return
     }
 
-    const command = result.items.at(-1)
+    const command = list.at(-1)
     if (
       record.type === 'system' &&
       record.subtype === 'local_command' &&
@@ -1023,30 +1193,40 @@ async function claudeAnswers(sessionId, env, options = {}) {
       terminal = { provenance: 'derived', itemId: candidate.itemId, uuid: record.uuid }
       settleCandidate()
     }
-  })
-
-  if (count === 0) throw new Error(`empty claude session ${sessionId}`)
-  let state = 'unknown'
-  if (terminal?.provenance === 'native' && openTools.size === 0 && queuedTurns() === 0) {
-    state = 'settled'
-  } else if (candidateCanSettle()) {
-    state = 'settled'
-  } else if (turnOpen || openTools.size > 0 || queuedTurns() > 0 || hooks.size > 0 || terminal) {
-    state = 'in-flight'
   }
 
-  result.inFlight = state === 'in-flight'
-  if (state === 'settled' && terminal?.itemId) {
-    const item = assistants.get(terminal.itemId)
-    if (item) item.settled = true
+  const flush = () => {
+    const records = pending
+    pending = []
+    for (const { record, place, seq } of records) replay(record, place, seq)
   }
-  result.settlement = { state }
-  for (const item of result.items) {
-    delete item._fragmentOrder
-    delete item._fragmentText
+
+  const result = () => {
+    if (count === 0) throw new Error(`empty claude session ${sessionId}`)
+    let state = 'unknown'
+    if (terminal?.provenance === 'native' && openTools.size === 0 && queuedTurns() === 0) {
+      state = 'settled'
+    } else if (candidateCanSettle()) {
+      state = 'settled'
+    } else if (turnOpen || openTools.size > 0 || queuedTurns() > 0 || hooks.size > 0 || terminal) {
+      state = 'in-flight'
+    }
+
+    const final = state === 'settled' && terminal?.itemId ? assistants.get(terminal.itemId) : null
+    const answer = resultBase()
+    answer.items = list
+      .map((item) => emit(item, item.settled || item === final))
+      .sort((left, right) => left.seq - right.seq || left.id.localeCompare(right.id))
+    answer.inFlight = state === 'in-flight'
+    answer.cancelled = cancelled
+    answer.failed = failed
+    answer.failure = failure
+    answer.quota = quota
+    answer.settlement = { state }
+    return answer
   }
-  result.items.sort((left, right) => left.seq - right.seq || left.id.localeCompare(right.id))
-  return result
+
+  return { visit, flush, result }
 }
 
 // =================================================================== pi
@@ -1125,29 +1305,50 @@ async function piWorkingEvidence(sessionId, env, options) {
   }
 }
 
-async function piAnswers(sessionId, env, options = {}) {
-  const file = options.file ?? (await locateTranscript('pi', sessionId, env))
-  if (file === null) {
-    if (!(await piWorkingEvidence(sessionId, env, options)))
-      return { unknown: true, reason: `unreadable: no pi session ${sessionId}` }
-    const working = resultBase()
-    working.inFlight = true
-    working.settlement = { state: 'in-flight' }
-    return working
+/**
+ * Pi's reader. Its answer also rests on the extension's evidence beside the
+ * session and on how long the session file has been quiet, both of which
+ * change while the transcript does not, so every look works it out anew.
+ */
+function piReader(sessionId, env) {
+  const transcript = followedTranscript('pi', sessionId, env, piParser)
+  return async (options = {}) => {
+    try {
+      const read = await transcript.read()
+      if (read === null) {
+        if (!(await piWorkingEvidence(sessionId, env, options)))
+          return { unknown: true, reason: `unreadable: no pi session ${sessionId}` }
+        const working = resultBase()
+        working.inFlight = true
+        working.settlement = { state: 'in-flight' }
+        return working
+      }
+      return await read.state.result(env, options, read.file)
+    } catch (error) {
+      return unreadable(error)
+    }
   }
+}
 
-  const result = resultBase()
+function piParser(sessionId) {
+  const list = []
   const openTools = new Set()
   let turnOpen = false
   let terminal = null
+  let cancelled = false
+  let failed = false
+  let failure = null
+  let quota = null
+  let count = 0
 
-  const count = await readJsonl(file, (record, seq) => {
+  const visit = (record, seq) => {
+    count += 1
     const at = record.timestamp ?? record.message?.timestamp ?? seq
 
     if (record.type === 'custom_message') {
       const text = typeof record.content === 'string' ? record.content : piText(record.content)
       if (text)
-        result.items.push({
+        list.push({
           id: nativeId(record.id, 'pi custom message', seq),
           role: 'custom',
           text,
@@ -1169,9 +1370,9 @@ async function piAnswers(sessionId, env, options = {}) {
       // does not settle the new turn or promote unfinished tool work.
       if (terminal?.complete && openTools.size === 0) terminal.item.settled = true
       openTools.clear()
-      result.failed = false
-      result.failure = null
-      result.items.push({
+      failed = false
+      failure = null
+      list.push({
         id,
         role: 'user',
         text,
@@ -1187,7 +1388,7 @@ async function piAnswers(sessionId, env, options = {}) {
 
     if (message.role === 'toolResult') {
       if (message.toolCallId) openTools.delete(message.toolCallId)
-      result.items.push({
+      list.push({
         id,
         role: 'tool',
         text: piText(message.content),
@@ -1214,54 +1415,65 @@ async function piAnswers(sessionId, env, options = {}) {
       at,
       seq,
     }
-    result.items.push(item)
+    list.push(item)
 
-    result.quota = null
+    quota = null
     if (message.stopReason === 'stop') {
       turnOpen = true
-      result.failed = false
-      result.failure = null
-      result.cancelled = false
+      failed = false
+      failure = null
+      cancelled = false
       terminal = { complete: true, item }
     } else if (message.stopReason === 'aborted') {
       // Stopped by an Escape (a pause, a tell, the human): the turn is over,
       // not failed, and the extension's settled evidence names this message.
       turnOpen = true
-      result.failed = false
-      result.failure = null
-      result.cancelled = true
+      failed = false
+      failure = null
+      cancelled = true
       terminal = { complete: false, aborted: true, item }
     } else if (message.stopReason === 'error') {
       turnOpen = true
-      result.failed = true
-      result.failure = String(message.errorMessage ?? 'provider error')
-      if (/^429\b/.test(result.failure)) {
-        result.quota = exhaustedQuota(result.failure, Number(message.timestamp))
+      failed = true
+      failure = String(message.errorMessage ?? 'provider error')
+      if (/^429\b/.test(failure)) {
+        quota = exhaustedQuota(failure, Number(message.timestamp))
       }
       terminal = { complete: false, item }
     } else {
       turnOpen = true
       terminal = null
     }
-  })
-
-  if (count === 0) throw new Error(`empty pi session ${sessionId}`)
-  const nativeEvidence = await piSettlementEvidence(sessionId, env, options)
-  const hasNativeBoundary = Boolean(
-    nativeEvidence && terminal?.item?.id === nativeEvidence.frontier.id,
-  )
-  const { mtimeMs } = await fs.stat(file)
-  const quiet = Date.now() - mtimeMs >= PI_SETTLEMENT_QUIET_MS
-  const open = openTools.size > 0
-  const canSettle = Boolean((terminal?.complete || terminal?.aborted) && quiet && !open)
-  const nativeSettled = hasNativeBoundary && !open
-  if (canSettle || nativeSettled) terminal.item.settled = true
-
-  result.inFlight = open || (terminal ? !(quiet || nativeSettled) : turnOpen)
-  result.settlement = {
-    state: nativeSettled || canSettle ? 'settled' : result.inFlight ? 'in-flight' : 'unknown',
   }
-  return result
+
+  /** The answer, with the extension's evidence and the session file's quiet as they are now. */
+  const result = async (env, options, file) => {
+    if (count === 0) throw new Error(`empty pi session ${sessionId}`)
+    const nativeEvidence = await piSettlementEvidence(sessionId, env, options)
+    const hasNativeBoundary = Boolean(
+      nativeEvidence && terminal?.item?.id === nativeEvidence.frontier.id,
+    )
+    const { mtimeMs } = await fs.stat(file)
+    const quiet = Date.now() - mtimeMs >= PI_SETTLEMENT_QUIET_MS
+    const open = openTools.size > 0
+    const canSettle = Boolean((terminal?.complete || terminal?.aborted) && quiet && !open)
+    const nativeSettled = hasNativeBoundary && !open
+    const final = canSettle || nativeSettled ? terminal.item : null
+
+    const answer = resultBase()
+    answer.items = list.map((item) => emit(item, item.settled || item === final))
+    answer.inFlight = open || (terminal ? !(quiet || nativeSettled) : turnOpen)
+    answer.cancelled = cancelled
+    answer.failed = failed
+    answer.failure = failure
+    answer.quota = quota
+    answer.settlement = {
+      state: nativeSettled || canSettle ? 'settled' : answer.inFlight ? 'in-flight' : 'unknown',
+    }
+    return answer
+  }
+
+  return { visit, result }
 }
 
 // ============================================================== opencode
@@ -1278,6 +1490,11 @@ function opencodeToolText(part) {
   if (part.state?.output !== undefined) return visibleText(part.state.output)
   if (part.state?.error !== undefined) return visibleText(part.state.error)
   return ''
+}
+
+/** OpenCode's reader: each look reads the conversation's rows and events whole. */
+function opencodeReader(sessionId, env) {
+  return (options = {}) => opencodeAnswers(sessionId, env, options).catch(unreadable)
 }
 
 async function opencodeAnswers(sessionId, env, options) {
@@ -1529,6 +1746,8 @@ async function openOpencodeDb(env, sessionId) {
   return first
 }
 
+// ================================================================= devin
+
 // Devin persists revisions, including cancelled assistant text. Only its main
 // chain plus a matching native request/complete boundary proves a reply.
 /**
@@ -1558,6 +1777,64 @@ const DEVIN_WORK = new Set([
   'tool_call',
   'tool_call_update',
 ])
+
+/** Devin's reader: each look reads its store and every wire log whole. */
+function devinReader(sessionId, env) {
+  return () => devinAnswers(sessionId, env).catch(unreadable)
+}
+
+/**
+ * A JSONL file read whole, a record at a time, without retaining it. A
+ * syntactically incomplete tail without a newline is the only malformed
+ * record tolerated.
+ */
+async function readJsonl(file, visit) {
+  const stream = createReadStream(file, { encoding: 'utf8' })
+  let buffer = ''
+  let recordIndex = 0
+  let count = 0
+
+  const consume = (raw) => {
+    const text = raw.endsWith('\r') ? raw.slice(0, -1) : raw
+    if (isJsonBlank(text)) return
+    let record
+    try {
+      record = JSON.parse(text)
+    } catch {
+      throw new Error(`malformed JSONL at record ${recordIndex}`)
+    }
+    visit(record, recordIndex)
+    recordIndex += 1
+    count += 1
+  }
+
+  for await (const chunk of stream) {
+    buffer += chunk
+    let newline = buffer.indexOf('\n')
+    while (newline !== -1) {
+      const line = buffer.slice(0, newline)
+      buffer = buffer.slice(newline + 1)
+      consume(line)
+      newline = buffer.indexOf('\n')
+    }
+  }
+
+  if (!isJsonBlank(buffer)) {
+    let record
+    try {
+      record = JSON.parse(buffer)
+    } catch {
+      if (jsonPrefixState(buffer) === 'incomplete') {
+        // A live writer may have left only the final, unterminated append.
+        return count
+      }
+      throw new Error(`malformed JSONL at record ${recordIndex}`)
+    }
+    visit(record, recordIndex)
+    count += 1
+  }
+  return count
+}
 
 async function devinAnswers(sessionId, env) {
   const { DatabaseSync } = await import('node:sqlite')
