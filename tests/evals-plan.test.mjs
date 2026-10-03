@@ -5,6 +5,7 @@ import {
   chiefEnvironment,
   claudeProjectKey,
   codexIsolation,
+  devinPickerAnswers,
   HARNESSES,
   lastLines,
   liveEnvironment,
@@ -164,6 +165,34 @@ describe("the owner's answer in a chief's terminal", () => {
       'Also: the reference document, do we keep it as is?',
     ].join('\n')
     assert.equal(terminalAnswer(scenario, text), 'Keep it, with a note on top. Not yet.')
+  })
+
+  it("answers a Devin chief's dialog: the scenario's words in Other, past each question's options", () => {
+    const scenario = { answers: [{ match: /file|name/i, text: 'site/cariere.html' }] }
+    const questions = [
+      {
+        question: 'Which file name?',
+        header: 'File name',
+        options: [{ label: 'a.html' }, { label: 'b.html' }],
+      },
+      {
+        question: 'Which language first?',
+        header: 'Language',
+        options: [{ label: 'Romanian' }, { label: 'English' }, { label: 'Both' }],
+      },
+    ]
+    const down = [27, 91, 66]
+    assert.deepEqual(
+      devinPickerAnswers(scenario, questions, (text) => text.toUpperCase()),
+      [
+        {
+          question: 'Which file name?',
+          answer: 'site/cariere.html',
+          keys: [down, down, [13], [...Buffer.from('SITE/CARIERE.HTML')], [13]],
+        },
+        { question: 'Which language first?', answer: null, keys: [[13]] },
+      ],
+    )
   })
 
   it('falls back for a question it has no answer for', () => {

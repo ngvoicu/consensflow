@@ -133,6 +133,34 @@ export function terminalAnswer(scenario, text) {
   return [...new Set(replies)].join(' ')
 }
 
+const DOWN = [27, 91, 66]
+const ENTER = [13]
+
+/**
+ * The owner's answers to a Devin chief's own question dialog, a question at
+ * a time, each with the keys that give it: a question the scenario has an
+ * answer for gets the answer typed into "Other (type your own)", which comes
+ * after the question's options (Down once per option from the first; one
+ * more starts the list over), and any other takes Enter, its first option.
+ * `spell` is how the window takes typed text: Devin on Windows, consoleText.
+ * Devin 3000.11.3, probed 2026-10-03.
+ */
+export function devinPickerAnswers(scenario, questions, spell = (text) => text) {
+  return questions.map(({ question, header, options }) => {
+    const answer =
+      (scenario.answers ?? []).find(({ match }) => match.test(`${header ?? ''} ${question}`))
+        ?.text ?? null
+    return {
+      question,
+      answer,
+      keys:
+        answer === null
+          ? [ENTER]
+          : [...options.map(() => DOWN), ENTER, [...Buffer.from(spell(answer))], ENTER],
+    }
+  })
+}
+
 /**
  * What a Windows program needs from its environment besides PATH: the
  * system's folders, the user's, and where Devin keeps its settings and

@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { devinFolders } from '../src/harnesses.js'
 import { openLedger } from '../src/ledger/index.js'
 
 /**
@@ -408,49 +409,82 @@ function eventsOf(ledger, projectId, kind) {
 
 /** What the chief wrote in its current conversation: the one the last switch started. */
 export function chiefWordsNow(file) {
-  const dir = mkdtempSync(join(tmpdir(), 'cf-eval-ledger-'))
-  try {
-    const copy = join(dir, 'ledger.db')
-    copyFileSync(file, copy)
-    if (existsSync(`${file}-wal`)) copyFileSync(`${file}-wal`, `${copy}-wal`)
-    const db = new DatabaseSync(copy)
-    try {
-      return db
-        .prepare(
-          `SELECT t.text FROM transcript t
-           JOIN conversation c ON c.id = t.conversation_id
-           JOIN participant p ON p.id = c.participant_id
-           WHERE p.role = 'chief' AND c.ended_at IS NULL AND t.role = 'assistant'
-           ORDER BY t.seq`,
-        )
-        .all()
-        .map((row) => row.text)
-        .join('\n')
-    } finally {
-      db.close()
-    }
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
+  return onCopy(file, (db) =>
+    db
+      .prepare(
+        `SELECT t.text FROM transcript t
+         JOIN conversation c ON c.id = t.conversation_id
+         JOIN participant p ON p.id = c.participant_id
+         WHERE p.role = 'chief' AND c.ended_at IS NULL AND t.role = 'assistant'
+         ORDER BY t.seq`,
+      )
+      .all()
+      .map((row) => row.text)
+      .join('\n'),
+  )
 }
 
 export function chiefTurnEnd(file) {
-  const dir = mkdtempSync(join(tmpdir(), 'cf-eval-ledger-'))
+  return onCopy(file, (db) =>
+    db
+      .prepare(
+        `SELECT t.item_id AS id, t.text FROM transcript t
+         JOIN conversation c ON c.id = t.conversation_id
+         JOIN participant p ON p.id = c.participant_id
+         WHERE p.role = 'chief' AND t.role = 'assistant' AND t.complete = 1
+         ORDER BY t.conversation_id DESC, t.seq DESC LIMIT 1`,
+      )
+      .get(),
+  )
+}
+
+/**
+ * The questions a Devin chief's own dialog holds open: its newest call to
+ * its question tool that no tool message has answered, read from a copy of
+ * Devin's store, each question with its options; null when none is open.
+ * The chief's session is its newest conversation in the ledger `file`.
+ */
+export function devinChiefQuestions(file, env) {
+  const session = onCopy(
+    file,
+    (db) =>
+      db
+        .prepare(
+          `SELECT c.native_session AS id FROM conversation c
+           JOIN participant p ON p.id = c.participant_id
+           WHERE p.role = 'chief' ORDER BY c.id DESC LIMIT 1`,
+        )
+        .get()?.id,
+  )
+  const store = join(devinFolders(env).data, 'cli', 'sessions.db')
+  if (!session || !existsSync(store)) return null
+  return onCopy(store, (db) => {
+    const answered = new Set()
+    for (const row of db
+      .prepare('SELECT chat_message FROM message_nodes WHERE session_id = ? ORDER BY row_id DESC')
+      .all(session)) {
+      const message = JSON.parse(row.chat_message)
+      if (message.role === 'tool') answered.add(message.tool_call_id)
+      const call =
+        message.role === 'assistant'
+          ? message.tool_calls?.find((c) => c.name === 'ask_user_question')
+          : undefined
+      if (call) return answered.has(call.id) ? null : (call.arguments?.questions ?? null)
+    }
+    return null
+  })
+}
+
+/** `read(db)` on a copy of the SQLite database `file` and its log: the one in use stays shut. */
+function onCopy(file, read) {
+  const dir = mkdtempSync(join(tmpdir(), 'cf-eval-db-'))
   try {
-    const copy = join(dir, 'ledger.db')
+    const copy = join(dir, 'copy.db')
     copyFileSync(file, copy)
     if (existsSync(`${file}-wal`)) copyFileSync(`${file}-wal`, `${copy}-wal`)
     const db = new DatabaseSync(copy)
     try {
-      return db
-        .prepare(
-          `SELECT t.item_id AS id, t.text FROM transcript t
-           JOIN conversation c ON c.id = t.conversation_id
-           JOIN participant p ON p.id = c.participant_id
-           WHERE p.role = 'chief' AND t.role = 'assistant' AND t.complete = 1
-           ORDER BY t.conversation_id DESC, t.seq DESC LIMIT 1`,
-        )
-        .get()
+      return read(db)
     } finally {
       db.close()
     }

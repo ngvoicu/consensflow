@@ -2,11 +2,13 @@ import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { describe, it } from 'node:test'
 import {
   changed,
   chiefTurnEnd,
   countQuestions,
+  devinChiefQuestions,
   measure,
   mechanics,
   ownerQuestions,
@@ -627,6 +629,66 @@ describe("reading the chief's last turn while the daemon runs", () => {
       ])
       // The ledger is still open, as the daemon's is during a run.
       assert.deepEqual({ ...chiefTurnEnd(file) }, { id: 'a2', text: 'Keep the old document?' })
+    } finally {
+      ledger.close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe("a Devin chief's own question dialog", () => {
+  it('is its newest question call no answer followed, read from a copy of its store', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-devin-dialog-'))
+    const file = path.join(dir, 'consensflow.db')
+    // Devin's data folder, on Windows (APPDATA) or elsewhere: dir/data/devin.
+    const env = {
+      HOME: dir,
+      XDG_DATA_HOME: path.join(dir, 'data'),
+      APPDATA: path.join(dir, 'data'),
+    }
+    const ledger = openLedger(file)
+    try {
+      const project = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'devin' },
+      })
+      const chief = ledger.project(project.id).participants.find((p) => p.role === 'chief')
+      ledger.bindConversation(
+        ledger.startConversation(chief.id, { harness: 'devin' }).id,
+        'swift-owl',
+      )
+      const folder = path.join(dir, 'data', 'devin', 'cli')
+      await mkdir(folder, { recursive: true })
+      const store = new DatabaseSync(path.join(folder, 'sessions.db'))
+      store.exec(
+        'CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT, chat_message TEXT)',
+      )
+      const add = (message) =>
+        store
+          .prepare('INSERT INTO message_nodes (session_id, chat_message) VALUES (?, ?)')
+          .run('swift-owl', JSON.stringify(message))
+      const ask = (id, question) => ({
+        role: 'assistant',
+        tool_calls: [
+          {
+            id,
+            name: 'ask_user_question',
+            arguments: {
+              questions: [{ question, header: 'File', options: [{ label: 'a.html' }] }],
+            },
+          },
+        ],
+      })
+      assert.equal(devinChiefQuestions(file, env), null, 'nothing asked yet')
+      add(ask('q1', 'Which file?'))
+      add({ role: 'tool', tool_call_id: 'q1', content: 'User answered your questions' })
+      assert.equal(devinChiefQuestions(file, env), null, 'answered')
+      add(ask('q2', 'Which language?'))
+      assert.deepEqual(devinChiefQuestions(file, env), [
+        { question: 'Which language?', header: 'File', options: [{ label: 'a.html' }] },
+      ])
+      store.close()
     } finally {
       ledger.close()
       await rm(dir, { recursive: true, force: true })

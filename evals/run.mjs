@@ -23,15 +23,25 @@ import { parseArgs } from 'node:util'
 import { answers } from '../hosts/lib/completion.js'
 import { interactiveStart } from '../hosts/lib/windows.js'
 import { recordState } from '../src/adapters/shared.js'
-import { runnable } from '../src/harnesses.js'
+import { consoleText } from '../src/console-text.js'
+import { onWindows, runnable } from '../src/harnesses.js'
 import { startIntegration } from '../tests/integration/harness.mjs'
 import { trustForClaude } from '../tests/live/trust-claude.mjs'
 import { askingTurnEnd, bareMetrics, findSession } from './bare.mjs'
-import { changed, chiefTurnEnd, countQuestions, measure, mechanics, verdict } from './measure.mjs'
+import {
+  changed,
+  chiefTurnEnd,
+  countQuestions,
+  devinChiefQuestions,
+  measure,
+  mechanics,
+  verdict,
+} from './measure.mjs'
 import {
   chiefEnvironment,
   claudeProjectKey,
   codexIsolation,
+  devinPickerAnswers,
   HARNESSES,
   lastLines,
   liveEnvironment,
@@ -234,6 +244,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const FOLLOW_UP_AFTER_MS = 20_000
 /** How long a chief's question dialog holds its window before the owner answers it. */
 const PICKER_AFTER_MS = 10_000
+/** How long the owner waits after each key in a dialog, and after each answer, for the window to draw it. */
+const KEY_PAUSE_MS = 600
+const QUESTION_PAUSE_MS = 2_000
 /** How many times at most the owner answers questions a chief left in its terminal. */
 const MAX_TERMINAL_REPLIES = 8
 /** How long a chief may sit idle with nothing on the board before the owner answers it in its terminal. */
@@ -413,7 +426,9 @@ async function run(index) {
         lane?.activity?.state !== 'idle' ||
         tasks.some((t) => ['queued', 'working', 'waiting'].includes(t.state))
       // A chief's own question dialog holds its window, waiting for input:
-      // the owner answers it there, Enter taking its first option.
+      // the owner answers it there. A Devin chief's question the scenario
+      // has an answer for gets it typed into the dialog's Other; any other,
+      // and any other harness's dialog, Enter: its first option.
       if (
         lane?.activity?.state === 'waiting' &&
         pickerAnswers < MAX_TERMINAL_REPLIES &&
@@ -421,9 +436,25 @@ async function run(index) {
       ) {
         pickerAnswers += 1
         note(
-          `the chief's question dialog waits; the owner pressed Enter there. Its screen: ${lastLines(app.output(pane.id)).slice(-6).join(' ⏎ ')}`,
+          `the chief's question dialog waits. Its screen: ${lastLines(app.output(pane.id)).slice(-6).join(' ⏎ ')}`,
         )
-        await app.request('pane.input', { id: pane.id, generation: pane.generation, bytes: [13] })
+        const questions = chief === 'devin' ? devinChiefQuestions(file, ENV) : null
+        const replies =
+          questions === null
+            ? [{ question: null, answer: null, keys: [[13]] }]
+            : devinPickerAnswers(scenario, questions, onWindows(ENV) ? consoleText : undefined)
+        for (const { question, answer, keys } of replies) {
+          note(
+            answer === null
+              ? `the owner took the first option there${question ? ` for "${question}"` : ''}`
+              : `the owner answered "${question}" there: ${answer}`,
+          )
+          for (const bytes of keys) {
+            await app.request('pane.input', { id: pane.id, generation: pane.generation, bytes })
+            await sleep(KEY_PAUSE_MS)
+          }
+          await sleep(QUESTION_PAUSE_MS)
+        }
         lastChange = Date.now()
         continue
       }
