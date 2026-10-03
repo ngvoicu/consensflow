@@ -15,7 +15,9 @@
  * waiting in the input is a failure, the one Devin showed on Windows.
  *
  *   npm run live:paste                      Devin
- *   npm run live:paste -- --harness claude --harness codex
+ *   npm run live:paste -- --harness claude --harness devin
+ *   npm run live:paste -- --harness claude --long 8000 --long 16000
+ *                                           long messages of those lengths, one of each
  *
  * Harnesses: the two the app pastes into, claude and devin (Codex, Pi and
  * OpenCode take their messages through their own queues). They run one
@@ -40,8 +42,18 @@ import { trustForClaude } from './trust-claude.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DAEMON = join(HERE, 'core-live-daemon.mjs')
-const { values } = parseArgs({ options: { harness: { type: 'string', multiple: true } } })
+const { values } = parseArgs({
+  options: {
+    harness: { type: 'string', multiple: true },
+    long: { type: 'string', multiple: true },
+  },
+})
 const harnesses = values.harness ?? ['devin']
+/** The long messages' lengths, in characters. */
+const LONG = (values.long ?? ['3700']).map(Number)
+if (!LONG.every((length) => Number.isInteger(length) && length > 0)) {
+  throw new Error('--long takes a length in characters')
+}
 for (const name of harnesses) {
   if (!['claude', 'devin'].includes(name)) {
     throw new Error(
@@ -77,17 +89,17 @@ const CASES = [
         line,
       ].join('\n'),
   },
-  {
-    name: 'a long message',
-    sum: [3141, 2718],
+  ...LONG.map((length, at) => ({
+    name: `a long message (${length} characters)`,
+    sum: [3141 + at, 2718 + at],
     body: (line) => {
       const lines = ['[ConsensFlow m-2 · T-1 · result from @worker]']
-      for (let n = 1; lines.join('\n').length < 3_700; n += 1) {
+      for (let n = 1; lines.join('\n').length < length; n += 1) {
         lines.push(`${n}. Section ${n} — headings, “links” → footer: all match…`)
       }
       return [...lines, line].join('\n')
     },
-  },
+  })),
 ]
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))

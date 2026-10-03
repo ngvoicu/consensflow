@@ -347,12 +347,14 @@ async function run(index) {
     pane = (await chiefLane()).pane
     await settled(() => app.output(pane.id).length)
     note(`chief (${chief}) ready; typing the prompt`)
-    /** Type into the chief's terminal as the owner would, Enter pressed again if the window kept the text. */
+    /** Type into the chief's terminal as the owner would, Enter pressed again while the window keeps the text. */
     const say = async (text) => {
       await app.tell(project, text, { idleMs: 240_000 })
-      await sleep(5_000)
-      if ((await chiefLane())?.activity?.state === 'idle') {
-        // Devin takes a pasted prompt into its box and waits for an Enter of its own.
+      // Devin takes a pasted prompt into its box and waits for an Enter of its
+      // own; Codex on Windows once took the second Enter as a new line too.
+      for (let more = 0; more < 3; more += 1) {
+        await sleep(5_000)
+        if ((await chiefLane())?.activity?.state !== 'idle') return
         await app.request('pane.input', { id: pane.id, generation: pane.generation, bytes: [13] })
         note('Enter pressed again: the window had not taken the text')
       }
@@ -626,10 +628,12 @@ async function runBare(index) {
         bytes: [...Buffer.from(`\u001b[200~${text}\u001b[201~\r`)],
       })
       await sleep(8_000)
-      // Devin takes a pasted prompt into its box and waits for an Enter of its own.
-      if (((await record())?.items.length ?? 0) === before) {
+      // Devin takes a pasted prompt into its box and waits for an Enter of its
+      // own; Codex on Windows once took the second Enter as a new line too.
+      for (let more = 0; more < 3 && ((await record())?.items.length ?? 0) === before; more += 1) {
         await app.request('pane.input', { ...pane, bytes: [13] })
         note('Enter pressed again: the window had not taken the text')
+        await sleep(5_000)
       }
     }
     await settled(() => app.output(pane.id).length)
