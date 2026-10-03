@@ -129,7 +129,10 @@ export function devinReader(sessionId, env) {
   // A turn Devin is still on shows only on the wire: thoughts, messages and
   // tool calls after the last end; its store holds the finished steps. A
   // tool's last word is not new work: a shell an Escape left running ends
-  // after its turn did, and its window would read as working for good.
+  // after its turn did, and its window would read as working for good. Nor
+  // is the history a window reopened on the conversation replays, which
+  // carries its timestamps and ends in no turn end (poker-lab's T-4 read as
+  // working for good after its window was opened again, 2026-10-03).
   const visitWire = (wire, event) => {
     if (event.sessionId !== sessionId) return
     wire.mine = true
@@ -137,7 +140,8 @@ export function devinReader(sessionId, env) {
     const toolEnded =
       update?.sessionUpdate === 'tool_call_update' &&
       ['completed', 'failed', 'cancelled'].includes(update.status)
-    if (DEVIN_WORK.has(update?.sessionUpdate) && !toolEnded) wire.busy = true
+    const replayed = update?._meta?.['cognition.ai/timestamp'] !== undefined
+    if (DEVIN_WORK.has(update?.sessionUpdate) && !toolEnded && !replayed) wire.busy = true
     if (update?.sessionUpdate === 'agent_message_chunk') {
       const id = update._meta?.['cognition.ai/streamingMessageId']
       // History replay has timestamps but no streaming UUID.
@@ -272,16 +276,20 @@ function devinChain(nodes, head, parsed) {
       complete: role !== 'assistant',
       at: message.metadata?.created_at ?? row.created_at,
       request,
+      stopped: message.metadata?.finish_reason === 'stop',
     })
   }
   return { items, asking: asking !== null }
 }
 
 /**
- * What Devin's chain says, by the wire's outcomes: a reply is complete only
- * when it is its request's last, the wire saw that request complete, and the
- * streamed text is the stored one. Whether Devin is still on a turn is judged
- * by the launch whose wire was written last (a resume opens a new one).
+ * What Devin's chain says: a reply is complete only when it is its request's
+ * last, and either Devin stored it as the turn's end (`finish_reason` stop)
+ * or the wire saw that request complete with the stored text streamed. A
+ * window reopened on the conversation replays its history with no turn end,
+ * so only the store tells that turn ended. Whether Devin is still on a turn
+ * is judged by the launch whose wire was written last (a resume opens a new
+ * one).
  */
 function devinAnswer(chain, outcomes, launches, wires) {
   // The newest window that carried this session says whether it is at work:
@@ -300,14 +308,16 @@ function devinAnswer(chain, outcomes, launches, wires) {
   const finalByRequest = new Map(
     chain.items.filter((item) => item.role === 'assistant').map((item) => [item.request, item.id]),
   )
-  result.items = chain.items.map(({ request, ...item }) => {
+  result.items = chain.items.map(({ request, stopped, ...item }) => {
     if (item.role !== 'assistant') return item
     const outcome = outcomes.get(request)
     // The same text needs no comparing, which every look would do again.
     const complete =
       finalByRequest.get(request) === item.id &&
-      outcome?.cause === 'complete' &&
-      (outcome.text === item.text || devinComparable(outcome.text) === devinComparable(item.text))
+      (stopped ||
+        (outcome?.cause === 'complete' &&
+          (outcome.text === item.text ||
+            devinComparable(outcome.text) === devinComparable(item.text))))
     return { ...item, complete }
   })
   const lastIndex = chain.items.findLastIndex((item) => item.role !== 'custom')

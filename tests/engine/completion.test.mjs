@@ -1644,7 +1644,7 @@ test('readOn passes over, unparsed, the lines that do not hold `only`', async ()
  * of `events`, in a temporary home; `windows` puts it where Devin keeps it
  * on Windows.
  */
-async function stageDevin(stored, events, { windows = false } = {}) {
+async function stageDevin(stored, events, { windows = false, finish } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-completion-devin-'))
   const env = {
     HOME: root,
@@ -1672,7 +1672,12 @@ async function stageDevin(stored, events, { windows = false } = {}) {
     'calm-river',
     'n-2',
     'n-1',
-    JSON.stringify({ message_id: 'a-1', role: 'assistant', content: stored }),
+    JSON.stringify({
+      message_id: 'a-1',
+      role: 'assistant',
+      content: stored,
+      ...(finish === undefined ? {} : { metadata: { finish_reason: finish } }),
+    }),
     '2026-09-26T05:10:00Z',
   )
   db.prepare('INSERT INTO sessions (id, main_chain_id) VALUES (?, ?)').run('calm-river', 'n-2')
@@ -1803,6 +1808,38 @@ test('completion/devin: a reply naming files on Windows, linked and quoted, is t
     assert.equal(result.settlement.state, 'settled')
   } finally {
     await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test("completion/devin: a window reopened on its conversation reads the history it replays as no work, and a reply stored as its turn's end as finished", async () => {
+  // poker-lab's T-4, 2026-10-03: its window opened again on the conversation,
+  // Devin replayed the last turn into the new wire log (each event with its
+  // timestamp, and no turn end), and the window read as working for good.
+  const at = { 'cognition.ai/timestamp': '2026-10-03T16:30:00Z' }
+  const replay = (update) => ({ sessionId: 'calm-river', update: { ...update, _meta: at } })
+  const events = [
+    replay({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'Review T-1' } }),
+    replay({ sessionUpdate: 'tool_call', toolCallId: 't-1', title: 'Ran git' }),
+    replay({ sessionUpdate: 'tool_call_update', toolCallId: 't-1', status: 'completed' }),
+    replay({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Done.' } }),
+    { sessionId: 'calm-river', update: { sessionUpdate: 'session_info_update' } },
+  ]
+  const stopped = await stageDevin('Done.', events, { finish: 'stop' })
+  try {
+    const answer = await completion.answers('devin', 'calm-river', stopped.env)
+    assert.equal(answer.settlement.state, 'settled')
+    assert.equal(answer.items.at(-1).complete, true)
+  } finally {
+    await fs.rm(stopped.root, { recursive: true, force: true })
+  }
+  // A reply that ended in tool calls is no turn's end, replayed or not.
+  const calling = await stageDevin('Next I run the tests.', events, { finish: 'tool_calls' })
+  try {
+    const answer = await completion.answers('devin', 'calm-river', calling.env)
+    assert.equal(answer.items.at(-1).complete, false)
+    assert.notEqual(answer.settlement.state, 'settled')
+  } finally {
+    await fs.rm(calling.root, { recursive: true, force: true })
   }
 })
 
