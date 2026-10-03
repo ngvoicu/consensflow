@@ -37,7 +37,7 @@ Usage: cf <command> [options]
 
   setup                                     Prepare private launcher and integrations
   catalog [--harness <h>] [--json]            List available agent presets
-  agent add <name>                           Add a catalog agent
+  agent add <name>                           Add an agent of your own
     [--harness <h>] [--model <m>] [--effort <e>] [--description <d>]
     [--designer]                            An image agent (Codex only): an image designer
   agent list [--json]
@@ -48,7 +48,8 @@ Usage: cf <command> [options]
   doctor                                    Inspect runtime, roster and bundled roles
 
 Inside a window ConsensFlow opened, cf is the board: task add --tier <t> "…",
-task list|get|done|accept|reopen|cancel, inbox, ask, answer, staff, whoami.
+task list|get|done|accept|reopen|cancel|pause|resume, tell, inbox, ask, note,
+answer, staff, whoami, history (cf help there says more).
 `
 
 function out(text) {
@@ -61,10 +62,9 @@ function fail(message) {
 }
 
 /**
- * A catalog name is a whole agent: `cf agent add zeus` needs no
- * flags. Anything passed explicitly wins over the catalog entry, and a name
- * nobody knows still needs a harness and a model; `--designer` makes it an
- * image agent, which only a Codex agent can be.
+ * An agent of the human's own: a name, a harness and a model. A catalog
+ * agent is in the roster already, so its name is refused; `--designer`
+ * makes it an image agent, which only a Codex agent can be.
  */
 function resolveAdd(name, values) {
   // Every catalog agent is in the roster already; an add defines one by hand.

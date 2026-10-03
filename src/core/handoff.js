@@ -84,7 +84,7 @@ export function handoffText({ from, to, open, last = null, cut = false, pages })
     ),
     ...open.results.map(
       (t) =>
-        `- T-${t.number} "${defuse(t.title)}": @${t.assignee}'s result waits for your decision (cf task show T-${t.number})`,
+        `- T-${t.number} "${defuse(t.title)}": @${t.assignee}'s result waits for your decision (cf task get T-${t.number})`,
     ),
     ...open.own.map((t) => `- T-${t.number} "${defuse(t.title)}" is yours, ${t.state}`),
   ]
@@ -149,7 +149,7 @@ function deliveryLine(id, message) {
   const gist = defuse(firstLine(m.body))
   switch (m.kind) {
     case 'result':
-      return `· m-${id}: ${from}'s result${on} (cf task show T-${m.taskNumber})`
+      return `· m-${id}: ${from}'s result${on} (cf task get T-${m.taskNumber})`
     case 'question':
       return `· m-${id}: ${from} asked${on}: "${gist}" (cf inbox read m-${id})`
     case 'task':

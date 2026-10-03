@@ -89,7 +89,7 @@ describe('cf history', () => {
     ])
     const text = pages.map((p) => p.text).join('\n')
     assert.ok(!text.includes('[ConsensFlow m-'), 'no page can prove a delivery arrived')
-    assert.match(text, /· m-5: @zeus's result on T-1 \(cf task show T-1\)/)
+    assert.match(text, /· m-5: @zeus's result on T-1 \(cf task get T-1\)/)
     assert.match(text, /· m-6: @zeus asked on T-1: "Which grammar\?" \(cf inbox read m-6\)/)
     assert.match(text, /Human: half a thought\n· m-7: the handoff that brought this chief in/)
     assert.match(text, /· m-99: a message ConsensFlow delivered \(no longer on record\)/)

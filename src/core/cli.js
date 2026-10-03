@@ -240,7 +240,7 @@ async function command(verb, rest, call, input) {
     }
     default:
       throw usage(
-        `unknown command ${JSON.stringify(verb ?? '')}: use task, inbox, ask, note, tell, answer, staff or whoami`,
+        `unknown command ${JSON.stringify(verb ?? '')}: use task, inbox, ask, note, tell, answer, staff, whoami or history`,
       )
   }
 }
