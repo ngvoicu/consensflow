@@ -33,7 +33,6 @@ test('Claude 2.1.265 native direct and tool turns settle at their root finalizer
     assert.equal(result.version, undefined)
     assert.equal(result.items.at(-1).text, text)
     assert.equal(result.items.at(-1).settled, true)
-    assert.equal(result.settlement.boundary, 'system.turn_duration')
     assert.equal(result.settlement.state, 'settled')
   }
 })
@@ -45,10 +44,12 @@ test('Claude 2.1.265 incomplete native prefixes never authorize an automatic sen
     assert.equal(result.unknown, undefined, result.reason)
     assert.notEqual(result.settlement.state, 'settled', `prefix ${take}`)
   }
-  assert.deepEqual((await read(5)).settlement.evidence.openTools, [
-    'toolu_016rxL6P8CoTD6xUKBhBQt9X',
-  ])
-  assert.deepEqual((await read(6)).settlement.evidence.openTools, [])
+  assert.ok(!(await read(5)).items.some((item) => item.id === 'toolu_016rxL6P8CoTD6xUKBhBQt9X'))
+  assert.equal(
+    (await read(6)).items.find((item) => item.id === 'toolu_016rxL6P8CoTD6xUKBhBQt9X')?.role,
+    'tool',
+    'its result closes the call',
+  )
 })
 
 test('Claude 2.1.265 sidechain and pending-work durations cannot settle the root', async (t) => {

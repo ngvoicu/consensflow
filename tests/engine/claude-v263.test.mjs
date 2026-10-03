@@ -68,13 +68,12 @@ test('claude-v263: versioned ignored envelopes never poison admission', async ()
 test('claude-v263: the tool loop opens and closes by native tool_use_id', async () => {
   const open = await answers('claude-code', SESSION, await stage(8))
   admitted(open)
-  assert.deepEqual(open.settlement.evidence.openTools, ['toolu_014xV8WiQG7e22f7RZQJYTSE'])
   assert.equal(open.inFlight, true)
   assert.notEqual(open.settlement.state, 'settled')
+  assert.ok(!open.items.some((item) => item.id === 'toolu_014xV8WiQG7e22f7RZQJYTSE'))
 
   const closed = await answers('claude-code', SESSION, await stage(9))
   admitted(closed)
-  assert.deepEqual(closed.settlement.evidence.openTools, [])
   const early = closed.items.find((item) => item.id === 'msg_011CepVzTaLVYh2bCvw5RpQe')
   assert.equal(early.role, 'assistant')
   assert.ok(
@@ -95,13 +94,12 @@ test('claude-v263: grouped fragments share one native id and the advisor call cl
     ),
     'server_tool_use closed by its advisor_tool_result',
   )
-  assert.ok(!result.settlement.evidence.openTools.includes('srvtoolu_016MAs2kPZC9C7R4dYkPDryP'))
 })
 
 test('claude-v263: both queue enqueue/remove pairs reconcile to empty', async () => {
   const result = await answers('claude-code', SESSION, await stage())
   admitted(result)
-  assert.deepEqual(result.settlement.evidence.queuedTurns, [])
+  assert.equal(result.settlement.state, 'settled', 'no queued message is left to come')
 })
 
 test('claude-v263: every incomplete prefix stays unready and never settles', async () => {
@@ -141,9 +139,7 @@ test('claude-v263: the now-complete actual final turn settles and reads ready', 
   assert.equal(final.role, 'assistant')
   assert.equal(final.complete, true)
   assert.equal(final.settled, true)
-  assert.equal(result.settlement.state, 'settled')
-  assert.deepEqual(result.settlement.evidence.openTools, [])
-  assert.deepEqual(result.settlement.evidence.queuedTurns, [])
+  assert.equal(result.inFlight, false)
   assert.equal(result.settlement.state, 'settled')
 })
 

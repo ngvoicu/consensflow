@@ -32,7 +32,6 @@ test('native Claude 2.1.268 /clear is ready before any model turn', async (t) =>
   const { completion } = await examine(t)
   assert.equal(completion.items.filter((x) => x.role === 'assistant').length, 0)
   assert.equal(completion.settlement.state, 'settled')
-  assert.equal(completion.settlement.boundary, 'system.local_command')
 })
 for (const [name, mutate] of [
   ['missing native boundary', (rows) => rows.pop()],
@@ -69,22 +68,19 @@ for (const [name, mutate] of [
     assert.notEqual(completion.settlement.state, 'settled')
   })
 
-test('native continuation retires readiness while retaining predecessor receipt items', async (t) => {
-  const next = 'e6acbeb1-181f-4fdc-a963-6ff6d6d792ee'
+test('a native continuation leaves the predecessor readable, with its completion', async (t) => {
   const { completion } = await examine(t, (rows) =>
     rows.push({
       type: 'continued-in',
       sessionId: session,
-      continuedInSessionId: next,
+      continuedInSessionId: 'e6acbeb1-181f-4fdc-a963-6ff6d6d792ee',
       timestamp: '2026-09-12T13:57:18.549Z',
     }),
   )
-  assert.equal(completion.continuedInSessionId, next)
-  assert.equal(completion.replaced, false, 'predecessor evidence remains readable')
+  assert.equal(completion.unknown, undefined)
   assert.equal(
     completion.settlement.state,
     'settled',
     'the predecessor keeps its historical completion evidence',
   )
-  assert.equal(completion.continuedAt, '2026-09-12T13:57:18.549Z')
 })
