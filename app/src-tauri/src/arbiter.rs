@@ -785,9 +785,11 @@ mod tests {
 
     #[test]
     fn a_pastes_enter_waits_for_the_window_to_finish_echoing_it() {
+        // A quiet spell well above the printer's 10 ms: a busy machine's
+        // scheduling gap is not the echo's end.
         let enter = EnterTiming {
             least_ms: 0,
-            quiet_ms: 60,
+            quiet_ms: 150,
             most_ms: 5_000,
         };
         let waited = enter_waited(enter, Duration::ZERO, Duration::from_millis(250));
@@ -834,9 +836,11 @@ mod tests {
 
     #[test]
     fn a_window_that_never_stops_printing_gets_its_enter_at_the_most() {
+        // A quiet spell longer than the most: only the most lets Enter go,
+        // however the printer is scheduled.
         let enter = EnterTiming {
             least_ms: 0,
-            quiet_ms: 60,
+            quiet_ms: 10_000,
             most_ms: 300,
         };
         let waited = enter_waited(enter, Duration::ZERO, Duration::from_millis(3_000));
