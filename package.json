@@ -25,6 +25,7 @@
     "check": "npm run lint && npm test",
     "eval": "node evals/run.mjs",
     "eval:summary": "node evals/summarize.mjs",
+    "watch": "node evals/watch.mjs",
     "eval:windows": "node tests/live/windows-matrix.mjs",
     "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs",
     "build:bridge": "cargo build --release --features test-helper --manifest-path app/src-tauri/Cargo.toml --bin consensflow-bridge",
