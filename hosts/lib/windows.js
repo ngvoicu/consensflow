@@ -14,10 +14,6 @@ const STRIPPED_CONTROL_ENV = new Set([
   'CONSENSFLOW_LAUNCH',
 ])
 
-// Every window carries this marker so ConsensFlow tooling running inside it
-// (the Claude Code hooks, the Pi extension, cf itself) can tell it is nested.
-const CHILD_ENV = { CONSENSFLOW_CHILD: '1' }
-
 /** The billing guard a window carries: a key whose presence would silently switch billing. */
 function interactiveGuards(kind) {
   if (kind === 'claude-code') return ['ANTHROPIC_API_KEY']
@@ -78,7 +74,7 @@ function interactiveWindow(agent, sessionId, seed, resume) {
           ...modelAndEffort(agent),
           ...YOLO.claude,
         ]),
-        env: { ...CHILD_ENV },
+        env: {},
         dropEnv: interactiveGuards('claude-code'),
       }
     case 'pi':
@@ -87,7 +83,7 @@ function interactiveWindow(agent, sessionId, seed, resume) {
       return {
         command: 'pi',
         args: seeded(['--session-id', sessionId, ...modelAndEffort(agent), ...YOLO.pi]),
-        env: { ...CHILD_ENV },
+        env: {},
         dropEnv: [],
       }
     case 'codex':
@@ -101,7 +97,7 @@ function interactiveWindow(agent, sessionId, seed, resume) {
           ...modelAndEffort(agent),
           ...YOLO.codex,
         ]),
-        env: { ...CHILD_ENV },
+        env: {},
         dropEnv: interactiveGuards('codex'),
       }
     case 'devin':
@@ -109,7 +105,7 @@ function interactiveWindow(agent, sessionId, seed, resume) {
         command: 'devin',
         args: [...(resume ? ['--resume', sessionId] : []), ...modelAndEffort(agent), ...YOLO.devin],
         ...(seed ? { prompt: seed } : {}),
-        env: { ...CHILD_ENV },
+        env: {},
         dropEnv: [],
       }
     case 'opencode':
@@ -122,7 +118,7 @@ function interactiveWindow(agent, sessionId, seed, resume) {
           ...(resume ? [] : modelAndEffort(agent)),
           ...YOLO.opencode,
         ],
-        env: { ...CHILD_ENV },
+        env: {},
         dropEnv: [],
       }
     default:

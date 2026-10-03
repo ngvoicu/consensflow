@@ -169,9 +169,5 @@ export function openCodeAdapter({
       if (window.sessionId === null) return unnamed(observed, HOLD)
       return showing ? observed : switchedTo(observed, window.sessionId)
     },
-
-    transcript({ launch }) {
-      return { harness: 'opencode', session: launch.nativeSession }
-    },
   }
 }

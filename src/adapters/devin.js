@@ -126,10 +126,6 @@ export function devinAdapter({
       if (shown === undefined) return unnamed(observed, HOLD)
       return shown === launch.nativeSession ? observed : switchedTo(observed, shown)
     },
-
-    transcript({ launch }) {
-      return { harness: 'devin', session: launch.nativeSession, wire: launch.channel.wire }
-    },
   }
 }
 

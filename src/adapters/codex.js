@@ -201,9 +201,5 @@ export function codexAdapter({
         ? observed
         : switchedTo(observed, shown.sessionId)
     },
-
-    transcript({ launch }) {
-      return { harness: 'codex', session: launch.nativeSession }
-    },
   }
 }

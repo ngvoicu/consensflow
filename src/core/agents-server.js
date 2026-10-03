@@ -91,7 +91,7 @@ export function agentsUi(
           return json(200, {
             agents: offerable(listAgents(env), missing),
             // An image agent runs through Codex: it goes when Codex is missing.
-            harnesss: HARNESSES.filter(
+            harnesses: HARNESSES.filter(
               (harness) => !missing.includes(harness === 'image' ? 'codex' : harness),
             ),
             efforts: EFFORTS,
@@ -566,7 +566,7 @@ function renderForm(data) {
   const harnessSelect = document.querySelector('select[name=harness]');
   if (harnessSelect.options.length === 0) {
     // An image agent is Codex's own image generation, not a harness of its own.
-    for (const r of data.harnesss) harnessSelect.add(new Option(r === 'image' ? 'codex images' : r, r));
+    for (const r of data.harnesses) harnessSelect.add(new Option(r === 'image' ? 'codex images' : r, r));
     harnessSelect.onchange = () => showEfforts(data.efforts, harnessSelect.value);
   }
   showEfforts(data.efforts, harnessSelect.value);

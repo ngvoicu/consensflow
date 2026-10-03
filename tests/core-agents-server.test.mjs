@@ -212,7 +212,7 @@ describe('the agents screens on the new core', () => {
     const mine = listed.agents.find((p) => p.name === 'mine')
     assert.deepEqual([mine.workTier, mine.custom], ['complex', true])
     assert.equal('tags' in mine, false, 'an agent carries no tags')
-    assert.ok(Array.isArray(listed.harnesss), 'the harnesses the form offers')
+    assert.ok(Array.isArray(listed.harnesses), 'the harnesses the form offers')
     assert.equal(Object.hasOwn(listed, 'catalog'), false, 'the agents are the catalog')
     assert.equal(
       existsSync(join(t.env.CONSENSFLOW_HOME, 'integrations')),

@@ -90,7 +90,6 @@ export class Bridge {
     this.idPrefix = idPrefix
     this.peerIdPrefix = peerIdPrefix
     this._bufs = []
-    this._bufferedBytes = 0
     this._discarding = false
     this._counter = 0
     this._pending = new Map()
@@ -243,11 +242,9 @@ export class Bridge {
     if (tail.length > this.maxFrameBytes) {
       this._discarding = true
       this._report(new Error('bridge frame over maxFrameBytes'))
-      this._bufferedBytes = 0
       return
     }
     if (tail.length > 0) this._bufs = [tail]
-    this._bufferedBytes = tail.length
   }
 
   _discardThroughNewline(buf) {

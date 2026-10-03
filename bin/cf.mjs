@@ -54,7 +54,7 @@ Usage: cf <command> [options]
   doctor                                    Inspect runtime, roster and bundled roles
 
 Inside a window ConsensFlow opened, cf is the board: task add --tier <t> "…",
-task list|get|done|review|accept|reopen|cancel, inbox, ask, answer, staff, whoami.
+task list|get|done|accept|reopen|cancel, inbox, ask, answer, staff, whoami.
 `
 
 function out(text) {

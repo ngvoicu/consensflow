@@ -39,7 +39,7 @@ export const EFFORTS = {
 }
 
 /**
- * The payload speaks in kinds, the manager in harnesss. `image` has no
+ * The payload speaks in kinds, the manager in harnesses. `image` has no
  * harness here on purpose: an image agent is generated through the
  * Codex backend rather than launched as a CLI, so the roster cannot create
  * one and offering it as a quick-add would hand the user a dead button.

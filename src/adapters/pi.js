@@ -117,9 +117,5 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
       if (shown === null) return unnamed(observed, HOLD)
       return shown === launch.nativeSession ? observed : switchedTo(observed, shown)
     },
-
-    transcript({ launch }) {
-      return { harness: 'pi', session: launch.nativeSession }
-    },
   }
 }

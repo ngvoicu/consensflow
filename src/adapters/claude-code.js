@@ -148,10 +148,6 @@ export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
         ? switchedTo(observed, live.sessionId)
         : observed
     },
-
-    transcript({ launch }) {
-      return { harness: 'claude-code', session: launch.nativeSession, configDir }
-    },
   }
 }
 

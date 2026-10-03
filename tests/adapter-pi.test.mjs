@@ -90,7 +90,6 @@ describe('the Pi adapter', () => {
       assert.equal(plan.env.CF_DELIVERY_INBOX, path.join(root, 'inbox'))
       assert.equal(plan.env.CF_DELIVERY_SETTLED, path.join(root, 'settled'))
       assert.equal(plan.env.CF_DELIVERY_LAUNCH_ID, 'launch-1')
-      assert.equal(plan.env.CONSENSFLOW_CHILD, undefined, 'cf stays usable inside the window')
     })
   })
 

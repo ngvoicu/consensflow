@@ -218,17 +218,6 @@ test('window: the billing guard is the same one the one-shot carries', () => {
   assert.deepEqual(interactiveResume(AGENTS.codex, 't').dropEnv, ['OPENAI_API_KEY'])
 })
 
-test('window: every window is marked a child, so agents never nest', () => {
-  for (const w of [
-    interactiveStart(AGENTS.claude, 'u', 's'),
-    interactiveStart(AGENTS.pi, 'n', 's'),
-    interactiveStart(AGENTS.opencode, null, 's'),
-    interactiveResume(AGENTS.codex, 't'),
-  ]) {
-    assert.equal(w.env.CONSENSFLOW_CHILD, '1')
-  }
-})
-
 test('childEnv applies the guards a window declares', () => {
   const base = {
     PATH: '/bin',
@@ -243,7 +232,6 @@ test('childEnv applies the guards a window declares', () => {
   assert.equal(env.CMUX_SOCKET_CAPABILITY, undefined, 'pane control stripped')
   assert.equal(env.CMUX_CLAUDE_HOOK_CMUX_BIN, undefined)
   assert.equal(env.CMUX_SURFACE_ID, 'pane-1', 'identity vars survive — only control is stripped')
-  assert.equal(env.CONSENSFLOW_CHILD, '1')
   assert.equal(env.PATH, '/bin')
 })
 
@@ -259,7 +247,7 @@ test('window: OpenCode worker opens its exact native session and leaves task del
   const w = interactiveStart(AGENTS.opencode, 'ses_created', 'Tell me a joke.')
   assert.equal(w.args[w.args.indexOf('--session') + 1], 'ses_created')
   assert.equal(w.args.includes('--prompt'), false, '--session ignores CLI prompts')
-  assert.deepEqual(Object.keys(w.env), ['CONSENSFLOW_CHILD'])
+  assert.deepEqual(Object.keys(w.env), [])
 })
 
 test('window: devin joins a family and its level into the model id it writes', () => {
