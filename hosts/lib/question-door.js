@@ -57,8 +57,9 @@ export async function askTheBoard(client, questions, { waitMs = DOOR_WAIT_MS, si
   while (answer === null && Date.now() < until && !signal?.aborted) {
     const wait = Math.min(POLL_WAIT_MS, until - Date.now())
     try {
-      answer = (await client('GET', `/api/questions/${message.id}?wait=${wait}`, undefined, { signal }))
-        .answer
+      answer = (
+        await client('GET', `/api/questions/${message.id}?wait=${wait}`, undefined, { signal })
+      ).answer
     } catch (cause) {
       if (signal?.aborted) break
       throw cause

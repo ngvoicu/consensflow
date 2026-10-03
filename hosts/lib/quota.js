@@ -67,7 +67,12 @@ function resetAt(text, atMs) {
   try {
     const timeZone = zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
     const today = Object.fromEntries(
-      new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: 'numeric', day: 'numeric' })
+      new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+      })
         .formatToParts(atMs)
         .map(({ type, value }) => [type, Number(value)]),
     )
@@ -76,11 +81,13 @@ function resetAt(text, atMs) {
       if (month === -1) return null
       let at = zonedTime(today.year, month, Number(dayOfMonth), hour, minute, timeZone)
       // A date gone by more than a day is next year's.
-      if (at < atMs - UNIT_MS.d) at = zonedTime(today.year + 1, month, Number(dayOfMonth), hour, minute, timeZone)
+      if (at < atMs - UNIT_MS.d)
+        at = zonedTime(today.year + 1, month, Number(dayOfMonth), hour, minute, timeZone)
       return new Date(at).toISOString()
     }
     let at = zonedTime(today.year, today.month - 1, today.day, hour, minute, timeZone)
-    if (at <= atMs) at = zonedTime(today.year, today.month - 1, today.day + 1, hour, minute, timeZone)
+    if (at <= atMs)
+      at = zonedTime(today.year, today.month - 1, today.day + 1, hour, minute, timeZone)
     return new Date(at).toISOString()
   } catch {
     return null
@@ -135,10 +142,16 @@ export function codexQuota(limits) {
   const reached = limits?.rate_limit_reached_type != null
   const usedPercent = fullest?.used_percent ?? null
   return {
-    state: reached ? 'exhausted' : usedPercent !== null && usedPercent >= LOW_PERCENT ? 'low' : 'ok',
+    state: reached
+      ? 'exhausted'
+      : usedPercent !== null && usedPercent >= LOW_PERCENT
+        ? 'low'
+        : 'ok',
     usedPercent,
     resetsAt:
-      typeof fullest?.resets_at === 'number' ? new Date(fullest.resets_at * 1000).toISOString() : null,
+      typeof fullest?.resets_at === 'number'
+        ? new Date(fullest.resets_at * 1000).toISOString()
+        : null,
   }
 }
 
