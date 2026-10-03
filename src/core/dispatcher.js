@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { RESUME_WORDS } from '../ledger/index.js'
 import { Deliveries } from './deliveries.js'
 import { deliveryText, markerOf } from './delivery-text.js'
 import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.js'
+import { Scheduler } from './scheduler.js'
 
 /**
  * The dispatcher: the only actor in the daemon. Agents never open panes or
@@ -105,12 +105,6 @@ export function requireLeadAgent(agent) {
 const isHandoff = (message) =>
   message.kind === 'note' && message.sender === null && message.body.startsWith(HANDOFF_TITLE)
 
-/** A reset this near holds a task with its window rather than sending it back to the board. */
-const HOLD_MS = 30 * 60_000
-
-/** How long a quota lasts when its harness names no reset. */
-const UNKNOWN_RESET_MS = 60 * 60_000
-
 /** How soon a lead that could not start is tried again; the wait doubles with each failure, up to the most. */
 const RELAUNCH_MS = 5_000
 const RELAUNCH_MAX_MS = 5 * 60_000
@@ -138,12 +132,12 @@ export class Dispatcher {
   #log
   /** What goes into each window and what comes back out (`deliveries.js`). */
   #deliveries
+  /** Who takes which open task, and who is out of quota (`scheduler.js`). */
+  #scheduler
   #runtime = new Map()
   /** The records of participants forgotten while their window was still open, until it exits. */
   #leaving = new Set()
   #listeners = new Set()
-  /** The open tasks whose requester heard that they wait for a free member, each with its project. */
-  #waitingNoted = new Map()
   #generation = 0
 
   constructor({
@@ -183,6 +177,16 @@ export class Dispatcher {
       traceWindow: (runtime, kind, details) => this.#traceWindow(runtime, kind, details),
       retire: (runtime) => this.#retire(runtime),
       forgotten: (runtime) => this.#forgotten(runtime),
+      now: () => this.#now(),
+      changed: () => this.#changed(),
+    })
+    this.#scheduler = new Scheduler({
+      ledger,
+      adapters,
+      roster,
+      deliveries: this.#deliveries,
+      runtimeOf: (participantId) => this.#runtimeOf(participantId),
+      runtime: (participantId) => this.#runtime.get(participantId),
       now: () => this.#now(),
       changed: () => this.#changed(),
     })
@@ -411,9 +415,7 @@ export class Dispatcher {
     // its own lines in the trace. The ledger never gives their ids to another
     // project; its participants are forgotten before their windows close, so
     // its work still waiting stops instead of acting on rows that are gone.
-    for (const [task, noted] of this.#waitingNoted) {
-      if (noted === deleted.id) this.#waitingNoted.delete(task)
-    }
+    this.#scheduler.forgetProject(deleted.id)
     this.#trace.forget?.(projectId)
     await this.#forget((project?.participants ?? []).map((participant) => participant.id))
     // A deleted project leaves no trace but the line that says it was. That
@@ -491,11 +493,11 @@ export class Dispatcher {
    * them open their windows in this pass.
    */
   async pass() {
-    this.#resumeHeld()
+    this.#scheduler.resumeHeld()
     const projects = this.#ledger
       .projects()
       .map((project) =>
-        project.state === 'open' && this.#assignOpenTasks(project)
+        project.state === 'open' && this.#scheduler.assignOpenTasks(project)
           ? this.#ledger.project(project.id)
           : project,
       )
@@ -618,7 +620,7 @@ export class Dispatcher {
     if (runtime.window.pane !== null) return this.#stepOpen(project, participant, runtime)
     if (project.state !== 'open') return
     // A lead whose agent is gone stays closed: its launch told the human, who switches it.
-    if (participant.role === 'chief' && this.#agentGone(participant)) return
+    if (participant.role === 'chief' && this.#scheduler.agentGone(participant)) return
     // A lead whose window keeps failing to start is tried again ever more slowly.
     if (runtime.window.relaunch !== null && runtime.window.relaunch.at > this.#now()) return
     const next = this.#ledger.nextDelivery(participant.id)
@@ -629,7 +631,8 @@ export class Dispatcher {
     if (participant.role === 'chief') return
     // A member whose agent is gone must not wait for a window that will not
     // open: its held work goes back to the board now.
-    if (this.#agentGone(participant)) return this.#withoutAgent(project, participant, null)
+    if (this.#scheduler.agentGone(participant))
+      return this.#scheduler.withoutAgent(project, participant, null)
     // A member's session is its task's: with the window gone (a restart, a
     // crash) and nothing due to it, nobody is doing the work any more.
     const task = this.#ledger.activeTask(participant.id)
@@ -656,7 +659,7 @@ export class Dispatcher {
       return
     }
     // Quota belongs to the member: a session that runs out takes its member out.
-    const owner = this.#memberOf(project, participant)
+    const owner = this.#scheduler.memberOf(project, participant)
     // A window with nothing in its record may still be drawing its screen:
     // Pi and Devin read idle before they could take a keystroke. One that
     // has not said which conversation it shows (a resumed window has its
@@ -668,7 +671,7 @@ export class Dispatcher {
     if (this.#forgotten(runtime)) return
     const starting = drawing || (unnamed && !runtime.window.named)
     // An out member's window says so, and nothing else, until the reset.
-    if (!this.#isOut(owner)) {
+    if (!this.#scheduler.isOut(owner)) {
       this.#setActivity(
         runtime,
         starting
@@ -688,9 +691,9 @@ export class Dispatcher {
       this.#follow(participant, runtime, observed.switched.nativeSession)
       return
     }
-    if (observed.quota !== undefined) this.#recordQuota(runtime, owner, observed.quota)
-    const out = this.#isOut(owner)
-    if (!out && this.#freshRefusal(owner, runtime.quota.reported)) {
+    if (observed.quota !== undefined) this.#scheduler.recordQuota(runtime, owner, observed.quota)
+    const out = this.#scheduler.isOut(owner)
+    if (!out && this.#scheduler.freshRefusal(owner, runtime.quota.reported)) {
       await this.#outOfQuota(project, participant, runtime, owner)
       return
     }
@@ -777,7 +780,11 @@ export class Dispatcher {
         // Asked of the project as it is once the lead's step in progress is
         // over: one deleted meanwhile is no project now.
         requireOpen(this.#knownProject(projectId))
-        if (runtime.window.pane !== null && !this.#isOut(chief) && (when === 'turn' || note)) {
+        if (
+          runtime.window.pane !== null &&
+          !this.#scheduler.isOut(chief) &&
+          (when === 'turn' || note)
+        ) {
           // A switch asked again replaces the one waiting, with a note not yet sent.
           const replaced = runtime.pendingSwitch?.note ?? null
           if (replaced !== null && this.#ledger.message(replaced).state === 'queued') {
@@ -881,25 +888,6 @@ export class Dispatcher {
         pages: historyPages(history, { message }),
       }),
     })
-  }
-
-  /** A participant whose saved agent the human has since deleted. */
-  #agentGone(participant) {
-    return participant.agent !== null && this.#savedAgent(participant.agent) === null
-  }
-
-  /**
-   * A saved agent as the roster has it now: its row, or null when it is gone.
-   * While the human's agents file cannot be read (the roster throws, saying
-   * why) it is undefined: nobody counts as free for new work, and nobody's
-   * agent as gone, so no work is taken back for a typo.
-   */
-  #savedAgent(name) {
-    try {
-      return this.#roster(name)
-    } catch {
-      return undefined
-    }
   }
 
   /**
@@ -1095,7 +1083,7 @@ export class Dispatcher {
       const agent = participant.agent === null ? null : this.#roster(participant.agent)
       if (participant.agent !== null && agent === null) {
         if (participant.role === 'chief') this.#leadWithoutAgent(project, participant, delivering)
-        else this.#withoutAgent(project, participant, delivering)
+        else this.#scheduler.withoutAgent(project, participant, delivering)
         // A session's window the human opened, with nothing to deliver, says why it did not come.
         if (participant.role !== 'chief' && delivering === null) {
           this.#launchFailed(
@@ -1303,159 +1291,6 @@ export class Dispatcher {
     }
   }
 
-  // --- assignment ---------------------------------------------------------------------
-
-  /**
-   * Each open task goes to the best free member of its tier; the requester
-   * hears once when none is. A task that needs others waits for them to be
-   * accepted, in silence: its card says what it waits for. Says whether it
-   * gave any task out.
-   */
-  #assignOpenTasks(project) {
-    let assigned = false
-    for (const task of this.#ledger.openTasks(project.id)) {
-      if (task.blockedBy.length > 0) continue
-      const candidates = this.#ledger.candidates(project.id, task.number)
-      const free = candidates.filter((member) => this.#available(member))
-      if (free.length > 0) {
-        this.#ledger.assignTask(project.id, task.number, this.#rank(free, candidates)[0].id)
-        this.#waitingNoted.delete(task.id)
-        this.#changed()
-        assigned = true
-      } else if (!this.#waitingNoted.has(task.id)) {
-        this.#waitingNoted.set(task.id, project.id)
-        const why = candidates
-          .map((member) => this.#whyNotFree(member))
-          .filter((reason) => reason !== null)
-        this.#ledger.note(project.id, {
-          to: task.requester,
-          task: task.number,
-          body: `T-${task.number} waits for a free ${task.pool === 'designer' ? 'image designer' : `${task.tier} ${task.pool}`}: ${why.join('; ')}.`,
-        })
-        this.#changed()
-      }
-    }
-    return assigned
-  }
-
-  /** The member a session belongs to; a member or the chief is its own. */
-  #memberOf(project, participant) {
-    if (participant.memberId === null) return participant
-    return project.participants.find((p) => p.id === participant.memberId) ?? participant
-  }
-
-  /** Free: on a harness whose windows open, its agent saved, not out of quota, not low on it. */
-  #available(member) {
-    return this.#whyNotFree(member) === null
-  }
-
-  /** Why a member is not free, the first reason that holds for it; null when it is free. */
-  #whyNotFree(member) {
-    if (this.#adapters[member.harness] === undefined) {
-      return `@${member.handle} runs on ${member.harness}, whose windows ConsensFlow cannot open`
-    }
-    const agent = this.#savedAgent(member.agent)
-    if (agent === undefined) {
-      return `@${member.handle}'s agent cannot be read (your agents file needs fixing: see Agents)`
-    }
-    if (agent === null) {
-      return `@${member.handle} has no agent any more (${member.agent} is not among your agents: define it, or remove the member)`
-    }
-    if (this.#isOut(member)) return `@${member.handle} is out of quota until ${member.outUntil}`
-    if (this.#isLow(member)) return `@${member.handle} is low on quota`
-    return null
-  }
-
-  #isLow(member) {
-    const until = this.#runtime.get(member.id)?.quota.lowUntil ?? null
-    return until !== null && Date.parse(until) > this.#now()
-  }
-
-  #isOut(member) {
-    return member.outUntil !== null && Date.parse(member.outUntil) > this.#now()
-  }
-
-  /**
-   * A harness keeps its last record, so a refusal stays in view long after
-   * its reset: only one dated after the member was last marked out is news.
-   */
-  #freshRefusal(participant, quota) {
-    if (quota?.state !== 'exhausted') return false
-    // A refusal whose reset has passed is old news, whatever record still shows it.
-    if (quota.resetsAt && Date.parse(quota.resetsAt) <= this.#now()) return false
-    if (participant.outSince === null || !quota.at) return true
-    return Date.parse(quota.at) > Date.parse(participant.outSince)
-  }
-
-  /**
-   * Who of the free members takes a task: one it was taken from goes last;
-   * then the harness whose members of this role and tier have taken the fewest
-   * tasks, so a tier's work is shared across harnesses; then the member with
-   * the fewest; then the earliest joined.
-   */
-  #rank(members, candidates) {
-    const load = new Map()
-    for (const member of candidates) {
-      load.set(member.harness, (load.get(member.harness) ?? 0) + member.taken)
-    }
-    return [...members].sort(
-      (a, b) =>
-        Number(a.hadIt === true) - Number(b.hadIt === true) ||
-        load.get(a.harness) - load.get(b.harness) ||
-        a.taken - b.taken ||
-        a.id - b.id,
-    )
-  }
-
-  /**
-   * A member whose agent is gone from the human's agents (a release dropped
-   * the catalog entry, or the human removed one of their own) runs on no
-   * default: its tiered work goes back to the board for another member, with
-   * whatever was on its way to it withdrawn, and a request given to it by
-   * name fails so the requester hears why. The board says why it sits.
-   */
-  #withoutAgent(project, participant, delivering) {
-    const because = `${participant.agent} is no longer among your agents`
-    const tiered = this.#tieredWork(project, participant)
-    for (const task of tiered) this.#ledger.releaseTask(project.id, task.number, { because })
-    if (delivering !== null)
-      this.#deliveries.settleFailure(
-        delivering,
-        `${because}: add it back under Agents, or remove @${participant.handle} from the staff`,
-        { retry: false },
-      )
-    else if (tiered.length > 0) this.#changed()
-  }
-
-  /**
-   * The work a participant holds that was given to its tier (queued, working
-   * or waiting): another member of the tier could take it.
-   */
-  #tieredWork(project, participant) {
-    const lane = this.#ledger
-      .board(project.id)
-      .lanes.find((l) => l.participant.id === participant.id)
-    return (lane?.tasks ?? []).filter(
-      (task) => task.pool !== null && ['queued', 'working', 'waiting'].includes(task.state),
-    )
-  }
-
-  /** What a window's harness says of its quota, as of this look. */
-  #recordQuota(runtime, owner, quota) {
-    runtime.quota.reported = quota ?? null
-    // Low is soft: the current task continues, nothing new comes until the
-    // reset it names (an hour when it names none). It outlives the window,
-    // which closes with the task, so a low member is not asked again at once.
-    if (runtime.quota.reported?.state === 'low') {
-      this.#runtimeOf(owner.id).quota.lowUntil = this.#resetOf(runtime.quota.reported)
-    } else if (runtime.quota.reported !== null) this.#runtimeOf(owner.id).quota.lowUntil = null
-  }
-
-  /** When a quota resets: the time its harness names, or an hour from now. */
-  #resetOf(quota) {
-    return quota.resetsAt ?? new Date(this.#now() + UNKNOWN_RESET_MS).toISOString()
-  }
-
   /**
    * A member whose harness just refused it: out until the reset it names (an
    * hour when it names none). What it was receiving is queued again, its
@@ -1465,7 +1300,7 @@ export class Dispatcher {
    * up again at the reset, beside whoever has it now.
    */
   async #outOfQuota(project, participant, runtime, owner) {
-    const until = this.#resetOf(runtime.quota.reported)
+    const until = this.#scheduler.resetOf(runtime.quota.reported)
     this.#setActivity(runtime, { state: 'out', reason: `out of quota until ${until}` })
     this.#ledger.markOut(owner.id, { until, reason: 'out of quota' })
     if (runtime.delivery.delivering !== null) {
@@ -1473,41 +1308,9 @@ export class Dispatcher {
       runtime.delivery.delivering = null
       this.#deliveries.settleFailure(delivering, 'the harness ran out of quota', { retry: true })
     }
-    // Near the reset, or with nobody else to take it, a task keeps its window
-    // and goes on by itself; otherwise it goes back to the board.
-    const soon = Date.parse(until) - this.#now() <= HOLD_MS
-    for (const task of this.#tieredWork(project, participant)) {
-      const teammate = this.#ledger
-        .candidates(project.id, task.number)
-        .some((member) => member.id !== owner.id && this.#available(member))
-      if (soon || !teammate) {
-        this.#ledger.holdTask(project.id, task.number, { until, because: 'out of quota' })
-        this.#ledger.note(project.id, {
-          to: task.requester,
-          task: task.number,
-          body: `T-${task.number} waits with @${participant.handle}: out of quota until ${until}; it goes on by itself then.`,
-        })
-      } else {
-        this.#ledger.releaseTask(project.id, task.number, {
-          because: 'ran out of quota after starting',
-        })
-      }
-    }
+    this.#scheduler.holdOrRelease(project, participant, owner, until)
     if (participant.role !== 'chief') await this.#closeIfFree(runtime)
     this.#changed()
-  }
-
-  /** A held task whose time has come goes on in its own window, unless its member is still out. */
-  #resumeHeld() {
-    for (const held of this.#ledger.heldTasksDue(new Date(this.#now()).toISOString())) {
-      const project = this.#ledger.project(held.projectId)
-      if (project === null || project.state !== 'open') continue
-      const assignee = project.participants.find((p) => p.id === held.assigneeId)
-      const owner = assignee === undefined ? null : this.#memberOf(project, assignee)
-      if (owner !== null && this.#isOut(owner)) continue
-      this.#ledger.resumeTask(held.projectId, held.number, { body: RESUME_WORDS })
-      this.#changed()
-    }
   }
 
   // --- small helpers -------------------------------------------------------------------
