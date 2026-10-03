@@ -84,10 +84,6 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       project: await dispatcher.openWindow(project, handle),
     })),
 
-    'session.close': change(async ({ project, handle }) => ({
-      project: await dispatcher.closeWindow(project, handle),
-    })),
-
     'session.end': change(async ({ project, handle }) => ({
       project: await dispatcher.endSession(project, handle),
     })),

@@ -239,7 +239,7 @@ test('with human approval required, the brief and the result each wait for the h
   }
 })
 
-test("the human opens a finished session's window on its own conversation, and closing it ends the process", async () => {
+test("the human opens a finished session's window on its own conversation, and it stays until the session ends", async () => {
   const app = await startIntegration({
     daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
@@ -285,11 +285,11 @@ test("the human opens a finished session's window on its own conversation, and c
     assert.notEqual((await session()).pane, null, 'it stays open with nothing to do')
     assert.equal(alive(again.pid), true)
 
-    const closed = await app.requestNode('session.close', { project: p.id, handle })
-    assert.equal(closed.ok, true, JSON.stringify(closed))
-    await app.waitFor(async () => (await session())?.pane === null, 30_000)
+    // Ending the session is what closes a window the human opened.
+    const ended = await app.requestNode('session.end', { project: p.id, handle })
+    assert.equal(ended.ok, true, JSON.stringify(ended))
     await app.waitFor(async () => !alive(again.pid), 30_000)
-    assert.ok(await session(), 'the session stays for the human')
+    assert.equal(await session(), undefined, 'its lane folds into its member')
   } finally {
     await app.close()
   }

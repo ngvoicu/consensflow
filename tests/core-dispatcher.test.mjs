@@ -2506,46 +2506,6 @@ describe('one task per member session', () => {
     })
   })
 
-  it("waits for a session's window still opening before it closes it at the human's hand", async () => {
-    await setup(async (context) => {
-      const { project } = await finished(context)
-      const killed = context.host.killed.length
-      let open
-      context.host.hold = new Promise((resolve) => {
-        open = resolve
-      })
-      // The human opens the finished session's window, and closes it before it is up.
-      await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
-      const closing = context.dispatcher.closeWindow(project.id, 'zeus-amber-pine')
-      await new Promise((resolve) => setImmediate(resolve))
-      assert.equal(context.host.killed.length, killed, 'the launch is still in progress')
-
-      open()
-      await closing
-      const pane = context.host.last('zeus-amber-pine')
-      assert.deepEqual(context.host.killed.at(-1), { id: pane.id, generation: pane.generation })
-    })
-  })
-
-  it('says so when a window the human closes would not close, and keeps it open until it does', async () => {
-    await setup(async (context) => {
-      const { project } = await finished(context)
-      await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
-      const killed = context.host.killed.length
-      context.host.refuseKills = true
-      await assert.rejects(
-        context.dispatcher.closeWindow(project.id, 'zeus-amber-pine'),
-        /@zeus-amber-pine's window could not be closed: try again/,
-      )
-      context.host.refuseKills = false
-      await context.dispatcher.pass()
-      await context.dispatcher.pass()
-      assert.equal(context.host.killed.length, killed + 1, "still the human's: no pass closes it")
-      await context.dispatcher.closeWindow(project.id, 'zeus-amber-pine')
-      assert.equal(context.host.killed.length, killed + 2, 'killed again, not taken as closing')
-    })
-  })
-
   it("continues a finished task's session with --after: the same window comes back on its conversation", async () => {
     await setup(async (context) => {
       const { project, id, task } = await finished(context)
@@ -2577,7 +2537,7 @@ describe('one task per member session', () => {
     })
   })
 
-  it("keeps a session after its work until the human ends it, and opens, closes and ends its window at the human's hand", async () => {
+  it('keeps a session after its work until the human ends it, and keeps a window the human opened through the work that comes', async () => {
     await setup(async (context) => {
       const { project, open, task } = await finished(context)
       await context.dispatcher.pass()
@@ -2599,11 +2559,11 @@ describe('one task per member session', () => {
         ['zeus-amber-pine', native, null],
       )
       const killed = context.host.killed.length
+      const kept = context.host.last('zeus-amber-pine')
+      const isKept = (pane) => pane.id === kept.id && pane.generation === kept.generation
       await context.dispatcher.pass()
       await context.dispatcher.pass()
       assert.equal(context.host.killed.length, killed, 'a window the human opened is not retired')
-      await context.dispatcher.closeWindow(project.id, 'zeus-amber-pine')
-      assert.equal(context.host.killed.length, killed + 1, "closed at the human's hand")
 
       // Ending the session closes its window and folds it away.
       open({ body: 'Docs' })
@@ -2626,6 +2586,11 @@ describe('one task per member session', () => {
         context.ledger.project(project.id).participants.some((p) => p.handle === working.assignee),
         false,
       )
+      // The window the human opened stayed through that work: ending its
+      // session is what closes it.
+      assert.ok(!context.host.killed.some(isKept))
+      await context.dispatcher.endSession(project.id, 'zeus-amber-pine')
+      assert.ok(context.host.killed.some(isKept))
     })
   })
 

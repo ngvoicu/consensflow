@@ -353,8 +353,8 @@ export class Dispatcher {
 
   /**
    * The human opens a session's window with nothing to deliver: it comes back
-   * on its own conversation, with its history, and stays open until the
-   * human closes it, whatever work comes and goes meanwhile.
+   * on its own conversation, with its history, and stays open, whatever work
+   * comes and goes meanwhile, until its session or its project ends.
    */
   async openWindow(projectId, handle) {
     const { project, participant } = this.#sessionOf(projectId, handle)
@@ -400,30 +400,6 @@ export class Dispatcher {
       },
       { wait: true },
     )
-  }
-
-  /**
-   * The human closes a session's window; work in it pauses, as any lost
-   * window's does. A window still opening is closed once it has opened, not
-   * left open behind an answer that said it was closed; one that would not
-   * close stays as it was, and the human is told.
-   */
-  async closeWindow(projectId, handle) {
-    const { participant } = this.#sessionOf(projectId, handle)
-    await this.#exclusive(
-      participant.id,
-      async () => {
-        const runtime = this.#runtimeOf(participant.id)
-        const { pinned } = runtime.window
-        runtime.window.pinned = false
-        if (runtime.window.pane !== null && !(await this.#windows.retire(runtime))) {
-          runtime.window.pinned = pinned
-          throw new Error(`@${handle}'s window could not be closed: try again`)
-        }
-      },
-      { wait: true },
-    )
-    return this.#ledger.project(projectId)
   }
 
   /** The human ends a session for good: the ledger folds it, and it is forgotten with its window. */

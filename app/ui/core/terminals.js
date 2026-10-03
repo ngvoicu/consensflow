@@ -228,7 +228,7 @@ export class TerminalsView {
   /**
    * The human asks to see a session's terminal: its card comes into the
    * dock with everything its window wrote since it opened. One asked for
-   * before its window is up (Open terminal) comes in when it is.
+   * before its window is up (a closed one shown) comes in when it is.
    */
   show(project, handle) {
     this.#showing.add(showingKey(project, handle))

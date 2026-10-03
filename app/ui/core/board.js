@@ -43,12 +43,6 @@ export const ICONS = {
     'M6.6 6.6C3.8 8.5 2 12 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6',
     'M9.9 9.9a3 3 0 0 0 4.2 4.2',
   ],
-  open: [
-    'M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z',
-    'M7 9l3 3-3 3',
-    'M13 15h4',
-  ],
-  close: ['M12 3v9', 'M18.4 6.6a9 9 0 1 1-12.8 0'],
   remove: ['M4 7h16', 'M9 7V4h6v3', 'M6 7l1 13h10l1-13', 'M10 11v6', 'M14 11v6'],
   stack: [
     'M4 11h16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Z',
@@ -289,7 +283,7 @@ export function laneStatus(lane, board, now) {
     const note = sessionsNote(lane, board)
     return note === null ? null : [state, note]
   }
-  // A closed session's row says nothing: its lamp and its Open terminal say it.
+  // A closed session's row says nothing: its lamp and its Show terminal say it.
   if (participant.member !== null && state === 'closed') return null
   return [state, ACTIVITY_LABEL[state] ?? 'No window']
 }
@@ -637,20 +631,20 @@ export class BoardView {
   }
 
   /**
-   * Only a session's terminal is the human's to open and close: a member's
-   * row heads its sessions and has no terminal of its own. An open terminal
-   * stays out of the dock until the human shows it, and hides again; a
-   * closed one opens again on its own conversation, and its copy is on its
-   * last task's card. The session is deleted from here too. Each of these
-   * is an icon, named in its tip; a closed project's rows have none.
+   * A session's terminal is the human's to show and hide: shown, its card is
+   * in the dock; hidden, the card goes while its window works on. One whose
+   * window has closed opens again on its own conversation when shown, and
+   * its copy is on its last task's card. The session is deleted from here
+   * too. Each of these is an icon, named in its tip; a closed project's rows
+   * have none.
    */
   #rowTools(lane, board) {
-    const { participant, pane } = lane
+    const { participant } = lane
     const tools = element('div', 'row-tools')
     const session = participant.member !== null
     const acting = acts(board)
     const name = laneName(participant)
-    if (session && pane !== null && acting) {
+    if (session && acting) {
       tools.append(
         this.#shows(participant)
           ? iconButton(
@@ -662,29 +656,12 @@ export class BoardView {
           : iconButton(
               ICONS.show,
               'Show terminal',
-              this.#onLane(this.#actions.onShowTerminal, participant),
+              () => {
+                const shown = this.#lane(participant)
+                this.#actions.onShowTerminal(shown.participant, { closed: shown.pane === null })
+              },
               `Show ${name}'s terminal`,
             ),
-      )
-    }
-    if (session && pane === null && acting) {
-      tools.append(
-        iconButton(
-          ICONS.open,
-          'Open terminal',
-          this.#onLane(this.#actions.onOpenTerminal, participant),
-          `Open ${name}'s terminal`,
-        ),
-      )
-    }
-    if (session && pane !== null && acting) {
-      tools.append(
-        iconButton(
-          ICONS.close,
-          'Close terminal',
-          this.#onLane(this.#actions.onCloseTerminal, participant),
-          `Close ${name}'s terminal`,
-        ),
       )
     }
     if (session && acting) {

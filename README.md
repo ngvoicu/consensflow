@@ -106,9 +106,10 @@ projects.
   four tasks or more is one tile, a stack and how many, that lists them. The
   chief's card is always docked beside the board: what the chief is doing and
   runs on, Switch chief, and its terminal while its window lives. A session's
-  terminal stays out of the dock until you choose Show terminal on its row;
-  Hide terminal (or Hide on its card) puts it away while its window works on,
-  and it keeps all it wrote.
+  terminal stays out of the dock until you choose Show terminal on its row
+  (one whose window has closed opens again on its own conversation); Hide
+  terminal (or Hide on its card) puts it away while its window works on, and
+  it keeps all it wrote.
 - **New project.** A folder, the saved agent the chief runs on (its harness,
   model and effort come with it), the staff (the last project's ticked
   already) and whether human approval is required.

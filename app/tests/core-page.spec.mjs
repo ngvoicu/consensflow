@@ -483,7 +483,7 @@ test('shows an agent-written title as text, never as markup', async ({ page }) =
   await expect(page.locator('tr[data-handle="diana"] img')).toHaveCount(0)
 })
 
-test("gives a session's lane the human's hand on its window: show, open, close, delete", async ({
+test("gives a session's lane the human's hand on its window: show (opening a closed one), hide, delete", async ({
   page,
 }) => {
   const data = model()
@@ -505,42 +505,32 @@ test("gives a session's lane the human's hand on its window: show, open, close, 
     },
   )
   await open(page, data)
+  // A live window and a closed one offer the same Show: nothing closes a
+  // window from the board, the work in it is paused or cancelled on its card.
   const live = page.locator('tr[data-handle="zeus-amber-pine"]')
-  await expect
-    .poll(() => toolsOf(live))
-    .toEqual(['Show terminal', 'Close terminal', 'Delete session'])
-  await expect(
-    live.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }),
-  ).toBeVisible()
-  await expect(
-    live.getByRole('button', { name: "Open @zeus · amber-pine's terminal" }),
-  ).toHaveCount(0)
+  await expect.poll(() => toolsOf(live)).toEqual(['Show terminal', 'Delete session'])
   const closed = page.locator('tr[data-handle="zeus-brisk-birch"]')
+  await expect.poll(() => toolsOf(closed)).toEqual(['Show terminal', 'Delete session'])
   await expect(closed.locator('.row-status')).toHaveCount(0)
-  // Opening a terminal unfolds the dock it shows in.
+  // Showing a closed one opens it again, and unfolds the dock it shows in.
   await page.getByRole('button', { name: 'Hide terminals' }).click()
   await expect(page.getByRole('region', { name: 'Terminals' })).toBeHidden()
-  await closed.getByRole('button', { name: "Open @zeus · brisk-birch's terminal" }).click()
+  await closed.getByRole('button', { name: "Show @zeus · brisk-birch's terminal" }).click()
   await expect
     .poll(() => calls(page, 'session.open'))
     .toEqual([{ project: 1, handle: 'zeus-brisk-birch' }])
   await expect(page.getByRole('region', { name: 'Terminals' })).toBeVisible()
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   const card = dock.locator('.terminal-card[data-handle="zeus-amber-pine"]')
-  // A live session's terminal is in the dock once the human shows it.
+  // A live session's terminal is in the dock once the human shows it, and
+  // asks the daemon nothing: its window is open already.
   await expect(card).toHaveCount(0)
   await live.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   await expect(card).toHaveCount(1)
-  // The chief's window stays with the project, and a session's card only
-  // hides it: neither card offers a Close.
+  expect(await calls(page, 'session.open')).toEqual([{ project: 1, handle: 'zeus-brisk-birch' }])
+  await expect.poll(() => toolsOf(live)).toEqual(['Hide terminal', 'Delete session'])
+  // Neither the chief's card nor a session's offers a Close.
   await expect(dock.getByRole('button', { name: /^Close/ })).toHaveCount(0)
-  // The row closes the window.
-  await live.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }).click()
-  await expect
-    .poll(() => calls(page, 'session.close'))
-    .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
-  // Its card goes at once, even while the board still lists the window on its way out.
-  await expect(dock.locator('.terminal-card[data-handle="zeus-amber-pine"]')).toHaveCount(0)
   await closed.getByRole('button', { name: "Delete @zeus · brisk-birch's session" }).click()
   await expect
     .poll(() => calls(page, 'session.end'))
@@ -1966,13 +1956,13 @@ test('a redraw leaves the keyboard where it was, on the board, the projects and 
   })
   await expect(page.locator('td[data-state="working"] button.card[data-task="4"]')).toHaveCount(1)
   expect(await focusedLabel(page)).toBe('T-4, Add the tests, Working, from @chief')
-  // A session's Close on its row, and its Hide on its card in the dock, while its lamp changes.
+  // A session's Hide on its row, and on its card in the dock, while its lamp changes.
   const row = page.locator('tr[data-handle="zeus-amber-pine"]')
   await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
-  await row.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }).focus()
+  await row.getByRole('button', { name: "Hide @zeus · amber-pine's terminal" }).focus()
   await lampDrawn('zeus-amber-pine', 'idle')
   await expect(
-    row.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }),
+    row.getByRole('button', { name: "Hide @zeus · amber-pine's terminal" }),
   ).toBeFocused()
   const card = page.locator('.terminal-card[data-handle="zeus-amber-pine"]')
   await card.getByRole('button', { name: "Hide @zeus · amber-pine's terminal" }).focus()
@@ -2696,8 +2686,8 @@ test("lists every member under the chief, with no staff groups, on the board and
   await expect(page.locator('tr[data-handle="athena"] .row-meta')).toContainText('advisor')
 
   // The dock on the right is a strip of terminals, the chief first, then the
-  // members' own (a session's waits to be shown); a row with its terminal
-  // open offers no Open terminal.
+  // members' own (a session's waits to be shown); a member's heading row
+  // offers no Show terminal.
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   const cards = () =>
     dock.locator('.terminal-card').evaluateAll((cards) => cards.map((c) => c.dataset.handle))
@@ -2706,7 +2696,7 @@ test("lists every member under the chief, with no staff groups, on the board and
     'data-handle',
     'chief',
   )
-  await expect(page.getByRole('button', { name: "Open @athena's terminal" })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: "Show @athena's terminal" })).toHaveCount(0)
   expect(await page.evaluate(() => window.__emulators.length)).toBe(3)
   expect(await page.locator('tbody tr[data-handle]').count()).toBe(
     4,
@@ -3294,8 +3284,8 @@ test("docks the chief's terminal and a member's own, offers no Open terminal for
     'data-handle',
     'chief',
   )
-  await expect(page.getByRole('button', { name: "Open @zeus's terminal" })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: "Open Chief of Staff's terminal" })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: "Show @zeus's terminal" })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: "Show Chief of Staff's terminal" })).toHaveCount(0)
   // A member without a window of its own is a heading: nothing to view on its row.
   await expect(page.locator('tr[data-handle="diana"] .row-tools button')).toHaveCount(0)
   await page.evaluate(() =>
@@ -3604,7 +3594,7 @@ test("takes a closed window's card out of the dock: its lane says so and opens i
   const row = page.locator('tr[data-handle="zeus-amber-pine"]')
   await expect(row.locator('.row-status')).toHaveCount(0)
   await expect(row.getByTestId('lamp')).toHaveAttribute('data-state', 'closed')
-  await row.getByRole('button', { name: "Open @zeus · amber-pine's terminal" }).click()
+  await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   await expect
     .poll(() => calls(page, 'session.open'))
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
@@ -3687,9 +3677,7 @@ test("keeps a session's terminal out of the dock until the human shows it, and t
   await expect.poll(() => docked(page)).toEqual(['chief'])
   const worker = page.locator('tr[data-handle="zeus-amber-pine"]')
   await expect(worker.locator('.row-status')).toHaveText('Working')
-  await expect
-    .poll(() => toolsOf(worker))
-    .toEqual(['Show terminal', 'Close terminal', 'Delete session'])
+  await expect.poll(() => toolsOf(worker)).toEqual(['Show terminal', 'Delete session'])
   const reviewer = page.locator('tr[data-handle="zeus-brisk-birch"]')
   await expect(reviewer.locator('.row-status')).toHaveText('Waiting: permission to run a command')
   await expect(
@@ -3734,9 +3722,7 @@ test("shows a session's terminal in front, the dock unfolded, and hides it again
   await expect(page.getByRole('region', { name: 'Terminals' })).toBeVisible()
   await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
   await expect(card).toHaveAttribute('data-focused', 'true')
-  await expect
-    .poll(() => toolsOf(row))
-    .toEqual(['Hide terminal', 'Close terminal', 'Delete session'])
+  await expect.poll(() => toolsOf(row)).toEqual(['Hide terminal', 'Delete session'])
   // Hidden from its row: the card goes and the chief's is in front again.
   await row.getByRole('button', { name: "Hide @zeus · amber-pine's terminal" }).click()
   await expect.poll(() => docked(page)).toEqual(['chief'])
@@ -3756,11 +3742,10 @@ test("shows a session's terminal in front, the dock unfolded, and hides it again
   ).toBeVisible()
   // None of it asks the daemon anything: the window works on, the same one throughout.
   expect(await calls(page, 'session.open')).toEqual([])
-  expect(await calls(page, 'session.close')).toEqual([])
   expect(await disposed(page)).toBe(0)
 })
 
-test("offers Hide alone on a session's card: its window works on, and only its row's Close ends it", async ({
+test("offers Hide alone on a session's card: its window works on, hidden from the dock", async ({
   page,
 }) => {
   await open(page, atWork())
@@ -3777,13 +3762,8 @@ test("offers Hide alone on a session's card: its window works on, and only its r
     window.__output.onmessage({ id: 'p1-zeus-amber-pine', generation: 9, seq: 1, bytes: [104] }),
   )
   await expect.poll(() => acked(page, 'p1-zeus-amber-pine')).toEqual([1])
-  expect(await calls(page, 'session.close')).toEqual([])
   expect(await disposed(page)).toBe(0)
-  // Its row's Close is the one way to end it.
-  await row.getByRole('button', { name: "Close @zeus · amber-pine's terminal" }).click()
-  await expect
-    .poll(() => calls(page, 'session.close'))
-    .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
+  await expect(row.getByRole('button', { name: /^Close/ })).toHaveCount(0)
 })
 
 test("keeps a shown session's card head on one line, Hide in it, at the default window and on a wider screen", async ({
@@ -3901,7 +3881,7 @@ test("takes a shown terminal out with its window; the session's next window wait
   // That one ends too, and the human opens the terminal: the window that
   // comes is shown, in front, as asked.
   await windowOf(null)
-  await row.getByRole('button', { name: "Open @zeus · amber-pine's terminal" }).click()
+  await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   await expect
     .poll(() => calls(page, 'session.open'))
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
@@ -4214,11 +4194,9 @@ test('keeps every button of a lane inside its column, however narrow the board',
   for (let press = 0; press < 30; press += 1) await grip.press('ArrowLeft')
   await expect(grip).toHaveAttribute('aria-valuenow', '280')
   const row = page.locator('tr[data-handle="zeus-lively-comet"]')
-  await expect.poll(() => toolsOf(row)).toEqual(['Open terminal', 'Delete session'])
+  await expect.poll(() => toolsOf(row)).toEqual(['Show terminal', 'Delete session'])
   const live = page.locator('tr[data-handle="zeus-amber-pine"]')
-  await expect
-    .poll(() => toolsOf(live))
-    .toEqual(['Show terminal', 'Close terminal', 'Delete session'])
+  await expect.poll(() => toolsOf(live)).toEqual(['Show terminal', 'Delete session'])
   const outside = () =>
     page.locator('table[aria-label="Tasks"] tbody th').evaluateAll((heads) =>
       heads.flatMap((head) => {
@@ -4234,9 +4212,7 @@ test('keeps every button of a lane inside its column, however narrow the board',
   expect(await outside()).toEqual([])
   // Its terminal shown, the live lane offers to hide it, in the same room.
   await live.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
-  await expect
-    .poll(() => toolsOf(live))
-    .toEqual(['Hide terminal', 'Close terminal', 'Delete session'])
+  await expect.poll(() => toolsOf(live)).toEqual(['Hide terminal', 'Delete session'])
   expect(await outside()).toEqual([])
 })
 
@@ -4255,14 +4231,14 @@ test("gives a member's heading row no buttons, and a closed session's row no Tra
   await expect(page.locator('tr[data-handle="diana"] .row-tools button')).toHaveCount(0)
   await expect
     .poll(() => toolsOf(page.locator('tr[data-handle="diana-amber-pine"]')))
-    .toEqual(['Open terminal', 'Delete session'])
+    .toEqual(['Show terminal', 'Delete session'])
   // Each tool is an icon, its name in a tip on hover.
-  const openTerminal = page.getByRole('button', { name: "Open @diana · amber-pine's terminal" })
-  await expect(openTerminal.locator('svg.icon')).toHaveCount(1)
-  await openTerminal.hover()
+  const showTerminal = page.getByRole('button', { name: "Show @diana · amber-pine's terminal" })
+  await expect(showTerminal.locator('svg.icon')).toHaveCount(1)
+  await showTerminal.hover()
   await expect
-    .poll(() => openTerminal.evaluate((node) => getComputedStyle(node, '::after').content))
-    .toBe('"Open terminal"')
+    .poll(() => showTerminal.evaluate((node) => getComputedStyle(node, '::after').content))
+    .toBe('"Show terminal"')
   await page.locator('tr[data-handle="diana-amber-pine"] button.card[data-task="3"]').click()
   await expect(page.getByRole('complementary', { name: 'Task T-3' })).toBeVisible()
 })
@@ -4441,7 +4417,7 @@ test("acts on the project a control was drawn for, while another one's board is 
   })
   await chooseProject(page, 'foundry')
   // harbour's board is still the one shown: what is done on it is done in harbour.
-  await page.getByRole('button', { name: "Open @zeus · amber-pine's terminal" }).click()
+  await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   await expect
     .poll(() => calls(page, 'session.open'))
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])

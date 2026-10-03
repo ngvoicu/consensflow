@@ -138,22 +138,21 @@ const board = new BoardView(boardRoot, $('#stack-dialog'), {
   // the human just chose, while that one's board is on its way.
   onOpenTask: (number) => act(() => openTask(state.board.project.id, number)),
   // A session's terminal is in the dock only once the human asks to see it:
-  // showing it unfolds the dock and brings it to the front, hiding it takes
-  // its card out while its window works on. Opening a closed one brings it
-  // back on its own conversation, shown the same way. Closing it ends its
-  // process and takes its card away with it.
-  onShowTerminal: (participant) => showTerminal(participant),
-  onHideTerminal: (participant) => terminals.hide(participant.projectId, participant.handle),
-  onOpenTerminal: (participant) =>
-    act(async () => {
+  // showing it unfolds the dock and brings it to the front, and a closed one
+  // opens first, on its own conversation. Hiding it takes its card out while
+  // its window works on; a window the human opened stays until its session
+  // or its project ends.
+  onShowTerminal: (participant, { closed }) => {
+    if (!closed) {
+      showTerminal(participant)
+      return
+    }
+    void act(async () => {
       await daemon('session.open', { project: participant.projectId, handle: participant.handle })
       showTerminal(participant)
-    }),
-  onCloseTerminal: (participant) =>
-    act(async () => {
-      await daemon('session.close', { project: participant.projectId, handle: participant.handle })
-      terminals.forget(participant.projectId, participant.handle)
-    }),
+    })
+  },
+  onHideTerminal: (participant) => terminals.hide(participant.projectId, participant.handle),
   onEndSession: (participant) =>
     act(async () => {
       await daemon('session.end', { project: participant.projectId, handle: participant.handle })
