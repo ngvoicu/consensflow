@@ -593,6 +593,31 @@ describe('the dispatcher', () => {
     })
   })
 
+  it('interrupts a task paused again after a resume, however many rounds its first pause took', async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const escapes = () => context.host.requests.filter(([op]) => op === 'pane.input').length
+      // A harness that ignores the key: three rounds, then no more for this pause.
+      context.adapter.busy('zeus')
+      context.ledger.pauseTask(project.id, 1, { by: 'chief' })
+      for (let round = 0; round < 4; round += 1) {
+        await context.dispatcher.pass()
+        context.clock.advance(3_100)
+      }
+      assert.equal(escapes(), 3, 'three rounds for the first pause')
+      context.ledger.resumeTask(project.id, 1, { by: 'chief', body: 'Carry on' })
+      await context.dispatcher.pass()
+      context.adapter.busy('zeus')
+      context.clock.advance(1_000)
+      context.ledger.pauseTask(project.id, 1, { by: 'chief' })
+      await context.dispatcher.pass()
+      assert.equal(escapes(), 4, 'the second pause is a stop of its own')
+    })
+  })
+
   it("leaves the window alone once the chief's tell reaches it, answered or not, until the task goes on", async () => {
     await setup(async (context) => {
       const { project } = await withStaff(context)
@@ -2422,6 +2447,27 @@ describe('one task per member session', () => {
       )
       await context.dispatcher.pass()
       assert.equal(task(1).state, 'working')
+    })
+  })
+
+  it("waits for a session's window still opening before it closes it at the human's hand", async () => {
+    await setup(async (context) => {
+      const { project } = await finished(context)
+      const killed = context.host.killed.length
+      let open
+      context.host.hold = new Promise((resolve) => {
+        open = resolve
+      })
+      // The human opens the finished session's window, and closes it before it is up.
+      await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
+      const closing = context.dispatcher.closeWindow(project.id, 'zeus-amber-pine')
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.equal(context.host.killed.length, killed, 'the launch is still in progress')
+
+      open()
+      await closing
+      const pane = context.host.last('zeus-amber-pine')
+      assert.deepEqual(context.host.killed.at(-1), { id: pane.id, generation: pane.generation })
     })
   })
 

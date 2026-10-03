@@ -393,7 +393,7 @@ export class Windows {
       // The chief's tell reached the window during this pause: the agent answers
       // it and ends its own turn, uninterrupted; the chief resumes the task.
       if (!this.#ledger.toldSincePaused(participant.id, paused.id)) {
-        await this.#interrupt(runtime, paused.id)
+        await this.#interrupt(runtime, `${paused.id} paused ${paused.pausedAt}`)
       }
       return
     }
@@ -405,17 +405,18 @@ export class Windows {
       (message) =>
         message.recipientId === participant.id && turn?.text.includes(markerOf(message.id)),
     )
-    if (about) await this.#interrupt(runtime, cancelled.id)
+    if (about) await this.#interrupt(runtime, `${cancelled.id} cancelled`)
   }
 
   /**
-   * The Escape key interrupts the turn on `taskId` (twice in a row where the
-   * harness asks for it), and again a few seconds later while the window
-   * still reads as working, since a harness may ignore the key while it
-   * thinks: three rounds at most.
+   * The Escape key interrupts the turn a task's `stop` is for (twice in a row
+   * where the harness asks for it), and again a few seconds later while the
+   * window still reads as working, since a harness may ignore the key while
+   * it thinks: three rounds at most for each stop, so a task paused again
+   * after a resume is interrupted again.
    */
-  async #interrupt(runtime, taskId) {
-    const done = runtime.window.interrupted?.task === taskId ? runtime.window.interrupted : null
+  async #interrupt(runtime, stop) {
+    const done = runtime.window.interrupted?.stop === stop ? runtime.window.interrupted : null
     if (
       done !== null &&
       (runtime.window.activity.state !== 'working' ||
@@ -424,7 +425,7 @@ export class Windows {
     ) {
       return
     }
-    runtime.window.interrupted = { task: taskId, rounds: (done?.rounds ?? 0) + 1, at: this.#now() }
+    runtime.window.interrupted = { stop, rounds: (done?.rounds ?? 0) + 1, at: this.#now() }
     const presses = runtime.window.adapter.interrupt?.presses ?? 1
     for (let press = 0; press < presses; press += 1) {
       if (press > 0) await new Promise((resolve) => setTimeout(resolve, DOUBLE_PRESS_MS))

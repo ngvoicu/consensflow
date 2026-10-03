@@ -389,12 +389,22 @@ export class Dispatcher {
     )
   }
 
-  /** The human closes a session's window; work in it pauses, as any lost window's does. */
+  /**
+   * The human closes a session's window; work in it pauses, as any lost
+   * window's does. A window still opening is closed once it has opened, not
+   * left open behind an answer that said it was closed.
+   */
   async closeWindow(projectId, handle) {
     const { participant } = this.#sessionOf(projectId, handle)
-    const runtime = this.#runtimeOf(participant.id)
-    runtime.window.pinned = false
-    if (runtime.window.pane !== null) await this.#windows.retire(runtime)
+    await this.#exclusive(
+      participant.id,
+      async () => {
+        const runtime = this.#runtimeOf(participant.id)
+        runtime.window.pinned = false
+        if (runtime.window.pane !== null) await this.#windows.retire(runtime)
+      },
+      { wait: true },
+    )
     return this.#ledger.project(projectId)
   }
 

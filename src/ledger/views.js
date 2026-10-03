@@ -83,6 +83,7 @@ export const taskView = (row) => ({
   session: row.assignee_member ? row.assignee : null,
   ...needsView(row.needs),
   heldUntil: row.held_until ?? null,
+  pausedAt: row.paused_at ?? null,
   deletedAt: row.deleted_at,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
