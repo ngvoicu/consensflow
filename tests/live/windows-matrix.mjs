@@ -1,0 +1,102 @@
+/**
+ * The eval matrix on a Windows machine: each scenario for each chief and
+ * staff pair, one run after another through `npm run windows`, each run's
+ * output kept in evals/reports/windows/ here (the run's own report stays on
+ * the machine), and one line per run at the end: PASS when every check
+ * passed, else the checks that failed. The exit code is 1 when any run did
+ * not pass.
+ *
+ *   npm run eval:windows -- --host <ssh host> [--build] \
+ *     --scenario round-trip --scenario question-trip \
+ *     --pair devin:devin --pair claude:devin [--claude-model claude-sonnet-5]
+ *
+ * --build builds the machine's copy before the first run; --claude-model is
+ * a Claude chief's model (the eval's own default otherwise).
+ */
+import { spawn } from 'node:child_process'
+import { createWriteStream, mkdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { parseArgs } from 'node:util'
+
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const { values } = parseArgs({
+  options: {
+    host: { type: 'string' },
+    build: { type: 'boolean', default: false },
+    scenario: { type: 'string', multiple: true },
+    pair: { type: 'string', multiple: true },
+    'claude-model': { type: 'string' },
+  },
+})
+if (!values.host || !values.scenario || !values.pair) {
+  throw new Error(
+    'usage: npm run eval:windows -- --host <ssh host> --scenario <name>… --pair <chief>:<staff>…',
+  )
+}
+const pairs = values.pair.map((pair) => {
+  const [chief, staff] = pair.split(':')
+  if (!chief || !staff) throw new Error(`a pair is chief:staff, not ${pair}`)
+  return { chief, staff }
+})
+const folder = join(
+  REPO,
+  'evals',
+  'reports',
+  'windows',
+  new Date().toISOString().slice(0, 19).replaceAll(':', '-'),
+)
+mkdirSync(folder, { recursive: true })
+
+/** One eval on the machine, its output kept in `log`; what its checks said. */
+async function run({ scenario, chief, staff }, build, log) {
+  const args = ['run', 'windows', '--', '--host', values.host, ...(build ? ['--build'] : [])]
+  args.push('--', 'npm', 'run', 'eval', '--', '--scenario', scenario, '--chief', chief)
+  args.push('--staff', staff, '--timeout-min', '30')
+  // A lead switch goes to the staff's harness.
+  if (scenario === 'lead-switch') args.push('--switch-to', staff)
+  if (chief === 'claude' && values['claude-model']) args.push('--model', values['claude-model'])
+  const out = createWriteStream(log)
+  const child = spawn('npm', args, { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] })
+  let text = ''
+  for (const stream of [child.stdout, child.stderr]) {
+    stream.on('data', (chunk) => {
+      text += chunk
+      out.write(chunk)
+    })
+  }
+  const code = await new Promise((resolve) => child.on('exit', (exit) => resolve(exit ?? 1)))
+  out.end()
+  const failed = [...text.matchAll(/^\s*FAIL (.+)$/gm)].map((match) => match[1])
+  const checks = (text.match(/^\s*(PASS|FAIL) /gm) ?? []).length
+  if (checks === 0) return { ok: false, line: `no verdict (exit ${code}): see ${log}` }
+  return failed.length === 0
+    ? { ok: true, line: `PASS ${checks} checks` }
+    : { ok: false, line: `FAIL ${failed.join(' · ')}` }
+}
+
+const results = []
+// Built once, before the first run that goes.
+let build = values.build
+for (const scenario of values.scenario) {
+  for (const pair of pairs) {
+    const name = `${scenario} ${pair.chief}:${pair.staff}`
+    if (scenario === 'lead-switch' && pair.chief === pair.staff) {
+      results.push({
+        name,
+        ok: true,
+        line: 'skipped: a lead switch needs another harness on the staff',
+      })
+      continue
+    }
+    process.stdout.write(`${name}…\n`)
+    const log = join(folder, `${scenario}-${pair.chief}-${pair.staff}.log`)
+    const result = await run({ scenario, ...pair }, build, log)
+    build = false
+    results.push({ name, ...result })
+    process.stdout.write(`  ${result.line}\n`)
+  }
+}
+process.stdout.write(`\nlogs: ${folder}\n`)
+for (const { name, line } of results) process.stdout.write(`${name.padEnd(36)} ${line}\n`)
+process.exitCode = results.every((result) => result.ok) ? 0 : 1
