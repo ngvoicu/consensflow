@@ -1,14 +1,15 @@
 /**
  * Lossless completion extraction from each harness's native, read-only store.
  *
- * A JSONL transcript is read on from where the previous look at it stopped,
- * from the byte after its last whole line. What a look returns is what a
- * reading of the whole transcript would: one that shrank or was replaced is
- * read again from its start. A final unterminated append may be incomplete;
+ * A record is read on from where the previous look at it stopped: a JSONL
+ * transcript from the byte after its last whole line, OpenCode's store from
+ * the conversation's last event, Devin's from its last message row and each
+ * wire log from where it was left. What a look returns is what a reading of
+ * the whole record would: a record that shrank or was replaced is read again
+ * from its start. A final unterminated JSONL append may be incomplete;
  * malformed newline-terminated records fail closed. SQLite is read under one
  * transaction. Nothing in this module uses the bounded display normaliser.
  */
-import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { devinFolders, opencodeStores, piSessionDir } from '../../src/harnesses.js'
@@ -1492,227 +1493,336 @@ function opencodeToolText(part) {
   return ''
 }
 
-/** OpenCode's reader: each look reads the conversation's rows and events whole. */
-function opencodeReader(sessionId, env) {
-  return (options = {}) => opencodeAnswers(sessionId, env, options).catch(unreadable)
-}
+/** The event types a look reads on past; any other has the store read whole. */
+const OPENCODE_EVENTS = new Set([
+  'message.updated.1',
+  'message.part.updated.1',
+  'session.created.1',
+  'session.updated.1',
+])
 
-async function opencodeAnswers(sessionId, env, options) {
-  const db = await openOpencodeDb(env, sessionId)
-  if (db === null) {
-    return { unknown: true, reason: `unreadable: no opencode store for ${sessionId}` }
+/**
+ * OpenCode's reader. OpenCode writes each change to a message or a part as
+ * an event of the conversation, numbered in order, in the same transaction
+ * as the row (a 1.1 GB store of 1.18.33 and 1.18.34, checked on 2026-10-03:
+ * every message and part row is its latest event's data). So a look reads
+ * the events after the last one it saw, and again only the rows they name.
+ * The conversation's message, part or event count disagreeing with what
+ * was read (a row removed, an event written out of order), or an event of a
+ * type not followed here, has the store read whole.
+ */
+function opencodeReader(sessionId, env) {
+  let store = null
+  let read = null
+  let answer = null
+  // Each row's data, parsed once; a row read again is a new object.
+  const parsed = new WeakMap()
+  const data = (row, description) => {
+    if (!parsed.has(row)) parsed.set(row, parseStoredJson(row.data, description))
+    return parsed.get(row)
   }
 
-  let transaction = false
-  try {
-    db.exec('BEGIN')
-    transaction = true
-    const session = db.prepare('select * from session where id = ?').get(sessionId)
-    if (!session) {
-      return { unknown: true, reason: `unreadable: no opencode session ${sessionId}` }
-    }
-    const messages = db
-      .prepare('select * from message where session_id = ? order by time_created, id')
-      .all(sessionId)
-    await options.betweenOpenCodeSnapshotReads?.()
-    const parts = db
-      .prepare('select * from part where session_id = ? order by time_created, id')
-      .all(sessionId)
-    const events = db
-      .prepare('select * from event where aggregate_id = ? order by seq')
-      .all(sessionId)
-
-    const result = resultBase()
-    const messagePositions = new Map()
-    const messageCompletionPositions = new Map()
-    const partPositions = new Map()
-    let previousPosition = -1
-    for (const row of events) {
+  /**
+   * Reads on through the conversation's events in `rows`: the messages and
+   * parts they name, and whether each is of a type followed here.
+   */
+  const readEvents = (rows) => {
+    const named = { messages: new Set(), parts: new Set(), followed: true }
+    for (const row of rows) {
       const seq = Number(row.seq)
-      if (!Number.isInteger(seq) || seq < 0 || seq <= previousPosition) {
+      if (!Number.isInteger(seq) || seq < 0 || seq <= read.last) {
         throw new Error(`malformed OpenCode event sequence at ${String(row.seq)}`)
       }
-      previousPosition = seq
-      const data = parseStoredJson(row.data, `event ${row.id}`)
-      if (row.type === 'message.updated.1' && data.info?.id) {
-        if (!messagePositions.has(data.info.id)) messagePositions.set(data.info.id, seq)
+      read.last = seq
+      read.events += 1
+      const event = parseStoredJson(row.data, `event ${row.id}`)
+      if (row.type === 'message.updated.1' && event.info?.id) {
+        named.messages.add(event.info.id)
+        if (!read.messagePositions.has(event.info.id)) read.messagePositions.set(event.info.id, seq)
         if (
-          data.info.time?.completed !== undefined &&
-          data.info.time?.completed !== null &&
-          !messageCompletionPositions.has(data.info.id)
+          event.info.time?.completed !== undefined &&
+          event.info.time?.completed !== null &&
+          !read.completionPositions.has(event.info.id)
         ) {
-          messageCompletionPositions.set(data.info.id, seq)
+          read.completionPositions.set(event.info.id, seq)
         }
-      } else if (row.type === 'message.part.updated.1' && data.part?.id) {
-        partPositions.set(data.part.id, seq)
-      }
+      } else if (row.type === 'message.part.updated.1' && event.part?.id) {
+        named.parts.add(event.part.id)
+        read.partPositions.set(event.part.id, seq)
+      } else if (!OPENCODE_EVENTS.has(row.type)) named.followed = false
     }
-    if (previousPosition < 0) throw new Error(`missing OpenCode event sequence for ${sessionId}`)
+    if (read.last < 0) throw new Error(`missing OpenCode event sequence for ${sessionId}`)
+    return named
+  }
 
-    const position = (positions, id, description) => {
-      const seq = positions.get(id)
-      if (!Number.isInteger(seq)) throw new Error(`missing OpenCode event for ${description} ${id}`)
-      return seq
+  const readWhole = async (db, options) => {
+    read = {
+      last: -1,
+      events: 0,
+      messages: new Map(),
+      parts: new Map(),
+      messagePositions: new Map(),
+      completionPositions: new Map(),
+      partPositions: new Map(),
     }
+    for (const row of db
+      .prepare('select * from message where session_id = ? order by time_created, id')
+      .all(sessionId))
+      read.messages.set(row.id, row)
+    await options.betweenOpenCodeSnapshotReads?.()
+    for (const row of db
+      .prepare('select * from part where session_id = ? order by time_created, id')
+      .all(sessionId))
+      read.parts.set(row.id, row)
+    readEvents(db.prepare('select * from event where aggregate_id = ? order by seq').all(sessionId))
+  }
 
-    const partsByMessage = new Map()
-    for (const row of parts) {
-      const parsed = parseStoredJson(row.data, `part ${row.id}`)
-      const entry = { row, data: parsed }
-      const list = partsByMessage.get(row.message_id) ?? []
-      list.push(entry)
-      partsByMessage.set(row.message_id, list)
-    }
-    for (const list of partsByMessage.values()) {
-      list.sort(
-        (left, right) =>
-          position(partPositions, left.row.id, 'part') -
-            position(partPositions, right.row.id, 'part') ||
-          left.row.id.localeCompare(right.row.id),
-      )
-    }
-    messages.sort(
-      (left, right) =>
-        position(messagePositions, left.id, 'message') -
-          position(messagePositions, right.id, 'message') || left.id.localeCompare(right.id),
+  /**
+   * Reads on from the last event seen, and the rows the events after it
+   * name: whether the store must be read whole instead, and whether anything
+   * changed.
+   */
+  const readOnward = (db) => {
+    const before = read.events
+    const named = readEvents(
+      db
+        .prepare('select * from event where aggregate_id = ? and seq > ? order by seq')
+        .all(sessionId, read.last),
     )
+    if (!named.followed) return { whole: true }
+    const message = db.prepare('select * from message where id = ? and session_id = ?')
+    for (const id of named.messages) {
+      const row = message.get(id, sessionId)
+      if (row === undefined) read.messages.delete(id)
+      else read.messages.set(id, row)
+    }
+    const part = db.prepare('select * from part where id = ? and session_id = ?')
+    for (const id of named.parts) {
+      const row = part.get(id, sessionId)
+      if (row === undefined) read.parts.delete(id)
+      else read.parts.set(id, row)
+    }
+    const counts = db
+      .prepare(
+        `select (select count(*) from message where session_id = ?) as messages,
+          (select count(*) from part where session_id = ?) as parts,
+          (select count(*) from event where aggregate_id = ?) as events`,
+      )
+      .get(sessionId, sessionId, sessionId)
+    const whole =
+      counts.messages !== read.messages.size ||
+      counts.parts !== read.parts.size ||
+      counts.events !== read.events
+    return { whole, changed: read.events > before }
+  }
 
-    const openTools = new Set()
-    let turnOpen = false
-    let terminal = null
-    for (const row of messages) {
-      const data = parseStoredJson(row.data, `message ${row.id}`)
-      const messageParts = partsByMessage.get(row.id) ?? []
-      const text = messageParts
-        .filter(({ data: part }) => part.type === 'text' && typeof part.text === 'string')
-        .map(({ data: part }) => part.text)
-        .join('\n')
-      const messageSeq = position(messagePositions, row.id, 'message')
-      const textPositions = messageParts
-        .filter(({ data: part }) => part.type === 'text')
-        .map(({ row: partRow }) => position(partPositions, partRow.id, 'part'))
-      const at = data.time?.completed ?? data.time?.created ?? row.time_created
-      const completed = data.time?.completed !== undefined && data.time?.completed !== null
-      const completionSeq = completed
-        ? position(messageCompletionPositions, row.id, 'message completion')
-        : null
-      const seq =
-        textPositions.length > 0
-          ? Math.max(messageSeq, ...textPositions)
-          : (completionSeq ?? messageSeq)
-
-      if (data.role === 'user') {
-        openTools.clear()
-        result.cancelled = false
-        result.failed = false
-        result.failure = null
-        if (text.trim()) {
-          result.items.push({
-            id: row.id,
-            role: 'user',
-            text,
-            complete: true,
-            settled: true,
-            at,
-            seq,
-          })
-        }
-        turnOpen = true
-        terminal = null
-        continue
+  return async (options = {}) => {
+    let db = null
+    let transaction = false
+    try {
+      const opened = await openOpencodeDb(env, sessionId)
+      if (opened === null) {
+        return { unknown: true, reason: `unreadable: no opencode store for ${sessionId}` }
       }
-      if (data.role !== 'assistant') continue
+      db = opened.db
+      if (opened.store !== store) {
+        store = opened.store
+        read = null
+      }
+      db.exec('BEGIN')
+      transaction = true
+      if (db.prepare('select 1 from session where id = ?').get(sessionId) === undefined) {
+        read = null
+        return { unknown: true, reason: `unreadable: no opencode session ${sessionId}` }
+      }
+      let changed = true
+      if (read === null) await readWhole(db, options)
+      else {
+        const onward = readOnward(db)
+        if (onward.whole) await readWhole(db, options)
+        else changed = onward.changed
+      }
+      if (!changed && answer !== null) return answer
+      answer = opencodeAnswer(read, data)
+      return answer
+    } catch (error) {
+      read = null
+      answer = null
+      return unreadable(error)
+    } finally {
+      if (transaction) {
+        try {
+          db.exec('ROLLBACK')
+        } catch {
+          // The read transaction may already have been closed by SQLite.
+        }
+      }
+      try {
+        db?.close()
+      } catch {
+        // Closing a failed read-only open must not mask the original result.
+      }
+    }
+  }
+}
 
+const byCreation = (left, right) =>
+  left.time_created - right.time_created || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+
+/** What OpenCode's rows and events, as read so far, say. */
+function opencodeAnswer(read, data) {
+  const result = resultBase()
+  const position = (positions, id, description) => {
+    const seq = positions.get(id)
+    if (!Number.isInteger(seq)) throw new Error(`missing OpenCode event for ${description} ${id}`)
+    return seq
+  }
+
+  const partsByMessage = new Map()
+  for (const row of [...read.parts.values()].sort(byCreation)) {
+    const entry = { row, data: data(row, `part ${row.id}`) }
+    const list = partsByMessage.get(row.message_id) ?? []
+    list.push(entry)
+    partsByMessage.set(row.message_id, list)
+  }
+  for (const list of partsByMessage.values()) {
+    list.sort(
+      (left, right) =>
+        position(read.partPositions, left.row.id, 'part') -
+          position(read.partPositions, right.row.id, 'part') ||
+        left.row.id.localeCompare(right.row.id),
+    )
+  }
+  const messages = [...read.messages.values()].sort(byCreation)
+  messages.sort(
+    (left, right) =>
+      position(read.messagePositions, left.id, 'message') -
+        position(read.messagePositions, right.id, 'message') || left.id.localeCompare(right.id),
+  )
+
+  const openTools = new Set()
+  let turnOpen = false
+  let terminal = null
+  for (const row of messages) {
+    const message = data(row, `message ${row.id}`)
+    const messageParts = partsByMessage.get(row.id) ?? []
+    const text = messageParts
+      .filter(({ data: part }) => part.type === 'text' && typeof part.text === 'string')
+      .map(({ data: part }) => part.text)
+      .join('\n')
+    const messageSeq = position(read.messagePositions, row.id, 'message')
+    const textPositions = messageParts
+      .filter(({ data: part }) => part.type === 'text')
+      .map(({ row: partRow }) => position(read.partPositions, partRow.id, 'part'))
+    const at = message.time?.completed ?? message.time?.created ?? row.time_created
+    const completed = message.time?.completed !== undefined && message.time?.completed !== null
+    const completionSeq = completed
+      ? position(read.completionPositions, row.id, 'message completion')
+      : null
+    const seq =
+      textPositions.length > 0
+        ? Math.max(messageSeq, ...textPositions)
+        : (completionSeq ?? messageSeq)
+
+    if (message.role === 'user') {
+      openTools.clear()
       result.cancelled = false
       result.failed = false
       result.failure = null
-      for (const { row: partRow, data: part } of messageParts) {
-        if (part.type !== 'tool') continue
-        const status = part.state?.status
-        const toolId = part.callID ?? partRow.id
-        const done = status === 'completed' || status === 'error'
-        if (done) openTools.delete(toolId)
-        else openTools.add(toolId)
-        if (part.tool === 'question') result.asking = !done
-      }
-
-      const errorName = data.error?.name
-      const isFailure = completed && Boolean(errorName)
-      // No supported-version native fixture establishes OpenCode cancellation.
-      // In particular, MessageAbortedError remains a failure, never cancellation.
-      const closesTurn =
-        completed && (data.finish === 'stop' || data.finish === 'length' || isFailure)
-      const complete = completed && data.finish === 'stop' && !errorName
-      const item = {
-        id: row.id,
-        role: 'assistant',
-        text,
-        complete,
-        settled: closesTurn && openTools.size === 0,
-        at,
-        seq,
-      }
-      result.items.push(item)
-
-      for (const { row: partRow, data: part } of messageParts) {
-        if (part.type !== 'tool') continue
-        const status = part.state?.status
-        if (status !== 'completed' && status !== 'error') continue
-        const toolTime = part.state?.time?.end ?? partRow.time_updated
+      if (text.trim()) {
         result.items.push({
-          id: partRow.id,
-          role: 'tool',
-          text: opencodeToolText(part),
+          id: row.id,
+          role: 'user',
+          text,
           complete: true,
           settled: true,
-          at: toolTime,
-          seq: position(partPositions, partRow.id, 'part'),
+          at,
+          seq,
         })
       }
+      turnOpen = true
+      terminal = null
+      continue
+    }
+    if (message.role !== 'assistant') continue
 
-      if (completed) result.quota = null
-      if (isFailure) {
-        result.failed = true
-        result.failure = String(data.error?.data?.message ?? visibleText(data.error))
-        if (data.error?.data?.statusCode === 429) {
-          result.quota = exhaustedQuota(result.failure, Number(data.time?.completed ?? at))
-        }
+    result.cancelled = false
+    result.failed = false
+    result.failure = null
+    for (const { row: partRow, data: part } of messageParts) {
+      if (part.type !== 'tool') continue
+      const status = part.state?.status
+      const toolId = part.callID ?? partRow.id
+      const done = status === 'completed' || status === 'error'
+      if (done) openTools.delete(toolId)
+      else openTools.add(toolId)
+      if (part.tool === 'question') result.asking = !done
+    }
+
+    const errorName = message.error?.name
+    const isFailure = completed && Boolean(errorName)
+    // No supported-version native fixture establishes OpenCode cancellation.
+    // In particular, MessageAbortedError remains a failure, never cancellation.
+    const closesTurn =
+      completed && (message.finish === 'stop' || message.finish === 'length' || isFailure)
+    const complete = completed && message.finish === 'stop' && !errorName
+    const item = {
+      id: row.id,
+      role: 'assistant',
+      text,
+      complete,
+      settled: closesTurn && openTools.size === 0,
+      at,
+      seq,
+    }
+    result.items.push(item)
+
+    for (const { row: partRow, data: part } of messageParts) {
+      if (part.type !== 'tool') continue
+      const status = part.state?.status
+      if (status !== 'completed' && status !== 'error') continue
+      const toolTime = part.state?.time?.end ?? partRow.time_updated
+      result.items.push({
+        id: partRow.id,
+        role: 'tool',
+        text: opencodeToolText(part),
+        complete: true,
+        settled: true,
+        at: toolTime,
+        seq: position(read.partPositions, partRow.id, 'part'),
+      })
+    }
+
+    if (completed) result.quota = null
+    if (isFailure) {
+      result.failed = true
+      result.failure = String(message.error?.data?.message ?? visibleText(message.error))
+      if (message.error?.data?.statusCode === 429) {
+        result.quota = exhaustedQuota(result.failure, Number(message.time?.completed ?? at))
       }
-
-      // The answer that closed the turn.
-      terminal = closesTurn ? item : null
-      turnOpen = !closesTurn
     }
 
-    const canSettle = terminal !== null && openTools.size === 0
-    if (canSettle) terminal.settled = true
-    result.inFlight = turnOpen || openTools.size > 0
-    result.settlement = {
-      state: canSettle ? 'settled' : result.inFlight ? 'in-flight' : 'unknown',
-    }
-
-    result.items.sort((left, right) => left.seq - right.seq || left.id.localeCompare(right.id))
-    return result
-  } finally {
-    if (transaction) {
-      try {
-        db.exec('ROLLBACK')
-      } catch {
-        // The read transaction may already have been closed by SQLite.
-      }
-    }
-    try {
-      db.close()
-    } catch {
-      // Closing a failed read-only open must not mask the original result.
-    }
+    // The answer that closed the turn.
+    terminal = closesTurn ? item : null
+    turnOpen = !closesTurn
   }
+
+  const canSettle = terminal !== null && openTools.size === 0
+  if (canSettle) terminal.settled = true
+  result.inFlight = turnOpen || openTools.size > 0
+  result.settlement = {
+    state: canSettle ? 'settled' : result.inFlight ? 'in-flight' : 'unknown',
+  }
+
+  result.items.sort((left, right) => left.seq - right.seq || left.id.localeCompare(right.id))
+  return result
 }
 
 /**
  * OpenCode's store, read-only: the one of its places that holds `sessionId`,
  * else the first there is (whose answer is then that the session is not in
- * it yet), else null.
+ * it yet), else null. `store` tells the file read from one that later takes
+ * its place.
  */
 async function openOpencodeDb(env, sessionId) {
   let sqlite
@@ -1724,8 +1834,9 @@ async function openOpencodeDb(env, sessionId) {
   let first = null
   for (const file of opencodeStores(env)) {
     let db
+    let store
     try {
-      await fs.access(file)
+      store = `${file}\n${(await fs.stat(file)).ino}`
       db = new sqlite.DatabaseSync(file, { readOnly: true })
     } catch {
       continue
@@ -1737,10 +1848,10 @@ async function openOpencodeDb(env, sessionId) {
       // A store that cannot be read as OpenCode's holds nothing of ours.
     }
     if (holds) {
-      first?.close()
-      return db
+      first?.db.close()
+      return { db, store }
     }
-    if (first === null) first = db
+    if (first === null) first = { db, store }
     else db.close()
   }
   return first
@@ -1778,204 +1889,252 @@ const DEVIN_WORK = new Set([
   'tool_call_update',
 ])
 
-/** Devin's reader: each look reads its store and every wire log whole. */
-function devinReader(sessionId, env) {
-  return () => devinAnswers(sessionId, env).catch(unreadable)
-}
-
 /**
- * A JSONL file read whole, a record at a time, without retaining it. A
- * syntactically incomplete tail without a newline is the only malformed
- * record tolerated.
+ * Devin's reader. Its store only gains message rows (a revision is a new
+ * node), so a look reads the rows after the last one it saw, and the store is
+ * read whole when the conversation's row count disagrees. Each launch's wire
+ * log is read on from where it was left; one that shrank, was replaced or is
+ * gone takes what it said with it, and every wire log is read again.
  */
-async function readJsonl(file, visit) {
-  const stream = createReadStream(file, { encoding: 'utf8' })
-  let buffer = ''
-  let recordIndex = 0
-  let count = 0
-
-  const consume = (raw) => {
-    const text = raw.endsWith('\r') ? raw.slice(0, -1) : raw
-    if (isJsonBlank(text)) return
-    let record
-    try {
-      record = JSON.parse(text)
-    } catch {
-      throw new Error(`malformed JSONL at record ${recordIndex}`)
-    }
-    visit(record, recordIndex)
-    recordIndex += 1
-    count += 1
-  }
-
-  for await (const chunk of stream) {
-    buffer += chunk
-    let newline = buffer.indexOf('\n')
-    while (newline !== -1) {
-      const line = buffer.slice(0, newline)
-      buffer = buffer.slice(newline + 1)
-      consume(line)
-      newline = buffer.indexOf('\n')
-    }
-  }
-
-  if (!isJsonBlank(buffer)) {
-    let record
-    try {
-      record = JSON.parse(buffer)
-    } catch {
-      if (jsonPrefixState(buffer) === 'incomplete') {
-        // A live writer may have left only the final, unterminated append.
-        return count
-      }
-      throw new Error(`malformed JSONL at record ${recordIndex}`)
-    }
-    visit(record, recordIndex)
-    count += 1
-  }
-  return count
-}
-
-async function devinAnswers(sessionId, env) {
-  const { DatabaseSync } = await import('node:sqlite')
-  const file = path.join(devinFolders(env).data, 'cli', 'sessions.db')
-  const db = new DatabaseSync(file, { readOnly: true })
-  const result = resultBase()
-  try {
-    db.exec('BEGIN')
-    const session = db.prepare('select main_chain_id from sessions where id = ?').get(sessionId)
-    if (!session) throw new Error('missing Devin session')
-    const rows = db
-      .prepare(
-        'select row_id, node_id, parent_node_id, chat_message, created_at from message_nodes where session_id = ? order by row_id',
-      )
-      .all(sessionId)
-    const nodes = new Map(rows.map((row) => [row.node_id, row]))
-    const chain = [],
-      visited = new Set()
-    let node = session.main_chain_id
-    while (node !== null) {
-      if (visited.has(node)) throw new Error('cyclic Devin main chain')
-      visited.add(node)
-      const row = nodes.get(node)
-      if (!row) throw new Error('missing Devin main chain ancestor')
-      chain.push(row)
-      node = row.parent_node_id
-    }
-    const ids = new Set()
-    let request = null
-    // Its question tool's call, until a tool message answers it.
-    let asking = null
-    for (const row of chain.reverse()) {
-      const message = JSON.parse(row.chat_message)
-      const call = message.tool_calls?.find((c) => c.name === 'ask_user_question')
-      if (message.role === 'assistant' && call) asking = call.id
-      else if (message.role === 'tool' && message.tool_call_id === asking) asking = null
-      if (typeof message.message_id !== 'string' || ids.has(message.message_id))
-        throw new Error('invalid Devin message identity')
-      ids.add(message.message_id)
-      const role = message.role === 'system' ? 'custom' : message.role
-      if (role === 'user')
-        request = message.metadata?.extensions?.['chisel/client-message-id'] ?? message.message_id
-      if (!ITEM_ROLES.has(role)) throw new Error('unknown Devin message role')
-      const text =
-        typeof message.content === 'string'
-          ? message.content
-          : Array.isArray(message.content)
-            ? message.content
-                .filter((part) => part.type === 'text')
-                .map((part) => part.text)
-                .join('')
-            : ''
-      result.items.push({
-        id: message.message_id,
-        role,
-        text,
-        complete: role !== 'assistant',
-        settled: role !== 'assistant',
-        at: message.metadata?.created_at ?? row.created_at,
-        seq: Number(row.row_id),
-        _request: request,
-      })
-    }
-    result.asking = asking !== null
-    db.exec('COMMIT')
-  } finally {
-    db.close()
-  }
-  const root = path.join(
-    env.CONSENSFLOW_HOME ?? path.join(home(env), '.consensflow'),
-    'integrations',
-    'devin',
-  )
+function devinReader(sessionId, env) {
+  let store = null
+  let wires = new Map()
+  let outcomes = new Map()
   let launches = []
-  try {
-    launches = await fs.readdir(root, { withFileTypes: true })
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error
-  }
-  const outcomes = new Map()
-  // A turn Devin is still on shows only on the wire: thoughts, messages and
-  // tool calls after the last end; its store holds the finished steps. Judged
-  // by the launch whose wire was written last (a resume opens a new one).
-  let working = false
-  let latestWire = -1
-  for (const launch of launches) {
-    if (!launch.isDirectory()) continue
-    let active = null
-    let busy = false
-    const wire = path.join(root, launch.name, 'wire.jsonl')
+  let answer = null
+  // Each row's message, parsed once.
+  const parsed = new WeakMap()
+
+  const readStore = async () => {
+    const { DatabaseSync } = await import('node:sqlite')
+    const file = path.join(devinFolders(env).data, 'cli', 'sessions.db')
+    const db = new DatabaseSync(file, { readOnly: true })
     try {
-      await readJsonl(wire, (event) => {
-        if (event.sessionId !== sessionId) return
-        const update = event.update
-        if (DEVIN_WORK.has(update?.sessionUpdate)) busy = true
-        if (update?.sessionUpdate === 'agent_message_chunk') {
-          const id = update._meta?.['cognition.ai/streamingMessageId']
-          // History replay has timestamps but no streaming UUID.
-          if (typeof id !== 'string' || update.content?.type !== 'text') return
-          if (active?.id !== id) active = { id, text: '', request: null }
-          active.text += update.content.text
+      db.exec('BEGIN')
+      const session = db.prepare('select main_chain_id from sessions where id = ?').get(sessionId)
+      if (!session) throw new Error('missing Devin session')
+      const columns = 'select row_id, node_id, parent_node_id, chat_message, created_at'
+      const all = () =>
+        db
+          .prepare(`${columns} from message_nodes where session_id = ? order by row_id`)
+          .all(sessionId)
+      let rows
+      if (store === null) rows = all()
+      else {
+        rows =
+          store.last === null
+            ? all()
+            : db
+                .prepare(
+                  `${columns} from message_nodes where session_id = ? and row_id > ? order by row_id`,
+                )
+                .all(sessionId, store.last)
+        const { count } = db
+          .prepare('select count(*) as count from message_nodes where session_id = ?')
+          .get(sessionId)
+        if (count !== store.count + rows.length) {
+          store = null
+          rows = all()
         }
-        if (active && typeof event.turnClientMessageId === 'string')
-          active.request = event.turnClientMessageId
-        if (['complete', 'cancelled', 'error'].includes(event.cause)) {
-          if (active?.request) {
-            const outcome = { ...active, cause: event.cause }
-            const previous = outcomes.get(active.request)
-            if (previous && (previous.text !== outcome.text || previous.cause !== outcome.cause))
-              throw new Error('conflicting Devin completion evidence')
-            outcomes.set(active.request, outcome)
-          }
-          active = null
-          busy = false
-        }
-      })
-      const { mtimeMs } = await fs.stat(wire)
-      if (mtimeMs >= latestWire) {
-        latestWire = mtimeMs
-        working = busy
       }
+      const fresh = store === null
+      store ??= { nodes: new Map(), count: 0, last: null, head: undefined, chain: null }
+      for (const row of rows) {
+        store.nodes.set(row.node_id, row)
+        store.count += 1
+        store.last = row.row_id
+      }
+      const changed = fresh || rows.length > 0 || session.main_chain_id !== store.head
+      if (changed) {
+        store.head = session.main_chain_id
+        store.chain = devinChain(store.nodes, store.head, parsed)
+      }
+      db.exec('COMMIT')
+      return changed
+    } finally {
+      db.close()
+    }
+  }
+
+  // A turn Devin is still on shows only on the wire: thoughts, messages and
+  // tool calls after the last end; its store holds the finished steps.
+  const visitWire = (wire, event) => {
+    if (event.sessionId !== sessionId) return
+    const update = event.update
+    if (DEVIN_WORK.has(update?.sessionUpdate)) wire.busy = true
+    if (update?.sessionUpdate === 'agent_message_chunk') {
+      const id = update._meta?.['cognition.ai/streamingMessageId']
+      // History replay has timestamps but no streaming UUID.
+      if (typeof id !== 'string' || update.content?.type !== 'text') return
+      if (wire.active?.id !== id) wire.active = { id, text: '', request: null }
+      wire.active.text += update.content.text
+    }
+    if (wire.active && typeof event.turnClientMessageId === 'string')
+      wire.active.request = event.turnClientMessageId
+    if (['complete', 'cancelled', 'error'].includes(event.cause)) {
+      if (wire.active?.request) {
+        const outcome = { ...wire.active, cause: event.cause }
+        const previous = outcomes.get(wire.active.request)
+        if (previous && (previous.text !== outcome.text || previous.cause !== outcome.cause))
+          throw new Error('conflicting Devin completion evidence')
+        outcomes.set(wire.active.request, outcome)
+      }
+      wire.active = null
+      wire.busy = false
+    }
+  }
+
+  const readWires = async () => {
+    const root = path.join(
+      env.CONSENSFLOW_HOME ?? path.join(home(env), '.consensflow'),
+      'integrations',
+      'devin',
+    )
+    launches = []
+    try {
+      launches = (await fs.readdir(root, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
     } catch (error) {
       if (error.code !== 'ENOENT') throw error
     }
+    for (;;) {
+      let changed = false
+      let whole = true
+      const present = new Set()
+      for (const launch of launches) {
+        const file = path.join(root, launch, 'wire.jsonl')
+        const wire = wires.get(launch) ?? { seen: null, active: null, busy: false }
+        let next
+        try {
+          next = await readOn(file, wire.seen, (event) => visitWire(wire, event))
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error
+          continue
+        }
+        if (next === null) {
+          whole = false
+          break
+        }
+        changed ||= next !== wire.seen
+        wire.seen = next
+        wires.set(launch, wire)
+        present.add(launch)
+      }
+      if (whole && [...wires.keys()].every((launch) => present.has(launch))) return changed
+      wires = new Map()
+      outcomes = new Map()
+    }
   }
+
+  return async () => {
+    try {
+      const stored = await readStore()
+      const wired = await readWires()
+      if (!stored && !wired && answer !== null) return answer
+      answer = devinAnswer(store.chain, outcomes, launches, wires)
+      return answer
+    } catch (error) {
+      store = null
+      wires = new Map()
+      outcomes = new Map()
+      answer = null
+      return unreadable(error)
+    }
+  }
+}
+
+/**
+ * The messages on Devin's main chain, the one ending at `head`, oldest first,
+ * and whether its question tool waits for an answer.
+ */
+function devinChain(nodes, head, parsed) {
+  const chain = []
+  const visited = new Set()
+  let node = head
+  while (node !== null) {
+    if (visited.has(node)) throw new Error('cyclic Devin main chain')
+    visited.add(node)
+    const row = nodes.get(node)
+    if (!row) throw new Error('missing Devin main chain ancestor')
+    chain.push(row)
+    node = row.parent_node_id
+  }
+  const items = []
+  const ids = new Set()
+  let request = null
+  // Its question tool's call, until a tool message answers it.
+  let asking = null
+  for (const row of chain.reverse()) {
+    if (!parsed.has(row)) parsed.set(row, JSON.parse(row.chat_message))
+    const message = parsed.get(row)
+    const call = message.tool_calls?.find((c) => c.name === 'ask_user_question')
+    if (message.role === 'assistant' && call) asking = call.id
+    else if (message.role === 'tool' && message.tool_call_id === asking) asking = null
+    if (typeof message.message_id !== 'string' || ids.has(message.message_id))
+      throw new Error('invalid Devin message identity')
+    ids.add(message.message_id)
+    const role = message.role === 'system' ? 'custom' : message.role
+    if (role === 'user')
+      request = message.metadata?.extensions?.['chisel/client-message-id'] ?? message.message_id
+    if (!ITEM_ROLES.has(role)) throw new Error('unknown Devin message role')
+    const text =
+      typeof message.content === 'string'
+        ? message.content
+        : Array.isArray(message.content)
+          ? message.content
+              .filter((part) => part.type === 'text')
+              .map((part) => part.text)
+              .join('')
+          : ''
+    items.push({
+      id: message.message_id,
+      role,
+      text,
+      complete: role !== 'assistant',
+      settled: role !== 'assistant',
+      at: message.metadata?.created_at ?? row.created_at,
+      seq: Number(row.row_id),
+      request,
+    })
+  }
+  return { items, asking: asking !== null }
+}
+
+/**
+ * What Devin's chain says, by the wire's outcomes: a reply is complete only
+ * when it is its request's last, the wire saw that request complete, and the
+ * streamed text is the stored one. Whether Devin is still on a turn is judged
+ * by the launch whose wire was written last (a resume opens a new one).
+ */
+function devinAnswer(chain, outcomes, launches, wires) {
+  let working = false
+  let latestWire = -1
+  for (const launch of launches) {
+    const wire = wires.get(launch)
+    if (wire !== undefined && wire.seen.mtimeMs >= latestWire) {
+      latestWire = wire.seen.mtimeMs
+      working = wire.busy
+    }
+  }
+  const result = resultBase()
+  result.asking = chain.asking
   const finalByRequest = new Map(
-    result.items
-      .filter((item) => item.role === 'assistant')
-      .map((item) => [item._request, item.id]),
+    chain.items.filter((item) => item.role === 'assistant').map((item) => [item.request, item.id]),
   )
-  for (const item of result.items) {
-    if (item.role !== 'assistant') continue
-    const outcome = outcomes.get(item._request)
-    item.complete =
-      finalByRequest.get(item._request) === item.id &&
+  result.items = chain.items.map(({ request, ...item }) => {
+    if (item.role !== 'assistant') return item
+    const outcome = outcomes.get(request)
+    // The same text needs no comparing, which every look would do again.
+    const complete =
+      finalByRequest.get(request) === item.id &&
       outcome?.cause === 'complete' &&
-      devinComparable(outcome.text) === devinComparable(item.text)
-    item.settled = item.complete
-  }
-  const last = result.items.findLast((item) => item.role !== 'custom')
-  const outcome = outcomes.get(last?._request)
+      (outcome.text === item.text || devinComparable(outcome.text) === devinComparable(item.text))
+    return { ...item, complete, settled: complete }
+  })
+  const lastIndex = chain.items.findLastIndex((item) => item.role !== 'custom')
+  const last = lastIndex === -1 ? undefined : result.items[lastIndex]
+  const outcome = outcomes.get(chain.items[lastIndex]?.request)
   result.cancelled = outcome?.cause === 'cancelled'
   result.failed = outcome?.cause === 'error'
   result.inFlight =
@@ -1987,6 +2146,5 @@ async function devinAnswers(sessionId, env) {
         ? 'settled'
         : 'unknown',
   }
-  for (const item of result.items) delete item._request
   return result
 }
