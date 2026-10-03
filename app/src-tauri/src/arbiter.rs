@@ -116,8 +116,11 @@ impl OutputClock {
 }
 
 /// When a paste's Enter goes: once the window has taken the paste in, that
-/// is, printed nothing for `quiet_ms` since the paste (its echo done), never
-/// sooner than `least_ms` and never later than `most_ms`.
+/// is, printed something after it (its echo) and then nothing for
+/// `quiet_ms`; never sooner than `least_ms`, and at `most_ms` whatever it
+/// printed. A window silent since the paste may still be reading it: Devin
+/// draws a long paste's placeholder only once it has read all of it, and an
+/// Enter before that finds nothing to send.
 #[derive(Clone, Copy, Debug)]
 pub struct EnterTiming {
     pub least_ms: u64,
@@ -140,8 +143,11 @@ impl EnterTiming {
         let pasted = Instant::now();
         loop {
             let since = u64::try_from(pasted.elapsed().as_millis()).unwrap_or(u64::MAX);
-            let quiet = output.quiet_ms().map_or(since, |quiet| quiet.min(since));
-            if since >= self.most_ms || (since >= self.least_ms && quiet >= self.quiet_ms) {
+            // How long the window has been quiet, once it printed after the paste.
+            let echoed = output.quiet_ms().filter(|quiet| *quiet < since);
+            if since >= self.most_ms
+                || (since >= self.least_ms && echoed.is_some_and(|quiet| quiet >= self.quiet_ms))
+            {
                 return;
             }
             std::thread::sleep(Duration::from_millis(5));
@@ -753,14 +759,16 @@ mod tests {
         assert!(records[1].at.duration_since(records[0].at) >= Duration::from_millis(25));
     }
 
-    /// Pastes `body` through an arbiter with `enter`, the pane printing every
-    /// 10 ms for `printing`, and says how long its Enter waited.
-    fn enter_waited(enter: EnterTiming, printing: Duration) -> Duration {
+    /// Pastes `body` through an arbiter with `enter`, the pane printing
+    /// nothing for `silent` and then every 10 ms for `printing`, and says how
+    /// long its Enter waited.
+    fn enter_waited(enter: EnterTiming, silent: Duration, printing: Duration) -> Duration {
         let key = PaneKey::new("echoing", 1);
         let (writer, _observed) = RecordingWriter::new(None);
         let arbiter = InputArbiter::new(enter);
         let clock = arbiter.register(&key).expect("register pane");
         let printer = thread::spawn(move || {
+            thread::sleep(silent);
             let started = Instant::now();
             while started.elapsed() < printing {
                 clock.note();
@@ -782,7 +790,7 @@ mod tests {
             quiet_ms: 60,
             most_ms: 5_000,
         };
-        let waited = enter_waited(enter, Duration::from_millis(250));
+        let waited = enter_waited(enter, Duration::ZERO, Duration::from_millis(250));
         assert!(
             waited >= Duration::from_millis(250),
             "{waited:?}: before the echo ended"
@@ -794,15 +802,34 @@ mod tests {
     }
 
     #[test]
-    fn a_pastes_enter_goes_after_a_quiet_spell_when_nothing_echoes() {
+    fn a_pastes_enter_waits_for_an_echo_that_comes_late() {
+        // Devin reading a long paste: silent, then its placeholder drawn.
         let enter = EnterTiming {
             least_ms: 0,
             quiet_ms: 60,
             most_ms: 5_000,
         };
-        let waited = enter_waited(enter, Duration::ZERO);
-        assert!(waited >= Duration::from_millis(60), "{waited:?}");
-        assert!(waited < Duration::from_millis(2_000), "{waited:?}");
+        let waited = enter_waited(enter, Duration::from_millis(300), Duration::from_millis(50));
+        assert!(
+            waited >= Duration::from_millis(350),
+            "{waited:?}: before the late echo"
+        );
+        assert!(
+            waited < Duration::from_millis(2_500),
+            "{waited:?}: long after it"
+        );
+    }
+
+    #[test]
+    fn a_paste_nothing_echoes_gets_its_enter_at_the_most() {
+        let enter = EnterTiming {
+            least_ms: 0,
+            quiet_ms: 60,
+            most_ms: 300,
+        };
+        let waited = enter_waited(enter, Duration::ZERO, Duration::ZERO);
+        assert!(waited >= Duration::from_millis(300), "{waited:?}");
+        assert!(waited < Duration::from_millis(2_500), "{waited:?}");
     }
 
     #[test]
@@ -812,7 +839,7 @@ mod tests {
             quiet_ms: 60,
             most_ms: 300,
         };
-        let waited = enter_waited(enter, Duration::from_millis(3_000));
+        let waited = enter_waited(enter, Duration::ZERO, Duration::from_millis(3_000));
         assert!(waited >= Duration::from_millis(300), "{waited:?}");
         assert!(waited < Duration::from_millis(2_500), "{waited:?}");
     }

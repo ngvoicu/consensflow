@@ -1,5 +1,12 @@
 import { deliveryText, markerOf } from './delivery-text.js'
 
+/** An Enter, pressed once more for a paste its window did not send. */
+const ENTER = 13
+/** How long a paste may go unshown in the record before its window gets that Enter. */
+const ENTER_AGAIN_MS = 10_000
+/** How long the window must have printed nothing first: one being typed into, or drawing, is left be. */
+const ENTER_AGAIN_QUIET_MS = 3_000
+
 /**
  * Delivery, for the dispatcher (`dispatcher.js`): a message goes into its
  * window through the harness's native path and counts once the harness's
@@ -162,13 +169,40 @@ export class Deliveries {
       await closing
       return
     }
-    if (delivering.queued || waited <= this.#arrivalTimeoutMs) return
+    if (delivering.queued) return
+    if (waited <= this.#arrivalTimeoutMs) {
+      if (waited > ENTER_AGAIN_MS && !delivering.enteredAgain) {
+        await this.#enterAgain(runtime, delivering)
+      }
+      return
+    }
     runtime.delivery.delivering = null
     // A paste the harness record never showed after the whole window did not
     // land: sending it again is how it reaches the reader, and the header
     // would show a late duplicate. (A message the harness queued itself waits
     // for the record, or for the window to close.)
     this.settleFailure(delivering, 'the harness record never showed it', { retry: true })
+  }
+
+  /**
+   * One more Enter, for a paste its window has not sent: an Enter that came
+   * before the window had read the paste finds nothing to send (Devin draws a
+   * long paste's placeholder only once it has read all of it), and the text
+   * waits in the input, where a second paste would only stack a copy beside
+   * it. An empty input takes an Enter as nothing. Pressed once, and only into
+   * a window quiet for a while; the next look tries again.
+   */
+  async #enterAgain(runtime, delivering) {
+    const { pane } = runtime.window
+    if (pane === null) return
+    delivering.enteredAgain = true
+    const snapshot = await this.#host.request('pane.snapshot', pane).catch(() => null)
+    if (snapshot?.ok !== true || !(snapshot.outputQuietMs >= ENTER_AGAIN_QUIET_MS)) {
+      delivering.enteredAgain = false
+      return
+    }
+    await this.#host.request('pane.input', { ...pane, bytes: [ENTER] }).catch(() => {})
+    this.#traceWindow(runtime, 'delivery.enter_again', { message: delivering.messageId })
   }
 
   /** A worker's answer to its task's latest message finishes the task. */

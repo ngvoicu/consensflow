@@ -853,6 +853,62 @@ describe('the dispatcher', () => {
     })
   })
 
+  it('presses Enter once more for a paste its window has not sent, into a quiet window only', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withStaff(context)
+      const chief = context.adapter.agent('chief')
+      chief.arrive = false
+      const note = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'hello' })
+      await context.dispatcher.pass()
+      const enters = () =>
+        context.host.requests.filter(([op, body]) => op === 'pane.input' && body.bytes[0] === 13)
+      context.clock.advance(9_000)
+      context.host.snapshot = { outputQuietMs: 5_000 }
+      await context.dispatcher.pass()
+      assert.equal(enters().length, 0, 'not before the record had its time')
+      // Printing a moment ago: being typed into, or still drawing.
+      context.host.snapshot = { outputQuietMs: 500 }
+      context.clock.advance(2_000)
+      await context.dispatcher.pass()
+      assert.equal(enters().length, 0, 'not into a window that just printed')
+      // Quiet now: the Enter sends what sat in the input, and the record shows it.
+      context.host.snapshot = { outputQuietMs: 5_000 }
+      const request = context.host.request
+      context.host.request = async (op, body) => {
+        if (op === 'pane.input' && body.bytes[0] === 13) {
+          chief.items.push(item('user', deliveryText(context.ledger.message(note.id))))
+        }
+        return request(op, body)
+      }
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const message = context.ledger.inbox(id('chief')).find((m) => m.id === note.id)
+      assert.deepEqual([message.state, message.attempts], ['delivered', 1])
+      assert.equal(enters().length, 1, 'pressed once')
+    })
+  })
+
+  it('pastes again, once its arrival window passes, when one more Enter did not bring it', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withStaff(context)
+      context.adapter.agent('chief').arrive = false
+      context.host.snapshot = { outputQuietMs: 5_000 }
+      const note = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'hello' })
+      await context.dispatcher.pass()
+      const enters = () =>
+        context.host.requests.filter(([op, body]) => op === 'pane.input' && body.bytes[0] === 13)
+      context.clock.advance(11_000)
+      await context.dispatcher.pass()
+      context.clock.advance(5_000)
+      await context.dispatcher.pass()
+      assert.equal(enters().length, 1, 'once for the attempt')
+      context.clock.advance(15_000)
+      await context.dispatcher.pass()
+      const message = context.ledger.inbox(id('chief')).find((m) => m.id === note.id)
+      assert.deepEqual([message.state, message.attempts], ['delivering', 2])
+    })
+  })
+
   it('tries an uncertain handover again once its arrival window passes with no sign of it', async () => {
     await setup(async (context) => {
       const { project, id } = await withStaff(context)

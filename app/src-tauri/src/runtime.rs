@@ -27,10 +27,12 @@ pub(crate) const MAX_FRAME_BYTES: usize = 1024 * 1024;
 const SHUTDOWN_DRAIN: Duration = Duration::from_secs(5);
 /// The page-side name of Node's `state.changed`. No dot: Tauri rejects it.
 pub(crate) const PAGE_STATE_EVENT: &str = "state-changed";
-/// A paste's Enter goes once the window has printed nothing for 120 ms since
-/// the paste (its echo done), never sooner than 10 ms, never later than 2 s.
-/// A fixed 10 ms was a Mac's speed: through Windows' ConPTY the paste was
-/// still going in when its Enter came, and Devin took the Enter into it.
+/// A paste's Enter goes once the window has drawn it and then printed
+/// nothing for 120 ms, never sooner than 10 ms, at 2 s whatever it drew. A
+/// fixed 10 ms was a Mac's speed: through Windows' ConPTY the paste was still
+/// going in when its Enter came, and Devin took the Enter into it; and 120 ms
+/// of silence was not enough either, since Devin reads a long paste silently
+/// before it draws it.
 const ENTER: EnterTiming = EnterTiming {
     least_ms: 10,
     quiet_ms: 120,

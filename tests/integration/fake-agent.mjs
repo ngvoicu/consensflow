@@ -227,6 +227,8 @@ process.stdin.on('data', (chunk) => {
     } else if (pending.startsWith(PASTE_END)) {
       pasting = false
       pending = pending.slice(PASTE_END.length)
+      // A real TUI draws what was pasted, and a paste's Enter waits for that.
+      process.stdout.write(`[pasted, ${buffer.length} characters]\n`)
     } else if (pending.startsWith('\u001b') && pending.length < PASTE_START.length) {
       return
     } else {
