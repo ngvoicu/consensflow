@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** App-scoped conversation commands, saved roster administration and runtime diagnostics. */
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -207,9 +207,6 @@ function doctor() {
   out(
     `harnesses:    ${harnesses.length > 0 ? harnesses.map((a) => a.id).join(', ') : 'none on PATH'}`,
   )
-  if (existsSync(join(configRoot(env), 'mode.json'))) {
-    out('legacy:       mode.json is ignored and can be removed')
-  }
   out(`agents:       ${listAgents(env).length}`)
   out('roles:        bundled chief, worker, reviewer and advisor; prepared when a window launches')
 
