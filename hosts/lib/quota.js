@@ -186,4 +186,4 @@ export function opencodeRetryQuota(status, nowMs) {
 }
 
 /** Devin's words for a refusal in its own messages. */
-export const DEVIN_REFUSAL = /rate limit|usage limit|quota exhausted/i
+export const DEVIN_REFUSAL = /rate limit|usage limit|quota exhausted|quota has been exhausted/i

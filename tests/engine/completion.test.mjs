@@ -1843,6 +1843,28 @@ test("completion/devin: a window reopened on its conversation reads the history 
   }
 })
 
+test('completion/devin: a turn Devin ended for its quota is over, neither failed nor finished', async () => {
+  const { root, env } = await stageDevin('Done.', [
+    { sessionId: 'calm-river', update: { sessionUpdate: 'tool_call' } },
+    devinChunk('Half'),
+    {
+      sessionId: 'calm-river',
+      turnClientMessageId: 'request-1',
+      cause: 'quota_exhausted',
+      errorMessage: 'Your daily usage quota has been exhausted.',
+    },
+  ])
+  try {
+    const answer = await completion.answers('devin', 'calm-river', env)
+    assert.equal(answer.inFlight, false)
+    assert.equal(answer.failed, false)
+    assert.equal(answer.settlement.state, 'settled')
+    assert.equal(answer.items.at(-1).complete, false, 'its half reply is no result')
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 test("completion/devin: a session at work reads as working, though another session's window wrote last", async () => {
   // Seen with three Devin windows of one worker, 2026-10-03: each read as
   // working only while its own wire log was the newest of all, so the three

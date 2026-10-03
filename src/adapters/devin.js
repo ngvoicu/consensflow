@@ -193,6 +193,12 @@ async function readWire(channel) {
         ) {
           channel.quota = exhaustedQuota(refused.message ?? '', Date.now())
         }
+        // Or the turn's own end for it, as Devin wrote it on a Pro plan
+        // (2026-10-03): cause quota_exhausted, its words in errorMessage
+        // ("Your daily usage quota has been exhausted.").
+        if (event.cause === 'quota_exhausted') {
+          channel.quota = exhaustedQuota(event.errorMessage ?? '', Date.now())
+        }
       }
     }
   } finally {

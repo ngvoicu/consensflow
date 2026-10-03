@@ -151,7 +151,8 @@ export function devinReader(sessionId, env) {
     }
     if (wire.active && typeof event.turnClientMessageId === 'string')
       wire.active.request = event.turnClientMessageId
-    if (['complete', 'cancelled', 'error'].includes(event.cause)) {
+    // A turn Devin ended for its quota is over, as a cancelled one is.
+    if (['complete', 'cancelled', 'error', 'quota_exhausted'].includes(event.cause)) {
       if (wire.active?.request) {
         const outcome = { ...wire.active, cause: event.cause }
         const previous = outcomes.get(wire.active.request)
@@ -323,7 +324,7 @@ function devinAnswer(chain, outcomes, launches, wires) {
   const lastIndex = chain.items.findLastIndex((item) => item.role !== 'custom')
   const last = lastIndex === -1 ? undefined : result.items[lastIndex]
   const outcome = outcomes.get(chain.items[lastIndex]?.request)
-  const cancelled = outcome?.cause === 'cancelled'
+  const cancelled = ['cancelled', 'quota_exhausted'].includes(outcome?.cause)
   result.failed = outcome?.cause === 'error'
   result.inFlight =
     working || (last?.role === 'assistant' && !last.complete && !cancelled && !result.failed)

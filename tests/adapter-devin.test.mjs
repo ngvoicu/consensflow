@@ -411,6 +411,22 @@ console.log('devin ${version}')
         },
       })
       assert.equal((await adapter.observe({ launch })).quota?.state, 'exhausted')
+
+      // Or the turn's own end for it, as Devin wrote it on a Pro plan (poker-lab, 2026-10-03).
+      await line({
+        jsonrpc: '2.0',
+        id: 5,
+        method: 'session/prompt',
+        params: { sessionId: 'dev-1' },
+      })
+      assert.equal((await adapter.observe({ launch })).quota, null)
+      await line({
+        cause: 'quota_exhausted',
+        errorMessage:
+          'Your daily usage quota has been exhausted. Visit https://app.devin.ai/settings/usage to purchase on-demand usage or turn on auto-reload. (trace ID: c27105417b16dd2a33d911ce59955e84)',
+        sessionId: 'dev-1',
+      })
+      assert.equal((await adapter.observe({ launch })).quota?.state, 'exhausted')
     })
   })
 })
