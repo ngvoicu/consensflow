@@ -4,3 +4,4 @@ node_modules/
 /deliveries/d-*.md
 test-results/
 .idea
+evals/reports/
