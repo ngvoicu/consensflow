@@ -1,9 +1,8 @@
-import { randomUUID } from 'node:crypto'
 import { Deliveries } from './deliveries.js'
-import { deliveryText, markerOf } from './delivery-text.js'
 import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.js'
 import { Scheduler } from './scheduler.js'
 import { Transcripts } from './transcripts.js'
+import { Windows } from './windows.js'
 
 /**
  * The dispatcher: the only actor in the daemon. Agents never open panes or
@@ -75,15 +74,6 @@ import { Transcripts } from './transcripts.js'
  * testable with explicit passes (`tests/core-dispatcher.test.mjs`).
  */
 
-/** The key that interrupts a harness's current turn, how often it is pressed again for a window still working, how soon, and the gap of a double press. */
-const ESCAPE = 27
-const INTERRUPT_ROUNDS = 3
-const INTERRUPT_AGAIN_MS = 3_000
-const DOUBLE_PRESS_MS = 150
-
-/** How long a fresh window's output must hold still before its screen counts as drawn. */
-const DRAWN_QUIET_MS = 1_500
-
 /** A closed project starts and changes no work, whatever asks: it is resumed first. */
 export function requireOpen(project) {
   if (project.state !== 'open') throw new Error(`${project.name} is closed: resume it first`)
@@ -106,10 +96,6 @@ export function requireLeadAgent(agent) {
 const isHandoff = (message) =>
   message.kind === 'note' && message.sender === null && message.body.startsWith(HANDOFF_TITLE)
 
-/** How soon a lead that could not start is tried again; the wait doubles with each failure, up to the most. */
-const RELAUNCH_MS = 5_000
-const RELAUNCH_MAX_MS = 5 * 60_000
-
 /**
  * Starts `work` inside an async function, so one that throws before its
  * first await rejects as one that throws after it does: whoever holds a
@@ -119,14 +105,8 @@ const begin = async (work) => work()
 
 export class Dispatcher {
   #ledger
-  #host
-  #adapters
   #clock
-  #credentials
-  #paneEnv
   #roster
-  #launchFiles
-  #roles
   /** Told each change of a window's activity, a delivery a window is not ready for and a deleted project, for the event file in the home. */
   #trace
   /** The daemon's log, for a launch or a delivery that failed apart from any pass. */
@@ -137,11 +117,12 @@ export class Dispatcher {
   #scheduler
   /** ConsensFlow's copy of each window's conversation (`transcripts.js`). */
   #transcripts
+  /** Each window's launch, looks and close (`windows.js`). */
+  #windows
   #runtime = new Map()
   /** The records of participants forgotten while their window was still open, until it exits. */
   #leaving = new Set()
   #listeners = new Set()
-  #generation = 0
 
   constructor({
     ledger,
@@ -160,16 +141,10 @@ export class Dispatcher {
     launchFiles = { forget: () => {} },
   }) {
     this.#ledger = ledger
-    this.#host = host
-    this.#adapters = adapters
     this.#clock = clock
-    this.#credentials = credentials
-    this.#paneEnv = paneEnv
     this.#roster = roster
-    this.#roles = roles
     this.#trace = trace
     this.#log = log
-    this.#launchFiles = launchFiles
     this.#deliveries = new Deliveries({
       ledger,
       host,
@@ -178,7 +153,7 @@ export class Dispatcher {
       launchTimeoutMs,
       maxAttempts,
       traceWindow: (runtime, kind, details) => this.#traceWindow(runtime, kind, details),
-      retire: (runtime) => this.#retire(runtime),
+      retire: (runtime) => this.#windows.retire(runtime),
       forgotten: (runtime) => this.#forgotten(runtime),
       now: () => this.#now(),
       changed: () => this.#changed(),
@@ -194,6 +169,27 @@ export class Dispatcher {
       changed: () => this.#changed(),
     })
     this.#transcripts = new Transcripts({ ledger, changed: () => this.#changed() })
+    this.#windows = new Windows({
+      ledger,
+      host,
+      adapters,
+      credentials,
+      paneEnv,
+      roster,
+      roles,
+      launchFiles,
+      deliveries: this.#deliveries,
+      scheduler: this.#scheduler,
+      leadFirst: (project, chief, conversation, message) =>
+        this.#leadFirst(project, chief, conversation, message),
+      leadWithoutAgent: (project, chief, delivering) =>
+        this.#leadWithoutAgent(project, chief, delivering),
+      paneExited: (pane) => this.paneExited(pane),
+      traceWindow: (runtime, kind, details) => this.#traceWindow(runtime, kind, details),
+      forgotten: (runtime) => this.#forgotten(runtime),
+      now: () => this.#now(),
+      changed: () => this.#changed(),
+    })
     host.onExit((pane) => this.paneExited(pane))
   }
 
@@ -218,11 +214,9 @@ export class Dispatcher {
     return this.#runtime.get(participantId)?.window.pane ?? null
   }
 
-  /** Refuses a harness ConsensFlow has no adapter for: none of its windows could open. */
+  /** Refuses a harness ConsensFlow has no adapter for (`windows.js`). */
   requireAdapter(harness) {
-    if (this.#adapters[harness] === undefined) {
-      throw new Error(`ConsensFlow cannot open ${harness} windows`)
-    }
+    this.#windows.requireAdapter(harness)
   }
 
   /**
@@ -294,7 +288,8 @@ export class Dispatcher {
         return this.#exclusive(
           participant.id,
           async () => {
-            if (runtime.window.pane !== null) await this.#closeOwn(runtime, runtime.window.pane)
+            if (runtime.window.pane !== null)
+              await this.#windows.closeOwn(runtime, runtime.window.pane)
           },
           { wait: true },
         )
@@ -326,7 +321,7 @@ export class Dispatcher {
       await (runtime.running ?? runtime.acting).catch(() => {})
     }
     if (runtime.window.pane === null) this.#leaving.delete(runtime)
-    else await this.#retire(runtime)
+    else await this.#windows.retire(runtime)
   }
 
   // --- the human's hand on a session's window ------------------------------------------
@@ -368,7 +363,7 @@ export class Dispatcher {
       async () => {
         const runtime = this.#runtimeOf(holder.id)
         runtime.window.pinned = false
-        if (runtime.window.pane !== null) await this.#retire(runtime)
+        if (runtime.window.pane !== null) await this.#windows.retire(runtime)
         return release()
       },
       { wait: true },
@@ -380,7 +375,7 @@ export class Dispatcher {
     const { participant } = this.#sessionOf(projectId, handle)
     const runtime = this.#runtimeOf(participant.id)
     runtime.window.pinned = false
-    if (runtime.window.pane !== null) await this.#retire(runtime)
+    if (runtime.window.pane !== null) await this.#windows.retire(runtime)
     return this.#ledger.project(projectId)
   }
 
@@ -536,18 +531,8 @@ export class Dispatcher {
       runtime.window.opening.exited = true
       return
     }
-    this.#credentials.revoke(runtime.window.token)
     const delivering = runtime.delivery.delivering
-    // The window's files in the home go with it.
-    this.#launchFiles.forget(runtime.window.launchId)
-    Object.assign(runtime.window, {
-      pane: null,
-      launch: null,
-      launchId: null,
-      token: null,
-      retiring: false,
-      activity: { state: 'closed' },
-    })
+    this.#windows.closed(runtime)
     runtime.delivery.delivering = null
     // A participant that left is forgotten already: its window's exit settles nothing more.
     if (this.#leaving.delete(runtime)) return
@@ -589,34 +574,6 @@ export class Dispatcher {
     })
   }
 
-  /** One look at a window: what its harness's record shows now. */
-  #observe(participant, runtime) {
-    return runtime.window.adapter.observe({
-      launch: runtime.window.launch,
-      pane: runtime.window.pane,
-      conversation: this.#ledger.currentConversation(participant.id),
-      host: this.#host,
-    })
-  }
-
-  /**
-   * Whether a window has drawn its screen: it printed, then held still for a
-   * moment (the pane host says how long it has printed nothing). A host that
-   * cannot tell is taken as drawn.
-   */
-  async #drawn(runtime) {
-    if (runtime.window.drawn) return true
-    const snapshot = await this.#host
-      .request('pane.snapshot', runtime.window.pane)
-      .catch(() => null)
-    const quiet = snapshot?.outputQuietMs
-    if (quiet === undefined || (quiet !== null && quiet >= DRAWN_QUIET_MS)) {
-      runtime.window.drawn = true
-      return true
-    }
-    return false
-  }
-
   // --- one participant's step ----------------------------------------------------
 
   async #step(project, participant) {
@@ -629,7 +586,7 @@ export class Dispatcher {
     if (runtime.window.relaunch !== null && runtime.window.relaunch.at > this.#now()) return
     const next = this.#ledger.nextDelivery(participant.id)
     if (next !== null) {
-      this.#act(runtime, () => this.#launch(project, participant, next))
+      this.#act(runtime, () => this.#windows.launch(runtime, project, participant, next))
       return
     }
     if (participant.role === 'chief') return
@@ -655,10 +612,10 @@ export class Dispatcher {
     // (`#closeLeaving`).
     let observed
     try {
-      observed = await this.#observe(participant, runtime)
+      observed = await this.#windows.observe(participant, runtime)
     } catch (cause) {
       if (!this.#forgotten(runtime)) {
-        this.#setActivity(runtime, { state: 'unknown', reason: cause.message })
+        this.#windows.setActivity(runtime, { state: 'unknown', reason: cause.message })
       }
       return
     }
@@ -671,12 +628,13 @@ export class Dispatcher {
     // draws its screen or until it names its first conversation.
     const unnamed = observed.unnamed === true
     if (!unnamed) runtime.window.named = true
-    const drawing = (observed.items.length === 0 || unnamed) && !(await this.#drawn(runtime))
+    const drawing =
+      (observed.items.length === 0 || unnamed) && !(await this.#windows.drawn(runtime))
     if (this.#forgotten(runtime)) return
     const starting = drawing || (unnamed && !runtime.window.named)
     // An out member's window says so, and nothing else, until the reset.
     if (!this.#scheduler.isOut(owner)) {
-      this.#setActivity(
+      this.#windows.setActivity(
         runtime,
         starting
           ? { state: 'starting' }
@@ -707,15 +665,15 @@ export class Dispatcher {
         await this.#performSwitch(project, participant, runtime, runtime.pendingSwitch)
         return
       }
-      this.#setActivity(runtime, {
+      this.#windows.setActivity(runtime, {
         state: 'out',
         reason: `out of quota until ${owner.outUntil}`,
       })
       // A held task's agent stops, as any paused task's; the window waits for
       // the reset, unless its task is gone meanwhile (cancelled, taken back).
       if (participant.role !== 'chief') {
-        await this.#interruptIfStopped(participant, runtime, observed)
-        if (!this.#forgotten(runtime)) await this.#closeIfFree(runtime)
+        await this.#windows.interruptIfStopped(participant, runtime, observed)
+        if (!this.#forgotten(runtime)) await this.#windows.closeIfFree(runtime)
       }
       return
     }
@@ -723,10 +681,10 @@ export class Dispatcher {
     // A window that began to close in this step (a launch that timed out) is not acted on.
     if (runtime.window.retiring) return
     if (participant.role !== 'chief') {
-      await this.#interruptIfStopped(participant, runtime, observed)
+      await this.#windows.interruptIfStopped(participant, runtime, observed)
       if (this.#forgotten(runtime)) return
       this.#deliveries.collect(project, participant, observed)
-      if (await this.#closeIfFree(runtime)) return
+      if (await this.#windows.closeIfFree(runtime)) return
     }
     const idle =
       runtime.delivery.delivering === null && observed.settled && !observed.waiting && !drawing
@@ -832,7 +790,7 @@ export class Dispatcher {
     let cut = false
     const { pane } = runtime.window
     if (pane !== null) {
-      const observed = await this.#observe(chief, runtime).catch(() => null)
+      const observed = await this.#windows.observe(chief, runtime).catch(() => null)
       if (this.#forgotten(runtime)) return
       if (observed !== null) {
         this.#transcripts.copy(chief, runtime, observed)
@@ -843,7 +801,7 @@ export class Dispatcher {
       runtime.delivery.delivering = null
       if (delivering !== null)
         this.#deliveries.giveBack(delivering, 'the lead was switched before it arrived')
-      await this.#closeOwn(runtime, pane)
+      await this.#windows.closeOwn(runtime, pane)
     }
     if (this.#forgotten(runtime)) return
     // A handoff still on its way is an earlier switch's: this one writes its
@@ -864,7 +822,7 @@ export class Dispatcher {
     const current = this.#ledger.project(project.id)
     if (current.state !== 'open') return
     const lead = current.participants.find((participant) => participant.role === 'chief')
-    this.#act(runtime, () => this.#launch(current, lead, null))
+    this.#act(runtime, () => this.#windows.launch(runtime, current, lead, null))
   }
 
   /**
@@ -910,280 +868,6 @@ export class Dispatcher {
   }
 
   /**
-   * A window whose task stopped stops too. A paused task's window stays
-   * open, but its agent is interrupted. An agent still at work on a turn
-   * about a task cancelled under its window is interrupted as well; the
-   * window then closes, as any that holds no work, unless the human opened
-   * it. A turn the human began since in a window they opened is theirs, and
-   * goes on. Whatever the agent still writes is not collected, since the
-   * task is not working.
-   */
-  async #interruptIfStopped(participant, runtime, observed) {
-    const paused = this.#ledger.pausedTask(participant.id)
-    if (paused !== null) {
-      // The chief's tell reached the window during this pause: the agent answers
-      // it and ends its own turn, uninterrupted; the chief resumes the task.
-      if (!this.#ledger.toldSincePaused(participant.id, paused.id)) {
-        await this.#interrupt(runtime, paused.id)
-      }
-      return
-    }
-    if (runtime.window.activity.state !== 'working') return
-    const cancelled = this.#ledger.lastTask(participant.id)
-    if (cancelled?.state !== 'cancelled') return
-    const turn = observed.items.findLast((item) => item.role === 'user')
-    const about = cancelled.messages.some(
-      (message) =>
-        message.recipientId === participant.id && turn?.text.includes(markerOf(message.id)),
-    )
-    if (about) await this.#interrupt(runtime, cancelled.id)
-  }
-
-  /**
-   * The Escape key interrupts the turn on `taskId` (twice in a row where the
-   * harness asks for it), and again a few seconds later while the window
-   * still reads as working, since a harness may ignore the key while it
-   * thinks: three rounds at most.
-   */
-  async #interrupt(runtime, taskId) {
-    const done = runtime.window.interrupted?.task === taskId ? runtime.window.interrupted : null
-    if (
-      done !== null &&
-      (runtime.window.activity.state !== 'working' ||
-        done.rounds >= INTERRUPT_ROUNDS ||
-        this.#now() - done.at < INTERRUPT_AGAIN_MS)
-    ) {
-      return
-    }
-    runtime.window.interrupted = { task: taskId, rounds: (done?.rounds ?? 0) + 1, at: this.#now() }
-    const presses = runtime.window.adapter.interrupt?.presses ?? 1
-    for (let press = 0; press < presses; press += 1) {
-      if (press > 0) await new Promise((resolve) => setTimeout(resolve, DOUBLE_PRESS_MS))
-      await this.#host
-        .request('pane.input', { ...runtime.window.pane, bytes: [ESCAPE] })
-        .catch(() => {})
-    }
-  }
-
-  /**
-   * A session's window closes with its task; its conversation stays until the
-   * session ends (the ledger ends both together), so a follow-up given with
-   * `--after` comes back on the same conversation. A window already closing
-   * had its kill.
-   */
-  async #retire(runtime) {
-    if (runtime.window.retiring) return
-    runtime.window.retiring = true
-    await this.#host.kill(runtime.window.pane).catch(() => {})
-    this.#changed()
-  }
-
-  /**
-   * A member's window closes once it holds no task, unless the human opened
-   * it or a message is still on its way in. Says whether it closed; one gone
-   * already during the step (a launch that timed out) has nothing to close.
-   */
-  async #closeIfFree(runtime) {
-    if (
-      runtime.window.pane === null ||
-      runtime.delivery.delivering !== null ||
-      runtime.window.pinned ||
-      this.#ledger.holdsWork(runtime.id)
-    ) {
-      return false
-    }
-    await this.#retire(runtime)
-    return true
-  }
-
-  /**
-   * A member's fresh session starts from nothing: when its first message is
-   * not the task's own brief (a reopening, an answer), the brief
-   * goes in first. A resumed conversation has it already.
-   */
-  #launchText(project, participant, message, resume) {
-    const text = deliveryText(message)
-    if (resume !== null || participant.role === 'chief' || message.taskNumber == null) {
-      return text
-    }
-    const task = this.#ledger.task(project.id, message.taskNumber)
-    const brief = task?.messages.find(
-      (m) => m.kind === 'task' && m.recipient === participant.handle && m.state !== 'cancelled',
-    )
-    if (brief === undefined || brief.id === message.id) return text
-    return `${deliveryText(brief)}\n\n${text}`
-  }
-
-  // --- launches --------------------------------------------------------------------
-
-  async #launch(project, participant, message) {
-    const runtime = this.#runtimeOf(participant.id)
-    const adapter = this.#adapters[participant.harness]
-    const conversation = this.#ledger.currentConversation(participant.id)
-    const resume = conversation?.nativeSession ?? null
-    const first =
-      participant.role === 'chief'
-        ? this.#leadFirst(project, participant, conversation, message)
-        : message
-    const launchId = randomUUID()
-    const generation = this.#nextGeneration()
-    const delivering =
-      first === null
-        ? null
-        : {
-            messageId: first.id,
-            marker: markerOf(first.id),
-            since: this.#now(),
-            launch: true,
-            chief: participant.role === 'chief',
-          }
-
-    let plan
-    try {
-      if (first !== null) this.#ledger.beginDelivery(first.id)
-      // A harness that lost its adapter fails what came for it, and says why.
-      this.requireAdapter(participant.harness)
-      // A session plays the role of the task it was started for; a member or
-      // the chief its own.
-      const { role } = participant
-      // A member runs on its saved agent's model, read now; one the human
-      // has deleted from their agents must not fall back to a harness default.
-      const agent = participant.agent === null ? null : this.#roster(participant.agent)
-      if (participant.agent !== null && agent === null) {
-        if (participant.role === 'chief') this.#leadWithoutAgent(project, participant, delivering)
-        else this.#scheduler.withoutAgent(project, participant, delivering)
-        // A session's window the human opened, with nothing to deliver, says why it did not come.
-        if (participant.role !== 'chief' && delivering === null) {
-          this.#launchFailed(
-            runtime,
-            project,
-            participant,
-            null,
-            `${participant.agent} is no longer among your agents`,
-          )
-        }
-        return
-      }
-      plan = await adapter.prepare({
-        launchId,
-        participant,
-        role,
-        project,
-        directory: project.directory,
-        resume,
-        message: first === null ? null : this.#launchText(project, participant, first, resume),
-        agent,
-        instructions: this.#roles(participant, project),
-      })
-    } catch (cause) {
-      // An adapter may fail after writing the launch's files; no window will read them.
-      this.#launchFiles.forget(launchId)
-      this.#launchFailed(
-        runtime,
-        project,
-        participant,
-        delivering,
-        `the launch failed: ${cause.message}`,
-      )
-      return
-    }
-    // A participant forgotten while its launch waits (it left, or its project
-    // was deleted) gets nothing more under its ids, whose rows may be gone:
-    // no window opens for it, and one already open goes with the record
-    // (`#closeLeaving`).
-    if (this.#forgotten(runtime)) {
-      this.#launchFiles.forget(launchId)
-      return
-    }
-    const token = this.#credentials.issue({ participant, project })
-    const pane = { id: `p${project.id}-${participant.handle}`, generation }
-    // The host watches a window's process before it answers the open, so an
-    // exit can come first, even in the same read: `paneExited` finds it here.
-    runtime.window.opening = { pane, exited: false }
-    const opened = await this.#host
-      .open({
-        ...pane,
-        cwd: project.directory,
-        argv: plan.argv,
-        env: { ...this.#paneEnv(participant, project), ...plan.env, CONSENSFLOW_TOKEN: token },
-        dropEnv: plan.dropEnv,
-      })
-      .catch((cause) => ({ ok: false, error: cause.message }))
-    const { exited } = runtime.window.opening
-    runtime.window.opening = null
-    if (opened?.ok !== true) {
-      this.#credentials.revoke(token)
-      this.#launchFiles.forget(launchId)
-      this.#launchFailed(
-        runtime,
-        project,
-        participant,
-        delivering,
-        `the window did not open: ${opened?.error ?? 'no answer from the pane host'}`,
-      )
-      return
-    }
-    // The window's own process, when the pane host knows it: an adapter may
-    // find the harness's own status by it from its first look.
-    if (opened.pid !== undefined) plan.launch.pid = opened.pid
-    if (this.#forgotten(runtime)) {
-      Object.assign(runtime.window, { pane, launchId, token })
-      // One that exited before its open was answered has gone already.
-      if (exited) await this.paneExited(pane)
-      return
-    }
-
-    const resumed = resume !== null && plan.nativeSession === resume
-    let conversationId = conversation?.id
-    if (!resumed) {
-      conversationId = this.#ledger.startConversation(participant.id, {
-        harness: participant.harness,
-      }).id
-      if (plan.nativeSession !== null && plan.nativeSession !== undefined)
-        this.#ledger.bindConversation(conversationId, plan.nativeSession)
-    }
-    Object.assign(runtime.window, {
-      adapter,
-      pane,
-      launch: plan.launch,
-      launchId,
-      token,
-      activity: { state: 'starting' },
-      drawn: false,
-      named: false,
-    })
-    runtime.delivery.delivering = delivering
-    // A window that exited before its open was answered goes as any exit does.
-    if (exited) {
-      await this.paneExited(pane)
-      return
-    }
-    const started = await adapter
-      .started({ launch: plan.launch, pane, host: this.#host })
-      .catch((cause) => ({ error: cause.message }))
-    if (started.error !== undefined && delivering !== null) {
-      runtime.delivery.delivering = null
-      // The lead's window goes without taking its project with it: the lead is tried again.
-      if (participant.role === 'chief') await this.#closeOwn(runtime, pane)
-      else this.#host.kill(pane).catch(() => {})
-      this.#launchFailed(
-        runtime,
-        project,
-        participant,
-        delivering,
-        `the window could not take its first message: ${started.error}`,
-      )
-      return
-    }
-    if (this.#forgotten(runtime)) return
-    runtime.window.relaunch = null
-    if (started.nativeSession && started.nativeSession !== plan.nativeSession) {
-      this.#ledger.bindConversation(conversationId, started.nativeSession)
-    }
-    this.#changed()
-  }
-
-  /**
    * A lead's first message. A handoff still on its way goes first: the
    * window it was written for never came up, or closed before showing it. A
    * lead that starts fresh with earlier conversations behind it (the human
@@ -1200,66 +884,6 @@ export class Dispatcher {
   }
 
   /**
-   * A launch that did not come up. A member's first message fails with it,
-   * so its task fails and the requester hears why; a window the human opened
-   * with nothing to deliver tells them why it did not come. The lead's first
-   * message goes back to its queue with its attempt, and the lead is tried
-   * again, ever more slowly while it keeps failing. The human hears why
-   * once, until the lead starts or they ask for it again. A participant
-   * forgotten while it launched hears nothing and settles nothing: its
-   * project may be gone, and its rows with it.
-   */
-  #launchFailed(runtime, project, participant, delivering, reason) {
-    if (this.#forgotten(runtime)) return
-    if (participant.role !== 'chief') {
-      if (delivering !== null) this.#deliveries.settleFailure(delivering, reason, { retry: false })
-      else {
-        this.#ledger.note(project.id, {
-          to: 'human',
-          body: `@${participant.handle} could not start: ${reason}.`,
-        })
-        this.#changed()
-      }
-      return
-    }
-    if (delivering !== null) this.#deliveries.giveBack(delivering, reason)
-    const failures = (runtime.window.relaunch?.failures ?? 0) + 1
-    runtime.window.relaunch = {
-      failures,
-      at: this.#now() + Math.min(RELAUNCH_MS * 2 ** (failures - 1), RELAUNCH_MAX_MS),
-    }
-    if (failures === 1) {
-      this.#ledger.note(project.id, {
-        to: 'human',
-        body: `The lead could not start: ${reason}. What comes for the lead waits for it, and ConsensFlow tries again; you may also switch the lead.`,
-      })
-    }
-    this.#changed()
-  }
-
-  /**
-   * Closes a window whose exit is the dispatcher's own (a switch, a Close, a
-   * lead that could not take its first message): the exit settles what the
-   * window was doing, as any exit does, but a lead's does not close its
-   * project. It is the dispatcher's whether its event came already or comes
-   * later. A window already going with its work had its kill.
-   */
-  async #closeOwn(runtime, pane) {
-    runtime.window.ownExit = true
-    try {
-      if (!runtime.window.retiring) await this.#host.kill(pane).catch(() => {})
-      if (
-        runtime.window.pane?.id === pane.id &&
-        runtime.window.pane.generation === pane.generation
-      ) {
-        await this.paneExited(pane)
-      }
-    } finally {
-      runtime.window.ownExit = false
-    }
-  }
-
-  /**
    * A member whose harness just refused it: out until the reset it names (an
    * hour when it names none). What it was receiving is queued again, its
    * tiered work goes back to the board; its own tasks (the chief's) wait for it.
@@ -1269,7 +893,7 @@ export class Dispatcher {
    */
   async #outOfQuota(project, participant, runtime, owner) {
     const until = this.#scheduler.resetOf(runtime.quota.reported)
-    this.#setActivity(runtime, { state: 'out', reason: `out of quota until ${until}` })
+    this.#windows.setActivity(runtime, { state: 'out', reason: `out of quota until ${until}` })
     this.#ledger.markOut(owner.id, { until, reason: 'out of quota' })
     if (runtime.delivery.delivering !== null) {
       const { delivering } = runtime.delivery
@@ -1277,7 +901,7 @@ export class Dispatcher {
       this.#deliveries.settleFailure(delivering, 'the harness ran out of quota', { retry: true })
     }
     this.#scheduler.holdOrRelease(project, participant, owner, until)
-    if (participant.role !== 'chief') await this.#closeIfFree(runtime)
+    if (participant.role !== 'chief') await this.#windows.closeIfFree(runtime)
     this.#changed()
   }
 
@@ -1346,7 +970,7 @@ export class Dispatcher {
         const project = this.#projectOf(participantId)
         if (runtime.window.pane !== null || project?.state !== 'open') return
         const participant = project.participants.find((p) => p.id === participantId)
-        this.#act(runtime, () => this.#launch(project, participant, null))
+        this.#act(runtime, () => this.#windows.launch(runtime, project, participant, null))
       },
       { wait: true },
     ).catch((cause) => this.#writeDown(cause))
@@ -1405,20 +1029,6 @@ export class Dispatcher {
     return this.#runtime.get(runtime.id) !== runtime
   }
 
-  #setActivity(runtime, activity) {
-    if (
-      runtime.window.activity.state === activity.state &&
-      runtime.window.activity.reason === activity.reason
-    )
-      return
-    runtime.window.activity = activity
-    this.#traceWindow(runtime, 'window.activity', {
-      state: activity.state,
-      reason: activity.reason ?? null,
-    })
-    this.#changed()
-  }
-
   /** Tells the trace what happened at a window, named by its project and participant. */
   #traceWindow(runtime, kind, details) {
     const project = this.#projectOf(runtime.id)
@@ -1437,11 +1047,6 @@ export class Dispatcher {
         .projects()
         .find((project) => project.participants.some((p) => p.id === participantId)) ?? null
     )
-  }
-
-  #nextGeneration() {
-    this.#generation = Math.max(this.#generation + 1, this.#now())
-    return this.#generation
   }
 
   #now() {
