@@ -81,6 +81,12 @@ describe('role instructions for each window the daemon opens', () => {
         assert.doesNotMatch(text, /VERDICT|Review round/, 'a review is a task: no verdict line')
         if (role === 'advisor') assert.match(text, /You advise this project's chief/)
         if (role === 'designer') assert.match(text, /image generation tool/)
+        // Poker-lab, 2026-10-03: a worker's rm -rf "$W/$d" stopped Claude Code
+        // for a human, with a countdown, in a window where every permission is granted.
+        assert.match(
+          text,
+          /an `rm -rf` whose path a\s+variable makes \(`"\$W\/\$d"`\)\. Give such a command a literal path, or `\$\{W:\?\}`\./,
+        )
       }
     })
   }

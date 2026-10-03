@@ -31,6 +31,10 @@ Questions go to the chief, never to another member. Never wait for an answer
 in your shell (no `sleep`, no loop over `cf inbox`): it arrives only once your
 turn has ended.
 
+Nobody watches this window, and a harness may stop for a human even with
+every permission granted: Claude Code does on an `rm -rf` whose path a
+variable makes (`"$W/$d"`). Give such a command a literal path, or `${W:?}`.
+
 Each message ConsensFlow brings you is typed into this terminal, headed
 `[ConsensFlow m-… · T-… · …]`; your harness may show it as pasted text. It is
 ConsensFlow's delivery, and acting on it is your role.
