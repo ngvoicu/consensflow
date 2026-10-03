@@ -3,6 +3,7 @@ import { Deliveries } from './deliveries.js'
 import { deliveryText, markerOf } from './delivery-text.js'
 import { HANDOFF_TITLE, handoffText, historyPages, lastWords } from './handoff.js'
 import { Scheduler } from './scheduler.js'
+import { Transcripts } from './transcripts.js'
 
 /**
  * The dispatcher: the only actor in the daemon. Agents never open panes or
@@ -134,6 +135,8 @@ export class Dispatcher {
   #deliveries
   /** Who takes which open task, and who is out of quota (`scheduler.js`). */
   #scheduler
+  /** ConsensFlow's copy of each window's conversation (`transcripts.js`). */
+  #transcripts
   #runtime = new Map()
   /** The records of participants forgotten while their window was still open, until it exits. */
   #leaving = new Set()
@@ -190,6 +193,7 @@ export class Dispatcher {
       now: () => this.#now(),
       changed: () => this.#changed(),
     })
+    this.#transcripts = new Transcripts({ ledger, changed: () => this.#changed() })
     host.onExit((pane) => this.paneExited(pane))
   }
 
@@ -683,12 +687,12 @@ export class Dispatcher {
               : { state: 'working' },
       )
     }
-    this.#copyTranscript(participant, runtime, observed)
+    this.#transcripts.copy(participant, runtime, observed)
     // The human switched the window to another conversation: this look was
     // the old one's last, and nothing is delivered on it.
     if (observed.switched !== undefined) {
       if (runtime.delivery.delivering !== null) this.#deliveries.confirmArrival(runtime, observed)
-      this.#follow(participant, runtime, observed.switched.nativeSession)
+      this.#transcripts.follow(participant, runtime, observed.switched.nativeSession)
       return
     }
     if (observed.quota !== undefined) this.#scheduler.recordQuota(runtime, owner, observed.quota)
@@ -831,7 +835,7 @@ export class Dispatcher {
       const observed = await this.#observe(chief, runtime).catch(() => null)
       if (this.#forgotten(runtime)) return
       if (observed !== null) {
-        this.#copyTranscript(chief, runtime, observed)
+        this.#transcripts.copy(chief, runtime, observed)
         if (runtime.delivery.delivering !== null) this.#deliveries.confirmArrival(runtime, observed)
         cut = !observed.settled
       }
@@ -902,42 +906,6 @@ export class Dispatcher {
     if (delivering !== null) {
       this.#deliveries.giveBack(delivering, `${chief.agent} is no longer among your agents`)
     }
-    this.#changed()
-  }
-
-  /**
-   * ConsensFlow's own copy of the window's conversation, kept in the home:
-   * what the agent was told, wrote and got back from its tools, readable on
-   * the card once the window is gone. Each look copies what is new and the
-   * item still being written; a record that shrank (a resumed window rewrote
-   * it) is copied over from the start.
-   */
-  #copyTranscript(participant, runtime, observed) {
-    const conversation = this.#ledger.currentConversation(participant.id)
-    if (conversation === null) return
-    const items = observed.items
-    const copied = runtime.copied?.conversation === conversation.id ? runtime.copied.count : 0
-    const from = items.length < copied ? 0 : Math.max(0, copied - 1)
-    if (items.length > from) {
-      this.#ledger.copyTranscript(conversation.id, items.slice(from), { from })
-    }
-    runtime.copied = { conversation: conversation.id, count: items.length }
-  }
-
-  /**
-   * A window the human switched to another conversation (/clear, /new,
-   * /resume) is followed: the participant's conversation is the one it shows
-   * now, and its launch names it, so later looks, deliveries and the
-   * transcript copy go there. A delivery still on its way counts once its
-   * header shows in the record the window now writes.
-   */
-  #follow(participant, runtime, nativeSession) {
-    this.#ledger.followConversation(participant.id, {
-      harness: participant.harness,
-      nativeSession,
-    })
-    runtime.window.launch.nativeSession = nativeSession
-    runtime.copied = null
     this.#changed()
   }
 
