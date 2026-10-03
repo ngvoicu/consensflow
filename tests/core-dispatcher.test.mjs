@@ -72,6 +72,12 @@ function fakeAdapter(harness = 'claude-code') {
       }
       return agent.queued ? { admitted: true, queued: true } : { admitted: true }
     },
+    async record({ conversation }) {
+      const agent = [...agents.values()]
+        .filter((a) => a.native === conversation.nativeSession)
+        .at(-1)
+      return agent === undefined ? { unknown: true } : { items: [...agent.items] }
+    },
     async observe({ launch }) {
       const agent = agents.get(launch.launchId)
       // A window that shows another conversation than its launch's: that
@@ -1469,6 +1475,37 @@ describe('a restart while a message is on its way', () => {
           .items.filter((i) => i.role === 'user')
           .map((i) => i.text.split('\n')[1]),
         ['One', 'Two'],
+      )
+    })
+  })
+
+  it('sends nothing again that its harness took, though the copy of its window missed it', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withStaff(context)
+      await context.dispatcher.pass()
+      const note = context.ledger.note(project.id, { from: 'zeus', to: 'chief', body: 'Taken' })
+      await context.dispatcher.pass()
+      // The harness took it, and its own record has it; the daemon stopped
+      // before its next look copied the window, so the copy does not.
+      assert.equal(context.ledger.message(note.id).state, 'delivering')
+      assert.equal(context.ledger.copiedItemWith(id('chief'), `m-${note.id}`), null)
+      const taken = context.adapter
+        .agent('chief')
+        .items.find((entry) => entry.role === 'user' && entry.text.includes('Taken'))
+
+      context.ledger.suspendForRestart()
+      const after = context.make()
+      await after.resumeAfterRestart()
+      const settled = context.ledger.message(note.id)
+      assert.deepEqual([settled.state, settled.receipt], ['delivered', { item: taken.id }])
+      await after.pass()
+      await after.pass()
+      assert.equal(
+        context.adapter
+          .agent('chief')
+          .items.filter((entry) => entry.role === 'user' && entry.text.includes('Taken')).length,
+        0,
+        'the window that came back is not given it again',
       )
     })
   })

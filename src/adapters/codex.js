@@ -182,6 +182,11 @@ export function codexAdapter({
       return admission(sent, 'the Codex broker refused it', { queued: true })
     },
 
+    /** Its harness's own record of a conversation, read with no window open. */
+    record({ conversation }) {
+      return answers('codex', conversation.nativeSession, env)
+    },
+
     async observe({ launch }) {
       if (launch.nativeSession === null) {
         return { items: [], settled: false, waiting: null, failed: false, quota: null }

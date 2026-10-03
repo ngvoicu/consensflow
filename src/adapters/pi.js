@@ -101,6 +101,11 @@ export function piAdapter({ env, send = sendPi, answers = cachedAnswers() }) {
       return admission(sent, 'Pi refused it', { queued: true })
     },
 
+    /** Its harness's own record of a conversation, read with no window open. */
+    record({ conversation }) {
+      return answers('pi', conversation.nativeSession, env)
+    },
+
     async observe({ launch }) {
       const [record, shown] = await Promise.all([
         answers('pi', launch.nativeSession, env, {

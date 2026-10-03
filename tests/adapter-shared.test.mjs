@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { claudeCodeAdapter } from '../src/adapters/claude-code.js'
+import { codexAdapter } from '../src/adapters/codex.js'
+import { devinAdapter } from '../src/adapters/devin.js'
+import { openCodeAdapter } from '../src/adapters/opencode.js'
+import { piAdapter } from '../src/adapters/pi.js'
 import { admission, windowText } from '../src/adapters/shared.js'
 
 /**
@@ -62,5 +67,31 @@ describe('a delivery outcome', () => {
       admitted: null,
       reason: 'EISDIR',
     })
+  })
+})
+
+describe("a harness's own record, read with no window open", () => {
+  it('asks each harness reader for the conversation it names', async () => {
+    const env = { HOME: '/home/a' }
+    for (const [make, kind] of [
+      [claudeCodeAdapter, 'claude-code'],
+      [codexAdapter, 'codex'],
+      [piAdapter, 'pi'],
+      [openCodeAdapter, 'opencode'],
+      [devinAdapter, 'devin'],
+    ]) {
+      const asked = []
+      const answers = async (...args) => {
+        asked.push(args)
+        return { items: [{ id: 'u1', role: 'user', text: 'hello' }] }
+      }
+      const record = await make({ env, answers }).record({ conversation: { nativeSession: 's-1' } })
+      assert.deepEqual(asked, [[kind, 's-1', env]], kind)
+      assert.deepEqual(
+        record.items.map((item) => item.id),
+        ['u1'],
+        kind,
+      )
+    }
   })
 })

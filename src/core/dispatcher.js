@@ -423,7 +423,7 @@ export class Dispatcher {
    * projects that were open when the previous process ended come back.
    */
   async resumeAfterRestart() {
-    this.#settleInFlight()
+    await this.#settleInFlight()
     const outcomes = []
     const due = this.#ledger.projects().filter((project) => project.resumeOnStart)
     for (const project of due) {
@@ -442,18 +442,39 @@ export class Dispatcher {
   /**
    * What was on its way to a window when the previous process ended: no
    * window survives a restart, so none will show it now. A message whose
-   * header ConsensFlow's copy of the window shows had arrived; any other
-   * goes back to its queue with its attempt, for the window that comes back.
+   * header ConsensFlow's copy of the window shows had arrived, and so had one
+   * the harness's own record shows: the copy can lag the record, and a
+   * message the harness took must not go again. Any other goes back to its
+   * queue with its attempt, for the window that comes back, as does one
+   * whose record cannot be read.
    */
-  #settleInFlight() {
+  async #settleInFlight() {
     for (const message of this.#ledger.inFlight()) {
-      const item = this.#ledger.copiedItemWith(message.recipientId, markerOf(message.id))
+      const marker = markerOf(message.id)
+      const item =
+        this.#ledger.copiedItemWith(message.recipientId, marker) ??
+        (await this.#recordedItemWith(message.recipientId, marker))
       if (item === null) {
         this.#ledger.retryDelivery(message.id, 'the daemon stopped before it arrived', {
           refund: true,
         })
       } else this.#ledger.confirmDelivery(message.id, { item })
     }
+  }
+
+  /**
+   * The first item a participant's harness recorded it was given (a user
+   * item) that holds `marker`, read with no window open: null when none does,
+   * or when its record cannot be read.
+   */
+  async #recordedItemWith(participantId, marker) {
+    const conversation = this.#ledger.currentConversation(participantId)
+    if (!conversation?.nativeSession) return null
+    const adapter = this.#adapters[conversation.harness]
+    if (adapter?.record === undefined) return null
+    const record = await adapter.record({ conversation }).catch(() => null)
+    const items = Array.isArray(record?.items) ? record.items : []
+    return items.find((item) => item.role === 'user' && item.text.includes(marker))?.id ?? null
   }
 
   /**

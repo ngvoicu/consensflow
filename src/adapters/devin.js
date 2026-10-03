@@ -109,6 +109,11 @@ export function devinAdapter({
       return admission(sent, 'Devin refused the paste')
     },
 
+    /** Its harness's own record of a conversation, read with no window open. */
+    record({ conversation }) {
+      return answers('devin', conversation.nativeSession, env)
+    },
+
     async observe({ launch }) {
       if (launch.nativeSession === null) {
         return { items: [], settled: false, waiting: null, failed: false, quota: null }

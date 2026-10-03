@@ -141,6 +141,11 @@ export function openCodeAdapter({
       return admission(sent, 'OpenCode refused it', { queued: true })
     },
 
+    /** Its harness's own record of a conversation, read with no window open. */
+    record({ conversation }) {
+      return answers('opencode', conversation.nativeSession, env)
+    },
+
     async observe({ launch }) {
       const [record, window] = await Promise.all([
         answers('opencode', launch.nativeSession, env),

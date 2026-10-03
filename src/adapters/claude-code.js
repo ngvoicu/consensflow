@@ -119,6 +119,11 @@ export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
       return admission(written, 'the window refused the paste')
     },
 
+    /** Its harness's own record of a conversation, read with no window open. */
+    record({ conversation }) {
+      return answers('claude-code', conversation.nativeSession, env)
+    },
+
     async observe({ launch }) {
       const [record, live] = await Promise.all([
         answers('claude-code', launch.nativeSession, env),
