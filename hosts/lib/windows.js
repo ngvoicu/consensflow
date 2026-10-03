@@ -4,16 +4,6 @@
  * it must not inherit. The daemon's adapters build every pane from here.
  */
 
-/** Control variables of an outer ConsensFlow process that a window must never inherit. */
-const STRIPPED_CONTROL_ENV = new Set([
-  'CONSENSFLOW_APP',
-  'CONSENSFLOW_APP_TOKEN',
-  'CONSENSFLOW_TAB',
-  'CONSENSFLOW_PANE_ID',
-  'CONSENSFLOW_LEAD_ID',
-  'CONSENSFLOW_LAUNCH',
-])
-
 /** The billing guard a window carries: a key whose presence would silently switch billing. */
 function interactiveGuards(kind) {
   if (kind === 'claude-code') return ['ANTHROPIC_API_KEY']
@@ -39,13 +29,7 @@ export function childEnv(base, { env: envOverrides, dropEnv } = {}) {
   const env = { ...base, ...(envOverrides ?? {}) }
   for (const key of dropEnv ?? []) delete env[key]
   for (const key of Object.keys(env)) {
-    if (
-      key.startsWith('CMUX_SOCKET') ||
-      key === 'CMUX_CLAUDE_HOOK_CMUX_BIN' ||
-      STRIPPED_CONTROL_ENV.has(key)
-    ) {
-      delete env[key]
-    }
+    if (key.startsWith('CMUX_SOCKET') || key === 'CMUX_CLAUDE_HOOK_CMUX_BIN') delete env[key]
   }
   return env
 }

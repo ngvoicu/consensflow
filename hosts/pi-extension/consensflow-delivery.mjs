@@ -275,13 +275,7 @@ export function createDeliveryExtension(
         if (cause?.code === 'ENOENT') return []
         throw cause
       })
-      const files = names
-        .filter((name) => name.endsWith('.json'))
-        .sort(
-          (a, b) =>
-            Number(/^(editor|session)-/.test(b)) - Number(/^(editor|session)-/.test(a)) ||
-            a.localeCompare(b),
-        )
+      const files = names.filter((name) => name.endsWith('.json')).sort()
       for (const file of files) {
         const path = join(inbox, file)
         let record
@@ -358,7 +352,7 @@ export function createDeliveryExtension(
           }
           break
         }
-        // Superseded d-N offers are never an automatic-delivery fallback.
+        // ConsensFlow writes messages alone: a record of any other type is set aside.
         if (typeof quarantine === 'string') await rename(path, await uniquePath(quarantine, file))
       }
     } finally {
