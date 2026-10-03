@@ -13,6 +13,7 @@
  * self-contained.
  */
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,8 +24,20 @@ const CACHE = join(APP, '.cache')
 const BINARIES = join(APP, 'src-tauri', 'binaries')
 const RESOURCES = join(APP, 'src-tauri', 'resources', 'cli')
 
-/** The Node the app ships. Pinned so a build is reproducible. */
-const NODE_VERSION = process.env.CONSENSFLOW_NODE_VERSION ?? 'v26.7.0'
+/**
+ * The Node the app ships, pinned so a build is reproducible, and each
+ * archive's SHA-256 as nodejs.org publishes it (its SHASUMS256.txt): the
+ * app runs this binary with the human's full permissions, so one that is
+ * not the published build is never bundled.
+ */
+const NODE_VERSION = 'v26.7.0'
+const NODE_SHA256 = {
+  'darwin-arm64': '7ee659a7768e641bbfd5360940660b8e8fd0052f77488f365562bac522fc15d4',
+  'darwin-x64': 'f279d1ed28ce57f7788bf23435d2ad7fdd7438904ad5c4d8a1081a7cde3d4b96',
+  'linux-arm64': '925aa6157dd37542d0d7f2e28b7bf61e7b39284411210b0498bc3788db4aef68',
+  'linux-x64': 'bd6b6c31e377bad9ad579bed72e5bc11f4c879ac9452ad51d30e646ea3d828df',
+  'win-x64': 'd3bd72755141ed32bbcd841228ee81897c8a98d50dfa7dae2179399a0a7c90f8',
+}
 
 const TRIPLES = {
   'darwin-arm64': 'aarch64-apple-darwin',
@@ -65,6 +78,7 @@ function fetchNode() {
     process.stdout.write(`fetching ${url}\n`)
     execFileSync('curl', ['-fsSL', '-o', archive, url], { stdio: ['ignore', 'inherit', 'inherit'] })
   }
+  verify(archive, NODE_SHA256[key])
   if (!existsSync(extracted)) {
     // Windows' own tar reads a zip; a GNU tar first on PATH (Git Bash's, in CI)
     // reads `D:\...` as a remote host and fails, so Windows names its own.
@@ -72,6 +86,17 @@ function fetchNode() {
     execFileSync(tar, ['-xf', archive, '-C', CACHE], { stdio: 'inherit' })
   }
   return WINDOWS ? join(extracted, 'node.exe') : join(extracted, 'bin', 'node')
+}
+
+/** Refuses an archive that is not the one nodejs.org published, deleting it so the next run fetches it again. */
+function verify(archive, expected) {
+  if (expected === undefined) throw new Error(`no published SHA-256 pinned for ${archive}`)
+  const actual = createHash('sha256').update(readFileSync(archive)).digest('hex')
+  if (actual === expected) return
+  rmSync(archive, { force: true })
+  throw new Error(
+    `${archive} is not the Node nodejs.org published (SHA-256 ${actual}, not ${expected}): deleted it; run again`,
+  )
 }
 
 function copyCli() {
