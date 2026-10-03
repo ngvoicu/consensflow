@@ -1772,6 +1772,41 @@ test('completion/devin: a question dialog still open is asking, until its answer
   }
 })
 
+test("completion/devin: a question its tool waits on below the chain's head is asking, until its answer comes", async () => {
+  // Seen on Windows, 2026-10-03: the chief's question dialog was open, and
+  // Devin's main chain still ended at the node before its call.
+  const { root, env } = await stageDevin('Voi întreba:', [])
+  const file = path.join(devinFolders(env).data, 'cli', 'sessions.db')
+  const add = (node, parent, message) => {
+    const db = new DatabaseSync(file)
+    try {
+      db.prepare(
+        'INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at) VALUES (?, ?, ?, ?, ?)',
+      ).run('calm-river', node, parent, JSON.stringify(message), '2026-09-26T05:11:00Z')
+    } finally {
+      db.close()
+    }
+  }
+  try {
+    add('n-3', 'n-2', {
+      message_id: 'a-2',
+      role: 'assistant',
+      content: '',
+      tool_calls: [{ id: 'call-1', name: 'ask_user_question', arguments: { questions: [] } }],
+    })
+    assert.equal((await completion.answers('devin', 'calm-river', env)).asking, true)
+    add('n-4', 'n-3', {
+      message_id: 't-1',
+      role: 'tool',
+      content: 'cariere',
+      tool_call_id: 'call-1',
+    })
+    assert.equal((await completion.answers('devin', 'calm-river', env)).asking, false)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 test('completion/devin: a final message that links a file settles, though Devin stores the link as a tag', async () => {
   const { streamed, stored } = JSON.parse(
     await fs.readFile(path.join(FIX, 'devin/file-link.json'), 'utf8'),

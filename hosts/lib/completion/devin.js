@@ -280,7 +280,31 @@ function devinChain(nodes, head, parsed) {
       stopped: message.metadata?.finish_reason === 'stop',
     })
   }
+  // Devin moves its main chain's head once a step is over: a call its
+  // question tool still waits on hangs below the head, and so may its
+  // answer (seen on Windows, 2026-10-03), newest child after newest child.
+  for (
+    let row = newestChild(nodes, head);
+    row !== undefined;
+    row = newestChild(nodes, row.node_id)
+  ) {
+    if (!parsed.has(row)) parsed.set(row, JSON.parse(row.chat_message))
+    const message = parsed.get(row)
+    const call = message.tool_calls?.find((c) => c.name === 'ask_user_question')
+    if (message.role === 'assistant' && call) asking = call.id
+    else if (message.role === 'tool' && message.tool_call_id === asking) asking = null
+  }
   return { items, asking: asking !== null }
+}
+
+/** The node written last below `parent`, if any. */
+function newestChild(nodes, parent) {
+  let newest
+  for (const row of nodes.values()) {
+    if (row.parent_node_id === parent && (newest === undefined || row.row_id > newest.row_id))
+      newest = row
+  }
+  return newest
 }
 
 /**
