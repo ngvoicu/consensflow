@@ -258,9 +258,12 @@ export const REREAD = Symbol('read the transcript again')
  * where the next look starts (`seen` itself when the file did not change),
  * or null when the file is not the one read so far: another file took its
  * place, or it no longer holds the bytes just before where the last look
- * stopped (it shrank, or was written over).
+ * stopped (it shrank, or was written over). With `only`, a line that does
+ * not hold that text is passed over unparsed: a log of many conversations,
+ * read for one, parses that one's lines alone.
  */
-export async function readOn(file, seen, visit) {
+export async function readOn(file, seen, visit, { only = null } = {}) {
+  const wanted = only === null ? null : Buffer.from(only)
   const handle = await fs.open(file, 'r')
   try {
     const { ino, size, mtimeMs } = await handle.stat()
@@ -290,7 +293,9 @@ export async function readOn(file, seen, visit) {
             if (!isBlankBytes(line)) return null
             visited = false
             tail = EMPTY
-          } else records = consumeLine(line.toString('utf8'), records, visit)
+          } else if (wanted === null || line.includes(wanted)) {
+            records = consumeLine(line.toString('utf8'), records, visit)
+          }
           offset = at + newline + 1
           start = newline + 1
         }
@@ -301,7 +306,7 @@ export async function readOn(file, seen, visit) {
     const rest = Buffer.concat(pieces)
     if (visited) {
       if (!isBlankBytes(rest)) return null
-    } else if (!isBlankBytes(rest)) {
+    } else if (!isBlankBytes(rest) && (wanted === null || rest.includes(wanted))) {
       const text = rest.toString('utf8')
       let record
       try {

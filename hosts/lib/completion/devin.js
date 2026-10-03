@@ -183,7 +183,9 @@ export function devinReader(sessionId, env) {
         const wire = wires.get(launch) ?? { seen: null, active: null, busy: false, mine: false }
         let next
         try {
-          next = await readOn(file, wire.seen, (event) => visitWire(wire, event))
+          next = await readOn(file, wire.seen, (event) => visitWire(wire, event), {
+            only: JSON.stringify(sessionId),
+          })
         } catch (error) {
           if (error.code !== 'ENOENT') throw error
           continue

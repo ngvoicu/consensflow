@@ -12,6 +12,7 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test, { after } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { readOn } from '../../hosts/lib/completion/shared.js'
 import * as completion from '../../hosts/lib/completion.js'
 import { devinFolders } from '../../src/harnesses.js'
 
@@ -1611,6 +1612,32 @@ test('quota/opencode: a 429 on the message is exhaustion; a completed turn after
 })
 
 // ------------------------------------------------------------------- devin
+
+test('readOn passes over, unparsed, the lines that do not hold `only`', async () => {
+  // A Devin window's wire log holds its own session alone, and every Devin
+  // session's reader reads every window's: each parses its own lines.
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-read-on-'))
+  try {
+    const file = path.join(dir, 'wire.jsonl')
+    await fs.writeFile(
+      file,
+      '{"sessionId":"calm-river","n":1}\nnot JSON, nor calm\n{"sessionId":"quiet-lake","n":2}\n{"sessionId":"calm-river","n":3}',
+    )
+    const seen = []
+    const visit = (record) => seen.push(record.n)
+    const only = { only: '"calm-river"' }
+    const first = await readOn(file, null, visit, only)
+    assert.deepEqual(seen, [1, 3])
+    await fs.appendFile(
+      file,
+      '\n{"sessionId":"quiet-lake","n":4}\n{"sessionId":"calm-river","n":5}\n{"sessionId":"quiet',
+    )
+    await readOn(file, first, visit, only)
+    assert.deepEqual(seen, [1, 3, 5])
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true })
+  }
+})
 
 /**
  * A Devin store with a user message and an assistant reply, and a wire log
