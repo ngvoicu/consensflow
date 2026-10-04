@@ -36,11 +36,11 @@ fn platform() -> &'static str {
 
 /// The number of situations the golden of `platform` holds: a golden that
 /// shrinks fails, and is recorded again on purpose. Windows leaves out the
-/// five that need a folder's permissions.
+/// five that need a folder's permissions, and has a name only it refuses.
 fn situations_in_the_golden(platform: &str) -> usize {
     match platform {
-        "darwin" => 14,
-        "win32" => 9,
+        "darwin" => 15,
+        "win32" => 11,
         other => panic!("no situations are counted for {other}: say how many its golden holds"),
     }
 }
@@ -90,10 +90,13 @@ fn set_mode(path: &Path, bits: u32) {
     fs::set_permissions(path, fs::Permissions::from_mode(bits)).unwrap();
 }
 
-/// No Windows situation sets a folder's permissions: the golden leaves them out.
+/// Node's `chmod` on Windows: the read-only attribute, set when the owner
+/// may not write. No Windows situation sets a folder's.
 #[cfg(windows)]
-fn set_mode(_: &Path, _: u32) {
-    panic!("a situation of the Windows golden sets a permission");
+fn set_mode(path: &Path, bits: u32) {
+    let mut permissions = fs::metadata(path).unwrap().permissions();
+    permissions.set_readonly((bits & 0o200) == 0);
+    fs::set_permissions(path, permissions).unwrap();
 }
 
 /// Makes the situation: its folders, files and permissions, in order.
@@ -174,9 +177,12 @@ fn every_save_that_fails_says_what_node_says_of_it() {
         let file = roster_path(&env).unwrap();
         let roster = Roster::new(&catalog, file.clone());
         let outcome = refused(&roster, &file, situation["call"].as_array().unwrap());
-        // A folder with no permission cannot be removed with what is in it.
+        // A folder with no permission cannot be removed with what is in it,
+        // nor a read-only file on Windows; a file the save removed is gone.
         for (path, _) in &permissions {
-            set_mode(path, 0o755);
+            if fs::symlink_metadata(path).is_ok() {
+                set_mode(path, 0o755);
+            }
         }
         let Err(refusal) = outcome else {
             panic!("{name}: saved, where Node refused");

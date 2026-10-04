@@ -38,10 +38,20 @@
  *   unreadable before it wrote, `write` when it refused the write;
  * - `message`: what the error said.
  *
- * A situation that cannot be made on a platform (a `chmod` of a folder on
- * Windows, which has no such permission) is left out of that platform's file.
+ * A situation that cannot be made on a platform is left out of that
+ * platform's file: `unix` marks a `chmod` of a folder, a permission Windows
+ * does not have; `windows` marks a name only Windows refuses. A `chmod` of a
+ * file without its owner's write bit is Windows' read-only attribute there.
  */
-import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { addAgent, setPreferences } from '../../../src/roster.js'
@@ -67,7 +77,7 @@ const SAVE = ['saveDocument', '{}\n']
 const EMPTY_ROSTER = '{"schemaVersion":1,"agents":[]}\n'
 const TEMPORARY = 'agents.json.$PID.tmp'
 
-/** Every situation; `unix` marks the ones that need a permission only Unix has. */
+/** Every situation; `unix` and `windows` mark the ones only that system can make. */
 const SITUATIONS = [
   {
     name: 'the folder is read-only',
@@ -101,6 +111,23 @@ const SITUATIONS = [
       { mode: 'home', bits: '555' },
     ],
     home: 'home',
+    call: PREFERENCE,
+  },
+  {
+    // Windows will not remove a read-only file: there the removal fails too.
+    name: 'a stale read-only temporary is where the temporary goes',
+    make: [
+      { file: `home/${TEMPORARY}`, text: 'stale' },
+      { mode: `home/${TEMPORARY}`, bits: '444' },
+    ],
+    home: 'home',
+    call: PREFERENCE,
+  },
+  {
+    name: 'a folder name Windows refuses',
+    windows: true,
+    make: [{ folder: 'home' }],
+    home: 'home/bad<name',
     call: PREFERENCE,
   },
   {
@@ -201,9 +228,10 @@ function said(situation) {
       `"${situation.name}" did not fail on ${process.platform}: a permission binds every user but root, which is not to run this`,
     )
   } finally {
-    // A folder with no permission cannot be removed with what is in it.
+    // A folder with no permission cannot be removed with what is in it, nor
+    // can a read-only file on Windows; a file the call removed is gone.
     for (const step of situation.make.filter((step) => step.mode !== undefined)) {
-      chmodSync(under(root, step.mode), 0o755)
+      if (existsSync(under(root, step.mode))) chmodSync(under(root, step.mode), 0o755)
     }
     rmSync(root, { recursive: true, force: true })
   }
@@ -234,7 +262,8 @@ function play(situation) {
 
 /** Every golden, by its path under crates/cf-catalog. */
 export function unwritableGoldens() {
-  const here = SITUATIONS.filter((situation) => !situation.unix || process.platform !== 'win32')
+  const windows = process.platform === 'win32'
+  const here = SITUATIONS.filter((situation) => (windows ? !situation.unix : !situation.windows))
   // A situation a line: diffs read it by situation.
   const lines = here.map((situation) => `    ${JSON.stringify(play(situation))}`).join(',\n')
   return {

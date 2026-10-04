@@ -299,3 +299,27 @@ mod unix {
         assert_eq!(fs::read_to_string(&temporary).unwrap(), "{}\n");
     }
 }
+
+#[cfg(windows)]
+#[test]
+fn a_folder_name_windows_refuses_ends_the_walk_where_node_ends_it() {
+    // libuv's mkdir says EINVAL for it, and the walk asks what is there: one
+    // that climbed above it would make the folder above, and climb again.
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("bad<name");
+    let path = folder.join("agents.json");
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(write_whole(&path, b"{}\n").map_err(|error| error.to_string()));
+    });
+    let said = receiver
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the walk ends");
+    assert_eq!(
+        said.unwrap_err(),
+        format!(
+            "ENOENT: no such file or directory, mkdir '{}'",
+            folder.display()
+        )
+    );
+}

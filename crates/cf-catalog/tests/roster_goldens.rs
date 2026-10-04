@@ -130,6 +130,23 @@ fn answered(roster: &Roster<'_>, call: &[Value], clock: &mut At) -> Result<Value
     }
 }
 
+/// Whether every number in `value` is one a JavaScript number holds as it
+/// is: no integer past 2^53 kept whole.
+fn holds_js_numbers(value: &Value) -> bool {
+    const SAFE: u64 = 1 << 53;
+    match value {
+        Value::Number(number) => {
+            number.as_u64().is_none_or(|whole| whole <= SAFE)
+                && number
+                    .as_i64()
+                    .is_none_or(|whole| whole.unsigned_abs() <= SAFE)
+        }
+        Value::Array(items) => items.iter().all(holds_js_numbers),
+        Value::Object(fields) => fields.values().all(holds_js_numbers),
+        _ => true,
+    }
+}
+
 /// The names of what the home holds, in order.
 fn left_in(home: &Path) -> Vec<String> {
     let mut left: Vec<String> = std::fs::read_dir(home)
@@ -168,6 +185,13 @@ fn every_operation_on_the_roster_answers_as_node_answered_and_leaves_the_file_no
             case.get("error"),
         ) {
             (Ok(actual), Some(golden), None) => {
+                // Compared as text below, where a number is written as
+                // JavaScript writes it: first, the answer's own numbers are
+                // ones JavaScript holds, an integer past 2^53 a double.
+                assert!(
+                    holds_js_numbers(&actual),
+                    "a number JavaScript rounds: {case}"
+                );
                 assert_eq!(
                     js::stringify(&actual),
                     js::stringify(&stringified(golden)),
@@ -222,15 +246,15 @@ fn every_operation_on_the_roster_answers_as_node_answered_and_leaves_the_file_no
     assert_eq!(
         calls.into_iter().collect::<Vec<_>>(),
         [
-            ("addAgent".to_owned(), 455),
+            ("addAgent".to_owned(), 479),
             ("agentRow".to_owned(), 143),
-            ("editAgent".to_owned(), 474),
+            ("editAgent".to_owned(), 500),
             ("listAgents".to_owned(), 48),
-            ("normalizeRoster".to_owned(), 27),
-            ("preferences".to_owned(), 30),
-            ("removeAgent".to_owned(), 109),
+            ("normalizeRoster".to_owned(), 28),
+            ("preferences".to_owned(), 28),
+            ("removeAgent".to_owned(), 108),
             ("setPreferences".to_owned(), 382),
         ]
     );
-    assert_eq!((answers, refusals, wrote, from_steps), (691, 977, 495, 60));
+    assert_eq!((answers, refusals, wrote, from_steps), (716, 1000, 523, 60));
 }
