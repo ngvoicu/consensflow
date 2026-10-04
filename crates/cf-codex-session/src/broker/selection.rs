@@ -20,9 +20,21 @@ use serde_json::{Map, Value};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ClientId(pub(crate) u64);
 
-/// The id a request carries: any JSON value, or none. Ids are compared as
-/// JSON values, so `1` and `"1"` are two ids.
+/// The id a request carries: any JSON value, or none.
 type RequestId = Option<Value>;
+
+/// Whether two ids are one, as a JavaScript `Map` keyed by them found them:
+/// numbers by their value (`1` and `1.0` are one), strings and the like by
+/// theirs (`1` and `"1"` are two), and an object or a list never, being a
+/// new one each time it is read.
+fn same_id(one: &RequestId, other: &RequestId) -> bool {
+    match (one, other) {
+        (Some(Value::Number(one)), Some(Value::Number(other))) => one.as_f64() == other.as_f64(),
+        (Some(Value::Object(_) | Value::Array(_)), _)
+        | (_, Some(Value::Object(_) | Value::Array(_))) => false,
+        _ => one == other,
+    }
+}
 
 /// What a TUI's request that was not answered yet may change.
 #[derive(Debug, Clone, PartialEq)]
@@ -46,14 +58,14 @@ pub(crate) struct Requests(Vec<(RequestId, Pending)>);
 impl Requests {
     /// Remembers `pending` for `id`, in place of what that id had.
     fn insert(&mut self, id: RequestId, pending: Pending) {
-        match self.0.iter_mut().find(|(known, _)| *known == id) {
+        match self.0.iter_mut().find(|(known, _)| same_id(known, &id)) {
             Some(entry) => entry.1 = pending,
             None => self.0.push((id, pending)),
         }
     }
 
     fn take(&mut self, id: &RequestId) -> Option<Pending> {
-        let at = self.0.iter().position(|(known, _)| known == id)?;
+        let at = self.0.iter().position(|(known, _)| same_id(known, id))?;
         Some(self.0.remove(at).1)
     }
 }

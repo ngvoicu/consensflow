@@ -34,14 +34,16 @@ pub struct InvalidBridge;
 
 impl Bridge {
     /// The bridge `text` names. A port is a whole number from 0 to 65535 (the
-    /// JSON `1234.0` is one, as it is in JavaScript), a token is at least 24
-    /// characters of letters, digits, `.`, `_` and `-`, and a launch id is one
-    /// or more of the same.
+    /// JSON `1234.0` is one, as it is in JavaScript), a token is any text of at
+    /// least 24 characters (UTF-16 units, as JavaScript counted them), and a
+    /// launch id is one or more letters, digits, `.`, `_` and `-`.
     pub fn parse(text: &str) -> Result<Self, InvalidBridge> {
         let value: Value = serde_json::from_str(text).map_err(|_| InvalidBridge)?;
         let launch_id = word(value.get("launchId")).ok_or(InvalidBridge)?;
-        let token = word(value.get("token"))
-            .filter(|token| token.len() >= MIN_TOKEN)
+        let token = value
+            .get("token")
+            .and_then(Value::as_str)
+            .filter(|token| token.encode_utf16().count() >= MIN_TOKEN)
             .ok_or(InvalidBridge)?;
         let port = value
             .get("port")
@@ -192,7 +194,6 @@ mod tests {
             bridge(&json!({ "port": "4100" })),
             bridge(&json!({ "port": null })),
             bridge(&json!({ "token": "short-token" })),
-            bridge(&json!({ "token": format!("{TOKEN} with spaces") })),
             bridge(&json!({ "token": 12 })),
             bridge(&json!({ "launchId": "" })),
             bridge(&json!({ "launchId": "has/slash" })),
@@ -205,6 +206,21 @@ mod tests {
             InvalidBridge.to_string(),
             "Invalid Codex broker configuration"
         );
+    }
+
+    #[test]
+    fn a_token_is_any_text_long_enough_as_javascript_checked_it() {
+        // A launch id keeps to its letters; a token does not (base64's +, / and = among them).
+        for token in [
+            "q83vEjRWeJ+rze8SNFZ4mg/s3e8SNFZ4mg==".to_string(),
+            format!("{TOKEN} with spaces"),
+        ] {
+            let parsed = Bridge::parse(&bridge(&json!({ "token": token }))).unwrap();
+            assert_eq!(parsed.token, token);
+        }
+        // Counted as JavaScript counted it: in UTF-16 units, so 12 emoji are 24.
+        let emoji = "\u{1F600}".repeat(12);
+        assert!(Bridge::parse(&bridge(&json!({ "token": emoji }))).is_ok());
     }
 
     #[test]

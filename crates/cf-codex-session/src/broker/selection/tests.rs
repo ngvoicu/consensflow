@@ -683,3 +683,22 @@ fn a_thread_id_is_a_hyphenated_uuid_of_version_1_to_8_and_variant_8_to_b_in_any_
         assert!(!is_thread_id(bad), "{bad:?}");
     }
 }
+
+#[test]
+fn an_answer_names_its_request_as_a_javascript_map_finds_it() {
+    // The same number written two ways is one id.
+    let mut window = Window::new();
+    window.says(start(json!(1)));
+    window.answers(json!({ "id": 1.0, "result": { "thread": { "id": A } } }));
+    assert_eq!(window.shown(), Some(A));
+    // A number and its text are two.
+    let mut window = Window::new();
+    window.says(start(json!(2)));
+    window.answers(json!({ "id": "2", "result": { "thread": { "id": A } } }));
+    assert_eq!(window.shown(), None, "still switching: no answer yet");
+    // A list is a new one each time it is read: it never answers.
+    let mut window = Window::new();
+    window.says(start(json!([3])));
+    window.answers(json!({ "id": [3], "result": { "thread": { "id": A } } }));
+    assert_eq!(window.shown(), None);
+}

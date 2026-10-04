@@ -82,6 +82,8 @@ struct Peer {
     headers: Vec<(String, String)>,
     open: Rc<Cell<bool>>,
     kill: Rc<Notify>,
+    /// Raised to stop reading what the connection sends, from now on.
+    stalled: Rc<Notify>,
     pongs: Rc<Cell<usize>>,
 }
 
@@ -266,6 +268,12 @@ impl FakeCodex {
         self.inner.peers.borrow()[peer].kill.notify_one();
     }
 
+    /// Stop reading what `peer` sends, from now on: it waits unread, so its
+    /// sender's writes back up.
+    pub(crate) fn stall_peer(&self, peer: usize) {
+        self.inner.peers.borrow()[peer].stalled.notify_one();
+    }
+
     /// Answers the first held `method` request with `result`, or `error` when
     /// there is one, and returns the request.
     pub(crate) async fn respond(&self, method: &str, result: Value, error: Option<Value>) -> Value {
@@ -318,6 +326,7 @@ async fn serve<S: AsyncRead + AsyncWrite + Unpin + 'static>(inner: Rc<Inner>, st
     let (out, mut outgoing) = mpsc::unbounded_channel();
     let open = Rc::new(Cell::new(true));
     let kill = Rc::new(Notify::new());
+    let stalled = Rc::new(Notify::new());
     let pongs = Rc::new(Cell::new(0));
     let me = {
         let mut peers = inner.peers.borrow_mut();
@@ -326,6 +335,7 @@ async fn serve<S: AsyncRead + AsyncWrite + Unpin + 'static>(inner: Rc<Inner>, st
             headers: headers.borrow().clone(),
             open: Rc::clone(&open),
             kill: Rc::clone(&kill),
+            stalled: Rc::clone(&stalled),
             pongs: Rc::clone(&pongs),
         });
         peers.len() - 1
@@ -341,7 +351,12 @@ async fn serve<S: AsyncRead + AsyncWrite + Unpin + 'static>(inner: Rc<Inner>, st
         if inner.stall.get() {
             std::future::pending::<()>().await;
         }
-        while let Some(Ok(message)) = stream.next().await {
+        loop {
+            let message = tokio::select! {
+                message = stream.next() => message,
+                () = stalled.notified() => std::future::pending().await,
+            };
+            let Some(Ok(message)) = message else { return };
             match message {
                 Message::Text(text) => {
                     inner.texts.borrow_mut().push((me, text.to_string()));

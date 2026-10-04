@@ -384,7 +384,7 @@ fn the_servers_standard_error_is_read_for_as_long_as_it_runs_not_only_until_it_i
             .expect("the server ended: it was not left blocked on a full pipe");
         assert!(status.unwrap().success());
         drain.await.unwrap();
-        session.finish(&plan).await;
+        session.finish(&plan).await.unwrap();
         let text = tail.borrow().text().to_string();
         text
     })
@@ -430,4 +430,19 @@ fn a_server_that_does_not_come_up_in_time_is_ended_and_said_with_what_it_wrote()
         .unwrap()
         .success();
     assert!(!alive, "the server {pid} is still running");
+}
+
+#[test]
+fn a_socket_folder_already_gone_is_no_failure_and_one_that_cannot_go_is() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(remove_folder(&dir.path().join("gone")).is_ok());
+    let locked = dir.path().join("locked");
+    fs::create_dir_all(locked.join("codex-1")).unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o500)).unwrap();
+    let kept = remove_folder(&locked.join("codex-1"));
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(
+        kept.map_err(|cause| cause.kind()),
+        Err(std::io::ErrorKind::PermissionDenied)
+    );
 }

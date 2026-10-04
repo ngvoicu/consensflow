@@ -18,6 +18,17 @@ use super::transport::{
 };
 use super::{now_ms, Shared};
 
+/// What became of a request to Codex's server.
+pub(super) enum Asked {
+    /// Its answer.
+    Answered(Value),
+    /// It never went out: the connection is closed, or would hold more than
+    /// 64 MiB unsent with it, and is ended for that.
+    NotSent,
+    /// It went out, and no answer came in time, or the connection was lost.
+    Unanswered,
+}
+
 /// The connection and the requests it has no answer to yet.
 pub(super) struct Control {
     outbox: Outbox,
@@ -139,20 +150,15 @@ impl Shared {
     }
 
     /// Asks Codex's server `method` and waits for the answer until
-    /// `expires_at` (milliseconds since the epoch): the whole response, or
-    /// none if it did not come in time or the connection was lost. The request
-    /// is sent before this first waits, so whoever checked something just
-    /// before calling it is not interrupted.
-    pub(super) async fn request(
-        &self,
-        method: &str,
-        params: Value,
-        expires_at: f64,
-    ) -> Option<Value> {
-        let control = self.control.borrow().clone()?;
-        if !control.open.get() {
-            return None;
-        }
+    /// `expires_at` (milliseconds since the epoch). The request is sent before
+    /// this first waits, so whoever checked something just before calling it
+    /// is not interrupted. A connection that takes nothing, with 64 MiB
+    /// waiting unsent, is ended: nothing more could reach Codex on it.
+    pub(super) async fn request(&self, method: &str, params: Value, expires_at: f64) -> Asked {
+        let control = self.control.borrow().clone();
+        let Some(control) = control.filter(|control| control.open.get()) else {
+            return Asked::NotSent;
+        };
         let id = uuid::Uuid::new_v4().to_string();
         let (reply, answer) = oneshot::channel();
         control.pending.borrow_mut().insert(id.clone(), reply);
@@ -161,16 +167,20 @@ impl Shared {
             id: &id,
         };
         let message = json!({ "id": id, "method": method, "params": params });
-        if control.outbox.send(Message::text(message.to_string())) != Sent::Queued {
-            return None;
+        match control.outbox.send(Message::text(message.to_string())) {
+            Sent::Queued => {}
+            Sent::Full => {
+                self.control_lost();
+                return Asked::NotSent;
+            }
+            Sent::Closed => return Asked::NotSent,
         }
         let wait = Duration::try_from_secs_f64((expires_at - now_ms()).max(1.0) / 1000.0)
             .unwrap_or(Duration::from_secs(3));
-        tokio::time::timeout(wait, answer)
-            .await
-            .ok()
-            .and_then(Result::ok)
-            .flatten()
+        match tokio::time::timeout(wait, answer).await {
+            Ok(Ok(Some(answer))) => Asked::Answered(answer),
+            _ => Asked::Unanswered,
+        }
     }
 
     /// How many requests are waiting for an answer.

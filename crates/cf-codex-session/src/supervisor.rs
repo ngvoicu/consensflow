@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use std::ffi::OsString;
 use std::future::pending;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -57,6 +57,8 @@ pub(crate) enum SessionError {
     Tui { program: String, cause: io::Error },
     #[error("could not watch for the signals that close a window: {0}")]
     Signals(io::Error),
+    #[error("could not remove the Codex socket folder {}: {cause}", path.display())]
+    Cleanup { path: PathBuf, cause: io::Error },
 }
 
 /// What one window is run with.
@@ -106,7 +108,9 @@ async fn supervise_with(env: &Env, args: &[OsString], setup: Setup) -> Result<i3
     };
     let mut session = Session::default();
     let outcome = session.run(&plan).await;
-    session.finish(&plan).await;
+    // A folder that could not be removed is the window's last word, as it
+    // was when JavaScript's `finally` threw.
+    session.finish(&plan).await?;
     outcome
 }
 
@@ -261,7 +265,7 @@ impl Session {
 
     /// Ends what is left: both processes asked to end, the broker closed, the
     /// app-server made to end if it has not within a moment, the socket's folder removed.
-    async fn finish(&mut self, plan: &Plan<'_>) {
+    async fn finish(&mut self, plan: &Plan<'_>) -> Result<(), SessionError> {
         self.stop();
         if let Some(broker) = self.broker.take() {
             broker.close().await;
@@ -275,8 +279,21 @@ impl Session {
             }
         }
         if let Some(directory) = plan.endpoint.directory() {
-            let _ = std::fs::remove_dir_all(directory);
+            remove_folder(directory).map_err(|cause| SessionError::Cleanup {
+                path: directory.to_path_buf(),
+                cause,
+            })?;
         }
+        Ok(())
+    }
+}
+
+/// Removes `folder` with what is in it; one already gone is no failure, as
+/// `rm` with `force` had it.
+fn remove_folder(folder: &Path) -> io::Result<()> {
+    match std::fs::remove_dir_all(folder) {
+        Err(cause) if cause.kind() != io::ErrorKind::NotFound => Err(cause),
+        _ => Ok(()),
     }
 }
 

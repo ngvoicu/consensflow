@@ -2,6 +2,7 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::rc::Weak;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -385,5 +386,51 @@ fn a_question_whose_tui_connection_ended_stops_asking_at_its_next_poll_and_the_o
         assert_eq!(board.polls(), 1, "no poll once its connection ended");
         assert!(asked_of(&f, "ask-1").is_none());
         assert!(!other.is_closed(), "another TUI's connection is its own");
+    });
+}
+
+#[test]
+fn a_pair_keeps_no_handle_of_a_question_answered_long_ago() {
+    run(async {
+        let replies = (0..4)
+            .flat_map(|at| {
+                [
+                    reply(201, json!({ "message": { "id": 61 + at } })),
+                    reply(
+                        200,
+                        json!({ "question": {}, "answer": {
+                            "id": 70 + at, "from": "chief", "body": "Colour: blue", "choices": [["blue"]],
+                        } }),
+                    ),
+                ]
+            })
+            .collect();
+        let api = scripted(replies);
+        let (f, _tui) = window(&api.url, Duration::from_secs(5)).await;
+        let held = || {
+            f.broker
+                .shared
+                .pairs
+                .borrow()
+                .values()
+                .find_map(Weak::upgrade)
+                .map_or(0, |pair| pair.tasks_held())
+        };
+        let mut after_one = 0;
+        for at in 1..=4 {
+            let id = format!("ask-{at}");
+            let mut request = request_user_input();
+            request["id"] = json!(id);
+            f.codex.send_json(1, &request);
+            wait(|| asked_of(&f, &id).is_some()).await;
+            if at == 1 {
+                after_one = held();
+            }
+        }
+        assert_eq!(
+            held(),
+            after_one,
+            "four answered questions hold no more than one"
+        );
     });
 }

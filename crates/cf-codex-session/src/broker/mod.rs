@@ -41,7 +41,7 @@ use tokio::net::TcpListener;
 use tokio::task::{AbortHandle, JoinHandle};
 
 use crate::endpoint::Upstream;
-use control::Control;
+use control::{Asked, Control};
 use pair::Pair;
 use selection::{ClientId, Selection};
 
@@ -128,7 +128,7 @@ impl Broker {
                 now_ms() + 3000.0,
             )
             .await;
-        if !js::truthy(initialized.as_ref().and_then(|answer| answer.get("result"))) {
+        if !matches!(initialized, Asked::Answered(answer) if js::truthy(answer.get("result"))) {
             shared.control_lost();
             return Err(StartError::NotInitialized);
         }

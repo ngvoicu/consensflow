@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 
 use super::fixture::{http, run, wait, wait_for, Fixture, A, B, TEXT, TOKEN};
 use crate::broker::now_ms;
+use crate::broker::transport::MAX_FRAME;
 
 fn refused(error: &str) -> Value {
     json!({ "ok": false, "admitted": false, "bytesWritten": 0, "error": error })
@@ -710,5 +711,28 @@ fn a_request_that_never_finishes_its_headers_or_its_body_is_ended_after_five_sec
             "{:?}",
             String::from_utf8_lossy(&two)
         );
+    });
+}
+
+#[test]
+fn a_delivery_that_would_put_more_than_64_mib_unsent_behind_the_connection_to_codex_is_refused_and_the_connection_ended(
+) {
+    run(async {
+        let f = Fixture::start().await;
+        let tui = f.connect().await;
+        f.start_thread(&tui, 1, json!({ "id": A, "status": { "type": "idle" } }))
+            .await;
+        // Codex reads no more of the broker's own connection (the first it
+        // took), and nearly 64 MiB wait unsent behind it.
+        f.codex.stall_peer(0);
+        let pad = "x".repeat(MAX_FRAME - 64);
+        assert!(f.broker.shared.send_control(&json!({ "pad": pad })));
+        // Nothing of the delivery went out: the daemon may route it again.
+        assert_eq!(
+            f.deliver(A, json!({})).await,
+            refused("native-session-unavailable")
+        );
+        assert_eq!(f.read().await["available"], false);
+        assert!(f.codex.requests_of("turn/start").is_empty());
     });
 }

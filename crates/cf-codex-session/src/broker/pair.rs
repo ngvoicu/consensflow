@@ -114,7 +114,10 @@ impl Pair {
         if self.retired.get() {
             task.abort();
         } else {
-            self.tasks.borrow_mut().push(task);
+            // A question answered long ago has nothing left to end.
+            let mut tasks = self.tasks.borrow_mut();
+            tasks.retain(|task| !task.is_finished());
+            tasks.push(task);
         }
     }
 
@@ -236,6 +239,12 @@ impl Pair {
                 Ok(Outcome::Unanswered) | Err(_) => this.forward(&this.tui, text),
             }
         });
+    }
+
+    /// How many of its tasks the pair still holds a handle to.
+    #[cfg(test)]
+    pub(super) fn tasks_held(&self) -> usize {
+        self.tasks.borrow().len()
     }
 
     fn answer_codex(&self, response: &Value) {

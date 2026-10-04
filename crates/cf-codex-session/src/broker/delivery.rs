@@ -11,6 +11,7 @@ use cf_base::json::from_slice_lossy;
 use cf_proto::codex::{Delivery, DeliveryReply, Refusal};
 use serde_json::json;
 
+use super::control::Asked;
 use super::selection::is_thread_id;
 use super::{now_ms, Shared};
 
@@ -34,7 +35,8 @@ pub(super) fn read(body: &[u8], launch_id: &str) -> Option<Delivery> {
 impl Shared {
     /// Puts `delivery` to Codex's server if the window still shows the thread
     /// it names: taken, refused (nothing was sent, so the daemon may route it
-    /// again), or uncertain (it may be in: never sent twice).
+    /// again: a request that never went out is refused too), or uncertain (it
+    /// may be in: never sent twice).
     pub(super) async fn deliver(&self, delivery: &Delivery) -> DeliveryReply {
         if delivery.expires_at <= now_ms() {
             return DeliveryReply::Refused(Refusal::Expired);
@@ -75,16 +77,18 @@ impl Shared {
         // A turn the TUI started a moment before is an explicit refusal: queue
         // it, unless the window has moved to another thread meanwhile. Nothing
         // went in, so the daemon may route the message again.
-        if admission.idle && js::truthy(answer.as_ref().and_then(|answer| answer.get("error"))) {
+        if admission.idle
+            && matches!(&answer, Asked::Answered(answer) if js::truthy(answer.get("error")))
+        {
             if !self.state.borrow().is_current(&admission) {
                 return DeliveryReply::Refused(Refusal::NativeSessionChanged);
             }
             answer = self.request("thread/queue/add", queue(), deadline).await;
         }
-        if js::truthy(answer.as_ref().and_then(|answer| answer.get("result"))) {
-            DeliveryReply::Admitted
-        } else {
-            DeliveryReply::Uncertain
+        match answer {
+            Asked::Answered(answer) if js::truthy(answer.get("result")) => DeliveryReply::Admitted,
+            Asked::NotSent => DeliveryReply::Refused(Refusal::NativeSessionUnavailable),
+            Asked::Answered(_) | Asked::Unanswered => DeliveryReply::Uncertain,
         }
     }
 }
