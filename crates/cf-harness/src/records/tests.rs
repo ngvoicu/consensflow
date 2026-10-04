@@ -5,6 +5,9 @@
 use std::fs;
 use std::path::Path;
 
+use jiff::tz::TimeZoneDatabase;
+use serde_json::{json, Value};
+
 use super::*;
 
 fn said(reading: &Reading) -> String {
@@ -61,6 +64,44 @@ fn each_harness_reads_its_own_record() {
     let devin = read(Harness::Devin);
     assert!(devin.starts_with("unreadable: "), "{devin}");
     assert!(!devin.starts_with("unreadable: no "), "{devin}");
+}
+
+#[test]
+fn a_reset_that_names_no_zone_is_read_in_the_zone_the_switch_is_given() {
+    let home = tempfile::tempdir().unwrap();
+    let env = at_home(home.path());
+    let folder = home.path().join(".claude").join("projects").join("-work");
+    fs::create_dir_all(&folder).unwrap();
+    let refused = json!({
+        "type": "assistant", "uuid": "a1", "sessionId": "s", "isSidechain": false,
+        "timestamp": "2026-10-03T12:00:00.000Z", "isApiErrorMessage": true, "apiErrorStatus": 429,
+        "message": {
+            "id": "m1", "role": "assistant",
+            "content": [{ "type": "text", "text": "You've hit your session limit · resets 7:30pm" }],
+        },
+    });
+    fs::write(folder.join("s.jsonl"), format!("{refused}\n")).unwrap();
+    let resets = |reading: &Reading| match reading {
+        Reading::Known(record) => serde_json::to_value(&record.quota).unwrap()["resetsAt"].clone(),
+        Reading::Unknown(reason) => panic!("{reason}"),
+    };
+    let los_angeles = TimeZoneDatabase::bundled()
+        .get("America/Los_Angeles")
+        .unwrap();
+    let options = Options::default();
+    // Node, TZ=America/Los_Angeles and TZ=UTC.
+    let (there, utc) = (
+        Value::from("2026-10-04T02:30:00.000Z"),
+        Value::from("2026-10-03T19:30:00.000Z"),
+    );
+    let answered = |local| answers(Harness::Claude, "s", &env, &options, local, 0);
+    assert_eq!(resets(&answered(&los_angeles)), there);
+    assert_eq!(resets(&answered(&TimeZone::UTC)), utc);
+    let mut cache = Cache::new(open(los_angeles), IDLE_MS, 0);
+    assert_eq!(
+        resets(&cache.look(Harness::Claude, "s", &env, &options, 0)),
+        there
+    );
 }
 
 #[test]

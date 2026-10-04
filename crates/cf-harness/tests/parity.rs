@@ -2,7 +2,8 @@
 //! (`tests/parity/records.mjs`) read on this machine, read again by the
 //! Rust readers at the same instant and held to Node's digest of its
 //! reading. Ignored by `cargo test`: it reads the machine's own harness
-//! stores, and only the npm script, which writes the digests first, runs it.
+//! stores, and only the npm script, which writes the digests first and names
+//! their file in `CF_PARITY_RECORDS`, runs it.
 //!
 //! A conversation whose stamp changed between the two reads was written in
 //! between: it is counted, not compared. A line of JSON this build cannot
@@ -34,9 +35,6 @@ use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
-
-/// Where Node's half writes its digests.
-const DIGESTS: &str = "consensflow-parity-records.jsonl";
 
 /// A conversation as Node's half read it.
 #[derive(Deserialize)]
@@ -71,9 +69,12 @@ struct Tally {
 #[test]
 #[ignore = "reads this machine's harness stores: npm run parity:records"]
 fn every_conversation_node_read_here_reads_the_same() {
-    let digests = std::env::temp_dir().join(DIGESTS);
-    let text = fs::read_to_string(&digests)
-        .unwrap_or_else(|error| panic!("{}: {error}: npm run parity:records", digests.display()));
+    let env = Env::from_process();
+    let digests = env
+        .path("CF_PARITY_RECORDS")
+        .expect("Node's digests, named by npm run parity:records");
+    let text = fs::read_to_string(digests)
+        .unwrap_or_else(|error| panic!("{}: {error}", digests.display()));
     let ours = our_reasons();
     let mut tallies = BTreeMap::<String, Tally>::new();
     let mut differences = Vec::new();
@@ -140,7 +141,7 @@ fn every_conversation_node_read_here_reads_the_same() {
     println!("\n{}", report(&tallies));
     assert!(
         tallies.values().map(|tally| tally.same).sum::<usize>() > 0,
-        "no conversation compared"
+        "no conversation compared: Node's half found none here, or each changed between the reads"
     );
     assert!(
         differences.is_empty(),

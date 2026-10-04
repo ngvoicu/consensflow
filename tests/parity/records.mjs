@@ -5,7 +5,7 @@
  *
  * Node's half is here. It reads each conversation at one instant and writes
  * it, one a line, to `<tmpdir>/consensflow-parity-records.jsonl` as a
- * digest: its items' ids, roles, completeness and times, and each text's
+ * digest (the Rust half is told the file in CF_PARITY_RECORDS): its items' ids, roles, completeness and times, and each text's
  * UTF-16 length and SHA-256, never the text, with how long the read took.
  * Then it runs the Rust half (`crates/cf-harness/tests/parity.rs`), which
  * reads each again, compares, and times its reads beside Node's.
@@ -240,6 +240,6 @@ console.log(`${lines.length} digests in ${OUTPUT}`)
 const rust = spawnSync(
   'cargo',
   ['test', '--release', '-p', 'cf-harness', '--test', 'parity', '--', '--ignored', '--nocapture'],
-  { cwd: REPO, stdio: 'inherit' },
+  { cwd: REPO, stdio: 'inherit', env: { ...process.env, CF_PARITY_RECORDS: OUTPUT } },
 )
 process.exitCode = rust.status ?? 1
