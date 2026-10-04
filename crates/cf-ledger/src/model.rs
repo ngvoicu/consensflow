@@ -11,11 +11,11 @@
 use cf_base::js;
 use cf_base::refusal::Refusal;
 use cf_base::text::{utf16_len, utf16_prefix};
+use cf_proto::agents::Harness;
 use serde_json::Value;
 
 use crate::views::ParticipantRow;
 
-pub const HARNESSES: [&str; 5] = ["claude-code", "codex", "opencode", "pi", "devin"];
 pub const MEMBER_ROLES: [&str; 4] = ["worker", "advisor", "reviewer", "designer"];
 /// Who hands out work and hears when the staff changes: the human and the chief.
 pub const COORDINATOR_HANDLES: [&str; 2] = ["human", "chief"];
@@ -122,11 +122,10 @@ pub fn parse_text(value: Option<&Value>, field: &str, max: usize) -> Result<Stri
     Ok(text.clone())
 }
 
-/// One of the harnesses.
+/// One of the harnesses, by its kind (`claude-code`).
 pub fn require_harness(harness: &str) -> Result<&'static str, LedgerError> {
-    HARNESSES
-        .into_iter()
-        .find(|known| *known == harness)
+    Harness::from_kind(harness)
+        .map(Harness::kind)
         .ok_or_else(|| {
             LedgerError::refused(
                 "invalid-harness",

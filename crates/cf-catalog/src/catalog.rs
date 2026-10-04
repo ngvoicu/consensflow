@@ -1,5 +1,4 @@
-//! The catalog (`src/catalog.js`): the ready-made agents of every harness,
-//! and the harness each kind belongs to (`src/roster.js`).
+//! The catalog (`src/catalog.js`): the ready-made agents of every harness.
 //!
 //! **One list, derived.** The groups are the presets themselves, reshaped
 //! into the manager's vocabulary (kind to harness, thinking and effort to
@@ -10,24 +9,6 @@ use cf_proto::agents::{CatalogEntry, FoundEntry, Harness};
 use crate::presets::Preset;
 use crate::profile::Settings;
 use crate::Catalog;
-
-/// The harnesses ConsensFlow runs, in the order the page and the roster list
-/// them (`HARNESSES`, `src/roster.js`).
-pub const HARNESSES: [Harness; 5] = [
-    Harness::Claude,
-    Harness::Codex,
-    Harness::Pi,
-    Harness::Opencode,
-    Harness::Devin,
-];
-
-/// The CLI behind a kind (`harnessForKind`): the store and the roster speak in
-/// kinds (`claude-code`), the launcher needs the CLI to find the binary. None
-/// for a kind the build does not run (`image`, `kimi`), and for a CLI's own
-/// name (`claude`).
-pub fn harness_for_kind(kind: &str) -> Option<Harness> {
-    HARNESSES.into_iter().find(|harness| harness.kind() == kind)
-}
 
 /// The effort levels `harness` accepts (`EFFORTS`, `src/catalog.js`), quoted
 /// from its CLI's own help output. `EFFORTS` keys them in `HARNESSES`' order.
@@ -56,7 +37,7 @@ pub struct Group {
 
 impl Catalog {
     /// `CATALOG`: each harness with its entries, the harnesses in the order
-    /// they first appear among the presets, which is not `HARNESSES`' order.
+    /// they first appear among the presets, which is not [`Harness::ALL`]'s order.
     pub fn groups(&self) -> &[Group] {
         &self.groups
     }
@@ -80,7 +61,7 @@ impl Catalog {
     pub(crate) fn grouped(&self) -> Vec<Group> {
         let mut groups: Vec<Group> = Vec::new();
         for preset in &self.presets {
-            let Some(harness) = harness_for_kind(&preset.kind) else {
+            let Some(harness) = Harness::from_kind(&preset.kind) else {
                 continue;
             };
             let entry = self.entry_for(preset, harness);
@@ -152,35 +133,8 @@ mod tests {
     }
 
     #[test]
-    fn the_harnesses_are_listed_as_the_roster_lists_them() {
-        let names: Vec<_> = HARNESSES.into_iter().map(Harness::as_str).collect();
-        assert_eq!(names, ["claude", "codex", "pi", "opencode", "devin"]);
-    }
-
-    #[test]
-    fn a_kind_names_its_harness_where_the_build_runs_one() {
-        for harness in HARNESSES {
-            assert_eq!(harness_for_kind(harness.kind()), Some(harness));
-        }
-        assert_eq!(harness_for_kind("claude-code"), Some(Harness::Claude));
-        for kind in [
-            "image",
-            "kimi",
-            "claude",
-            "",
-            "Codex",
-            "codex ",
-            "claude-code ",
-            "constructor",
-            "__proto__",
-        ] {
-            assert_eq!(harness_for_kind(kind), None, "{kind:?}");
-        }
-    }
-
-    #[test]
     fn every_harness_accepts_some_efforts_and_the_codex_cli_one_more() {
-        for harness in HARNESSES {
+        for harness in Harness::ALL {
             assert!(!efforts(harness).is_empty(), "{}", harness.as_str());
         }
         assert!(efforts(Harness::Codex).contains(&"ultra"));

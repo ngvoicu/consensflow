@@ -9,8 +9,7 @@
 
 use cf_base::js;
 use cf_catalog::{
-    efforts, harness_for_kind, validate_work_tier, work_tier_info, Catalog, Settings, HARNESSES,
-    WORK_TIERS,
+    efforts, validate_work_tier, work_tier_info, Catalog, Harness, Settings, WORK_TIERS,
 };
 use serde_json::{json, Map, Value};
 
@@ -174,7 +173,7 @@ fn every_lookup_by_name_answers_as_node_answered() {
 #[test]
 fn the_efforts_the_work_tiers_and_the_harnesses_are_listed_as_node_lists_them() {
     let golden = golden("catalog.json");
-    let by_harness: Map<String, Value> = HARNESSES
+    let by_harness: Map<String, Value> = Harness::ALL
         .into_iter()
         .map(|harness| (harness.as_str().to_owned(), json!(efforts(harness))))
         .collect();
@@ -198,7 +197,7 @@ fn the_efforts_the_work_tiers_and_the_harnesses_are_listed_as_node_lists_them() 
         "the work tiers",
     );
     assert_same_text(
-        &serde_json::to_string(&HARNESSES).unwrap(),
+        &serde_json::to_string(&Harness::ALL).unwrap(),
         &golden["harnesses"].to_string(),
         "the harnesses",
     );
@@ -210,7 +209,7 @@ fn each_kind_names_the_harness_node_names_and_none_where_node_names_none() {
     let kinds = golden["harnessForKind"].as_array().unwrap();
     for case in kinds {
         let kind = case["kind"].as_str().unwrap();
-        let answered = json!({ "kind": kind, "harness": harness_for_kind(kind) });
+        let answered = json!({ "kind": kind, "harness": Harness::from_kind(kind) });
         assert_same_text(
             &answered.to_string(),
             &case.to_string(),

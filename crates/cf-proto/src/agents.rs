@@ -21,6 +21,16 @@ pub enum Harness {
 }
 
 impl Harness {
+    /// Every harness, in the order the page and the roster list them
+    /// (`HARNESSES`, `src/roster.js`).
+    pub const ALL: [Harness; 5] = [
+        Harness::Claude,
+        Harness::Codex,
+        Harness::Pi,
+        Harness::Opencode,
+        Harness::Devin,
+    ];
+
     /// The CLI's own name (`claude`), as the page and the launcher say it.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -35,15 +45,17 @@ impl Harness {
     /// The harness a request names by the CLI's own name (`claude`); none for
     /// any other word, a kind (`claude-code`) among them.
     pub fn from_name(name: &str) -> Option<Harness> {
-        [
-            Harness::Claude,
-            Harness::Codex,
-            Harness::Pi,
-            Harness::Opencode,
-            Harness::Devin,
-        ]
-        .into_iter()
-        .find(|harness| harness.as_str() == name)
+        Self::ALL
+            .into_iter()
+            .find(|harness| harness.as_str() == name)
+    }
+
+    /// The harness behind a kind (`harnessForKind`, `src/roster.js`): the
+    /// store and the roster speak in kinds (`claude-code`), the launcher
+    /// needs the CLI to find the binary. None for a kind the build does not
+    /// run (`image`, `kimi`), and for a CLI's own name (`claude`).
+    pub fn from_kind(kind: &str) -> Option<Harness> {
+        Self::ALL.into_iter().find(|harness| harness.kind() == kind)
     }
 
     /// The payload's word for it (`claude-code`), as the store and the roster say it.
@@ -237,6 +249,36 @@ mod tests {
                 format!("\"{name}\"")
             );
         }
+    }
+
+    #[test]
+    fn the_harnesses_are_listed_as_the_roster_lists_them() {
+        let names: Vec<_> = Harness::ALL.into_iter().map(Harness::as_str).collect();
+        assert_eq!(names, ["claude", "codex", "pi", "opencode", "devin"]);
+    }
+
+    #[test]
+    fn a_name_or_a_kind_names_its_harness_where_the_build_runs_one() {
+        for harness in Harness::ALL {
+            assert_eq!(Harness::from_name(harness.as_str()), Some(harness));
+            assert_eq!(Harness::from_kind(harness.kind()), Some(harness));
+        }
+        assert_eq!(Harness::from_kind("claude-code"), Some(Harness::Claude));
+        assert_eq!(Harness::from_name("claude-code"), None);
+        for word in [
+            "image",
+            "kimi",
+            "",
+            "Codex",
+            "codex ",
+            "claude-code ",
+            "constructor",
+            "__proto__",
+        ] {
+            assert_eq!(Harness::from_kind(word), None, "{word:?}");
+            assert_eq!(Harness::from_name(word), None, "{word:?}");
+        }
+        assert_eq!(Harness::from_kind("claude"), None);
     }
 
     #[test]

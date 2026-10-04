@@ -15,13 +15,13 @@ use cf_proto::agents::AgentView;
 use serde_json::Value;
 
 use super::agent_row::{effort_key, AgentRow};
-use crate::{harness_for_kind, validate_work_tier, Catalog, Settings};
+use crate::{validate_work_tier, Catalog, Harness, Settings};
 
 impl Catalog {
     /// `toView`: a row as the page and the CLI list it. A work tier the row
     /// names that is none of the four is refused, as its profile is built.
     pub(crate) fn view(&self, row: &AgentRow) -> Result<AgentView, Refusal> {
-        let harness = row.kind().and_then(harness_for_kind);
+        let harness = row.kind().and_then(Harness::from_kind);
         let work_tier = validate_work_tier(row.get("workTier"))?;
         let profile = self.profile(&Settings {
             harness: row.harness(),

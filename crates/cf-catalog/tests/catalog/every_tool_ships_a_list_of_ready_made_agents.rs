@@ -12,7 +12,10 @@ fn covers_every_harness_each_with_a_real_list_the_image_agent_among_codex_s() {
         .map(|group| group.harness.as_str())
         .collect();
     offered.sort_unstable();
-    let mut harnesses: Vec<&str> = HARNESSES.iter().map(|harness| harness.as_str()).collect();
+    let mut harnesses: Vec<&str> = Harness::ALL
+        .iter()
+        .map(|harness| harness.as_str())
+        .collect();
     harnesses.sort_unstable();
     assert_eq!(offered, harnesses);
     for group in catalog.groups() {
@@ -302,7 +305,7 @@ fn is_the_payload_presets_and_nothing_else_one_list_not_two() {
             "{}: records its provenance",
             entry.name
         );
-        assert!(HARNESSES.contains(&harness));
+        assert!(Harness::ALL.contains(&harness));
     }
 
     // Every preset is offered, the image agent among Codex's.
