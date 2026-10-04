@@ -9,5 +9,6 @@
 pub mod claude;
 pub mod codex;
 pub mod devin;
+pub mod pi;
 pub mod records;
 mod shared;

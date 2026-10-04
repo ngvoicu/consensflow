@@ -2,8 +2,8 @@
 //! on them: a JSON value written into a template literal, tested for truth,
 //! joined, written by `JSON.stringify`; a number written as `String` writes
 //! it; text trimmed, read as a number, or ordered as `localeCompare` orders
-//! it. A port that reads a value the way the Node code did says what Node
-//! said.
+//! it; a JSON value read as `Number(value)` reads it. A port that reads a
+//! value the way the Node code did says what Node said.
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -11,6 +11,10 @@ use std::cmp::Ordering;
 use serde_json::{Map, Value};
 
 use crate::json::array_index;
+
+mod to_number;
+
+pub use to_number::to_number;
 
 /// `value` as `${value}` wrote it; `None` is a field that was not there. For
 /// a value that may hold an object with a `toString` of its own, where

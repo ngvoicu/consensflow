@@ -9,6 +9,8 @@ publish = false
 [dependencies]
 cf-base.workspace = true
 cf-proto.workspace = true
+jiff.workspace = true
+regex.workspace = true
 # `rc`: a reading's quota is shared, as Node shared the object.
 serde = { workspace = true, features = ["rc"] }
 serde_json.workspace = true

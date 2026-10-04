@@ -114,6 +114,8 @@ fn every_look_at_a_ported_harness_reads_what_node_read() {
             }
         }
     }
-    // Codex's: every look but the one with no session, which the switch answers.
-    assert_eq!((scenarios_played, answered), (85, 261));
+    // Codex's 261 looks in 85 scenarios and Pi's 227 in 78, one scenario
+    // holding both: every look of either but the one Codex look with no
+    // session, which the switch answers.
+    assert_eq!((scenarios_played, answered), (162, 261 + 227));
 }

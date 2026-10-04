@@ -18,11 +18,29 @@ use cf_base::env::Env;
 
 use super::reading::Reading;
 
+/// What a look is told besides the conversation: what a reader may weigh
+/// that its harness's own record does not hold.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Options {
+    /// Where Pi's extension keeps its evidence of a window's turns.
+    pub pi_settlement: Option<PiSettlement>,
+}
+
+/// Where Pi's extension keeps its evidence of a window's turns, and which
+/// launch is the window's (`options.piSettlement`). What is none is read
+/// from the environment the reader was opened with: `CF_DELIVERY_SETTLED`
+/// and `CF_DELIVERY_LAUNCH_ID`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PiSettlement {
+    pub directory: Option<String>,
+    pub launch_id: Option<String>,
+}
+
 /// A conversation's record, read on from look to look.
 pub trait Look {
-    /// What the record says now. Never a failure: a record that cannot be
-    /// read is an unknown reading.
-    fn look(&mut self) -> Arc<Reading>;
+    /// What the record says at `now_ms`, told `options`. Never a failure: a
+    /// record that cannot be read is an unknown reading.
+    fn look(&mut self, options: &Options, now_ms: i64) -> Arc<Reading>;
 }
 
 /// How a cache opens the reader of a conversation, by its harness's kind,
@@ -61,11 +79,18 @@ impl Cache {
         }
     }
 
-    /// A look at `session` of the harness `kind`, at `now_ms`. The
-    /// environment opens its reader on the first look; a later look's is
-    /// not read. Every `idle_ms`, the conversations unread that long are
-    /// forgotten first, this one too: it is then read anew.
-    pub fn look(&mut self, kind: &str, session: &str, env: &Env, now_ms: i64) -> Arc<Reading> {
+    /// A look at `session` of the harness `kind`, at `now_ms`, told
+    /// `options`. The environment opens its reader on the first look; a later
+    /// look's is not read. Every `idle_ms`, the conversations unread that
+    /// long are forgotten first, this one too: it is then read anew.
+    pub fn look(
+        &mut self,
+        kind: &str,
+        session: &str,
+        env: &Env,
+        options: &Options,
+        now_ms: i64,
+    ) -> Arc<Reading> {
         if now_ms - self.swept >= self.idle_ms {
             self.swept = now_ms;
             let idle_ms = self.idle_ms;
@@ -82,7 +107,7 @@ impl Cache {
             },
         };
         kept.read_at = now_ms;
-        kept.reader.look()
+        kept.reader.look(options, now_ms)
     }
 }
 
@@ -98,12 +123,21 @@ mod tests {
     }
 
     impl Look for Counting {
-        fn look(&mut self) -> Arc<Reading> {
+        fn look(&mut self, _options: &Options, _now_ms: i64) -> Arc<Reading> {
             self.looks += 1;
             Arc::new(Reading::Unknown(format!(
                 "reader {} look {}",
                 self.reader, self.looks
             )))
+        }
+    }
+
+    /// A reader that says what its look was told.
+    struct Telling;
+
+    impl Look for Telling {
+        fn look(&mut self, options: &Options, now_ms: i64) -> Arc<Reading> {
+            Arc::new(Reading::Unknown(format!("{options:?} at {now_ms}")))
         }
     }
 
@@ -134,7 +168,9 @@ mod tests {
     fn each_conversation_keeps_its_reader() {
         let env = Env::default();
         let mut cache = cache(IDLE_MS);
-        let mut look = |kind, session, now| said(&cache.look(kind, session, &env, now)).to_owned();
+        let options = Options::default();
+        let mut look =
+            |kind, session, now| said(&cache.look(kind, session, &env, &options, now)).to_owned();
         assert_eq!(look("codex", "a", 0), "reader 1 look 1");
         assert_eq!(look("codex", "b", 1), "reader 2 look 1");
         assert_eq!(look("pi", "a", 2), "reader 3 look 1");
@@ -146,7 +182,9 @@ mod tests {
         // completion.test.mjs: "a conversation nobody reads any more is forgotten".
         let env = Env::default();
         let mut cache = cache(1000);
-        let mut look = |session, now| said(&cache.look("codex", session, &env, now)).to_owned();
+        let options = Options::default();
+        let mut look =
+            |session, now| said(&cache.look("codex", session, &env, &options, now)).to_owned();
         assert_eq!(look("a", 0), "reader 1 look 1");
         assert_eq!(look("a", 999), "reader 1 look 2", "read again soon: kept");
         assert_eq!(
@@ -170,12 +208,34 @@ mod tests {
     fn a_conversation_no_reader_reads_is_answered_afresh_and_never_kept() {
         let env = Env::default();
         let mut cache = cache(IDLE_MS);
-        let first = cache.look("none", "a", &env, 0);
-        let second = cache.look("none", "a", &env, 1);
+        let options = Options::default();
+        let first = cache.look("none", "a", &env, &options, 0);
+        let second = cache.look("none", "a", &env, &options, 1);
         assert_eq!(said(&first), "unknown kind: none");
         assert_eq!(first, second);
         assert!(!Arc::ptr_eq(&first, &second), "another reading each time");
         assert!(cache.known.is_empty());
+    }
+
+    #[test]
+    fn each_look_hands_its_own_options_and_its_time_to_the_reader() {
+        let env = Env::default();
+        let mut cache = Cache::new(Box::new(|_, _, _| Ok(Box::new(Telling))), IDLE_MS, 0);
+        let settlement = |launch_id: &str| Options {
+            pi_settlement: Some(PiSettlement {
+                directory: None,
+                launch_id: Some(launch_id.to_owned()),
+            }),
+        };
+        let first = cache.look("pi", "a", &env, &settlement("one"), 5);
+        let second = cache.look("pi", "a", &env, &settlement("two"), 7);
+        let third = cache.look("pi", "a", &env, &Options::default(), 9);
+        assert_eq!(
+            said(&first),
+            r#"Options { pi_settlement: Some(PiSettlement { directory: None, launch_id: Some("one") }) } at 5"#
+        );
+        assert!(said(&second).ends_with(r#"Some("two") }) } at 7"#));
+        assert_eq!(said(&third), "Options { pi_settlement: None } at 9");
     }
 
     #[test]

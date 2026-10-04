@@ -11,5 +11,5 @@
 //! to look are a [`Cache`].
 
 pub use crate::shared::quota::{Level, Quota};
-pub use crate::shared::record::cache::{Cache, Look, Open, IDLE_MS};
+pub use crate::shared::record::cache::{Cache, Look, Open, Options, PiSettlement, IDLE_MS};
 pub use crate::shared::record::reading::{Item, Reading, Record, Role, Settlement};

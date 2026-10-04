@@ -2,16 +2,12 @@
 //! `hosts/lib/quota.js`): the `rate_limits` of a `token_count` event, where
 //! the fullest window decides.
 
-use cf_base::time::iso;
 use serde_json::Value;
 
-use crate::shared::quota::{Level, Quota};
+use crate::shared::quota::{date, Level, Quota};
 
 /// From this much of a window used, the quota is low.
 const LOW_PERCENT: f64 = 95.0;
-
-/// The latest instant a date holds, in milliseconds either side of the epoch.
-const LAST_MS: f64 = 8.64e15;
 
 /// The quota `limits` says: the fuller of its two windows (the primary on a
 /// tie) gives how much is used and when it resets; a limit reached is
@@ -50,19 +46,6 @@ pub(crate) fn codex_quota(limits: &Value) -> Result<Quota, String> {
 /// How much of `window` is used, when it says so with a number.
 fn used(window: &Value) -> Option<f64> {
     window.get("used_percent")?.as_f64()
-}
-
-/// `new Date(ms).toISOString()`: the instant to the millisecond toward
-/// zero, or a failure past what a date holds.
-fn date(ms: f64) -> Result<String, String> {
-    if !ms.is_finite() || ms.abs() > LAST_MS {
-        return Err(format!(
-            "a rate limit resets past what a date holds: {ms} ms"
-        ));
-    }
-    // In range: within ±8.64e15, which an i64 holds exactly.
-    #[allow(clippy::cast_possible_truncation)]
-    Ok(iso(ms.trunc() as i64))
 }
 
 #[cfg(test)]

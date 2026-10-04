@@ -9,33 +9,44 @@
 use std::fs::{self, File, FileTimes};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, UNIX_EPOCH};
 
 use cf_base::env::Env;
 use cf_base::js;
-use cf_harness::records::{Cache, Look, Quota, Reading, IDLE_MS};
+use cf_harness::records::{Cache, Look, Options, PiSettlement, Quota, Reading, IDLE_MS};
+use jiff::tz::{TimeZone, TimeZoneDatabase};
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
 use crate::scenario::{
-    Append, Clock, Mkdir, Move, Mtime, Reader, Remove, Replace, Scenario, Step, Write,
+    goldens, Append, Clock, Mkdir, Move, Mtime, Reader, Remove, Replace, Scenario, Step, Write,
 };
 
 /// Where every scenario's clock starts: 2026-09-21T12:26:40.000Z.
 const START: i64 = 1_790_000_000_000;
 
+/// The zone the machine was in when Node made the goldens, which a reset that
+/// names none is read in: the generator sets `TZ` to the one tables.json names.
+static LOCAL_ZONE: LazyLock<TimeZone> = LazyLock::new(|| {
+    let tables: Value =
+        serde_json::from_str(&fs::read_to_string(goldens().join("tables.json")).unwrap()).unwrap();
+    let name = tables["quota"]["defaultZone"].as_str().unwrap();
+    TimeZoneDatabase::bundled().get(name).unwrap()
+});
+
 /// Whether this build reads what `look` looks at: a harness whose reader is
 /// ported, and a session to read. The others wait for the readers and the
 /// switch still to come.
 pub fn ported(look: &crate::scenario::Look) -> bool {
-    look.kind == "codex" && !look.session.is_empty()
+    matches!(look.kind.as_str(), "codex" | "pi") && !look.session.is_empty()
 }
 
 /// A ported harness's reader of `session`, made afresh.
 fn reader(kind: &str, session: &str, env: &Env) -> Box<dyn Look + Send> {
     match kind {
         "codex" => cf_harness::codex::record::reader(session, env),
+        "pi" => cf_harness::pi::record::reader(session, env, &LOCAL_ZONE),
         other => panic!("no reader of {other} yet"),
     }
 }
@@ -155,20 +166,23 @@ impl Stage<'_> {
         }
         let name = format!("{}, step {index}", self.scenario.name);
         assert!(
-            look.options.is_empty() && look.between.is_none(),
-            "{name}: options no ported reader takes"
+            look.between.is_none(),
+            "{name}: a look between snapshot reads, which no ported reader takes"
         );
         let env = look.env.as_ref().map_or_else(
             || self.env.clone(),
             |env| environment(self.root.path(), env),
         );
+        let options = options(self.root.path(), &look.options);
         if matches!(look.look, Reader::Cached | Reader::Both) {
-            let reading = self.cache.look(&look.kind, &look.session, &env, self.clock);
+            let reading = self
+                .cache
+                .look(&look.kind, &look.session, &env, &options, self.clock);
             self.hold(&reading, look.read.unwrap(), &format!("{name}, cached"));
             self.identity(&reading, look, index, &name);
         }
         if matches!(look.look, Reader::Fresh | Reader::Both) {
-            let reading = reader(&look.kind, &look.session, &env).look();
+            let reading = reader(&look.kind, &look.session, &env).look(&options, self.clock);
             // A look of both readers records the fresh reading only where it differs.
             let at = look.fresh.or(look.read).unwrap();
             self.hold(&reading, at, &format!("{name}, fresh"));
@@ -293,6 +307,57 @@ fn environment(root: &Path, vars: &Map<String, Value>) -> Env {
         vars.iter()
             .map(|(name, value)| (name.clone(), resolve(root, value.as_str().unwrap()))),
     )
+}
+
+/// `value` with every `$ROOT` path in it made real, at any depth, as
+/// `runner.mjs`'s `resolveAll` makes them.
+fn resolve_all(root: &Path, value: &Value) -> Value {
+    match value {
+        Value::Array(items) => {
+            Value::Array(items.iter().map(|item| resolve_all(root, item)).collect())
+        }
+        Value::Object(fields) => Value::Object(
+            fields
+                .iter()
+                .map(|(key, item)| (key.clone(), resolve_all(root, item)))
+                .collect(),
+        ),
+        Value::String(text) => Value::String(resolve(root, text)),
+        other => other.clone(),
+    }
+}
+
+/// A look's options, its paths made real, as the type holds them. An option
+/// the type cannot hold fails the scenario: none is dropped.
+fn options(root: &Path, given: &Map<String, Value>) -> Options {
+    let Value::Object(mut options) = resolve_all(root, &Value::Object(given.clone())) else {
+        unreachable!("an object resolves to an object");
+    };
+    let pi_settlement = options.remove("piSettlement").map(|settlement| {
+        let Value::Object(mut fields) = settlement else {
+            panic!("piSettlement is no object: {settlement}");
+        };
+        let mut text = |name: &str| {
+            fields.remove(name).map(|value| match value {
+                Value::String(text) => text,
+                other => panic!("{name} is no text: {other}"),
+            })
+        };
+        let settlement = PiSettlement {
+            directory: text("directory"),
+            launch_id: text("launchId"),
+        };
+        assert!(
+            fields.is_empty(),
+            "piSettlement holds more than the type: {fields:?}"
+        );
+        settlement
+    });
+    assert!(
+        options.is_empty(),
+        "options the type cannot hold: {options:?}"
+    );
+    Options { pi_settlement }
 }
 
 /// A fixture's lines with line `line` written as `text`, each line ended by

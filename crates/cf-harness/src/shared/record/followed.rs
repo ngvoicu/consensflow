@@ -14,7 +14,7 @@ use std::sync::Arc;
 use cf_base::file::{stat, Stat};
 use serde_json::Value;
 
-use super::cache::Look;
+use super::cache::{Look, Options};
 use super::jsonl::{read_on, Looked, Seen, Stop};
 use super::reading::{Reading, Record};
 
@@ -47,6 +47,8 @@ pub(crate) struct Followed<P> {
 /// What a look at a followed transcript read.
 pub(crate) struct Read<'a, P> {
     pub(crate) state: &'a mut P,
+    /// The transcript the look read.
+    pub(crate) file: PathBuf,
     /// Whether the look read anything since the last.
     pub(crate) changed: bool,
 }
@@ -104,6 +106,7 @@ impl<P: Parser> Followed<P> {
                 Ok(Looked::Unchanged) => {
                     return Ok(Some(Read {
                         state: self.state.get_or_insert_with(|| (self.parse)()),
+                        file,
                         changed: false,
                     }))
                 }
@@ -111,6 +114,7 @@ impl<P: Parser> Followed<P> {
                     self.seen = Some(seen);
                     return Ok(Some(Read {
                         state: self.state.get_or_insert_with(|| (self.parse)()),
+                        file,
                         changed: true,
                     }));
                 }
@@ -155,7 +159,8 @@ impl<P> TranscriptReader<P> {
 }
 
 impl<P: Parser + Answer> Look for TranscriptReader<P> {
-    fn look(&mut self) -> Arc<Reading> {
+    /// Takes no options and reads no clock: the transcript alone answers.
+    fn look(&mut self, _options: &Options, _now_ms: i64) -> Arc<Reading> {
         match self.transcript.read() {
             // A thread with no transcript yet is unknown: missing history alone proves nothing.
             Ok(None) => {
