@@ -715,6 +715,12 @@ fn a_request_that_never_finishes_its_headers_or_its_body_is_ended_after_five_sec
 }
 
 #[test]
+// The pressure this needs is the system's: Windows' loopback takes far more
+// than 64 MiB from a peer that reads nothing, so what waits unsent never builds.
+#[cfg_attr(
+    windows,
+    ignore = "Windows' loopback absorbs what a peer does not read"
+)]
 fn a_delivery_that_would_put_more_than_64_mib_unsent_behind_the_connection_to_codex_is_refused_and_the_connection_ended(
 ) {
     run(async {

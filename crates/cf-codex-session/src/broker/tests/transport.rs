@@ -230,6 +230,12 @@ fn a_message_over_64_mib_ends_the_pair_whichever_end_sent_it() {
 }
 
 #[test]
+// The pressure this needs is the system's: Windows' loopback takes far more
+// than 64 MiB from a peer that reads nothing, so what waits unsent never builds.
+#[cfg_attr(
+    windows,
+    ignore = "Windows' loopback absorbs what a peer does not read"
+)]
 fn a_socket_that_takes_nothing_ends_its_pair_once_64_mib_wait_unsent_for_it() {
     run(async {
         let f = Fixture::start().await;
