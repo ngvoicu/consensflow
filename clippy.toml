@@ -1,6 +1,7 @@
-# Two rules of the Rust rewrite (consensflow-sme, decisions/2026-10-04-rust-rewrite.md)
+# Three rules of the Rust rewrite (consensflow-sme, decisions/2026-10-04-rust-rewrite.md)
 # that clippy keeps: the environment is read once, in main, and handed down
-# as cf_base::env::Env; and a process is started only through cf-process.
+# as cf_base::env::Env; a process is started only through cf-process; and the
+# time of day is read in one place, cf_base::time's SystemClock.
 # Code older than the rewrite (the Tauri app, the pane host's tests) says so
 # where it is exempt.
 disallowed-methods = [
@@ -9,6 +10,7 @@ disallowed-methods = [
   { path = "std::env::vars", reason = "read the environment once, in main: cf_base::env::Env" },
   { path = "std::env::vars_os", reason = "read the environment once, in main: cf_base::env::Env" },
   { path = "std::process::Command::new", reason = "a process starts only through cf-process" },
+  { path = "std::time::SystemTime::now", reason = "the time of day is read in one place: cf_base::time::SystemClock" },
 ]
 
 # Tests may unwrap, expect and print: a failure there is the test's answer.
