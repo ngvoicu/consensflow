@@ -422,6 +422,29 @@ it('a delivery whose turn Codex refuses, a turn having just started, waits in th
   assert.deepEqual(await delivery, { ok: true, admitted: true })
 })
 
+it('a refused turn is never queued on a thread the window moved to meanwhile', async (t) => {
+  // A delivery to idle thread A starts a turn; while Codex weighs it, the
+  // window opens thread B. A's refusal must not put A's message in B's queue.
+  const f = await fixture(t)
+  const tui = await f.connect()
+  await startThread(f, tui, 1, { id: A, status: { type: 'idle' } })
+  const delivery = f.deliver(A)
+  await f.wait(() => f.pending.some((p) => p.message.method === 'turn/start'))
+  await startThread(f, tui, 2, { id: B, status: { type: 'idle' } })
+  await f.respond('turn/start', null, { code: -32600, message: 'a turn is already running' })
+  assert.deepEqual(await delivery, {
+    ok: false,
+    admitted: false,
+    bytesWritten: 0,
+    error: 'native-session-changed',
+  })
+  assert.equal(
+    f.requests.some((m) => m.method === 'thread/queue/add'),
+    false,
+    'nothing was queued',
+  )
+})
+
 it('a connection that is not speaking JSON is closed, and the thread it chose is forgotten', async (t) => {
   const f = await fixture(t)
   const tui = await f.connect()

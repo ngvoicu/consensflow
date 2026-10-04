@@ -175,24 +175,33 @@ export async function startBroker({
     // queue is right: the message goes in when the turn ends.
     const input = [{ type: 'text', text: record.text, text_elements: [] }]
     const deadline = Math.min(record.expiresAt, Date.now() + 3000)
-    const idleNow = idle.get(selected) === true
-    if (idleNow) idle.set(selected, false)
+    // The thread this delivery was checked against: every request below
+    // names it, never whatever the window shows by the time an answer comes.
+    const thread = selected
+    const checked = revision
+    const idleNow = idle.get(thread) === true
+    if (idleNow) idle.set(thread, false)
     // No await between comparing the selected main and forwarding this request.
     // A subsequent switch can only retire later submissions, never replay this one.
     let result = idleNow
-      ? await request('turn/start', { threadId: selected, input }, deadline)
+      ? await request('turn/start', { threadId: thread, input }, deadline)
       : await request(
           'thread/queue/add',
-          { threadId: selected, input, clientUserMessageId: randomUUID() },
+          { threadId: thread, input, clientUserMessageId: randomUUID() },
           deadline,
         )
-    // A turn the TUI started a moment before is an explicit refusal: queue it.
-    if (idleNow && result?.error)
+    // A turn the TUI started a moment before is an explicit refusal: queue it,
+    // unless the window has moved to another thread meanwhile. Nothing went
+    // in, so the dispatcher may route the message again.
+    if (idleNow && result?.error) {
+      if (revision !== checked || selected !== thread)
+        return reply(response, refused('native-session-changed'))
       result = await request(
         'thread/queue/add',
-        { threadId: selected, input, clientUserMessageId: randomUUID() },
+        { threadId: thread, input, clientUserMessageId: randomUUID() },
         deadline,
       )
+    }
     reply(response, result?.result ? { ok: true, admitted: true } : uncertain())
   })
   server.requestTimeout = 5000
