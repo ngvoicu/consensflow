@@ -97,23 +97,37 @@ impl Reads<'_> {
         first(&mut self.prepare(sql)?, params)
     }
 
-    /// The first row `sql` selects with JavaScript's `values` (`.get(...values)`),
-    /// each bound as `node:sqlite` binds it ([`arguments`]); a place no value
-    /// takes is NULL, as SQLite leaves a parameter unbound.
-    pub(crate) fn get_js(&self, sql: &str, values: &[&Value]) -> Result<Option<Row>, String> {
-        let mut statement = self.prepare(sql)?;
-        let mut bound = arguments(values)?;
-        let places = statement.parameter_count();
-        if bound.len() < places {
-            bound.resize(places, Bound::Null);
-        }
-        first(&mut statement, params_from_iter(bound))
+    /// `sql` prepared for gets with JavaScript's values (`db.prepare(sql)`):
+    /// one SQLite cannot prepare fails here, run or not.
+    pub(crate) fn prepare_js(&self, sql: &str) -> Result<Prepared<'_>, String> {
+        Ok(Prepared {
+            statement: self.prepare(sql)?,
+        })
     }
 
     fn prepare(&self, sql: &str) -> Result<Statement<'_>, String> {
         self.connection
             .prepare(sql)
             .map_err(|error| error.to_string())
+    }
+}
+
+/// A statement prepared for gets with JavaScript's values.
+pub(crate) struct Prepared<'a> {
+    statement: Statement<'a>,
+}
+
+impl Prepared<'_> {
+    /// The first row it selects with JavaScript's `values` (`.get(...values)`),
+    /// each bound as `node:sqlite` binds it ([`arguments`]); a place no value
+    /// takes is NULL, as SQLite leaves a parameter unbound.
+    pub(crate) fn get(&mut self, values: &[&Value]) -> Result<Option<Row>, String> {
+        let mut bound = arguments(values)?;
+        let places = self.statement.parameter_count();
+        if bound.len() < places {
+            bound.resize(places, Bound::Null);
+        }
+        first(&mut self.statement, params_from_iter(bound))
     }
 }
 

@@ -173,3 +173,25 @@ fn a_writer_between_a_whole_read_s_messages_and_its_parts_is_not_seen_until_the_
         )
     );
 }
+
+#[test]
+fn a_lookup_is_prepared_though_no_event_names_a_row() {
+    let staged = Staged::new();
+    staged.stopped();
+    let mut reader = staged.reader();
+    assert_eq!(
+        show(&look(&mut reader)),
+        settled(&conversation_items(true, 9))
+    );
+    // Node 26: "unreadable: no such column: id", the message lookup prepared
+    // with no new event to name a row.
+    staged
+        .store
+        .execute_batch("alter table message rename column id to retired_id")
+        .unwrap();
+    let read = show(&look(&mut reader));
+    assert!(
+        read.starts_with("unknown: unreadable: no such column: id"),
+        "{read}"
+    );
+}

@@ -171,7 +171,9 @@ fn javascript_s_values_are_bound_as_node_binds_them() {
     let store = Store::open(&file).unwrap();
     let bound = |values: &[&Value]| {
         store.read(|reads| {
-            let row = reads.get_js("select ? as a, ? as b, typeof(?) as c", values)?;
+            let row = reads
+                .prepare_js("select ? as a, ? as b, typeof(?) as c")?
+                .get(values)?;
             Ok(row.map(|row| {
                 row.columns
                     .into_iter()
@@ -206,5 +208,16 @@ fn javascript_s_values_are_bound_as_node_binds_them() {
     assert!(
         bound(&[&json!("s"), &json!({})]).is_err(),
         "Node cannot bind it"
+    );
+}
+
+#[test]
+fn a_statement_sqlite_cannot_prepare_fails_though_it_is_never_run() {
+    let (_dir, file, _writer) = store_with("create table t (a integer);");
+    let store = Store::open(&file).unwrap();
+    let prepared = store.read(|reads| reads.prepare_js("select b from t").map(|_| ()));
+    assert_eq!(
+        prepared.unwrap_err(),
+        "no such column: b in select b from t at offset 7"
     );
 }

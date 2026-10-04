@@ -4,10 +4,11 @@
 //! the sort.
 //!
 //! Every stable sort orders items alike by a comparator that is an order, so
-//! this one orders them as V8's TimSort does. Kept from Node on purpose: by a
-//! comparator that is no order (its numbers `NaN`), the order may be another,
-//! and of two items the comparator fails on, the one met first may be
-//! another. Rust's own sort is not used: it may panic on such a comparator.
+//! this one orders them as V8's TimSort does. Kept from Node on purpose: it
+//! compares other pairs than TimSort does, so by a comparator that is no
+//! order (its numbers `NaN`) the order may be another, and by one that fails
+//! on some pairs alone whether the sort fails, and on which pair, may differ.
+//! Rust's own sort is not used: it may panic on a comparator that is no order.
 
 /// `items` sorted stably by `compare`, a JavaScript comparator's number,
 /// or the comparator's failure.

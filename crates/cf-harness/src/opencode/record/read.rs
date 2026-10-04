@@ -132,10 +132,13 @@ impl Read {
             return Ok(Onward::Whole);
         }
         let session_value = Value::from(session);
+        // Each lookup is prepared though no event names a row of its table.
         for (table, ids) in [("message", named.messages), ("part", named.parts)] {
-            let sql = format!("select * from {table} where id = ? and session_id = ?");
+            let mut lookup = reads.prepare_js(&format!(
+                "select * from {table} where id = ? and session_id = ?"
+            ))?;
             for (key, id) in ids.named {
-                let found = reads.get_js(&sql, &[&id, &session_value])?;
+                let found = lookup.get(&[&id, &session_value])?;
                 let rows = if table == "message" {
                     &mut self.messages
                 } else {

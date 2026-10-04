@@ -16,11 +16,18 @@
 //! A column is held as `node:sqlite` hands it over (`Cell`), and made what
 //! OpenCode's JavaScript made of it where it made it.
 //!
-//! Kept from Node on purpose: an item whose row's id is no text fails the
-//! look (`answer`); JSON past serde's limits in a row's data fails the look;
-//! and of rows sorted by a comparator that is no order, or one that fails on
-//! more than one of them, the order or the row named may be another
-//! (`shared::record::sort`).
+//! Kept from Node on purpose:
+//! - an item whose row's id is no text fails the look (`answer`);
+//! - JSON past serde's limits in a row's data fails the look;
+//! - rows sorted by a comparator that is no order, or one that fails on some
+//!   pairs alone, may come out in another order, or fail otherwise
+//!   (`shared::record::sort`);
+//! - a store is known by its path and its file's volume and index, where
+//!   Node knew it by its path and its inode's number: a store put at the
+//!   same path from another volume is another store here;
+//! - with neither `HOME` nor `USERPROFILE`, and no variable naming the store,
+//!   the look fails (`shared::paths::home`), where Node read the account's
+//!   home.
 
 mod answer;
 mod read;
