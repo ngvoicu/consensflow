@@ -351,10 +351,12 @@ dependencies = [
 name = "cf-base"
 version = "3.0.0-alpha.73"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
  "tempfile",
  "winapi-util",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

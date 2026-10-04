@@ -75,11 +75,27 @@ pub fn number_text(number: f64) -> String {
 /// integer past 2^53 as the double it reads as).
 pub fn stringify(value: &Value) -> String {
     let mut written = String::new();
-    stringify_into(value, &mut written);
+    write_json(value, "", 0, &mut written);
     written
 }
 
-fn stringify_into(value: &Value, written: &mut String) {
+/// `value` as `JSON.stringify(value, null, spaces)` writes it: each member
+/// and item on a line of its own, indented `spaces` more than its parent;
+/// an empty object or list as `{}` or `[]`.
+pub fn stringify_indented(value: &Value, spaces: usize) -> String {
+    let mut written = String::new();
+    write_json(value, &" ".repeat(spaces), 0, &mut written);
+    written
+}
+
+fn write_json(value: &Value, indent: &str, depth: usize, written: &mut String) {
+    // Before a member or an item: nothing compact, else a line at its depth.
+    let open_line = |written: &mut String, depth: usize| {
+        if !indent.is_empty() {
+            written.push('\n');
+            written.push_str(&indent.repeat(depth));
+        }
+    };
     match value {
         Value::Null => written.push_str("null"),
         Value::Bool(flag) => written.push_str(if *flag { "true" } else { "false" }),
@@ -99,7 +115,11 @@ fn stringify_into(value: &Value, written: &mut String) {
                 if at > 0 {
                     written.push(',');
                 }
-                stringify_into(item, written);
+                open_line(written, depth + 1);
+                write_json(item, indent, depth + 1, written);
+            }
+            if !items.is_empty() {
+                open_line(written, depth);
             }
             written.push(']');
         }
@@ -109,9 +129,16 @@ fn stringify_into(value: &Value, written: &mut String) {
                 if at > 0 {
                     written.push(',');
                 }
+                open_line(written, depth + 1);
                 written.push_str(&Value::String(key.clone()).to_string());
                 written.push(':');
-                stringify_into(item, written);
+                if !indent.is_empty() {
+                    written.push(' ');
+                }
+                write_json(item, indent, depth + 1, written);
+            }
+            if !fields.is_empty() {
+                open_line(written, depth);
             }
             written.push('}');
         }
@@ -328,6 +355,13 @@ mod tests {
             stringify(&json!("line\nbreak\u{2028}")),
             "\"line\\nbreak\u{2028}\""
         );
+        // JSON.stringify(value, null, 2), as Node 26 writes it.
+        assert_eq!(
+            stringify_indented(&read(r#"{"a":1.0,"b":[1,[],{}],"c":{"d":null},"e":[]}"#), 2),
+            "{\n  \"a\": 1,\n  \"b\": [\n    1,\n    [],\n    {}\n  ],\n  \"c\": {\n    \"d\": null\n  },\n  \"e\": []\n}"
+        );
+        assert_eq!(stringify_indented(&read("[]"), 2), "[]");
+        assert_eq!(stringify_indented(&json!("x"), 2), "\"x\"");
     }
 
     #[test]
