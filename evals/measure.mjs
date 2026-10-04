@@ -253,6 +253,13 @@ export function mechanics(metrics, boardTasks) {
   ]
 }
 
+/**
+ * Files a harness keeps in the project for itself, which no agent wrote:
+ * Claude Code's lock while a wakeup it scheduled waits (a Claude chief on
+ * Windows scheduled one to check on its worker, 2026-10-04).
+ */
+const HARNESS_OWN = new Set(['.claude/scheduled_tasks.lock'])
+
 /** Files of the fixture that differ in the workspace, and files the run added, relative. */
 export function changed(fixture, workspace) {
   const digest = (path) => createHash('sha256').update(readFileSync(path)).digest('hex')
@@ -261,9 +268,9 @@ export function changed(fixture, workspace) {
     readdirSync(dir).flatMap((name) => {
       const path = join(dir, name)
       if (name === '.git' || name === 'node_modules') return []
-      return statSync(path).isDirectory()
-        ? list(root, path)
-        : [relative(root, path).split(sep).join('/')]
+      if (statSync(path).isDirectory()) return list(root, path)
+      const file = relative(root, path).split(sep).join('/')
+      return HARNESS_OWN.has(file) ? [] : [file]
     })
   const before = new Map(list(fixture).map((path) => [path, digest(join(fixture, path))]))
   return list(workspace)

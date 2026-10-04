@@ -31,6 +31,7 @@ describe('what a run changed on disk', () => {
         ['workspace/site/evaluare.html', 'scor 0 și 10'],
         ['workspace/docs/guide.md', 'guide'],
         ['workspace/site/legislatie.html', 'new page'],
+        ['workspace/.claude/scheduled_tasks.lock', '{"pid":1}'],
       ]) {
         await mkdir(path.dirname(path.join(dir, file)), { recursive: true })
         await writeFile(path.join(dir, file), text)
