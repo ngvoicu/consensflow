@@ -18,7 +18,10 @@ import { fileURLToPath } from 'node:url'
 
 const WINDOWS = process.platform === 'win32'
 const CRATE = fileURLToPath(new URL('../../app/cf-launcher/', import.meta.url))
-const BUILT = join(CRATE, 'target', 'release', WINDOWS ? 'cf.exe' : 'cf')
+// The workspace's one build folder (.cargo/config.toml) holds every crate's output.
+const BUILT = fileURLToPath(
+  new URL(`../../app/src-tauri/target/release/${WINDOWS ? 'cf.exe' : 'cf'}`, import.meta.url),
+)
 /** Line breaks, quotes, a variable cmd.exe would expand, its operators, diacritics. */
 const TEXT = [
   'Întrebarea 1: verific și versiunea în engleză?',

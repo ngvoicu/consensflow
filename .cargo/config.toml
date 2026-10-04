@@ -1,0 +1,4 @@
+# The workspace builds where the app always did: the integration rig, the
+# release workflows and the portable build read app/src-tauri/target.
+[build]
+target-dir = "app/src-tauri/target"

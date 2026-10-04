@@ -15,7 +15,10 @@ const DATE = '2026-09-09T12:00:00Z'
 function writeRepo(dir, version) {
   mkdirSync(join(dir, 'app', 'src-tauri'), { recursive: true })
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ version }))
-  writeFileSync(join(dir, 'app', 'src-tauri', 'Cargo.toml'), `[package]\nversion = "${version}"\n`)
+  writeFileSync(
+    join(dir, 'Cargo.toml'),
+    `[workspace]\nmembers = ["app/src-tauri"]\n\n[workspace.package]\nversion = "${version}"\n`,
+  )
   writeFileSync(join(dir, 'app', 'src-tauri', 'tauri.conf.json'), JSON.stringify({ version }))
 }
 

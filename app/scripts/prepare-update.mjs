@@ -175,9 +175,10 @@ function bundleInfo(app) {
 
 function sourceVersions(repo) {
   const packageVersion = readJson(join(repo, 'package.json'), 'source package.json').version
-  const cargo = readFileSync(join(repo, 'app', 'src-tauri', 'Cargo.toml'), 'utf8')
-  const cargoVersion = /^version\s*=\s*"([^"]+)"/m.exec(cargo)?.[1]
-  if (cargoVersion === undefined) fail('source Cargo.toml has no package version')
+  // Every crate takes its version from the workspace's root manifest.
+  const cargo = readFileSync(join(repo, 'Cargo.toml'), 'utf8')
+  const cargoVersion = /^\[workspace\.package\][^[]*?^version\s*=\s*"([^"]+)"/m.exec(cargo)?.[1]
+  if (cargoVersion === undefined) fail('source Cargo.toml has no workspace package version')
   const tauriVersion = readJson(join(repo, 'app', 'src-tauri', 'tauri.conf.json'), 'Tauri config').version
   for (const [label, version] of [['package.json', packageVersion], ['Cargo.toml', cargoVersion], ['tauri.conf.json', tauriVersion]]) {
     semver(version, `source ${label} version`)

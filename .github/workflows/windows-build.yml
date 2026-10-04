@@ -33,7 +33,7 @@ jobs:
       - run: rustup update stable --no-self-update && rustup default stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: app/src-tauri
+          workspaces: ". -> app/src-tauri/target"
 
       - run: npm ci
       - run: npm ci --prefix app

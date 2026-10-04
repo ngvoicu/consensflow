@@ -1,9 +1,9 @@
 [package]
 name = "app"
 default-run = "app"
-version = "3.0.0-alpha.72"
-edition = "2021"
-rust-version = "1.95"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [lib]
 name = "app_lib"
@@ -59,3 +59,6 @@ windows-sys = { version = "0.61", features = [
 
 [dev-dependencies]
 tauri = { version = "2.11.3", features = ["test"] }
+
+[lints]
+workspace = true

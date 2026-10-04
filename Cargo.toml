@@ -1,0 +1,22 @@
+# Every Rust crate of ConsensFlow in one workspace: one lockfile, shared
+# versions and lints. The Node code moves here module by module (decided
+# 2026-10-04; the plan is in the consensflow-sme brain).
+[workspace]
+resolver = "2"
+members = ["app/src-tauri"]
+# The Windows `cf` launcher goes when the native `cf` replaces it.
+exclude = ["app/cf-launcher"]
+
+[workspace.package]
+version = "3.0.0-alpha.72"
+edition = "2021"
+rust-version = "1.95"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+await_holding_lock = "deny"
+await_holding_refcell_ref = "deny"
+dbg_macro = "deny"
+todo = "deny"

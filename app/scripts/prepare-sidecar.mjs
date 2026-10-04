@@ -112,7 +112,8 @@ function buildLauncher() {
     ['build', '--release', '--locked', '--manifest-path', join(crate, 'Cargo.toml')],
     { stdio: 'inherit' },
   )
-  cpSync(join(crate, 'target', 'release', 'cf.exe'), join(REPO, 'bin', 'cf.exe'))
+  // The workspace's one build folder (.cargo/config.toml) holds every crate's output.
+  cpSync(join(APP, 'src-tauri', 'target', 'release', 'cf.exe'), join(REPO, 'bin', 'cf.exe'))
 }
 
 function copyCli() {
