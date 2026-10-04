@@ -21,25 +21,40 @@ cf-base = { path = "crates/cf-base" }
 cf-board = { path = "crates/cf-board" }
 cf-harness = { path = "crates/cf-harness" }
 cf-process = { path = "crates/cf-process" }
+cf-codex-session = { path = "crates/cf-codex-session" }
 cf-ledger = { path = "crates/cf-ledger" }
+base64 = "0.22"
+bytes = "1"
+flate2 = "1"
+form_urlencoded = "1"
 futures-channel = "0.3"
 futures-executor = "0.3"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+getrandom = "0.4"
+http-body-util = "0.1"
+# HTTP/1 for the Codex window's broker, routes matched by hand, as the plan decided.
+hyper = { version = "1", default-features = false, features = ["http1", "server"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 libc = "0.2"
 portable-pty = "0.9"
 # The ledger's SQLite, built in: every platform runs the same SQLite.
 rusqlite = { version = "0.40", features = ["bundled"] }
-base64 = "0.22"
-flate2 = "1"
-form_urlencoded = "1"
 serde = { version = "1.0", features = ["derive"] }
-sha2 = "0.10"
-tempfile = "3"
 # Objects keep their keys in the order written, as JavaScript's do: JSON
 # that Node wrote reads back, and goes out again, as Node had it.
 serde_json = { version = "1.0", features = ["preserve_order"] }
+sha2 = "0.10"
+subtle = "2"
+tempfile = "3"
 thiserror = "2"
+# One thread, as Node is: a crate adds the features it needs. Only the Codex
+# window's supervisor and broker run a runtime so far.
+tokio = { version = "1", default-features = false }
+# WebSockets with no TLS: both ends of the broker are on this machine.
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 # Plain HTTP to the daemon on loopback, synchronous: a `cf` run starts no runtime.
 ureq = { version = "3", default-features = false }
+uuid = { version = "1", default-features = false, features = ["v4"] }
 windows-sys = "0.61"
 
 [workspace.lints.rust]

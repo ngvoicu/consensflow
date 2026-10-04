@@ -8,6 +8,12 @@ use cf_base::env::Env;
 fn main() -> ExitCode {
     let env = Env::from_process();
     let args: Vec<_> = std::env::args_os().skip(1).collect();
+    // A Codex window's supervisor reports from any of its threads: it runs
+    // before this thread takes the standard streams' locks, which a panic
+    // on another thread would then wait on for good.
+    if let Some(code) = cf::codex_session(&env, &args) {
+        return exit_code(code);
+    }
     let stdout = io::stdout();
     let mut out = stdout.lock();
     let ran = cf::run(
@@ -28,4 +34,9 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `code` as the process's exit code: Windows exit codes are more than a byte.
+fn exit_code(code: i32) -> ExitCode {
+    u8::try_from(code).map_or_else(|_| std::process::exit(code), ExitCode::from)
 }

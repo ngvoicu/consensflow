@@ -45,9 +45,17 @@ pub fn truthy(value: Option<&Value>) -> bool {
 /// `text` without what `.trim()` took off: Rust's own `trim` keeps U+FEFF,
 /// which JavaScript drops, and drops U+0085, which JavaScript keeps.
 pub fn trim(text: &str) -> &str {
-    text.trim_matches(|character: char| {
-        character == '\u{FEFF}' || (character != '\u{85}' && character.is_whitespace())
-    })
+    text.trim_matches(is_space)
+}
+
+/// `text` without what `.trimStart()` took off.
+pub fn trim_start(text: &str) -> &str {
+    text.trim_start_matches(is_space)
+}
+
+/// Whether JavaScript's `\s` and `.trim()` take `character` for white space.
+fn is_space(character: char) -> bool {
+    character == '\u{FEFF}' || (character != '\u{85}' && character.is_whitespace())
 }
 
 /// `text` as `Number(text)` read it: blank is 0, and what is no number is NaN.
@@ -152,6 +160,13 @@ mod tests {
         assert_eq!(trim(" \t\n\u{A0}\u{3000}x y\u{2028}\r "), "x y");
         assert_eq!(trim("\u{FEFF}x\u{FEFF}"), "x");
         assert_eq!(trim("\u{85}x\u{85}"), "\u{85}x\u{85}");
+    }
+
+    #[test]
+    fn trims_the_start_alone_as_javascript_does() {
+        assert_eq!(trim_start(" \t\n\u{A0}\u{FEFF}x y \n"), "x y \n");
+        assert_eq!(trim_start("\u{85}x"), "\u{85}x");
+        assert_eq!(trim_start(" \n"), "");
     }
 
     #[test]

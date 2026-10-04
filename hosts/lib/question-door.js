@@ -1,11 +1,12 @@
 /**
- * The door a member's harness question tool opens onto the board. The
- * window's plugin, hook or broker posts the questions as its participant,
- * waits for the chief to answer on the board, and hands the answer back
- * into the tool call, so nothing is typed into the window. When
- * the answer does not come in time, the door gives up and the harness's own
- * dialog takes over; when the window answered first, the board's copy of the
- * question gets that answer, so nobody answers it twice.
+ * The door a member's harness question tool opens onto the board, for
+ * OpenCode's plugin, which loads it into OpenCode's own runtime (the native
+ * cf has its own, in crates/cf-board). The plugin posts the questions as its
+ * window's participant, waits for the chief to answer on the board, and
+ * hands the answer back into the tool call, so nothing is typed into the
+ * window. When the answer does not come in time, the door gives up and the
+ * harness's own dialog takes over; when the window answered first, the
+ * board's copy of the question gets that answer, so nobody answers it twice.
  */
 
 /** How long a door waits for the board before the harness's own dialog takes over. */
@@ -50,9 +51,9 @@ export const refusalReason = (cause) =>
  * the answer null when the wait ran out or `signal` ended it. `questions` are
  * in the board's shape: question, header, options (label, description), multiple.
  */
-export async function askTheBoard(client, questions, { waitMs = DOOR_WAIT_MS, signal } = {}) {
+export async function askTheBoard(client, questions, { signal } = {}) {
   const { message } = await client('POST', '/api/questions', { questions })
-  const until = Date.now() + waitMs
+  const until = Date.now() + DOOR_WAIT_MS
   let answer = null
   while (answer === null && Date.now() < until && !signal?.aborted) {
     const wait = Math.min(POLL_WAIT_MS, until - Date.now())

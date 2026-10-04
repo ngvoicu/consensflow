@@ -14,7 +14,7 @@ use cf_base::js;
 use cf_base::json::from_slice_lossy;
 use cf_board::door::{ask_the_board, refusal_reason};
 use cf_board::Board;
-use cf_proto::questions::{Choice, Question};
+use cf_proto::questions::Question;
 use serde_json::{Map, Value};
 
 /// How one harness's question tool is named, and how its hook answers.
@@ -73,28 +73,10 @@ pub(crate) fn answer<T: QuestionTool>(
 /// One of the tool's questions in the board's shape; none for a question
 /// the hook's JavaScript could not read (it threw, and so said nothing).
 fn board_question(question: &Value) -> Option<Question> {
-    if question.is_null() {
-        return None;
-    }
-    let options = match question.get("options") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(options)) => options
-            .iter()
-            .map(|option| {
-                (!option.is_null()).then(|| Choice {
-                    label: option.get("label").cloned(),
-                    description: option.get("description").cloned(),
-                })
-            })
-            .collect::<Option<Vec<_>>>()?,
-        Some(_) => return None,
-    };
-    Some(Question {
-        question: question.get("question").cloned(),
-        header: question.get("header").cloned(),
-        options,
-        multiple: question.get("multiSelect") == Some(&Value::Bool(true)),
-    })
+    Question::read(
+        question,
+        question.get("multiSelect") == Some(&Value::Bool(true)),
+    )
 }
 
 #[cfg(test)]

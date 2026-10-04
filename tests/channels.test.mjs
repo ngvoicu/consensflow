@@ -3,7 +3,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { it } from 'node:test'
-import { launchConfiguration } from '../src/channels.js'
+import { fileURLToPath } from 'node:url'
+import { launchConfiguration, withNativeBridge } from '../src/channels.js'
 import { fakeNodeExecutable } from './helpers.mjs'
 
 /** A stand-in `codex` that says its version, has the native queue or not, and counts its runs. */
@@ -66,4 +67,29 @@ it('refuses to open a Codex without the native queue, naming its version', async
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+it('launches the bundled supervisor with the Codex invocation it supervises', () => {
+  const A = '01a09094-938f-7fd1-a2d3-315cf92b4559'
+  const TOKEN = 'private-launch-token-1234567890'
+  const invocation = {
+    command: '/native/codex',
+    args: ['resume', A],
+    env: { EXISTING: 'preserved' },
+    dropEnv: ['OPENAI_API_KEY'],
+  }
+  const configured = {
+    channel: {
+      kind: 'codex-queue',
+      executable: '/native/codex',
+      sessionBridge: { endpoint: 'http://127.0.0.1:1234', token: TOKEN },
+    },
+  }
+  const wrapped = withNativeBridge(invocation, configured)
+  // The bundle's native cf, spelled as this platform spells a program it starts.
+  const cf = `../bin/${process.platform === 'win32' ? 'cf.exe' : 'cf'}`
+  assert.equal(wrapped.command, fileURLToPath(new URL(cf, import.meta.url)))
+  assert.deepEqual(wrapped.args, ['codex-session', '/native/codex', 'resume', A])
+  assert.deepEqual(wrapped.env, invocation.env)
+  assert.deepEqual(wrapped.dropEnv, invocation.dropEnv)
 })

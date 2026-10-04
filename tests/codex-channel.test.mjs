@@ -6,9 +6,9 @@ import { send, sessionState } from '../src/channels/codex.js'
 const SESSION = '01a0817b-e6b0-7f32-8e11-370dc000cbc0'
 
 /**
- * A stand-in for the supervisor's broker (`hosts/codex-session.mjs`), the
- * only way into a Codex window: it shows one thread and admits a message for
- * that thread alone.
+ * A stand-in for the supervisor's broker (`cf codex-session`), the only way
+ * into a Codex window: it shows one thread and admits a message for that
+ * thread alone.
  */
 async function broker(t) {
   let selected = SESSION
