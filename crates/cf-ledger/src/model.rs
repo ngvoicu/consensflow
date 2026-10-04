@@ -13,6 +13,8 @@ use cf_base::refusal::Refusal;
 use cf_base::text::{utf16_len, utf16_prefix};
 use serde_json::Value;
 
+use crate::views::ParticipantRow;
+
 pub const HARNESSES: [&str; 5] = ["claude-code", "codex", "opencode", "pi", "devin"];
 pub const MEMBER_ROLES: [&str; 4] = ["worker", "advisor", "reviewer", "designer"];
 /// Who hands out work and hears when the staff changes: the human and the chief.
@@ -66,6 +68,27 @@ impl LedgerError {
             _ => None,
         }
     }
+}
+
+/// Words as SQL lists them: `'queued', 'working', 'waiting'`.
+pub(crate) fn sql_list(words: &[&str]) -> String {
+    words
+        .iter()
+        .map(|word| format!("'{word}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// A participant that is still in the project; a member who left is refused.
+pub(crate) fn require_active(row: ParticipantRow) -> Result<ParticipantRow, LedgerError> {
+    if row.left_at.is_some() {
+        return Err(LedgerError::refused_with(
+            "member-left",
+            format!("@{} left the staff", row.handle),
+            409,
+        ));
+    }
+    Ok(row)
 }
 
 /// `value` as `JSON.stringify` printed it in a refusal: "undefined" for a value not given.

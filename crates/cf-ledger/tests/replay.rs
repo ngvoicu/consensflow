@@ -17,15 +17,18 @@ use std::rc::Rc;
 use base64::Engine;
 use cf_base::js;
 use cf_base::time::{parse, Clock};
-use cf_ledger::model::parse_gate;
-use cf_ledger::{open_ledger, Event, Ledger, LedgerError, NewProject, Options};
+use cf_ledger::model::{parse_gate, parse_roles};
+use cf_ledger::{
+    open_ledger, ChiefSwitch, Event, Ledger, LedgerError, NewMember, NewProject, Options,
+};
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use serde_json::{json, Value};
 
 /// What a replay found.
 enum Outcome {
-    Replayed,
+    /// Every call answered as Node's did: the methods called, one per call.
+    Replayed(Vec<String>),
     /// Calls something this crate does not do yet.
     Skipped(String),
     Failed(String),
@@ -62,6 +65,7 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
     names.sort();
     assert!(!names.is_empty(), "no traces: npm run goldens:ledger");
     let (mut replayed, mut skipped, mut failed) = (0, BTreeMap::<String, usize>::new(), Vec::new());
+    let mut calls = BTreeMap::<String, usize>::new();
     for name in &names {
         let mut text = String::new();
         flate2::read::GzDecoder::new(std::fs::File::open(name).unwrap())
@@ -69,7 +73,12 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
             .unwrap();
         let trace = name.file_name().unwrap().to_string_lossy().to_string();
         match replay(&text) {
-            Outcome::Replayed => replayed += 1,
+            Outcome::Replayed(methods) => {
+                replayed += 1;
+                for method in methods {
+                    *calls.entry(method).or_default() += 1;
+                }
+            }
             Outcome::Skipped(why) => *skipped.entry(why).or_default() += 1,
             Outcome::Failed(why) => failed.push(format!("{trace}: {why}")),
         }
@@ -83,6 +92,11 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
     for (why, count) in &skipped {
         println!("  skipped {count}: {why}");
     }
+    let replayed_calls: Vec<String> = calls
+        .iter()
+        .map(|(method, count)| format!("{method} {count}"))
+        .collect();
+    println!("calls replayed: {}", replayed_calls.join(", "));
     assert!(
         failed.is_empty(),
         "{} traces answered otherwise:\n{}",
@@ -127,7 +141,7 @@ fn replay(text: &str) -> Outcome {
                 &failure(&error),
                 &json!({ "$error": expected }),
             )
-            .map_or(Outcome::Replayed, Outcome::Failed);
+            .map_or(Outcome::Replayed(Vec::new()), Outcome::Failed);
         }
         (Ok(_), Some(expected)) => {
             return Outcome::Failed(format!("opened, where Node was refused: {expected}"))
@@ -153,15 +167,12 @@ fn replay(text: &str) -> Outcome {
                 .close()
                 .map_or_else(|error| failure(&error), |()| undefined()),
             (_, Some(mut open)) => {
-                let args: Vec<Option<Value>> = call["args"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(revive)
-                    .collect();
-                let answered = answer(&mut open, method, &args);
+                let answered = answer(&mut open, call);
                 ledger = Some(open);
-                answered
+                match answered {
+                    Ok(answered) => answered,
+                    Err(why) => return Outcome::Failed(format!("call {at} ({method}): {why}")),
+                }
             }
         };
         let left = readings.borrow_mut().drain(..).count();
@@ -199,13 +210,18 @@ fn replay(text: &str) -> Outcome {
             }
         }
     }
-    Outcome::Replayed
+    Outcome::Replayed(
+        calls
+            .iter()
+            .map(|call| call["method"].as_str().unwrap_or_default().to_string())
+            .collect(),
+    )
 }
 
 /// What this crate does not do yet, in one call; none when it does all of it.
 fn unsupported(call: &Value) -> Option<String> {
     let method = call["method"].as_str().unwrap_or_default();
-    const DONE: [&str; 11] = [
+    const DONE: &[&str] = &[
         "createProject",
         "project",
         "projects",
@@ -217,9 +233,39 @@ fn unsupported(call: &Value) -> Option<String> {
         "events",
         "integrity",
         "close",
+        "addMember",
+        "refreshMemberTiers",
+        "setRoles",
+        "removeMember",
+        "lastStaff",
+        "holdsWork",
+        "candidates",
+        "members",
+        "endSession",
+        "markOut",
+        "markBack",
+        "startConversation",
+        "bindConversation",
+        "copyTranscript",
+        "transcript",
+        "chiefHistory",
+        "chiefOpenWork",
+        "switchChief",
+        "historyRead",
+        "lastSwitch",
+        "endConversation",
+        "currentConversation",
+        "copiedItemWith",
+        "followConversation",
+        "message",
     ];
     if !DONE.contains(&method) {
         return Some(format!("calls {method}"));
+    }
+    // A probe of what only JavaScript could be handed, which the Rust
+    // signature rules out.
+    if method == "copyTranscript" && !call["args"][1].is_array() {
+        return Some("hands copyTranscript items that are no list".into());
     }
     if call["names"]
         .as_array()
@@ -231,7 +277,8 @@ fn unsupported(call: &Value) -> Option<String> {
 }
 
 /// A value a call passed, as the recorder wrote it: `undefined` is no value,
-/// so an argument holding it is missing and an object leaves its key out.
+/// so an argument holding it is missing, an object leaves its key out, and
+/// a list holds null in its place, as `JSON.stringify` writes it.
 fn revive(value: &Value) -> Option<Value> {
     match value {
         Value::Object(fields) if fields.contains_key("$undefined") => None,
@@ -241,40 +288,157 @@ fn revive(value: &Value) -> Option<Value> {
                 .filter_map(|(key, item)| Some((key.clone(), revive(item)?)))
                 .collect(),
         )),
+        Value::Array(items) => Some(Value::Array(
+            items
+                .iter()
+                .map(|item| revive(item).unwrap_or(Value::Null))
+                .collect(),
+        )),
         other => Some(other.clone()),
     }
 }
 
-/// One call made here, and its answer as the recorder wrote Node's.
-fn answer(ledger: &mut Ledger, method: &str, args: &[Option<Value>]) -> Value {
-    let arg = |at: usize| args.get(at).and_then(Option::as_ref);
-    let id = || arg(0).and_then(Value::as_i64).expect("an id");
+/// Argument `at`, when the call passed one.
+fn arg(args: &[Option<Value>], at: usize) -> Option<&Value> {
+    args.get(at).and_then(Option::as_ref)
+}
+
+/// Field `name` of argument `at`, an object.
+fn field<'a>(args: &'a [Option<Value>], at: usize, name: &str) -> Option<&'a Value> {
+    arg(args, at).and_then(|value| value.get(name))
+}
+
+fn text(value: Option<&Value>) -> &str {
+    value.and_then(Value::as_str).expect("text")
+}
+
+fn integer(value: Option<&Value>) -> i64 {
+    value.and_then(Value::as_i64).expect("an integer")
+}
+
+/// One call made here, and its answer as the recorder wrote Node's; why
+/// not, when it asked its function argument otherwise than Node's call did.
+fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
+    let method = call["method"].as_str().unwrap_or_default();
+    let args: Vec<Option<Value>> = call["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(revive)
+        .collect();
+    let args = args.as_slice();
+    let id = || integer(arg(args, 0));
     let answered: Result<Value, LedgerError> = match method {
-        "createProject" => NewProject::from_json(arg(0).expect("a request"))
+        "createProject" => NewProject::from_json(arg(args, 0).expect("a request"))
             .and_then(|request| encode(ledger.create_project(&request))),
         "project" => encode(ledger.project(id())),
         "projects" => encode(ledger.projects()),
-        "setProjectState" => encode(ledger.set_project_state(id(), &js::text(arg(1)))),
+        "setProjectState" => encode(ledger.set_project_state(id(), &js::text(arg(args, 1)))),
         "deleteProject" => encode(ledger.delete_project(id())),
-        "setGate" => parse_gate(arg(1)).and_then(|gate| encode(ledger.set_gate(id(), gate))),
+        "setGate" => parse_gate(arg(args, 1)).and_then(|gate| encode(ledger.set_gate(id(), gate))),
         "suspendForRestart" => encode(ledger.suspend_for_restart()),
         "forgetResume" => ledger.forget_resume(id()).map(|()| undefined()),
         "events" => {
-            let options = arg(1);
-            let after = options
-                .and_then(|o| o.get("after"))
-                .and_then(Value::as_i64)
-                .unwrap_or(0);
-            let limit = options
-                .and_then(|o| o.get("limit"))
-                .and_then(Value::as_i64)
-                .unwrap_or(500);
-            encode(ledger.events(id(), after, limit))
+            let after = field(args, 1, "after").and_then(Value::as_i64);
+            let limit = field(args, 1, "limit").and_then(Value::as_i64);
+            encode(ledger.events(id(), after.unwrap_or(0), limit.unwrap_or(500)))
         }
         "integrity" => encode(ledger.integrity()),
+        "addMember" => NewMember::from_json(arg(args, 1).expect("a member"))
+            .and_then(|member| encode(ledger.add_member(id(), &member))),
+        "refreshMemberTiers" => return tiers(ledger, &call["callbacks"]),
+        "setRoles" => parse_roles(arg(args, 2))
+            .and_then(|roles| encode(ledger.set_roles(id(), text(arg(args, 1)), &roles))),
+        "removeMember" => encode(ledger.remove_member(id(), text(arg(args, 1)))),
+        "lastStaff" => encode(ledger.last_staff()),
+        "holdsWork" => encode(ledger.holds_work(id())),
+        "candidates" => encode(ledger.candidates(id(), integer(arg(args, 1)))),
+        "members" => encode(ledger.members(id(), text(arg(args, 1)))),
+        "endSession" => {
+            encode(ledger.end_session(id(), text(arg(args, 1)), text(field(args, 2, "by"))))
+        }
+        "markOut" => encode(ledger.mark_out(
+            id(),
+            text(field(args, 1, "until")),
+            text(field(args, 1, "reason")),
+        )),
+        "markBack" => encode(ledger.mark_back(id(), text(field(args, 1, "because")))),
+        "startConversation" => {
+            encode(ledger.start_conversation(id(), text(field(args, 1, "harness"))))
+        }
+        "bindConversation" => encode(ledger.bind_conversation(id(), text(arg(args, 1)))),
+        "copyTranscript" => {
+            let items = arg(args, 1).and_then(Value::as_array).expect("a list");
+            let from = field(args, 2, "from").and_then(Value::as_i64);
+            encode(ledger.copy_transcript(id(), items, from.unwrap_or(0)))
+        }
+        "transcript" => {
+            let limit = field(args, 2, "limit").and_then(Value::as_u64);
+            encode(ledger.transcript(
+                id(),
+                integer(arg(args, 1)),
+                limit.map(|limit| usize::try_from(limit).unwrap()),
+            ))
+        }
+        "chiefHistory" => encode(ledger.chief_history(id())),
+        "chiefOpenWork" => encode(ledger.chief_open_work(id())),
+        "switchChief" => ChiefSwitch::from_json(arg(args, 1).expect("a switch"))
+            .and_then(|switch| encode(ledger.switch_chief(id(), &switch))),
+        "historyRead" => ledger
+            .history_read(
+                id(),
+                integer(field(args, 1, "page")),
+                field(args, 1, "find").and_then(Value::as_str),
+                field(args, 1, "tools")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            )
+            .map(|()| undefined()),
+        "lastSwitch" => encode(ledger.last_switch(id())),
+        "endConversation" => encode(ledger.end_conversation(id())),
+        "currentConversation" => encode(ledger.current_conversation(id())),
+        "copiedItemWith" => encode(ledger.copied_item_with(id(), text(arg(args, 1)))),
+        "followConversation" => encode(ledger.follow_conversation(
+            id(),
+            text(field(args, 1, "harness")),
+            text(field(args, 1, "nativeSession")),
+        )),
+        "message" => encode(ledger.message(id())),
         other => unreachable!("{other} is checked before the replay"),
     };
-    answered.unwrap_or_else(|error| failure(&error))
+    Ok(answered.unwrap_or_else(|error| failure(&error)))
+}
+
+/// `refreshMemberTiers`, its `tierOf` answered as Node's was: the same
+/// agents asked in the same order, each answered what Node's answered.
+fn tiers(ledger: &mut Ledger, callbacks: &Value) -> Result<Value, String> {
+    let mut recorded = callbacks
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter();
+    let mut wrong = None;
+    let answered = ledger.refresh_member_tiers(|agent| {
+        let asked = json!([agent]);
+        match recorded.next() {
+            Some(entry) if entry["args"] == asked => entry["result"].as_str().map(str::to_string),
+            Some(entry) => {
+                wrong.get_or_insert(format!("asked tierOf {asked}, Node {}", entry["args"]));
+                None
+            }
+            None => {
+                wrong.get_or_insert(format!("asked tierOf {asked} past Node's last"));
+                None
+            }
+        }
+    });
+    if let Some(why) = wrong {
+        return Err(why);
+    }
+    if let Some(entry) = recorded.next() {
+        return Err(format!("never asked tierOf {}, as Node did", entry["args"]));
+    }
+    Ok(encode(answered).unwrap_or_else(|error| failure(&error)))
 }
 
 fn encode<T: Serialize>(answered: Result<T, LedgerError>) -> Result<Value, LedgerError> {

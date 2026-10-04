@@ -144,7 +144,7 @@ impl NewMember {
     }
 
     /// Checks the member as the Node ledger did: its roles, normalized.
-    fn check(&self) -> Result<Vec<&'static str>, LedgerError> {
+    pub(crate) fn check(&self) -> Result<Vec<&'static str>, LedgerError> {
         let roles = model::require_roles(&self.roles, || model::printed(Some(&json!(self.roles))))?;
         model::require_agent_id(&self.agent, &COORDINATOR_HANDLES)?;
         model::require_harness(&self.harness)?;
@@ -257,7 +257,7 @@ pub(crate) fn project(store: &Store, id: i64) -> Result<Option<ProjectView>, Led
 }
 
 /// A project the operation has just found or made.
-fn known_project(store: &Store, id: i64) -> Result<ProjectView, LedgerError> {
+pub(crate) fn known_project(store: &Store, id: i64) -> Result<ProjectView, LedgerError> {
     project(store, id)?.ok_or_else(|| {
         LedgerError::refused_with("unknown-project", format!("no project {id}"), 404)
     })

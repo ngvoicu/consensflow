@@ -15,10 +15,12 @@
 
 #![forbid(unsafe_code)]
 
+mod conversations;
 /// The ledger's vocabulary: the words its records hold, their limits, and
 /// the parsers a caller reading JSON (the API, the page) checks a request with.
 pub mod model;
 mod projects;
+mod queue;
 mod schema;
 mod staff;
 mod store;
@@ -31,7 +33,12 @@ use cf_base::time::{Clock, SystemClock};
 use rusqlite::{Connection, ErrorCode};
 use serde_json::Value;
 
-pub use cf_proto::ledger::{DeletedProject, EventView, ParticipantView, ProjectView};
+pub use cf_proto::ledger::{
+    Candidate, ChiefConversation, ChiefOpenWork, ConversationView, DeletedProject, EventView,
+    LastSwitch, MemberView, MessageView, ParticipantView, ProjectView, RemovedMember, StaffMember,
+    TaskTranscript, TierChange,
+};
+pub use conversations::{ChiefSwitch, TRANSCRIPT_ITEM_MAX};
 pub use model::LedgerError;
 pub use projects::{NewChief, NewMember, NewProject};
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
@@ -159,6 +166,207 @@ impl Ledger {
     /// A project's resume on start has been tried: the mark goes.
     pub fn forget_resume(&mut self, id: i64) -> Result<(), LedgerError> {
         projects::forget_resume(&mut self.store, id)
+    }
+
+    /// A member joins the staff, or rejoins it in the roles, harness,
+    /// designer flag and tier given now.
+    pub fn add_member(
+        &mut self,
+        project_id: i64,
+        member: &NewMember,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::add_member(&mut self.store, project_id, member)
+    }
+
+    /// Each active member's tier becomes its saved agent's now (`tier_of`
+    /// answers it, or none for an agent the roster no longer has): the members that changed.
+    pub fn refresh_member_tiers(
+        &mut self,
+        tier_of: impl FnMut(&str) -> Option<String>,
+    ) -> Result<Vec<TierChange>, LedgerError> {
+        staff::refresh_member_tiers(&mut self.store, tier_of)
+    }
+
+    /// A member's roles change in place; a role it gains must fit its agent.
+    pub fn set_roles<S: AsRef<str>>(
+        &mut self,
+        project_id: i64,
+        handle: &str,
+        roles: &[S],
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::set_roles(&mut self.store, project_id, handle, roles)
+    }
+
+    /// A member leaves the staff, its open tasks cancelled.
+    pub fn remove_member(
+        &mut self,
+        project_id: i64,
+        handle: &str,
+    ) -> Result<RemovedMember, LedgerError> {
+        staff::remove_member(&mut self.store, project_id, handle)
+    }
+
+    /// The members of the newest project that has any: the staff a new project starts from.
+    pub fn last_staff(&self) -> Result<Vec<StaffMember>, LedgerError> {
+        staff::last_staff(&self.store)
+    }
+
+    /// Whether a participant has a task on its hands, paused work included.
+    pub fn holds_work(&self, participant_id: i64) -> Result<bool, LedgerError> {
+        staff::holds_work(&self.store, participant_id)
+    }
+
+    /// The active members an open task may go to, with what the daemon ranks them by.
+    pub fn candidates(&self, project_id: i64, number: i64) -> Result<Vec<Candidate>, LedgerError> {
+        staff::candidates(&self.store, project_id, number)
+    }
+
+    /// The active members of one role, in join order.
+    pub fn members(&self, project_id: i64, role: &str) -> Result<Vec<MemberView>, LedgerError> {
+        staff::members(&self.store, project_id, Some(role))
+    }
+
+    /// The human ends a session that holds no work, `by` saying who did.
+    pub fn end_session(
+        &mut self,
+        project_id: i64,
+        handle: &str,
+        by: &str,
+    ) -> Result<ProjectView, LedgerError> {
+        staff::end_session(&mut self.store, project_id, handle, by)
+    }
+
+    /// A member out of quota takes no work until `until`, an ISO time.
+    pub fn mark_out(
+        &mut self,
+        participant_id: i64,
+        until: &str,
+        reason: &str,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::mark_out(&mut self.store, participant_id, until, reason)
+    }
+
+    /// A member out of quota is back before its reset; the tasks held for it go on.
+    pub fn mark_back(
+        &mut self,
+        participant_id: i64,
+        because: &str,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::mark_back(&mut self.store, participant_id, because)
+    }
+
+    /// A participant's new native conversation; the one before it ends.
+    pub fn start_conversation(
+        &mut self,
+        participant_id: i64,
+        harness: &str,
+    ) -> Result<ConversationView, LedgerError> {
+        conversations::start_conversation(&mut self.store, participant_id, harness)
+    }
+
+    /// The harness's own session a conversation runs in.
+    pub fn bind_conversation(
+        &mut self,
+        conversation_id: i64,
+        native_session: &str,
+    ) -> Result<ConversationView, LedgerError> {
+        conversations::bind_conversation(&mut self.store, conversation_id, native_session)
+    }
+
+    /// Copies a window's items as its harness recorded them, the first at
+    /// position `from`: how many rows changed.
+    pub fn copy_transcript(
+        &mut self,
+        conversation_id: i64,
+        items: &[Value],
+        from: i64,
+    ) -> Result<usize, LedgerError> {
+        conversations::copy_transcript(&mut self.store, conversation_id, items, from)
+    }
+
+    /// What the windows that had a task wrote, the last `limit` items (all with none).
+    pub fn transcript(
+        &self,
+        project_id: i64,
+        number: i64,
+        limit: Option<usize>,
+    ) -> Result<TaskTranscript, LedgerError> {
+        conversations::transcript(&self.store, project_id, number, limit)
+    }
+
+    /// The chief's earlier conversations, oldest first, with their items.
+    pub fn chief_history(&self, project_id: i64) -> Result<Vec<ChiefConversation>, LedgerError> {
+        conversations::chief_history(&self.store, project_id)
+    }
+
+    /// What waits on the chief now, for a chief that takes over.
+    pub fn chief_open_work(&self, project_id: i64) -> Result<ChiefOpenWork, LedgerError> {
+        conversations::chief_open_work(&self.store, project_id)
+    }
+
+    /// The human's Switch chief.
+    pub fn switch_chief(
+        &mut self,
+        project_id: i64,
+        switch: &ChiefSwitch,
+    ) -> Result<ProjectView, LedgerError> {
+        conversations::switch_chief(&mut self.store, project_id, switch)
+    }
+
+    /// The chief read its history: which page, or what it searched for.
+    pub fn history_read(
+        &mut self,
+        project_id: i64,
+        page: i64,
+        find: Option<&str>,
+        tools: bool,
+    ) -> Result<(), LedgerError> {
+        conversations::history_read(&mut self.store, project_id, page, find, tools)
+    }
+
+    /// The project's latest Switch chief; none before any.
+    pub fn last_switch(&self, project_id: i64) -> Result<Option<LastSwitch>, LedgerError> {
+        conversations::last_switch(&self.store, project_id)
+    }
+
+    /// A conversation ends; one that has ended already, or none, stays as it is.
+    pub fn end_conversation(
+        &mut self,
+        conversation_id: i64,
+    ) -> Result<Option<ConversationView>, LedgerError> {
+        conversations::end_conversation(&mut self.store, conversation_id)
+    }
+
+    /// A participant's conversation now, if one has not ended.
+    pub fn current_conversation(
+        &self,
+        participant_id: i64,
+    ) -> Result<Option<ConversationView>, LedgerError> {
+        conversations::current_conversation(&self.store, participant_id)
+    }
+
+    /// The first item of the participant's current conversation it was given that contains `text`.
+    pub fn copied_item_with(
+        &self,
+        participant_id: i64,
+        text: &str,
+    ) -> Result<Option<String>, LedgerError> {
+        conversations::copied_item_with(&self.store, participant_id, text)
+    }
+
+    /// A window the human switched to another conversation: the participant's is that one now.
+    pub fn follow_conversation(
+        &mut self,
+        participant_id: i64,
+        harness: &str,
+        native_session: &str,
+    ) -> Result<ConversationView, LedgerError> {
+        conversations::follow_conversation(&mut self.store, participant_id, harness, native_session)
+    }
+
+    /// One message, or none.
+    pub fn message(&self, id: i64) -> Result<Option<MessageView>, LedgerError> {
+        self.store.message(id)
     }
 
     /// A project's events after the one numbered `after`, oldest first, at most `limit` (Node's defaults: 0 and 500).

@@ -1,17 +1,19 @@
 //! The connection every operation runs on, and what every concern shares:
-//! one transaction around an operation, the clock, the event log, and the
-//! rows looked up by id or handle (`src/ledger/store.js`). The ledger holds
-//! it privately; nothing outside the crate reaches the connection.
+//! one transaction around an operation, the clock, the event log, the rows
+//! looked up by id or handle, and the one way a task changes state
+//! (`src/ledger/store.js`). The ledger holds it privately; nothing outside
+//! the crate reaches the connection.
 
 use std::panic::{self, AssertUnwindSafe};
 
 use cf_base::time::{iso, Clock};
-use rusqlite::{Connection, OptionalExtension};
-use serde_json::Value;
+use cf_proto::ledger::MessageView;
+use rusqlite::{params, Connection, OptionalExtension};
+use serde_json::{json, Value};
 
-use crate::model::LedgerError;
+use crate::model::{quoted, require_active, LedgerError};
 use crate::projects::ProjectRow;
-use crate::views::{ParticipantRow, PARTICIPANT_SELECT};
+use crate::views::{message_view, ParticipantRow, TaskRow, MESSAGE_SELECT, PARTICIPANT_SELECT};
 use crate::Event;
 
 pub(crate) struct Store {
@@ -91,6 +93,82 @@ impl Store {
                     404,
                 )
             })
+    }
+
+    /// A participant still in the project, by its handle; one that left is refused.
+    pub(crate) fn participant_by_handle(
+        &self,
+        project_id: i64,
+        handle: &str,
+    ) -> Result<ParticipantRow, LedgerError> {
+        self.project_row(project_id)?;
+        let row = self
+            .db
+            .query_row(
+                &format!("{PARTICIPANT_SELECT} WHERE p.project_id = ? AND p.handle = ?"),
+                params![project_id, handle],
+                ParticipantRow::read,
+            )
+            .optional()?
+            .ok_or_else(|| {
+                LedgerError::refused_with(
+                    "unknown-participant",
+                    format!("{} is not in project {project_id}", quoted(handle)),
+                    404,
+                )
+            })?;
+        require_active(row)
+    }
+
+    /// A task of the project by its number, or a refusal naming it.
+    pub(crate) fn task_row(&self, project_id: i64, number: i64) -> Result<TaskRow, LedgerError> {
+        self.db
+            .query_row(
+                "SELECT * FROM task WHERE project_id = ? AND number = ?",
+                params![project_id, number],
+                TaskRow::read,
+            )
+            .optional()?
+            .ok_or_else(|| {
+                LedgerError::refused_with(
+                    "unknown-task",
+                    format!("no task T-{number} in project {project_id}"),
+                    404,
+                )
+            })
+    }
+
+    /// One message, or none.
+    pub(crate) fn message(&self, id: i64) -> Result<Option<MessageView>, LedgerError> {
+        Ok(self
+            .db
+            .query_row(
+                &format!("{MESSAGE_SELECT} WHERE m.id = ?"),
+                [id],
+                message_view,
+            )
+            .optional()?)
+    }
+
+    /// A task moves to another state, and the log says so, `detail` after
+    /// the move. A member leaving, a delivery and a decision all move tasks,
+    /// so the move lives here, under every concern that makes one.
+    pub(crate) fn move_task(
+        &mut self,
+        task: &TaskRow,
+        to: &str,
+        detail: Value,
+    ) -> Result<(), LedgerError> {
+        let at = self.at();
+        self.db.execute(
+            "UPDATE task SET state = ?, updated_at = ?, held_until = NULL WHERE id = ?",
+            params![to, at, task.id],
+        )?;
+        let mut data = json!({ "task": task.number, "from": task.state, "to": to });
+        if let (Value::Object(data), Value::Object(detail)) = (&mut data, detail) {
+            data.extend(detail);
+        }
+        self.log(task.project_id, "task.state", data)
     }
 
     /// Logs an event of the project, and tells the trace.
