@@ -4,18 +4,41 @@
 //! nothing is typed into the window. When the answer does not come in time,
 //! the door gives up and the harness's own dialog takes over.
 //!
-//! The Codex window's broker (`cf codex-session`) puts its questions through
-//! [`ask_the_board_until`], where a closed window ends the wait. OpenCode's
-//! extension keeps its own copy, `hosts/lib/question-door.js`: the harness
-//! loads it into its own runtime.
+//! The question hooks of `cf hook` and the Codex window's broker (`cf
+//! codex-session`) ask through [`ask`], where a closed window ends the wait.
+//! OpenCode's extension keeps its own copy, `hosts/lib/question-door.js`:
+//! the harness loads it into its own runtime.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use cf_proto::questions::{Answer, Question};
+use cf_base::env::Env;
+use cf_proto::questions::{Answer, Question, Reply};
 use serde_json::{json, Value};
 
-use crate::{Board, BoardError, Method};
+use crate::{Board, BoardError};
+
+/// The board a window's questions go to: the daemon at `CONSENSFLOW_URL`,
+/// as the participant `CONSENSFLOW_TOKEN` names. None outside a window, which
+/// has no URL or no token. A token that is set but empty is a token still, as
+/// the door has always taken one: the board refuses it, and the question is
+/// answered with the reason, not left to a dialog nobody watches. (`cf`'s
+/// commands take a token only when it says something: `Board::from_env`.)
+pub fn board_of(env: &Env) -> Option<Board> {
+    let url = env.text("CONSENSFLOW_URL")?;
+    let token = env.os("CONSENSFLOW_TOKEN")?;
+    Some(Board::new(Some(url), &token.to_string_lossy()))
+}
+
+/// Puts `questions` on the board and waits up to `wait` for the chief's
+/// answer, or until `stop` is raised: what came of it.
+pub fn ask(board: &Board, questions: &[Question], wait: Duration, stop: &AtomicBool) -> Reply {
+    match ask_the_board_until(board, questions, wait, stop) {
+        Ok(Some(answer)) => Reply::Answered(answer),
+        Err(cause) if cause.is_refusal() => Reply::Refused(refusal_reason(&cause)),
+        Ok(None) | Err(_) => Reply::Unanswered,
+    }
+}
 
 /// How long a door waits for the board before the harness's own dialog takes over.
 pub const DOOR_WAIT: Duration = Duration::from_millis(3_500_000);
@@ -25,27 +48,19 @@ const POLL_WAIT: Duration = Duration::from_secs(20);
 /// What a member's window tells its model when the board refuses its
 /// question: nobody watches a member's window, so its own dialog would hold
 /// the task for good.
-pub fn refusal_reason(cause: &BoardError) -> String {
+fn refusal_reason(cause: &BoardError) -> String {
     format!(
         "ConsensFlow could not put this question to the chief ({cause}). Ask with cf ask \"…\" instead."
     )
 }
 
-/// Puts `questions` on the board and waits up to `wait` for their answer:
-/// `None` when the wait ran out first. A wait too long to reach never runs out.
-pub fn ask_the_board(
-    board: &Board,
-    questions: &[Question],
-    wait: Duration,
-) -> Result<Option<Answer>, BoardError> {
-    ask_the_board_until(board, questions, wait, &AtomicBool::new(false))
-}
-
-/// [`ask_the_board`] that gives up, with no answer, once `stop` is raised:
-/// checked before each request, so a poll already held at the board ends first
-/// (up to 20 seconds). A window whose question nobody waits for any more
-/// (its broker closed, its connection gone) raises it.
-pub fn ask_the_board_until(
+/// Puts `questions` on the board and waits up to `wait` for their answer
+/// (`None` when the wait ran out first; a wait too long to reach never runs
+/// out), or until `stop` is raised: checked before each request, so a poll
+/// already held at the board ends first (up to 20 seconds). A window whose
+/// question nobody waits for any more (its broker closed, its connection
+/// gone) raises it.
+fn ask_the_board_until(
     board: &Board,
     questions: &[Question],
     wait: Duration,
@@ -54,15 +69,12 @@ pub fn ask_the_board_until(
     if stop.load(Ordering::Relaxed) {
         return Ok(None);
     }
-    let path = "/api/questions";
-    let posted = board.call(Method::Post, path, Some(&json!({ "questions": questions })))?;
+    let posted = board.post("/api/questions", &json!({ "questions": questions }))?;
     let id = posted
+        .value()
         .pointer("/message/id")
         .and_then(Value::as_u64)
-        .ok_or(BoardError::Malformed {
-            path: path.to_string(),
-            what: "message id",
-        })?;
+        .ok_or_else(|| posted.lacks("message id"))?;
     let until = Instant::now().checked_add(wait);
     loop {
         let left = until.map_or(POLL_WAIT, |until| {
@@ -75,22 +87,13 @@ pub fn ask_the_board_until(
             "/api/questions/{id}?wait={}",
             left.min(POLL_WAIT).as_millis()
         );
-        let polled = board.call(Method::Get, &path, None)?;
-        match polled.get("answer") {
-            Some(Value::Null) => {}
-            Some(answer) => {
+        let polled = board.get(&path)?;
+        match polled.part("answer")? {
+            Value::Null => {}
+            answer => {
                 return serde_json::from_value(answer.clone())
                     .map(Some)
-                    .map_err(|_| BoardError::Malformed {
-                        path,
-                        what: "answer",
-                    });
-            }
-            None => {
-                return Err(BoardError::Malformed {
-                    path,
-                    what: "answer",
-                })
+                    .map_err(|_| polled.lacks("answer"));
             }
         }
     }
@@ -131,9 +134,10 @@ mod tests {
             ),
         ]);
         let board = Board::new(Some(&api.url), "tok");
-        let answer = ask_the_board(&board, &one_question(), DOOR_WAIT)
-            .unwrap()
-            .unwrap();
+        let answer =
+            ask_the_board_until(&board, &one_question(), DOOR_WAIT, &AtomicBool::new(false))
+                .unwrap()
+                .unwrap();
         assert_eq!(answer.picks(0), ["SQLite".to_string()]);
         assert!(answer.picks(1).is_empty());
 
@@ -162,7 +166,13 @@ mod tests {
             reply(200, json!({ "answer": null })).held(Duration::from_millis(400)),
         ]);
         let board = Board::new(Some(&api.url), "tok");
-        let gone = ask_the_board(&board, &one_question(), Duration::from_millis(300)).unwrap();
+        let gone = ask_the_board_until(
+            &board,
+            &one_question(),
+            Duration::from_millis(300),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
         assert_eq!(gone, None);
         let received = api.received();
         let wait: u64 = received[1]
@@ -215,7 +225,9 @@ mod tests {
     fn a_refused_question_is_a_refusal_whose_reason_points_the_model_to_cf_ask() {
         let api = scripted(vec![reply(409, json!({ "message": "T-3 was cancelled" }))]);
         let board = Board::new(Some(&api.url), "tok");
-        let refused = ask_the_board(&board, &one_question(), DOOR_WAIT).unwrap_err();
+        let refused =
+            ask_the_board_until(&board, &one_question(), DOOR_WAIT, &AtomicBool::new(false))
+                .unwrap_err();
         assert!(refused.is_refusal());
         assert_eq!(
             refusal_reason(&refused),
@@ -230,7 +242,21 @@ mod tests {
             reply(200, json!({ "question": {} })),
         ]);
         let board = Board::new(Some(&api.url), "tok");
-        let unread = ask_the_board(&board, &one_question(), DOOR_WAIT).unwrap_err();
+        let unread =
+            ask_the_board_until(&board, &one_question(), DOOR_WAIT, &AtomicBool::new(false))
+                .unwrap_err();
         assert!(!unread.is_refusal());
+    }
+
+    #[test]
+    fn a_window_has_a_board_when_it_has_a_url_and_a_token_even_an_empty_one() {
+        let env = |vars: &[(&str, &str)]| Env::from_vars(vars.iter().copied());
+        let url = ("CONSENSFLOW_URL", "http://127.0.0.1:9");
+        assert!(board_of(&env(&[url, ("CONSENSFLOW_TOKEN", "window-token")])).is_some());
+        assert!(board_of(&env(&[url, ("CONSENSFLOW_TOKEN", "")])).is_some());
+        assert!(board_of(&env(&[url])).is_none(), "no token");
+        assert!(board_of(&env(&[("CONSENSFLOW_TOKEN", "window-token")])).is_none());
+        assert!(board_of(&env(&[("CONSENSFLOW_URL", ""), ("CONSENSFLOW_TOKEN", "t")])).is_none());
+        assert!(board_of(&env(&[])).is_none());
     }
 }

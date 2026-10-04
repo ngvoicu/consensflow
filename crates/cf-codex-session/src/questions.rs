@@ -7,30 +7,17 @@
 //! dialog would hold the task for good.
 
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
 use std::time::Duration;
 
-use cf_base::env::Env;
 use cf_base::js;
 use cf_base::json::js_order;
-use cf_board::door::{ask_the_board_until, refusal_reason};
+use cf_board::door::ask;
 use cf_board::Board;
-use cf_proto::questions::{Answer, Question};
+use cf_proto::questions::{Answer, Question, Reply};
 use serde_json::{json, Map, Value};
 
 /// The method of Codex's request.
 pub(crate) const REQUEST_USER_INPUT: &str = "item/tool/requestUserInput";
-
-/// The board this window's questions go to: the daemon at `CONSENSFLOW_URL`,
-/// as the participant `CONSENSFLOW_TOKEN` names. None outside a window, which
-/// has no URL or no token. A token that is set but empty is a token still: the
-/// board refuses it, and the question is answered with the reason, as the
-/// door has always done, not left to a dialog nobody watches.
-pub(crate) fn board_of(env: &Env) -> Option<Arc<Board>> {
-    let url = env.text("CONSENSFLOW_URL")?;
-    let token = env.os("CONSENSFLOW_TOKEN")?.to_str()?;
-    Some(Arc::new(Board::new(Some(url), token)))
-}
 
 /// The questions of one request, in the board's shape, with the id each is
 /// answered under.
@@ -38,16 +25,6 @@ pub(crate) fn board_of(env: &Env) -> Option<Arc<Board>> {
 pub(crate) struct Asked {
     questions: Vec<Question>,
     keys: Vec<String>,
-}
-
-/// What the board made of the questions.
-#[derive(Debug, PartialEq)]
-pub(crate) enum Outcome {
-    Answered(Answer),
-    /// The board refused them, for this reason.
-    Refused(String),
-    /// Nobody answered in time, or the board could not be reached, or the wait was cancelled.
-    Unanswered,
 }
 
 impl Asked {
@@ -94,12 +71,8 @@ impl Asked {
     /// Puts the questions on the board and waits up to `wait` for the answer,
     /// or until `stop` is raised. Blocks: the caller runs it where blocking is
     /// fine, and everything else goes on meanwhile.
-    pub(crate) fn ask(&self, board: &Board, wait: Duration, stop: &AtomicBool) -> Outcome {
-        match ask_the_board_until(board, &self.questions, wait, stop) {
-            Ok(Some(answer)) => Outcome::Answered(answer),
-            Err(cause) if cause.is_refusal() => Outcome::Refused(refusal_reason(&cause)),
-            Ok(None) | Err(_) => Outcome::Unanswered,
-        }
+    pub(crate) fn ask(&self, board: &Board, wait: Duration, stop: &AtomicBool) -> Reply {
+        ask(board, &self.questions, wait, stop)
     }
 }
 
@@ -237,7 +210,7 @@ mod tests {
         let board = Board::new(Some(&api.url), "window-token");
         let outcome =
             asked(&request()).ask(&board, Duration::from_secs(5), &AtomicBool::new(false));
-        let Outcome::Answered(answer) = outcome else {
+        let Reply::Answered(answer) = outcome else {
             panic!("{outcome:?}");
         };
         assert_eq!(answer.picks(0), ["blue".to_string()]);
@@ -258,23 +231,11 @@ mod tests {
             asked(&request()).ask(&board, Duration::from_secs(5), &AtomicBool::new(false));
         assert_eq!(
             outcome,
-            Outcome::Refused(
+            Reply::Refused(
                 "ConsensFlow could not put this question to the chief (questions: one to 4 questions). Ask with cf ask \"…\" instead."
                     .into()
             )
         );
-    }
-
-    #[test]
-    fn a_window_has_a_board_when_it_has_a_url_and_a_token_even_an_empty_one() {
-        let env = |vars: &[(&str, &str)]| Env::from_vars(vars.iter().copied());
-        let url = ("CONSENSFLOW_URL", "http://127.0.0.1:9");
-        assert!(board_of(&env(&[url, ("CONSENSFLOW_TOKEN", "window-token")])).is_some());
-        assert!(board_of(&env(&[url, ("CONSENSFLOW_TOKEN", "")])).is_some());
-        assert!(board_of(&env(&[url])).is_none(), "no token");
-        assert!(board_of(&env(&[("CONSENSFLOW_TOKEN", "window-token")])).is_none());
-        assert!(board_of(&env(&[("CONSENSFLOW_URL", ""), ("CONSENSFLOW_TOKEN", "t")])).is_none());
-        assert!(board_of(&env(&[])).is_none());
     }
 
     #[test]
@@ -283,15 +244,15 @@ mod tests {
             401,
             json!({ "error": "unauthorized", "message": "unknown participant" }),
         )]);
-        let env = Env::from_vars([
+        let env = cf_base::env::Env::from_vars([
             ("CONSENSFLOW_URL", api.url.as_str()),
             ("CONSENSFLOW_TOKEN", ""),
         ]);
-        let board = board_of(&env).unwrap();
+        let board = cf_board::door::board_of(&env).unwrap();
         let outcome =
             asked(&request()).ask(&board, Duration::from_secs(5), &AtomicBool::new(false));
         assert!(
-            matches!(&outcome, Outcome::Refused(reason) if reason.contains("unknown participant")),
+            matches!(&outcome, Reply::Refused(reason) if reason.contains("unknown participant")),
             "{outcome:?}"
         );
         assert_eq!(api.received().len(), 1);
@@ -303,7 +264,7 @@ mod tests {
         let quick = AtomicBool::new(false);
         assert_eq!(
             asked(&request()).ask(&gone, Duration::from_secs(5), &quick),
-            Outcome::Unanswered
+            Reply::Unanswered
         );
 
         let api = scripted(vec![
@@ -313,7 +274,7 @@ mod tests {
         let board = Board::new(Some(&api.url), "t");
         assert_eq!(
             asked(&request()).ask(&board, Duration::from_millis(50), &quick),
-            Outcome::Unanswered
+            Reply::Unanswered
         );
         quick.store(true, Ordering::Relaxed);
     }

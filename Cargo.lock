@@ -340,6 +340,7 @@ dependencies = [
  "cf-codex-session",
  "cf-harness",
  "cf-process",
+ "cf-proto",
  "form_urlencoded",
  "serde",
  "serde_json",
@@ -404,7 +405,6 @@ name = "cf-harness"
 version = "3.0.0-alpha.73"
 dependencies = [
  "cf-base",
- "cf-board",
  "cf-proto",
  "serde_json",
  "tempfile",

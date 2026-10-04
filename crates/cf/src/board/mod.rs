@@ -11,7 +11,7 @@ mod words;
 
 use std::io::{self, Read, Write};
 
-use cf_board::{Board, BoardError, Method};
+use cf_board::{Board, BoardError};
 use serde_json::{json, Map, Value};
 
 use cf_base::js;
@@ -40,22 +40,18 @@ pub struct Said {
     text: String,
 }
 
-/// Runs the command in `args` against `board`, reading a `-` text from
-/// `input`: the exit code. Only a failure to write `out` or `err` is an error.
+/// Runs the command in `words` against `board`, reading a `-` text from
+/// `input`, answering with the API's JSON when `json` asks: the exit code.
+/// Only a failure to write `out` or `err` is an error.
 pub fn run(
-    args: &[String],
+    words: &[String],
+    json: bool,
     board: &Board,
     input: &mut dyn Read,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> io::Result<u8> {
-    let json = args.iter().any(|arg| arg == "--json");
-    let words: Vec<String> = args
-        .iter()
-        .filter(|arg| *arg != "--json")
-        .cloned()
-        .collect();
-    match command(&words, board, input) {
+    match command(words, board, input) {
         Ok(said) => {
             if json {
                 let data = cf_base::json::js_order(said.data);
@@ -103,7 +99,7 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
     if rest.first().map(String::as_str) == Some("read") {
         let id = message_id(rest.get(1).map(String::as_str))?;
         let path = format!("/api/inbox/{id}");
-        let message = field(board.call(Method::Get, &path, None)?, "message", &path)?;
+        let message = board.get(&path)?.take("message")?;
         let text = format!(
             "{}\n\n{}",
             message_line(&message),
@@ -114,12 +110,9 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
             text,
         });
     }
-    let messages = field(
-        board.call(Method::Get, "/api/inbox", None)?,
-        "messages",
-        "/api/inbox",
-    )?;
-    let text = match items(Some(&messages), "/api/inbox", "messages")? {
+    let mut answer = board.get("/api/inbox")?;
+    let messages = answer.take("messages")?;
+    let text = match answer.list(Some(&messages), "messages")? {
         [] => "Your inbox is empty.".to_string(),
         all => all.iter().map(message_line).collect::<Vec<_>>().join("\n"),
     };
@@ -219,12 +212,9 @@ fn answer(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, 
 }
 
 fn staff(board: &Board) -> Result<Said, Failure> {
-    let members = field(
-        board.call(Method::Get, "/api/staff", None)?,
-        "members",
-        "/api/staff",
-    )?;
-    let text = match items(Some(&members), "/api/staff", "members")? {
+    let mut answer = board.get("/api/staff")?;
+    let members = answer.take("members")?;
+    let text = match answer.list(Some(&members), "members")? {
         [] => {
             "No agents are on this project staff yet; the human adds them in the app.".to_string()
         }
@@ -265,13 +255,14 @@ fn history(rest: &[String], board: &Board) -> Result<Said, Failure> {
     } else {
         format!("/api/history?{query}")
     };
-    let page = board.call(Method::Get, &path, None)?;
+    let page = board.get(&path)?.into_value();
     let text = js::text(page.get("text")).into_owned();
     Ok(Said { data: page, text })
 }
 
 fn whoami(board: &Board) -> Result<Said, Failure> {
-    let me = board.call(Method::Get, "/api/whoami", None)?;
+    let answer = board.get("/api/whoami")?;
+    let me = answer.value();
     let participant = me.get("participant");
     let task = match me.get("task") {
         Some(Value::Null) => String::new(),
@@ -282,13 +273,7 @@ fn whoami(board: &Board) -> Result<Said, Failure> {
                 js::text(task.get("title"))
             )
         }
-        None => {
-            return Err(BoardError::Malformed {
-                path: "/api/whoami".into(),
-                what: "task",
-            }
-            .into())
-        }
+        None => return Err(answer.lacks("task").into()),
     };
     let text = format!(
         "@{} ({}) in project {}{task}",
@@ -296,7 +281,10 @@ fn whoami(board: &Board) -> Result<Said, Failure> {
         js::text(participant.and_then(|it| it.get("role"))),
         js::text(me.get("project").and_then(|it| it.get("name"))),
     );
-    Ok(Said { data: me, text })
+    Ok(Said {
+        data: answer.into_value(),
+        text,
+    })
 }
 
 /// The text a command was given, or standard input when it is `-`: a brief
@@ -324,50 +312,5 @@ fn body_of(text: String) -> Map<String, Value> {
 
 /// POSTs `body` to `path`: the message the API answers with.
 fn posted(board: &Board, path: &str, body: Map<String, Value>) -> Result<Value, Failure> {
-    field(
-        board.call(Method::Post, path, Some(&Value::Object(body)))?,
-        "message",
-        path,
-    )
-}
-
-/// The list `value` is, from the API's answer to `path`: what Node read
-/// `.length` or `.map` of, and so threw on when the answer had none.
-fn items<'a>(
-    value: Option<&'a Value>,
-    path: &str,
-    what: &'static str,
-) -> Result<&'a [Value], Failure> {
-    value
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .ok_or_else(|| {
-            BoardError::Malformed {
-                path: path.to_string(),
-                what,
-            }
-            .into()
-        })
-}
-
-/// The field `key` of the API's answer to `path`, borrowed.
-fn part<'a>(answer: &'a Value, key: &'static str, path: &str) -> Result<&'a Value, Failure> {
-    answer.get(key).ok_or_else(|| {
-        BoardError::Malformed {
-            path: path.to_string(),
-            what: key,
-        }
-        .into()
-    })
-}
-
-/// The field `key` of the API's answer to `path`.
-fn field(mut answer: Value, key: &'static str, path: &str) -> Result<Value, Failure> {
-    answer.get_mut(key).map(Value::take).ok_or_else(|| {
-        BoardError::Malformed {
-            path: path.to_string(),
-            what: key,
-        }
-        .into()
-    })
+    Ok(board.post(path, &Value::Object(body))?.take("message")?)
 }

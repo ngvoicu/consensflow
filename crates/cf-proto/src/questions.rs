@@ -75,6 +75,17 @@ impl Answer {
     }
 }
 
+/// What came of questions put to the board: the chief's answer; a refusal,
+/// with what the window tells its model; or nothing in time, which leaves
+/// the questions to the harness's own dialog (no board, a wait that ran out,
+/// a board that could not be reached).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Reply {
+    Answered(Answer),
+    Refused(String),
+    Unanswered,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,17 +4,15 @@
 //! the form its harness reads. A question the board refuses is refused in
 //! the window too, with the board's reason, so the model asks with `cf ask`:
 //! nobody watches a member's window, and its own dialog would hold the task
-//! for good. Anything else (no board, a wait that ran out, another tool, an
-//! event it cannot read) ends silently, and the harness shows its own dialog.
+//! for good. Anything else (no answer in time, another tool, an event it
+//! cannot read) ends silently, and the harness shows its own dialog. How the
+//! board is asked is the caller's (`cf hook`): this crate reaches no network.
 
 use std::io::Read;
-use std::time::Duration;
 
 use cf_base::js;
-use cf_base::json::from_slice_lossy;
-use cf_board::door::{ask_the_board, refusal_reason};
-use cf_board::Board;
-use cf_proto::questions::Question;
+use cf_base::json::{from_slice_lossy, js_order};
+use cf_proto::questions::{Question, Reply};
 use serde_json::{Map, Value};
 
 /// How one harness's question tool is named, and how its hook answers.
@@ -30,14 +28,13 @@ pub(crate) trait QuestionTool {
     fn refused(reason: String) -> Value;
 }
 
-/// What `T`'s hook says to the PreToolUse event on `input`, asking `board`
-/// and waiting up to `wait`; nothing when it has nothing to say.
+/// What `T`'s hook prints for the PreToolUse event on `input`, its
+/// questions put to the board through `ask`: one line of JSON, or nothing
+/// when it has nothing to say.
 pub(crate) fn answer<T: QuestionTool>(
     input: &mut dyn Read,
-    board: Option<&Board>,
-    wait: Duration,
-) -> Option<Value> {
-    let board = board?;
+    ask: impl FnOnce(&[Question]) -> Reply,
+) -> Option<String> {
     let mut bytes = Vec::new();
     input.read_to_end(&mut bytes).ok()?;
     let event = from_slice_lossy(&bytes).ok()?;
@@ -50,8 +47,8 @@ pub(crate) fn answer<T: QuestionTool>(
         .iter()
         .map(board_question)
         .collect::<Option<Vec<_>>>()?;
-    match ask_the_board(board, &asked, wait) {
-        Ok(Some(answer)) => {
+    let said = match ask(&asked) {
+        Reply::Answered(answer) => {
             let answers = questions
                 .iter()
                 .enumerate()
@@ -62,12 +59,12 @@ pub(crate) fn answer<T: QuestionTool>(
                     )
                 })
                 .collect();
-            Some(T::answered(tool_input, answers))
+            T::answered(tool_input, answers)
         }
-        Ok(None) => None,
-        Err(cause) if cause.is_refusal() => Some(T::refused(refusal_reason(&cause))),
-        Err(_) => None,
-    }
+        Reply::Refused(reason) => T::refused(reason),
+        Reply::Unanswered => return None,
+    };
+    Some(format!("{}\n", js_order(said)))
 }
 
 /// One of the tool's questions in the board's shape; none for a question

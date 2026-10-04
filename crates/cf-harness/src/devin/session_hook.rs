@@ -8,7 +8,7 @@ use std::io::Read;
 use std::path::Path;
 
 use cf_base::js;
-use cf_base::json::from_slice_lossy;
+use cf_base::json::{from_slice_lossy, js_order};
 use serde_json::{json, Value};
 
 use super::wire::selected_session;
@@ -16,10 +16,20 @@ use super::wire::selected_session;
 /// The most of an event the hook reads; past it, the event is not read at all.
 const SESSION_EVENT_LIMIT: u64 = 1024 * 1024;
 
-/// What `cf hook devin-session` says to the event on `input`: the role text
-/// in `role_file`, as the context a session starts with, when the event
+/// What `cf hook devin-session` prints for the event on `input`: the role
+/// text in `role_file`, as the context a session starts with, when the event
 /// starts a session of the conversation `wire_log` says the window shows.
+/// Devin reads a SessionStart hook's output whole: no line break after it.
 pub fn session_hook(
+    input: &mut dyn Read,
+    role_file: Option<&Path>,
+    wire_log: Option<&Path>,
+) -> Option<String> {
+    context(input, role_file, wire_log).map(|said| js_order(said).to_string())
+}
+
+/// The context `session_hook` gives, as JSON.
+fn context(
     input: &mut dyn Read,
     role_file: Option<&Path>,
     wire_log: Option<&Path>,
@@ -90,7 +100,7 @@ mod tests {
     }
 
     fn run(launch: &Launch, event: &Value) -> Option<Value> {
-        session_hook(
+        context(
             &mut event.to_string().as_bytes(),
             Some(&launch.role),
             Some(&launch.wire),
@@ -159,23 +169,23 @@ mod tests {
         let line = start.to_string();
         let missing = launch.role.with_file_name("gone.md");
         assert_eq!(
-            session_hook(&mut line.as_bytes(), None, Some(&launch.wire)),
+            context(&mut line.as_bytes(), None, Some(&launch.wire)),
             None
         );
         assert_eq!(
-            session_hook(&mut line.as_bytes(), Some(&missing), Some(&launch.wire)),
+            context(&mut line.as_bytes(), Some(&missing), Some(&launch.wire)),
             None
         );
         assert_eq!(
-            session_hook(&mut line.as_bytes(), Some(&launch.role), None),
+            context(&mut line.as_bytes(), Some(&launch.role), None),
             None
         );
         assert_eq!(
-            session_hook(&mut line.as_bytes(), Some(&launch.role), Some(&missing)),
+            context(&mut line.as_bytes(), Some(&launch.role), Some(&missing)),
             None
         );
         assert_eq!(
-            session_hook(
+            context(
                 &mut &b"{\"hook_event_name\":"[..],
                 Some(&launch.role),
                 Some(&launch.wire)

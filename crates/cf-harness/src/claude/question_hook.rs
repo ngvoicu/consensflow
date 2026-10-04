@@ -3,9 +3,8 @@
 //! documents, or denies it with the board's reason.
 
 use std::io::Read;
-use std::time::Duration;
 
-use cf_board::Board;
+use cf_proto::questions::{Question, Reply};
 use serde_json::{json, Map, Value};
 
 use crate::shared::question_hook::{answer, QuestionTool};
@@ -41,9 +40,13 @@ impl QuestionTool for AskUserQuestion {
     }
 }
 
-/// What `cf hook claude` says to the PreToolUse event on `input`.
-pub fn question_hook(input: &mut dyn Read, board: Option<&Board>, wait: Duration) -> Option<Value> {
-    answer::<AskUserQuestion>(input, board, wait)
+/// What `cf hook claude` prints for the PreToolUse event on `input`, its
+/// questions put to the board through `ask`.
+pub fn question_hook(
+    input: &mut dyn Read,
+    ask: impl FnOnce(&[Question]) -> Reply,
+) -> Option<String> {
+    answer::<AskUserQuestion>(input, ask)
 }
 
 #[cfg(test)]

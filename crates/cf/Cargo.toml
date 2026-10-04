@@ -12,6 +12,7 @@ cf-board.workspace = true
 cf-codex-session.workspace = true
 cf-harness.workspace = true
 cf-process.workspace = true
+cf-proto.workspace = true
 form_urlencoded.workspace = true
 serde_json.workspace = true
 

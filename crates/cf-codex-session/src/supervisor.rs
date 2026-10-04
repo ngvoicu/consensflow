@@ -15,10 +15,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
-use cf_board::door::DOOR_WAIT;
+use cf_board::door::{board_of, DOOR_WAIT};
 use cf_process::{runnable, terminate, Ending};
 use cf_proto::codex::{Bridge, InvalidBridge, BRIDGE_VARIABLE};
 use tokio::io::AsyncReadExt;
@@ -28,7 +29,6 @@ use tokio::task::JoinHandle;
 use crate::arguments::{self, consensflow_shell_environment, MissingValue, Split, BYPASS};
 use crate::broker::{Broker, Config, StartError};
 use crate::endpoint::{Endpoint, EndpointError, Upstream};
-use crate::questions::board_of;
 use crate::tail::Tail;
 
 /// How long Codex's server has to come up, and how often that is looked at.
@@ -134,7 +134,7 @@ impl Session {
             bridge: plan.bridge.clone(),
             upstream,
             fresh_bypass: plan.bypass,
-            board: board_of(plan.env),
+            board: board_of(plan.env).map(Arc::new),
             question_wait: DOOR_WAIT,
         });
         let broker = self.until_started(starting, &mut signals).await?;

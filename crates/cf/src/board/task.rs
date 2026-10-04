@@ -4,13 +4,13 @@ use std::io::Read;
 
 use cf_base::js;
 use cf_base::text::{utf16_len, utf16_prefix};
-use cf_board::{Board, Method};
+use cf_board::Board;
 use serde_json::{json, Map, Value};
 
 use super::lines::{a_pool, message_line, numbers, task_head, task_line, tasks};
 use super::usage::{task_usage, ADD_USAGE};
 use super::words::{quoted, require_text, split, task_number, task_numbers};
-use super::{field, items, part, text_of, Failure, Said};
+use super::{text_of, Failure, Said};
 
 /// How much of one transcript item `cf task get --transcript` shows, in UTF-16 units.
 const ITEM_CHARS: usize = 600;
@@ -101,16 +101,16 @@ fn add(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
     }
     body.insert("body".into(), brief.into());
 
-    let created = board.call(Method::Post, "/api/tasks", Some(&Value::Object(body)))?;
-    let task = part(&created, "task", "/api/tasks")?;
+    let created = board.post("/api/tasks", &Value::Object(body))?;
+    let task = created.part("task")?;
     let number = js::text(task.get("number"));
     // With human approval required, nothing moves until the human passes it on.
-    let gated = if js::truthy(created.get("gated")) && !mine {
+    let gated = if js::truthy(created.value().get("gated")) && !mine {
         " The human approves each message before it moves."
     } else {
         ""
     };
-    let blocked = items(task.get("blockedBy"), "/api/tasks", "blockedBy")?;
+    let blocked = created.list(task.get("blockedBy"), "blockedBy")?;
     let waits = match blocked.len() {
         0 => String::new(),
         1 => format!(" It waits until {} is accepted.", tasks(numbers(blocked))),
@@ -138,7 +138,7 @@ fn add(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
             None | Some(Value::Null) => tier.map(Value::from),
             Some(tier) => Some(tier.clone()),
         };
-        let nearest = match created.get("asked") {
+        let nearest = match created.value().get("asked") {
             None => String::new(),
             asked => format!(
                 " (no {} {} is on the staff, so the nearest tier)",
@@ -152,21 +152,21 @@ fn add(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
         )
     };
     Ok(Said {
-        data: created,
+        data: created.into_value(),
         text,
     })
 }
 
 fn board_list(board: &Board) -> Result<Said, Failure> {
-    let board = board.call(Method::Get, "/api/tasks", None)?;
+    let answer = board.get("/api/tasks")?;
     let mut lines = Vec::new();
-    let open = items(board.get("open"), "/api/tasks", "open")?;
+    let open = answer.list(answer.value().get("open"), "open")?;
     if !open.is_empty() {
         lines.push("Waiting for a member".to_string());
         lines.extend(open.iter().map(task_line));
     }
-    for lane in items(board.get("lanes"), "/api/tasks", "lanes")? {
-        let lane_tasks = items(lane.get("tasks"), "/api/tasks", "tasks")?;
+    for lane in answer.list(answer.value().get("lanes"), "lanes")? {
+        let lane_tasks = answer.list(lane.get("tasks"), "tasks")?;
         if !lane_tasks.is_empty() {
             lines.push(format!(
                 "@{} ({})",
@@ -181,15 +181,20 @@ fn board_list(board: &Board) -> Result<Said, Failure> {
     } else {
         lines.join("\n")
     };
-    Ok(Said { data: board, text })
+    Ok(Said {
+        data: answer.into_value(),
+        text,
+    })
 }
 
 fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
     let words = split(rest, &["--transcript"], &["--last"]);
     let path = format!("/api/tasks/{number}");
-    let task = field(board.call(Method::Get, &path, None)?, "task", &path)?;
+    let mut answer = board.get(&path)?;
+    let task = answer.take("task")?;
     if !words.on("--transcript") {
-        let thread = items(task.get("messages"), &path, "messages")?
+        let thread = answer
+            .list(task.get("messages"), "messages")?
             .iter()
             .map(|message| {
                 format!(
@@ -208,9 +213,9 @@ fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
         return Err(Failure::Usage("--last takes a number of items".into()));
     }
     let transcript = format!("/api/tasks/{number}/transcript?last={last}");
-    let copy = board.call(Method::Get, &transcript, None)?;
-    let listed = items(copy.get("items"), &transcript, "items")?;
-    let total = copy.get("total");
+    let copy = board.get(&transcript)?;
+    let listed = copy.list(copy.value().get("items"), "items")?;
+    let total = copy.value().get("total");
     let text = if total.and_then(Value::as_f64) == Some(0.0) {
         "Its window has written nothing yet.".to_string()
     } else {
@@ -245,7 +250,7 @@ fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
     let text = format!("{}\n\n{text}", task_head(&task));
     let mut data = Map::new();
     data.insert("task".into(), task);
-    if let Value::Object(copy) = copy {
+    if let Value::Object(copy) = copy.into_value() {
         data.extend(copy);
     }
     Ok(Said {
@@ -277,11 +282,7 @@ fn moved(
         body.insert("body".into(), text.into());
     }
     let path = format!("/api/tasks/{number}/{action}");
-    let task = field(
-        board.call(Method::Post, &path, Some(&Value::Object(body)))?,
-        "task",
-        &path,
-    )?;
+    let task = board.post(&path, &Value::Object(body))?.take("task")?;
     let said = match action {
         "pause" => format!(
             "T-{number} is paused: its window stops and its work waits. Resume it with: cf task resume T-{number} \"what to do now\""

@@ -37,22 +37,18 @@ pub fn run(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> io::Result<u8> {
+    // `--json` anywhere asks for the API's JSON; the words are the rest.
+    let json = args.iter().any(|arg| arg == "--json");
     let words: Vec<String> = args
         .iter()
+        .filter(|arg| *arg != "--json")
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
-    let mut plain = words
-        .iter()
-        .map(String::as_str)
-        .filter(|word| *word != "--json");
-    if plain.next() == Some("hook") {
-        return hook::run(plain.next(), env, input, out);
+    if words.first().map(String::as_str) == Some("hook") {
+        return hook::run(words.get(1).map(String::as_str), env, input, out);
     }
-    match env.text("CONSENSFLOW_TOKEN") {
-        Some(token) => {
-            let board = Board::new(env.text("CONSENSFLOW_URL"), token);
-            board::run(&words, &board, input, out, err)
-        }
+    match Board::from_env(env) {
+        Some(board) => board::run(&words, json, &board, input, out, err),
         None => node::run(env, args, err),
     }
 }

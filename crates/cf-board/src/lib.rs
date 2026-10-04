@@ -13,6 +13,7 @@ pub mod door;
 
 use std::time::Duration;
 
+use cf_base::env::Env;
 use serde_json::{json, Value};
 
 /// How long one request may take. Node's `fetch`, which this replaces, gave a
@@ -40,11 +41,57 @@ impl BoardError {
     }
 }
 
-/// An HTTP method the API takes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Method {
-    Get,
-    Post,
+/// What the API answered to one request, with the path it answered: what a
+/// caller reads of it and does not find is said with that path.
+#[derive(Debug)]
+pub struct Answer {
+    path: String,
+    value: Value,
+}
+
+impl Answer {
+    /// The answer whole.
+    pub fn value(&self) -> &Value {
+        &self.value
+    }
+
+    pub fn into_value(self) -> Value {
+        self.value
+    }
+
+    /// Field `key` of the answer, which the caller reads.
+    pub fn part(&self, key: &'static str) -> Result<&Value, BoardError> {
+        self.value.get(key).ok_or_else(|| self.lacks(key))
+    }
+
+    /// Field `key`, taken out of the answer, which stays to say what else it lacks.
+    pub fn take(&mut self, key: &'static str) -> Result<Value, BoardError> {
+        match self.value.get_mut(key) {
+            Some(value) => Ok(value.take()),
+            None => Err(self.lacks(key)),
+        }
+    }
+
+    /// The list `value`, a part of this answer named `what`, is: what Node
+    /// read `.length` or `.map` of, and so threw on when the answer had none.
+    pub fn list<'a>(
+        &self,
+        value: Option<&'a Value>,
+        what: &'static str,
+    ) -> Result<&'a [Value], BoardError> {
+        value
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .ok_or_else(|| self.lacks(what))
+    }
+
+    /// That the answer has no `what`.
+    pub fn lacks(&self, what: &'static str) -> BoardError {
+        BoardError::Malformed {
+            path: self.path.clone(),
+            what,
+        }
+    }
 }
 
 /// One window's way into the daemon's API.
@@ -72,31 +119,49 @@ impl Board {
         }
     }
 
-    /// `method` on `path` (with its query), with `body` as JSON when there is
-    /// one: the response's JSON, `{}` when it has none.
-    pub fn call(
-        &self,
-        method: Method,
-        path: &str,
-        body: Option<&Value>,
-    ) -> Result<Value, BoardError> {
+    /// The board of the window `env` is, none outside one: the API at
+    /// `CONSENSFLOW_URL`, as the participant `CONSENSFLOW_TOKEN` names. A token
+    /// is any value that says something, as Node tested it, whether or not it
+    /// is UTF-8: one that is not is refused by the board rather than taken
+    /// for no window, which would hand the command to `cf.mjs`, and back.
+    pub fn from_env(env: &Env) -> Option<Self> {
+        let token = env
+            .os("CONSENSFLOW_TOKEN")
+            .filter(|token| !token.is_empty())?;
+        Some(Self::new(
+            env.text("CONSENSFLOW_URL"),
+            &token.to_string_lossy(),
+        ))
+    }
+
+    /// GET `path` (with its query).
+    pub fn get(&self, path: &str) -> Result<Answer, BoardError> {
+        self.send(path, None)
+    }
+
+    /// POST `body` to `path`, as `JSON.stringify` wrote it: compact, keys in order.
+    pub fn post(&self, path: &str, body: &Value) -> Result<Answer, BoardError> {
+        self.send(path, Some(body))
+    }
+
+    /// A GET, or a POST of `body`: the response's JSON, `{}` when it has none.
+    fn send(&self, path: &str, body: Option<&Value>) -> Result<Answer, BoardError> {
         let url = self.url.as_deref().ok_or(BoardError::NoUrl)?;
         let address = format!("{url}{path}");
         let authorization = format!("Bearer {}", self.token);
-        let sent = match method {
-            Method::Get => self
+        let sent = match body {
+            None => self
                 .agent
                 .get(&address)
                 .header("authorization", &authorization)
                 .header("content-type", "application/json")
                 .call(),
-            // The body as `JSON.stringify` wrote it: compact, keys in order.
-            Method::Post => self
+            Some(body) => self
                 .agent
                 .post(&address)
                 .header("authorization", &authorization)
                 .header("content-type", "application/json")
-                .send(body.map_or_else(|| "{}".to_string(), Value::to_string)),
+                .send(body.to_string()),
         };
         let mut response = sent.map_err(|cause| BoardError::Unreachable {
             url: url.to_string(),
@@ -120,7 +185,10 @@ impl Board {
                 .map_or_else(|| format!("ConsensFlow answered {status}"), str::to_string);
             return Err(BoardError::Refused { message });
         }
-        Ok(value)
+        Ok(Answer {
+            path: path.to_string(),
+            value,
+        })
     }
 }
 
@@ -259,17 +327,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_call_sends_the_token_and_the_body_and_returns_the_answer() {
+    fn a_post_sends_the_token_and_the_body_and_returns_the_answer() {
         let api = scripted(vec![reply(200, json!({ "task": { "number": 3 } }))]);
         let board = Board::new(Some(&api.url), "tok");
         let answer = board
-            .call(
-                Method::Post,
-                "/api/tasks",
-                Some(&json!({ "tier": "standard", "body": "x" })),
-            )
+            .post("/api/tasks", &json!({ "tier": "standard", "body": "x" }))
             .unwrap();
-        assert_eq!(answer, json!({ "task": { "number": 3 } }));
+        assert_eq!(answer.value(), &json!({ "task": { "number": 3 } }));
         assert_eq!(
             api.received(),
             vec![Received {
@@ -288,10 +352,10 @@ mod tests {
             reply(500, json!({})),
         ]);
         let board = Board::new(Some(&api.url), "tok");
-        let refused = board.call(Method::Get, "/api/tasks/3", None).unwrap_err();
+        let refused = board.get("/api/tasks/3").unwrap_err();
         assert!(refused.is_refusal());
         assert_eq!(refused.to_string(), "T-3 is not yours");
-        let bare = board.call(Method::Get, "/api/tasks", None).unwrap_err();
+        let bare = board.get("/api/tasks").unwrap_err();
         assert_eq!(bare.to_string(), "ConsensFlow answered 500");
     }
 
@@ -301,12 +365,12 @@ mod tests {
         let lone = format!(r#"{{"message":{{"preview":"cut {}ud83d"}}}}"#, '\\');
         let api = scripted(vec![reply_text(200, lone), reply_text(200, "no json")]);
         let board = Board::new(Some(&api.url), "tok");
-        let answer = board.call(Method::Get, "/api/inbox/3", None).unwrap();
-        assert_eq!(answer, json!({ "message": { "preview": "cut \u{FFFD}" } }));
+        let answer = board.get("/api/inbox/3").unwrap();
         assert_eq!(
-            board.call(Method::Get, "/api/inbox", None).unwrap(),
-            json!({})
+            answer.value(),
+            &json!({ "message": { "preview": "cut \u{FFFD}" } })
         );
+        assert_eq!(board.get("/api/inbox").unwrap().value(), &json!({}));
     }
 
     #[test]
@@ -314,19 +378,63 @@ mod tests {
         let body = "x".repeat(12 * 1024 * 1024);
         let api = scripted(vec![reply(200, json!({ "task": { "body": body } }))]);
         let answer = Board::new(Some(&api.url), "tok")
-            .call(Method::Get, "/api/tasks/3", None)
+            .get("/api/tasks/3")
             .unwrap();
         assert_eq!(
-            answer["task"]["body"].as_str().map(str::len),
+            answer.value()["task"]["body"].as_str().map(str::len),
             Some(12 * 1024 * 1024)
         );
     }
 
     #[test]
+    fn what_an_answer_lacks_is_said_with_the_path_it_answered() {
+        let api = scripted(vec![reply(200, json!({ "board": { "lanes": 3 } }))]);
+        let mut answer = Board::new(Some(&api.url), "tok").get("/api/tasks").unwrap();
+        let board = answer.take("board").unwrap();
+        assert_eq!(
+            answer
+                .list(board.get("lanes"), "lanes")
+                .unwrap_err()
+                .to_string(),
+            "ConsensFlow's answer to /api/tasks has no lanes"
+        );
+        assert_eq!(
+            answer.part("open").unwrap_err().to_string(),
+            "ConsensFlow's answer to /api/tasks has no open"
+        );
+    }
+
+    #[test]
+    fn a_window_is_a_token_that_says_something_utf_8_or_not() {
+        use cf_base::env::Env;
+        let window = |token: &str| {
+            Board::from_env(&Env::from_vars([
+                ("CONSENSFLOW_URL", "http://127.0.0.1:1"),
+                ("CONSENSFLOW_TOKEN", token),
+            ]))
+            .is_some()
+        };
+        assert!(window("tok"));
+        assert!(
+            !window(""),
+            "an empty token is no window, as Node tested it"
+        );
+        assert!(Board::from_env(&Env::from_vars([("CONSENSFLOW_URL", "u")])).is_none());
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let token = std::ffi::OsStr::from_bytes(b"t\xffk");
+            let env = Env::from_vars([("CONSENSFLOW_TOKEN", token)]);
+            assert!(
+                Board::from_env(&env).is_some(),
+                "a token that is no UTF-8 is still a window's, refused by the board"
+            );
+        }
+    }
+
+    #[test]
     fn no_url_and_no_daemon_are_not_refusals() {
-        let none = Board::new(None, "tok")
-            .call(Method::Get, "/api/inbox", None)
-            .unwrap_err();
+        let none = Board::new(None, "tok").get("/api/inbox").unwrap_err();
         assert_eq!(
             none.to_string(),
             "CONSENSFLOW_URL is not set: run cf from a window ConsensFlow opened"
@@ -338,9 +446,7 @@ mod tests {
             .local_addr()
             .unwrap();
         let url = format!("http://{address}");
-        let gone = Board::new(Some(&url), "tok")
-            .call(Method::Get, "/api/inbox", None)
-            .unwrap_err();
+        let gone = Board::new(Some(&url), "tok").get("/api/inbox").unwrap_err();
         assert!(!gone.is_refusal());
         assert!(gone
             .to_string()

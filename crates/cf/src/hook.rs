@@ -3,14 +3,14 @@
 //! exits 0 whatever happened: a failing hook would stop its harness.
 
 use std::io::{self, Read, Write};
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use cf_base::env::Env;
 use cf_base::js;
-use cf_base::json::js_order;
-use cf_board::door::DOOR_WAIT;
-use cf_board::Board;
+use cf_board::door::{self, DOOR_WAIT};
 use cf_harness::{claude, devin};
+use cf_proto::questions::Question;
 
 pub fn run(
     harness: Option<&str>,
@@ -18,29 +18,31 @@ pub fn run(
     input: &mut dyn Read,
     out: &mut dyn Write,
 ) -> io::Result<u8> {
-    let board = || {
-        env.text("CONSENSFLOW_TOKEN")
-            .map(|token| Board::new(env.text("CONSENSFLOW_URL"), token))
-    };
     let said = match harness {
-        Some("claude") => claude::question_hook(input, board().as_ref(), question_wait(env)),
-        Some("devin") => devin::question_hook(input, board().as_ref(), question_wait(env)),
-        // Devin reads a SessionStart hook's output whole: no line break after it.
-        Some("devin-session") => {
-            let said = devin::session_hook(
-                input,
-                env.path("CF_DEVIN_ROLE_FILE"),
-                env.path("CHISEL_PURE_ACP_WIRE_LOG"),
-            );
-            if let Some(said) = said {
-                write!(out, "{}", serde_json::to_string(&js_order(said))?)?;
+        Some(tool @ ("claude" | "devin")) => {
+            // Outside a window there is no board to ask: nothing is read, nothing said.
+            let Some(board) = door::board_of(env) else {
+                return Ok(0);
+            };
+            let wait = question_wait(env);
+            let ask = |questions: &[Question]| {
+                door::ask(&board, questions, wait, &AtomicBool::new(false))
+            };
+            if tool == "claude" {
+                claude::question_hook(input, ask)
+            } else {
+                devin::question_hook(input, ask)
             }
-            return Ok(0);
         }
+        Some("devin-session") => devin::session_hook(
+            input,
+            env.path("CF_DEVIN_ROLE_FILE"),
+            env.path("CHISEL_PURE_ACP_WIRE_LOG"),
+        ),
         _ => None,
     };
     if let Some(said) = said {
-        writeln!(out, "{}", serde_json::to_string(&js_order(said))?)?;
+        write!(out, "{said}")?;
     }
     Ok(0)
 }

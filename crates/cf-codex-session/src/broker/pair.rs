@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use cf_board::Board;
+use cf_proto::questions::Reply;
 use futures_util::StreamExt;
 use serde_json::Value;
 use tokio::task::AbortHandle;
@@ -25,7 +26,7 @@ use super::transport::{
     MAX_FRAME,
 };
 use super::Shared;
-use crate::questions::{Asked, Outcome, REQUEST_USER_INPUT};
+use crate::questions::{Asked, REQUEST_USER_INPUT};
 
 /// What the TUI said before the connection to Codex's server opened.
 struct Waiting {
@@ -234,9 +235,9 @@ impl Pair {
             let outcome =
                 tokio::task::spawn_blocking(move || asking.ask(&board, wait, &stop)).await;
             match outcome {
-                Ok(Outcome::Answered(answer)) => this.answer_codex(&asked.answered(&id, &answer)),
-                Ok(Outcome::Refused(reason)) => this.answer_codex(&asked.refused(&id, &reason)),
-                Ok(Outcome::Unanswered) | Err(_) => this.forward(&this.tui, text),
+                Ok(Reply::Answered(answer)) => this.answer_codex(&asked.answered(&id, &answer)),
+                Ok(Reply::Refused(reason)) => this.answer_codex(&asked.refused(&id, &reason)),
+                Ok(Reply::Unanswered) | Err(_) => this.forward(&this.tui, text),
             }
         });
     }
