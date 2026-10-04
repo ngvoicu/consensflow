@@ -71,8 +71,9 @@ fn read_on_passes_over_unparsed_the_lines_that_do_not_hold_only() {
 
 #[test]
 fn a_look_reads_the_bytes_after_where_the_last_stopped_and_no_others() {
-    // A record rewritten in place before the edge the next look checks is
-    // not read again: only bytes past where the last look stopped are.
+    // Only bytes past where the last look stopped are read: a record made
+    // malformed in place, before the edge the next look checks, would fail
+    // any look that read it again.
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("t.jsonl");
     let padding = "x".repeat(40);
@@ -85,7 +86,7 @@ fn a_look_reads_the_bytes_after_where_the_last_stopped_and_no_others() {
     let seen = read(collect(&file, None, None).0);
     assert_eq!(seen.records, 41);
     let mut rewritten = fs::File::options().write(true).open(&file).unwrap();
-    std::io::Write::write_all(&mut rewritten, b"{\"a\":9").unwrap();
+    std::io::Write::write_all(&mut rewritten, b"{bad::").unwrap();
     drop(rewritten);
     let mut appended = fs::OpenOptions::new().append(true).open(&file).unwrap();
     std::io::Write::write_all(&mut appended, b"{\"n\":99}\n").unwrap();
