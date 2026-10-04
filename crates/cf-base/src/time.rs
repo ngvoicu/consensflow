@@ -67,9 +67,10 @@ pub fn time_clip(ms: f64) -> Option<i64> {
 /// epoch, or none where it gives NaN. A date alone is UTC.
 ///
 /// V8 also reads what the format does not hold, through a legacy parser: a
-/// time with no offset as local time, a space for the `T`, a day past the
-/// month's last as one in the next. ConsensFlow writes none of these (every
-/// time it stores is `toISOString`'s), so they are read as none here.
+/// time with no offset as local time, a space or a `t` for the `T`, a `z`
+/// for the `Z`, an offset with no colon, a day past the month's last as one
+/// in the next. ConsensFlow writes none of these (every time it stores is
+/// `toISOString`'s), so they are read as none here.
 pub fn parse(text: &str) -> Option<i64> {
     let mut rest = text;
     let year = take_year(&mut rest)?;
@@ -87,8 +88,9 @@ pub fn parse(text: &str) -> Option<i64> {
         rest = time;
         let hours = take_digits(&mut rest, 2)?;
         let minutes = take_part(&mut rest, ':', 2)?;
-        let seconds = take_part(&mut rest, ':', 2).unwrap_or(0);
-        let millis = match rest.strip_prefix('.') {
+        let seconds = take_part(&mut rest, ':', 2);
+        // A fraction is of a second: one after the minutes is no time.
+        let millis = match rest.strip_prefix('.').filter(|_| seconds.is_some()) {
             Some(fraction) => {
                 let digits = fraction.bytes().take_while(u8::is_ascii_digit).count();
                 if digits == 0 {
@@ -105,6 +107,7 @@ pub fn parse(text: &str) -> Option<i64> {
             }
             None => 0,
         };
+        let seconds = seconds.unwrap_or(0);
         let ends_day = hours == 24 && minutes == 0 && seconds == 0 && millis == 0;
         if (hours > 23 && !ends_day) || minutes > 59 || seconds > 59 {
             return None;
@@ -534,10 +537,17 @@ mod tests {
             "",
             "2026-13-01",
             "2026-10-02T25:00Z",
-            // V8's legacy parser reads these three; the format does not hold them.
+            // Node 26 gives NaN for a fraction after the minutes.
+            "2026-09-19T12:00.1Z",
+            "2026-10-02T08:00.000Z",
+            "2026-10-02T08:00.5+03:00",
+            // V8's legacy parser reads these; the format does not hold them.
             "2026-10-02T08:00:00.000",
             "2026-10-02 08:00:00Z",
             "2026-02-31",
+            "2026-10-02T08:00:00+0300",
+            "2026-10-02T08:00:00.000z",
+            "2026-10-02t08:00:00Z",
             "-000000-01-01T00:00:00Z",
             "2026-10-02T08:00:00.Z",
             "2026-10-02T24:00:01Z",
