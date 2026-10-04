@@ -417,6 +417,8 @@ version = "3.0.0-alpha.73"
 dependencies = [
  "cf-base",
  "cf-proto",
+ "flate2",
+ "serde",
  "serde_json",
  "tempfile",
 ]
