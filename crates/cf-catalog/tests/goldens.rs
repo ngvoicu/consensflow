@@ -1,16 +1,21 @@
 //! The goldens `npm run goldens:catalog` writes from the JavaScript, which
 //! the unit suite holds equal to what Node computes now. Here, the catalog's
 //! and `agentProfile`'s answers are held to them, case by case and as text, so
-//! a key out of order or a word changed fails; and, for the roster, that each
-//! case reads whole (its port is the next landing).
+//! a key out of order or a word changed fails; and the roster's reads
+//! (`listAgents`, `agentRow`, `preferences`) likewise, each on a file written
+//! into a home of its own. The roster's writes are the next landing: their
+//! cases are counted, not answered.
 
 // The goldens' own reading: a failure in it is the test's.
 #![allow(clippy::unwrap_used)]
 
+use std::path::Path;
+
 use cf_base::js;
+use cf_base::refusal::Refusal;
 use cf_catalog::{
-    efforts, harness_for_kind, validate_work_tier, work_tier_info, Catalog, Settings, HARNESSES,
-    WORK_TIERS,
+    efforts, harness_for_kind, validate_work_tier, work_tier_info, Catalog, Roster, Settings,
+    HARNESSES, WORK_TIERS,
 };
 use serde_json::{json, Map, Value};
 
@@ -241,4 +246,162 @@ fn each_roster_case_starts_from_a_file_and_answers_once() {
             "{case}"
         );
     }
+}
+
+/// The golden's stand-in for what JSON cannot hold, JavaScript's `undefined`.
+fn undefined() -> Value {
+    json!({ "$undefined": true })
+}
+
+/// `value` as `JSON.stringify` writes it: the members that are `undefined`
+/// are left out, and an item of a list that is, is `null`.
+fn stringified(value: &Value) -> Value {
+    match value {
+        Value::Object(members) => Value::Object(
+            members
+                .iter()
+                .filter(|(_, member)| **member != undefined())
+                .map(|(key, member)| (key.clone(), stringified(member)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| {
+                    if *item == undefined() {
+                        Value::Null
+                    } else {
+                        stringified(item)
+                    }
+                })
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// The text of the file a roster case starts from, none for a case that
+/// starts with no file: a document the golden names, or the file the step
+/// before left.
+fn file_before<'a>(case: &'a Value, documents: &'a Map<String, Value>) -> Option<&'a str> {
+    let before = if case["sequence"].is_string() {
+        &case["before"]
+    } else {
+        &documents[case["document"].as_str().unwrap()]
+    };
+    before.as_str()
+}
+
+/// What a roster read answers: its JSON, where an `agentRow` that finds
+/// nothing is `undefined`.
+fn answered(roster: &Roster<'_>, call: &[Value]) -> Result<Value, Refusal> {
+    match call[0].as_str().unwrap() {
+        "listAgents" => roster
+            .list()
+            .map(|views| serde_json::to_value(views).unwrap()),
+        "agentRow" => {
+            // `{"$undefined":true}` is no name: the empty one, `String(name ?? '')`.
+            let name = call[1].as_str().unwrap_or("");
+            roster
+                .agent_row(name)
+                .map(|row| row.map_or_else(undefined, |row| serde_json::to_value(row).unwrap()))
+        }
+        "preferences" => roster
+            .preferences()
+            .map(|choices| serde_json::to_value(choices).unwrap()),
+        other => panic!("{other} is no read"),
+    }
+}
+
+/// The names of what the home holds, in order.
+fn left_in(home: &Path) -> Vec<String> {
+    let mut left: Vec<String> = std::fs::read_dir(home)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    left
+}
+
+#[test]
+fn every_read_of_the_roster_answers_as_node_answered_it_and_leaves_the_file_as_it_found_it() {
+    let catalog = catalog();
+    let golden = golden("roster.json");
+    let documents = golden["documents"].as_object().unwrap();
+    let cases = golden["cases"].as_array().unwrap();
+    let (mut lists, mut rows, mut choices, mut from_steps, mut not_yet) = (0, 0, 0, 0, 0);
+    let (mut answers, mut refusals) = (0, 0);
+    for case in cases {
+        let call = case["call"].as_array().unwrap();
+        match call[0].as_str().unwrap() {
+            "listAgents" => lists += 1,
+            "agentRow" => rows += 1,
+            "preferences" => choices += 1,
+            _ => {
+                // A write: the lead's next landing answers it.
+                not_yet += 1;
+                continue;
+            }
+        }
+        from_steps += usize::from(case["sequence"].is_string());
+        // The file the case starts from, in a home of its own.
+        let before = file_before(case, documents);
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("agents.json");
+        if let Some(text) = before {
+            std::fs::write(&path, text).unwrap();
+        }
+        let roster = Roster::new(&catalog, path.clone());
+        match (
+            answered(&roster, call),
+            case.get("result"),
+            case.get("error"),
+        ) {
+            (Ok(actual), Some(golden), None) => {
+                assert_same_text(
+                    &actual.to_string(),
+                    &stringified(golden).to_string(),
+                    &format!("the answer to {case}"),
+                );
+                answers += 1;
+            }
+            (Err(refusal), None, Some(error)) => {
+                // The file's path, whatever the platform writes it as, is `«home»/agents.json`.
+                let said = refusal
+                    .message
+                    .replace(&path.display().to_string(), "«home»/agents.json");
+                assert_eq!(Some(said.as_str()), error.as_str(), "{case}");
+                let code = if said.starts_with("Your agents file ") {
+                    "agents-file-unreadable"
+                } else {
+                    "work-tier"
+                };
+                assert_eq!((refusal.code, refusal.status), (code, 400), "{case}");
+                refusals += 1;
+            }
+            (answer, golden, error) => {
+                panic!("{case}: answered {answer:?}, the golden has {golden:?} {error:?}")
+            }
+        }
+        // A read changes nothing and makes nothing.
+        assert_eq!(case.get("unchanged"), Some(&json!(true)), "{case}");
+        match before {
+            Some(text) => {
+                assert_eq!(std::fs::read(&path).unwrap(), text.as_bytes(), "{case}");
+                assert_eq!(left_in(home.path()), ["agents.json"], "{case}");
+            }
+            None => assert_eq!(left_in(home.path()), Vec::<String>::new(), "{case}"),
+        }
+    }
+    eprintln!(
+        "roster goldens: {} reads checked ({lists} listAgents, {rows} agentRow, {choices} \
+         preferences; {answers} answered, {refusals} refused), {not_yet} writes not yet answered",
+        lists + rows + choices
+    );
+    assert_eq!((lists, rows, choices), (22, 117, 22));
+    assert_eq!(lists + rows + choices, 161, "the reads answered");
+    assert_eq!((answers, refusals), (132, 29));
+    assert_eq!(from_steps, 7, "of them, the steps of the seeded sequences");
+    assert_eq!(not_yet, 867, "the writes, not yet answered");
+    assert_eq!(cases.len(), 161 + 867);
 }

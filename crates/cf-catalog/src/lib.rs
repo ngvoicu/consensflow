@@ -8,22 +8,26 @@
 //! writes `agents.json` before the flip; the Node build is its one writer.
 //!
 //! `presets` reads the data, `profile` names a model and its road and tiers
-//! its agent, `catalog` lists the presets by harness. The [`Catalog`] is
-//! built once and handed down: it holds what a profile needs, so none of them
-//! scans the presets again.
+//! its agent, `catalog` lists the presets by harness, and `roster` reads the
+//! human's file over them. The [`Catalog`] is built once and handed down: it
+//! holds what a profile needs, so none of them scans the presets again.
 
 #![forbid(unsafe_code)]
 
 mod catalog;
 mod presets;
 mod profile;
+mod roster;
 
 use std::collections::BTreeMap;
 
 pub use catalog::{efforts, harness_for_kind, Group, HARNESSES};
-pub use cf_proto::agents::{CatalogEntry, FoundEntry, Harness, Profile, WorkTier, WorkTierInfo};
+pub use cf_proto::agents::{
+    AgentView, CatalogEntry, FoundEntry, Harness, Preferences, Profile, WorkTier, WorkTierInfo,
+};
 pub use presets::Preset;
 pub use profile::{validate_work_tier, work_tier_info, Settings, WORK_TIERS};
+pub use roster::{roster_path, AgentRow, Roster};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogError {
