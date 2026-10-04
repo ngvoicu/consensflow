@@ -1,13 +1,14 @@
 //! A column's value as `node:sqlite` hands it to JavaScript, and what
-//! JavaScript makes of one: `String(value)`, `===`, `>`, a `Map`'s key, the
-//! JSON `JSON.stringify` writes of it, and the parameter `node:sqlite` binds
-//! it as. A reader holds each column as it was read and makes of it what its
-//! JavaScript made, where it made it.
+//! JavaScript makes of one: `String(value)`, `Number(value)`, `===`, `>`, a
+//! `Map`'s key, `JSON.parse(value)`, the JSON `JSON.stringify` writes of it,
+//! and the parameter `node:sqlite` binds it as. A reader holds each column as
+//! it was read and makes of it what its JavaScript made, where it made it.
 
 use std::borrow::Cow;
 use std::sync::Arc;
 
 use cf_base::js;
+use cf_base::json::{from_slice_lossy, is_json_lossy, DEEPEST};
 use rusqlite::types::Value as Bound;
 use serde_json::{Number, Value};
 
@@ -68,13 +69,26 @@ impl Cell {
         self.number() > other.number()
     }
 
-    /// `Number(value)`, as `>` reads it.
-    fn number(&self) -> f64 {
+    /// `Number(value)`.
+    pub(crate) fn number(&self) -> f64 {
         match self {
             Cell::Null => 0.0,
             Cell::Number(number) => *number,
             Cell::Text(_) | Cell::Bytes(_) => js::number(&self.text()),
         }
+    }
+
+    /// `JSON.parse(value)`: the value made text as `String` makes it, then
+    /// read as JSON.
+    pub(crate) fn parse(&self) -> Result<Value, Unparsed> {
+        let text = self.text();
+        from_slice_lossy(text.as_bytes()).map_err(|_| {
+            if is_json_lossy(text.as_bytes()) {
+                Unparsed::Unheld
+            } else {
+                Unparsed::NoJson
+            }
+        })
     }
 
     /// The key a `Map` or a `Set` takes it by (SameValueZero): a blob a key
@@ -113,6 +127,30 @@ impl Cell {
             Cell::Number(number) => Bound::Real(*number),
             Cell::Text(text) => Bound::Text(text.clone()),
             Cell::Bytes(bytes) => Bound::Blob(bytes.to_vec()),
+        }
+    }
+}
+
+/// Why a cell is no JSON value here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Unparsed {
+    /// It is no JSON: `JSON.parse` threw.
+    NoJson,
+    /// It is JSON this build cannot hold, nested past [`DEEPEST`] levels or
+    /// with a number past a double's range, which Node read: a difference
+    /// kept on purpose.
+    Unheld,
+}
+
+impl Unparsed {
+    /// The failure of reading `what`: `no_json` where it is no JSON, else
+    /// this build's own sentence.
+    pub(crate) fn said(self, what: &str, no_json: String) -> String {
+        match self {
+            Unparsed::NoJson => no_json,
+            Unparsed::Unheld => format!(
+                "{what} is JSON this build cannot hold: nested past {DEEPEST} levels, or a number past a double's range"
+            ),
         }
     }
 }

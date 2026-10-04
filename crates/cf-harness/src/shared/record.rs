@@ -11,6 +11,7 @@ pub(crate) mod followed;
 pub(crate) mod jsonl;
 pub(crate) mod key;
 pub(crate) mod reading;
+pub(crate) mod sort;
 pub(crate) mod sqlite;
 
 use cf_base::env::Env;

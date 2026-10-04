@@ -44,7 +44,7 @@ static LOCAL_ZONE: LazyLock<TimeZone> = LazyLock::new(|| {
 /// ported, and a session to read. The others wait for the readers and the
 /// switch still to come.
 pub fn ported(look: &crate::scenario::Look) -> bool {
-    matches!(look.kind.as_str(), "codex" | "pi" | "devin") && !look.session.is_empty()
+    matches!(look.kind.as_str(), "codex" | "pi" | "devin" | "opencode") && !look.session.is_empty()
 }
 
 /// A ported harness's reader of `session`, made afresh.
@@ -53,6 +53,7 @@ fn reader(kind: &str, session: &str, env: &Env) -> Box<dyn Look + Send> {
         "codex" => cf_harness::codex::record::reader(session, env),
         "pi" => cf_harness::pi::record::reader(session, env, &LOCAL_ZONE),
         "devin" => cf_harness::devin::record::reader(session, env),
+        "opencode" => cf_harness::opencode::record::reader(session, env, &LOCAL_ZONE),
         other => panic!("no reader of {other} yet"),
     }
 }
@@ -175,10 +176,6 @@ impl Stage<'_> {
             return;
         }
         let name = format!("{}, step {index}", self.scenario.name);
-        assert!(
-            look.between.is_none(),
-            "{name}: a look between snapshot reads, which no ported reader takes"
-        );
         let env = look.env.as_ref().map_or_else(
             || self.env.clone(),
             |env| environment(self.root.path(), env),
@@ -196,6 +193,13 @@ impl Stage<'_> {
             // A look of both readers records the fresh reading only where it differs.
             let at = look.fresh.or(look.read).unwrap();
             self.hold(&reading, at, &format!("{name}, fresh"));
+        }
+        // Node played these between OpenCode's two snapshot reads, which read
+        // the store as it was before them: so is it read here, before them.
+        // That the reads are one snapshot, a writer between them unseen, is
+        // OpenCode's reader's own test.
+        for step in look.between.iter().flatten() {
+            self.step(step, index);
         }
         self.played.answered += 1;
     }

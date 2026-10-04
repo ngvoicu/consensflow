@@ -1,4 +1,5 @@
 use super::*;
+use cf_base::json::DEEPEST;
 use std::sync::Arc;
 
 /// A row of node `node` below `parent`, its id `id` and its message `message`.

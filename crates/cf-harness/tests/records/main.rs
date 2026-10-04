@@ -115,7 +115,11 @@ fn every_look_at_a_ported_harness_reads_what_node_read() {
         }
     }
     // Codex's 261 looks in 85 scenarios, Pi's 227 in 78, one scenario
-    // holding both, and Devin's 273 in 18: every look of the three but the
-    // one Codex look with no session, which the switch answers.
-    assert_eq!((scenarios_played, answered), (162 + 18, 261 + 227 + 273));
+    // holding both, Devin's 273 in 18, and OpenCode's 100 in 28, one of them
+    // a scenario of Codex's and Pi's too: every look of the four but the one
+    // Codex look with no session, which the switch answers.
+    assert_eq!(
+        (scenarios_played, answered),
+        (162 + 18 + 27, 261 + 227 + 273 + 100)
+    );
 }

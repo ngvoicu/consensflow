@@ -18,7 +18,6 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use cf_base::env::Env;
-use cf_base::json::{from_slice_lossy, is_json_lossy, DEEPEST};
 use rusqlite::types::Value as Bound;
 use serde_json::Value;
 
@@ -254,16 +253,10 @@ impl Row {
         if let Some(message) = self.parsed.get() {
             return Ok(message);
         }
-        let text = self.message.text();
-        let message = from_slice_lossy(text.as_bytes()).map_err(|_| {
-            let at = self.id.text();
-            if is_json_lossy(text.as_bytes()) {
-                format!(
-                    "Devin's message at row {at} is JSON this build cannot hold: nested past {DEEPEST} levels, or a number past a double's range"
-                )
-            } else {
-                format!("Devin's message at row {at} is no JSON")
-            }
+        let message = self.message.parse().map_err(|unparsed| {
+            let what = format!("Devin's message at row {}", self.id.text());
+            let no_json = format!("{what} is no JSON");
+            unparsed.said(&what, no_json)
         })?;
         Ok(self.parsed.get_or_init(|| message))
     }

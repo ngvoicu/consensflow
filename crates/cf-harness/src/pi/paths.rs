@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use cf_base::env::Env;
 use cf_base::path;
 
-use crate::shared::paths::home;
+use crate::shared::paths::{home, set};
 use crate::shared::record::find::{find_file, DEPTH};
 
 /// Where Pi keeps the file of the session `session`: the first file under
@@ -57,13 +57,6 @@ fn expand(configured: &str, env: &Env) -> Result<String, String> {
         }
     }
     Ok(configured.to_owned())
-}
-
-/// A variable set to something, as `env.NAME ||` takes it, read as Node read
-/// its environment: bytes that are no UTF-8 as U+FFFD.
-fn set(env: &Env, name: &str) -> Option<String> {
-    env.path(name)
-        .map(|value| value.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]

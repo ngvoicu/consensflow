@@ -6,7 +6,7 @@
 use cf_base::env::Env;
 use cf_base::path;
 
-use crate::shared::paths::home;
+use crate::shared::paths::{data_home, home};
 
 /// Devin's store of its sessions: `cli/sessions.db` in its data folder.
 pub(crate) fn store(env: &Env) -> Result<String, String> {
@@ -18,17 +18,12 @@ pub(crate) fn store(env: &Env) -> Result<String, String> {
 /// (`.local/share` in the home). A variable set empty is kept, as `??`
 /// kept it.
 fn data(env: &Env) -> Result<String, String> {
-    let (variable, under_home) = if env.on_windows() {
-        ("APPDATA", ["AppData", "Roaming"])
+    let base = if !env.on_windows() {
+        data_home(env)?
+    } else if let Some(roaming) = env.os("APPDATA") {
+        roaming.to_string_lossy().into_owned()
     } else {
-        ("XDG_DATA_HOME", [".local", "share"])
-    };
-    let base = match env.os(variable) {
-        Some(base) => base.to_string_lossy().into_owned(),
-        None => {
-            let home = home(env)?;
-            path::join(&[&home, under_home[0], under_home[1]])
-        }
+        path::join(&[&home(env)?, "AppData", "Roaming"])
     };
     Ok(path::join(&[&base, "devin"]))
 }
