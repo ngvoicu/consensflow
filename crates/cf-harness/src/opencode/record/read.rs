@@ -2,7 +2,6 @@
 //! `readOnward`, `hosts/lib/completion/opencode.js`): the session's messages
 //! and parts by id, and the events that name them, numbered in order.
 
-use std::borrow::Cow;
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 
@@ -11,7 +10,7 @@ use rusqlite::types::Value as Bound;
 use serde_json::Value;
 
 use crate::shared::record::key::{Key, Keys};
-use crate::shared::record::sqlite::{self, Cell, Reads};
+use crate::shared::record::sqlite::{self, text_of, Cell, Reads};
 
 /// The event types a look reads on past; any other has the store read whole.
 const FOLLOWED: [&str; 4] = [
@@ -193,12 +192,15 @@ impl Read {
             if !(seq.is_finite() && seq.fract() == 0.0) || seq < 0.0 || seq <= self.last {
                 return Err(format!(
                     "malformed OpenCode event sequence at {}",
-                    text(written)
+                    text_of(written)
                 ));
             }
             self.last = seq;
             self.events += 1;
-            let event = parse(row.get("data"), &format!("event {}", text(row.get("id"))))?;
+            let event = parse(
+                row.get("data"),
+                &format!("event {}", text_of(row.get("id"))),
+            )?;
             let kind = match row.get("type") {
                 Some(Cell::Text(kind)) => Some(kind.as_str()),
                 _ => None,
@@ -324,11 +326,6 @@ fn parse(raw: Option<&Cell>, description: &str) -> Result<Value, String> {
     let raw = raw.ok_or_else(malformed)?;
     raw.parse()
         .map_err(|unparsed| unparsed.said(&format!("OpenCode {description}"), malformed()))
-}
-
-/// `${value}` of a column, `undefined` where the row has none.
-pub(super) fn text(cell: Option<&Cell>) -> Cow<'_, str> {
-    cell.map_or(Cow::Borrowed("undefined"), Cell::text)
 }
 
 /// `value.name`, where JavaScript reads a field of a value it holds: none

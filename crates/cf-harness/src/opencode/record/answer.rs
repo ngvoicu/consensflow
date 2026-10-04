@@ -15,12 +15,12 @@ use cf_base::js;
 use jiff::tz::TimeZone;
 use serde_json::Value;
 
-use super::read::{optional, property, text, Read, Stored};
+use super::read::{optional, property, Read, Stored};
 use crate::shared::quota::{exhausted_quota, quota_status};
 use crate::shared::record::key::{Key, Keys};
 use crate::shared::record::reading::{visible_text, Item, Record, Role, Settlement};
 use crate::shared::record::sort::sort;
-use crate::shared::record::sqlite::Cell;
+use crate::shared::record::sqlite::{greater_of, text_of, Cell};
 
 /// A part's row, and its data.
 type Part<'a> = (&'a Stored, &'a Value);
@@ -47,7 +47,7 @@ pub(super) fn answer(read: &Read, local: &TimeZone, keys: &mut Keys) -> Result<R
     let mut turn_open = false;
     let mut closed = false;
     for row in messages {
-        let message = row.data(&format!("message {}", text(row.cell("id"))))?;
+        let message = row.data(&format!("message {}", text_of(row.cell("id"))))?;
         let parts: &[Part<'_>] = parts_of.get(&row.id).map_or(&[], Vec::as_slice);
         let mut texts = Vec::new();
         for (_, part) in parts {
@@ -196,7 +196,7 @@ fn parts_by_message(read: &Read) -> Result<HashMap<Key, Vec<Part<'_>>>, String> 
     let mut lists: Vec<(Key, Vec<Part<'_>>)> = Vec::new();
     let mut places: HashMap<Key, usize> = HashMap::new();
     for row in parts {
-        let data = row.data(&format!("part {}", text(row.cell("id"))))?;
+        let data = row.data(&format!("part {}", text_of(row.cell("id"))))?;
         match places.get(&row.message) {
             Some(&at) => lists[at].1.push((row, data)),
             None => {
@@ -222,15 +222,10 @@ fn by_creation(left: &Stored, right: &Stored) -> Result<f64, String> {
     if between != 0.0 && !between.is_nan() {
         return Ok(between);
     }
-    let less = |left: Option<&Cell>, right: Option<&Cell>| match (left, right) {
-        (Some(left), Some(right)) => right.greater(left),
-        // `undefined` is no number, and no text: never less nor greater.
-        _ => false,
-    };
     let (left, right) = (left.cell("id"), right.cell("id"));
-    Ok(if less(left, right) {
+    Ok(if greater_of(right, left) {
         -1.0
-    } else if less(right, left) {
+    } else if greater_of(left, right) {
         1.0
     } else {
         0.0
@@ -252,10 +247,10 @@ fn by_position(
     let Some(Cell::Text(id)) = left.cell("id") else {
         return Err(format!(
             "OpenCode's {description} {} has an id that is no text, where localeCompare was asked of it",
-            text(left.cell("id"))
+            text_of(left.cell("id"))
         ));
     };
-    Ok(ordering(js::locale_compare(id, &text(right.cell("id")))))
+    Ok(ordering(js::locale_compare(id, &text_of(right.cell("id")))))
 }
 
 /// The seq of the event of `row`, or the failure of a row no event named.
@@ -263,7 +258,7 @@ fn position(positions: &HashMap<Key, f64>, row: &Stored, description: &str) -> R
     positions.get(&row.id).copied().ok_or_else(|| {
         format!(
             "missing OpenCode event for {description} {}",
-            text(row.cell("id"))
+            text_of(row.cell("id"))
         )
     })
 }
@@ -299,7 +294,7 @@ fn item(
     let Some(Cell::Text(id)) = row.cell("id") else {
         return Err(format!(
             "an OpenCode row's id is no text: {}",
-            super::read::text(row.cell("id"))
+            text_of(row.cell("id"))
         ));
     };
     Ok(Item {

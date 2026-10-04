@@ -6,11 +6,11 @@ use std::sync::Arc;
 fn row(id: f64, node: &str, parent: &str, message: Cell, keys: &mut Keys) -> Row {
     let text = |text: &str| Cell::Text(text.to_owned());
     Row::of(
-        Cell::Number(id),
-        &text(node),
-        &text(parent),
-        message,
-        text("2026-10-04T10:00:00Z"),
+        Some(Cell::Number(id)),
+        Some(&text(node)),
+        Some(&text(parent)),
+        Some(message),
+        Some(text("2026-10-04T10:00:00Z")),
         keys,
     )
 }
@@ -37,7 +37,7 @@ fn of_rows_below_a_node_the_newest_has_the_greatest_id_and_the_first_read_of_equ
     assert_eq!(store.rows.len(), 4);
     assert!(store
         .newest_child(&text("p"))
-        .is_some_and(|row| row.id.same(&Cell::Number(6.0))));
+        .is_some_and(|row| same_of(row.id.as_ref(), Some(&Cell::Number(6.0)))));
 }
 
 #[test]

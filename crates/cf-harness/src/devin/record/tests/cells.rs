@@ -171,3 +171,63 @@ fn a_blob_read_in_another_look_is_another_object() {
         "unknown: unreadable: missing Devin main chain ancestor"
     );
 }
+
+#[test]
+fn a_column_a_table_names_in_another_case_is_none_as_javascript_reads_it() {
+    let schema = |columns: &str| {
+        format!(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
+             CREATE TABLE message_nodes ({columns})"
+        )
+    };
+    let staged = |columns: &str| {
+        let (root, env, store) = staged_with(&schema(columns), "'n'");
+        store
+            .execute(
+                "INSERT INTO message_nodes VALUES (1, ?, 'n', NULL, ?, 7)",
+                (
+                    SESSION,
+                    json!({ "message_id": "m", "role": "user", "content": "hi" }).to_string(),
+                ),
+            )
+            .unwrap();
+        (root, env)
+    };
+    // Node 26: the row's columns are named as the table declares them, so
+    // `row.created_at` is undefined, and the item has no time.
+    let (_root, env) = staged(
+        "row_id INTEGER PRIMARY KEY, session_id TEXT, node_id TEXT, parent_node_id TEXT,
+         chat_message TEXT, CREATED_AT INTEGER",
+    );
+    let mut looks = reader(SESSION, &env);
+    for _ in 0..2 {
+        assert_eq!(
+            serde_json::to_string(&*look(&mut looks)).unwrap(),
+            r#"{"items":[{"id":"m","role":"user","text":"hi","complete":true}],"inFlight":false,"asking":false,"failed":false,"quota":null,"settlement":{"state":"settled"}}"#
+        );
+    }
+    // `row.row_id` undefined: read once, then bound to the next query, where
+    // Node threw ("Provided value cannot be bound to SQLite parameter 2.").
+    let (_root, env) = staged(
+        "ROW_ID INTEGER PRIMARY KEY, session_id TEXT, node_id TEXT, parent_node_id TEXT,
+         chat_message TEXT, created_at INTEGER",
+    );
+    let mut looks = reader(SESSION, &env);
+    assert_eq!(
+        serde_json::to_string(&*look(&mut looks)).unwrap(),
+        r#"{"items":[{"id":"m","role":"user","text":"hi","complete":true,"at":7}],"inFlight":false,"asking":false,"failed":false,"quota":null,"settlement":{"state":"settled"}}"#
+    );
+    assert_eq!(
+        show(&look(&mut looks)),
+        "unknown: unreadable: provided value cannot be bound to SQLite parameter 2"
+    );
+    // `row.chat_message` undefined: `JSON.parse(undefined)` threw.
+    let (_root, env) = staged(
+        "row_id INTEGER PRIMARY KEY, session_id TEXT, node_id TEXT, parent_node_id TEXT,
+         CHAT_MESSAGE TEXT, created_at INTEGER",
+    );
+    assert_eq!(
+        show(&look(&mut reader(SESSION, &env))),
+        "unknown: unreadable: Devin's message at row 1 is no JSON"
+    );
+}

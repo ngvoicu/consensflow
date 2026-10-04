@@ -22,7 +22,7 @@ use rusqlite::types::{Value as Bound, ValueRef};
 use rusqlite::{params_from_iter, Connection, OpenFlags, Params, Statement};
 use serde_json::Value;
 
-pub(crate) use cell::Cell;
+pub(crate) use cell::{greater_of, key_of, same_of, text_of, Cell, Unparsed};
 
 /// The largest integer a JavaScript number holds exactly, either way
 /// (`Number.MAX_SAFE_INTEGER`).

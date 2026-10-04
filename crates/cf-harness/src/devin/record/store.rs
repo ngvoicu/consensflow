@@ -24,7 +24,9 @@ use serde_json::Value;
 use super::chain::Chain;
 use crate::devin::paths;
 use crate::shared::record::key::{Key, Keys};
-use crate::shared::record::sqlite::{self, Cell, Reads};
+use crate::shared::record::sqlite::{
+    self, greater_of, key_of, same_of, text_of, Cell, Reads, Unparsed,
+};
 
 /// The last rows of a conversation each look reads again, in case one was rewritten.
 const RECHECKED: usize = 8;
@@ -41,21 +43,23 @@ pub(super) struct Store {
     /// How many rows were read since the store was last read whole.
     count: usize,
     /// The id of the row read last: null before any.
-    last: Cell,
+    last: Option<Cell>,
     /// The main chain's head, as the last look read it.
     head: Key,
     /// What the main chain says.
     pub(super) chain: Chain,
 }
 
-/// A row of `message_nodes`, each column as JavaScript held it, its node
-/// and its parent as a `Map` keys them.
+/// A row of `message_nodes`, each column as JavaScript read it, its node
+/// and its parent as a `Map` keys them. A column is none where the row has
+/// none by the name asked (`undefined`): a table may declare it in another
+/// case, which names the row's column.
 pub(super) struct Row {
-    pub(super) id: Cell,
+    pub(super) id: Option<Cell>,
     pub(super) node: Key,
     pub(super) parent: Key,
-    message: Cell,
-    pub(super) created_at: Cell,
+    message: Option<Cell>,
+    pub(super) created_at: Option<Cell>,
     /// Its message's JSON, parsed the first time it is read (`parsed`).
     parsed: OnceCell<Value>,
 }
@@ -102,8 +106,8 @@ impl Store {
             None => (None, all()?),
             Some(mut store) => {
                 let at_most = match &store.last {
-                    Cell::Null => Bound::Real(-1.0),
-                    last => last.bound(),
+                    None | Some(Cell::Null) => Bound::Real(-1.0),
+                    Some(last) => last.bound(),
                 };
                 let recheck = format!(
                     "{COLUMNS} from message_nodes where session_id = ? and row_id <= ?
@@ -116,14 +120,20 @@ impl Store {
                         rewritten = true;
                     }
                 }
-                let rows = if matches!(store.last, Cell::Null) {
+                let rows = if let Some(Cell::Null) = store.last {
                     all()?
                 } else {
+                    // Node bound `undefined`, and threw.
+                    let Some(last) = &store.last else {
+                        return Err(
+                            "provided value cannot be bound to SQLite parameter 2".to_owned()
+                        );
+                    };
                     reads.all(
                         &format!(
                             "{COLUMNS} from message_nodes where session_id = ? and row_id > ? order by row_id"
                         ),
-                        (session, store.last.bound()),
+                        (session, last.bound()),
                     )?
                 };
                 let counted = reads.get(
@@ -164,7 +174,7 @@ impl Store {
             rows: Vec::new(),
             nodes: HashMap::new(),
             count: 0,
-            last: Cell::Null,
+            last: Some(Cell::Null),
             head: Key::Undefined,
             chain: Chain::default(),
         }
@@ -175,7 +185,7 @@ impl Store {
     fn holds(&self, row: &Row) -> bool {
         self.nodes
             .get(&row.node)
-            .is_some_and(|&at| self.rows[at].message.same(&row.message))
+            .is_some_and(|&at| same_of(self.rows[at].message.as_ref(), row.message.as_ref()))
     }
 
     /// `row` as its node's row (`store.nodes.set`): in the place of the
@@ -205,7 +215,9 @@ impl Store {
     pub(super) fn newest_child(&self, parent: &Key) -> Option<&Row> {
         let mut newest: Option<&Row> = None;
         for row in &self.rows {
-            if row.parent == *parent && newest.is_none_or(|newest| row.id.greater(&newest.id)) {
+            if row.parent == *parent
+                && newest.is_none_or(|newest| greater_of(row.id.as_ref(), newest.id.as_ref()))
+            {
                 newest = Some(row);
             }
         }
@@ -214,14 +226,13 @@ impl Store {
 }
 
 impl Row {
-    /// A row as a query read it. A query names each column, so none is
-    /// missing.
+    /// A row as a query read it.
     fn new(mut columns: sqlite::Row, keys: &mut Keys) -> Self {
-        let mut column = |name: &str| columns.take(name).unwrap_or(Cell::Null);
+        let mut column = |name: &str| columns.take(name);
         Self::of(
             column("row_id"),
-            &column("node_id"),
-            &column("parent_node_id"),
+            column("node_id").as_ref(),
+            column("parent_node_id").as_ref(),
             column("chat_message"),
             column("created_at"),
             keys,
@@ -230,17 +241,17 @@ impl Row {
 
     /// A row of these columns.
     pub(super) fn of(
-        id: Cell,
-        node: &Cell,
-        parent: &Cell,
-        message: Cell,
-        created_at: Cell,
+        id: Option<Cell>,
+        node: Option<&Cell>,
+        parent: Option<&Cell>,
+        message: Option<Cell>,
+        created_at: Option<Cell>,
         keys: &mut Keys,
     ) -> Self {
         Self {
             id,
-            node: node.key(keys),
-            parent: parent.key(keys),
+            node: key_of(node, keys),
+            parent: key_of(parent, keys),
             message,
             created_at,
             parsed: OnceCell::new(),
@@ -253,8 +264,13 @@ impl Row {
         if let Some(message) = self.parsed.get() {
             return Ok(message);
         }
-        let message = self.message.parse().map_err(|unparsed| {
-            let what = format!("Devin's message at row {}", self.id.text());
+        // `JSON.parse(undefined)` reads the text "undefined", which is no JSON.
+        let parsed = self
+            .message
+            .as_ref()
+            .map_or(Err(Unparsed::NoJson), Cell::parse);
+        let message = parsed.map_err(|unparsed| {
+            let what = format!("Devin's message at row {}", text_of(self.id.as_ref()));
             let no_json = format!("{what} is no JSON");
             unparsed.said(&what, no_json)
         })?;

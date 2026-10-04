@@ -131,6 +131,35 @@ impl Cell {
     }
 }
 
+/// `String(row.name)`: `undefined` where the row has no such column, as a
+/// row's names are its columns' as the table declares them.
+pub(crate) fn text_of(cell: Option<&Cell>) -> Cow<'_, str> {
+    cell.map_or(Cow::Borrowed("undefined"), Cell::text)
+}
+
+/// `left === right` of two rows' columns: `undefined` is itself alone.
+pub(crate) fn same_of(left: Option<&Cell>, right: Option<&Cell>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => left.same(right),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+/// `left > right` of two rows' columns: `undefined` is no number and no
+/// text, never greater nor less.
+pub(crate) fn greater_of(left: Option<&Cell>, right: Option<&Cell>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => left.greater(right),
+        _ => false,
+    }
+}
+
+/// The key of a row's column: `undefined` where the row has no such column.
+pub(crate) fn key_of(cell: Option<&Cell>, keys: &mut Keys) -> Key {
+    cell.map_or(Key::Undefined, |cell| cell.key(keys))
+}
+
 /// Why a cell is no JSON value here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Unparsed {
