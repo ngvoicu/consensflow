@@ -314,11 +314,16 @@ button:disabled { opacity: .45; cursor: default; }
    column's width as given, and a width mixing % and px as none at all. */
 .kanban .kanban-staff { width: 176px; }
 .kanban th[data-state="finished"] { color: var(--muted); }
-/* Delete finished sits under the heading it acts on, as an icon whose tip
-   opens leftward into the board, and the other headings stay level. */
-.kanban thead th { vertical-align: top; }
-.kanban thead .icon-button { display: grid; margin-top: 6px; width: 28px; height: 24px; border-radius: 6px; }
+/* Delete finished sits beside the heading it acts on, as an icon whose tip
+   opens leftward into the board; its margins keep the headings level. */
+.kanban thead th { vertical-align: middle; white-space: nowrap; }
+.kanban thead .icon-button { display: inline-grid; vertical-align: middle; margin: -6px 0 -6px 8px; width: 26px; height: 22px; border-radius: 6px; }
 .kanban thead .icon-button[data-tip]::after { left: auto; right: 0; }
+/* A member's row folds its sessions' rows away: the arrow turns down while they show. */
+.icon-button.fold-sessions { width: 22px; height: 22px; border-radius: 6px; flex: none; }
+.fold-sessions .icon { width: 14px; height: 14px; transition: transform .15s; }
+.fold-sessions[aria-expanded="true"] .icon { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .fold-sessions .icon { transition: none; } }
 .kanban tbody td, .kanban tbody th {
   vertical-align: top;
   padding: 8px;

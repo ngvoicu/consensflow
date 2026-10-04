@@ -49,6 +49,7 @@ export const ICONS = {
     'M5 7.5h14',
     'M7 4h10',
   ],
+  fold: ['M9 6l6 6-6 6'],
 }
 /** How many cards a cell shows: more are one tile, a stack and how many, whose cards open in a dialog. */
 const CELL_HOLDS = 3
@@ -121,12 +122,26 @@ const rowTasks = (lane, board) =>
   )
 
 /**
+ * The cards a row holds, the newest first: a folded member's row holds its
+ * sessions' too, so folding takes rows off the board and no work with them.
+ */
+function rowCards(row, board, folded) {
+  if (!folded) return rowTasks(row, board)
+  return [row, ...row.sessions]
+    .flatMap((lane) => rowTasks(lane, board))
+    .sort((a, b) => b.number - a.number)
+}
+
+/** What keeps a member's row unfolded on a board: its project, member and role. */
+const foldKey = (board, { handle, role }) => `${board.project.id}:${handle}:${role}`
+
+/**
  * The board's rows: a member with several roles heads one row per role, each
- * followed by that role's sessions and holding that role's cards, so a worker
- * and a reviewer read as two things; everything else in lane order. The human
- * has no row: nothing assigns them a task, and what is for them is in For you.
- * The chief has one only while a task is on it, its own or one it asked for:
- * what it is doing is on its card in the dock.
+ * holding that role's cards and, in `sessions`, that role's sessions, so a
+ * worker and a reviewer read as two things; everything else in lane order. The
+ * human has no row: nothing assigns them a task, and what is for them is in For
+ * you. The chief has one only while a task is on it, its own or one it asked
+ * for: what it is doing is on its card in the dock.
  */
 function boardRows(board) {
   const ordered = laneOrder(board.lanes).filter(
@@ -153,10 +168,10 @@ function boardRows(board) {
         ...lane,
         participant: { ...participant, role, roles: [role] },
         tasks: lane.tasks.filter((task) => roleOf(task, roles) === role),
+        sessions: sessions.filter((session) => session.participant.role === role),
       })
-      rows.push(...sessions.filter((session) => session.participant.role === role))
     }
-    // A session of a role the member no longer holds still shows, last.
+    // A session of a role the member no longer holds still shows, last, on its own.
     rows.push(...sessions.filter((session) => !roles.includes(session.participant.role)))
   }
   return rows
@@ -344,6 +359,10 @@ export class BoardView {
   #stackCards
   /** The cell the stack dialog was opened on: its project, its row's handle and role, its column. */
   #stacked = null
+  /** The members' rows the human unfolded, by foldKey: every other is folded. */
+  #unfolded = new Set()
+  /** What the board was drawn from last, to draw it again when a row folds. */
+  #drawn = null
 
   constructor(root, stack, actions) {
     this.#root = root
@@ -359,6 +378,7 @@ export class BoardView {
 
   /** Redraw from the daemon's state; `shows(participant)` says whose terminals the human asked to see. */
   render({ board, inbox, agents = [], shows, now = Date.now() }) {
+    this.#drawn = { board, inbox, agents, shows }
     this.#board = board
     this.#shows = shows
     const models = new Map(agents.map((agent) => [agent.name, agent]))
@@ -574,8 +594,13 @@ export class BoardView {
     }
     head.append(headRow)
     const body = element('tbody')
-    for (const lane of boardRows(board)) {
-      body.append(this.#row(lane, board, models.get(lane.participant.agent), now))
+    for (const row of boardRows(board)) {
+      const folded = this.#folded(board, row)
+      body.append(this.#row(row, board, models.get(row.participant.agent), now, folded))
+      if (folded !== false) continue
+      for (const session of row.sessions) {
+        body.append(this.#row(session, board, models.get(session.participant.agent), now, null))
+      }
     }
     // A project with nobody on its staff looks like any other board, and every
     // task the chief hands out is refused: say it where the members would be.
@@ -611,14 +636,25 @@ export class BoardView {
     ]
   }
 
-  #row(lane, board, agent, now) {
+  /**
+   * Whether a member's row is folded, its sessions' rows off the board and
+   * their cards on its own: every one is until the human unfolds it. Null for
+   * a row with no sessions under it.
+   */
+  #folded(board, row) {
+    if ((row.sessions?.length ?? 0) === 0) return null
+    return !this.#unfolded.has(foldKey(board, row.participant))
+  }
+
+  #row(lane, board, agent, now, folded) {
     const { participant } = lane
     const row = element('tr')
     row.dataset.handle = participant.handle
     row.dataset.role = participant.role
     if (participant.member) row.dataset.session = participant.member
-    row.append(this.#rowHead(lane, board, agent, now))
-    const mine = rowTasks(lane, board)
+    if (folded !== null) row.dataset.folded = String(folded)
+    row.append(this.#rowHead(lane, board, agent, now, folded))
+    const mine = rowCards(lane, board, folded === true)
     for (const [state, label] of COLUMNS) {
       const cell = element('td')
       cell.dataset.state = state
@@ -635,11 +671,12 @@ export class BoardView {
     return row
   }
 
-  #rowHead(lane, board, agent, now) {
+  #rowHead(lane, board, agent, now, folded) {
     const { participant } = lane
     const head = element('th', 'row-head')
     head.setAttribute('scope', 'row')
     const title = element('div', 'row-title')
+    if (folded !== null) title.append(this.#foldButton(lane, folded))
     title.append(lamp(lane, now), element('span', 'row-name', laneName(participant)))
     head.append(title)
     // The chief's row only holds its tasks: what it is doing, what it runs on
@@ -655,6 +692,24 @@ export class BoardView {
     }
     head.append(this.#rowTools(lane, board))
     return head
+  }
+
+  /** Unfolds a member's row, its sessions' rows under it, or folds it again. */
+  #foldButton({ participant, sessions }, folded) {
+    const sessionsOf = `${laneName(participant)}'s ${plural(sessions.length, 'session')}`
+    const toggle = iconButton(
+      ICONS.fold,
+      folded ? 'Show sessions' : 'Hide sessions',
+      () => {
+        const key = foldKey(this.#board, participant)
+        if (!this.#unfolded.delete(key)) this.#unfolded.add(key)
+        this.render(this.#drawn)
+      },
+      `${folded ? 'Show' : 'Hide'} ${sessionsOf}`,
+      'fold-sessions',
+    )
+    toggle.setAttribute('aria-expanded', String(!folded))
+    return toggle
   }
 
   /**
@@ -739,12 +794,16 @@ export class BoardView {
     const { project, handle, role, state } = this.#stacked
     const row =
       this.#board.project.id === project
-        ? boardRows(this.#board).find(
-            ({ participant }) => participant.handle === handle && participant.role === role,
-          )
+        ? boardRows(this.#board)
+            .flatMap((member) => [member, ...(member.sessions ?? [])])
+            .find(({ participant }) => participant.handle === handle && participant.role === role)
         : undefined
     const held =
-      row === undefined ? [] : rowTasks(row, this.#board).filter((task) => columnOf(task) === state)
+      row === undefined
+        ? []
+        : rowCards(row, this.#board, this.#folded(this.#board, row) === true).filter(
+            (task) => columnOf(task) === state,
+          )
     if (held.length === 0) {
       this.#stack.close()
       return

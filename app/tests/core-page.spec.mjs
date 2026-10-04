@@ -505,6 +505,7 @@ test("gives a session's lane the human's hand on its window: show (opening a clo
     },
   )
   await open(page, data)
+  await unfold(page)
   // A live window and a closed one offer the same Show: nothing closes a
   // window from the board, the work in it is paused or cancelled on its card.
   const live = page.locator('tr[data-handle="zeus-amber-pine"]')
@@ -575,6 +576,7 @@ test('gives a member with two roles a row per role, each with its own sessions a
     },
   )
   await open(page, data)
+  await unfold(page)
   const rows = await page
     .locator('tbody tr[data-handle^="zeus"]')
     .evaluateAll((rows) => rows.map((row) => [row.dataset.handle, row.dataset.role]))
@@ -621,6 +623,7 @@ test("draws a member's sessions as lanes under it, named, and counts its open wi
     },
   )
   await open(page, data)
+  await unfold(page)
   const rows = page.locator('table[aria-label="Tasks"] tbody tr')
   await expect(rows.evaluateAll((nodes) => nodes.map((n) => n.dataset.handle))).resolves.toEqual([
     'chief',
@@ -786,6 +789,7 @@ test("says the effort an agent runs at, after its model: on a member's row, a se
     },
   )
   await open(page, data)
+  await unfold(page)
   const meta = (handle) => page.locator(`tr[data-handle="${handle}"] .row-meta`)
   await expect(
     page.locator('#stage .terminal-card[data-handle="chief"] .terminal-meta'),
@@ -1926,6 +1930,7 @@ test('a redraw leaves the keyboard where the human put it in the dock', async ({
     pane: { id: 'p1-zeus-amber-pine', generation: 1 },
   })
   await open(page, data)
+  await unfold(page)
   await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   const keyboard = dock.locator('.terminal-card[data-handle="zeus-amber-pine"] .stub-input')
@@ -1970,6 +1975,7 @@ test('a redraw leaves the keyboard where it was, on the board, the projects and 
     pane: { id: 'p1-zeus-amber-pine', generation: 1 },
   })
   await open(page, data)
+  await unfold(page)
   // A lamp changed, and drawn: the redraw has happened.
   const lampDrawn = async (handle, state) => {
     await changed(page, setLamp, [handle, state])
@@ -2074,6 +2080,7 @@ test('the dock stays where the human scrolled it across redraws', async ({ page 
     pane: { id: 'p1-zeus-amber-pine', generation: 1 },
   })
   await open(page, data)
+  await unfold(page)
   await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   const stage = page.getByRole('region', { name: 'Terminals' })
   await expect(stage.locator('.terminal-card')).toHaveCount(3)
@@ -2992,7 +2999,9 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
   page,
 }) => {
   await open(page, closedFoundry())
+  await unfold(page)
   await chooseProject(page, 'foundry')
+  await unfold(page)
   const main = page.locator('main.main')
   await expect(main).toHaveAttribute('data-suspended', 'true')
   const banner = page.getByRole('status').filter({ hasText: 'foundry is closed.' })
@@ -3016,7 +3025,7 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
   await expect(switchChief).toHaveCount(0)
   await banner.getByRole('button', { name: 'Resume project' }).focus()
   const reached = []
-  for (let press = 0; press < 3; press += 1) {
+  for (let press = 0; press < 4; press += 1) {
     await page.keyboard.press('Tab')
     reached.push(
       await page.evaluate(
@@ -3025,7 +3034,13 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
       ),
     )
   }
-  expect(reached).toEqual(['Open task', 'Open task', 'T-3, Write the lexer, Done, from @chief'])
+  // Folding a member's sessions only reads: it stays, as the cards do.
+  expect(reached).toEqual([
+    'Open task',
+    'Open task',
+    "Hide @zeus's 1 session",
+    'T-3, Write the lexer, Done, from @chief',
+  ])
   // What it says is all there to read: a card opens its task, with nothing to do on it.
   await page.locator('button.card[data-task="3"]').click()
   const drawer = page.getByRole('complementary', { name: 'Task T-3' })
@@ -3035,6 +3050,7 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
   await banner.getByRole('button', { name: 'Resume project' }).click()
   await expect.poll(() => calls(page, 'project.resume')).toEqual([{ project: 2 }])
   await chooseProject(page, 'harbour')
+  await unfold(page)
   await expect(main).toHaveAttribute('data-suspended', 'false')
   await expect(page.getByRole('button', { name: 'Staff' })).toBeEnabled()
 })
@@ -3094,6 +3110,9 @@ test('lays the windows out: the chief a whole column, the members two to a colum
       },
       { id, name },
     )
+    // A member's sessions fold under its row, which the redraw gives an arrow.
+    await page.locator('tr[data-handle="zeus"] button.fold-sessions').waitFor()
+    await unfold(page)
     await page.getByRole('button', { name: `Show @zeus · ${name}'s terminal` }).click()
   }
   // One member: a column of its own, as tall as the chief's.
@@ -3605,6 +3624,7 @@ test("takes a closed window's card out of the dock: its lane says so and opens i
     pane: { id: 'p1-zeus-amber-pine', generation: 9 },
   })
   await open(page, data)
+  await unfold(page)
   await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   const dock = page.getByRole('complementary', { name: 'Terminal dock' })
   await expect(dock.locator('.terminal-card[data-handle="zeus-amber-pine"]')).toHaveCount(1)
@@ -3654,6 +3674,12 @@ function atWork() {
   return data
 }
 
+/** Every member's row unfolded, its sessions' rows under it, as the human unfolds them. */
+async function unfold(page) {
+  const folded = page.locator('button.fold-sessions[aria-expanded="false"]')
+  while ((await folded.count()) > 0) await folded.first().click()
+}
+
 /** The handles of the terminals in the dock, in their order there. */
 const docked = (page) =>
   page
@@ -3693,6 +3719,7 @@ test("keeps a session's terminal out of the dock until the human shows it, and t
     messages: [],
   }
   await open(page, data)
+  await unfold(page)
   await expect.poll(() => docked(page)).toEqual(['chief'])
   const worker = page.locator('tr[data-handle="zeus-amber-pine"]')
   await expect(worker.locator('.row-status')).toHaveText('Working')
@@ -3750,6 +3777,7 @@ test("opens a task's closed window from its drawer, and offers none for a task n
     messages: [],
   }
   await open(page, data)
+  await unfold(page)
   await page.locator('tr[data-handle="zeus-brisk-birch"] button.card[data-task="23"]').click()
   const drawer = page.getByRole('complementary', { name: 'Task T-23' })
   await drawer.getByRole('button', { name: "Show @zeus · brisk-birch's terminal" }).click()
@@ -3768,6 +3796,7 @@ test("shows a session's terminal in front, the dock unfolded, and hides it again
   page,
 }) => {
   await open(page, atWork())
+  await unfold(page)
   const row = page.locator('tr[data-handle="zeus-amber-pine"]')
   const card = page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
   // Asked for with the dock folded away, it unfolds the dock.
@@ -3803,6 +3832,7 @@ test("offers Hide alone on a session's card: its window works on, hidden from th
   page,
 }) => {
   await open(page, atWork())
+  await unfold(page)
   const row = page.locator('tr[data-handle="zeus-amber-pine"]')
   const card = page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
   await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
@@ -3824,6 +3854,7 @@ test("keeps a shown session's card head on one line, Hide in it, at the default 
   page,
 }) => {
   await open(page, atWork())
+  await unfold(page)
   await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   const card = page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
   await expect.poll(() => named(card.locator('button'))).toEqual(['Hide terminal'])
@@ -3853,6 +3884,7 @@ test("keeps a hidden terminal's scrollback: its output goes on arriving, and sho
   page,
 }) => {
   await open(page, twoOpen(atWork()))
+  await unfold(page)
   const row = page.locator('tr[data-handle="zeus-amber-pine"]')
   const print = (seq, text) =>
     page.evaluate(
@@ -3887,15 +3919,19 @@ test("keeps a hidden terminal's scrollback: its output goes on arriving, and sho
   await expect.poll(lexer).toEqual([['parsing done', true, false]])
   // Away to foundry and back: shown as it was, every line still there.
   await chooseProject(page, 'foundry')
+  await unfold(page)
   await expect.poll(() => docked(page)).toEqual(['chief'])
   await chooseProject(page, 'harbour')
+  await unfold(page)
   await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
   expect(await lexer()).toEqual([['parsing done', true, false]])
   // Hidden, it stays hidden there and back.
   await row.getByRole('button', { name: "Hide @zeus · amber-pine's terminal" }).click()
   await chooseProject(page, 'foundry')
+  await unfold(page)
   await expect(page.locator('#project-title')).toHaveText('foundry')
   await chooseProject(page, 'harbour')
+  await unfold(page)
   await expect(page.locator('#project-title')).toHaveText('harbour')
   await expect.poll(() => docked(page)).toEqual(['chief'])
   expect(await lexer()).toEqual([['parsing done', false, false]])
@@ -3905,6 +3941,7 @@ test("takes a shown terminal out with its window; the session's next window wait
   page,
 }) => {
   await open(page, atWork())
+  await unfold(page)
   const row = page.locator('tr[data-handle="zeus-amber-pine"]')
   /** The session's window as the board has it: `generation`, or none. */
   const windowOf = (generation) =>
@@ -3953,9 +3990,11 @@ test("forgets on a reload which terminals were shown: the dock starts again with
   page,
 }) => {
   await open(page, atWork())
+  await unfold(page)
   await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
   await page.reload()
+  await unfold(page)
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
   await expect.poll(() => docked(page)).toEqual(['chief'])
   await expect(
@@ -3970,6 +4009,7 @@ test("keeps the chief's card first in the dock while its window is down and a se
   const chief = data.boards[1].lanes.find((l) => l.participant.handle === 'chief')
   Object.assign(chief, { activity: { state: 'starting' }, pane: null })
   await open(page, data)
+  await unfold(page)
   const card = page.locator('#stage .terminal-card[data-handle="chief"]')
   await expect(card.locator('.terminal-status')).toHaveText('Starting')
   await expect(
@@ -4099,10 +4139,59 @@ function crowded(count) {
   return data
 }
 
+test("folds a member's sessions under its row until the human unfolds them, their cards on its row meanwhile", async ({
+  page,
+}) => {
+  await open(page, atWork())
+  const member = page.locator('tr[data-handle="zeus"]')
+  const session = page.locator('tr[data-handle="zeus-amber-pine"]')
+  // Folded at first: the session's row is off the board, its card on the member's.
+  await expect(member).toHaveAttribute('data-folded', 'true')
+  await expect(session).toHaveCount(0)
+  await expect(member.locator('button.card[data-task="21"]')).toHaveCount(1)
+  const toggle = member.getByRole('button', { name: "Show @zeus's 1 session" })
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  // Unfolded: the session's row is under it, holding its card and its tools.
+  await toggle.click()
+  await expect(member).toHaveAttribute('data-folded', 'false')
+  await expect(session.locator('button.card[data-task="21"]')).toHaveCount(1)
+  await expect(member.locator('button.card[data-task="21"]')).toHaveCount(0)
+  await expect(
+    session.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }),
+  ).toBeVisible()
+  // It stays unfolded across a redraw, and folds again on its arrow.
+  await page.evaluate(() => window.__listeners.get('state-changed')())
+  await expect(session).toHaveCount(1)
+  const unfolded = member.getByRole('button', { name: "Hide @zeus's 1 session" })
+  await expect(unfolded).toHaveAttribute('aria-expanded', 'true')
+  await unfolded.click()
+  await expect(session).toHaveCount(0)
+  await expect(member.locator('button.card[data-task="21"]')).toHaveCount(1)
+})
+
+test('puts Delete finished beside its heading, the headings level', async ({ page }) => {
+  const data = model()
+  const zeus = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  zeus.tasks.push(task(5, 'Old spike', 'accepted', 'chief', 'zeus', 90))
+  await open(page, data)
+  const finished = page.locator('th[data-state="finished"]')
+  const button = finished.getByRole('button', { name: 'Delete finished' })
+  const [heading, done, icon] = [
+    await finished.boundingBox(),
+    await page.locator('th[data-state="done"]').boundingBox(),
+    await button.boundingBox(),
+  ]
+  expect(Math.abs(heading.height - done.height)).toBeLessThan(2)
+  // Beside the word, on its line: its middle at the heading's.
+  expect(Math.abs(icon.y + icon.height / 2 - (heading.y + heading.height / 2))).toBeLessThan(3)
+  expect(icon.x).toBeGreaterThan(heading.x + 40)
+})
+
 test('stacks a cell of four cards or more into one tile: a stack, and how many', async ({
   page,
 }) => {
   await open(page, crowded(3))
+  await unfold(page)
   const cell = page.locator('tr[data-handle="zeus-amber-pine"] td[data-state="finished"]')
   await expect(cell.locator('button.card')).toHaveCount(3)
   /** Task `number`, finished on the session's row. */
@@ -4138,6 +4227,7 @@ test("lists a stack's tasks in a dialog, the newest first, and opens the one cho
   page,
 }) => {
   await open(page, crowded(5))
+  await unfold(page)
   const tile = page.getByRole('button', { name: '5 finished tasks of @zeus · amber-pine' })
   await tile.click()
   const dialog = page.getByRole('dialog', { name: 'Finished tasks of @zeus · amber-pine' })
@@ -4242,6 +4332,7 @@ test('keeps every button of a lane inside its column, however narrow the board',
     },
   )
   await open(page, data)
+  await unfold(page)
   // The board at its narrowest, the windows given the rest.
   const grip = page.locator('#board-resize')
   await grip.focus()
@@ -4282,6 +4373,7 @@ test("gives a member's heading row no buttons, and a closed session's row no Tra
     pane: null,
   })
   await open(page, data)
+  await unfold(page)
   await expect(page.locator('tr[data-handle="diana"] .row-tools button')).toHaveCount(0)
   await expect
     .poll(() => toolsOf(page.locator('tr[data-handle="diana-amber-pine"]')))
@@ -4480,10 +4572,12 @@ test("acts on the project a control was drawn for, while another one's board is 
     pane: null,
   })
   await open(page, data)
+  await unfold(page)
   await page.evaluate(() => {
     window.__delay['board.get'] = 400
   })
   await chooseProject(page, 'foundry')
+  await unfold(page)
   // harbour's board is still the one shown: what is done on it is done in harbour.
   await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   await expect
