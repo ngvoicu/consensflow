@@ -353,6 +353,8 @@ version = "3.0.0-alpha.73"
 dependencies = [
  "serde",
  "serde_json",
+ "tempfile",
+ "winapi-util",
 ]
 
 [[package]]

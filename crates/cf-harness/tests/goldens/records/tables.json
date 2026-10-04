@@ -4131,5 +4131,31 @@
       ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=>",
       ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><="
     ]
+  },
+  "reasons": {
+    "ours": [
+      "missing session id",
+      "missing explicit env argument",
+      "unknown kind: ",
+      "unreadable: no claude session ",
+      "unreadable: no codex rollout for ",
+      "unreadable: no pi session ",
+      "unreadable: no opencode store for ",
+      "unreadable: no opencode session ",
+      "unreadable: missing home in env",
+      "unreadable: missing native ",
+      "unreadable: malformed JSONL at record ",
+      "unreadable: empty claude session ",
+      "unreadable: empty codex rollout for ",
+      "unreadable: empty pi session ",
+      "unreadable: malformed OpenCode ",
+      "unreadable: missing OpenCode event ",
+      "unreadable: missing Devin session",
+      "unreadable: conflicting Devin completion evidence",
+      "unreadable: cyclic Devin main chain",
+      "unreadable: missing Devin main chain ancestor",
+      "unreadable: invalid Devin message identity",
+      "unreadable: unknown Devin message role"
+    ]
   }
 }

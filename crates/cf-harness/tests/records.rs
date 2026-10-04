@@ -180,31 +180,23 @@ fn scenarios(group: &str) -> Vec<Scenario> {
     serde_json::from_str(&text).unwrap_or_else(|error| panic!("{group}: {error}"))
 }
 
-/// The sentences a reading's reason may be: ConsensFlow's own, or a
-/// platform's failure, which only its prefix promises.
-fn a_reason_it_may_have(reason: &str) -> bool {
-    const OURS: [&str; 17] = [
-        "missing session id",
-        "unreadable: no claude session ",
-        "unreadable: no codex rollout for ",
-        "unreadable: no pi session ",
-        "unreadable: no opencode store for ",
-        "unreadable: no opencode session ",
-        "unreadable: missing home in env",
-        "unreadable: missing native ",
-        "unreadable: malformed JSONL at record ",
-        "unreadable: empty ",
-        "unreadable: malformed OpenCode ",
-        "unreadable: missing OpenCode event ",
-        "unreadable: missing Devin session",
-        "unreadable: conflicting Devin completion evidence",
-        "unreadable: cyclic Devin main chain",
-        "unreadable: missing Devin main chain ancestor",
-        "unreadable: invalid Devin message identity",
-    ];
-    reason == "unreadable: «platform»"
-        || reason == "unreadable: unknown Devin message role"
-        || OURS.iter().any(|ours| reason.starts_with(ours))
+/// Whether a reading's reason is one it may have: ConsensFlow's own sentence
+/// (`ours`, by how each begins, as tables.json lists them), or a platform's
+/// failure, which only its prefix promises.
+fn a_reason_it_may_have(reason: &str, ours: &[String]) -> bool {
+    reason == "unreadable: «platform»" || ours.iter().any(|ours| reason.starts_with(ours.as_str()))
+}
+
+/// The beginnings of ConsensFlow's own reasons, from tables.json.
+fn our_reasons() -> Vec<String> {
+    let file = goldens().join("tables.json");
+    let tables: Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+    tables["reasons"]["ours"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|ours| ours.as_str().unwrap().to_owned())
+        .collect()
 }
 
 /// Whether `path` is a place under the scenario's root.
@@ -292,6 +284,7 @@ fn looks(steps: &[Step]) -> Vec<&Look> {
 
 #[test]
 fn every_look_node_took_is_read_whole_and_counted_until_the_readers_answer_it() {
+    let ours = our_reasons();
     let mut by_kind = BTreeMap::<String, usize>::new();
     let mut counted = Vec::new();
     for group in ["sequences", "suite", "sweep"] {
@@ -312,7 +305,11 @@ fn every_look_node_took_is_read_whole_and_counted_until_the_readers_answer_it() 
             for reading in &scenario.readings {
                 if reading["unknown"] == Value::Bool(true) {
                     let reason = reading["reason"].as_str().unwrap();
-                    assert!(a_reason_it_may_have(reason), "{}: {reason}", scenario.name);
+                    assert!(
+                        a_reason_it_may_have(reason, &ours),
+                        "{}: {reason}",
+                        scenario.name
+                    );
                 } else {
                     for item in reading["items"].as_array().unwrap() {
                         let at = item.as_u64().unwrap();
@@ -388,4 +385,46 @@ fn the_tables_hold_every_quota_case_and_the_collation_of_ascii() {
         .unwrap()
         .iter()
         .all(|row| row.as_str().unwrap().len() == words));
+}
+
+#[test]
+fn locale_compare_orders_every_ascii_pair_and_every_fixture_id_as_node_did() {
+    let file = goldens().join("tables.json");
+    let tables: Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+    let collation = &tables["collation"];
+    let sign = |ordering: std::cmp::Ordering| match ordering {
+        std::cmp::Ordering::Less => '<',
+        std::cmp::Ordering::Equal => '=',
+        std::cmp::Ordering::Greater => '>',
+    };
+    let characters: Vec<String> = collation["characters"]
+        .as_str()
+        .unwrap()
+        .chars()
+        .map(String::from)
+        .collect();
+    let words: Vec<&str> = collation["words"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|word| word.as_str().unwrap())
+        .collect();
+    let mut compared = 0;
+    for (table, list) in [
+        (
+            "matrix",
+            characters.iter().map(String::as_str).collect::<Vec<_>>(),
+        ),
+        ("pairs", words),
+    ] {
+        for (row, left) in collation[table].as_array().unwrap().iter().zip(&list) {
+            let expected: Vec<char> = row.as_str().unwrap().chars().collect();
+            for (column, right) in list.iter().enumerate() {
+                let ours = sign(cf_base::js::locale_compare(left, right));
+                assert_eq!(ours, expected[column], "{left:?} against {right:?}");
+                compared += 1;
+            }
+        }
+    }
+    assert!(compared > 95 * 95);
 }
