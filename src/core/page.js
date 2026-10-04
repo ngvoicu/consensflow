@@ -150,6 +150,12 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
     // Back to the board for another member of its tier, once its window is stopped.
     'task.reassign': change(async ({ project, task }) => dispatcher.reassignTask(project, task)),
 
+    // A member, or the chief, out of quota is back before its reset: the
+    // human ran its harness on another account, or a bigger plan.
+    'member.back': change(async ({ project, participant }) => ({
+      member: dispatcher.backFromQuota(project, participant),
+    })),
+
     // The human resumes without writing to the agent: the words are always these.
     'task.resume': change(async ({ project, task }) =>
       ledger.resumeTask(project, task, { by: 'human', body: RESUME_WORDS }),

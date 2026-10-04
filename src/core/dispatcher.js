@@ -57,15 +57,22 @@ import { Windows } from './windows.js'
  *   whose members of the tier have taken the fewest tasks, then the one with
  *   the fewest tasks so far, then the earliest joined; a task taken back from
  *   a member goes to another one first. When none is free the requester is
- *   told once. A review is such a task, for a reviewer. A member whose
- *   harness reports a fresh refusal (one after it was last marked out) is out
- *   until the reset it names (an hour when it names none): its tiered task
- *   goes back to open for another member and its window closes, a delivery
- *   in flight is queued again, the chief keeps its own tasks for after the
- *   reset, and nothing reaches it while out. A refusal still in the record
- *   after the reset is history, not a new one; the member is simply
- *   eligible again. A member low on quota takes nothing new. The human may
- *   also give a working or paused task back to the board (Reassign).
+ *   told once. A review is such a task, for a reviewer. A window whose
+ *   harness reports a fresh refusal (one after its member was last marked
+ *   out or back) takes its member out until the reset it names (an hour when
+ *   it names none), or the later one it is out until already: each of a
+ *   member's windows that runs into it gives its tiered task back to open
+ *   for another member, its window closing, or holds it to go on by itself
+ *   at the reset when that is near or nobody else could take it; a task given
+ *   by name waits with it, a delivery in flight is queued again, the chief
+ *   keeps its own tasks for after the reset, and nothing reaches the member
+ *   while out. A refusal still in the record after the reset is history, not
+ *   a new one: the member is simply eligible again, and a turn the refusal
+ *   cut short goes on, failing nothing. A member is back before its reset
+ *   once one of its windows gets a turn through (its harness on another
+ *   account), or when the human says so; what was held for it goes on. A
+ *   member low on quota takes nothing new. The human may also give a working
+ *   or paused task back to the board (Reassign).
  * - What a human typed in a window and left unsent holds nothing (the
  *   owner's choice, 2026-10-01): a paste goes in behind it. The pane host
  *   holds only their keys pressed during a paste, until it is in.
@@ -392,6 +399,25 @@ export class Dispatcher {
    * it only then: no two windows ever work on one task. A window that would
    * not stop keeps the task, and the human is told.
    */
+  /**
+   * The human says a member, or the chief, out of quota is back before its
+   * reset: its harness runs on another account now, or a bigger plan. What
+   * was held for it goes on, and messages reach it again; a window that runs
+   * into its quota once more takes it out again.
+   */
+  backFromQuota(projectId, handle) {
+    const project = this.#knownProject(projectId)
+    const participant = project.participants.find((p) => p.handle === handle)
+    if (participant === undefined || participant.role === 'human') {
+      throw new Error(`no @${handle} in project ${projectId}`)
+    }
+    const member = this.#ledger.markBack(this.#scheduler.memberOf(project, participant).id, {
+      because: 'by @human',
+    })
+    this.#changed()
+    return member
+  }
+
   async reassignTask(projectId, number) {
     this.#ledger.checkRelease(projectId, number)
     const { assignee } = this.#ledger.task(projectId, number)
@@ -698,10 +724,17 @@ export class Dispatcher {
       return
     }
     if (observed.quota !== undefined) this.#scheduler.recordQuota(runtime, owner, observed.quota)
-    const out = this.#scheduler.isOut(owner)
-    if (!out && this.#scheduler.freshRefusal(owner, runtime.quota.reported)) {
+    if (this.#scheduler.refusedHere(runtime, owner)) {
       await this.#outOfQuota(project, participant, runtime, owner)
       return
+    }
+    let out = this.#scheduler.isOut(owner)
+    // A window that got a turn through after its member was marked out says
+    // the quota is back before its reset: the member is back.
+    if (out && this.#scheduler.answeredSince(owner, observed)) {
+      this.#ledger.markBack(owner.id, { because: `@${participant.handle} answered again` })
+      this.#changed()
+      out = false
     }
     if (out) {
       // A chief out of quota has no turn to finish: the switch the human asked for goes now.
@@ -727,7 +760,9 @@ export class Dispatcher {
     if (participant.role !== 'chief') {
       await this.#windows.interruptIfStopped(participant, runtime, observed)
       if (this.#forgotten(runtime)) return
-      this.#deliveries.collect(project, participant, observed)
+      // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
+      if (this.#scheduler.cutShort(observed)) this.#scheduler.goOn(project, participant)
+      else this.#deliveries.collect(project, participant, observed)
       if (await this.#windows.closeIfFree(runtime)) return
     }
     const idle =
@@ -785,17 +820,21 @@ export class Dispatcher {
   }
 
   /**
-   * A member whose harness just refused it: out until the reset it names (an
-   * hour when it names none). What it was receiving is queued again, its
-   * tiered work goes back to the board; its own tasks (the chief's) wait for it.
-   * The session's window then closes, as any window whose work left it: a
+   * A window whose harness just refused it: its member is out until the
+   * reset it names (an hour when it names none), or the later one it is out
+   * until already. What the window was receiving is queued again, its work
+   * goes back to the board or waits with it; the chief's own tasks wait for
+   * it. A session's window whose work left it then closes, as any does: a
    * harness that waits out its limit (OpenCode) would otherwise take the task
    * up again at the reset, beside whoever has it now.
    */
   async #outOfQuota(project, participant, runtime, owner) {
-    const until = this.#scheduler.resetOf(runtime.quota.reported)
+    this.#scheduler.handled(runtime)
+    const { outUntil: until } = this.#ledger.markOut(owner.id, {
+      until: this.#scheduler.resetOf(runtime.quota.reported),
+      reason: 'out of quota',
+    })
     this.#windows.setActivity(runtime, { state: 'out', reason: `out of quota until ${until}` })
-    this.#ledger.markOut(owner.id, { until, reason: 'out of quota' })
     if (runtime.delivery.delivering !== null) {
       const { delivering } = runtime.delivery
       runtime.delivery.delivering = null
@@ -910,7 +949,7 @@ export class Dispatcher {
           activity: { state: 'closed' },
         },
         delivery: { delivering: null, held: null, unsent: false },
-        quota: { reported: null, lowUntil: null },
+        quota: { reported: null, lowUntil: null, handled: null },
         pendingSwitch: null,
         copied: null,
       }

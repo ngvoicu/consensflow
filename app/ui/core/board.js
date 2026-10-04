@@ -191,9 +191,24 @@ export function laneOrder(lanes) {
 }
 
 const who = (handle) => (handle === null || handle === undefined ? 'ConsensFlow' : `@${handle}`)
-/** "18:30": a time of day, as when a member out of quota is back. */
+/** "18:30": a time of day. */
 const clock = (iso) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+/**
+ * When a member out of quota is back: "18:30" today, "Tue 11:00" within the
+ * week, "Oct 13, 11:00" further off. A weekly limit's reset read "11:00"
+ * two days early, as if already past (poker-lab, 2026-10-04).
+ */
+const backAt = (iso, now = Date.now()) => {
+  const at = new Date(iso)
+  const time = clock(iso)
+  const today = new Date(now)
+  if (at.toDateString() === today.toDateString()) return time
+  if (at.getTime() - today.getTime() < 6 * 86_400_000) {
+    return `${at.toLocaleDateString([], { weekday: 'short' })} ${time}`
+  }
+  return `${at.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`
+}
 const outOfQuota = (participant, now) =>
   participant.outUntil !== null && Date.parse(participant.outUntil) > now
 /** "@zeus · amber-pine" for a session; the member's own name otherwise. */
@@ -232,7 +247,7 @@ function route(task) {
       : `blocked by ${taskNumbers(task.blockedBy)} · ${waitsFor}`
   }
   if (task.state === 'paused' && task.heldUntil) {
-    return `out of quota until ${clock(task.heldUntil)} · from ${who(task.requester)}`
+    return `out of quota until ${backAt(task.heldUntil)} · from ${who(task.requester)}`
   }
   return task.blockedBy.length === 0
     ? `from ${who(task.requester)}`
@@ -290,7 +305,7 @@ export function laneStatus(lane, board, now) {
     return ['switching', `Switching the chief to ${lane.switching.agent} after this turn`]
   }
   if (outOfQuota(participant, now)) {
-    return ['out', `Out of quota until ${clock(participant.outUntil)}`]
+    return ['out', `Out of quota until ${backAt(participant.outUntil, now)}`]
   }
   if (lane.holding) {
     return ['holding', 'A message waits until you send or erase what you typed here']
@@ -305,6 +320,18 @@ export function laneStatus(lane, board, now) {
   if (participant.member !== null && state === 'closed') return null
   return [state, ACTIVITY_LABEL[state] ?? 'No window']
 }
+
+/**
+ * The human's way to try a member, or the chief, out of quota again before
+ * its reset: its harness runs on another account now, or a bigger plan.
+ */
+export const tryAgain = (participant, action) =>
+  button(
+    'Try again now',
+    'quiet-button try-again',
+    action,
+    `Try ${laneName(participant)} again now, before its quota resets`,
+  )
 
 /** A participant's lamp: what its window is doing, at a glance, or that it is out of quota. */
 export function lamp({ participant, activity }, now) {
@@ -689,6 +716,9 @@ export class BoardView {
       const status = element('span', 'row-status', text)
       status.dataset.state = state
       head.append(status)
+      if (state === 'out' && acts(board)) {
+        head.append(tryAgain(participant, this.#onLane(this.#actions.onTryAgain, participant)))
+      }
     }
     head.append(this.#rowTools(lane, board))
     return head

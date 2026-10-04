@@ -57,6 +57,13 @@ async function withPage(fn) {
     async reassignTask(project, number) {
       return ledger.releaseTask(project, number, { because: 'by @human' })
     },
+    backFromQuota(project, handle) {
+      const participant = ledger.project(project).participants.find((p) => p.handle === handle)
+      if (participant === undefined || participant.role === 'human') {
+        throw new Error(`no @${handle} in project ${project}`)
+      }
+      return ledger.markBack(participant.memberId ?? participant.id, { because: 'by @human' })
+    },
     windows: [],
     async openWindow(project, handle) {
       dispatcher.windows.push(['open', handle])
@@ -494,6 +501,31 @@ describe('the page protocol of the daemon', () => {
       await assert.rejects(
         operations['task.reassign']({ project: project.id, task: own.task.number }),
         /given by name, not by tier/,
+      )
+    })
+  })
+
+  it('tries a member out of quota again before its reset, its held work going on', async () => {
+    await withPage(async ({ ledger, operations, kicks }) => {
+      const { project } = await operations['project.open']({
+        directory: '/work/app',
+        agent: 'leto',
+      })
+      await operations['member.add']({ project: project.id, agent: 'artemis' })
+      const artemis = () =>
+        ledger.project(project.id).participants.find((p) => p.handle === 'artemis')
+      ledger.markOut(artemis().id, { until: '2099-01-01T00:00:00.000Z', reason: 'out of quota' })
+      const before = kicks()
+      const { member } = await operations['member.back']({
+        project: project.id,
+        participant: 'artemis',
+      })
+      assert.deepEqual([member.handle, member.outUntil], ['artemis', null])
+      assert.equal(artemis().outUntil, null)
+      assert.ok(kicks() > before, 'the daemon looks at once')
+      await assert.rejects(
+        operations['member.back']({ project: project.id, participant: 'nobody' }),
+        /no @nobody/,
       )
     })
   })

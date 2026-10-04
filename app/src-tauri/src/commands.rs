@@ -211,6 +211,7 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "member.add",
     "member.remove",
     "member.roles",
+    "member.back",
     "session.open",
     "session.end",
     "task.get",

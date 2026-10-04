@@ -2,7 +2,7 @@ import { button, element, iconButton, redraw } from '../dom.js'
 import { EmulatorRegistry, paneKey } from '../term.js'
 import { TerminalLink } from '../terminal-link.js'
 import { consoleText } from '../vendor/console-text.js'
-import { ICONS, identity, lamp, laneName, laneOrder, laneStatus } from './board.js'
+import { ICONS, identity, lamp, laneName, laneOrder, laneStatus, tryAgain } from './board.js'
 
 /** The windows that read key presses on Windows, where the console drops a non-ASCII mark. */
 const KEY_READERS = new Set(['devin', 'codex'])
@@ -11,13 +11,17 @@ const WINDOWS = /Windows/.test(globalThis.navigator?.userAgent ?? '')
 /** A session in `#showing`: its project's id and its handle. */
 const showingKey = (project, handle) => `${project}:${handle}`
 
-/** What the chief is doing, then what it runs on: the line under its name on its card. */
-function about(lane, board, agent, now) {
+/**
+ * What the chief is doing, then what it runs on: the line under its name on
+ * its card; out of quota, with the human's way to try it again now.
+ */
+function about(lane, board, agent, now, onTryAgain) {
   const [state, text] = laneStatus(lane, board, now)
   const status = element('span', 'terminal-status', text)
   status.dataset.state = state
   const line = element('div', 'terminal-about')
   line.append(status, element('span', 'terminal-meta', identity(lane.participant, agent)))
+  if (state === 'out') line.append(tryAgain(lane.participant, () => onTryAgain(lane.participant)))
   return line
 }
 
@@ -45,6 +49,8 @@ export class TerminalsView {
   #onChange
   /** The human asking to switch the chief, from its card. */
   #onSwitchChief
+  /** The human trying the chief again before its quota resets, from its card. */
+  #onTryAgain
   /** The chief's card while its window is down, made the first time it is: its head alone. */
   #windowless = null
   /** The card last brought into view: a redraw scrolls only when it changes. */
@@ -60,11 +66,19 @@ export class TerminalsView {
 
   constructor(
     stage,
-    { invoke, report, createEmulator, onChange = () => {}, onSwitchChief = () => {} },
+    {
+      invoke,
+      report,
+      createEmulator,
+      onChange = () => {},
+      onSwitchChief = () => {},
+      onTryAgain = () => {},
+    },
   ) {
     this.#stage = stage
     this.#onChange = onChange
     this.#onSwitchChief = onSwitchChief
+    this.#onTryAgain = onTryAgain
     this.#registry = new EmulatorRegistry({
       ...(createEmulator ? { createEmulator } : {}),
       onData: (pane, data) => void this.#link.input(pane, this.#typed(pane, data)),
@@ -336,7 +350,7 @@ export class TerminalsView {
               () => this.#onSwitchChief(entry.participant),
               'Switch the chief to another agent',
             ),
-            about(lane, board, agent, now),
+            about(lane, board, agent, now, this.#onTryAgain),
           ]
         : [
             element('span', 'terminal-meta', participant.harness ?? ''),

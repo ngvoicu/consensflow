@@ -6,6 +6,12 @@ const HOLD_MS = 30 * 60_000
 /** How long a quota lasts when its harness names no reset. */
 const UNKNOWN_RESET_MS = 60 * 60_000
 
+/** The same refusal: the one object a record's reading gave, or one of the same time. */
+const sameRefusal = (handled, quota) =>
+  handled !== undefined &&
+  handled !== null &&
+  (handled === quota || (quota.at !== null && quota.at !== undefined && handled.at === quota.at))
+
 /**
  * Scheduling, for the dispatcher (`dispatcher.js`): decisions over the
  * ledger's data about who works. Each pass gives every open task to the
@@ -143,15 +149,50 @@ export class Scheduler {
   }
 
   /**
-   * A harness keeps its last record, so a refusal stays in view long after
-   * its reset: only one dated after the member was last marked out is news.
+   * Whether the refusal a window shows is news for it: each window of a
+   * member runs into its quota on its own, the first marking the member out
+   * and every one holding or giving back its own work (three of a member's
+   * windows ran into a weekly limit after the first had marked it out, and
+   * their tasks stayed working; poker-lab, 2026-10-04). A harness keeps its
+   * last record, so a refusal stays in view long after its reset: one whose
+   * reset has passed, one dated before the member was last marked out or
+   * back, and one this window acted on already are history.
    */
-  freshRefusal(participant, quota) {
+  refusedHere(runtime, owner) {
+    const quota = runtime.quota.reported
     if (quota?.state !== 'exhausted') return false
-    // A refusal whose reset has passed is old news, whatever record still shows it.
     if (quota.resetsAt && Date.parse(quota.resetsAt) <= this.#now()) return false
-    if (participant.outSince === null || !quota.at) return true
-    return Date.parse(quota.at) > Date.parse(participant.outSince)
+    if (sameRefusal(runtime.quota.handled, quota)) return false
+    if (owner.outSince === null || !quota.at) return true
+    return Date.parse(quota.at) > Date.parse(owner.outSince)
+  }
+
+  /** Marks the refusal a window shows as acted on, so the window acts on it once. */
+  handled(runtime) {
+    runtime.quota.handled = runtime.quota.reported
+  }
+
+  /**
+   * Whether a window of a member out of quota answered after it was marked
+   * out: its harness got a turn through, so the quota is back before its
+   * reset (the human logged its harness into another account; poker-lab,
+   * 2026-10-04). Only a record that names its time says so.
+   */
+  answeredSince(owner, observed) {
+    if (owner.outSince === null || observed.failed || observed.quota?.state === 'exhausted') {
+      return false
+    }
+    const at = observed.items.findLast((item) => item.role === 'assistant')?.at
+    return typeof at === 'string' && Date.parse(at) > Date.parse(owner.outSince)
+  }
+
+  /**
+   * Whether a window's last turn ended in a refusal its member is past now
+   * (its reset came, or the member is back): the turn was cut short, and
+   * failed nothing.
+   */
+  cutShort(observed) {
+    return observed.failed === true && observed.quota?.state === 'exhausted'
   }
 
   /** What a window's harness says of its quota, as of this look. */
@@ -170,15 +211,22 @@ export class Scheduler {
     return quota.resetsAt ?? new Date(this.#now() + UNKNOWN_RESET_MS).toISOString()
   }
 
-  /** The tiered work of a member out of quota until `until`, once it is marked out. */
+  /**
+   * The work a window of a member out of quota until `until` holds, once its
+   * harness refused it. Near the reset, or with nobody else to take it, a
+   * task keeps its window and goes on by itself; otherwise a task given to
+   * the tier goes back to the board. One given to the member by name has
+   * nobody else to go to, and waits for it. The chief keeps its own tasks.
+   */
   holdOrRelease(project, participant, owner, until) {
-    // Near the reset, or with nobody else to take it, a task keeps its window
-    // and goes on by itself; otherwise it goes back to the board.
+    if (participant.role === 'chief') return
     const soon = Date.parse(until) - this.#now() <= HOLD_MS
-    for (const task of this.#tieredWork(project, participant)) {
-      const teammate = this.#ledger
-        .candidates(project.id, task.number)
-        .some((member) => member.id !== owner.id && this.#available(member))
+    for (const task of this.#activeWork(project, participant)) {
+      const teammate =
+        task.pool !== null &&
+        this.#ledger
+          .candidates(project.id, task.number)
+          .some((member) => member.id !== owner.id && this.#available(member))
       if (soon || !teammate) {
         this.#ledger.holdTask(project.id, task.number, { until, because: 'out of quota' })
         this.#ledger.note(project.id, {
@@ -191,6 +239,21 @@ export class Scheduler {
           because: 'ran out of quota after starting',
         })
       }
+    }
+  }
+
+  /**
+   * A member window whose last turn its quota cut short, the member past it
+   * now: its task goes on in the window, as a held task does at its time,
+   * and is not taken for failed.
+   */
+  goOn(project, participant) {
+    const now = new Date(this.#now()).toISOString()
+    // A queued task is on its way to the window already, a held one's resume
+    // among them: its delivery starts the next turn.
+    for (const task of this.#activeWork(project, participant)) {
+      if (task.state === 'queued') continue
+      this.#ledger.holdTask(project.id, task.number, { until: now, because: 'out of quota' })
     }
   }
 
@@ -227,17 +290,22 @@ export class Scheduler {
     else if (tiered.length > 0) this.#changed()
   }
 
+  /** The work a participant holds and has not finished: queued, working or waiting. */
+  #activeWork(project, participant) {
+    const lane = this.#ledger
+      .board(project.id)
+      .lanes.find((l) => l.participant.id === participant.id)
+    return (lane?.tasks ?? []).filter((task) =>
+      ['queued', 'working', 'waiting'].includes(task.state),
+    )
+  }
+
   /**
    * The work a participant holds that was given to its tier (queued, working
    * or waiting): another member of the tier could take it.
    */
   #tieredWork(project, participant) {
-    const lane = this.#ledger
-      .board(project.id)
-      .lanes.find((l) => l.participant.id === participant.id)
-    return (lane?.tasks ?? []).filter(
-      (task) => task.pool !== null && ['queued', 'working', 'waiting'].includes(task.state),
-    )
+    return this.#activeWork(project, participant).filter((task) => task.pool !== null)
   }
 
   /** A participant whose saved agent the human has since deleted. */

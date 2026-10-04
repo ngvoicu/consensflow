@@ -68,6 +68,8 @@ function fakeAdapter(harness = 'claude-code') {
       if (agent.arrive) {
         agent.items.push(item('user', text))
         agent.settled = false
+        // A message that arrives starts a turn: the one before it ended as it did.
+        agent.failed = false
       }
       return agent.queued ? { admitted: true, queued: true } : { admitted: true }
     },
@@ -87,7 +89,7 @@ function fakeAdapter(harness = 'claude-code') {
           settled: false,
           waiting: null,
           quota: agent.quota,
-          failed: false,
+          failed: agent.failed ?? false,
           switched: { nativeSession: agent.shows },
         }
       }
@@ -96,7 +98,7 @@ function fakeAdapter(harness = 'claude-code') {
         settled: agent.settled,
         waiting: agent.waiting,
         quota: agent.quota,
-        failed: false,
+        failed: agent.failed ?? false,
       }
       // A window that has not said which conversation it shows, and why a message waits.
       return agent.unnamed === undefined ? observed : unnamed(observed, agent.unnamed)
@@ -117,6 +119,19 @@ function fakeAdapter(harness = 'claude-code') {
   }
   adapter.quota = (handle, quota) => {
     adapter.agent(handle).quota = quota
+  }
+  // The harness refuses the turn, as Claude Code writes its limit: the turn
+  // ends on the refusal, which the record reads as a failure.
+  adapter.refuse = (handle, quota) => {
+    const agent = adapter.agent(handle)
+    agent.items.push(item('assistant', "You've hit your weekly limit", { at: quota.at }))
+    agent.quota = quota
+    agent.failed = true
+    agent.settled = true
+  }
+  // A turn gets through: the record writes the agent's words, with their time.
+  adapter.writes = (handle, text, at) => {
+    adapter.agent(handle).items.push(item('assistant', text, { at, complete: false }))
   }
   // The human switches the window to another conversation (/clear, /new,
   // /resume): from then on it writes that one's record, idle at first.
@@ -2309,6 +2324,135 @@ describe('a member out of quota mid-task', () => {
         [{ id: pane.id, generation: pane.generation }],
         'it waits for no reset now',
       )
+    })
+  })
+
+  it("holds the task of every one of a member's windows that runs into its quota, not only the first one's", async () => {
+    // Three of a member's windows ran into a weekly limit after the first had
+    // taken it out, and their tasks stayed working (poker-lab, 2026-10-04).
+    await setup(async (context) => {
+      const { open, task, notes } = await withTiers(context, { workers: ['zeus'] })
+      open({ body: 'One' })
+      open({ body: 'Two' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const [one, two] = [task(1).assignee, task(2).assignee]
+      assert.deepEqual([task(1).state, task(2).state], ['working', 'working'])
+      const resetsAt = new Date(context.clock.now().getTime() + 48 * 3_600_000).toISOString()
+      const refusal = () => ({
+        state: 'exhausted',
+        resetsAt,
+        at: context.clock.now().toISOString(),
+      })
+      context.adapter.refuse(one, refusal())
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).state, task(1).heldUntil], ['paused', resetsAt])
+      // The other window runs into the same limit a minute later, its member out by then.
+      context.clock.advance(60_000)
+      context.adapter.refuse(two, refusal())
+      await context.dispatcher.pass()
+      assert.deepEqual([task(2).state, task(2).heldUntil], ['paused', resetsAt])
+      assert.deepEqual(notes('chief'), [
+        `T-1 waits with @${one}: out of quota until ${resetsAt}; it goes on by itself then.`,
+        `T-2 waits with @${two}: out of quota until ${resetsAt}; it goes on by itself then.`,
+      ])
+      await context.dispatcher.pass()
+      assert.equal(notes('chief').length, 2, 'each window acts on its refusal once')
+    })
+  })
+
+  it('takes a member back once one of its windows gets a turn through, and what was held for it goes on', async () => {
+    // The human logged the harness into another account (poker-lab, 2026-10-04).
+    await setup(async (context) => {
+      const { project, open, task, id } = await withTiers(context, { workers: ['zeus'] })
+      open({ body: 'One' })
+      open({ body: 'Two' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const [one, two] = [task(1).assignee, task(2).assignee]
+      const resetsAt = new Date(context.clock.now().getTime() + 48 * 3_600_000).toISOString()
+      context.adapter.refuse(one, {
+        state: 'exhausted',
+        resetsAt,
+        at: context.clock.now().toISOString(),
+      })
+      await context.dispatcher.pass()
+      const zeus = () =>
+        context.ledger.project(project.id).participants.find((p) => p.id === id('zeus'))
+      assert.deepEqual([task(1).state, zeus().outUntil], ['paused', resetsAt])
+      // The other window was in a long command meanwhile; its next turn gets through.
+      context.clock.advance(60_000)
+      context.adapter.writes(two, 'The tests pass.', context.clock.now().toISOString())
+      await context.dispatcher.pass()
+      assert.equal(zeus().outUntil, null, 'back before its reset')
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        [task(1).state, task(1).assignee],
+        ['working', one],
+        'held, it goes on in its own window',
+      )
+      assert.match(context.ledger.inbox(id(one))[0].body, /^Resumed: Go on where you stopped\.$/)
+      assert.equal(task(2).state, 'working', 'the window that got through goes on as it was')
+    })
+  })
+
+  it('lets a turn its quota cut short go on once the reset has passed, and fails nothing', async () => {
+    // A refusal still the window's last word at the reset read as a failed
+    // turn, and failed its task (poker-lab, 2026-10-04).
+    await setup(async (context) => {
+      const { open, task, notes, id } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const session = task(1).assignee
+      const ago = (ms) => new Date(context.clock.now().getTime() - ms).toISOString()
+      context.adapter.refuse(session, {
+        state: 'exhausted',
+        resetsAt: ago(60_000),
+        at: ago(2 * 3_600_000),
+      })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).state, task(1).assignee], ['working', session])
+      assert.match(
+        context.ledger.inbox(id(session))[0].body,
+        /^Resumed: Go on where you stopped\.$/,
+      )
+      assert.deepEqual(
+        notes('chief').filter((note) => note.includes('failed')),
+        [],
+      )
+    })
+  })
+
+  it('reaches the chief again once the human says it is back before its reset', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withTiers(context)
+      await context.dispatcher.pass()
+      context.adapter.answer('chief', 'Ready.')
+      await context.dispatcher.pass()
+      const until = new Date(context.clock.now().getTime() + 48 * 3_600_000).toISOString()
+      context.ledger.markOut(id('chief'), { until, reason: 'out of quota' })
+      const { message } = context.ledger.createTask(project.id, {
+        from: 'human',
+        to: 'chief',
+        body: 'Plan the release',
+      })
+      await context.dispatcher.pass()
+      assert.equal(context.dispatcher.activity(id('chief')).state, 'out')
+      assert.equal(
+        context.ledger.message(message.id).state,
+        'queued',
+        'nothing reaches it while out',
+      )
+      const back = context.dispatcher.backFromQuota(project.id, 'chief')
+      assert.equal(back.outUntil, null)
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(context.ledger.message(message.id).state, 'delivered')
+      assert.throws(() => context.dispatcher.backFromQuota(project.id, 'human'), /no @human/)
     })
   })
 })

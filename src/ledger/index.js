@@ -242,6 +242,9 @@ class Ledger {
   markOut(participantId, request) {
     return staff.markOut(this.#store, participantId, request)
   }
+  markBack(participantId, request) {
+    return staff.markBack(this.#store, participantId, request)
+  }
   releaseTask(projectId, number, request) {
     return tasks.releaseTask(this.#store, projectId, number, request)
   }

@@ -256,6 +256,57 @@ describe('the project staff', () => {
     })
   })
 
+  it('keeps a member out until the later reset, from when it was first marked, and takes it back early with what was held for it', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      const first = ledger.markOut(id('zeus'), {
+        until: '2026-09-20T00:00:00.000Z',
+        reason: 'out of quota',
+      })
+      // Another of its windows runs into a shorter limit: nothing changes.
+      const shorter = ledger.markOut(id('zeus'), {
+        until: '2026-09-19T18:00:00.000Z',
+        reason: 'out of quota',
+      })
+      assert.deepEqual([shorter.outUntil, shorter.outSince], [first.outUntil, first.outSince])
+      // A longer one: out until then, still from when it was first marked.
+      const longer = ledger.markOut(id('zeus'), {
+        until: '2026-09-21T00:00:00.000Z',
+        reason: 'out of quota',
+      })
+      assert.deepEqual(
+        [longer.outUntil, longer.outSince],
+        ['2026-09-21T00:00:00.000Z', first.outSince],
+      )
+      ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      ledger.holdTask(project.id, 1, { until: '2026-09-21T00:00:00.000Z', because: 'out of quota' })
+      const back = ledger.markBack(id('zeus'), { because: 'by @human' })
+      assert.equal(back.outUntil, null)
+      assert.ok(
+        Date.parse(back.outSince) > Date.parse(first.outSince),
+        'what came before is history',
+      )
+      assert.equal(ledger.task(project.id, 1).heldUntil, back.outSince, 'the held task goes on now')
+      assert.deepEqual(
+        ledger.heldTasksDue(back.outSince).map((task) => task.number),
+        [1],
+      )
+      // Back already: nothing more happens, and nothing more is logged.
+      ledger.markBack(id('zeus'), { because: 'by @human' })
+      const logged = ledger
+        .events(project.id)
+        .filter((event) => ['member.out', 'member.back'].includes(event.kind))
+      assert.deepEqual(
+        logged.map((event) => [event.kind, event.data.until ?? event.data.because]),
+        [
+          ['member.out', '2026-09-20T00:00:00.000Z'],
+          ['member.out', '2026-09-21T00:00:00.000Z'],
+          ['member.back', 'by @human'],
+        ],
+      )
+    })
+  })
+
   it('makes an image designer of an image agent alone, and an image agent nothing else', async () => {
     await withLedger((ledger) => {
       const { project } = staff(ledger)

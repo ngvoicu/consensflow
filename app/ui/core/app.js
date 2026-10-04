@@ -120,6 +120,16 @@ async function act(work) {
   await refresh()
 }
 
+/**
+ * A member, or the chief, out of quota tried again before its reset: the
+ * human ran its harness on another account, or a bigger plan.
+ */
+const tryAgain = (participant) =>
+  act(async () => {
+    await daemon('member.back', { project: participant.projectId, participant: participant.handle })
+    note(`Trying @${participant.handle} again: what waited for it goes on.`)
+  })
+
 // A crowded cell's cards are listed in the stack dialog, the board's own.
 const board = new BoardView(boardRoot, $('#stack-dialog'), {
   onRead: (message) => act(() => daemon('message.read', { message: message.id })),
@@ -139,6 +149,7 @@ const board = new BoardView(boardRoot, $('#stack-dialog'), {
   onOpenTask: (number) => act(() => openTask(state.board.project.id, number)),
   onShowTerminal: (participant, opened) => showSession(participant, opened),
   onHideTerminal: (participant) => terminals.hide(participant.projectId, participant.handle),
+  onTryAgain: (participant) => tryAgain(participant),
   onEndSession: (participant) =>
     act(async () => {
       await daemon('session.end', { project: participant.projectId, handle: participant.handle })
@@ -243,8 +254,9 @@ const terminals = new TerminalsView(stage, {
   report,
   createEmulator: tauri.test?.createEmulator,
   onChange: () => render(),
-  // The chief is switched from its card in the dock.
+  // The chief is switched from its card in the dock, and tried again there when out of quota.
   onSwitchChief: (chief) => act(() => switchChief.open(chief)),
+  onTryAgain: (chief) => tryAgain(chief),
 })
 
 // A fold changes the room the board and the windows have: both draw again.

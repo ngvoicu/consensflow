@@ -846,12 +846,46 @@ test("shows a member out of quota, and a reviewer's review tasks as cards on its
   await open(page, data)
   const diana = page.locator('tr[data-handle="diana"]')
   await expect(diana.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
-  await expect(diana.locator('.row-status')).toHaveText(/^Out of quota until \d\d:\d\d$/)
+  await expect(diana.locator('.row-status')).toHaveText(/^Out of quota until (\S+ )?\d\d:\d\d$/)
   const hera = page.locator('tr[data-handle="hera"]')
   await expect(hera.locator('td[data-state="working"] button.card[data-task="9"]')).toHaveCount(1)
   await expect(hera.locator('td[data-state="done"] button.card[data-task="10"]')).toHaveCount(1)
   // A review hangs under no other card: it is a task of its own.
   await expect(page.locator('.reviews')).toHaveCount(0)
+})
+
+test('names the day of a reset that is not today, and tries a member or the chief out of quota again', async ({
+  page,
+}) => {
+  // A weekly limit's reset read "11:00" two days early, and nothing in the
+  // app could say the human had logged the harness into another account
+  // (poker-lab, 2026-10-04).
+  const data = model()
+  const reset = new Date(Date.now() + 2 * 86_400_000).toISOString()
+  const lanes = data.boards[1].lanes
+  lanes.find((lane) => lane.participant.handle === 'diana').participant.outUntil = reset
+  lanes.find((lane) => lane.participant.handle === 'chief').participant.outUntil = reset
+  await open(page, data)
+  const day = await page.evaluate((iso) => {
+    const at = new Date(iso)
+    const time = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+    return `${at.toLocaleDateString([], { weekday: 'short' })} ${time}`
+  }, reset)
+  const diana = page.locator('tr[data-handle="diana"]')
+  await expect(diana.locator('.row-status')).toHaveText(`Out of quota until ${day}`)
+  await diana.getByRole('button', { name: 'Try @diana again now, before its quota resets' }).click()
+  expect(await calls(page, 'member.back')).toEqual([{ project: 1, participant: 'diana' }])
+  const card = page.locator('#stage .terminal-card[data-handle="chief"]')
+  await expect(card.locator('.terminal-status')).toHaveText(`Out of quota until ${day}`)
+  await card
+    .getByRole('button', { name: 'Try Chief of Staff again now, before its quota resets' })
+    .click()
+  expect(await calls(page, 'member.back')).toEqual([
+    { project: 1, participant: 'diana' },
+    { project: 1, participant: 'chief' },
+  ])
+  // A member not out has nothing to try again.
+  await expect(page.locator('tr[data-handle="zeus"] .try-again')).toHaveCount(0)
 })
 
 test('a task held while its member is out of quota says when it goes on', async ({ page }) => {
@@ -860,7 +894,7 @@ test('a task held while its member is out of quota says when it goes on', async 
   lane.tasks.push(task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, { heldUntil: at(-25) }))
   await open(page, data)
   await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
-    /^out of quota until \d\d:\d\d · from /,
+    /^out of quota until (\S+ )?\d\d:\d\d · from /,
   )
 })
 
@@ -1862,7 +1896,7 @@ test("says on the chief's card in the dock what the chief is doing and runs on, 
     chief.participant.outUntil = new Date(Date.now() + 90 * 60_000).toISOString()
   })
   await expect(card.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
-  await expect(card.locator('.terminal-status')).toHaveText(/^Out of quota until \d\d:\d\d$/)
+  await expect(card.locator('.terminal-status')).toHaveText(/^Out of quota until (\S+ )?\d\d:\d\d$/)
   await expect(card.locator('.terminal-status')).toHaveAttribute('data-state', 'out')
   // Switch chief is on the card: none on the board, though the chief's row is there for its tasks.
   await expect(page.locator('tr[data-handle="chief"]')).toHaveCount(1)

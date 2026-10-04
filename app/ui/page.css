@@ -339,6 +339,8 @@ tr[data-session] .row-head { padding-left: 22px; border-left: 3px solid var(--li
 tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-transform: none; }
 .row-meta { display: block; margin-top: 6px; font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 .row-status { display: block; margin-top: 6px; font: 600 11px var(--mono); color: var(--muted); }
+.try-again { margin-top: 6px; padding: 2px 9px; font-size: 12px; }
+.terminal-about .try-again { margin: 0 0 0 8px; }
 :is(.row-status, .terminal-status)[data-state="working"] { color: var(--seafoam); }
 :is(.row-status, .terminal-status)[data-state="waiting"] { color: var(--amber); }
 :is(.row-status, .terminal-status):is([data-state="out"], [data-state="missing"]) { color: var(--buoy); }

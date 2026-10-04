@@ -374,7 +374,12 @@ export function requireMemberRow(store, participantId, does) {
   return row
 }
 
-/** A member that ran out of quota takes no work until then (an ISO time); `outSince` says when it was marked. */
+/**
+ * A member that ran out of quota takes no work until then (an ISO time);
+ * `outSince` says when it was marked. One already out stays out until the
+ * later of the two resets, and keeps the time it was first marked: what its
+ * other windows run into after that is still news for each of them.
+ */
 export function markOut(store, participantId, { until, reason }) {
   if (Number.isNaN(Date.parse(until))) {
     throw new LedgerError('invalid-time', `not a time: ${JSON.stringify(until)}`)
@@ -382,10 +387,42 @@ export function markOut(store, participantId, { until, reason }) {
   requireText(reason, 'reason', 1000)
   return store.write(() => {
     const member = store.participantRow(participantId)
+    const now = store.at()
+    const out = member.out_until !== null && Date.parse(member.out_until) > Date.parse(now)
+    if (out && Date.parse(member.out_until) >= Date.parse(until)) return participantView(member)
     store.db
       .prepare('UPDATE participant SET out_until = ?, out_since = ? WHERE id = ?')
-      .run(until, store.at(), member.id)
+      .run(until, out ? member.out_since : now, member.id)
     store.log(member.project_id, 'member.out', { handle: member.handle, until, reason })
+    return participantView(store.participantRow(member.id))
+  })
+}
+
+/**
+ * A member out of quota is back before its reset: one of its windows
+ * answered again, or the human says so (another account, a bigger plan).
+ * What its windows ran into before now is history, and the tasks held for
+ * it, its own and its sessions', go on at once.
+ */
+export function markBack(store, participantId, { because }) {
+  requireText(because, 'because', 1000)
+  return store.write(() => {
+    const member = store.participantRow(participantId)
+    const now = store.at()
+    if (member.out_until === null || Date.parse(member.out_until) <= Date.parse(now)) {
+      return participantView(member)
+    }
+    store.db
+      .prepare('UPDATE participant SET out_until = NULL, out_since = ? WHERE id = ?')
+      .run(now, member.id)
+    store.db
+      .prepare(
+        `UPDATE task SET held_until = ?
+         WHERE state = 'paused' AND held_until IS NOT NULL AND held_until > ?
+           AND assignee_id IN (SELECT id FROM participant WHERE id = ? OR member_id = ?)`,
+      )
+      .run(now, now, member.id, member.id)
+    store.log(member.project_id, 'member.back', { handle: member.handle, because })
     return participantView(store.participantRow(member.id))
   })
 }
