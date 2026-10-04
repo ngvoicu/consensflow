@@ -1,8 +1,10 @@
-//! The agents the catalog lists, as they cross to the CLI, the API and the
-//! page: each shape with its fields in the order the Node code builds them
-//! (`hosts/lib/presets.js`, `src/catalog.js`), so its JSON reads as it did.
+//! The agents the catalog lists and the roster shows, as they cross to the
+//! CLI, the API and the page: each shape with its fields in the order the
+//! Node code builds them (`hosts/lib/presets.js`, `src/catalog.js`,
+//! `src/roster.js`), so its JSON reads as it did.
 
 use serde::Serialize;
+use serde_json::Value;
 
 /// A CLI ConsensFlow runs agents on, in the order `HARNESSES`
 /// (`src/roster.js`) lists them. The page, the CLI and the launcher speak
@@ -28,6 +30,20 @@ impl Harness {
             Harness::Opencode => "opencode",
             Harness::Devin => "devin",
         }
+    }
+
+    /// The harness a request names by the CLI's own name (`claude`); none for
+    /// any other word, a kind (`claude-code`) among them.
+    pub fn from_name(name: &str) -> Option<Harness> {
+        [
+            Harness::Claude,
+            Harness::Codex,
+            Harness::Pi,
+            Harness::Opencode,
+            Harness::Devin,
+        ]
+        .into_iter()
+        .find(|harness| harness.as_str() == name)
     }
 
     /// The payload's word for it (`claude-code`), as the store and the roster say it.
@@ -117,6 +133,61 @@ pub struct FoundEntry {
     pub harness: Harness,
 }
 
+/// An agent of the roster as the page and the CLI list it (`toView`,
+/// `src/roster.js`). A key JavaScript leaves `undefined` is not written by
+/// `JSON.stringify`, so a field the row did not have is none and skipped: a
+/// row with no `id` has no `name`, one with no `kind` no `harness`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentView {
+    /// The row's `id`: the agent's handle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The CLI's own name (`claude`) for a kind the build runs, else the kind
+    /// as the row names it (`kimi`): text, not a [`Harness`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
+    /// An image agent; said only when the row's `designer` is `true` itself.
+    #[serde(skip_serializing_if = "is_false")]
+    pub designer: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// The tier the human chose for the agent, when they chose one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub work_tier: Option<WorkTier>,
+    /// The effort under the key the row's kind reads (Pi's `thinking`, every
+    /// other kind's `effort`); said only when it is not empty.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// The row's own description, whatever JSON it holds: said when truthy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<Value>,
+    /// Provenance, as a row an older build saved names its entry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
+    /// An agent the human defined: the catalog's have none.
+    #[serde(skip_serializing_if = "is_false")]
+    pub custom: bool,
+    pub profile: Profile,
+    /// A kind the build does not run (`kimi`): the row is kept, never launched.
+    #[serde(skip_serializing_if = "is_false")]
+    pub unsupported: bool,
+    /// Kept out of the list the human sees: a Claude or OpenAI model through
+    /// Pi or OpenCode, while they keep to their own harnesses. Said by
+    /// `listAgents` alone, and last.
+    #[serde(skip_serializing_if = "is_false")]
+    pub hidden: bool,
+}
+
+/// What the human chose about the roster, kept in the file beside their own
+/// agents (`preferences`, `src/roster.js`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Preferences {
+    /// Claude and OpenAI models reached through Pi or OpenCode are hidden.
+    pub own_harness_only: bool,
+}
+
 fn is_false(value: &bool) -> bool {
     !value
 }
@@ -124,6 +195,7 @@ fn is_false(value: &bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn muse() -> Profile {
         Profile {
@@ -245,6 +317,92 @@ mod tests {
         assert!(
             written.starts_with(r#"{"name":"gefjon","model":"#),
             "{written}"
+        );
+    }
+
+    fn bare() -> AgentView {
+        AgentView {
+            name: None,
+            harness: None,
+            designer: false,
+            model: None,
+            work_tier: None,
+            effort: None,
+            description: None,
+            preset: None,
+            custom: false,
+            profile: muse(),
+            unsupported: false,
+            hidden: false,
+        }
+    }
+
+    #[test]
+    fn a_view_writes_its_fields_in_the_order_the_roster_builds_them() {
+        let view = AgentView {
+            name: Some("mine".into()),
+            harness: Some("kimi".into()),
+            designer: true,
+            model: Some("moonshot-ai/kimi-k3".into()),
+            work_tier: Some(WorkTier::Complex),
+            effort: Some("high".into()),
+            description: Some(json!("Mine")),
+            preset: Some("mine".into()),
+            custom: true,
+            unsupported: true,
+            hidden: true,
+            ..bare()
+        };
+        assert_eq!(
+            serde_json::to_string(&view).unwrap(),
+            concat!(
+                r#"{"name":"mine","harness":"kimi","designer":true,"model":"moonshot-ai/kimi-k3","#,
+                r#""workTier":"complex","effort":"high","description":"Mine","preset":"mine","custom":true,"#,
+                r#""profile":{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenCode Zen · Contributor · Free","routeNote":"Prompts and replies may train Meta models.","workTier":"light"},"#,
+                r#""unsupported":true,"hidden":true}"#
+            )
+        );
+    }
+
+    #[test]
+    fn a_view_of_a_row_with_nothing_to_say_writes_its_profile_alone() {
+        // `JSON.stringify` leaves out what is `undefined`: a row with no `id`, `kind` or
+        // `model` has no `name`, `harness` or `model`, and the flags are said only when set.
+        let written = serde_json::to_string(&bare()).unwrap();
+        assert!(
+            written.starts_with(r#"{"profile":{"modelKey":"#),
+            "{written}"
+        );
+        assert!(written.ends_with(r#""workTier":"light"}}"#), "{written}");
+    }
+
+    #[test]
+    fn a_view_keeps_the_description_as_the_json_the_row_held() {
+        for description in [json!(5), json!(true), json!([]), json!({}), json!("text")] {
+            let view = AgentView {
+                description: Some(description.clone()),
+                ..bare()
+            };
+            let written = serde_json::to_value(&view).unwrap();
+            assert_eq!(written["description"], description);
+        }
+    }
+
+    #[test]
+    fn preferences_write_the_one_choice_the_roster_keeps() {
+        let on = Preferences {
+            own_harness_only: true,
+        };
+        assert_eq!(
+            serde_json::to_string(&on).unwrap(),
+            r#"{"ownHarnessOnly":true}"#
+        );
+        let off = Preferences {
+            own_harness_only: false,
+        };
+        assert_eq!(
+            serde_json::to_string(&off).unwrap(),
+            r#"{"ownHarnessOnly":false}"#
         );
     }
 }

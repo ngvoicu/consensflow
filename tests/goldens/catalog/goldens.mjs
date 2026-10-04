@@ -54,8 +54,21 @@ const HARNESS_OF = {
 }
 
 /** `value` with every `undefined` it holds written as the marker. */
+/**
+ * A request as the text the API reads, its keys in the order written: Node
+ * is handed what `JSON.parse` makes of it, keys in JavaScript's order; the
+ * Rust reads the text as serde_json does. The golden holds `{"$json": text}`.
+ */
+class Raw {
+  constructor(text) {
+    this.text = text
+  }
+}
+const raw = (text) => new Raw(text)
+
 function encode(value) {
   if (value === undefined) return { $undefined: true }
+  if (value instanceof Raw) return { $json: value.text }
   if (Array.isArray(value)) return value.map(encode)
   if (value !== null && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, encode(item)]))
@@ -248,7 +261,85 @@ function documents() {
       agents: [row('kim', 'kimi', 'kimi-k3', { effort: 'high' }), nova],
     }),
     'a tier no longer known': file({ schemaVersion: 1, agents: [{ ...nova, workTier: 'huge' }] }),
+    // A row that keeps a `custom` key of its own: the roster's mark goes in its place.
+    'custom kept': file({
+      schemaVersion: 1,
+      agents: [
+        { id: 'nova', custom: false, kind: 'codex', model: 'gpt-6-astra' },
+        { ...pip, custom: 'yes' },
+      ],
+    }),
+    // Numbers as JSON.parse reads them: a whole double, past 2^53, past 1e21,
+    // and those only a correctly rounded reading reads as Node does.
+    numbers: `{"schemaVersion":1.0,"agents":[{"id":"nova","kind":"codex","model":"m","x":9007199254740993,"y":1e21,"z":2.50,"p":1000000000000000.1,"q":1.7976931348623157000e308,"r":4.9406564584124654e-324,"s":123456789012345678901234567890,"t":1e-400}],"w":-0.0}\n`,
   }
+}
+
+/**
+ * Documents of seeded rows, for a sweep of every operation over shapes no
+ * hand wrote: ids that are the human's, the catalog's or twice the same,
+ * kinds that run and that do not, efforts under either key, tiers, image
+ * flags, descriptions of any JSON, stored `custom` marks, provenance that is
+ * the entry's or not, stale and unknown fields. Every row is of the shape
+ * both implementations read the same (its id, kind and model text when
+ * there, its preset, harness, effort and thinking text or null): the
+ * shapes the Rust refuses on purpose are its own tests'.
+ */
+function sweptDocuments(random) {
+  const pick = (list) => list[Math.floor(random() * list.length)]
+  const maybe = (key, values) => {
+    const value = pick(values)
+    return value === undefined ? {} : { [key]: value }
+  }
+  const ids = ['nova', 'pip', 'kim', 'zed', 'thoth', 'zeus', 'pygmalion', 'Nova', '']
+  const row = () => ({
+    ...maybe('id', [...ids, undefined]),
+    ...maybe('name', ['Nova', undefined, 7]),
+    ...maybe('kind', [
+      'claude-code',
+      'codex',
+      'pi',
+      'opencode',
+      'devin',
+      'image',
+      'kimi',
+      '',
+      undefined,
+    ]),
+    ...maybe('designer', [undefined, undefined, true, false, 'yes', 1, null]),
+    ...maybe('model', [
+      'gpt-6-astra',
+      'openrouter/anthropic/claude-fable-5.1',
+      'claude-opus-5-5',
+      'm',
+      '',
+      undefined,
+    ]),
+    ...maybe('effort', [undefined, 'high', 'max', '', null, 'bogus']),
+    ...maybe('thinking', [undefined, 'low', '', null]),
+    ...maybe('harness', [undefined, undefined, 'codex', 'claude', null]),
+    ...maybe('workTier', [undefined, undefined, 'complex', 'light', null, 'huge']),
+    ...maybe('description', [undefined, 'Mine', '', 5, null, { a: 1 }, ['x']]),
+    ...maybe('custom', [undefined, undefined, true, false, 'yes']),
+    ...maybe('preset', [undefined, undefined, 'thoth', 'zeus', 'pygmalion', null, '']),
+    ...maybe('skills', [undefined, undefined, ['a']]),
+    ...maybe('colour', [undefined, undefined, 'green', { deep: [1] }]),
+  })
+  return Array.from({ length: 24 }, (_, index) => {
+    const agents = Array.from({ length: 1 + Math.floor(random() * 4) }, row)
+    const document = {
+      ...maybe('note', [undefined, 'kept']),
+      ...maybe('schemaVersion', [1, 1, undefined, null, 2]),
+      agents,
+      ...maybe('preferences', [
+        undefined,
+        { ownHarnessOnly: true },
+        { ownHarnessOnly: 'yes' },
+        null,
+      ]),
+    }
+    return [`swept ${index}`, file(document)]
+  })
 }
 
 /** The roster's operations, each called with the home's environment last. */
@@ -268,6 +359,15 @@ const WRITES = [
   ['setPreferences', { ownHarnessOnly: 'yes' }],
   ['setPreferences', { other: true, ownHarnessOnly: false }],
   ['setPreferences', null],
+  ['setPreferences', undefined],
+  // What `Object.entries` makes of a patch that is no object.
+  ['setPreferences', ['x']],
+  ['setPreferences', 'x'],
+  ['setPreferences', ''],
+  ['setPreferences', 5],
+  ['setPreferences', true],
+  ['setPreferences', []],
+  ['setPreferences', raw('{"ownHarnessOnly":"yes","2":false}')],
   [
     'addAgent',
     {
@@ -290,6 +390,16 @@ const WRITES = [
   ['addAgent', { name: 'zed', harness: 'codex', model: 'm', workTier: 'huge' }],
   ['addAgent', { harness: 'codex', model: 'm' }],
   ['addAgent', { name: 'nova', harness: 'codex', model: 'm' }],
+  // Requests whose keys are written out of JavaScript's order.
+  [
+    'addAgent',
+    raw(
+      '{"name":"zed","harness":"codex","model":"m","description":{"z":0,"2":"b","1":"a","x":{"b":1,"10":2,"9":3}}}',
+    ),
+  ],
+  ['addAgent', raw('{"name":"zed","harness":"codex","model":"m","description":9007199254740993}')],
+  ['addAgent', raw('{"name":{"b":1,"1":2},"harness":"codex","model":"m"}')],
+  ['addAgent', raw('{"name":"zed","harness":{"x":1,"0":2},"model":"m"}')],
   ['editAgent', 'thoth', { model: 'x' }],
   ['editAgent', 'nobody', { model: '' }],
   ['editAgent', 'nova', { model: 'gpt-x' }],
@@ -305,6 +415,8 @@ const WRITES = [
   ['editAgent', 'painter', { effort: 'high' }],
   ['editAgent', 'painter', { model: 'gpt-image-3' }],
   ['editAgent', 'kim', { effort: 'high' }],
+  ['editAgent', 'nova', raw('{"description":{"b":1,"10":2,"2":[{"y":1,"3":0}]}}')],
+  ['editAgent', 'nova', raw('{"description":[9007199254740993,-9007199254740995]}')],
   ['removeAgent', 'thoth'],
   ['removeAgent', 'nobody'],
   ['removeAgent', 'nova'],
@@ -345,7 +457,8 @@ function rosterCase(before, call, now, skipped) {
   globalThis.Date = fixedDate(now)
   let outcome
   try {
-    outcome = { result: encode(OPERATIONS[name](...args, { CONSENSFLOW_HOME: home })) }
+    const parsed = args.map((arg) => (arg instanceof Raw ? JSON.parse(arg.text) : arg))
+    outcome = { result: encode(OPERATIONS[name](...parsed, { CONSENSFLOW_HOME: home })) }
   } catch (cause) {
     if (cause instanceof TypeError) outcome = null
     // The file's path, whatever the platform writes it as, is «home»/agents.json.
@@ -389,6 +502,20 @@ function rosterGolden(skipped) {
   const cases = []
   for (const [document, before] of Object.entries(docs)) {
     for (const call of [...READS, ...WRITES]) {
+      const result = rosterCase(before, call, now(), skipped)
+      if (result !== null) cases.push({ document, ...result })
+    }
+  }
+  // A sweep: seeded documents, each with a seeded handful of operations.
+  const swept = seeded(20261005)
+  const sweptCalls = [...READS.filter(([name]) => name !== 'listAgents'), ...WRITES]
+  for (const [document, before] of sweptDocuments(swept)) {
+    docs[document] = before
+    const calls = [
+      ['listAgents'],
+      ...Array.from({ length: 10 }, () => sweptCalls[Math.floor(swept() * sweptCalls.length)]),
+    ]
+    for (const call of calls) {
       const result = rosterCase(before, call, now(), skipped)
       if (result !== null) cases.push({ document, ...result })
     }

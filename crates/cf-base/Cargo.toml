@@ -10,8 +10,16 @@ publish = false
 serde.workspace = true
 serde_json.workspace = true
 
+# The errno names Node prints (`EACCES`): the numbers differ between the
+# systems, the constants do not.
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+nix.workspace = true
+
+# Win32_Networking_WinSock: libuv's table also names the `WSAE…` codes.
 [target.'cfg(windows)'.dependencies]
 winapi-util.workspace = true
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Networking_WinSock"] }
 
 [dev-dependencies]
 tempfile.workspace = true

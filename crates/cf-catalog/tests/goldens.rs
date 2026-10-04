@@ -1,8 +1,8 @@
 //! The goldens `npm run goldens:catalog` writes from the JavaScript, which
 //! the unit suite holds equal to what Node computes now. Here, the catalog's
 //! and `agentProfile`'s answers are held to them, case by case and as text, so
-//! a key out of order or a word changed fails; and, for the roster, that each
-//! case reads whole (its port is the next landing).
+//! a key out of order or a word changed fails. The roster's golden has a file
+//! of its own, `roster_goldens.rs`.
 
 // The goldens' own reading: a failure in it is the test's.
 #![allow(clippy::unwrap_used)]
@@ -218,27 +218,4 @@ fn each_kind_names_the_harness_node_names_and_none_where_node_names_none() {
         );
     }
     assert_eq!(kinds.len(), 8);
-}
-
-#[test]
-fn each_roster_case_starts_from_a_file_and_answers_once() {
-    let roster = golden("roster.json");
-    let documents = roster["documents"].as_object().unwrap();
-    let cases = roster["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 1028);
-    for case in cases {
-        let from_a_document = case["document"]
-            .as_str()
-            .is_some_and(|document| documents.contains_key(document));
-        let from_a_step = case["sequence"].is_string() && case["step"].is_u64();
-        assert!(from_a_document != from_a_step, "{case}");
-        assert!(
-            case.get("result").is_some() != case.get("error").is_some(),
-            "{case}"
-        );
-        assert!(
-            case.get("unchanged").is_some() != case.get("after").is_some(),
-            "{case}"
-        );
-    }
 }

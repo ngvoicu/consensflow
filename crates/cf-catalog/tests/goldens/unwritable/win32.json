@@ -1,0 +1,15 @@
+{
+  "situations": [
+    {"name":"a stale read-only temporary is where the temporary goes","make":[{"file":"home/agents.json.$PID.tmp","text":"stale"},{"mode":"home/agents.json.$PID.tmp","bits":"444"}],"home":"home","call":["setPreferences",{"ownHarnessOnly":true}],"stage":"write","message":"EPERM: operation not permitted, open '$ROOT\\home\\agents.json.$PID.tmp'"},
+    {"name":"a folder name Windows refuses","make":[{"folder":"home"}],"home":"home/bad<name","call":["setPreferences",{"ownHarnessOnly":true}],"stage":"write","message":"ENOENT: no such file or directory, mkdir '$ROOT\\home\\bad<name'"},
+    {"name":"a directory is at the temporary","make":[{"folder":"home/agents.json.$PID.tmp"}],"home":"home","call":["setPreferences",{"ownHarnessOnly":true}],"stage":"write","message":"Path is a directory: rm returned EISDIR (is a directory) $ROOT\\home\\agents.json.$PID.tmp"},
+    {"name":"a directory with a file in it is at the temporary","make":[{"file":"home/agents.json.$PID.tmp/inside","text":"kept"}],"home":"home","call":["addAgent",{"name":"zed","harness":"codex","model":"gpt-6-astra"}],"stage":"write","message":"Path is a directory: rm returned EISDIR (is a directory) $ROOT\\home\\agents.json.$PID.tmp"},
+    {"name":"a directory with a file in it is at the agents file","make":[{"file":"home/agents.json/inside","text":"kept"}],"home":"home","call":["addAgent",{"name":"zed","harness":"codex","model":"gpt-6-astra"}],"stage":"read","message":"Your agents file $ROOT\\home\\agents.json cannot be read (EISDIR): fix it or move it away. ConsensFlow left it as it is."},
+    {"name":"a file is where the folder should be: the folder itself is a file","make":[{"file":"home","text":"a file"}],"home":"home","call":["setPreferences",{"ownHarnessOnly":true}],"stage":"write","message":"EEXIST: file already exists, mkdir '$ROOT\\home'"},
+    {"name":"a file is where the folder above should be","make":[{"file":"state","text":"a file"}],"home":"state/home","call":["addAgent",{"name":"zed","harness":"codex","model":"gpt-6-astra"}],"stage":"write","message":"ENOTDIR: not a directory, mkdir '$ROOT\\state\\home'"},
+    {"name":"a file is where a folder far above should be","make":[{"file":"state","text":"a file"}],"home":"state/a/b/home","call":["setPreferences",{"ownHarnessOnly":true}],"stage":"write","message":"ENOTDIR: not a directory, mkdir '$ROOT\\state\\a\\b\\home'"},
+    {"name":"saving where the folder itself is a file","make":[{"file":"home","text":"a file"}],"home":"home","call":["saveDocument","{}\n"],"stage":"write","message":"EEXIST: file already exists, mkdir '$ROOT\\home'"},
+    {"name":"saving where a file is in the way of the folder","make":[{"file":"state","text":"a file"}],"home":"state/a/b","call":["saveDocument","{}\n"],"stage":"write","message":"ENOTDIR: not a directory, mkdir '$ROOT\\state\\a\\b'"},
+    {"name":"saving over a directory with a file in it","make":[{"file":"home/agents.json/inside","text":"kept"}],"home":"home","call":["saveDocument","{}\n"],"stage":"write","message":"EPERM: operation not permitted, rename '$ROOT\\home\\agents.json.$PID.tmp' -> '$ROOT\\home\\agents.json'"}
+  ]
+}

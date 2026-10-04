@@ -1,10 +1,23 @@
-//! A file as the record readers tell it apart: which file a path names now
-//! (another file renamed over it is another file), and when it was last
-//! written, in milliseconds as Node's `mtimeMs` has it.
+//! Files as Node read and wrote them: which file a path names now (another
+//! file renamed over it is another file), when it was last written, in
+//! milliseconds as `mtimeMs` has it, what a failure is called (`error.code`,
+//! `ENOENT`) and how Node words it, and a file written whole or not at all.
+//!
+//! - `errno`: libuv's names and words for a failure;
+//! - `error`: a failed file operation, said as Node's error says it;
+//! - `write`: a file written whole, each step's failure said.
 
 use std::fs::{File, Metadata};
 use std::io;
 use std::time::UNIX_EPOCH;
+
+mod errno;
+mod error;
+mod write;
+
+pub use errno::{errno_name, error_code, is_missing, uv_words};
+pub use error::FileError;
+pub use write::write_whole;
 
 /// Which file an open file is, whatever its path: its device and inode on
 /// Unix, its volume and file index on Windows (Node's `stat` calls the
