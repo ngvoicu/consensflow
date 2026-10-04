@@ -30,6 +30,7 @@
     "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs",
     "goldens:ledger": "node tests/goldens/ledger/record.mjs",
     "goldens:catalog": "node tests/goldens/catalog/record.mjs",
+    "goldens:path": "node tests/goldens/path/record.mjs",
     "goldens:records": "node tests/goldens/records/record.mjs",
     "parity:ledger": "npm run goldens:ledger && cargo test -p cf-ledger --test replay",
     "build:bridge": "cargo build --release -p cf-panes --bin consensflow-bridge",
