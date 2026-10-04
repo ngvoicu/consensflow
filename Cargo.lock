@@ -392,6 +392,11 @@ dependencies = [
 [[package]]
 name = "cf-process"
 version = "3.0.0-alpha.72"
+dependencies = [
+ "cf-base",
+ "libc",
+ "tempfile",
+]
 
 [[package]]
 name = "cf-proto"

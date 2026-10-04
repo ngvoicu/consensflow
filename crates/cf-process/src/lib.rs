@@ -1,6 +1,17 @@
-//! The one place a ConsensFlow program starts another process.
+//! The one place a ConsensFlow program starts another process: how a
+//! program starts here (Windows scripts and npm's shims included), where a
+//! command is on PATH, running one in this process's place, and ending one.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
+#![deny(clippy::undocumented_unsafe_blocks)]
+
+mod runnable;
+mod search;
+mod terminate;
+
+pub use runnable::{runnable, Run};
+pub use search::{on_path, on_windows};
+pub use terminate::{terminate, Ending};
 
 use std::ffi::{OsStr, OsString};
 use std::io;
