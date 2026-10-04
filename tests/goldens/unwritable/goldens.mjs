@@ -38,6 +38,11 @@
  *   unreadable before it wrote, `write` when it refused the write;
  * - `message`: what the error said.
  *
+ * The goldens hold no sentence Node's releases word differently, as CI runs
+ * the latest Node 26 and the app bundles 26.7.0: a removal the system refuses
+ * (26.10 names its path once, 26.7.0 twice) is pinned to 26.7.0's words by
+ * cf-base's own tests (`file/error/tests.rs`, `file/write/tests.rs`).
+ *
  * A situation that cannot be made on a platform is left out of that
  * platform's file: `unix` marks a `chmod` of a folder, a permission Windows
  * does not have; `windows` marks a name only Windows refuses. A `chmod` of a
@@ -101,16 +106,6 @@ const SITUATIONS = [
     unix: true,
     make: [{ folder: 'ro' }, { mode: 'ro', bits: '555' }],
     home: 'ro/x/y',
-    call: PREFERENCE,
-  },
-  {
-    name: 'a stale temporary is in a read-only folder',
-    unix: true,
-    make: [
-      { file: `home/${TEMPORARY}`, text: 'stale' },
-      { mode: 'home', bits: '555' },
-    ],
-    home: 'home',
     call: PREFERENCE,
   },
   {

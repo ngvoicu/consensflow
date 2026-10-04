@@ -36,10 +36,10 @@ fn platform() -> &'static str {
 
 /// The number of situations the golden of `platform` holds: a golden that
 /// shrinks fails, and is recorded again on purpose. Windows leaves out the
-/// five that need a folder's permissions, and has a name only it refuses.
+/// four that need a folder's permissions, and has a name only it refuses.
 fn situations_in_the_golden(platform: &str) -> usize {
     match platform {
-        "darwin" => 15,
+        "darwin" => 14,
         "win32" => 11,
         other => panic!("no situations are counted for {other}: say how many its golden holds"),
     }
