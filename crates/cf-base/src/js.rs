@@ -8,7 +8,9 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
+
+use crate::json::array_index;
 
 /// `value` as `${value}` wrote it; `None` is a field that was not there.
 pub fn text(value: Option<&Value>) -> Cow<'_, str> {
@@ -70,9 +72,11 @@ pub fn number_text(number: f64) -> String {
     format!("{sign}{written}")
 }
 
-/// `value` as `JSON.stringify(value)` writes it: no white space, keys in
-/// their order, every number as JavaScript writes it (`2` for `2.0`, and an
-/// integer past 2^53 as the double it reads as).
+/// `value` as `JSON.stringify(value)` writes it: no white space, each
+/// object's keys in the order JavaScript enumerates them (those that are
+/// array indices first, ascending, then the others as they are held), every
+/// number as JavaScript writes it (`2` for `2.0`, and an integer past 2^53
+/// as the double it reads as).
 pub fn stringify(value: &Value) -> String {
     let mut written = String::new();
     write_json(value, "", 0, &mut written);
@@ -125,7 +129,7 @@ fn write_json(value: &Value, indent: &str, depth: usize, written: &mut String) {
         }
         Value::Object(fields) => {
             written.push('{');
-            for (at, (key, item)) in fields.iter().enumerate() {
+            for (at, (key, item)) in enumerated(fields).into_iter().enumerate() {
                 if at > 0 {
                     written.push(',');
                 }
@@ -143,6 +147,19 @@ fn write_json(value: &Value, indent: &str, depth: usize, written: &mut String) {
             written.push('}');
         }
     }
+}
+
+/// An object's fields in the order JavaScript enumerates them: the keys
+/// that are array indices first, ascending, then the others as held. An
+/// object Node parsed or built enumerates so, whatever order serde_json
+/// read its text in.
+fn enumerated(fields: &Map<String, Value>) -> Vec<(&String, &Value)> {
+    let mut entries: Vec<_> = fields.iter().collect();
+    if entries.iter().any(|(key, _)| array_index(key).is_some()) {
+        // A stable sort: the other keys keep their order behind the indices.
+        entries.sort_by_key(|(key, _)| array_index(key).map_or((1, 0), |index| (0, index)));
+    }
+    entries
 }
 
 /// ASCII in the order ICU's root collation sorts it at its first level,
@@ -362,6 +379,22 @@ mod tests {
         );
         assert_eq!(stringify_indented(&read("[]"), 2), "[]");
         assert_eq!(stringify_indented(&json!("x"), 2), "\"x\"");
+    }
+
+    #[test]
+    fn writes_keys_that_are_array_indices_first_whatever_order_they_were_read_in() {
+        let read = |text: &str| serde_json::from_str::<Value>(text).unwrap();
+        // Node: JSON.stringify(JSON.parse(text)).
+        assert_eq!(
+            stringify(&read(
+                r#"{"b":1,"10":2,"a":{"z":0,"2":1,"1":2},"01":3,"4294967295":4,"4294967294":5}"#
+            )),
+            r#"{"10":2,"4294967294":5,"b":1,"a":{"1":2,"2":1,"z":0},"01":3,"4294967295":4}"#
+        );
+        assert_eq!(
+            stringify_indented(&read(r#"{"b":1,"0":2}"#), 1),
+            "{\n \"0\": 2,\n \"b\": 1\n}"
+        );
     }
 
     #[test]

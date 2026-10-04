@@ -123,7 +123,7 @@ pub fn js_order_fields(fields: Map<String, Value>) -> Map<String, Value> {
 }
 
 /// The array index a key is: digits with no leading zero, below 2^32 - 1.
-fn array_index(key: &str) -> Option<u32> {
+pub(crate) fn array_index(key: &str) -> Option<u32> {
     let canonical = !key.is_empty()
         && key.bytes().all(|byte| byte.is_ascii_digit())
         && (key == "0" || !key.starts_with('0'));
