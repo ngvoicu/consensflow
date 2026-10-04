@@ -6,9 +6,9 @@ import { preview, render } from './markdown.js'
  * column per state, every task a card that stays where it ended, with its
  * result on it. A review is a task like any other, on its reviewer's row.
  * Above the grid, what waits for the human: messages to approve when the
- * project asks for approval, notes to read, and questions a coordinator has
- * left unanswered. The human is asked nothing here: the chief asks in its
- * terminal.
+ * project asks for approval, notes to read, and, while the chief waits for
+ * the human in its terminal, the way there. The human is asked nothing here:
+ * the chief asks in its terminal, and what is for the chief stays its own.
  *
  * Everything here is drawn from the daemon's state with `textContent`, never
  * markup, so an agent-written title cannot become HTML. Actions go out through
@@ -399,12 +399,13 @@ export class BoardView {
 
   /** What waits for the human. */
   #forYou(inbox, board, now) {
-    // What waits for the human's approval, then the questions a coordinator
-    // has left unanswered too long.
-    const waiting = [
-      ...(board.gated ?? []),
-      ...(board.overdue ?? []).map((message) => ({ ...message, overdue: true })),
-    ]
+    // What waits for the human's approval.
+    const waiting = board.gated ?? []
+    // The chief waits for the human only in its terminal: its own question,
+    // or a prompt. Messages for the chief stay its own, however long it waits.
+    const chief = board.lanes.find((lane) => lane.participant.role === 'chief')
+    const asking = acts(board) && chief?.activity?.state === 'waiting' ? chief : null
+    const count = waiting.length + (asking === null ? 0 : 1)
     // The human's notes not yet read: each reads and is marked read, in its
     // own list. The daemon reads the newest one frame holds, and says how many
     // there are.
@@ -418,12 +419,9 @@ export class BoardView {
       element(
         'span',
         'foryou-status',
-        waiting.length === 0 && unread === 0
+        count === 0 && unread === 0
           ? 'Nothing waiting'
-          : [
-              waiting.length === 0 ? null : `${waiting.length} waiting`,
-              unread === 0 ? null : plural(unread, 'note'),
-            ]
+          : [count === 0 ? null : `${count} waiting`, unread === 0 ? null : plural(unread, 'note')]
               .filter(Boolean)
               .join(' · '),
       ),
@@ -431,6 +429,7 @@ export class BoardView {
     section.append(head)
     const strips = element('ol', 'strips')
     strips.setAttribute('aria-label', 'Waiting for you')
+    if (asking !== null) strips.append(this.#chiefAsks(asking))
     for (const message of waiting) strips.append(this.#messageStrip(message, board, now))
     // A gated project says what will wait here; otherwise the head's "Nothing waiting" says it all.
     if (waiting.length === 0 && board.project?.gate) {
@@ -463,12 +462,39 @@ export class BoardView {
     return section
   }
 
+  /** The chief waits for the human in its terminal: the way there, where it is answered. */
+  #chiefAsks(lane) {
+    const item = element('li', 'strip strip-chief')
+    item.dataset.testid = 'chief-asks'
+    const line = element('div', 'strip-line')
+    line.append(
+      element('span', 'strip-number', 'chief'),
+      element('span', 'strip-title', 'The chief is asking you something in its terminal'),
+      element(
+        'span',
+        'strip-route',
+        lane.activity.reason ? `Waiting: ${lane.activity.reason}` : 'Waiting for you',
+      ),
+      element('span', 'strip-age', ''),
+    )
+    const actions = element('div', 'strip-actions')
+    actions.append(
+      button(
+        'Show terminal',
+        'primary-button',
+        () => this.#actions.onShowTerminal(lane.participant, { closed: lane.pane === null }),
+        `Show ${laneName(lane.participant)}'s terminal`,
+      ),
+    )
+    item.append(line, actions)
+    return item
+  }
+
   #messageStrip(message, board, now) {
     const item = element('li', 'strip strip-message')
     item.dataset.kind = message.kind
     item.dataset.message = String(message.id)
     const gated = message.state === 'gated'
-    const toSomeone = message.overdue || gated
     const line = element('div', 'strip-line')
     line.append(
       element('span', 'strip-number', `m-${message.id}`),
@@ -478,11 +504,10 @@ export class BoardView {
       element(
         'span',
         'strip-route',
-        `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)}${toSomeone ? ` to ${who(message.recipient)}` : ''}${message.taskNumber ? ` · T-${message.taskNumber}` : ''}${message.overdue ? ' · unanswered' : ''}${gated ? ' · needs your approval' : ''}`,
+        `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)}${gated ? ` to ${who(message.recipient)}` : ''}${message.taskNumber ? ` · T-${message.taskNumber}` : ''}${gated ? ' · needs your approval' : ''}`,
       ),
       element('span', 'strip-age', age(message.createdAt, now)),
     )
-    if (message.overdue) item.dataset.overdue = 'true'
     if (gated) item.dataset.gated = 'true'
     item.append(line)
     const actions = element('div', 'strip-actions')
@@ -492,8 +517,7 @@ export class BoardView {
         button('Open task', 'quiet-button', () => this.#actions.onOpenTask(message.taskNumber)),
       )
     }
-    // An unanswered question of the chief's was never in the human's inbox.
-    if (!gated && !message.overdue && acts(board)) {
+    if (!gated && acts(board)) {
       actions.append(
         button(
           'Mark read',
@@ -776,6 +800,8 @@ export class TaskDrawer {
   #task = null
   /** Its fold of what its window wrote, kept open or shut while the task is shown. */
   #fold = null
+  /** The session whose window works on the task, if it has one: the terminal it shows. */
+  #terminal = null
 
   constructor(root, actions) {
     this.#root = root
@@ -798,9 +824,10 @@ export class TaskDrawer {
    * `closed`: the task's project is closed, and its task reads with nothing
    * to do on it. The same task drawn again keeps whatever did not change in
    * place: each step of its story and its fold open or shut, and the drawer
-   * where it was scrolled.
+   * where it was scrolled. `terminal`: the participant whose window works on
+   * the task and whether that window is closed, or null when it has none.
    */
-  show(task, { total, closed = false, now = Date.now() }) {
+  show(task, { total, closed = false, now = Date.now(), terminal = null }) {
     const same = this.#drawn(task)
     const changed = !this.shows(task)
     const head = element('header', 'drawer-head')
@@ -825,6 +852,7 @@ export class TaskDrawer {
       redraw(this.#fold, [transcriptHead(total), ...[...this.#fold.children].slice(1)])
       sections.push(this.#fold)
     }
+    this.#terminal = terminal
     const actions = element('div', 'drawer-actions')
     if (!closed) actions.append(...this.#taskActions(task))
     if (actions.childElementCount > 0) sections.push(actions)
@@ -929,6 +957,18 @@ export class TaskDrawer {
     // A button kept across redraws acts on the task as it was read last.
     const on = (action) => () => action(this.#task)
     const actions = []
+    // Its window, in front in the dock (a closed one opens on its conversation).
+    if (this.#terminal !== null) {
+      const { participant, closed } = this.#terminal
+      actions.push(
+        button(
+          'Show terminal',
+          'quiet-button',
+          () => this.#actions.onShowTerminal(participant, { closed }),
+          `Show ${laneName(participant)}'s terminal`,
+        ),
+      )
+    }
     if (PAUSABLE.includes(task.state) && task.assignee !== 'chief') {
       actions.push(button('Pause', 'quiet-button', on(this.#actions.onPause)))
     }
@@ -960,6 +1000,7 @@ export class TaskDrawer {
   hide() {
     this.#task = null
     this.#fold = null
+    this.#terminal = null
     this.#root.hidden = true
     this.#root.replaceChildren()
   }

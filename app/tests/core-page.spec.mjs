@@ -670,34 +670,37 @@ test('asks the human nothing in For you: the chief asks in its terminal', async 
   await expect(bay.getByRole('list', { name: 'Waiting for you' })).toHaveCount(0)
 })
 
-test('shows a question the chief left unanswered in For you as a notice, with nothing to write', async ({
+test("points the human to the chief's terminal while the chief waits for them there", async ({
   page,
 }) => {
   const data = model()
-  data.boards[1].overdue = [
-    {
-      id: 15,
-      kind: 'question',
-      state: 'delivered',
-      sender: 'zeus',
-      recipient: 'chief',
-      taskNumber: 2,
-      body: 'Which parser?',
-      questions: null,
-      createdAt: at(12),
-    },
-  ]
+  const chief = data.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+  chief.activity = { state: 'waiting', reason: 'input needed' }
   await open(page, data)
-  const strip = page.locator('.strip-message[data-message="15"]')
-  await expect(strip).toHaveAttribute('data-overdue', 'true')
-  await expect(strip.locator('.strip-route')).toHaveText(
-    'Question from @zeus to @chief · T-2 · unanswered',
+  const foryou = page.getByRole('region', { name: 'For you' })
+  await expect(foryou.locator('.foryou-status')).toHaveText('1 waiting · 1 note')
+  const strip = foryou.getByTestId('chief-asks')
+  await expect(strip.locator('.strip-title')).toHaveText(
+    'The chief is asking you something in its terminal',
   )
-  // The human tells the chief in its terminal; nothing here writes to an agent.
+  await expect(strip.locator('.strip-route')).toHaveText('Waiting: input needed')
+  // Nothing is answered here: the way to its terminal, the dock unfolded and the chief's card in front.
   await expect(strip.getByRole('textbox')).toHaveCount(0)
-  await expect(strip.getByRole('button', { name: 'Mark m-15 read' })).toHaveCount(0)
-  await strip.getByRole('button', { name: 'Open task' }).click()
-  await expect(page.getByRole('complementary', { name: 'Task T-2' })).toBeVisible()
+  await page.getByRole('button', { name: 'Hide terminals' }).click()
+  await strip.getByRole('button', { name: "Show Chief of Staff's terminal" }).click()
+  await expect(page.getByRole('region', { name: 'Terminals' })).toBeVisible()
+  await expect(page.locator('#stage .terminal-card[data-handle="chief"]')).toHaveAttribute(
+    'data-focused',
+    'true',
+  )
+  // Back at work, the chief waits for nothing of the human's.
+  await page.evaluate(() => {
+    const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+    lane.activity = { state: 'working' }
+    window.__listeners.get('state-changed')()
+  })
+  await expect(foryou.getByTestId('chief-asks')).toHaveCount(0)
+  await expect(foryou.locator('.foryou-status')).toHaveText('1 note')
 })
 
 test("shows a task waiting for a member in its requester's backlog, with the tier it waits for", async ({
@@ -1282,7 +1285,7 @@ test("cancels a task from its drawer, and offers the chief's own work no Pause",
   await open(page, data)
   await page.locator('button.card[data-task="1"]').click()
   const own = page.getByRole('complementary', { name: 'Task T-1' })
-  await expect(own.getByRole('button')).toHaveText(['Close', 'Cancel task'])
+  await expect(own.getByRole('button')).toHaveText(['Close', 'Show terminal', 'Cancel task'])
   await page.locator('button.card[data-task="4"]').click()
   const queued = page.getByRole('complementary', { name: 'Task T-4' })
   await queued.getByRole('button', { name: 'Cancel task' }).click()
@@ -1494,7 +1497,7 @@ test('offers no delete on a closed project until it is resumed: its finished tas
   })
   await expect(heading.getByRole('button')).toHaveAccessibleName('Delete finished')
   await page.locator('button.card[data-task="4"]').click()
-  await expect(drawer.getByRole('button')).toHaveText(['Close', 'Delete task'])
+  await expect(drawer.getByRole('button')).toHaveText(['Close', 'Show terminal', 'Delete task'])
 })
 
 test('says so on the board when the project has no members yet', async ({ page }) => {
@@ -3685,20 +3688,6 @@ test("keeps a session's terminal out of the dock until the human shows it, and t
     activity: { state: 'waiting', reason: 'permission to run a command' },
     pane: { id: 'p1-zeus-brisk-birch', generation: 2 },
   })
-  // The worker's question, left unanswered, waits in For you with its task.
-  data.boards[1].overdue = [
-    {
-      id: 15,
-      kind: 'question',
-      state: 'delivered',
-      sender: 'zeus-amber-pine',
-      recipient: 'chief',
-      taskNumber: 21,
-      body: 'Which grammar?',
-      questions: null,
-      createdAt: at(12),
-    },
-  ]
   data.tasks['1:21'] = {
     ...task(21, 'Write the lexer', 'working', 'chief', 'zeus-amber-pine', 3),
     messages: [],
@@ -3726,18 +3715,53 @@ test("keeps a session's terminal out of the dock until the human shows it, and t
     window.__output.onmessage({ id: 'p1-zeus-amber-pine', generation: 9, seq: 1, bytes: [104] }),
   )
   await expect.poll(() => acked(page, 'p1-zeus-amber-pine')).toEqual([1])
-  // Reading its task, from its card or from For you, is not asking to see its window.
+  // Reading its task is not asking to see its window; its drawer's Show terminal is.
   await worker.locator('button.card[data-task="21"]').click()
   const drawer = page.getByRole('complementary', { name: 'Task T-21' })
   await expect(drawer).toBeVisible()
-  await drawer.getByRole('button', { name: 'Close the task' }).click()
-  await page
-    .getByRole('region', { name: 'For you' })
-    .locator('li[data-message="15"]')
-    .getByRole('button', { name: 'Open task' })
-    .click()
-  await expect(drawer).toBeVisible()
   expect(await docked(page)).toEqual(['chief'])
+  await drawer.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  // The drawer covers the dock: it closes, and the task's window is in front.
+  await expect(drawer).toBeHidden()
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  await expect(
+    page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]'),
+  ).toHaveAttribute('data-focused', 'true')
+  expect(await calls(page, 'session.open')).toEqual([])
+})
+
+test("opens a task's closed window from its drawer, and offers none for a task no window has", async ({
+  page,
+}) => {
+  const data = atWork()
+  const zeus = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus').participant
+  data.boards[1].lanes.push({
+    participant: session(22, zeus, 'brisk-birch'),
+    tasks: [task(23, 'Write the docs', 'done', 'chief', 'zeus-brisk-birch', 30)],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  data.tasks['1:23'] = {
+    ...task(23, 'Write the docs', 'done', 'chief', 'zeus-brisk-birch', 30),
+    messages: [],
+  }
+  data.tasks['1:6'] = {
+    ...task(6, 'Write the docs', 'open', 'chief', null, 1, { pool: 'worker', tier: 'standard' }),
+    messages: [],
+  }
+  await open(page, data)
+  await page.locator('tr[data-handle="zeus-brisk-birch"] button.card[data-task="23"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-23' })
+  await drawer.getByRole('button', { name: "Show @zeus · brisk-birch's terminal" }).click()
+  await expect(drawer).toBeHidden()
+  await expect
+    .poll(() => calls(page, 'session.open'))
+    .toEqual([{ project: 1, handle: 'zeus-brisk-birch' }])
+  // A task on the board for any worker has no window yet.
+  await page.locator('button.card[data-task="6"]').click()
+  const open6 = page.getByRole('complementary', { name: 'Task T-6' })
+  await expect(open6).toBeVisible()
+  await expect(open6.getByRole('button', { name: /terminal/ })).toHaveCount(0)
 })
 
 test("shows a session's terminal in front, the dock unfolded, and hides it again from its row or its card", async ({

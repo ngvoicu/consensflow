@@ -12,7 +12,7 @@ import * as tasks from './tasks.js'
 
 export { TRANSCRIPT_ITEM_MAX } from './conversations.js'
 export { fitsRole, HARNESSES, LedgerError, TIERS } from './model.js'
-export { OVERDUE_MS, PAGE_BYTES } from './page-reads.js'
+export { PAGE_BYTES } from './page-reads.js'
 export { SCHEMA_VERSION } from './schema.js'
 export { RESUME_WORDS } from './tasks.js'
 

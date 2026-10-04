@@ -137,21 +137,7 @@ const board = new BoardView(boardRoot, $('#stack-dialog'), {
   // Each control acts on the project of the board it is on: not yet the one
   // the human just chose, while that one's board is on its way.
   onOpenTask: (number) => act(() => openTask(state.board.project.id, number)),
-  // A session's terminal is in the dock only once the human asks to see it:
-  // showing it unfolds the dock and brings it to the front, and a closed one
-  // opens first, on its own conversation. Hiding it takes its card out while
-  // its window works on; a window the human opened stays until its session
-  // or its project ends.
-  onShowTerminal: (participant, { closed }) => {
-    if (!closed) {
-      showTerminal(participant)
-      return
-    }
-    void act(async () => {
-      await daemon('session.open', { project: participant.projectId, handle: participant.handle })
-      showTerminal(participant)
-    })
-  },
+  onShowTerminal: (participant, opened) => showSession(participant, opened),
   onHideTerminal: (participant) => terminals.hide(participant.projectId, participant.handle),
   onEndSession: (participant) =>
     act(async () => {
@@ -202,6 +188,11 @@ const drawer = new TaskDrawer($('#task-drawer'), {
       )
     }),
   onDelete: (task) => askToDeleteTasks(task.projectId, [task.number], `Delete T-${task.number}?`),
+  // The drawer covers the dock: it closes, and the task's window is in front.
+  onShowTerminal: (participant, opened) => {
+    closeTask()
+    showSession(participant, opened)
+  },
   // What a task's window wrote, read when its fold opens.
   onTranscript: async (task) => {
     try {
@@ -218,6 +209,24 @@ const drawer = new TaskDrawer($('#task-drawer'), {
 // The packaged smoke watches acks and arrivals here, on the real paths.
 let ackObserver = null
 let outputObserver = null
+
+/**
+ * A session's terminal is in the dock only once the human asks to see it:
+ * showing it unfolds the dock and brings it to the front, and a closed one
+ * opens first, on its own conversation. Hiding it takes its card out while
+ * its window works on; a window the human opened stays until its session or
+ * its project ends.
+ */
+function showSession(participant, { closed }) {
+  if (!closed) {
+    showTerminal(participant)
+    return
+  }
+  void act(async () => {
+    await daemon('session.open', { project: participant.projectId, handle: participant.handle })
+    showTerminal(participant)
+  })
+}
 
 /** A session's terminal the human asked to see: in the dock, unfolded, in front. */
 function showTerminal(participant) {
@@ -258,7 +267,19 @@ async function openTask(project, number) {
   ])
   if (state.selected !== project) return
   state.openTask = { project, number, total }
-  drawer.show(task, { total, closed: closedProject(project) })
+  drawer.show(task, { total, closed: closedProject(project), terminal: terminalOf(task) })
+}
+
+/**
+ * The window that works on `task`, on the board shown, and whether it is
+ * closed: a session's, or the chief's own; a member itself has none.
+ */
+function terminalOf(task) {
+  const lane = state.board?.lanes.find((l) => l.participant.handle === task.assignee)
+  if (lane === undefined) return null
+  const { participant } = lane
+  if (participant.member === null && participant.role !== 'chief') return null
+  return { participant, closed: lane.pane === null }
 }
 
 function closeTask() {
@@ -285,7 +306,11 @@ async function rereadTask() {
     if (!drawer.shows(task)) opened.total = await written(project, number)
     // Closed, or another task opened, while these were on their way.
     if (state.openTask !== opened) return
-    drawer.show(task, { total: opened.total, closed: closedProject(project) })
+    drawer.show(task, {
+      total: opened.total,
+      closed: closedProject(project),
+      terminal: terminalOf(task),
+    })
   } catch (cause) {
     closeTask()
     report(cause)

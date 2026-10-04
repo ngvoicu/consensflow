@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { OVERDUE_MS, openLedger, PAGE_BYTES, TRANSCRIPT_ITEM_MAX } from '../src/ledger/index.js'
+import { openLedger, PAGE_BYTES, TRANSCRIPT_ITEM_MAX } from '../src/ledger/index.js'
 import { deliver, names, staff, withDir, withLedger } from './ledger-fixtures.mjs'
 
 /** What the page reads in one frame, and the whole reads beside them (src/ledger/page-reads.js). */
@@ -28,11 +28,7 @@ describe('views', () => {
 
   it('stays small however long the briefs and results run: no brief on a card, a part in the bay', async () => {
     await withDir((dir) => {
-      let at = Date.parse('2026-09-19T10:00:00.000Z')
-      const ledger = openLedger(path.join(dir, 'consensflow.db'), {
-        now: () => new Date(at),
-        names: names(),
-      })
+      const ledger = openLedger(path.join(dir, 'consensflow.db'), { names: names() })
       try {
         const { project, id } = staff(ledger)
         ledger.setGate(project.id, true)
@@ -55,14 +51,7 @@ describe('views', () => {
         const long = 'A finding, with the evidence for it. '.repeat(24_000).trim()
         working(1)
         ledger.recordResult(project.id, 1, { body: long })
-        const question = ledger.ask(project.id, {
-          from: working(2),
-          to: 'chief',
-          task: 2,
-          body: long,
-        })
-        ledger.approveMessage(question.id, { by: 'human' })
-        at += OVERDUE_MS
+        ledger.ask(project.id, { from: working(2), to: 'chief', task: 2, body: long })
         const board = ledger.board(project.id)
         const bytes = Buffer.byteLength(JSON.stringify(board))
         assert.ok(300 * brief.length > 1024 * 1024, 'more than a frame of briefs')
@@ -75,7 +64,7 @@ describe('views', () => {
           'the drawer reads the brief with the task',
         )
         assert.equal(cards.find((task) => task.number === 1).result, `${long.slice(0, 119)}…`)
-        const bay = [...board.gated, ...board.overdue]
+        const bay = board.gated
         assert.deepEqual(
           bay.map((m) => [m.kind, m.taskNumber]),
           [

@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
-import path from 'node:path'
 import { describe, it } from 'node:test'
-import { OVERDUE_MS, openLedger } from '../src/ledger/index.js'
-import { deliver, names, staff, withDir, withLedger } from './ledger-fixtures.mjs'
+import { deliver, staff, withLedger } from './ledger-fixtures.mjs'
 
 /** Messages: delivery one at a time, questions and their answers (src/ledger/messages.js). */
 
@@ -409,87 +407,31 @@ describe('the inbox queue: delivery, questions and answers', () => {
     })
   })
 
-  it("lets only the one asked answer, and shows a coordinator's unanswered question as overdue until then", async () => {
-    await withDir((dir) => {
-      let at = Date.parse('2026-09-19T10:00:00.000Z')
-      const ledger = openLedger(path.join(dir, 'consensflow.db'), { now: () => new Date(at) })
-      try {
-        const { project, id } = staff(ledger)
-        deliver(
-          ledger,
-          ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' }).message,
-        )
-        const question = ledger.ask(project.id, {
-          from: 'zeus',
-          to: 'chief',
-          task: 1,
-          body: 'Which format?',
-        })
-        at += OVERDUE_MS - 1000
-        assert.deepEqual(ledger.board(project.id).overdue, [])
-        at += 2000
-        assert.deepEqual(
-          ledger.board(project.id).overdue.map((m) => [m.id, m.recipient]),
-          [[question.id, 'chief']],
-        )
-        assert.throws(() => ledger.answer(question.id, { from: id('human'), body: 'JSON' }), {
-          code: 'not-your-question',
-        })
-        const answer = ledger.answer(question.id, { from: question.recipientId, body: 'JSON' })
-        assert.deepEqual(
-          [answer.recipient, answer.state, answer.choices],
-          ['zeus', 'queued', null],
-          'a plain question is answered in text, delivered as before',
-        )
-        assert.deepEqual(ledger.board(project.id).overdue, [])
-        assert.throws(() => ledger.answer(question.id, { from: id('diana'), body: 'CSV' }), {
-          code: 'not-your-question',
-        })
-      } finally {
-        ledger.close()
-      }
-    })
-  })
-
-  it('shows as overdue only a question still waiting: none withdrawn, none whose task or asker went', async () => {
-    await withDir((dir) => {
-      let at = Date.parse('2026-09-19T10:00:00.000Z')
-      const ledger = openLedger(path.join(dir, 'consensflow.db'), {
-        now: () => new Date(at),
-        names: names(),
+  it('lets only the one asked answer', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      deliver(
+        ledger,
+        ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' }).message,
+      )
+      const question = ledger.ask(project.id, {
+        from: 'zeus',
+        to: 'chief',
+        task: 1,
+        body: 'Which format?',
       })
-      try {
-        const { project, id } = staff(ledger)
-        const asks = (body, question) => {
-          const { task } = ledger.createTask(project.id, {
-            from: 'chief',
-            pool: 'worker',
-            tier: 'standard',
-            body,
-          })
-          const { message } = ledger.assignTask(project.id, task.number, id('zeus'))
-          deliver(ledger, message)
-          const from = message.recipient
-          return ledger.ask(project.id, { from, to: 'chief', task: task.number, body: question })
-        }
-        // T-1 is cancelled with its question in the chief's window; T-2's
-        // question is withdrawn before it went; diana asks about no task and
-        // leaves the staff; T-3's question waits.
-        deliver(ledger, asks('Parser', 'Which grammar?'))
-        const withdrawn = asks('Lexer', 'Which tokens?')
-        deliver(ledger, asks('Tests', 'Which runner?'))
-        deliver(ledger, ledger.ask(project.id, { from: 'diana', to: 'chief', body: 'Any work?' }))
-        ledger.cancelTask(project.id, 1, { by: 'chief' })
-        ledger.cancelMessage(withdrawn.id, 'no longer asked')
-        ledger.removeMember(project.id, 'diana')
-        at += OVERDUE_MS
-        assert.deepEqual(
-          ledger.board(project.id).overdue.map((m) => [m.taskNumber, m.body]),
-          [[3, 'Which runner?']],
-        )
-      } finally {
-        ledger.close()
-      }
+      assert.throws(() => ledger.answer(question.id, { from: id('human'), body: 'JSON' }), {
+        code: 'not-your-question',
+      })
+      const answer = ledger.answer(question.id, { from: question.recipientId, body: 'JSON' })
+      assert.deepEqual(
+        [answer.recipient, answer.state, answer.choices],
+        ['zeus', 'queued', null],
+        'a plain question is answered in text, delivered as before',
+      )
+      assert.throws(() => ledger.answer(question.id, { from: id('diana'), body: 'CSV' }), {
+        code: 'not-your-question',
+      })
     })
   })
 

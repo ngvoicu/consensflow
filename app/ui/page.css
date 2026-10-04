@@ -518,7 +518,9 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
 .strip-message[data-kind="result"] { --state: var(--seafoam); --state-ink: var(--ink); }
 .strip-message[data-kind="answer"] { --state: var(--seafoam-dim); }
 .strip-actions { display: flex; gap: 8px; padding: 8px 12px 10px 78px; align-items: flex-start; }
-.strip[data-overdue="true"] .strip-route { color: var(--amber); }
+/* The chief waits for the human in its terminal: the way there, in a question's amber. */
+.strip-chief { --state: var(--amber); --state-ink: var(--ink); }
+.strip-chief .strip-route { color: var(--amber); }
 .strip[data-gated="true"] .strip-route { color: var(--seafoam); }
 .strip[data-gated="true"] { border-left: 3px solid var(--seafoam-dim); }
 /* A list too narrow for the text beside who sent it (For you at the

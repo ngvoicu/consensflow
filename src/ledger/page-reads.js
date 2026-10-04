@@ -11,8 +11,6 @@ import { MESSAGE_SELECT, messageView, TASK_SELECT, taskView } from './views.js'
  * counted; `cf` reads the same records whole.
  */
 
-/** How long a coordinator may leave a question before the human sees it too. */
-export const OVERDUE_MS = 10 * 60_000
 /**
  * How much of a list the page reads at once (the human's notes, what a
  * window wrote), as JSON: half the 1 MiB frame the Rust host's bridge carries
@@ -132,7 +130,6 @@ export function board(store, projectId) {
       participant,
       tasks: tasks.filter((task) => laneOf.get(task.id) === participant.handle),
     })),
-    overdue: overdueQuestions(store, projectId),
     gated: gatedMessages(store, projectId),
   }
 }
@@ -142,31 +139,6 @@ function gatedMessages(store, projectId) {
   return store.db
     .prepare(`${MESSAGE_SELECT} WHERE m.project_id = ? AND m.state = 'gated' ORDER BY m.id`)
     .all(projectId)
-    .map(bayView)
-}
-
-/**
- * Questions a coordinator has left unanswered for OVERDUE_MS: the human sees
- * them too. Only one still on its way or in the chief's window counts, from
- * an asker still on the staff, about no task or one still at work (working
- * or waiting); an answer held for the human or declined is no answer yet,
- * as for the task.
- */
-function overdueQuestions(store, projectId) {
-  const before = new Date(store.now().getTime() - OVERDUE_MS).toISOString()
-  return store.db
-    .prepare(
-      `${MESSAGE_SELECT}
-       WHERE m.project_id = ? AND m.kind = 'question' AND r.role = 'chief'
-         AND m.state IN ('queued', 'delivering', 'delivered') AND m.created_at <= ?
-         AND s.left_at IS NULL AND (m.task_id IS NULL OR t.state IN ('working', 'waiting'))
-         AND NOT EXISTS (
-           SELECT 1 FROM message a WHERE a.reply_to = m.id AND a.kind = 'answer'
-             AND a.state NOT IN ('gated', 'cancelled')
-         )
-       ORDER BY m.id`,
-    )
-    .all(projectId, before)
     .map(bayView)
 }
 
