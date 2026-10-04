@@ -108,9 +108,9 @@ impl AgentRow {
         self.fields.insert(field.to_owned(), value);
     }
 
-    /// The row as the JSON object it is.
-    pub(crate) fn into_value(self) -> Value {
-        Value::Object(self.fields)
+    /// `delete row[field]`: the fields after it keep their order.
+    pub(crate) fn remove(&mut self, field: &str) {
+        self.fields.shift_remove(field);
     }
 
     fn text(&self, key: &str) -> Option<&str> {

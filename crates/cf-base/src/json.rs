@@ -19,6 +19,56 @@ pub fn from_slice_lossy(bytes: &[u8]) -> serde_json::Result<Value> {
     serde_json::from_str(&without_lone_surrogates(&text))
 }
 
+/// What [`from_slice_exact`] will not read: JSON a value here cannot hold as
+/// `JSON.parse` would, without losing some of it.
+#[derive(Debug)]
+pub enum Inexact {
+    /// No JSON, or JSON serde_json does not read: nested past 128 levels, or a
+    /// number past a double's range, where JavaScript reads `Infinity`.
+    Json(serde_json::Error),
+    /// A lone surrogate's escape, which a JavaScript string holds and a Rust
+    /// one cannot: read as U+FFFD, two keys could become one.
+    LoneSurrogate,
+}
+
+/// The JSON in `bytes` as `JSON.parse` reads it from a file Node decoded as
+/// UTF-8: invalid UTF-8 as U+FFFD, keys in the order JavaScript enumerates
+/// them, and every number the double it reads as (an integer past 2^53
+/// rounds). What a value here cannot hold without losing some of it is no
+/// reading at all ([`Inexact`]), so a file read to be written back is never
+/// written back changed.
+pub fn from_slice_exact(bytes: &[u8]) -> Result<Value, Inexact> {
+    let text = String::from_utf8_lossy(bytes);
+    if matches!(without_lone_surrogates(&text), Cow::Owned(_)) {
+        return Err(Inexact::LoneSurrogate);
+    }
+    let value = serde_json::from_str(&text).map_err(Inexact::Json)?;
+    Ok(js_order(as_doubles(value)))
+}
+
+/// `value` with every integer past 2^53 the double JavaScript reads it as.
+fn as_doubles(value: Value) -> Value {
+    const SAFE: u64 = 1 << 53;
+    match value {
+        Value::Number(number) => {
+            let beyond = number.as_u64().is_some_and(|whole| whole > SAFE)
+                || number.as_i64().is_some_and(|whole| whole.unsigned_abs() > SAFE);
+            match number.as_f64().filter(|_| beyond).and_then(serde_json::Number::from_f64) {
+                Some(double) => Value::Number(double),
+                None => Value::Number(number),
+            }
+        }
+        Value::Array(items) => Value::Array(items.into_iter().map(as_doubles).collect()),
+        Value::Object(fields) => Value::Object(
+            fields
+                .into_iter()
+                .map(|(key, item)| (key, as_doubles(item)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
 /// Whether `bytes` are JSON nested to any depth, which [`from_slice_lossy`]
 /// reads to 128 levels only: JSON that is skipped, never built into a value, so
 /// it cannot overflow a stack.
@@ -111,6 +161,29 @@ fn escaped_unit(bytes: &[u8], at: usize) -> Option<u16> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn json_read_exactly_is_what_json_parse_reads_or_no_reading() {
+        let read = |text: &str| from_slice_exact(text.as_bytes());
+        // Node: JSON.parse('{"b":9007199254740993,"2":1,"a":1.5}')
+        assert_eq!(
+            crate::js::stringify(&read(r#"{"b":9007199254740993,"2":1,"a":1.5}"#).unwrap()),
+            r#"{"2":1,"b":9007199254740992,"a":1.5}"#
+        );
+        assert_eq!(
+            crate::js::stringify(&read("[-9007199254740993, 9007199254740992, 5]").unwrap()),
+            "[-9007199254740992,9007199254740992,5]"
+        );
+        assert!(matches!(read(r#"{"\ud800":1,"\ud801":2}"#), Err(Inexact::LoneSurrogate)));
+        assert!(matches!(read(r#"["\udc00"]"#), Err(Inexact::LoneSurrogate)));
+        assert_eq!(read(r#"["\ud83d\ude00"]"#).unwrap(), json!(["\u{1F600}"]));
+        assert!(matches!(read(r#"{"x":1e400}"#), Err(Inexact::Json(_))));
+        let deep = format!("{}{}", "[".repeat(200), "]".repeat(200));
+        assert!(matches!(read(&deep), Err(Inexact::Json(_))));
+        assert!(matches!(read("{,}"), Err(Inexact::Json(_))));
+        // Bytes that are no UTF-8 are U+FFFD, as Node decoded the file.
+        assert_eq!(from_slice_exact(b"[\"\xff\"]").unwrap(), json!(["\u{FFFD}"]));
+    }
 
     #[test]
     fn a_preview_cut_through_an_emoji_reads_with_a_replacement_character() {

@@ -33,6 +33,26 @@ fn without_a_configured_home_it_is_in_the_dot_consensflow_of_the_users_home() {
 }
 
 #[test]
+fn a_dot_dot_in_the_configured_home_takes_off_the_folder_before_it_as_node_joins() {
+    // Node's path.join reads `missing/..` by its text: the folder need not be there.
+    let home = tempdir().unwrap();
+    let configured = home.path().join("base").join("missing").join("..");
+    fs::create_dir_all(home.path().join("base")).unwrap();
+    fs::write(
+        home.path().join("base").join("agents.json"),
+        r#"{"agents":[]}"#,
+    )
+    .unwrap();
+    let env = Env::from_vars([("CONSENSFLOW_HOME", configured.as_os_str())]);
+    let path = roster_path(&env).unwrap();
+    assert_eq!(path, home.path().join("base").join("agents.json"));
+    assert!(
+        read_roster(&path).unwrap().is_some(),
+        "the file there is read"
+    );
+}
+
+#[test]
 fn with_no_home_at_all_the_environment_names_no_path() {
     assert_eq!(roster_path(&Env::default()), None);
 }
@@ -168,10 +188,37 @@ fn bytes_that_are_no_utf8_read_as_replacement_characters() {
 }
 
 #[test]
-fn a_lone_surrogate_escape_reads_as_a_replacement_character() {
-    let (_home, path) = file_with(br#"{"note":"cut \ud83d"}"#);
+fn json_this_build_cannot_hold_as_node_would_is_refused_and_left_as_it_is() {
+    // Stricter than Node, decided and kept on purpose: a lone surrogate's
+    // escape (two such keys would read as one), a number past a double's
+    // range (Node reads Infinity and writes null), nesting past 128 levels.
+    // Each refuses the file rather than have the next write change it.
+    let nested = format!("{}{}", "[".repeat(200), "]".repeat(200));
+    for text in [
+        r#"{"agents":[{"id":"nova","\ud800":1,"\ud801":2}]}"#.to_owned(),
+        r#"{"note":"cut \ud83d"}"#.to_owned(),
+        r#"{"agents":[{"id":"nova","extra":1e400}]}"#.to_owned(),
+        format!(r#"{{"agents":[],"deep":{nested}}}"#),
+    ] {
+        let (_home, path) = file_with(text.as_bytes());
+        assert_eq!(
+            refused(&path).message,
+            sentence(&path, "is not valid JSON"),
+            "{text}"
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), text, "left as it is");
+    }
+}
+
+#[test]
+fn a_number_reads_as_the_double_javascript_reads() {
+    // JSON.parse rounds an integer past 2^53, and JSON.stringify writes the double.
+    let (_home, path) = file_with(br#"{"agents":[{"id":"nova","extra":9007199254740993}]}"#);
     let roster = read_roster(&path).unwrap().unwrap();
-    assert_eq!(roster["note"], json!("cut \u{FFFD}"));
+    assert_eq!(
+        cf_base::js::stringify(&Value::Object(roster)),
+        r#"{"agents":[{"id":"nova","extra":9007199254740992}]}"#
+    );
 }
 
 #[test]
@@ -189,23 +236,6 @@ fn a_key_written_twice_keeps_the_place_of_its_first_and_the_value_of_its_last() 
     let (_home, path) = file_with(br#"{"a":1,"b":2,"a":3}"#);
     let roster = read_roster(&path).unwrap().unwrap();
     assert_eq!(Value::Object(roster).to_string(), r#"{"a":3,"b":2}"#);
-}
-
-#[test]
-fn json_nested_past_the_limit_serde_json_reads_to_is_refused_as_not_valid_json() {
-    // A difference from Node, pinned here for the lead to decide: `JSON.parse`
-    // has no limit on how deep JSON nests and reads this file, serde_json
-    // stops at 128 levels and the file is said to be no JSON, a sentence Node
-    // never had for it. Nothing decided it; no golden holds it.
-    let nested = format!("{}{}", "[".repeat(200), "]".repeat(200));
-    let (_home, path) = file_with(format!(r#"{{"agents":[],"deep":{nested}}}"#).as_bytes());
-    assert_eq!(refused(&path).message, sentence(&path, "is not valid JSON"));
-}
-
-#[test]
-fn an_error_with_no_errno_says_its_own_words() {
-    let error = io::Error::other("the disk is gone");
-    assert_eq!(code_of(&error), "the disk is gone");
 }
 
 #[cfg(unix)]
@@ -298,43 +328,5 @@ mod unix {
         let path = home.path().join("agents.json");
         symlink("nowhere.json", &path).unwrap();
         assert_eq!(read_roster(&path).unwrap(), None);
-    }
-
-    #[test]
-    fn each_errno_the_table_knows_says_its_own_name() {
-        let table = [
-            (libc::EACCES, "EACCES"),
-            (libc::EPERM, "EPERM"),
-            (libc::EISDIR, "EISDIR"),
-            (libc::ENOTDIR, "ENOTDIR"),
-            (libc::ELOOP, "ELOOP"),
-            (libc::ENAMETOOLONG, "ENAMETOOLONG"),
-            (libc::EIO, "EIO"),
-            (libc::EMFILE, "EMFILE"),
-            (libc::ENFILE, "ENFILE"),
-            (libc::ENOMEM, "ENOMEM"),
-            (libc::EBUSY, "EBUSY"),
-            (libc::ENXIO, "ENXIO"),
-            (libc::ENODEV, "ENODEV"),
-            (libc::EINVAL, "EINVAL"),
-            (libc::EOVERFLOW, "EOVERFLOW"),
-            (libc::ETIMEDOUT, "ETIMEDOUT"),
-            (libc::ESTALE, "ESTALE"),
-            (libc::EAGAIN, "EAGAIN"),
-        ];
-        for (errno, name) in table {
-            assert_eq!(code_of(&io::Error::from_raw_os_error(errno)), name);
-        }
-    }
-
-    #[test]
-    fn an_errno_the_table_does_not_know_says_the_systems_words() {
-        let error = io::Error::from_raw_os_error(libc::ENOSPC);
-        let said = code_of(&error);
-        assert_eq!(said, error.to_string());
-        assert!(
-            said.contains(&format!("(os error {})", libc::ENOSPC)),
-            "{said}"
-        );
     }
 }

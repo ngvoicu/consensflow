@@ -38,8 +38,9 @@ impl Catalog {
     pub(crate) fn rows(&self, document: &Document) -> Vec<AgentRow> {
         let custom: Vec<AgentRow> = document
             .agents()
-            .into_iter()
+            .iter()
             .filter(|row| self.entry_of(row).is_none())
+            .cloned()
             .collect();
         let hidden: HashSet<&str> = custom.iter().filter_map(AgentRow::id).collect();
         let mut rows: Vec<AgentRow> = self

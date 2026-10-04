@@ -1,20 +1,66 @@
 //! What the human chose about the roster, kept in the file beside their own
 //! agents (`preferencesOf`, `RELAYED` and `hides`, `src/roster.js`).
 
-use cf_proto::agents::{AgentView, Preferences};
-use serde_json::Value;
+use std::path::Path;
 
-use super::document::Document;
+use cf_base::json::js_order;
+use cf_base::refusal::Refusal;
+use cf_proto::agents::{AgentView, Preferences};
+use serde_json::{Map, Value};
+
+use super::document::{load_document, Document};
+use super::save::save_document;
 
 /// The choices the file records. One it does not record is off, and so is
 /// one that is anything but `true`.
 pub(crate) fn preferences_of(document: &Document) -> Preferences {
     let own_harness_only = document
-        .fields()
         .get("preferences")
         .and_then(|preferences| preferences.get("ownHarnessOnly"))
         == Some(&Value::Bool(true));
     Preferences { own_harness_only }
+}
+
+/// What the human may choose: each by its name in the file.
+const PREFERENCE_KEYS: [&str; 1] = ["ownHarnessOnly"];
+
+/// `setPreferences`: the choices `patch` names set, each refused in the
+/// order JavaScript enumerates the request's keys, then the whole set kept
+/// in the file: a write even when nothing changes, and a file made when
+/// there is none. A key the file kept that this build does not know is
+/// dropped from it.
+pub(crate) fn set_preferences(
+    path: &Path,
+    patch: Option<&Map<String, Value>>,
+) -> Result<Preferences, Refusal> {
+    let mut document = load_document(path)?;
+    let mut next = preferences_of(&document);
+    if let Some(Value::Object(patch)) = patch.map(|patch| js_order(Value::Object(patch.clone()))) {
+        for (key, value) in &patch {
+            if !PREFERENCE_KEYS.contains(&key.as_str()) {
+                return Err(Refusal::new(
+                    "preference-unknown",
+                    format!("no preference named {key}"),
+                ));
+            }
+            let Value::Bool(on) = value else {
+                return Err(Refusal::new(
+                    "preference-switch",
+                    format!("{key} is on or off"),
+                ));
+            };
+            next.own_harness_only = *on;
+        }
+    }
+    document.set(
+        "preferences",
+        Value::Object(Map::from_iter([(
+            "ownHarnessOnly".to_owned(),
+            Value::Bool(next.own_harness_only),
+        )])),
+    );
+    save_document(path, &mut document)?;
+    Ok(next)
 }
 
 /// The harnesses that reach other makers' models.

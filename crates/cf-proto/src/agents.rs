@@ -32,6 +32,20 @@ impl Harness {
         }
     }
 
+    /// The harness a request names by the CLI's own name (`claude`); none for
+    /// any other word, a kind (`claude-code`) among them.
+    pub fn from_name(name: &str) -> Option<Harness> {
+        [
+            Harness::Claude,
+            Harness::Codex,
+            Harness::Pi,
+            Harness::Opencode,
+            Harness::Devin,
+        ]
+        .into_iter()
+        .find(|harness| harness.as_str() == name)
+    }
+
     /// The payload's word for it (`claude-code`), as the store and the roster say it.
     pub fn kind(self) -> &'static str {
         match self {

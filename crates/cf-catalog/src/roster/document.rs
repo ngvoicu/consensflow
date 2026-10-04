@@ -33,27 +33,48 @@ pub(crate) fn stored_document(path: &Path) -> Result<Map<String, Value>, Refusal
 /// now.
 #[derive(Debug)]
 pub(crate) struct Document {
-    /// Every key of the file in JavaScript's order; `agents` holds the rows
-    /// [`load_document`] checked.
+    /// Every key of the file in JavaScript's order. `agents` holds its place
+    /// with an empty list: its rows are in `rows`.
     fields: Map<String, Value>,
+    /// The rows, in the file's order, each of a shape this build reads.
+    rows: Vec<AgentRow>,
 }
 
 impl Document {
-    /// Every key of the file with what it holds.
-    pub(crate) fn fields(&self) -> &Map<String, Value> {
-        &self.fields
+    /// A key of the file with what it holds; the rows are [`Document::agents`].
+    pub(crate) fn get(&self, key: &str) -> Option<&Value> {
+        self.fields.get(key)
     }
 
-    /// The rows, in the file's order. Each was checked when the document was
-    /// loaded, so none is left out here.
-    pub(crate) fn agents(&self) -> Vec<AgentRow> {
-        match self.fields.get("agents") {
-            Some(Value::Array(rows)) => rows
-                .iter()
-                .filter_map(|row| AgentRow::from_value(row.clone()))
-                .collect(),
-            _ => Vec::new(),
-        }
+    /// `key` set to `value`, as `{...document, [key]: value}` sets it: a key
+    /// the file has keeps its place, a new one comes last.
+    pub(crate) fn set(&mut self, key: &str, value: Value) {
+        self.fields.insert(key.to_owned(), value);
+    }
+
+    /// The rows, in the file's order.
+    pub(crate) fn agents(&self) -> &[AgentRow] {
+        &self.rows
+    }
+
+    /// The rows, to change before the document is saved.
+    pub(crate) fn agents_mut(&mut self) -> &mut Vec<AgentRow> {
+        &mut self.rows
+    }
+
+    /// The whole document, its rows in their place.
+    pub(crate) fn to_value(&self) -> Value {
+        let mut fields = self.fields.clone();
+        fields.insert(
+            "agents".to_owned(),
+            Value::Array(
+                self.rows
+                    .iter()
+                    .map(|row| Value::Object(row.fields().clone()))
+                    .collect(),
+            ),
+        );
+        Value::Object(fields)
     }
 }
 
@@ -64,14 +85,15 @@ impl Document {
 /// row, with its profile, refuses a tier no longer known.
 pub(crate) fn load_document(path: &Path) -> Result<Document, Refusal> {
     let mut fields = stored_document(path)?;
-    if let Some(Value::Array(rows)) = fields.get_mut("agents") {
-        for row in rows {
-            let checked = AgentRow::from_value(row.take())
+    let mut rows = Vec::new();
+    if let Some(Value::Array(stored)) = fields.get_mut("agents") {
+        for row in stored.drain(..) {
+            let checked = AgentRow::from_value(row)
                 .ok_or_else(|| unreadable(path, "is not an agents file"))?;
-            *row = designing_codex(checked).into_value();
+            rows.push(designing_codex(checked));
         }
     }
-    Ok(Document { fields })
+    Ok(Document { fields, rows })
 }
 
 /// An image agent as it is now: `{...row, kind: 'codex', designer: true}`.

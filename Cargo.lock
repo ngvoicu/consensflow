@@ -385,7 +385,6 @@ version = "3.0.0-alpha.73"
 dependencies = [
  "cf-base",
  "cf-proto",
- "libc",
  "serde",
  "serde_json",
  "tempfile",

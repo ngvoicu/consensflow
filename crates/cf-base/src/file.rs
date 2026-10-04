@@ -214,6 +214,40 @@ mod tests {
         assert_eq!(errno_name(&io::Error::other("no system code")), None);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn each_errno_a_file_meets_is_called_by_its_name_and_any_other_by_none() {
+        let table = [
+            (libc::ENOENT, "ENOENT"),
+            (libc::EACCES, "EACCES"),
+            (libc::EPERM, "EPERM"),
+            (libc::EISDIR, "EISDIR"),
+            (libc::ENOTDIR, "ENOTDIR"),
+            (libc::ELOOP, "ELOOP"),
+            (libc::ENAMETOOLONG, "ENAMETOOLONG"),
+            (libc::EIO, "EIO"),
+            (libc::EMFILE, "EMFILE"),
+            (libc::ENFILE, "ENFILE"),
+            (libc::ENOMEM, "ENOMEM"),
+            (libc::EBUSY, "EBUSY"),
+            (libc::ENXIO, "ENXIO"),
+            (libc::ENODEV, "ENODEV"),
+            (libc::EINVAL, "EINVAL"),
+            (libc::EOVERFLOW, "EOVERFLOW"),
+            (libc::ETIMEDOUT, "ETIMEDOUT"),
+            (libc::ESTALE, "ESTALE"),
+            (libc::EAGAIN, "EAGAIN"),
+            (libc::ENOSPC, "ENOSPC"),
+            (libc::EROFS, "EROFS"),
+            (libc::EEXIST, "EEXIST"),
+            (libc::EXDEV, "EXDEV"),
+        ];
+        for (errno, name) in table {
+            assert_eq!(errno_name(&io::Error::from_raw_os_error(errno)), Some(name));
+        }
+        assert_eq!(errno_name(&io::Error::from_raw_os_error(libc::EHOSTUNREACH)), None);
+    }
+
     #[cfg(windows)]
     #[test]
     fn on_windows_a_name_no_file_can_have_is_missing_as_node_says() {

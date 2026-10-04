@@ -5,19 +5,21 @@
 //! agent in it.
 
 use std::fs;
-use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
 use cf_base::env::Env;
-use cf_base::home::config_root;
-use cf_base::json::{from_slice_lossy, js_order};
+use cf_base::file::{errno_name, is_missing};
+use cf_base::home::{config_root, normalized};
+use cf_base::json::from_slice_exact;
 use cf_base::refusal::Refusal;
 use serde_json::{Map, Value};
 
-/// The human's agents file, inside ConsensFlow's folder. None when the
-/// environment names no folder to keep it in.
+/// The human's agents file, inside ConsensFlow's folder, joined as Node's
+/// `path.join` joins it: a `..` in `CONSENSFLOW_HOME` takes off the folder
+/// before it by the text alone, so `/base/missing/..` is `/base`. None when
+/// the environment names no folder to keep it in.
 pub fn roster_path(env: &Env) -> Option<PathBuf> {
-    config_root(env).map(|root| root.join("agents.json"))
+    config_root(env).map(|root| normalized(&root.join("agents.json")))
 }
 
 /// The file as the human left it: the object it holds, its keys in the order
@@ -32,9 +34,13 @@ pub(crate) fn read_roster(path: &Path) -> Result<Option<Map<String, Value>>, Ref
         }
     };
     // Node reads bytes that are no UTF-8 as U+FFFD, and keeps a byte order
-    // mark, which `JSON.parse` then refuses: so does this.
-    let parsed = from_slice_lossy(&bytes).map_err(|_| unreadable(path, "is not valid JSON"))?;
-    match js_order(parsed) {
+    // mark, which `JSON.parse` then refuses: so does this. JSON a value here
+    // cannot hold as Node would (a lone surrogate's escape, a number past a
+    // double's range, nesting past 128 levels) is refused as JSON this build
+    // cannot read, stricter than Node and kept on purpose: the next write
+    // would otherwise change the file, and the file is left as it is.
+    let parsed = from_slice_exact(&bytes).map_err(|_| unreadable(path, "is not valid JSON"))?;
+    match parsed {
         Value::Object(fields) => Ok(Some(fields)),
         _ => Err(unreadable(path, "is not an agents file")),
     }
@@ -64,54 +70,17 @@ enum Unread {
 fn read_bytes(path: &Path) -> Result<Vec<u8>, Unread> {
     // Node says EISDIR for a directory on every system. Unix opens one and
     // refuses to read it with the same word; Windows refuses to open it, as
-    // "access denied".
+    // access denied.
     if path.is_dir() {
         return Err(Unread::Code("EISDIR".to_owned()));
     }
-    fs::read(path).map_err(|error| match error.kind() {
-        ErrorKind::NotFound => Unread::Missing,
-        _ => Unread::Code(code_of(&error)),
+    fs::read(path).map_err(|error| {
+        if is_missing(&error) {
+            Unread::Missing
+        } else {
+            Unread::Code(errno_name(&error).map_or_else(|| error.to_string(), str::to_owned))
+        }
     })
-}
-
-/// `error.code ?? error.message`: the errno's name when it has one, else
-/// the system's own words.
-fn code_of(error: &io::Error) -> String {
-    errno_name(error).map_or_else(|| error.to_string(), str::to_owned)
-}
-
-/// The name of the errno behind `error`, as Node's `error.code` has it: the
-/// ones a file the human can reach fails with. The numbers differ between
-/// the systems, so the names come from the constants. Windows has no errno,
-/// and its codes are other numbers: it says the system's words.
-#[cfg(unix)]
-fn errno_name(error: &io::Error) -> Option<&'static str> {
-    Some(match error.raw_os_error()? {
-        libc::EACCES => "EACCES",
-        libc::EPERM => "EPERM",
-        libc::EISDIR => "EISDIR",
-        libc::ENOTDIR => "ENOTDIR",
-        libc::ELOOP => "ELOOP",
-        libc::ENAMETOOLONG => "ENAMETOOLONG",
-        libc::EIO => "EIO",
-        libc::EMFILE => "EMFILE",
-        libc::ENFILE => "ENFILE",
-        libc::ENOMEM => "ENOMEM",
-        libc::EBUSY => "EBUSY",
-        libc::ENXIO => "ENXIO",
-        libc::ENODEV => "ENODEV",
-        libc::EINVAL => "EINVAL",
-        libc::EOVERFLOW => "EOVERFLOW",
-        libc::ETIMEDOUT => "ETIMEDOUT",
-        libc::ESTALE => "ESTALE",
-        libc::EAGAIN => "EAGAIN",
-        _ => return None,
-    })
-}
-
-#[cfg(not(unix))]
-fn errno_name(_error: &io::Error) -> Option<&'static str> {
-    None
 }
 
 #[cfg(test)]

@@ -1,12 +1,9 @@
-//! The tests of `tests/roster.test.mjs` that only read, ported with the
-//! roster's reads: each keeps its sentence, as a name, and its assertions.
-//! The tests that write wait for the roster's writes.
-//!
-//! A `describe` block of the JS is a module here, in a file of its own; the
-//! tests outside one are in this file. Where a `describe` mixes reading and
-//! writing, the reading half is a test of its own (the file the JS wrote
-//! with `addAgent` or `setPreferences` is written by hand), named for what
-//! it reads, and says which JS test its writing half is.
+//! The tests of `tests/roster.test.mjs`, ported with the roster: each keeps
+//! its sentence, as a name, and its assertions. A `describe` block of the JS
+//! is a module here, in a file of its own; the tests outside one are in this
+//! file. The JS ran a block's tests in order in one home, a later one on the
+//! file an earlier one left: here each starts from a home of its own, with
+//! what the earlier ones left written into it first.
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used)]
@@ -16,9 +13,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use cf_base::env::Env;
+use cf_base::time::Clock;
 use cf_catalog::{roster_path, AgentView, Catalog, Roster, WorkTier};
+use serde_json::{Map, Value};
 use tempfile::TempDir;
 
+mod a_catalog_agent_stays_as_the_catalog_has_it;
 mod agents_defined_by_hand_are_stored_in_full_v1_shaped;
 mod an_agents_file_that_cannot_be_read;
 mod the_human_s_own_agent_and_a_catalog_that_takes_its_name_later;
@@ -63,6 +63,16 @@ impl Home {
         fs::read_to_string(self.path()).unwrap()
     }
 
+    /// The file as JSON (`raw`).
+    fn raw(&self) -> Value {
+        serde_json::from_str(&self.text()).unwrap()
+    }
+
+    /// The roster in this home.
+    fn roster<'a>(&self, catalog: &'a Catalog) -> Roster<'a> {
+        Roster::new(catalog, self.path())
+    }
+
     /// `seedSharedRoster`: the v1 fixture, put in the file's place.
     fn seed_the_v1_roster(&self) {
         self.write(&fs::read_to_string(v1_fixture()).unwrap());
@@ -82,6 +92,23 @@ impl Home {
 
 fn catalog() -> Catalog {
     Catalog::bundled().unwrap()
+}
+
+/// The clock the writes read: 2026-10-04T12:00:00.000Z.
+struct Now;
+
+impl Clock for Now {
+    fn now_ms(&mut self) -> i64 {
+        1_791_115_200_000
+    }
+}
+
+/// A request's body: the object `json` writes.
+fn body(json: Value) -> Map<String, Value> {
+    match json {
+        Value::Object(fields) => fields,
+        other => panic!("no object: {other}"),
+    }
 }
 
 fn v1_fixture() -> PathBuf {

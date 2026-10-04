@@ -190,7 +190,7 @@ fn a_file_with_no_rows_loads_with_none() {
     let document = load_document(&home.path().join("agents.json")).unwrap();
     assert!(document.agents().is_empty());
     assert_eq!(
-        Value::Object(document.fields().clone()).to_string(),
+        document.to_value().to_string(),
         r#"{"schemaVersion":1,"agents":[]}"#
     );
 }
@@ -202,7 +202,7 @@ fn a_document_keeps_the_keys_the_file_carried_beside_its_agents() {
     );
     let document = load_document(&path).unwrap();
     assert_eq!(
-        Value::Object(document.fields().clone()).to_string(),
+        document.to_value().to_string(),
         r#"{"2":"index","note":"kept","agents":[{"id":"a"}],"preferences":{"ownHarnessOnly":true},"schemaVersion":1}"#
     );
 }

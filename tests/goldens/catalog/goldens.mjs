@@ -248,7 +248,84 @@ function documents() {
       agents: [row('kim', 'kimi', 'kimi-k3', { effort: 'high' }), nova],
     }),
     'a tier no longer known': file({ schemaVersion: 1, agents: [{ ...nova, workTier: 'huge' }] }),
+    // A row that keeps a `custom` key of its own: the roster's mark goes in its place.
+    'custom kept': file({
+      schemaVersion: 1,
+      agents: [
+        { id: 'nova', custom: false, kind: 'codex', model: 'gpt-6-astra' },
+        { ...pip, custom: 'yes' },
+      ],
+    }),
+    // Numbers as JSON.parse reads them: a whole double, past 2^53, past 1e21.
+    numbers: `{"schemaVersion":1.0,"agents":[{"id":"nova","kind":"codex","model":"m","x":9007199254740993,"y":1e21,"z":2.50}],"w":-0.0}\n`,
   }
+}
+
+/**
+ * Documents of seeded rows, for a sweep of every operation over shapes no
+ * hand wrote: ids that are the human's, the catalog's or twice the same,
+ * kinds that run and that do not, efforts under either key, tiers, image
+ * flags, descriptions of any JSON, stored `custom` marks, provenance that is
+ * the entry's or not, stale and unknown fields. Every row is of the shape
+ * both implementations read the same (its id, kind and model text when
+ * there, its preset, harness, effort and thinking text or null): the
+ * shapes the Rust refuses on purpose are its own tests'.
+ */
+function sweptDocuments(random) {
+  const pick = (list) => list[Math.floor(random() * list.length)]
+  const maybe = (key, values) => {
+    const value = pick(values)
+    return value === undefined ? {} : { [key]: value }
+  }
+  const ids = ['nova', 'pip', 'kim', 'zed', 'thoth', 'zeus', 'pygmalion', 'Nova', '']
+  const row = () => ({
+    ...maybe('id', [...ids, undefined]),
+    ...maybe('name', ['Nova', undefined, 7]),
+    ...maybe('kind', [
+      'claude-code',
+      'codex',
+      'pi',
+      'opencode',
+      'devin',
+      'image',
+      'kimi',
+      '',
+      undefined,
+    ]),
+    ...maybe('designer', [undefined, undefined, true, false, 'yes', 1, null]),
+    ...maybe('model', [
+      'gpt-6-astra',
+      'openrouter/anthropic/claude-fable-5.1',
+      'claude-opus-5-5',
+      'm',
+      '',
+      undefined,
+    ]),
+    ...maybe('effort', [undefined, 'high', 'max', '', null, 'bogus']),
+    ...maybe('thinking', [undefined, 'low', '', null]),
+    ...maybe('harness', [undefined, undefined, 'codex', 'claude', null]),
+    ...maybe('workTier', [undefined, undefined, 'complex', 'light', null, 'huge']),
+    ...maybe('description', [undefined, 'Mine', '', 5, null, { a: 1 }, ['x']]),
+    ...maybe('custom', [undefined, undefined, true, false, 'yes']),
+    ...maybe('preset', [undefined, undefined, 'thoth', 'zeus', 'pygmalion', null, '']),
+    ...maybe('skills', [undefined, undefined, ['a']]),
+    ...maybe('colour', [undefined, undefined, 'green', { deep: [1] }]),
+  })
+  return Array.from({ length: 24 }, (_, index) => {
+    const agents = Array.from({ length: 1 + Math.floor(random() * 4) }, row)
+    const document = {
+      ...maybe('note', [undefined, 'kept']),
+      ...maybe('schemaVersion', [1, 1, undefined, null, 2]),
+      agents,
+      ...maybe('preferences', [
+        undefined,
+        { ownHarnessOnly: true },
+        { ownHarnessOnly: 'yes' },
+        null,
+      ]),
+    }
+    return [`swept ${index}`, file(document)]
+  })
 }
 
 /** The roster's operations, each called with the home's environment last. */
@@ -389,6 +466,20 @@ function rosterGolden(skipped) {
   const cases = []
   for (const [document, before] of Object.entries(docs)) {
     for (const call of [...READS, ...WRITES]) {
+      const result = rosterCase(before, call, now(), skipped)
+      if (result !== null) cases.push({ document, ...result })
+    }
+  }
+  // A sweep: seeded documents, each with a seeded handful of operations.
+  const swept = seeded(20261005)
+  const sweptCalls = [...READS.filter(([name]) => name !== 'listAgents'), ...WRITES]
+  for (const [document, before] of sweptDocuments(swept)) {
+    docs[document] = before
+    const calls = [
+      ['listAgents'],
+      ...Array.from({ length: 10 }, () => sweptCalls[Math.floor(swept() * sweptCalls.length)]),
+    ]
+    for (const call of calls) {
       const result = rosterCase(before, call, now(), skipped)
       if (result !== null) cases.push({ document, ...result })
     }
