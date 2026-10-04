@@ -11,7 +11,6 @@ use super::patterns::CLEAR;
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind, Candidate, Terminal, Transcript};
 use crate::shared::quota::exhausted_quota;
-use crate::shared::record::jsonl::Stop;
 use crate::shared::record::reading::{native_id, Role};
 
 impl Transcript {
@@ -22,7 +21,7 @@ impl Transcript {
         record: &Value,
         place: Option<usize>,
         seq: usize,
-    ) -> Result<(), Stop> {
+    ) -> Result<(), String> {
         let number = Value::from(seq);
         // `record.timestamp ?? seq`.
         let at = match record.get("timestamp") {
@@ -44,7 +43,7 @@ impl Transcript {
 
     /// An attachment: what a `UserPromptSubmit` hook added to the prompt, a
     /// context of the conversation that is its own, not the assistant's.
-    fn hook_context(&mut self, record: &Value, at: &Value, seq: usize) -> Result<(), Stop> {
+    fn hook_context(&mut self, record: &Value, at: &Value, seq: usize) -> Result<(), String> {
         let attachment = record.get("attachment");
         let of = |name: &str| field(attachment, name);
         let says = |name: &str, wanted: &str| of(name).and_then(Value::as_str) == Some(wanted);
@@ -77,7 +76,7 @@ impl Transcript {
     }
 
     /// An operation on Claude Code's queue of messages.
-    fn queue_operation(&mut self, record: &Value) -> Result<(), Stop> {
+    fn queue_operation(&mut self, record: &Value) -> Result<(), String> {
         match record.get("operation").and_then(Value::as_str) {
             Some("enqueue") => self.queues.enqueue(queued_content(record)?),
             Some("dequeue") => self.queues.dequeue(),
@@ -91,7 +90,7 @@ impl Transcript {
     /// An assistant's record: a fragment of a message, the tool calls it
     /// makes and the results it holds; its refusal when the API refused; and
     /// its answer, if it ended the turn.
-    fn assistant(&mut self, record: &Value, at: &Value, seq: usize) -> Result<(), Stop> {
+    fn assistant(&mut self, record: &Value, at: &Value, seq: usize) -> Result<(), String> {
         // `record.message ?? {}`: none and null hold no field.
         let message = record.get("message").filter(|message| !message.is_null());
         let in_message = |name: &str| field(message, name);
@@ -147,8 +146,8 @@ impl Transcript {
             if status == Some(429.0)
                 || record.get("error").and_then(Value::as_str) == Some("rate_limit")
             {
-                let at_ms = date_parse(record.get("timestamp")).map_err(Stop::Failed)?;
-                let quota = exhausted_quota(&text, at_ms, &self.local).map_err(Stop::Failed)?;
+                let at_ms = date_parse(record.get("timestamp"))?;
+                let quota = exhausted_quota(&text, at_ms, &self.local)?;
                 self.quota = Some(Arc::new(quota));
             }
             self.terminal = Some(Terminal::Native);
@@ -170,13 +169,13 @@ impl Transcript {
 
     /// A tool's result in a block: the call it answers is closed, and the
     /// result is an item. A block that names no call is passed over.
-    fn tool_result(&mut self, block: &Value, at: &Value, seq: usize) -> Result<(), Stop> {
+    fn tool_result(&mut self, block: &Value, at: &Value, seq: usize) -> Result<(), String> {
         let call = self.keys.of(block.get("tool_use_id"));
         if !call.truthy() {
             return Ok(());
         }
         self.open_tools.remove(&call);
-        let text = claude_tool_text(block.get("content")).map_err(Stop::Failed)?;
+        let text = claude_tool_text(block.get("content"))?;
         let id = id_of(block.get("tool_use_id"), "claude tool result", seq)?;
         self.items.tool(id, &text, at, seq);
         Ok(())
@@ -191,7 +190,7 @@ impl Transcript {
         place: Option<usize>,
         at: &Value,
         seq: usize,
-    ) -> Result<(), Stop> {
+    ) -> Result<(), String> {
         let content = field(record.get("message"), "content");
         for block in blocks(content) {
             if kind(block) == Some("tool_result") {
@@ -333,19 +332,17 @@ fn blocks(content: Option<&Value>) -> &[Value] {
     }
 }
 
-/// `nativeId` of a record's field, as the look's failure.
-fn id_of(value: Option<&Value>, what: &str, seq: usize) -> Result<Arc<str>, Stop> {
-    native_id(value, what, &Value::from(seq)).map_err(Stop::Failed)
+/// `nativeId` of a record's field.
+fn id_of(value: Option<&Value>, what: &str, seq: usize) -> Result<Arc<str>, String> {
+    native_id(value, what, &Value::from(seq))
 }
 
 /// `String(record.content ?? '')`, or the failure V8 threw: the content a
 /// queue operation names.
-fn queued_content(record: &Value) -> Result<String, Stop> {
+fn queued_content(record: &Value) -> Result<String, String> {
     match record.get("content") {
         None | Some(Value::Null) => Ok(String::new()),
-        content => js::string(content)
-            .map(Cow::into_owned)
-            .map_err(Stop::Failed),
+        content => js::string(content).map(Cow::into_owned),
     }
 }
 

@@ -188,7 +188,7 @@ impl Parser for Transcript {
     }
 
     /// The records of the look are all in: they are replayed in order.
-    fn flush(&mut self) -> Result<(), Stop> {
+    fn flush(&mut self) -> Result<(), String> {
         let records = std::mem::take(&mut self.pending);
         for Pending { record, place, seq } in records {
             self.replay(&record, place, seq)?;

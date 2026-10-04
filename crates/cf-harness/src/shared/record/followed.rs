@@ -26,7 +26,8 @@ pub(crate) trait Parser {
     fn visit(&mut self, record: Value, index: usize) -> Result<(), Stop>;
 
     /// The records of a look are all in: what waited for the rest is decided.
-    fn flush(&mut self) -> Result<(), Stop> {
+    /// Fails with the look's reason; only a record asks for another read.
+    fn flush(&mut self) -> Result<(), String> {
         Ok(())
     }
 }
@@ -102,12 +103,7 @@ impl<P: Parser> Followed<P> {
             )
             .and_then(|looked| match looked {
                 Looked::NotTheFile => Ok(looked),
-                looked => match state.flush() {
-                    // Only a record asks for another read: JavaScript's catch
-                    // let one that came with the flush pass, the look read.
-                    Err(Stop::Reread) => Ok(looked),
-                    flushed => flushed.map(|()| looked),
-                },
+                looked => state.flush().map(|()| looked).map_err(Stop::Failed),
             });
             match looked {
                 Ok(Looked::Unchanged) => {
@@ -251,25 +247,17 @@ mod tests {
 
     /// A parser that numbers its states, as made, and keeps the places of the
     /// records it is given. The first state asks to read again at the record
-    /// `asks_at`; `flushing` has its flush ask instead.
+    /// `asks_at`.
     struct Rereading {
         number: usize,
         visited: Vec<usize>,
         asks_at: usize,
-        flushing: bool,
     }
 
     impl Parser for Rereading {
         fn visit(&mut self, _: Value, index: usize) -> Result<(), Stop> {
             self.visited.push(index);
-            if self.number == 1 && index == self.asks_at && !self.flushing {
-                return Err(Stop::Reread);
-            }
-            Ok(())
-        }
-
-        fn flush(&mut self) -> Result<(), Stop> {
-            if self.number == 1 && self.flushing {
+            if self.number == 1 && index == self.asks_at {
                 return Err(Stop::Reread);
             }
             Ok(())
@@ -278,10 +266,7 @@ mod tests {
 
     /// A transcript of two records, followed by `Rereading` parsers, and the
     /// file that holds it.
-    fn rereading(
-        asks_at: usize,
-        flushing: bool,
-    ) -> (tempfile::TempDir, PathBuf, Followed<Rereading>) {
+    fn rereading(asks_at: usize) -> (tempfile::TempDir, PathBuf, Followed<Rereading>) {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("t.jsonl");
         fs::write(&file, "{\"a\":0}\n{\"a\":1}\n").unwrap();
@@ -293,7 +278,6 @@ mod tests {
                 number: made.fetch_add(1, Ordering::Relaxed) + 1,
                 visited: Vec::new(),
                 asks_at,
-                flushing,
             }),
         );
         (dir, file, followed)
@@ -309,7 +293,7 @@ mod tests {
     #[test]
     fn a_reread_reads_the_transcript_again_in_the_same_look_into_a_fresh_state_and_breaks_nothing()
     {
-        let (_dir, _file, mut followed) = rereading(1, false);
+        let (_dir, _file, mut followed) = rereading(1);
         let (number, visited, changed) = read_into(&mut followed);
         assert_eq!(number, 2, "the first state was dropped for a fresh one");
         assert_eq!(visited, [0, 1], "read from the start, whole");
@@ -321,7 +305,7 @@ mod tests {
 
     #[test]
     fn a_reread_in_a_later_look_reads_from_the_start_and_not_from_where_the_last_look_stopped() {
-        let (_dir, file, mut followed) = rereading(2, false);
+        let (_dir, file, mut followed) = rereading(2);
         assert_eq!(read_into(&mut followed), (1, vec![0, 1], true));
         let mut appended = fs::OpenOptions::new().append(true).open(&file).unwrap();
         std::io::Write::write_all(&mut appended, b"{\"a\":2}\n").unwrap();
@@ -330,12 +314,5 @@ mod tests {
         assert_eq!(read_into(&mut followed), (2, vec![0, 1, 2], true));
         assert!(followed.broken.is_none());
         assert_eq!(read_into(&mut followed), (2, vec![0, 1, 2], false));
-    }
-
-    #[test]
-    fn a_reread_asked_for_by_the_flush_is_let_pass_as_javascript_s_catch_let_it() {
-        let (_dir, _file, mut followed) = rereading(0, true);
-        assert_eq!(read_into(&mut followed), (1, vec![0, 1], true));
-        assert!(followed.broken.is_none());
     }
 }
