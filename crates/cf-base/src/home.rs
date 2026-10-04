@@ -56,11 +56,20 @@ mod tests {
     fn a_path_is_normalized_as_node_joins_it() {
         let root = std::env::temp_dir();
         assert_eq!(
-            normalized(&root.join("base").join("missing").join("..").join("agents.json")),
+            normalized(
+                &root
+                    .join("base")
+                    .join("missing")
+                    .join("..")
+                    .join("agents.json")
+            ),
             root.join("base").join("agents.json")
         );
         assert_eq!(normalized(&root.join(".").join("a")), root.join("a"));
-        assert_eq!(normalized(Path::new("../a/./b/..")), Path::new("..").join("a"));
+        assert_eq!(
+            normalized(Path::new("../a/./b/..")),
+            Path::new("..").join("a")
+        );
         assert_eq!(normalized(Path::new("a/..")), Path::new("."));
         let top = root.ancestors().last().unwrap().to_path_buf();
         assert_eq!(normalized(&top.join("..").join("x")), top.join("x"));

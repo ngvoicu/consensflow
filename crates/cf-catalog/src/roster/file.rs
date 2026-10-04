@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use cf_base::env::Env;
-use cf_base::file::{errno_name, is_missing};
+use cf_base::file::{error_code, is_missing};
 use cf_base::home::{config_root, normalized};
 use cf_base::json::from_slice_exact;
 use cf_base::refusal::Refusal;
@@ -63,8 +63,9 @@ pub(crate) fn unreadable(path: &Path, why: &str) -> Refusal {
 enum Unread {
     /// There is no such file: the roster is empty.
     Missing,
-    /// What Node prints for it: the errno's name (`EACCES`), else the system's words.
-    Code(String),
+    /// What Node prints for it, `error.code`: the errno's name (`EACCES`),
+    /// or `UNKNOWN` for one libuv has no name for.
+    Code(&'static str),
 }
 
 fn read_bytes(path: &Path) -> Result<Vec<u8>, Unread> {
@@ -72,13 +73,13 @@ fn read_bytes(path: &Path) -> Result<Vec<u8>, Unread> {
     // refuses to read it with the same word; Windows refuses to open it, as
     // access denied.
     if path.is_dir() {
-        return Err(Unread::Code("EISDIR".to_owned()));
+        return Err(Unread::Code("EISDIR"));
     }
     fs::read(path).map_err(|error| {
         if is_missing(&error) {
             Unread::Missing
         } else {
-            Unread::Code(errno_name(&error).map_or_else(|| error.to_string(), str::to_owned))
+            Unread::Code(error_code(&error))
         }
     })
 }

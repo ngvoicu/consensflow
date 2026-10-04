@@ -52,8 +52,14 @@ fn as_doubles(value: Value) -> Value {
     match value {
         Value::Number(number) => {
             let beyond = number.as_u64().is_some_and(|whole| whole > SAFE)
-                || number.as_i64().is_some_and(|whole| whole.unsigned_abs() > SAFE);
-            match number.as_f64().filter(|_| beyond).and_then(serde_json::Number::from_f64) {
+                || number
+                    .as_i64()
+                    .is_some_and(|whole| whole.unsigned_abs() > SAFE);
+            match number
+                .as_f64()
+                .filter(|_| beyond)
+                .and_then(serde_json::Number::from_f64)
+            {
                 Some(double) => Value::Number(double),
                 None => Value::Number(number),
             }
@@ -174,7 +180,10 @@ mod tests {
             crate::js::stringify(&read("[-9007199254740993, 9007199254740992, 5]").unwrap()),
             "[-9007199254740992,9007199254740992,5]"
         );
-        assert!(matches!(read(r#"{"\ud800":1,"\ud801":2}"#), Err(Inexact::LoneSurrogate)));
+        assert!(matches!(
+            read(r#"{"\ud800":1,"\ud801":2}"#),
+            Err(Inexact::LoneSurrogate)
+        ));
         assert!(matches!(read(r#"["\udc00"]"#), Err(Inexact::LoneSurrogate)));
         assert_eq!(read(r#"["\ud83d\ude00"]"#).unwrap(), json!(["\u{1F600}"]));
         assert!(matches!(read(r#"{"x":1e400}"#), Err(Inexact::Json(_))));
@@ -182,7 +191,10 @@ mod tests {
         assert!(matches!(read(&deep), Err(Inexact::Json(_))));
         assert!(matches!(read("{,}"), Err(Inexact::Json(_))));
         // Bytes that are no UTF-8 are U+FFFD, as Node decoded the file.
-        assert_eq!(from_slice_exact(b"[\"\xff\"]").unwrap(), json!(["\u{FFFD}"]));
+        assert_eq!(
+            from_slice_exact(b"[\"\xff\"]").unwrap(),
+            json!(["\u{FFFD}"])
+        );
     }
 
     #[test]
