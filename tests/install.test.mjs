@@ -49,7 +49,7 @@ describe('harness executable discovery', () => {
 describe('BO12: the path a pane is launched with is absolute, whatever PATH says', () => {
   it('resolves a relative PATH entry before handing it to the pane host', () => {
     // `pane.open` refuses a relative argv[0] outright
-    // (`validate_open_request` in `app/src-tauri/src/pane_handlers.rs`), and a
+    // (`validate_open_request` in `crates/cf-panes/src/pane_handlers.rs`), and a
     // PATH carrying a relative entry is ordinary — `PATH=.:...` or a `bin` a
     // launcher exported from wherever it happened to be. Joining that with the
     // command name produces a relative candidate, and the pane never opens.

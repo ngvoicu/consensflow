@@ -105,7 +105,7 @@ impl OutputClock {
     }
 
     /// The pane printed something now.
-    pub fn note(&self) {
+    pub(crate) fn note(&self) {
         let now = self.elapsed_ms();
         self.printed.store(now.saturating_add(1), Ordering::Release);
     }
@@ -296,7 +296,7 @@ impl InputArbiter {
 
     /// A pane gone from the table leaves the arbiter. A newer generation of
     /// the same id that took its place keeps its own state.
-    pub fn retire(&self, pane: &PaneKey) {
+    pub(crate) fn retire(&self, pane: &PaneKey) {
         let Ok(mut panes) = self.lock_panes() else {
             return;
         };
@@ -318,7 +318,7 @@ impl InputArbiter {
 
     /// The human's own keys, written at once, and counted for what they
     /// leave unsent in the window's input box.
-    pub fn write_typed(
+    pub(crate) fn write_typed(
         &self,
         table: &PaneTable,
         pane: &PaneKey,
@@ -343,7 +343,7 @@ impl InputArbiter {
     }
 
     /// The emulator's replies and the daemon's own keys, written at once.
-    pub fn write(
+    pub(crate) fn write(
         &self,
         table: &PaneTable,
         pane: &PaneKey,
@@ -368,7 +368,7 @@ impl InputArbiter {
             .map_err(|error| fail_input(&state, pane, error, false))
     }
 
-    pub fn write_paste(
+    pub(crate) fn write_paste(
         &self,
         table: &PaneTable,
         pane: &PaneKey,
@@ -381,7 +381,7 @@ impl InputArbiter {
     /// as a paste is admitted: the pane is current and its input works. It
     /// reserves nothing and sends nothing; its place in the pane's worker is
     /// what keeps it out of a paste going in.
-    pub fn claim(&self, pane: &PaneKey) -> Result<(), ArbiterError> {
+    pub(crate) fn claim(&self, pane: &PaneKey) -> Result<(), ArbiterError> {
         let state = self.pane_state(pane)?;
         let state = lock_state(&state)?;
         validate_admission(&state, pane)
@@ -522,7 +522,7 @@ fn fail_input(state: &PaneState, pane: &PaneKey, error: PaneError, begun: bool) 
     error.into()
 }
 
-pub fn sanitize(body: &[u8]) -> Result<Vec<u8>, SanitizeError> {
+pub(crate) fn sanitize(body: &[u8]) -> Result<Vec<u8>, SanitizeError> {
     let mut sanitized = Vec::with_capacity(body.len());
     let mut index = 0;
     while index < body.len() {

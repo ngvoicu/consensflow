@@ -3,26 +3,16 @@ use std::io::{BufRead, Write};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
-pub mod arbiter;
 pub mod commands;
 mod daemon;
 mod daemon_command;
-mod input_queue;
-#[cfg(windows)]
-mod job_object;
-mod output_hub;
-mod pane_handlers;
 // Only the Windows app reads a runtime from its own exe; tested everywhere.
 #[cfg_attr(not(windows), allow(dead_code))]
 mod portable;
-#[cfg(target_os = "macos")]
-mod process_tree;
-pub mod pty;
 pub mod runtime;
 #[cfg(target_os = "macos")]
 mod update_install;
 pub mod updates;
-mod validation;
 
 use runtime::AppRuntime;
 

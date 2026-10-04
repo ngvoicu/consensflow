@@ -131,6 +131,8 @@ fn process(pid: i32) -> Option<Process> {
     // SAFETY: proc_pidinfo writes a fixed-size native struct into this buffer.
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of_val(&info);
+    // SAFETY: the buffer is `info`, writable for the `size` bytes passed with
+    // it, and proc_pidinfo writes no more than that.
     let read = unsafe {
         libc::proc_pidinfo(
             pid,
@@ -142,6 +144,8 @@ fn process(pid: i32) -> Option<Process> {
     };
     if read != size as i32
         || info.pbi_pid != pid as u32
+        // SAFETY: getuid takes no arguments, reads no memory of ours and
+        // cannot fail.
         || info.pbi_uid != unsafe { libc::getuid() }
         || info.pbi_status == libc::SZOMB
     {
@@ -177,6 +181,8 @@ fn signal(identity: Identity, signal: i32) -> io::Result<()> {
     if process(identity.pid).map(|p| p.identity) != Some(identity) {
         return Ok(());
     }
+    // SAFETY: kill takes two integers and touches no memory of ours; the pid
+    // was checked above to still be the process this tree discovered.
     if unsafe { libc::kill(identity.pid, signal) } == 0 {
         return Ok(());
     }
@@ -190,12 +196,16 @@ fn signal(identity: Identity, signal: i32) -> io::Result<()> {
 
 fn processes() -> io::Result<Vec<Process>> {
     for _ in 0..3 {
+        // SAFETY: a null buffer of size 0 only asks how many processes there
+        // are; nothing is written.
         let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
         if count <= 0 {
             return Err(io::Error::last_os_error());
         }
         let mut pids = vec![0i32; count as usize + 256];
         let size = (pids.len() * std::mem::size_of::<i32>()) as i32;
+        // SAFETY: the buffer is `pids`, writable for the `size` bytes passed
+        // with it, and proc_listallpids writes no more than that.
         let read = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), size) };
         if read <= 0 {
             return Err(io::Error::last_os_error());
@@ -217,6 +227,9 @@ fn has_marker(pid: i32, marker: &str) -> bool {
     // values are logged, retained, or returned to the app.
     let mut bytes = vec![0u8; 1024 * 1024];
     let mut size = bytes.len();
+    // SAFETY: `mib` holds the `mib.len()` name entries passed with it, and
+    // `bytes` is writable for the `size` bytes passed with it, which sysctl
+    // lowers to what it wrote. Nothing is set: the new value is null, of length 0.
     let result = unsafe {
         libc::sysctl(
             mib.as_mut_ptr(),

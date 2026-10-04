@@ -6,7 +6,6 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use tauri::ipc::Channel;
 
 use crate::pty::PaneOutput;
 
@@ -39,14 +38,14 @@ struct OutputHubState {
 /// hub parks what follows until a new one arrives. The sink runs under the
 /// hub's lock and the headless one waits while its peer is busy, so publish
 /// only from a pane's own output thread, never from a bridge handler.
-pub(crate) type OutputSink = Arc<dyn Fn(PaneOutputMessage) -> bool + Send + Sync>;
+pub type OutputSink = Arc<dyn Fn(PaneOutputMessage) -> bool + Send + Sync>;
 
-pub(crate) struct OutputHub {
+pub struct OutputHub {
     state: Mutex<OutputHubState>,
 }
 
 impl OutputHub {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             state: Mutex::new(OutputHubState {
                 sink: None,
@@ -55,17 +54,14 @@ impl OutputHub {
         }
     }
 
-    /// The window's destination: a webview channel the page reads.
-    pub(crate) fn register(&self, channel: Channel<PaneOutputMessage>) {
-        self.attach(Arc::new(move |message| channel.send(message).is_ok()));
-    }
-
-    /// The headless destination: back over the bridge the request came in on.
+    /// A destination for the panes' bytes: the window's, a webview channel the
+    /// page reads (the app wraps it in a sink), or the headless one, back over
+    /// the bridge the request came in on.
     ///
     /// The hub exists so `register_pane_handlers` need not know which of the
     /// two it is feeding — that is what lets the window and the helper share
     /// one set of handlers instead of two that drift.
-    pub(crate) fn register_sink(&self, sink: OutputSink) {
+    pub fn register_sink(&self, sink: OutputSink) {
         self.attach(sink);
     }
 
@@ -93,6 +89,12 @@ impl OutputHub {
     pub(crate) fn publish(&self, message: PaneOutputMessage) {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         Self::deliver_or_park(&mut state, message);
+    }
+}
+
+impl Default for OutputHub {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

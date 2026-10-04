@@ -9,11 +9,11 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::daemon::RosterHandle;
-use crate::input_queue::{wait_for_input, InputWork, PageInputCompletion};
-use crate::output_hub::PaneOutputMessage;
 use crate::runtime::{AppRuntime, PAGE_STATE_EVENT};
-use crate::validation::{pane_key, validate_seq, validate_size, validate_text};
 use cf_bridge::Bridge;
+use cf_panes::input_queue::{wait_for_input, InputWork, PageInputCompletion};
+use cf_panes::output_hub::PaneOutputMessage;
+use cf_panes::validation::{pane_key, validate_seq, validate_size, validate_text};
 
 pub(crate) fn window_command_allowed(window: &str, _command: &str) -> bool {
     window == "main"
@@ -286,7 +286,7 @@ pub async fn subscribe_output<R: Runtime>(
         )
     };
     inputs.begin_page();
-    output.register(on_output);
+    output.register_sink(Arc::new(move |message| on_output.send(message).is_ok()));
     // Once the new page listens: everything sent before it went to the old.
     panes.ack_all();
     daemon.tell_again();
@@ -343,17 +343,18 @@ mod tests {
     use portable_pty::PtySize;
 
     #[cfg(unix)]
-    use crate::arbiter::{EnterTiming, InputArbiter};
-    #[cfg(unix)]
-    use crate::input_queue::InputQueue;
-    #[cfg(unix)]
-    use crate::pty::{PaneEnvironment, PaneKey, PaneTable};
-    #[cfg(unix)]
     use crate::runtime::test_runtime;
     #[cfg(unix)]
-    use crate::validation::MAX_INPUT_BYTES;
-    #[cfg(unix)]
     use cf_bridge::BridgeBuilder;
+    #[cfg(unix)]
+    use cf_panes::arbiter::{EnterTiming, InputArbiter};
+    #[cfg(unix)]
+    use cf_panes::input_queue::InputQueue;
+    #[cfg(unix)]
+    use cf_panes::pty::{PaneEnvironment, PaneKey, PaneTable};
+    #[cfg(unix)]
+    use cf_panes::validation::MAX_INPUT_BYTES;
+    #[cfg(unix)]
     use cf_proto::bridge::Role;
 
     #[test]
@@ -425,7 +426,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn production_ipc_arrivals_admit_1000_human_writes_in_order() {
-        let _pty_guard = crate::pty::serial_pty_test();
+        let _pty_guard = cf_panes::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
@@ -540,7 +541,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn production_ipc_consumes_sequence_before_size_refusal() {
-        let _pty_guard = crate::pty::serial_pty_test();
+        let _pty_guard = cf_panes::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
@@ -676,7 +677,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_reloaded_page_types_into_the_panes_it_finds() {
-        let _pty_guard = crate::pty::serial_pty_test();
+        let _pty_guard = cf_panes::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
@@ -768,7 +769,7 @@ mod tests {
     #[test]
     fn a_reloaded_page_finds_every_pane_printing() {
         const BACKLOG_BYTES: usize = 1024;
-        let _pty_guard = crate::pty::serial_pty_test();
+        let _pty_guard = cf_panes::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
@@ -827,7 +828,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn blocked_command_input_does_not_starve_another_pane_or_output_ack() {
-        let _pty_guard = crate::pty::serial_pty_test();
+        let _pty_guard = cf_panes::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));

@@ -40,7 +40,7 @@ pub struct PaneInfo {
     pub idle_ms: u64,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub struct OpenedPane {
     pub key: PaneKey,
     pub reader: Box<dyn Read + Send>,
@@ -160,7 +160,7 @@ impl From<io::Error> for PaneError {
 /// Rejects names that `std::process::Command` cannot represent. Keeping this
 /// at the PTY boundary makes every caller refuse a malformed removal before
 /// it can spawn a child.
-pub fn validate_drop_env(names: &[String]) -> Result<(), PaneError> {
+pub(crate) fn validate_drop_env(names: &[String]) -> Result<(), PaneError> {
     for name in names {
         if name.is_empty() || name.bytes().any(|byte| byte == b'=' || byte == b'\0') {
             return Err(PaneError::InvalidEnvironmentVariableName(name.clone()));
@@ -303,7 +303,7 @@ impl OutputFlow {
 
 pub struct PaneTable {
     panes: Mutex<HashMap<PaneKey, Pane>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     next_id: AtomicU64,
     updating: AtomicBool,
     teardown: Arc<Teardown>,
@@ -353,7 +353,7 @@ impl PaneTable {
     pub fn new() -> Self {
         Self {
             panes: Mutex::new(HashMap::new()),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             next_id: AtomicU64::new(1),
             updating: AtomicBool::new(false),
             teardown: Arc::new(Teardown::default()),
@@ -390,7 +390,7 @@ impl PaneTable {
     /// A test's pane, under a name of the table's own and with its raw
     /// output: the app opens every pane streamed, at the identity the daemon
     /// reserved for it (`open_streamed_at`).
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn open(
         &self,
         cwd: &Path,
@@ -403,13 +403,13 @@ impl PaneTable {
         Ok(OpenedPane { key, reader })
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     fn mint_key(&self) -> PaneKey {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         PaneKey::new(format!("pane-{id}"), 1)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn open_at(
         &self,
         key: PaneKey,
@@ -616,7 +616,7 @@ impl PaneTable {
         }
     }
 
-    pub fn write(&self, key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError> {
+    pub(crate) fn write(&self, key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError> {
         let (writer, last_activity, active_writes) = {
             let panes = self.lock_panes()?;
             let pane = panes
@@ -679,7 +679,7 @@ impl PaneTable {
     /// while its program still runs, so the pane stays for a `pane.kill`. The
     /// output ends a moment before the exit can be read, so it looks again
     /// for a while before it says so.
-    pub fn retire_exited(&self, key: &PaneKey) -> Result<bool, PaneError> {
+    pub(crate) fn retire_exited(&self, key: &PaneKey) -> Result<bool, PaneError> {
         self.retire_exited_within(key, EXIT_GRACE)
     }
 
@@ -814,7 +814,7 @@ impl PaneTable {
         Ok(listed)
     }
 
-    pub fn process_group_id(&self, key: &PaneKey) -> Result<i32, PaneError> {
+    pub(crate) fn process_group_id(&self, key: &PaneKey) -> Result<i32, PaneError> {
         self.lock_panes()?
             .get(key)
             .ok_or_else(|| PaneError::NotFound(key.clone()))?
@@ -904,21 +904,21 @@ impl Default for PaneTable {
 /// learnt which. After 60 s, far past any PTY test's run, the watchdog names
 /// the test on stderr (past the test's capture) and aborts, as the recorder's
 /// ready read does.
-#[cfg(test)]
-pub(crate) struct SerialPtyTest {
+#[cfg(any(test, feature = "test-support"))]
+pub struct SerialPtyTest {
     _lock: MutexGuard<'static, ()>,
     done: Arc<AtomicBool>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl Drop for SerialPtyTest {
     fn drop(&mut self) {
         self.done.store(true, Ordering::SeqCst);
     }
 }
 
-#[cfg(test)]
-pub(crate) fn serial_pty_test() -> SerialPtyTest {
+#[cfg(any(test, feature = "test-support"))]
+pub fn serial_pty_test() -> SerialPtyTest {
     use std::io::Write as _;
     static LOCK: Mutex<()> = Mutex::new(());
     let lock = LOCK.lock().unwrap_or_else(|error| error.into_inner());
@@ -945,8 +945,8 @@ pub(crate) fn serial_pty_test() -> SerialPtyTest {
 }
 
 /// Whether a pid is still there — signal 0 delivers nothing and only asks.
-#[cfg(all(test, unix))]
-pub(crate) fn process_exists(pid: i32) -> bool {
+#[cfg(all(any(test, feature = "test-support"), unix))]
+pub fn process_exists(pid: i32) -> bool {
     unsafe extern "C" {
         fn kill(pid: i32, signal: i32) -> i32;
     }
@@ -1311,9 +1311,12 @@ mod tests {
 
         // Someone else reaps the child first, so the table's own wait sees
         // ECHILD. That is proof the process is gone, not a doubt to hold on to.
+        // SAFETY: kill takes two integers and touches no memory of ours.
         assert_eq!(unsafe { kill(pid, 9) }, 0, "signal the pane child");
         let mut status = 0;
         assert_eq!(
+            // SAFETY: `status` is a live local, writable for the one int
+            // waitpid stores in it.
             unsafe { waitpid(pid, &mut status, 0) },
             pid,
             "reap the pane child outside the table"
@@ -1664,6 +1667,7 @@ mod tests {
         reader.read_line(&mut line).unwrap();
         let pid = line.trim().parse::<i32>().expect("native child pid");
         assert_ne!(
+            // SAFETY: getpgid takes an integer and touches no memory of ours.
             unsafe { libc::getpgid(pid) },
             table.process_group_id(&key).unwrap()
         );
@@ -1687,6 +1691,8 @@ mod tests {
         let stopped = !process_exists(pid);
         // A failing regression must not leave the test's own sleeper behind.
         if !stopped {
+            // SAFETY: kill takes two integers and touches no memory of ours;
+            // the pid is the test's own sleeper.
             unsafe {
                 libc::kill(pid, libc::SIGKILL);
             }

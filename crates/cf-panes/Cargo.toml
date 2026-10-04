@@ -1,0 +1,39 @@
+[package]
+name = "cf-panes"
+description = "The pane host: every window's program in a PTY of its own, its input and output, and the bridge handlers that serve them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# What the app's own tests need of the pane host that no program does: a pane
+# opened under a name of the table's own with its raw output, the lock that
+# keeps PTY tests one at a time, and whether a process is still there. The app
+# turns it on for its tests alone.
+[features]
+test-support = []
+
+[dependencies]
+cf-bridge.workspace = true
+cf-proto.workspace = true
+futures-channel.workspace = true
+futures-executor.workspace = true
+portable-pty.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# Only the macOS process tree (src/process_tree.rs) and the pane table's macOS
+# tests call libc.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
+[lints]
+workspace = true

@@ -1,6 +1,5 @@
 [package]
 name = "app"
-default-run = "app"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,33 +8,15 @@ rust-version.workspace = true
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-# consensflow-bridge is a test helper: the headless pane host the Rust and the
-# integration tests drive. Tauri bundles every binary it builds, so the helper
-# builds only with this feature, which no app build turns on:
-#   cargo build --release --features test-helper --bin consensflow-bridge
-[features]
-test-helper = []
-
-[[bin]]
-name = "consensflow-bridge"
-path = "src/bin/consensflow-bridge.rs"
-required-features = ["test-helper"]
-
-[[test]]
-name = "headless"
-path = "tests/headless.rs"
-required-features = ["test-helper"]
-
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
-futures-channel = "0.3"
 serde_json.workspace = true
 serde.workspace = true
 cf-proto.workspace = true
 cf-bridge.workspace = true
-portable-pty = "0.9"
+cf-panes.workspace = true
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-dialog = "2.7.3"
 tauri-plugin-updater = "~2.11.0"
@@ -48,18 +29,14 @@ flate2 = "1"
 reqwest = { version = "0.13.4", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = [
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_System_Console",
-    "Win32_System_JobObjects",
-    "Win32_System_Threading",
-] }
+windows-sys = { workspace = true, features = ["Win32_System_Console"] }
 
 [dev-dependencies]
+cf-panes = { workspace = true, features = ["test-support"] }
+portable-pty.workspace = true
 tauri = { version = "2.11.3", features = ["test"] }
 
 [lints]
