@@ -7,21 +7,25 @@
 //! conversation's row count disagrees. Its last few rows are read again too:
 //! a message Devin rewrote in place would otherwise stay as first seen, and
 //! a reply never read whole never settles.
+//!
+//! A column is held as it was read, and made what Devin's JavaScript made of
+//! it where it made it: a blob or an infinity fails no look it plays no part
+//! in. A blob is an object to JavaScript: the node a blob names is no node
+//! another names.
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::path::Path;
 
 use cf_base::env::Env;
-use cf_base::js;
 use cf_base::json::{from_slice_lossy, is_json_lossy, DEEPEST};
 use rusqlite::types::Value as Bound;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use super::chain::Chain;
 use crate::devin::paths;
 use crate::shared::record::key::{Key, Keys};
-use crate::shared::record::sqlite::{self, bound, Reads};
+use crate::shared::record::sqlite::{self, Cell, Reads};
 
 /// The last rows of a conversation each look reads again, in case one was rewritten.
 const RECHECKED: usize = 8;
@@ -38,20 +42,21 @@ pub(super) struct Store {
     /// How many rows were read since the store was last read whole.
     count: usize,
     /// The id of the row read last: null before any.
-    last: Value,
+    last: Cell,
     /// The main chain's head, as the last look read it.
     head: Key,
     /// What the main chain says.
     pub(super) chain: Chain,
 }
 
-/// A row of `message_nodes`, each column as JavaScript held it.
+/// A row of `message_nodes`, each column as JavaScript held it, its node
+/// and its parent as a `Map` keys them.
 pub(super) struct Row {
-    pub(super) id: Value,
+    pub(super) id: Cell,
     pub(super) node: Key,
     pub(super) parent: Key,
-    message: Value,
-    pub(super) created_at: Value,
+    message: Cell,
+    pub(super) created_at: Cell,
     /// Its message's JSON, parsed the first time it is read (`parsed`).
     parsed: OnceCell<Value>,
 }
@@ -59,16 +64,18 @@ pub(super) struct Row {
 impl Store {
     /// A look at the store of `session`: what it holds now, and whether that
     /// changed since the look that left `kept`. A look that fails leaves
-    /// none, so the next reads the store whole.
+    /// none, so the next reads the store whole. `keys` makes every key the
+    /// reader keeps, so that no two blobs it read are one.
     pub(super) fn read<'a>(
         kept: &'a mut Option<Store>,
+        keys: &mut Keys,
         session: &str,
         env: &Env,
     ) -> Result<(bool, &'a Store), String> {
         let file = paths::store(env)?;
         let opened = sqlite::Store::open(Path::new(&file))?;
         let previous = kept.take();
-        let (store, changed) = opened.read(|reads| Store::look(previous, reads, session))?;
+        let (store, changed) = opened.read(|reads| Store::look(previous, reads, keys, session))?;
         Ok((changed, kept.insert(store)))
     }
 
@@ -76,13 +83,15 @@ impl Store {
     fn look(
         previous: Option<Store>,
         reads: &Reads<'_>,
+        keys: &mut Keys,
         session: &str,
     ) -> Result<(Store, bool), String> {
         let found = reads
             .get("select main_chain_id from sessions where id = ?", [session])?
             .ok_or_else(|| "missing Devin session".to_owned())?;
-        let mut keys = Keys::default();
-        let head = keys.of(found.get("main_chain_id"));
+        let head = found
+            .get("main_chain_id")
+            .map_or(Key::Undefined, |head| head.key(keys));
         let all = || {
             reads.all(
                 &format!("{COLUMNS} from message_nodes where session_id = ? order by row_id"),
@@ -93,39 +102,40 @@ impl Store {
         let (kept, rows) = match previous {
             None => (None, all()?),
             Some(mut store) => {
-                let at_most = if store.last.is_null() {
-                    Bound::Real(-1.0)
-                } else {
-                    bound(&store.last)
+                let at_most = match &store.last {
+                    Cell::Null => Bound::Real(-1.0),
+                    last => last.bound(),
                 };
                 let recheck = format!(
                     "{COLUMNS} from message_nodes where session_id = ? and row_id <= ?
                      order by row_id desc limit {RECHECKED}"
                 );
                 for row in reads.all(&recheck, (session, at_most))? {
-                    let row = Row::new(row, &mut keys);
+                    let row = Row::new(row, keys);
                     if !store.holds(&row) {
                         store.set(row);
                         rewritten = true;
                     }
                 }
-                let rows = if store.last.is_null() {
+                let rows = if matches!(store.last, Cell::Null) {
                     all()?
                 } else {
                     reads.all(
                         &format!(
                             "{COLUMNS} from message_nodes where session_id = ? and row_id > ? order by row_id"
                         ),
-                        (session, bound(&store.last)),
+                        (session, store.last.bound()),
                     )?
                 };
-                let count = reads
-                    .get(
-                        "select count(*) as count from message_nodes where session_id = ?",
-                        [session],
-                    )?
-                    .and_then(|counted| counted.get("count").and_then(Value::as_u64));
-                if count == u64::try_from(store.count + rows.len()).ok() {
+                let counted = reads.get(
+                    "select count(*) as count from message_nodes where session_id = ?",
+                    [session],
+                )?;
+                // A count is a whole number within 2^53, so a double holds it.
+                #[allow(clippy::cast_precision_loss)]
+                let expected = (store.count + rows.len()) as f64;
+                let count = counted.as_ref().and_then(|counted| counted.get("count"));
+                if count.is_some_and(|count| count.same(&Cell::Number(expected))) {
                     (Some(store), rows)
                 } else {
                     (None, all()?)
@@ -136,7 +146,7 @@ impl Store {
         let mut store = kept.unwrap_or_else(Store::empty);
         let read_rows = !rows.is_empty();
         for row in rows {
-            let row = Row::new(row, &mut keys);
+            let row = Row::new(row, keys);
             store.count += 1;
             store.last = row.id.clone();
             store.set(row);
@@ -155,7 +165,7 @@ impl Store {
             rows: Vec::new(),
             nodes: HashMap::new(),
             count: 0,
-            last: Value::Null,
+            last: Cell::Null,
             head: Key::Undefined,
             chain: Chain::default(),
         }
@@ -166,7 +176,7 @@ impl Store {
     fn holds(&self, row: &Row) -> bool {
         self.nodes
             .get(&row.node)
-            .is_some_and(|&at| same(&self.rows[at].message, &row.message))
+            .is_some_and(|&at| self.rows[at].message.same(&row.message))
     }
 
     /// `row` as its node's row (`store.nodes.set`): in the place of the
@@ -196,7 +206,7 @@ impl Store {
     pub(super) fn newest_child(&self, parent: &Key) -> Option<&Row> {
         let mut newest: Option<&Row> = None;
         for row in &self.rows {
-            if row.parent == *parent && newest.is_none_or(|newest| greater(&row.id, &newest.id)) {
+            if row.parent == *parent && newest.is_none_or(|newest| row.id.greater(&newest.id)) {
                 newest = Some(row);
             }
         }
@@ -207,19 +217,33 @@ impl Store {
 impl Row {
     /// A row as a query read it. A query names each column, so none is
     /// missing.
-    fn new(mut columns: Map<String, Value>, keys: &mut Keys) -> Self {
-        let mut column = |name: &str| columns.remove(name).unwrap_or(Value::Null);
-        let (id, node, parent) = (
+    fn new(mut columns: sqlite::Row, keys: &mut Keys) -> Self {
+        let mut column = |name: &str| columns.take(name).unwrap_or(Cell::Null);
+        Self::of(
             column("row_id"),
-            column("node_id"),
-            column("parent_node_id"),
-        );
+            &column("node_id"),
+            &column("parent_node_id"),
+            column("chat_message"),
+            column("created_at"),
+            keys,
+        )
+    }
+
+    /// A row of these columns.
+    pub(super) fn of(
+        id: Cell,
+        node: &Cell,
+        parent: &Cell,
+        message: Cell,
+        created_at: Cell,
+        keys: &mut Keys,
+    ) -> Self {
         Self {
             id,
-            node: keys.of(Some(&node)),
-            parent: keys.of(Some(&parent)),
-            message: column("chat_message"),
-            created_at: column("created_at"),
+            node: node.key(keys),
+            parent: parent.key(keys),
+            message,
+            created_at,
             parsed: OnceCell::new(),
         }
     }
@@ -230,9 +254,9 @@ impl Row {
         if let Some(message) = self.parsed.get() {
             return Ok(message);
         }
-        let text = js::text(Some(&self.message));
+        let text = self.message.text();
         let message = from_slice_lossy(text.as_bytes()).map_err(|_| {
-            let at = js::text(Some(&self.id));
+            let at = self.id.text();
             if is_json_lossy(text.as_bytes()) {
                 format!(
                     "Devin's message at row {at} is JSON this build cannot hold: nested past {DEEPEST} levels, or a number past a double's range"
@@ -243,26 +267,6 @@ impl Row {
         })?;
         Ok(self.parsed.get_or_init(|| message))
     }
-}
-
-/// `left === right` for a column's values: null, a number (an integer and
-/// the same double alike) or text.
-fn same(left: &Value, right: &Value) -> bool {
-    match (left, right) {
-        (Value::Number(left), Value::Number(right)) => left.as_f64() == right.as_f64(),
-        _ => left == right,
-    }
-}
-
-/// `left > right` for a column's values, as JavaScript compares them: two
-/// texts by their UTF-16 code units, anything else as numbers (null as 0,
-/// text that is no number as `NaN`, never greater).
-fn greater(left: &Value, right: &Value) -> bool {
-    if let (Value::String(left), Value::String(right)) = (left, right) {
-        return left.encode_utf16().gt(right.encode_utf16());
-    }
-    let number = |value: &Value| js::to_number(Some(value)).unwrap_or(f64::NAN);
-    number(left) > number(right)
 }
 
 #[cfg(test)]

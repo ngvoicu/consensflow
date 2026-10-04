@@ -7,6 +7,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use cf_base::file::is_missing;
 use cf_base::path;
 
 /// How deep under its root a lookup goes.
@@ -45,10 +46,19 @@ pub(crate) fn find_file(
 }
 
 /// A folder's entries in the order Node's `readdir` lists them: libuv sorts
-/// them by name on Unix, and takes the system's order on Windows.
+/// them by name on Unix, and takes the system's order on Windows. A file
+/// where the folder is fails as libuv's `readdir` fails, not a directory,
+/// where Windows says there is no such path.
 pub(crate) fn entries(folder: &Path) -> io::Result<Vec<fs::DirEntry>> {
+    let listed = fs::read_dir(folder).map_err(|error| {
+        if is_missing(&error) && fs::metadata(folder).is_ok_and(|found| !found.is_dir()) {
+            io::Error::from(io::ErrorKind::NotADirectory)
+        } else {
+            error
+        }
+    })?;
     #[allow(unused_mut)] // Sorted on Unix alone.
-    let mut entries: Vec<fs::DirEntry> = fs::read_dir(folder)?.filter_map(Result::ok).collect();
+    let mut entries: Vec<fs::DirEntry> = listed.filter_map(Result::ok).collect();
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
@@ -84,6 +94,27 @@ mod tests {
             find_file(&root.path().join("missing"), &|_| true, DEPTH),
             None
         );
+    }
+
+    #[test]
+    fn a_file_where_the_folder_is_is_no_folder_as_libuv_says_on_every_platform() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("devin");
+        fs::write(&file, "").unwrap();
+        let kind = |folder: &Path| entries(folder).err().map(|error| error.kind());
+        assert_eq!(kind(&file), Some(io::ErrorKind::NotADirectory));
+        assert_eq!(
+            kind(&root.path().join("none")),
+            Some(io::ErrorKind::NotFound)
+        );
+        // Under a file: ENOTDIR on Unix, ENOENT on Windows, for Node as here.
+        let under = if cfg!(windows) {
+            io::ErrorKind::NotFound
+        } else {
+            io::ErrorKind::NotADirectory
+        };
+        assert_eq!(kind(&file.join("x")), Some(under));
+        assert!(entries(root.path()).unwrap().len() == 1);
     }
 
     #[test]

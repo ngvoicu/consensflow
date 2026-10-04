@@ -76,14 +76,15 @@ impl Chain {
             };
             let at = metadata("created_at")
                 .filter(|at| !at.is_null())
-                .unwrap_or(&row.created_at);
+                .cloned()
+                .unwrap_or_else(|| row.created_at.json());
             entries.push(Entry {
                 item: Item {
                     id: Arc::from(id.as_str()),
                     role,
                     text: Arc::from(text),
                     complete: role != Role::Assistant,
-                    at: at.clone(),
+                    at,
                     commentary: false,
                 },
                 request: request.clone(),
@@ -96,7 +97,7 @@ impl Chain {
             if !met.insert(&row.node) {
                 return Err(format!(
                     "Devin's rows below the main chain's head lead back to row {}",
-                    js::text(Some(&row.id))
+                    row.id.text()
                 ));
             }
             follow(&mut asking, row.message()?, row, &mut keys)?;
@@ -146,7 +147,7 @@ fn follow(asking: &mut Key, message: &Value, row: &Row, keys: &mut Keys) -> Resu
 /// why V8 threw: a message that is null, tool calls that are no list, or a
 /// call that is null before the one found.
 fn question_call<'a>(message: &'a Value, row: &Row) -> Result<Option<&'a Value>, String> {
-    let at = || js::text(Some(&row.id));
+    let at = || row.id.text();
     if message.is_null() {
         return Err(format!(
             "Devin's message at row {} is null, where an object was read",

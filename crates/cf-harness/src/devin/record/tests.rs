@@ -2,6 +2,7 @@
 //! Node's `devinReader` read of the same store and logs (Node 26), written
 //! as `show` writes one; a failure V8 threw is said here in words of its own.
 
+mod cells;
 mod logs;
 mod messages;
 mod rows;

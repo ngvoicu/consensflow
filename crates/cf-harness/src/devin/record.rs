@@ -28,6 +28,7 @@ use std::sync::Arc;
 use cf_base::env::Env;
 
 use crate::shared::record::cache::{Look, Options};
+use crate::shared::record::key::Keys;
 use crate::shared::record::reading::Reading;
 use store::Store;
 use wires::Wires;
@@ -39,6 +40,7 @@ pub fn reader(session: &str, env: &Env) -> Box<dyn Look + Send> {
         session: session.to_owned(),
         env: env.clone(),
         store: None,
+        keys: Keys::default(),
         wires: Wires::default(),
         answer: None,
     })
@@ -50,6 +52,8 @@ struct Reader {
     env: Env,
     /// The store as the last look left it: none to read it whole.
     store: Option<Store>,
+    /// What makes the keys of what the store says, from look to look.
+    keys: Keys,
     wires: Wires,
     /// The last look's answer, while nothing it rests on changes.
     answer: Option<Arc<Reading>>,
@@ -71,7 +75,8 @@ impl Look for Reader {
 impl Reader {
     /// What the session says now, or why it cannot be read.
     fn read(&mut self) -> Result<Arc<Reading>, String> {
-        let (stored, store) = Store::read(&mut self.store, &self.session, &self.env)?;
+        let (stored, store) =
+            Store::read(&mut self.store, &mut self.keys, &self.session, &self.env)?;
         let wired = self.wires.read(&self.session, &self.env)?;
         if let (false, false, Some(answer)) = (stored, wired, &self.answer) {
             return Ok(Arc::clone(answer));

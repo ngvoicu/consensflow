@@ -37,6 +37,11 @@ impl Key {
     pub(crate) fn is_nullish(&self) -> bool {
         matches!(self, Key::Undefined | Key::Null)
     }
+
+    /// A number as a key: by its value, `-0` as `0`.
+    pub(crate) fn number(number: f64) -> Self {
+        Key::Number(if number == 0.0 { 0.0_f64 } else { number }.to_bits())
+    }
 }
 
 /// What tells one object a reader keys by from another.
@@ -53,16 +58,16 @@ impl Keys {
             None => Key::Undefined,
             Some(Value::Null) => Key::Null,
             Some(Value::Bool(flag)) => Key::Flag(*flag),
-            Some(Value::Number(number)) => {
-                let double = number.as_f64().unwrap_or(f64::NAN);
-                Key::Number(if double == 0.0 { 0.0_f64 } else { double }.to_bits())
-            }
+            Some(Value::Number(number)) => Key::number(number.as_f64().unwrap_or(f64::NAN)),
             Some(Value::String(text)) => Key::Text(Arc::from(text.as_str())),
-            Some(Value::Array(_) | Value::Object(_)) => {
-                self.objects += 1;
-                Key::Object(self.objects)
-            }
+            Some(Value::Array(_) | Value::Object(_)) => self.object(),
         }
+    }
+
+    /// The key of an object no key was made of before.
+    pub(crate) fn object(&mut self) -> Key {
+        self.objects += 1;
+        Key::Object(self.objects)
     }
 }
 

@@ -1,5 +1,4 @@
 use super::*;
-use serde_json::json;
 use std::path::PathBuf;
 
 /// A store in a folder of its own, written by a connection of the test's.
@@ -11,12 +10,20 @@ fn store_with(sql: &str) -> (tempfile::TempDir, PathBuf, Connection) {
     (dir, file, writer)
 }
 
+/// A row's columns, by name in their order.
+fn columns(row: &Row) -> Vec<(&str, &Cell)> {
+    row.columns
+        .iter()
+        .map(|(name, cell)| (name.as_str(), cell))
+        .collect()
+}
+
 #[test]
 fn a_row_is_an_object_of_its_columns_as_javascript_held_it() {
     let (_dir, file, _writer) = store_with(
-        "create table t (a integer, b real, c text, d integer);
+        "create table t (a integer, b real, c text, d);
          insert into t values (9007199254740991, 1.5, 'x', null);
-         insert into t values (-2, 0.25, 'y', 7);",
+         insert into t values (-2, 1e999, cast(x'ff78' as text), x'0102');",
     );
     let store = Store::open(&file).unwrap();
     let rows = store
@@ -24,9 +31,23 @@ fn a_row_is_an_object_of_its_columns_as_javascript_held_it() {
         .unwrap();
     // Node: a later column of a name holds the name's place and its own value.
     assert_eq!(
-        serde_json::to_string(&rows).unwrap(),
-        r#"[{"a":9007199254740991,"b":1.5,"c":"x","d":1},{"a":-2,"b":0.25,"c":"y","d":1}]"#
+        columns(&rows[0]),
+        [
+            ("a", &Cell::Number(9_007_199_254_740_991.0)),
+            ("b", &Cell::Number(1.5)),
+            ("c", &Cell::Text("x".to_owned())),
+            ("d", &Cell::Number(1.0)),
+        ]
     );
+    // An infinity, a text of no UTF-8 and a blob are read, as Node reads them.
+    let mut second = store
+        .read(|reads| reads.get("select b, c, d from t where a = -2", []))
+        .unwrap()
+        .unwrap();
+    assert_eq!(second.get("b"), Some(&Cell::Number(f64::INFINITY)));
+    assert_eq!(second.get("c"), Some(&Cell::Text("\u{FFFD}x".to_owned())));
+    assert_eq!(second.take("d"), Some(Cell::Bytes(Arc::from(&[1, 2][..]))));
+    assert_eq!(second.get("d"), None, "taken");
     let none = store
         .read(|reads| reads.get("select a from t where a = ?", [3]))
         .unwrap();
@@ -34,19 +55,41 @@ fn a_row_is_an_object_of_its_columns_as_javascript_held_it() {
 }
 
 #[test]
-fn an_integer_past_a_number_and_a_blob_fail_the_read() {
-    let (_dir, file, _writer) = store_with(
-        "create table t (a integer, b blob);
-         insert into t values (9007199254740993, x'0102');",
-    );
+fn an_integer_past_a_number_fails_the_read() {
+    let (_dir, file, _writer) =
+        store_with("create table t (a integer); insert into t values (9007199254740993);");
     let store = Store::open(&file).unwrap();
-    // Node: ERR_OUT_OF_RANGE for the integer, a Uint8Array for the blob.
-    assert!(store
-        .read(|reads| reads.all("select a from t", []))
-        .is_err());
-    assert!(store
-        .read(|reads| reads.all("select b from t", []))
-        .is_err());
+    // Node: ERR_OUT_OF_RANGE, reading no BigInt.
+    assert_eq!(
+        store
+            .read(|reads| reads.all("select a from t", []))
+            .unwrap_err(),
+        "the integer 9007199254740993 is past what a JavaScript number holds"
+    );
+}
+
+#[test]
+fn a_store_is_read_with_the_defaults_of_node_s_connection() {
+    let (_dir, file, _writer) = store_with("create table t (a integer);");
+    let store = Store::open(&file).unwrap();
+    let value = |sql: &str| {
+        store.read(|reads| {
+            Ok(reads
+                .get(sql, [])?
+                .and_then(|row| row.columns.into_iter().next())
+                .map(|(_, cell)| cell))
+        })
+    };
+    // Node: "no such column", where SQLite itself would read the text "x".
+    assert!(value("select \"x\"").is_err());
+    assert_eq!(
+        value("select 'x'").unwrap(),
+        Some(Cell::Text("x".to_owned()))
+    );
+    assert_eq!(
+        value("pragma foreign_keys").unwrap(),
+        Some(Cell::Number(1.0))
+    );
 }
 
 #[test]
@@ -105,21 +148,18 @@ fn what_a_read_gave_is_bound_as_node_binds_the_javascript_value() {
         .read(|reads| reads.get("select i from t", []))
         .unwrap()
         .unwrap();
+    let one = row.get("i").unwrap().bound();
     // Node bound the number 1 as a double: an integer column finds it, and
     // text made of it is `1.0`.
     let found = store
         .read(|reads| {
             reads.get(
                 "select x, cast(? as text) as written from t where i = ?",
-                [bound(&row["i"]), bound(&row["i"])],
+                [one.clone(), one],
             )
         })
         .unwrap()
         .unwrap();
-    assert_eq!(
-        (&found["x"], &found["written"]),
-        (&json!("a"), &json!("1.0"))
-    );
-    assert_eq!(bound(&json!("x")), Bound::Text("x".to_owned()));
-    assert_eq!(bound(&Value::Null), Bound::Null);
+    assert_eq!(found.get("x"), Some(&Cell::Text("a".to_owned())));
+    assert_eq!(found.get("written"), Some(&Cell::Text("1.0".to_owned())));
 }
