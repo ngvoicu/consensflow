@@ -1,4 +1,5 @@
 #![cfg(unix)]
+#![deny(clippy::undocumented_unsafe_blocks)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, RawFd};

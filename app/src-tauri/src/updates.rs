@@ -427,9 +427,9 @@ impl UpdateManager {
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn install(
         &self,
-        panes: &std::sync::Arc<crate::pty::PaneTable>,
+        panes: &std::sync::Arc<cf_panes::pty::PaneTable>,
         action: impl FnOnce(&[u8], &str) -> Result<(), String>,
-    ) -> Result<crate::pty::UpdatePermit, String> {
+    ) -> Result<cf_panes::pty::UpdatePermit, String> {
         let (permit, bytes, version) = {
             let mut state = self.state.lock().unwrap();
             if state.snapshot.phase != "ready" || state.bytes.is_none() {
@@ -799,10 +799,10 @@ mod tests {
 
     #[test]
     fn install_failure_preserves_verified_download_and_pane_admission() {
-        let _serial = crate::pty::serial_pty_test();
+        let _serial = cf_panes::pty::serial_pty_test();
         let manager =
             UpdateManager::new("3.0.0-alpha.35", PathBuf::from("unused-test-preferences"));
-        let panes = std::sync::Arc::new(crate::pty::PaneTable::new());
+        let panes = std::sync::Arc::new(cf_panes::pty::PaneTable::new());
         assert!(manager
             .install(&panes, |_, _| panic!(
                 "must not install without a verified download"

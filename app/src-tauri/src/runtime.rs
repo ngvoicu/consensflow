@@ -1,44 +1,33 @@
 //! What the app runs: the window's runtime, its panes and its daemon started
-//! together and stopped in order, and the headless helper's, over the same
-//! pane handlers and the same drain.
+//! together and stopped in order, over the pane handlers and the same drain
+//! the headless helper runs.
 
 use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 
-use crate::arbiter::{EnterTiming, InputArbiter};
 use crate::daemon::{
     connect_daemon, stop_daemon, Daemon, DaemonStarter, DaemonStatus, DAEMON_READY_TIMEOUT,
     DAEMON_RESTART, DAEMON_STATUS_EVENT,
 };
 use crate::daemon_command::daemon_command;
-use crate::input_queue::InputQueue;
-use crate::output_hub::{OutputHub, PaneOutputMessage};
-use crate::pane_handlers::register_pane_handlers;
-use crate::pty::{PaneKey, PaneTable};
 use cf_bridge::BridgeBuilder;
+use cf_panes::arbiter::InputArbiter;
+use cf_panes::headless::{reap_all, ENTER, MAX_FRAME_BYTES};
+use cf_panes::input_queue::InputQueue;
+use cf_panes::output_hub::OutputHub;
+use cf_panes::pane_handlers::register_pane_handlers;
+use cf_panes::pty::PaneTable;
 use cf_proto::bridge::Role;
 
-pub(crate) const MAX_FRAME_BYTES: usize = 1024 * 1024;
 /// How long quitting, or installing an update, waits for what was admitted
 /// before the daemon stopped to finish.
 const SHUTDOWN_DRAIN: Duration = Duration::from_secs(5);
 /// The page-side name of Node's `state.changed`. No dot: Tauri rejects it.
 pub(crate) const PAGE_STATE_EVENT: &str = "state-changed";
-/// A paste's Enter goes once the window has drawn it and then printed
-/// nothing for 120 ms, never sooner than 10 ms, at 2 s whatever it drew. A
-/// fixed 10 ms was a Mac's speed: through Windows' ConPTY the paste was still
-/// going in when its Enter came, and Devin took the Enter into it; and 120 ms
-/// of silence was not enough either, since Devin reads a long paste silently
-/// before it draws it.
-const ENTER: EnterTiming = EnterTiming {
-    least_ms: 10,
-    quiet_ms: 120,
-    most_ms: 2_000,
-};
 
 type PageEventSink = Arc<dyn Fn(&str, Value) + Send + Sync>;
 
@@ -162,14 +151,6 @@ fn finish_before_deadline(timeout: Duration, finish: impl FnOnce() + Send + 'sta
     done.recv_timeout(timeout).is_ok()
 }
 
-fn reap_all(panes: &PaneTable) {
-    if let Ok(open) = panes.list() {
-        for pane in open {
-            let _ = panes.kill(&PaneKey::new(pane.id, pane.generation));
-        }
-    }
-}
-
 /// Node's `state.changed` becomes the page's `state-changed`.
 ///
 /// The two names are not the same namespace and cannot be. Tauri 2 accepts
@@ -179,61 +160,6 @@ fn reap_all(panes: &PaneTable) {
 /// name; only the hop into the webview is renamed.
 fn register_page_events(builder: &mut BridgeBuilder, sink: PageEventSink) {
     builder.on_event("state.changed", move |body| sink(PAGE_STATE_EVENT, body));
-}
-
-/// The headless pane helper, running the WINDOW's handlers.
-///
-/// `consensflow-bridge` used to carry its own copy of the pane operations, and
-/// a copy is a contract that drifts: it had no pane id or generation on
-/// `pane.open`, and it never reported a natural `pane.exit`. The real Node
-/// side speaks to the window, so against the helper it could only be refused.
-/// There is nothing to keep in step here: this is `register_pane_handlers`,
-/// the same `InputQueue` and the same shutdown drain the window uses, over
-/// stdin and stdout instead of a webview.
-///
-/// Serves until the peer closes the transport, then reaps what it opened.
-pub fn run_headless() -> Result<(), String> {
-    let panes = Arc::new(PaneTable::new());
-    let output = Arc::new(OutputHub::new());
-    let arbiter = Arc::new(InputArbiter::new(ENTER));
-    let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
-
-    let mut builder = BridgeBuilder::new(Role::Host, MAX_FRAME_BYTES);
-    register_pane_handlers(
-        &mut builder,
-        Arc::clone(&panes),
-        Arc::clone(&arbiter),
-        Arc::clone(&output),
-        Arc::clone(&inputs),
-    );
-    builder.on_error(|error| eprintln!("consensflow-bridge: {error}"));
-
-    let bridge = builder
-        .serve(
-            std::io::stdin(),
-            std::io::stdout(),
-            &json!({"v":1,"kind":"consensflow-bridge"}),
-        )
-        .map_err(|error| error.to_string())?;
-
-    // No page to draw into, so a pane's bytes go back over the same bridge, as
-    // a stream: a burst waits for the peer to read instead of closing the
-    // bridge. Registered after `serve` on purpose: whatever a pane produced in
-    // between is parked in the hub and drains into this sink the moment it
-    // attaches.
-    let sink = bridge.clone();
-    output.register_sink(Arc::new(move |message: PaneOutputMessage| {
-        sink.stream_event("pane.output", json!(message)).is_ok()
-    }));
-
-    // The same order the window shuts down in, and for the same reason: the
-    // peer's EOF is what closes admission, so the drain can only run after it.
-    bridge
-        .wait_launches_closed()
-        .map_err(|error| error.to_string())?;
-    reap_all(&panes);
-    inputs.close_and_drain();
-    bridge.wait_closed().map_err(|error| error.to_string())
 }
 
 /// A runtime around what a test stands up: its panes and input queue, and
@@ -263,9 +189,11 @@ mod tests {
     use std::time::Instant;
 
     use portable_pty::PtySize;
+    use serde_json::json;
 
     use crate::daemon::DAEMON_STOP_GRACE;
-    use crate::pty::process_exists;
+    use cf_panes::arbiter::EnterTiming;
+    use cf_panes::pty::{process_exists, PaneKey};
 
     #[test]
     fn node_state_changed_event_is_forwarded_to_the_page_sink() {
@@ -315,7 +243,7 @@ mod tests {
         use std::os::unix::net::UnixStream;
         use std::sync::Barrier;
 
-        let _pty_guard = crate::pty::serial_pty_test();
+        let _pty_guard = cf_panes::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
@@ -487,7 +415,7 @@ mod tests {
     fn gui_shutdown_kills_a_present_daemon_then_drains_its_admitted_launch() {
         use std::sync::Barrier;
 
-        let _pty_guard = crate::pty::serial_pty_test();
+        let _pty_guard = cf_panes::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));

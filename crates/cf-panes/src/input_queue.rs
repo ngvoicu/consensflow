@@ -28,7 +28,7 @@ const INPUT_SEQUENCE_REGRESSION: &str = "pane-input-sequence-regression";
 /// What a pane's worker does, in order: the human's own keys (counted for
 /// what they leave unsent), the emulator's replies and the daemon's keys, a
 /// delivery's paste, a native send's claim.
-pub(crate) enum InputWork {
+pub enum InputWork {
     Typed(Vec<u8>),
     Write(Vec<u8>),
     Paste(Vec<u8>),
@@ -49,7 +49,7 @@ impl InputWork {
 /// it may be sent again. Uncertain: the write itself failed partway, and some
 /// of it may have reached the window.
 #[derive(Debug)]
-pub(crate) enum InputError {
+pub enum InputError {
     Refused { code: &'static str, cause: String },
     Uncertain(String),
 }
@@ -111,7 +111,7 @@ impl From<ArbiterError> for InputError {
     }
 }
 
-pub(crate) type InputResponse = Result<(), InputError>;
+pub type InputResponse = Result<(), InputError>;
 
 struct InputJob {
     work: InputWork,
@@ -120,9 +120,9 @@ struct InputJob {
     pending_bytes: Arc<AtomicUsize>,
 }
 
-pub(crate) struct PageInputCompletion {
-    pub(crate) receiver: oneshot::Receiver<InputResponse>,
-    pub(crate) human: bool,
+pub struct PageInputCompletion {
+    pub receiver: oneshot::Receiver<InputResponse>,
+    pub human: bool,
 }
 
 struct PageInputState {
@@ -138,7 +138,7 @@ struct InputRoute {
 
 /// Every open pane's input, in order: one worker and one bounded queue per
 /// pane, from its `pane.open` until it leaves the table.
-pub(crate) struct InputQueue {
+pub struct InputQueue {
     panes: Arc<PaneTable>,
     arbiter: Arc<InputArbiter>,
     senders: Mutex<HashMap<PaneKey, InputRoute>>,
@@ -148,7 +148,7 @@ pub(crate) struct InputQueue {
 }
 
 impl InputQueue {
-    pub(crate) fn new(panes: Arc<PaneTable>, arbiter: Arc<InputArbiter>) -> Self {
+    pub fn new(panes: Arc<PaneTable>, arbiter: Arc<InputArbiter>) -> Self {
         Self {
             panes,
             arbiter,
@@ -163,7 +163,7 @@ impl InputQueue {
         }
     }
 
-    pub(crate) fn enqueue_page(
+    pub fn enqueue_page(
         &self,
         key: PaneKey,
         sequence: u64,
@@ -213,13 +213,13 @@ impl InputQueue {
     /// A new page counts every pane's input from 1: the page that sent the
     /// old numbers is gone (a reload replaced it), and so are the tickets it
     /// never came back for. What it had admitted still goes in, in order.
-    pub(crate) fn begin_page(&self) {
+    pub fn begin_page(&self) {
         let mut page = self.page.lock().unwrap_or_else(|error| error.into_inner());
         page.last_sequences.clear();
         page.completions.clear();
     }
 
-    pub(crate) fn take_page_completion(&self, ticket: &str) -> Result<PageInputCompletion, String> {
+    pub fn take_page_completion(&self, ticket: &str) -> Result<PageInputCompletion, String> {
         self.page
             .lock()
             .map_err(|_| "pane input admission lock is poisoned".to_string())?
@@ -255,7 +255,7 @@ impl InputQueue {
     }
 
     /// A pane just opened gets its worker and queue.
-    pub(crate) fn open(&self, key: &PaneKey) -> Result<(), String> {
+    pub fn open(&self, key: &PaneKey) -> Result<(), String> {
         let mut senders = self
             .senders
             .lock()
@@ -360,7 +360,7 @@ impl InputQueue {
         }
     }
 
-    pub(crate) fn close_and_drain(&self) {
+    pub fn close_and_drain(&self) {
         if !self.accepting.swap(false, Ordering::AcqRel) {
             return;
         }
@@ -400,7 +400,7 @@ fn input_worker(
     }
 }
 
-pub(crate) async fn wait_for_input(receiver: oneshot::Receiver<InputResponse>) -> InputResponse {
+pub async fn wait_for_input(receiver: oneshot::Receiver<InputResponse>) -> InputResponse {
     // The worker answers every job it takes: one left unanswered went down
     // with the worker, perhaps in the middle of its write.
     receiver
@@ -409,7 +409,7 @@ pub(crate) async fn wait_for_input(receiver: oneshot::Receiver<InputResponse>) -
 }
 
 pub(crate) fn wait_for_input_blocking(receiver: oneshot::Receiver<InputResponse>) -> InputResponse {
-    tauri::async_runtime::block_on(wait_for_input(receiver))
+    futures_executor::block_on(wait_for_input(receiver))
 }
 
 #[cfg(test)]
@@ -427,6 +427,7 @@ mod tests {
     use crate::pty::PaneError;
     #[cfg(unix)]
     use cf_bridge::BridgeBuilder;
+    #[cfg(unix)]
     use cf_proto::bridge::Role;
 
     /// A pane's input lives as long as the pane: killed, or ended on its own,

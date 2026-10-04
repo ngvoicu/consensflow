@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::pty::PaneTable;
 use cf_bridge::{Bridge, BridgeBuilder, BridgeError};
+use cf_panes::pty::PaneTable;
 
 /// How long the daemon gets to stop on its own before it is killed.
 pub(crate) const DAEMON_STOP_GRACE: Duration = Duration::from_secs(2);
@@ -495,6 +495,7 @@ impl Daemon {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use cf_proto::bridge::Role;
     #[cfg(unix)]
     use std::collections::HashMap;
@@ -508,13 +509,13 @@ mod tests {
     use tauri::ipc::Channel;
     use tauri::{Emitter, Manager};
 
-    use crate::arbiter::{EnterTiming, InputArbiter};
     use crate::commands::subscribe_output;
-    use crate::input_queue::InputQueue;
-    use crate::output_hub::OutputHub;
-    #[cfg(unix)]
-    use crate::pty::process_exists;
     use crate::runtime::AppRuntime;
+    use cf_panes::arbiter::{EnterTiming, InputArbiter};
+    use cf_panes::input_queue::InputQueue;
+    use cf_panes::output_hub::OutputHub;
+    #[cfg(unix)]
+    use cf_panes::pty::process_exists;
 
     /// Starts between failures, short enough for a test.
     const QUICK: Backoff = Backoff {
@@ -808,7 +809,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn no_start_is_tried_again_while_a_pane_is_open() {
-        let _pty_guard = crate::pty::serial_pty_test();
+        let _pty_guard = cf_panes::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
         let opened = panes
             .open(

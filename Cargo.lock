@@ -52,9 +52,9 @@ name = "app"
 version = "3.0.0-alpha.72"
 dependencies = [
  "cf-bridge",
+ "cf-panes",
  "cf-proto",
  "flate2",
- "futures-channel",
  "libc",
  "portable-pty",
  "reqwest",
@@ -322,6 +322,21 @@ version = "3.0.0-alpha.72"
 dependencies = [
  "cf-proto",
  "serde_json",
+]
+
+[[package]]
+name = "cf-panes"
+version = "3.0.0-alpha.72"
+dependencies = [
+ "cf-bridge",
+ "cf-proto",
+ "futures-channel",
+ "futures-executor",
+ "libc",
+ "portable-pty",
+ "serde",
+ "serde_json",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

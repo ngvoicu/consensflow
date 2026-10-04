@@ -22,6 +22,8 @@ pub(crate) struct JobObject {
 
 // SAFETY: a job handle is a kernel handle, usable from any thread.
 unsafe impl Send for JobObject {}
+// SAFETY: the handle is all a JobObject holds, and the kernel serializes calls
+// made on one handle from several threads.
 unsafe impl Sync for JobObject {}
 
 impl JobObject {
@@ -58,6 +60,7 @@ impl JobObject {
         // SAFETY: both handles are open; the process handle is closed after.
         let assigned = unsafe { AssignProcessToJobObject(self.handle, process) };
         let error = io::Error::last_os_error();
+        // SAFETY: `process` was opened above, is not null, and is closed only here.
         unsafe { CloseHandle(process) };
         if assigned == 0 {
             return Err(error);

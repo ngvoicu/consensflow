@@ -15,7 +15,7 @@
  * pane host first: on a fresh machine, and after any change to the Rust. --in runs the
  * command in a folder of the copy (cargo reads app/src-tauri/.cargo there).
  *
- *   npm run windows -- --host <ssh host> --in app/src-tauri -- cargo test --features test-helper The machine needs an
+ *   npm run windows -- --host <ssh host> --in app/src-tauri -- cargo test The machine needs an
  * OpenSSH server, Node, Rust, and Windows' own tar.exe; the folder is
  * %USERPROFILE%\consensflow-build unless --dir names another under it. Run
  * one at a time: a live run's windows are the machine's.

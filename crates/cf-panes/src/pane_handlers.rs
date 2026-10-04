@@ -95,7 +95,7 @@ fn default_backlog_bytes() -> usize {
     DEFAULT_BACKLOG_BYTES
 }
 
-pub(crate) fn register_pane_handlers(
+pub fn register_pane_handlers(
     builder: &mut BridgeBuilder,
     panes: Arc<PaneTable>,
     arbiter: Arc<InputArbiter>,
@@ -321,6 +321,7 @@ mod tests {
     use super::*;
     #[cfg(unix)]
     use crate::arbiter::EnterTiming;
+    #[cfg(unix)]
     use cf_proto::bridge::Role;
     #[cfg(unix)]
     use std::sync::mpsc;
@@ -328,9 +329,9 @@ mod tests {
     use std::time::Duration;
 
     #[cfg(unix)]
-    use crate::output_hub::PaneOutputMessage;
+    use crate::headless::MAX_FRAME_BYTES;
     #[cfg(unix)]
-    use crate::runtime::MAX_FRAME_BYTES;
+    use crate::output_hub::PaneOutputMessage;
 
     #[test]
     fn open_request_requires_absolute_launch_inputs() {

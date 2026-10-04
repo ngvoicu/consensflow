@@ -1,4 +1,6 @@
-use app_lib::runtime::run_headless;
+#![deny(clippy::undocumented_unsafe_blocks)]
+
+use cf_panes::headless::run_headless;
 
 fn main() {
     if !stdin_is_pipe() {
@@ -25,6 +27,8 @@ fn stdin_is_pipe() -> bool {
     if file_descriptor < 0 {
         return false;
     }
+    // SAFETY: the descriptor is the duplicate dup just returned, open and
+    // owned by nothing else, so File may take it over.
     let input = unsafe { std::fs::File::from_raw_fd(file_descriptor) };
     input.metadata().is_ok_and(|metadata| {
         let file_type = metadata.file_type();

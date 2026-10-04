@@ -6,7 +6,7 @@ import { copyFileSync, existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 const [executable, ...args] = process.argv.slice(2)
-if (/^(app_lib|consensflow_bridge)-.*\.exe$/i.test(basename(executable))) {
+if (/^app_lib-.*\.exe$/i.test(basename(executable))) {
   const manifest = `${executable}.manifest`
   if (!existsSync(manifest)) copyFileSync(join(import.meta.dirname, '..', 'tests.manifest'), manifest)
 }
