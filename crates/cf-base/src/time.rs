@@ -148,7 +148,8 @@ pub fn parse(text: &str) -> Option<i64> {
 /// - A year from 0 to 99 is that year of the 1900s.
 /// - The month's first day is counted in whole numbers, V8's way: before the
 ///   year -399,999 its division cuts toward zero, a day off the calendar.
-///   The rest is in doubles, each product and sum rounded as JavaScript's.
+///   The rest is in doubles, each sum rounded as JavaScript's, and each
+///   product as the machine's Node rounds it ([`product_plus`]).
 ///
 /// None where JavaScript gives NaN: past what a date holds, or, as V8 reads
 /// it, for a year more than a million either side of 0 or a month more than
@@ -167,8 +168,21 @@ pub fn utc_ms(year: i64, month: i64, day: i64, hour: i64, minute: i64) -> Option
     }
     let first = month_start(year + month.div_euclid(12), month.rem_euclid(12))?;
     let days = (first - 1) as f64 + day as f64;
-    let time = hour as f64 * 3_600_000.0 + minute as f64 * 60_000.0;
-    time_clip(days * 86_400_000.0 + time)
+    let time = product_plus(hour as f64, 3_600_000.0, minute as f64 * 60_000.0);
+    time_clip(product_plus(days, 86_400_000.0, time))
+}
+
+/// `a * b + c` as V8 computes it on this machine. Built for arm64, V8 fuses
+/// the product into the sum (clang contracts it); built for x64, it rounds
+/// the product first. So Node's own answer for a product past 2^53 differs
+/// between the two: `Date.UTC(1970, 0, 1, 400000000001, -24000000000059)` is
+/// 60032 on a Mac with Apple silicon, and 59904 on Windows x64 (Node 26.8.1).
+fn product_plus(a: f64, b: f64, c: f64) -> f64 {
+    if cfg!(target_arch = "aarch64") {
+        a.mul_add(b, c)
+    } else {
+        a * b + c
+    }
 }
 
 /// The day of the first of `month` (from 0) in `year`, counted from the
@@ -452,6 +466,17 @@ mod tests {
         assert_eq!(
             utc_ms(1970, 0, 1, 100_000_000_000, -5_999_999_999_999),
             Some(60_032)
+        );
+        // Node 26.8.1 on a Mac with Apple silicon fuses each product into its
+        // sum; on Windows x64 it rounds the product first.
+        let fused = cfg!(target_arch = "aarch64");
+        assert_eq!(
+            utc_ms(1970, 0, 1, 400_000_000_001, -24_000_000_000_059),
+            Some(if fused { 60_032 } else { 59_904 })
+        );
+        assert_eq!(
+            utc_ms(1970, 0, 200_000_000_002, -4_800_000_000_024, 1),
+            Some(if fused { 60_416 } else { 59_392 })
         );
         assert_eq!(
             utc_ms(1970, 0, 1, 2_400_000_000, 0),
