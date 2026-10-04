@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::io::{self, ErrorKind, Write};
 use std::process::ExitCode;
 

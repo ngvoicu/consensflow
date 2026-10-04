@@ -5,6 +5,8 @@
 //! answer. `cf hook <harness>` is what a harness's hooks run, in a window or
 //! not; it says only what its harness reads, and never fails.
 
+#![forbid(unsafe_code)]
+
 mod board;
 mod hook;
 mod node;

@@ -2,6 +2,8 @@
 
 use cf_panes::headless::run_headless;
 
+// Its errors go to its stderr: the helper's own log, which the integration rig reads.
+#[allow(clippy::print_stderr)]
 fn main() {
     if !stdin_is_pipe() {
         return;

@@ -10,3 +10,8 @@ disallowed-methods = [
   { path = "std::env::vars_os", reason = "read the environment once, in main: cf_base::env::Env" },
   { path = "std::process::Command::new", reason = "a process starts only through cf-process" },
 ]
+
+# Tests may unwrap, expect and print: a failure there is the test's answer.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-print-in-tests = true

@@ -3,8 +3,9 @@
 //! ledger, or a newer build's, is named rather than failed on. Another
 //! process is this test binary run again, as a child that opens the file.
 
-// The tests start the child process themselves, and the child reads what to do from its environment.
-#![allow(clippy::disallowed_methods)]
+// The tests start the child process themselves, and the child reads what to
+// do from its environment; their helpers expect, as the tests do.
+#![allow(clippy::disallowed_methods, clippy::expect_used)]
 
 use std::cell::RefCell;
 use std::io::{BufRead, BufReader};
