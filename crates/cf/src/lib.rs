@@ -6,6 +6,8 @@
 //! not; it says only what its harness reads, and never fails.
 //! `cf codex-session <codex> <args…>` is what a Codex window runs in Codex's place.
 
+#![forbid(unsafe_code)]
+
 mod board;
 mod hook;
 mod node;

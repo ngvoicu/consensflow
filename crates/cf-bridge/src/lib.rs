@@ -5,6 +5,10 @@
 //! [`Role::Host`]; which end a program is decides the ids it mints and the
 //! ones it accepts.
 
+// One function calls into C, to make a pipe non-blocking; everything else is safe Rust.
+#![deny(unsafe_code)]
+#![deny(clippy::undocumented_unsafe_blocks)]
+
 use std::collections::HashMap;
 use std::fmt;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -1089,6 +1093,7 @@ impl<W: Write> Write for InterruptibleWriter<W> {
 }
 
 #[cfg(unix)]
+#[allow(unsafe_code)]
 fn set_nonblocking(file_descriptor: RawFd) -> std::io::Result<()> {
     const F_GETFL: i32 = 3;
     const F_SETFL: i32 = 4;
@@ -1107,6 +1112,7 @@ fn set_nonblocking(file_descriptor: RawFd) -> std::io::Result<()> {
     if flags < 0 {
         return Err(std::io::Error::last_os_error());
     }
+    // SAFETY: as above, with the flags just read and O_NONBLOCK added.
     if unsafe { fcntl(file_descriptor, F_SETFL, flags | O_NONBLOCK) } < 0 {
         return Err(std::io::Error::last_os_error());
     }

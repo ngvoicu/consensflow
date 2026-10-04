@@ -30,9 +30,10 @@ use std::future::Future;
 use std::net::Ipv4Addr;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use cf_base::js;
+use cf_base::time::{Clock, SystemClock};
 use cf_board::Board;
 use cf_proto::codex::{Bridge, Session};
 use serde_json::json;
@@ -214,9 +215,7 @@ impl Shared {
     }
 }
 
-/// Milliseconds since the epoch: `Date.now()`.
+/// Milliseconds since the epoch: `Date.now()`, as the daemon's deadlines count them.
 fn now_ms() -> f64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0.0, |since| since.as_millis() as f64)
+    SystemClock.now_ms() as f64
 }

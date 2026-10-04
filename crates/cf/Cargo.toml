@@ -12,13 +12,13 @@ cf-board.workspace = true
 cf-codex-session.workspace = true
 cf-harness.workspace = true
 cf-process.workspace = true
-form_urlencoded = "1"
+form_urlencoded.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
 cf-board = { workspace = true, features = ["test-support"] }
 serde.workspace = true
-tempfile = "3"
+tempfile.workspace = true
 
 [lints]
 workspace = true

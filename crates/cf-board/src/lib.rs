@@ -124,7 +124,9 @@ impl Board {
     }
 }
 
+// A test fixture other crates' tests compile too: a failure in it is the test's.
 #[cfg(any(test, feature = "test-support"))]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 pub mod scripted {
     //! A scripted daemon API on loopback, for tests: it answers each request
     //! with the next scripted reply, as written, and keeps what it was asked.

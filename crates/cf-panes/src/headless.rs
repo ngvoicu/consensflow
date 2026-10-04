@@ -48,6 +48,8 @@ pub fn reap_all(panes: &PaneTable) {
 /// stdin and stdout instead of a webview.
 ///
 /// Serves until the peer closes the transport, then reaps what it opened.
+// Its errors go to its stderr: the helper's own log, which the integration rig reads.
+#[allow(clippy::print_stderr)]
 pub fn run_headless() -> Result<(), String> {
     let panes = Arc::new(PaneTable::new());
     let output = Arc::new(OutputHub::new());

@@ -1150,8 +1150,10 @@ fn signal_process_group(process_group_id: i32) -> Result<(), PaneError> {
     }
 }
 
-/// ConPTY helpers the Windows tests of the pane table and the arbiter share.
+/// ConPTY helpers the Windows tests of the pane table and the arbiter share:
+/// they expect, as the tests do.
 #[cfg(all(test, windows))]
+#[allow(clippy::expect_used)]
 pub(crate) mod conpty_test {
     use std::collections::HashMap;
     use std::sync::mpsc::Receiver;

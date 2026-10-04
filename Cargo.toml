@@ -6,7 +6,7 @@ resolver = "2"
 members = ["app/src-tauri", "crates/*"]
 
 [workspace.package]
-version = "3.0.0-alpha.72"
+version = "3.0.0-alpha.73"
 edition = "2021"
 rust-version = "1.95"
 
@@ -22,7 +22,11 @@ cf-board = { path = "crates/cf-board" }
 cf-harness = { path = "crates/cf-harness" }
 cf-process = { path = "crates/cf-process" }
 cf-codex-session = { path = "crates/cf-codex-session" }
+cf-ledger = { path = "crates/cf-ledger" }
+base64 = "0.22"
 bytes = "1"
+flate2 = "1"
+form_urlencoded = "1"
 futures-channel = "0.3"
 futures-executor = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
@@ -33,12 +37,15 @@ hyper = { version = "1", default-features = false, features = ["http1", "server"
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 libc = "0.2"
 portable-pty = "0.9"
+# The ledger's SQLite, built in: every platform runs the same SQLite.
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 # Objects keep their keys in the order written, as JavaScript's do: JSON
 # that Node wrote reads back, and goes out again, as Node had it.
 serde_json = { version = "1.0", features = ["preserve_order"] }
 sha2 = "0.10"
 subtle = "2"
+tempfile = "3"
 thiserror = "2"
 # One thread, as Node is: a crate adds the features it needs. Only the Codex
 # window's supervisor and broker run a runtime so far.
@@ -58,3 +65,10 @@ await_holding_lock = "deny"
 await_holding_refcell_ref = "deny"
 dbg_macro = "deny"
 todo = "deny"
+# The rewrite's rules: a failure is a value, and nothing prints behind its
+# caller's back (tests are exempt in clippy.toml; code older than the rules
+# says so where it is).
+unwrap_used = "deny"
+expect_used = "deny"
+print_stdout = "deny"
+print_stderr = "deny"

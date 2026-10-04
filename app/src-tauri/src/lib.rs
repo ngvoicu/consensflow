@@ -1,6 +1,13 @@
-// The app reads its environment and starts its processes where it needs
-// to; it is older than the rules in clippy.toml and not moved onto them yet.
-#![allow(clippy::disallowed_methods)]
+// The app reads its environment, starts its processes, unwraps and prints
+// where it needs to: it is older than the rewrite's rules (clippy.toml, the
+// workspace's lints) and not moved onto them yet.
+#![allow(
+    clippy::disallowed_methods,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::print_stdout,
+    clippy::print_stderr
+)]
 
 use std::io::{BufRead, Write};
 

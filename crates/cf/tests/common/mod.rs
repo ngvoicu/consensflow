@@ -2,6 +2,9 @@
 //! variables from a window this test may itself run in, and only those the
 //! case gives.
 
+// The tests' own helper: a failure in it is the test's.
+#![allow(clippy::expect_used)]
+
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
 

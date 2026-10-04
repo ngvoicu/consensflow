@@ -1,6 +1,6 @@
 {
   "name": "consensflow",
-  "version": "3.0.0-alpha.72",
+  "version": "3.0.0-alpha.73",
   "description": "Native terminal workspace where a Chief of Staff runs your project with a staff of coding agents.",
   "license": "MIT",
   "type": "module",
@@ -28,6 +28,7 @@
     "watch": "node evals/watch.mjs",
     "eval:windows": "node tests/live/windows-matrix.mjs",
     "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs",
+    "goldens:ledger": "node tests/goldens/ledger/record.mjs",
     "build:bridge": "cargo build --release -p cf-panes --bin consensflow-bridge",
     "build:cf": "node app/scripts/build-cf.mjs",
     "smoke": "CONSENSFLOW_SMOKE=1 node --test tests/smoke.test.mjs",
