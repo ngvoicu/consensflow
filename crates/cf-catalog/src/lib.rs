@@ -6,14 +6,24 @@
 //! `data/presets.json` is generated from them (`npm run goldens:catalog`)
 //! and the unit suite holds it equal, so the two cannot drift. Nothing here
 //! writes `agents.json` before the flip; the Node build is its one writer.
+//!
+//! `presets` reads the data, `profile` names a model and its road and tiers
+//! its agent, `catalog` lists the presets by harness. The [`Catalog`] is
+//! built once and handed down: it holds what a profile needs, so none of them
+//! scans the presets again.
 
 #![forbid(unsafe_code)]
 
-use serde::Deserialize;
+mod catalog;
+mod presets;
+mod profile;
+
 use std::collections::BTreeMap;
 
-/// The presets and model labels as `presets.js` has them, built into the binary.
-const BUNDLED: &str = include_str!("../data/presets.json");
+pub use catalog::{efforts, harness_for_kind, Group, HARNESSES};
+pub use cf_proto::agents::{CatalogEntry, FoundEntry, Harness, Profile, WorkTier};
+pub use presets::Preset;
+pub use profile::{validate_work_tier, work_tier_info, Settings, WorkTierInfo, WORK_TIERS};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogError {
@@ -23,43 +33,34 @@ pub enum CatalogError {
     Bundled(#[from] serde_json::Error),
 }
 
-/// A ready-made agent, as `AGENT_PRESETS` writes one. A field the JavaScript
-/// adds and this does not know fails the build's own test, not a user.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Preset {
-    /// Its provenance: what a copy of it in `agents.json` names.
-    pub preset: String,
-    pub id: String,
-    pub name: String,
-    /// The one-line headline the roster shows.
-    pub label: String,
-    /// The paragraph the catalog card shows.
-    pub description: String,
-    /// The harness, in the payload's vocabulary (`claude-code`, `codex`, `pi`, `opencode`, `devin`).
-    pub kind: String,
-    pub model: String,
-    pub effort: Option<String>,
-    /// Pi's word for the effort.
-    pub thinking: Option<String>,
-    /// An image agent: a Codex agent whose image tool draws.
-    #[serde(default)]
-    pub designer: bool,
-}
-
-/// The catalog: the presets in the order the JavaScript lists them, and
-/// each model's label by its key.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+/// The catalog: the presets in the order the JavaScript lists them, each
+/// model's label by its key, and what is worked out from them once: the
+/// (harness, model) pairs the presets run, and the entries of every harness.
+#[derive(Debug, Clone)]
 pub struct Catalog {
     presets: Vec<Preset>,
     model_labels: BTreeMap<String, String>,
+    known: profile::Known,
+    groups: Vec<Group>,
 }
 
 impl Catalog {
     /// The catalog built into this binary: read once, in `main`, and handed down.
     pub fn bundled() -> Result<Self, CatalogError> {
-        Ok(serde_json::from_str(BUNDLED)?)
+        let data = presets::bundled()?;
+        Ok(Self::new(data.presets, data.model_labels))
+    }
+
+    fn new(presets: Vec<Preset>, model_labels: BTreeMap<String, String>) -> Self {
+        let known = profile::Known::of(&presets);
+        let mut catalog = Self {
+            presets,
+            model_labels,
+            known,
+            groups: Vec::new(),
+        };
+        catalog.groups = catalog.grouped();
+        catalog
     }
 
     /// The ready-made agents, in the catalog's order.

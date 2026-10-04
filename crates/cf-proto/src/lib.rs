@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod agents;
 pub mod bridge;
 pub mod codex;
 pub mod ledger;
