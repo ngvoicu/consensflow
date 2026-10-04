@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process'
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 /**
  * A stand-in for the `claude` CLI in the integration tests. It
@@ -22,7 +21,6 @@ import { fileURLToPath } from 'node:url'
  * `REPLY <words>` is answered with `cf answer`. Anything else is acknowledged.
  */
 
-const CF = fileURLToPath(new URL('../../bin/cf.mjs', import.meta.url))
 const VALUE_FLAGS = new Set([
   '--settings',
   '--add-dir',
@@ -84,9 +82,10 @@ const status = (value) =>
     JSON.stringify({ pid: process.pid, sessionId, kind: 'interactive', status: value }),
   )
 
+/** `cf` as an agent runs it: the one first on the window's PATH, whichever ConsensFlow installed there. */
 function runCf(words) {
   return new Promise((resolve) => {
-    const child = spawn(process.env.CONSENSFLOW_NODE ?? process.execPath, [CF, ...words], {
+    const child = spawn('cf', words, {
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
