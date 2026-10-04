@@ -56,6 +56,8 @@ tokio-tungstenite = { version = "0.30", default-features = false, features = ["h
 ureq = { version = "3", default-features = false }
 uuid = { version = "1", default-features = false, features = ["v4"] }
 windows-sys = "0.61"
+# A file's index on Windows, the identity std keeps unstable, with no unsafe of ours.
+winapi-util = "0.1"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

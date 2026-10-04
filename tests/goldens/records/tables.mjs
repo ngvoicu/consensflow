@@ -4,7 +4,8 @@
  *   in named zones and in the machine's (`DEFAULT_ZONE`, which the generator
  *   pins); Codex's rate limits; OpenCode's retries; the status tests;
  * - `localeCompare`, by which the Claude and OpenCode readers break ties
- *   between item ids: ICU's collation, which the port emulates for ASCII.
+ *   between item ids: ICU's collation, which the port emulates for ASCII;
+ * - the reasons that are ConsensFlow's own sentences, by how each begins.
  *
  * A call that throws is written `{"throws": true}`.
  */
@@ -17,6 +18,7 @@ import {
   refusedForQuota,
 } from '../../../hosts/lib/quota.js'
 import { fixtureJson, fixtureLines } from './fixtures.mjs'
+import { OUR_REASONS } from './runner.mjs'
 
 /** The zone a reset that names none is read in; the generator sets `TZ` to it. */
 export const DEFAULT_ZONE = 'America/Los_Angeles'
@@ -272,5 +274,5 @@ function collationTable() {
 
 /** The tables, as one golden. */
 export function tables() {
-  return { quota: quotaTable(), collation: collationTable() }
+  return { quota: quotaTable(), collation: collationTable(), reasons: { ours: OUR_REASONS } }
 }

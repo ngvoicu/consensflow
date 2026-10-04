@@ -31,26 +31,54 @@ import { FIXTURES } from './fixtures.mjs'
 /** Where every scenario's clock starts: 2026-09-21T12:26:40.000Z. */
 export const START = 1_790_000_000_000
 
-/** The reasons that are ConsensFlow's own sentences: kept as they are. */
-const OURS = [
-  /^missing session id$/,
-  /^missing explicit env argument$/,
-  /^unknown kind: /,
-  /^unreadable: no (claude session|codex rollout for|pi session|opencode store for|opencode session) /,
-  /^unreadable: missing home in env$/,
-  /^unreadable: missing native .+ id at record \d+$/,
-  /^unreadable: malformed JSONL at record \d+$/,
-  /^unreadable: empty (claude session|codex rollout for|pi session) /,
-  /^unreadable: malformed OpenCode /,
-  /^unreadable: missing OpenCode event /,
-  /^unreadable: (missing Devin session|conflicting Devin completion evidence|cyclic Devin main chain|missing Devin main chain ancestor|invalid Devin message identity|unknown Devin message role)$/,
+/**
+ * The reasons that are ConsensFlow's own sentences, by how each begins: kept
+ * as they are. tables.json carries the list, and the Rust test reads it there.
+ */
+export const OUR_REASONS = [
+  'missing session id',
+  'missing explicit env argument',
+  'unknown kind: ',
+  'unreadable: no claude session ',
+  'unreadable: no codex rollout for ',
+  'unreadable: no pi session ',
+  'unreadable: no opencode store for ',
+  'unreadable: no opencode session ',
+  'unreadable: missing home in env',
+  'unreadable: missing native ',
+  'unreadable: malformed JSONL at record ',
+  'unreadable: empty claude session ',
+  'unreadable: empty codex rollout for ',
+  'unreadable: empty pi session ',
+  'unreadable: malformed OpenCode ',
+  'unreadable: missing OpenCode event ',
+  'unreadable: missing Devin session',
+  'unreadable: conflicting Devin completion evidence',
+  'unreadable: cyclic Devin main chain',
+  'unreadable: missing Devin main chain ancestor',
+  'unreadable: invalid Devin message identity',
+  'unreadable: unknown Devin message role',
 ]
 
-/** A reason as the golden keeps it. */
+/**
+ * The reasons a platform says: V8's TypeError and SyntaxError, Node's errno
+ * line, SQLite's words, an invalid time. Only their prefix is promised.
+ */
+const PLATFORM_REASONS = [
+  /^unreadable: Cannot read properties of (null|undefined) \(reading '[^']*'\)$/,
+  /^unreadable: .+ is not (iterable|a function)$/,
+  /^unreadable: (Unexpected (token|end of JSON input|non-whitespace character)|Bad control character|Unterminated string|Expected .+ in JSON)/,
+  /is not valid JSON/,
+  /^unreadable: E[A-Z]+: /,
+  /^unreadable: (no such (table|column)|database is locked|file is not a database|unable to open database file|disk I\/O error)/,
+  /^unreadable: Invalid time value$/,
+]
+
+/** A reason as the golden keeps it; one of neither kind is a new sentence to sort first. */
 export function keptReason(reason) {
-  if (OURS.some((pattern) => pattern.test(reason))) return reason
-  if (!reason.startsWith('unreadable: ')) throw new Error(`a reason with no class: ${reason}`)
-  return 'unreadable: «platform»'
+  if (OUR_REASONS.some((ours) => reason.startsWith(ours))) return reason
+  if (PLATFORM_REASONS.some((pattern) => pattern.test(reason))) return 'unreadable: «platform»'
+  throw new Error(`a reason neither ours nor a platform's: ${reason}`)
 }
 
 /** `$ROOT/a/b` as a path under `root`, joined as this platform joins it. */

@@ -1,9 +1,12 @@
 //! JavaScript's readings of values and text, for ports of code that relied
 //! on them: a JSON value written into a template literal, tested for truth,
-//! joined; text trimmed or read as a number. A port that reads a value the
-//! way the Node code did says what Node said.
+//! joined, written by `JSON.stringify`; a number written as `String` writes
+//! it; text trimmed, read as a number, or ordered as `localeCompare` orders
+//! it. A port that reads a value the way the Node code did says what Node
+//! said.
 
 use std::borrow::Cow;
+use std::cmp::Ordering;
 
 use serde_json::Value;
 
@@ -15,8 +18,149 @@ pub fn text(value: Option<&Value>) -> Cow<'_, str> {
         Some(Value::String(text)) => Cow::Borrowed(text),
         Some(Value::Array(items)) => Cow::Owned(join(items, ",")),
         Some(Value::Object(_)) => Cow::Borrowed("[object Object]"),
-        Some(other) => Cow::Owned(other.to_string()),
+        Some(Value::Number(number)) => Cow::Owned(number_text(number.as_f64().unwrap_or(f64::NAN))),
+        Some(Value::Bool(flag)) => Cow::Borrowed(if *flag { "true" } else { "false" }),
     }
+}
+
+/// `number` as `String(number)` writes it: the shortest digits that read
+/// back as it, in a plain or an exponent form by its size (`2`, `0.000001`,
+/// `1e-7`, `1e+21`), where Rust writes `2.0` and `1e21`.
+pub fn number_text(number: f64) -> String {
+    if number.is_nan() {
+        return "NaN".to_owned();
+    }
+    if number == 0.0 {
+        return "0".to_owned();
+    }
+    if number.is_infinite() {
+        return if number > 0.0 {
+            "Infinity"
+        } else {
+            "-Infinity"
+        }
+        .to_owned();
+    }
+    let sign = if number < 0.0 { "-" } else { "" };
+    // Rust's exponent form is the shortest digits that read back: `d.ddde±x`.
+    let scientific = format!("{:e}", number.abs());
+    let (mantissa, exponent) = scientific.split_once('e').unwrap_or((&scientific, "0"));
+    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+    let point = exponent.parse::<i32>().unwrap_or(0) + 1;
+    let count = i32::try_from(digits.len()).unwrap_or(i32::MAX);
+    let zeros = |count: i32| "0".repeat(usize::try_from(count).unwrap_or(0));
+    let written = if count <= point && point <= 21 {
+        format!("{digits}{}", zeros(point - count))
+    } else if 0 < point && point <= 21 {
+        let (whole, fraction) = digits.split_at(usize::try_from(point).unwrap_or(0));
+        format!("{whole}.{fraction}")
+    } else if -6 < point && point <= 0 {
+        format!("0.{}{digits}", zeros(-point))
+    } else {
+        let power = point - 1;
+        let power_sign = if power < 0 { '-' } else { '+' };
+        let (first, rest) = digits.split_at(1);
+        let rest = if rest.is_empty() {
+            String::new()
+        } else {
+            format!(".{rest}")
+        };
+        format!("{first}{rest}e{power_sign}{}", power.abs())
+    };
+    format!("{sign}{written}")
+}
+
+/// `value` as `JSON.stringify(value)` writes it: no white space, keys in
+/// their order, every number as JavaScript writes it (`2` for `2.0`, and an
+/// integer past 2^53 as the double it reads as).
+pub fn stringify(value: &Value) -> String {
+    let mut written = String::new();
+    stringify_into(value, &mut written);
+    written
+}
+
+fn stringify_into(value: &Value, written: &mut String) {
+    match value {
+        Value::Null => written.push_str("null"),
+        Value::Bool(flag) => written.push_str(if *flag { "true" } else { "false" }),
+        Value::Number(number) => {
+            let number = number.as_f64().unwrap_or(f64::NAN);
+            // JSON writes a number that is no finite one as null.
+            if number.is_finite() {
+                written.push_str(&number_text(number));
+            } else {
+                written.push_str("null");
+            }
+        }
+        Value::String(text) => written.push_str(&Value::String(text.clone()).to_string()),
+        Value::Array(items) => {
+            written.push('[');
+            for (at, item) in items.iter().enumerate() {
+                if at > 0 {
+                    written.push(',');
+                }
+                stringify_into(item, written);
+            }
+            written.push(']');
+        }
+        Value::Object(fields) => {
+            written.push('{');
+            for (at, (key, item)) in fields.iter().enumerate() {
+                if at > 0 {
+                    written.push(',');
+                }
+                written.push_str(&Value::String(key.clone()).to_string());
+                written.push(':');
+                stringify_into(item, written);
+            }
+            written.push('}');
+        }
+    }
+}
+
+/// ASCII in the order ICU's root collation sorts it at its first level,
+/// as Node's `localeCompare` reported it (`tests/goldens/records/tables.json`):
+/// white space, punctuation and symbols, digits, then letters, a letter's
+/// two cases as one. The other control characters are ignored.
+const COLLATED: &str = "\t\n\u{b}\u{c}\r _-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$0123456789aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ";
+
+/// A character's place among `COLLATED` at the first level (a letter's two
+/// cases share one), and its case at the third: none for a character ICU
+/// ignores, past every ASCII one for any other.
+fn collation_weights(character: char) -> Option<(u32, u32)> {
+    if character.is_ascii_control() && !"\t\n\u{b}\u{c}\r".contains(character) {
+        return None;
+    }
+    let lower = character.to_ascii_lowercase();
+    let primary = COLLATED
+        .chars()
+        .filter(|collated| !collated.is_ascii_uppercase())
+        .position(|collated| collated == lower)
+        .map_or(0x100 + u32::from(character), |at| {
+            u32::try_from(at).unwrap_or(u32::MAX)
+        });
+    Some((primary, u32::from(character.is_ascii_uppercase())))
+}
+
+/// `left.localeCompare(right)` for text in ASCII: ICU's root collation, its
+/// first level (letters as one case, white space and punctuation before
+/// digits before letters), then its third (a lowercase letter before its
+/// capital). Beyond ASCII it orders by code point, where ICU would weigh
+/// each script: no id ConsensFlow sorts holds such a character.
+pub fn locale_compare(left: &str, right: &str) -> Ordering {
+    let weights = |text: &str| {
+        text.chars()
+            .filter_map(collation_weights)
+            .collect::<Vec<_>>()
+    };
+    let (left, right) = (weights(left), weights(right));
+    let primary =
+        |weights: &[(u32, u32)]| weights.iter().map(|weight| weight.0).collect::<Vec<_>>();
+    let tertiary =
+        |weights: &[(u32, u32)]| weights.iter().map(|weight| weight.1).collect::<Vec<_>>();
+    primary(&left)
+        .cmp(&primary(&right))
+        .then_with(|| tertiary(&left).cmp(&tertiary(&right)))
 }
 
 /// `items` as `.join(separator)` joined them, `null` as nothing.
@@ -137,6 +281,87 @@ mod tests {
             join(&[json!("worker"), json!(null), json!("advisor")], "+"),
             "worker++advisor"
         );
+    }
+
+    #[test]
+    fn writes_a_number_as_string_did() {
+        // Node 26's String(x) for each.
+        let cases = [
+            (1e21, "1e+21"),
+            (1.5e-7, "1.5e-7"),
+            (123_456_789_012_345_680_000.0, "123456789012345680000"),
+            (0.000_001, "0.000001"),
+            (1e-7, "1e-7"),
+            (-0.0, "0"),
+            (2.5, "2.5"),
+            (2.0, "2"),
+            (100.0, "100"),
+            (1.0 / 3.0, "0.3333333333333333"),
+            (5e-324, "5e-324"),
+            (f64::MAX, "1.7976931348623157e+308"),
+            (12_345_678_901_234_567_890.0, "12345678901234567000"),
+            (0.1 + 0.2, "0.30000000000000004"),
+            (-1.25e-9, "-1.25e-9"),
+            (f64::NAN, "NaN"),
+            (f64::NEG_INFINITY, "-Infinity"),
+        ];
+        for (number, written) in cases {
+            assert_eq!(number_text(number), written, "{number:e}");
+        }
+        assert_eq!(text(Some(&serde_json::from_str("2.0").unwrap())), "2");
+        assert_eq!(text(Some(&serde_json::from_str("1e21").unwrap())), "1e+21");
+    }
+
+    #[test]
+    fn writes_json_as_json_stringify_did() {
+        let read = |text: &str| serde_json::from_str::<Value>(text).unwrap();
+        assert_eq!(
+            stringify(&read(r#"{"b":2.0,"a":[1e21,null,"x\u0001\"y"],"c":{}}"#)),
+            r#"{"b":2,"a":[1e+21,null,"x\u0001\"y"],"c":{}}"#
+        );
+        // An integer past 2^53 is the double JavaScript reads it as.
+        assert_eq!(
+            stringify(&read("12345678901234567890")),
+            "12345678901234567000"
+        );
+        assert_eq!(
+            stringify(&json!("line\nbreak\u{2028}")),
+            "\"line\\nbreak\u{2028}\""
+        );
+    }
+
+    #[test]
+    fn orders_ascii_as_locale_compare_did() {
+        fn sorted<'a>(words: &[&'a str]) -> Vec<&'a str> {
+            let mut words = words.to_vec();
+            words.sort_by(|left, right| locale_compare(left, right));
+            words
+        }
+        // Node 26 (ICU 78) sorts each list so.
+        assert_eq!(
+            sorted(&["b", "AB", "Ab", "aB", "ab", "A", "a"]),
+            ["a", "A", "ab", "aB", "Ab", "AB", "b"]
+        );
+        assert_eq!(
+            sorted(&["aB", "ab", "a1", "a-b", "a_b", "a b"]),
+            ["a b", "a_b", "a-b", "a1", "ab", "aB"]
+        );
+        assert_eq!(
+            sorted(&["a2", "a10", "2", "1a", "10"]),
+            ["10", "1a", "2", "a10", "a2"]
+        );
+        assert_eq!(locale_compare("\t", " "), Ordering::Less);
+        assert_eq!(
+            locale_compare("a\u{1}b", "ab"),
+            Ordering::Equal,
+            "a control character is ignored"
+        );
+        assert_eq!(
+            locale_compare("a\tb", "ab"),
+            Ordering::Less,
+            "white space is not"
+        );
+        assert_eq!(locale_compare("\u{7f}", "a"), Ordering::Less);
     }
 
     #[test]
