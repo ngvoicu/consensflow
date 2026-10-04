@@ -17,7 +17,8 @@ import { gzipSync } from 'node:zlib'
 
 const REPO = fileURLToPath(new URL('../../..', import.meta.url))
 const OUT = join(REPO, 'crates', 'cf-ledger', 'tests', 'traces')
-const HOOKS = fileURLToPath(new URL('./hooks.mjs', import.meta.url))
+// A URL, not a path: `--import` reads `D:\\…` on Windows as a URL with the scheme `d:`.
+const HOOKS = new URL('./hooks.mjs', import.meta.url).href
 const SUITE = ['tests', join('tests', 'engine')].flatMap((dir) =>
   readdirSync(join(REPO, dir))
     .filter((file) => file.endsWith('.test.mjs'))

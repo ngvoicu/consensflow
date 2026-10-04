@@ -76,8 +76,7 @@ jobs:
       # ledgers recorded afresh from src/ledger as it is now, and replayed
       # against cf-ledger. A change to the Node ledger that cf-ledger does not
       # mirror fails here, whether or not anyone recorded the traces again.
-      - run: npm run goldens:ledger
-      - run: cargo test -p cf-ledger --test replay
+      - run: npm run parity:ledger
         timeout-minutes: 15
       # Every crate linted, its tests included.
       - run: cargo clippy --workspace --all-targets -- -D warnings

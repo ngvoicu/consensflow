@@ -29,6 +29,7 @@
     "eval:windows": "node tests/live/windows-matrix.mjs",
     "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs",
     "goldens:ledger": "node tests/goldens/ledger/record.mjs",
+    "parity:ledger": "npm run goldens:ledger && cargo test -p cf-ledger --test replay",
     "build:bridge": "cargo build --release -p cf-panes --bin consensflow-bridge",
     "build:cf": "node app/scripts/build-cf.mjs",
     "smoke": "CONSENSFLOW_SMOKE=1 node --test tests/smoke.test.mjs",
