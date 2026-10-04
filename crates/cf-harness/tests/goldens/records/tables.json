@@ -1,0 +1,4135 @@
+{
+  "quota": {
+    "defaultZone": "America/Los_Angeles",
+    "instants": [
+      1774612800000,
+      1792843200000,
+      1792929600000,
+      1793534400000,
+      1804939200000,
+      1806148800000,
+      1798759800000,
+      1801396800000,
+      1835352000000,
+      1789839000000,
+      1790758860000,
+      1790758740000,
+      1789812000000.75,
+      "NaN",
+      "Infinity",
+      8640000000000001
+    ],
+    "resets": [
+      {
+        "text": "Resets in 3 days.",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-30T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-27T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-28T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-04T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-16T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-30T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-03T23:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-02-03T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-03-02T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-22T17:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-10-03T09:01:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-10-03T08:59:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-22T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "Weekly usage limit reached. Resets in 3hr 4min.",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-27T15:04:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-24T15:04:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T15:04:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T15:04:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-13T15:04:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-27T15:04:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-01T02:34:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-01-31T15:04:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-28T15:04:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-19T20:34:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-30T12:05:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-30T12:03:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-19T13:04:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets in 35 minutes",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-27T12:35:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-24T12:35:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T12:35:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T12:35:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-13T12:35:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-27T12:35:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-01T00:05:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-01-31T12:35:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-28T12:35:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-19T18:05:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-30T09:36:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-30T09:34:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-19T10:35:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "Resets in 4h 30m",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-27T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-24T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-13T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-27T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-01T04:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-01-31T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-28T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-19T22:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-30T13:31:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-30T13:29:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-19T14:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets in 2 months",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-27T12:02:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-24T12:02:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T12:02:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T12:02:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-13T12:02:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-27T12:02:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2026-12-31T23:32:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-01-31T12:02:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-28T12:02:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-19T17:32:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-30T09:03:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-30T09:01:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-19T10:02:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "reset in 1 week and 2 days",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-04-05T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-11-02T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-11-03T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-10T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-22T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-04-05T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-09T23:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-02-09T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-03-08T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-28T17:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-10-09T09:01:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-10-09T08:59:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-28T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets in 1 week, 2 days, and 3 hours",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-04-05T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-11-02T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-11-03T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-10T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-22T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-04-05T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-10T02:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-02-09T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-03-08T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-28T20:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-10-09T12:01:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-10-09T11:59:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-28T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets in 5 parsecs",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "Resets in soon",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "RESETS IN 90 SECONDS",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-27T12:01:30.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-24T12:01:30.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T12:01:30.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T12:01:30.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-13T12:01:30.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-27T12:01:30.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2026-12-31T23:31:30.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-01-31T12:01:30.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-28T12:01:30.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-19T17:31:30.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-30T09:02:30.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-30T09:00:30.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-19T10:01:30.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets in 0 minutes",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-27T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-24T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-13T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-27T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2026-12-31T23:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-01-31T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-28T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-19T17:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-30T09:01:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-30T08:59:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-19T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets 7:30pm (Europe/Bucharest)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-27T17:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-24T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T17:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T17:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-13T17:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-27T17:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-01T17:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-01-31T17:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-28T17:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-20T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-30T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-30T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-19T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets Sep 29 at 11am (Europe/Bucharest)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-09-29T08:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2027-09-29T08:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2027-09-29T08:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2027-09-29T08:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-09-29T08:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-09-29T08:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-09-29T08:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-09-29T08:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-09-29T08:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-29T08:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2027-09-29T08:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2027-09-29T08:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-29T08:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets 3pm (America/New_York)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-27T19:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-24T19:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T19:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T20:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-13T20:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-27T19:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-01T20:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-01-31T20:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-28T20:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-19T19:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-30T19:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-30T19:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-19T19:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets 3pm",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-27T22:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-24T22:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T22:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T23:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-13T23:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-27T22:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-01T23:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-01-31T23:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-28T23:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-19T22:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-30T22:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-30T22:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-19T22:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets at 3pm (Europe/Bucharest)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets tomorrow at 3pm (Europe/Bucharest)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets 13pm (UTC)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-27T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-24T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-13T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-27T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-01T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-01-31T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-28T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-20T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-30T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-30T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-19T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets 12am (Asia/Tokyo)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-27T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-24T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-13T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-27T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-01T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-01-31T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-28T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-20T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-30T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-30T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-19T15:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets 12pm (Asia/Tokyo)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-28T03:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-25T03:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-26T03:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-02T03:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-14T03:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-28T03:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-01T03:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-02-01T03:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-29T03:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-20T03:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-10-01T03:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-10-01T03:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-20T03:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets 7:75pm (UTC)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-27T20:15:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-24T20:15:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T20:15:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T20:15:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-13T20:15:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-27T20:15:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-01T20:15:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-01-31T20:15:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-28T20:15:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-19T20:15:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-30T20:15:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-30T20:15:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-19T20:15:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets Feb 31 at 9am (UTC)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-03T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2027-03-03T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2027-03-03T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2027-03-03T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2028-03-02T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2028-03-02T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-03-03T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-03-03T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-03-02T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2027-03-03T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2027-03-03T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2027-03-03T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2027-03-03T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets Feb 29 at 9am (UTC)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-01T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2027-03-01T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2027-03-01T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2027-03-01T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2028-02-29T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2028-02-29T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-03-01T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-03-01T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-29T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2027-03-01T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2027-03-01T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2027-03-01T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2027-03-01T09:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets Dec 31 at 11pm (Pacific/Auckland)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets Jan 1 at 12am (Pacific/Kiritimati)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-12-31T10:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets 3pm (Mars/Olympus)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets 3pm ( Europe/Bucharest )",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets 3pm (europe/bucharest)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-27T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-25T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-13T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-27T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-01T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-01-31T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-28T13:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-20T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-30T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-30T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-19T12:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets 3:30am (Australia/Lord_Howe)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-27T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-24T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-13T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-27T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-01T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-01-31T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-28T16:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-20T17:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-30T17:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-30T17:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-19T17:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets 2:15am (Asia/Kathmandu)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-27T20:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-24T20:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T20:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T20:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-13T20:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-27T20:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-01-01T20:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-01-31T20:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-02-28T20:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-19T20:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-30T20:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-30T20:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-19T20:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets Sept 29 at 11am (UTC)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-09-29T11:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2027-09-29T11:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2027-09-29T11:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2027-09-29T11:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-09-29T11:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-09-29T11:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-09-29T11:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-09-29T11:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-09-29T11:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-09-29T11:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-09-29T11:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-09-29T11:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-09-29T11:00:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets Xyz 29 at 11am (UTC)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets Mar 28 at 3:30am (Europe/Bucharest)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-03-28T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2027-03-28T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2027-03-28T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2027-03-28T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-28T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-28T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-03-28T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-03-28T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-03-28T00:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2027-03-28T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2027-03-28T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2027-03-28T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2027-03-28T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets Oct 25 at 3:30am (Europe/Bucharest)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-10-25T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-10-25T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-10-25T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2027-10-25T00:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-10-25T00:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-10-25T00:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-10-25T00:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-10-25T00:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-10-25T00:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-10-25T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-10-25T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-10-25T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-10-25T01:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets Mar 14 at 2:30am (America/New_York)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2027-03-14T06:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2027-03-14T06:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2027-03-14T06:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2027-03-14T06:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-03-14T06:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2028-03-14T06:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-03-14T06:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-03-14T06:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-03-14T06:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2027-03-14T06:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2027-03-14T06:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2027-03-14T06:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2027-03-14T06:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets Nov 1 at 1:30am (America/New_York)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-11-01T05:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2026-11-01T05:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2026-11-01T05:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2026-11-01T05:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-11-01T05:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-11-01T05:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-11-01T05:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-11-01T05:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-11-01T05:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-11-01T05:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-11-01T05:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-11-01T05:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-11-01T05:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "resets Oct 4 at 2:30am (Australia/Lord_Howe)",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": "2026-10-03T15:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": "2027-10-03T15:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": "2027-10-03T15:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": "2027-10-03T15:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": "2027-10-03T15:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": "2027-10-03T15:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": "2027-10-03T15:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": "2027-10-03T15:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": "2028-10-03T15:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": "2026-10-03T15:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": "2026-10-03T15:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": "2026-10-03T15:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": "2026-10-03T15:30:00.000Z"
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "You've hit your limit.",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      },
+      {
+        "text": "",
+        "at": [
+          {
+            "state": "exhausted",
+            "at": "2026-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-24T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-10-25T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-11-01T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-13T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-03-27T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-12-31T23:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2027-01-31T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2028-02-28T12:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T17:30:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T09:01:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-30T08:59:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": "2026-09-19T10:00:00.000Z",
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "state": "exhausted",
+            "at": null,
+            "resetsAt": null
+          },
+          {
+            "throws": true
+          }
+        ]
+      }
+    ],
+    "codex": [
+      {
+        "limits": {
+          "undefined": true
+        },
+        "quota": {
+          "state": "ok",
+          "usedPercent": null,
+          "resetsAt": null
+        }
+      },
+      {
+        "limits": {
+          "undefined": true
+        },
+        "quota": {
+          "state": "ok",
+          "usedPercent": null,
+          "resetsAt": null
+        }
+      },
+      {
+        "limits": {},
+        "quota": {
+          "state": "ok",
+          "usedPercent": null,
+          "resetsAt": null
+        }
+      },
+      {
+        "limits": {
+          "primary": {
+            "used_percent": 12.5,
+            "resets_at": 1789900000
+          }
+        },
+        "quota": {
+          "state": "ok",
+          "usedPercent": 12.5,
+          "resetsAt": "2026-09-20T10:26:40.000Z"
+        }
+      },
+      {
+        "limits": {
+          "secondary": {
+            "used_percent": 95,
+            "resets_at": 1790423393
+          }
+        },
+        "quota": {
+          "state": "low",
+          "usedPercent": 95,
+          "resetsAt": "2026-09-26T11:49:53.000Z"
+        }
+      },
+      {
+        "limits": {
+          "primary": {
+            "used_percent": 94.99,
+            "resets_at": 1789900000
+          },
+          "secondary": {
+            "used_percent": 94.99,
+            "resets_at": 1790423393
+          }
+        },
+        "quota": {
+          "state": "ok",
+          "usedPercent": 94.99,
+          "resetsAt": "2026-09-20T10:26:40.000Z"
+        }
+      },
+      {
+        "limits": {
+          "primary": {
+            "used_percent": 97,
+            "resets_at": 1790423393.5
+          },
+          "secondary": {
+            "used_percent": 12
+          }
+        },
+        "quota": {
+          "state": "low",
+          "usedPercent": 97,
+          "resetsAt": "2026-09-26T11:49:53.500Z"
+        }
+      },
+      {
+        "limits": {
+          "primary": {
+            "used_percent": "97"
+          },
+          "secondary": {
+            "used_percent": 3,
+            "resets_at": "1790423393"
+          }
+        },
+        "quota": {
+          "state": "ok",
+          "usedPercent": 3,
+          "resetsAt": null
+        }
+      },
+      {
+        "limits": {
+          "primary": {
+            "used_percent": 100
+          },
+          "rate_limit_reached_type": "primary"
+        },
+        "quota": {
+          "state": "exhausted",
+          "usedPercent": 100,
+          "resetsAt": null
+        }
+      },
+      {
+        "limits": {
+          "rate_limit_reached_type": null
+        },
+        "quota": {
+          "state": "ok",
+          "usedPercent": null,
+          "resetsAt": null
+        }
+      },
+      {
+        "limits": {
+          "rate_limit_reached_type": 0
+        },
+        "quota": {
+          "state": "exhausted",
+          "usedPercent": null,
+          "resetsAt": null
+        }
+      },
+      {
+        "limits": {
+          "primary": {
+            "used_percent": 2
+          },
+          "secondary": {
+            "used_percent": -1
+          }
+        },
+        "quota": {
+          "state": "ok",
+          "usedPercent": 2,
+          "resetsAt": null
+        }
+      },
+      {
+        "limits": {
+          "primary": {
+            "used_percent": 1e+21
+          }
+        },
+        "quota": {
+          "state": "low",
+          "usedPercent": 1e+21,
+          "resetsAt": null
+        }
+      }
+    ],
+    "opencode": [
+      {
+        "status": {
+          "undefined": true
+        },
+        "nowMs": 0,
+        "quota": null
+      },
+      {
+        "status": {
+          "undefined": true
+        },
+        "nowMs": 1000,
+        "quota": null
+      },
+      {
+        "status": {
+          "undefined": true
+        },
+        "nowMs": 0,
+        "quota": null
+      },
+      {
+        "status": {
+          "undefined": true
+        },
+        "nowMs": 1000,
+        "quota": null
+      },
+      {
+        "status": {
+          "type": "idle"
+        },
+        "nowMs": 0,
+        "quota": null
+      },
+      {
+        "status": {
+          "type": "idle"
+        },
+        "nowMs": 1000,
+        "quota": null
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "Too Many Requests",
+          "next": 0
+        },
+        "nowMs": 0,
+        "quota": null
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "Too Many Requests",
+          "next": 0
+        },
+        "nowMs": 1000,
+        "quota": null
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "Too many requests",
+          "next": 59999
+        },
+        "nowMs": 0,
+        "quota": null
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "Too many requests",
+          "next": 59999
+        },
+        "nowMs": 1000,
+        "quota": null
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "Too many requests",
+          "next": 60000
+        },
+        "nowMs": 0,
+        "quota": {
+          "state": "exhausted",
+          "at": null,
+          "resetsAt": "1970-01-01T00:01:00.000Z"
+        }
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "Too many requests",
+          "next": 60000
+        },
+        "nowMs": 1000,
+        "quota": null
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "Overloaded",
+          "next": 3600000
+        },
+        "nowMs": 0,
+        "quota": null
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "Overloaded",
+          "next": 3600000
+        },
+        "nowMs": 1000,
+        "quota": null
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "Usage limit reached",
+          "next": 3600000
+        },
+        "nowMs": 0,
+        "quota": {
+          "state": "exhausted",
+          "at": null,
+          "resetsAt": "1970-01-01T01:00:00.000Z"
+        }
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "Usage limit reached",
+          "next": 3600000
+        },
+        "nowMs": 1000,
+        "quota": {
+          "state": "exhausted",
+          "at": null,
+          "resetsAt": "1970-01-01T01:00:00.000Z"
+        }
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "x",
+          "action": {
+            "reason": "free_tier_limit"
+          },
+          "next": 1000
+        },
+        "nowMs": 0,
+        "quota": {
+          "state": "exhausted",
+          "at": null,
+          "resetsAt": null
+        }
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "x",
+          "action": {
+            "reason": "free_tier_limit"
+          },
+          "next": 1000
+        },
+        "nowMs": 1000,
+        "quota": {
+          "state": "exhausted",
+          "at": null,
+          "resetsAt": null
+        }
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "x",
+          "action": {
+            "reason": "QUOTA spent"
+          }
+        },
+        "nowMs": 0,
+        "quota": {
+          "state": "exhausted",
+          "at": null,
+          "resetsAt": null
+        }
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "x",
+          "action": {
+            "reason": "QUOTA spent"
+          }
+        },
+        "nowMs": 1000,
+        "quota": {
+          "state": "exhausted",
+          "at": null,
+          "resetsAt": null
+        }
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "rate limit hit",
+          "next": "soon"
+        },
+        "nowMs": 0,
+        "quota": {
+          "state": "exhausted",
+          "at": null,
+          "resetsAt": null
+        }
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "rate limit hit",
+          "next": "soon"
+        },
+        "nowMs": 1000,
+        "quota": {
+          "state": "exhausted",
+          "at": null,
+          "resetsAt": null
+        }
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "rate limit hit",
+          "next": "7200000"
+        },
+        "nowMs": 0,
+        "quota": {
+          "state": "exhausted",
+          "at": null,
+          "resetsAt": "1970-01-01T02:00:00.000Z"
+        }
+      },
+      {
+        "status": {
+          "type": "retry",
+          "message": "rate limit hit",
+          "next": "7200000"
+        },
+        "nowMs": 1000,
+        "quota": {
+          "state": "exhausted",
+          "at": null,
+          "resetsAt": "1970-01-01T02:00:00.000Z"
+        }
+      }
+    ],
+    "refused": [
+      {
+        "text": "429: {\"type\":\"GoUsageLimitError\"}",
+        "refused": true
+      },
+      {
+        "text": "OpenAI API error (429): {\"type\":\"GoUsageLimitError\"}",
+        "refused": true
+      },
+      {
+        "text": "402 This request requires more credits.",
+        "refused": true
+      },
+      {
+        "text": "500: provider down",
+        "refused": false
+      },
+      {
+        "text": "4290: no",
+        "refused": false
+      },
+      {
+        "text": "x429: no",
+        "refused": false
+      },
+      {
+        "text": "(429)",
+        "refused": true
+      },
+      {
+        "text": "abc(402): x",
+        "refused": true
+      },
+      {
+        "text": "abc\n(429): x",
+        "refused": false
+      },
+      {
+        "text": "error 429: x",
+        "refused": false
+      },
+      {
+        "text": " 429: x",
+        "refused": false
+      },
+      {
+        "text": "",
+        "refused": false
+      },
+      {
+        "text": {
+          "undefined": true
+        },
+        "refused": false
+      },
+      {
+        "text": {
+          "undefined": true
+        },
+        "refused": false
+      },
+      {
+        "text": 429,
+        "refused": true
+      }
+    ],
+    "statuses": [
+      {
+        "status": 429,
+        "quota": true
+      },
+      {
+        "status": 402,
+        "quota": true
+      },
+      {
+        "status": 401,
+        "quota": false
+      },
+      {
+        "status": 500,
+        "quota": false
+      },
+      {
+        "status": "429",
+        "quota": true
+      },
+      {
+        "status": " 429 ",
+        "quota": true
+      },
+      {
+        "status": "402.0",
+        "quota": true
+      },
+      {
+        "status": "0x1AD",
+        "quota": true
+      },
+      {
+        "status": "4.29e2",
+        "quota": true
+      },
+      {
+        "status": {
+          "undefined": true
+        },
+        "quota": false
+      },
+      {
+        "status": {
+          "undefined": true
+        },
+        "quota": false
+      },
+      {
+        "status": "",
+        "quota": false
+      },
+      {
+        "status": true,
+        "quota": false
+      },
+      {
+        "status": [
+          429
+        ],
+        "quota": true
+      }
+    ],
+    "devin": [
+      {
+        "text": "Rate limit exceeded",
+        "refusal": true
+      },
+      {
+        "text": "You have hit your usage limit.",
+        "refusal": true
+      },
+      {
+        "text": "Your daily usage quota has been exhausted.",
+        "refusal": true
+      },
+      {
+        "text": "quota has been exhausted",
+        "refusal": true
+      },
+      {
+        "text": "QUOTA EXHAUSTED",
+        "refusal": true
+      },
+      {
+        "text": "quota nearly exhausted",
+        "refusal": false
+      },
+      {
+        "text": "limit",
+        "refusal": false
+      },
+      {
+        "text": "",
+        "refusal": false
+      }
+    ]
+  },
+  "collation": {
+    "characters": " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~",
+    "matrix": [
+      "=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">=<<<<<<<<<<>><<<<<<<<<<<<>><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>=<<<<><<<<>>><<<<<<<<<<<>><<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>=<<>>>>><>>>><<<<<<<<<<>><<<>><<<<<<<<<<<<<<<<<<<<<<<<<<>>><><<<<<<<<<<<<<<<<<<<<<<<<<<<><><",
+      ">>>>=>>>>>>>>>>><<<<<<<<<<>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>><=>>>>><>>>><<<<<<<<<<>><<<>><<<<<<<<<<<<<<<<<<<<<<<<<<>>><><<<<<<<<<<<<<<<<<<<<<<<<<<<><><",
+      ">>><<<=>>>><>>>><<<<<<<<<<>><<<>><<<<<<<<<<<<<<<<<<<<<<<<<<>>><><<<<<<<<<<<<<<<<<<<<<<<<<<<><><",
+      ">><<<<<=<<<<>>><<<<<<<<<<<>><<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>><<<<>=<<<>>><<<<<<<<<<<>><<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>><<<<>>=<<>>><<<<<<<<<<<>><<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>><<<<>>>=<>>><<<<<<<<<<<>><<<>><<<<<<<<<<<<<<<<<<<<<<<<<<><><><<<<<<<<<<<<<<<<<<<<<<<<<<<><><",
+      ">>>><>>>>>>=>>>><<<<<<<<<<>><<<>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<><><",
+      "><<<<<<<<<<<=><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      "><<<<<<<<<<<<=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">><<<<<<<<<<>>=<<<<<<<<<<<>><<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>><<<<>>>><>>>=<<<<<<<<<<>><<<>><<<<<<<<<<<<<<<<<<<<<<<<<<><><><<<<<<<<<<<<<<<<<<<<<<<<<<<><><",
+      ">>>>>>>>>>>>>>>>=<<<<<<<<<>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>=<<<<<<<<>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>=<<<<<<<>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>=<<<<<<>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>=<<<<<>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>=<<<<>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>=<<<>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>=<<>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>=<>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>=>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      "><<<<<<<<<<<>><<<<<<<<<<<<=><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      "><<<<<<<<<<<>><<<<<<<<<<<<<=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>><>>>>>>>>>>><<<<<<<<<<>>=<<>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<><><",
+      ">>>><>>>>>>>>>>><<<<<<<<<<>>>=<>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<><><",
+      ">>>><>>>>>>>>>>><<<<<<<<<<>>>>=>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<><><",
+      ">><<<<<<<<<<>><<<<<<<<<<<<>><<<=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>><<<<>>><<>>><<<<<<<<<<<>><<<>=<<<<<<<<<<<<<<<<<<<<<<<<<<><><><<<<<<<<<<<<<<<<<<<<<<<<<<<><><",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>><<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>",
+      ">>><<<<>>><<>>><<<<<<<<<<<>><<<><<<<<<<<<<<<<<<<<<<<<<<<<<<=<<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>><<<<>>>><>>>><<<<<<<<<<>><<<>><<<<<<<<<<<<<<<<<<<<<<<<<<>=><><<<<<<<<<<<<<<<<<<<<<<<<<<<><><",
+      ">>><<<<>>><<>>><<<<<<<<<<<>><<<><<<<<<<<<<<<<<<<<<<<<<<<<<<><=<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>><>>>>>><>>>><<<<<<<<<<>><<<>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>=>><<<<<<<<<<<<<<<<<<<<<<<<<<><><",
+      "><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>><>>>>>><>>>><<<<<<<<<<>><<<>><<<<<<<<<<<<<<<<<<<<<<<<<<>>><>=<<<<<<<<<<<<<<<<<<<<<<<<<<><><",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<>>>>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=>>>>",
+      ">>><<<<>>><<>>><<<<<<<<<<<>><<<><<<<<<<<<<<<<<<<<<<<<<<<<<<><><><<<<<<<<<<<<<<<<<<<<<<<<<<<=<<<",
+      ">>>><>>>>>>>>>>><<<<<<<<<<>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>=><",
+      ">>><<<<>>><<>>><<<<<<<<<<<>><<<><<<<<<<<<<<<<<<<<<<<<<<<<<<><><><<<<<<<<<<<<<<<<<<<<<<<<<<<><=<",
+      ">>>><>>>>>>>>>>><<<<<<<<<<>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<>>>="
+    ],
+    "words": [
+      "",
+      " ",
+      "06ed7c7a-1aa8-409e-91ac-fcc76124b1d7",
+      "133bbb8e-60c9-40f2-b4e5-6cd626216111",
+      "159597f6-0e3a-4af8-8188-be64de277326",
+      "1af3efcd-2593-4811-82b7-f311b5d5b276",
+      "21d31b27-c132-458d-82ff-f027b56d8c27",
+      "2a9aae88-1292-4bad-961d-b7d923445c30",
+      "2cdcfb94-2b4d-41be-98ca-c40ba1075766",
+      "2dd20600-b5b4-4b36-a2ad-8f4246ed067c",
+      "301f24c0-1644-4525-9c21-b79c5957a67c",
+      "3036a2be-eaf5-4794-9cf2-7db95944a07d",
+      "30472e63-49ac-4e8d-91a9-a0e44141ec9e",
+      "3063f9dc-2cb3-4617-9452-df1a199239c4",
+      "3606534e-4f7b-49a5-925a-495c139f7b3a",
+      "3b6b64c2-ce1f-425b-be14-1a4435037155",
+      "78171615-56ec-4b9b-b20c-a198069f5ed1",
+      "79be9ac1-bf6f-45a7-ba7e-1b7c9b37623a",
+      "7c750193-85a8-4f16-ab03-9dfed588eda5",
+      "8711efff-6968-4f07-a253-9c4fe48d9713",
+      "93d95855-74d0-459f-9a4b-58f669d85fb5",
+      "A",
+      "AB",
+      "Ab",
+      "a",
+      "a b",
+      "a-",
+      "a-b",
+      "a1",
+      "a89a53f0-8ba3-4b3a-b450-469793181cd2",
+      "aB",
+      "a_",
+      "a_b",
+      "ab",
+      "ab ",
+      "ab-",
+      "b491ee4b-a932-4be0-b84b-fb358e8f66e5",
+      "bbd8415e-6351-49ca-bcca-dbdbe66ef1bc",
+      "be3edac3-3deb-4ca0-8512-90edba6d31b6",
+      "c0487df2-19c2-4aaa-8c23-de4368336c98",
+      "c16c389e-d2ce-45e0-b52d-ea58e734e2b0",
+      "ccc46182-49ec-493d-9c39-c4cd4dd0e766",
+      "d2c9f2b1-6dc6-4103-88a8-afaa516b061b",
+      "d3222458-e7ae-4156-8e1a-2b61410627b8",
+      "d705df30-08c7-457e-ae53-aa8943c3c828",
+      "dbe6215f-2a54-4d2d-85d6-214883889999",
+      "ed85ed67-8302-4c8b-ba42-572aef4dd6b6",
+      "f17b894c-c792-4d95-a5f3-e6d6a73b0bfe",
+      "facde33c-29cc-457d-a7cf-cfbd8abd854a",
+      "fc57939e-8d0e-4b84-9026-a5ce927b829f",
+      "msg-1",
+      "msg1",
+      "msg_011CeMhojBgvhpsANRYPv7wM",
+      "msg_011CeMib8DXcSqLRwtK8cgv6",
+      "msg_011CeN4TSS1YDxWFLbmQK18Z",
+      "msg_011CeTZ4moLoyUafGxCpFzhW",
+      "msg_011CepVzTaLVYh2bCvw5RpQe",
+      "msg_011CepWUqv3VgZSDKwGzUWKH",
+      "msg_011CepWmcaLizC64ktpPeEg1",
+      "msg_011CepWsDm4DzKV4t8Fbdzno",
+      "msg_0781dd0a1001NxYXxddKs7UGGM",
+      "msg_07834cf2a001ZxKIEEils8Twxd",
+      "msg_07834e4450017pCEw2eVdPoUxQ",
+      "msg_084accb0a001OXZ22uJXyjJknX",
+      "msg_084accb1c0018HlzgGI27r6K7z",
+      "msg_084aceef2001NjOuHkUBMbyY11",
+      "msg_1",
+      "msg_A",
+      "msg_a",
+      "prt_0",
+      "prt_0781dd0a2001eqaXpgYyr6ji2y",
+      "prt_07834dc8d001z87P7xjz2EX5lp",
+      "prt_07834dc8f001J4vUNaC9k7U0lp",
+      "prt_07834de0e001LFavSKJTkpG9xh",
+      "prt_07834e408001gbigBkx3fOpem5",
+      "prt_07834fd66001by6dnMLDwyzr5Y",
+      "prt_07834fd70001aAGLSN74ke5QX3",
+      "prt_0783525960018ZNyS85g4IlFXh",
+      "prt_084accb12001s5e6WwSpJgvFBC",
+      "prt_084acd44a001lXXd6lb14K2vaL",
+      "prt_084acd44c001I9jQjPjq6J7J16",
+      "prt_084acecff001CslMg1LzQWVYVY",
+      "prt_084aced0d001cEXf6SNFfqWFXY",
+      "prt_084aceeb0001UvVCOIWFPnM5U2",
+      "prt_084acf6ea001R1nb2j8d6g46DM",
+      "prt_084acf6ec001av28a4BRbnREY0",
+      "prt_084acf6ed001cD90E0XFz9iXFJ",
+      "prt_084acf787001HM32d83H8atbGj",
+      "prt_Z",
+      "prt_z"
+    ],
+    "pairs": [
+      "=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>=<<><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>=>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>><=>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>><<<=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>><<>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>><<>>=<<<<>><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>><<>>>=<<<>><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>><<>>>>=<<>><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>><<>>>>>=<>><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>><<>>>>>>=>>><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>><<>><<<<<=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>><<>><<<<<>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>><<>>>>>><>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>>=>>>><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>><=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>><>=>><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>><><=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>><><>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>>>>>>>>>>>>>>=><<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<>>>>>>>>>>>>>>><=<<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=<<",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>=>",
+      ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><="
+    ]
+  }
+}
