@@ -252,15 +252,17 @@ mod tests {
     }
 
     #[test]
-    fn the_first_group_holding_a_name_wins() {
+    fn the_first_group_holding_a_name_wins_not_the_first_preset() {
+        // Pi's group comes first, by its first preset; the first preset named
+        // `twin` is Codex's, which a lookup over the presets would answer.
         let catalog = catalog_of(vec![
-            preset("twin", "pi", "pi-model"),
-            preset("twin", "codex", "codex-model"),
-            preset("twin", "pi", "later-pi-model"),
+            preset("seed", "pi", "m0"),
+            preset("twin", "codex", "m1"),
+            preset("twin", "pi", "m2"),
         ]);
         let found = catalog.entry("twin").unwrap();
         assert_eq!(found.harness, Harness::Pi);
-        assert_eq!(found.entry.model, "pi-model");
+        assert_eq!(found.entry.model, "m2");
     }
 
     #[test]

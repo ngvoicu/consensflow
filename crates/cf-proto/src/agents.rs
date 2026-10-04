@@ -62,6 +62,14 @@ impl WorkTier {
     }
 }
 
+/// How a tier reads on the page and in the chief's text (`WORK_TIERS[tier]`,
+/// `hosts/lib/presets.js`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct WorkTierInfo {
+    pub label: &'static str,
+    pub description: &'static str,
+}
+
 /// What a model and the road to it are called, and the work its agent
 /// suits (`agentProfile`, `hosts/lib/presets.js`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

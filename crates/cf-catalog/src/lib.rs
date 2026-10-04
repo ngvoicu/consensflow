@@ -21,9 +21,9 @@ mod profile;
 use std::collections::BTreeMap;
 
 pub use catalog::{efforts, harness_for_kind, Group, HARNESSES};
-pub use cf_proto::agents::{CatalogEntry, FoundEntry, Harness, Profile, WorkTier};
+pub use cf_proto::agents::{CatalogEntry, FoundEntry, Harness, Profile, WorkTier, WorkTierInfo};
 pub use presets::Preset;
-pub use profile::{validate_work_tier, work_tier_info, Settings, WorkTierInfo, WORK_TIERS};
+pub use profile::{validate_work_tier, work_tier_info, Settings, WORK_TIERS};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogError {
