@@ -532,6 +532,15 @@ async function run(index) {
       }
       if (Date.now() - started > timeoutMs) {
         note('time is up')
+        // A harness's record keeps only what it finished: a member's turn
+        // that never ends shows only on its screen.
+        for (const member of current.lanes) {
+          if (member.participant.role === 'chief' || member.activity?.state !== 'working') continue
+          if (!member.pane) continue
+          note(
+            `@${member.participant.handle} still works. Its screen: ${lastLines(app.output(member.pane.id)).slice(-20).join(' ⏎ ')}`,
+          )
+        }
         break
       }
     }
