@@ -4,9 +4,12 @@
 //! nothing is typed into the window. When the answer does not come in time,
 //! the door gives up and the harness's own dialog takes over.
 //!
-//! The Pi and OpenCode extensions keep their own copy,
-//! `hosts/lib/question-door.js`: each harness loads it into its own runtime.
+//! The Codex window's broker (`cf codex-session`) puts its questions through
+//! [`ask_the_board_until`], where a closed window ends the wait. OpenCode's
+//! extension keeps its own copy, `hosts/lib/question-door.js`: the harness
+//! loads it into its own runtime.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use cf_proto::questions::{Answer, Question};
@@ -35,6 +38,22 @@ pub fn ask_the_board(
     questions: &[Question],
     wait: Duration,
 ) -> Result<Option<Answer>, BoardError> {
+    ask_the_board_until(board, questions, wait, &AtomicBool::new(false))
+}
+
+/// [`ask_the_board`] that gives up, with no answer, once `stop` is raised:
+/// checked before each request, so a poll already held at the board ends first
+/// (up to 20 seconds). A window whose question nobody waits for any more
+/// (its broker closed, its connection gone) raises it.
+pub fn ask_the_board_until(
+    board: &Board,
+    questions: &[Question],
+    wait: Duration,
+    stop: &AtomicBool,
+) -> Result<Option<Answer>, BoardError> {
+    if stop.load(Ordering::Relaxed) {
+        return Ok(None);
+    }
     let path = "/api/questions";
     let posted = board.call(Method::Post, path, Some(&json!({ "questions": questions })))?;
     let id = posted
@@ -49,7 +68,7 @@ pub fn ask_the_board(
         let left = until.map_or(POLL_WAIT, |until| {
             until.saturating_duration_since(Instant::now())
         });
-        if left.is_zero() {
+        if left.is_zero() || stop.load(Ordering::Relaxed) {
             return Ok(None);
         }
         let path = format!(
@@ -154,6 +173,42 @@ mod tests {
             .parse()
             .unwrap();
         assert!(wait <= 300, "asked to wait {wait} ms of 300");
+    }
+
+    #[test]
+    fn a_raised_stop_ends_the_wait_once_the_poll_in_hand_returns() {
+        let api = scripted(vec![
+            reply(201, json!({ "message": { "id": 4 } })),
+            reply(200, json!({ "answer": null })).held(Duration::from_millis(300)),
+            // Never asked for: the stop was up by then.
+            reply(
+                200,
+                json!({ "answer": { "id": 5, "choices": [["SQLite"]] } }),
+            ),
+        ]);
+        let board = Board::new(Some(&api.url), "tok");
+        let stop = AtomicBool::new(false);
+        let asked = std::thread::scope(|scope| {
+            let asking =
+                scope.spawn(|| ask_the_board_until(&board, &one_question(), DOOR_WAIT, &stop));
+            // Up while the first poll is held at the board.
+            while api.received().len() < 2 {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            stop.store(true, Ordering::Relaxed);
+            asking.join().unwrap()
+        });
+        assert_eq!(asked.unwrap(), None);
+        assert_eq!(api.received().len(), 2, "no poll after the stop");
+    }
+
+    #[test]
+    fn a_stop_up_before_the_question_is_asked_posts_nothing() {
+        let api = scripted(vec![reply(201, json!({ "message": { "id": 4 } }))]);
+        let board = Board::new(Some(&api.url), "tok");
+        let asked = ask_the_board_until(&board, &one_question(), DOOR_WAIT, &AtomicBool::new(true));
+        assert_eq!(asked.unwrap(), None);
+        assert!(api.received().is_empty());
     }
 
     #[test]

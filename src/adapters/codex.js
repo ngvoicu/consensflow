@@ -18,14 +18,14 @@ import {
 } from './shared.js'
 
 /**
- * Codex, for the daemon. Codex runs under ConsensFlow's supervisor
- * (`hosts/codex-session.mjs`): an app-server, a broker that knows the thread
- * the TUI shows and queues messages on it, and the TUI attached to both. The
- * first message is Codex's last argument; the broker names the thread once
- * Codex starts it, and again whenever the human starts or resumes another
- * one in the window (/new, /resume), so the window is followed to it. A
- * Codex too old for the native queue is refused: nothing could reach its
- * window.
+ * Codex, for the daemon. Codex runs under ConsensFlow's supervisor, the
+ * bundle's native `cf codex-session`: an app-server, a broker that knows the
+ * thread the TUI shows and queues messages on it, and the TUI attached to
+ * both. The first message is Codex's last argument; the broker names the
+ * thread once Codex starts it, and again whenever the human starts or resumes
+ * another one in the window (/new, /resume), so the window is followed to
+ * it. A Codex too old for the native queue is refused: nothing could reach
+ * its window.
  */
 const QUESTION_TOOL = [
   '--enable',
@@ -141,7 +141,6 @@ export function codexAdapter({
           args: [...roleSetup.args, ...questions, ...WINDOW, ...isolation, ...runner.args],
         },
         configuration,
-        env.CONSENSFLOW_NODE ?? process.execPath,
       )
       return {
         argv: [invocation.command, ...invocation.args],

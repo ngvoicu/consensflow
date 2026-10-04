@@ -78,3 +78,61 @@ fn a_runtime_that_does_not_start_is_said_and_fails() {
         "{said}"
     );
 }
+
+const BRIDGE: &str =
+    r#"{"launchId":"launch-1","port":0,"token":"private-launch-token-1234567890"}"#;
+
+#[test]
+fn a_codex_window_is_matched_on_the_first_argument_before_a_window_token_is_looked_for() {
+    // With a window's token anything else would be a board command.
+    let ran = cf(
+        &["codex-session", "/nonexistent/codex"],
+        &[
+            ("CONSENSFLOW_TOKEN", "window-token"),
+            ("CONSENSFLOW_URL", "http://127.0.0.1:9"),
+        ],
+        "",
+    );
+    assert_eq!(ran.status.code(), Some(1));
+    assert!(ran.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8_lossy(&ran.stderr),
+        "ConsensFlow could not open Codex: Invalid Codex broker configuration\n"
+    );
+}
+
+#[test]
+fn a_json_flag_before_it_makes_it_no_codex_window() {
+    let ran = cf(&["--json", "codex-session", "/nonexistent/codex"], &[], "");
+    let said = String::from_utf8_lossy(&ran.stderr);
+    assert!(
+        said.starts_with("cf: CONSENSFLOW_NODE is not set:"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_codex_window_says_when_codex_cannot_start_and_leaves_no_socket_behind() {
+    let home = tempfile::tempdir().unwrap();
+    let ran = cf(
+        &["codex-session", "/nonexistent/consensflow-codex", "resume"],
+        &[
+            ("CONSENSFLOW_HOME", home.path().to_str().unwrap()),
+            ("CF_CODEX_SESSION_BRIDGE", BRIDGE),
+        ],
+        "",
+    );
+    assert_eq!(ran.status.code(), Some(1));
+    assert!(ran.stdout.is_empty());
+    let said = String::from_utf8_lossy(&ran.stderr);
+    assert!(
+        said.starts_with(
+            "ConsensFlow could not open Codex: Codex server could not start: \
+             /nonexistent/consensflow-codex: "
+        ) && said.ends_with(")\n"),
+        "{said}"
+    );
+    // The window's socket folder went with it.
+    let left = fs::read_dir(home.path().join("tmp")).map_or(0, |entries| entries.count());
+    assert_eq!(left, 0);
+}

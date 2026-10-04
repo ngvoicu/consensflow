@@ -3,6 +3,7 @@ import { createServer } from 'node:net'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DEFAULT_DEADLINE_MS } from './channels/opencode.js'
+import { BUNDLE_CF } from './core/pane-cf.js'
 import { probeExecutable } from './harnesses.js'
 import { configRoot } from './roster.js'
 
@@ -158,15 +159,15 @@ export async function launchConfiguration(kind, input) {
   throw new Error(`no launch configuration for harness: ${kind}`)
 }
 
-/** Native argument construction stays in the window builders; Codex opens under its supervisor. */
-export function withNativeBridge(invocation, configuration, node) {
+/**
+ * Native argument construction stays in the window builders; Codex opens
+ * under its supervisor, the bundle's native `cf codex-session`, given the
+ * Codex executable and then Codex's own arguments.
+ */
+export function withNativeBridge(invocation, configuration) {
   return {
     ...invocation,
-    command: node,
-    args: [
-      fileURLToPath(new URL('../hosts/codex-session.mjs', import.meta.url)),
-      configuration.channel.executable,
-      ...invocation.args,
-    ],
+    command: BUNDLE_CF,
+    args: ['codex-session', configuration.channel.executable, ...invocation.args],
   }
 }

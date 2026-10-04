@@ -49,6 +49,14 @@ impl Env {
             .and_then(OsStr::to_str)
             .filter(|value| !value.is_empty())
     }
+
+    /// Every variable, by name in order: what `Object.keys(process.env)` listed.
+    /// Windows names are in upper case, as `os` and `text` look them up.
+    pub fn iter(&self) -> impl Iterator<Item = (&OsStr, &OsStr)> {
+        self.vars
+            .iter()
+            .map(|(name, value)| (name.as_os_str(), value.as_os_str()))
+    }
 }
 
 /// A variable's name as the system compares names: on Windows, in any case.
@@ -74,6 +82,24 @@ mod tests {
         assert_eq!(env.os("CONSENSFLOW_TOKEN"), Some(OsStr::new("")));
         assert_eq!(env.text("CONSENSFLOW_URL"), Some("http://127.0.0.1:1"));
         assert_eq!(env.text("CONSENSFLOW_NODE"), None);
+    }
+
+    #[test]
+    fn lists_every_variable_in_order_with_its_value() {
+        let env = Env::from_vars([
+            ("CONSENSFLOW_URL", "u"),
+            ("A", "1"),
+            ("CONSENSFLOW_HOME", ""),
+        ]);
+        let listed: Vec<_> = env.iter().collect();
+        assert_eq!(
+            listed,
+            [
+                (OsStr::new("A"), OsStr::new("1")),
+                (OsStr::new("CONSENSFLOW_HOME"), OsStr::new("")),
+                (OsStr::new("CONSENSFLOW_URL"), OsStr::new("u")),
+            ]
+        );
     }
 
     #[test]

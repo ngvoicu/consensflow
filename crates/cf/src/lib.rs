@@ -4,6 +4,7 @@
 //! standalone commands, which its Node sources beside this binary still
 //! answer. `cf hook <harness>` is what a harness's hooks run, in a window or
 //! not; it says only what its harness reads, and never fails.
+//! `cf codex-session <codex> <args…>` is what a Codex window runs in Codex's place.
 
 mod board;
 mod hook;
@@ -14,6 +15,17 @@ use std::io::{self, Read, Write};
 
 use cf_base::env::Env;
 use cf_board::Board;
+
+/// Runs `cf codex-session <codex> <args…>` when `args` ask for it: its exit
+/// code. Matched on the first argument as it came, before a hook, a token or
+/// a `--json` is looked for, and its arguments are passed on as the system
+/// gave them. It holds the terminal for as long as the window lives and may
+/// report from any thread, so the caller runs it before taking the standard
+/// streams, never with them held.
+pub fn codex_session(env: &Env, args: &[OsString]) -> Option<i32> {
+    let (first, rest) = args.split_first()?;
+    (first == "codex-session").then(|| cf_codex_session::run(env, rest))
+}
 
 /// Runs the command in `args`: its exit code. Only a failure to write is an error.
 pub fn run(

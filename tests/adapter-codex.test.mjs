@@ -4,26 +4,24 @@ import { createServer } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
 import { codexAdapter } from '../src/adapters/codex.js'
+import { BUNDLE_CF } from '../src/core/pane-cf.js'
 import { fakeNodeExecutable } from './helpers.mjs'
 
 /**
  * The Codex adapter (TEST-BDC-05, IMPL-BDC-07): Codex runs under ConsensFlow's
- * supervisor (its app-server, a broker that knows the thread and its queue,
- * and the TUI attached to both), in full-permission mode, with the first
- * message as its last argument. The broker names the thread and queues every
- * later message; a Codex without the native queue is refused.
+ * supervisor, `cf codex-session` (its app-server, a broker that knows the
+ * thread and its queue, and the TUI attached to both), in full-permission
+ * mode, with the first message as its last argument. The broker names the
+ * thread and queues every later message; a Codex without the native queue is
+ * refused.
  */
-const SUPERVISOR = fileURLToPath(new URL('../hosts/codex-session.mjs', import.meta.url))
-
 async function withHome(fn, { queue = true } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cf-codex-adapter-'))
   const env = {
     HOME: path.join(root, 'home'),
     CONSENSFLOW_HOME: path.join(root, 'consensflow'),
     PATH: path.join(root, 'bin'),
-    CONSENSFLOW_NODE: process.execPath,
   }
   await mkdir(env.PATH, { recursive: true })
   // A Codex that answers the four things a launch asks of it: its version,
@@ -92,8 +90,8 @@ describe('the Codex adapter', () => {
       const plan = await codexAdapter({ env }).prepare(request())
       assert.equal(plan.nativeSession, null, 'the broker names the thread')
       assert.deepEqual(withoutRole(plan.argv), [
-        process.execPath,
-        SUPERVISOR,
+        BUNDLE_CF,
+        'codex-session',
         executable,
         '--enable',
         'default_mode_request_user_input',

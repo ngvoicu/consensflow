@@ -6,4 +6,5 @@
 #![forbid(unsafe_code)]
 
 pub mod bridge;
+pub mod codex;
 pub mod questions;

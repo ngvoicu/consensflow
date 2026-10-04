@@ -42,7 +42,8 @@
     "check:all": "npm run check && cargo fmt --all --check && cargo test --offline --workspace && cargo clippy --offline --workspace --all-targets -- -D warnings && npm --prefix app run test:ui && npm run build:bridge -- --offline && npm run build:cf -- --offline && npm run test:integration && npm run smoke"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.8"
+    "@biomejs/biome": "2.5.8",
+    "ws": "8.21.3"
   },
   "repository": {
     "type": "git",
@@ -61,8 +62,5 @@
     "pi",
     "second-opinion"
   ],
-  "author": "Gabriel Voicu (https://ngvoicu.dev)",
-  "dependencies": {
-    "ws": "8.21.3"
-  }
+  "author": "Gabriel Voicu (https://ngvoicu.dev)"
 }

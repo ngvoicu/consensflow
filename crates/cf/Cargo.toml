@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 cf-base.workspace = true
 cf-board.workspace = true
+cf-codex-session.workspace = true
 cf-harness.workspace = true
 cf-process.workspace = true
 form_urlencoded = "1"

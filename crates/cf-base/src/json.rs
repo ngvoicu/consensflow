@@ -11,9 +11,20 @@ use std::borrow::Cow;
 use serde_json::Value;
 
 /// The JSON in `bytes`, invalid UTF-8 and lone surrogate escapes read as U+FFFD.
+/// serde_json reads no further than 128 levels of nesting, where JavaScript's
+/// `JSON.parse` has no such limit: [`is_json_lossy`] tells what is too deep to
+/// read from what is no JSON.
 pub fn from_slice_lossy(bytes: &[u8]) -> serde_json::Result<Value> {
     let text = String::from_utf8_lossy(bytes);
     serde_json::from_str(&without_lone_surrogates(&text))
+}
+
+/// Whether `bytes` are JSON nested to any depth, which [`from_slice_lossy`]
+/// reads to 128 levels only: JSON that is skipped, never built into a value, so
+/// it cannot overflow a stack.
+pub fn is_json_lossy(bytes: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(bytes);
+    serde_json::from_str::<serde::de::IgnoredAny>(&text).is_ok()
 }
 
 /// `value` with each object's keys in the order JavaScript enumerates them:
@@ -146,5 +157,37 @@ mod tests {
     #[test]
     fn what_is_not_json_is_still_refused() {
         assert!(from_slice_lossy(b"{\"a\":").is_err());
+    }
+
+    #[test]
+    fn json_nested_deeper_than_serde_json_reads_is_json_all_the_same() {
+        let nested = |depth: usize| format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+        // What `JSON.parse` reads at any depth is read here to 127 levels (the root is the first).
+        assert!(from_slice_lossy(nested(127).as_bytes()).is_ok());
+        for depth in [128, 200, 100_000] {
+            let deep = nested(depth);
+            assert!(from_slice_lossy(deep.as_bytes()).is_err(), "{depth}");
+            assert!(is_json_lossy(deep.as_bytes()), "{depth}");
+        }
+        assert!(is_json_lossy(b"{\"a\":[1,{\"b\":null}]}"));
+        assert!(
+            is_json_lossy(br#"["\ud83d"]"#),
+            "a lone surrogate escape is read"
+        );
+        assert!(
+            is_json_lossy(b"[\"a\xff\"]"),
+            "so are bytes that are no UTF-8"
+        );
+    }
+
+    #[test]
+    fn what_is_no_json_is_none_however_deep() {
+        for text in [
+            "", "not json", "[1,", "{\"a\":}", "[[[[1]]]", "[] []", "{'a':1}",
+        ] {
+            assert!(!is_json_lossy(text.as_bytes()), "{text:?}");
+        }
+        let broken = format!("{}1{}", "[".repeat(300), "]".repeat(299));
+        assert!(!is_json_lossy(broken.as_bytes()));
     }
 }
