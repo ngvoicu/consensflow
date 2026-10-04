@@ -1,0 +1,23 @@
+[package]
+name = "cf"
+description = "ConsensFlow's command: the board's verbs and the harness hooks inside a window, the rest through the CLI's Node sources."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+cf-base.workspace = true
+cf-board.workspace = true
+cf-harness.workspace = true
+cf-process.workspace = true
+form_urlencoded = "1"
+serde_json.workspace = true
+
+[dev-dependencies]
+cf-board = { workspace = true, features = ["test-support"] }
+serde.workspace = true
+tempfile = "3"
+
+[lints]
+workspace = true

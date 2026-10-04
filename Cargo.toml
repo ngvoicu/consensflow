@@ -19,12 +19,21 @@ rust-version = "1.95"
 cf-proto = { path = "crates/cf-proto" }
 cf-bridge = { path = "crates/cf-bridge" }
 cf-panes = { path = "crates/cf-panes" }
+cf-base = { path = "crates/cf-base" }
+cf-board = { path = "crates/cf-board" }
+cf-harness = { path = "crates/cf-harness" }
+cf-process = { path = "crates/cf-process" }
 futures-channel = "0.3"
 futures-executor = "0.3"
 libc = "0.2"
 portable-pty = "0.9"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# Objects keep their keys in the order written, as JavaScript's do: JSON
+# that Node wrote reads back, and goes out again, as Node had it.
+serde_json = { version = "1.0", features = ["preserve_order"] }
+thiserror = "2"
+# Plain HTTP to the daemon on loopback, synchronous: a `cf` run starts no runtime.
+ureq = { version = "3", default-features = false }
 windows-sys = "0.61"
 
 [workspace.lints.rust]

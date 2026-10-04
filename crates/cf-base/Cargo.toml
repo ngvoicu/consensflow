@@ -1,0 +1,13 @@
+[package]
+name = "cf-base"
+description = "What every ConsensFlow crate shares: text as JavaScript measured it, and JSON as Node wrote it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

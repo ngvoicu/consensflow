@@ -1,0 +1,21 @@
+[package]
+name = "cf-board"
+description = "The daemon's agents' door as a window's cf reaches it, and the question door."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# The scripted API on loopback, for the tests of the crates that call it.
+[features]
+test-support = []
+
+[dependencies]
+cf-base.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ureq.workspace = true
+
+[lints]
+workspace = true

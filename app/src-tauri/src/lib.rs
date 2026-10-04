@@ -1,3 +1,7 @@
+// The app reads its environment and starts its processes where it needs
+// to; it is older than the rules in clippy.toml and not moved onto them yet.
+#![allow(clippy::disallowed_methods)]
+
 use std::io::{BufRead, Write};
 
 use serde_json::{json, Value};

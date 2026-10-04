@@ -1162,6 +1162,7 @@ pub(crate) mod conpty_test {
 
     use super::{PaneEnvironment, PaneKey, PaneOutput, PaneTable};
 
+    #[allow(clippy::disallowed_methods)] // A test's own Windows folder.
     pub fn system(program: &str) -> String {
         let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
         format!(r"{root}\System32\{program}")

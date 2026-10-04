@@ -1,0 +1,19 @@
+[package]
+name = "cf-harness"
+description = "ConsensFlow's integration with each coding-agent harness, one module per harness, and what they share."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+cf-base.workspace = true
+cf-board.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+cf-board = { workspace = true, features = ["test-support"] }
+tempfile = "3"
+
+[lints]
+workspace = true

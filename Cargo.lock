@@ -129,6 +129,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -317,11 +323,53 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
 
 [[package]]
+name = "cf"
+version = "3.0.0-alpha.72"
+dependencies = [
+ "cf-base",
+ "cf-board",
+ "cf-harness",
+ "cf-process",
+ "form_urlencoded",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "cf-base"
+version = "3.0.0-alpha.72"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "cf-board"
+version = "3.0.0-alpha.72"
+dependencies = [
+ "cf-base",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "ureq",
+]
+
+[[package]]
 name = "cf-bridge"
 version = "3.0.0-alpha.72"
 dependencies = [
  "cf-proto",
  "serde_json",
+]
+
+[[package]]
+name = "cf-harness"
+version = "3.0.0-alpha.72"
+dependencies = [
+ "cf-base",
+ "cf-board",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -338,6 +386,10 @@ dependencies = [
  "serde_json",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "cf-process"
+version = "3.0.0-alpha.72"
 
 [[package]]
 name = "cf-proto"
@@ -3092,6 +3144,7 @@ version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
+ "indexmap 2.14.0",
  "itoa",
  "memchr",
  "serde",
@@ -4283,6 +4336,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
+name = "ureq"
+version = "3.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a7ac20be9b7726e0bbdbf974c059676d9acb1cd414961f570a4e8231cacd7fc"
+dependencies = [
+ "base64 0.23.1",
+ "log",
+ "percent-encoding",
+ "ureq-proto",
+ "utf8-zero",
+]
+
+[[package]]
+name = "ureq-proto"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f86fd172ccca569e458f61b6bdd6220965a9ef36e672a6852953b51a0e1583be"
+dependencies = [
+ "base64 0.23.1",
+ "http",
+ "httparse",
+ "log",
+]
+
+[[package]]
 name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4306,6 +4384,12 @@ dependencies = [
  "unic-ucd-ident",
  "url",
 ]
+
+[[package]]
+name = "utf8-zero"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8c0a043c9540bae7c578c88f91dda8bd82e59ae27c21baca69c8b191aaf5a6e"
 
 [[package]]
 name = "utf8_iter"

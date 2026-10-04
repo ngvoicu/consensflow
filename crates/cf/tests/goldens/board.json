@@ -1,0 +1,1709 @@
+[
+  {
+    "name": "usage with no command",
+    "args": [],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "cf inside a ConsensFlow window: the board's commands.\n\n  cf task add --tier <critical|complex|standard|light> \"…\"\n                                    work for a worker of that tier; ConsensFlow picks\n                                    the member (--purpose for critical work)\n  cf task add --advice --tier <tier> \"…\"\n                                    a question for an advisor of that tier: findings and\n                                    recommendations back, no file changed\n  cf task add --review --tier <tier> \"…\"\n                                    a review for a reviewer of that tier: say what to\n                                    review; findings back, no file changed\n  cf task add --design \"…\"          an image from the image designer: what to draw, what\n                                    to use as reference, where to save it\n  cf task add --after T-3 \"…\"       a follow-up for the window that did T-3, which\n                                    keeps its context; only when that context matters\n  cf task add --self --needs T-3 \"…\" your own later step: its brief comes back to you when T-3 is accepted\n  … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted\n  … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task\n  cf task list                      the board: what waits for a member, then every lane\n  cf task get T-3                   one task and its whole thread\n  cf task get T-3 --transcript      what its window did so far (the last 10 items; --last 30 for more)\n  cf task done T-3 \"…\"              finish a task assigned to you (the chief)\n  cf task accept|cancel T-3         move a task you asked for\n  cf task reopen T-3 \"…\"            send a finished or failed task back with a follow-up\n  cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait\n  cf task resume T-3 \"…\"            go on with it: the same window, with your words\n  cf tell T-3 \"…\"                   stop T-3 and put this to its window: its answer arrives as\n                                    a message; then cf task resume T-3 \"…\"\n  cf inbox [read m-12]              what is waiting for you, or one message in full\n  cf ask \"…\"                        a question to the chief (a member's; the chief asks the\n                                    human in its own terminal)\n  cf note \"…\" [--human]             something they should know; nothing waits on it\n  cf answer m-12 \"…\"                answer a question put to you\n  cf staff                           the members: roles and tiers\n  cf whoami                         your project, role and current task\n  cf history [--page 2] [--find \"…\"] [--tools]\n                                    the chief's: what the human and the chiefs before you\n                                    said, newest page first (after the chief was switched)\n\nAny \"…\" can be - to read the text from standard input, as written:\n  cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)\n\nAdd --json for machine output.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "usage on help",
+    "args": [
+      "help"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "cf inside a ConsensFlow window: the board's commands.\n\n  cf task add --tier <critical|complex|standard|light> \"…\"\n                                    work for a worker of that tier; ConsensFlow picks\n                                    the member (--purpose for critical work)\n  cf task add --advice --tier <tier> \"…\"\n                                    a question for an advisor of that tier: findings and\n                                    recommendations back, no file changed\n  cf task add --review --tier <tier> \"…\"\n                                    a review for a reviewer of that tier: say what to\n                                    review; findings back, no file changed\n  cf task add --design \"…\"          an image from the image designer: what to draw, what\n                                    to use as reference, where to save it\n  cf task add --after T-3 \"…\"       a follow-up for the window that did T-3, which\n                                    keeps its context; only when that context matters\n  cf task add --self --needs T-3 \"…\" your own later step: its brief comes back to you when T-3 is accepted\n  … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted\n  … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task\n  cf task list                      the board: what waits for a member, then every lane\n  cf task get T-3                   one task and its whole thread\n  cf task get T-3 --transcript      what its window did so far (the last 10 items; --last 30 for more)\n  cf task done T-3 \"…\"              finish a task assigned to you (the chief)\n  cf task accept|cancel T-3         move a task you asked for\n  cf task reopen T-3 \"…\"            send a finished or failed task back with a follow-up\n  cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait\n  cf task resume T-3 \"…\"            go on with it: the same window, with your words\n  cf tell T-3 \"…\"                   stop T-3 and put this to its window: its answer arrives as\n                                    a message; then cf task resume T-3 \"…\"\n  cf inbox [read m-12]              what is waiting for you, or one message in full\n  cf ask \"…\"                        a question to the chief (a member's; the chief asks the\n                                    human in its own terminal)\n  cf note \"…\" [--human]             something they should know; nothing waits on it\n  cf answer m-12 \"…\"                answer a question put to you\n  cf staff                           the members: roles and tiers\n  cf whoami                         your project, role and current task\n  cf history [--page 2] [--find \"…\"] [--tools]\n                                    the chief's: what the human and the chiefs before you\n                                    said, newest page first (after the chief was switched)\n\nAny \"…\" can be - to read the text from standard input, as written:\n  cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)\n\nAdd --json for machine output.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "usage on --help",
+    "args": [
+      "--help"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "cf inside a ConsensFlow window: the board's commands.\n\n  cf task add --tier <critical|complex|standard|light> \"…\"\n                                    work for a worker of that tier; ConsensFlow picks\n                                    the member (--purpose for critical work)\n  cf task add --advice --tier <tier> \"…\"\n                                    a question for an advisor of that tier: findings and\n                                    recommendations back, no file changed\n  cf task add --review --tier <tier> \"…\"\n                                    a review for a reviewer of that tier: say what to\n                                    review; findings back, no file changed\n  cf task add --design \"…\"          an image from the image designer: what to draw, what\n                                    to use as reference, where to save it\n  cf task add --after T-3 \"…\"       a follow-up for the window that did T-3, which\n                                    keeps its context; only when that context matters\n  cf task add --self --needs T-3 \"…\" your own later step: its brief comes back to you when T-3 is accepted\n  … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted\n  … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task\n  cf task list                      the board: what waits for a member, then every lane\n  cf task get T-3                   one task and its whole thread\n  cf task get T-3 --transcript      what its window did so far (the last 10 items; --last 30 for more)\n  cf task done T-3 \"…\"              finish a task assigned to you (the chief)\n  cf task accept|cancel T-3         move a task you asked for\n  cf task reopen T-3 \"…\"            send a finished or failed task back with a follow-up\n  cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait\n  cf task resume T-3 \"…\"            go on with it: the same window, with your words\n  cf tell T-3 \"…\"                   stop T-3 and put this to its window: its answer arrives as\n                                    a message; then cf task resume T-3 \"…\"\n  cf inbox [read m-12]              what is waiting for you, or one message in full\n  cf ask \"…\"                        a question to the chief (a member's; the chief asks the\n                                    human in its own terminal)\n  cf note \"…\" [--human]             something they should know; nothing waits on it\n  cf answer m-12 \"…\"                answer a question put to you\n  cf staff                           the members: roles and tiers\n  cf whoami                         your project, role and current task\n  cf history [--page 2] [--find \"…\"] [--tools]\n                                    the chief's: what the human and the chiefs before you\n                                    said, newest page first (after the chief was switched)\n\nAny \"…\" can be - to read the text from standard input, as written:\n  cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)\n\nAdd --json for machine output.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "usage on -h, as JSON",
+    "args": [
+      "-h",
+      "--json"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "{\n  \"usage\": \"cf inside a ConsensFlow window: the board's commands.\\n\\n  cf task add --tier <critical|complex|standard|light> \\\"…\\\"\\n                                    work for a worker of that tier; ConsensFlow picks\\n                                    the member (--purpose for critical work)\\n  cf task add --advice --tier <tier> \\\"…\\\"\\n                                    a question for an advisor of that tier: findings and\\n                                    recommendations back, no file changed\\n  cf task add --review --tier <tier> \\\"…\\\"\\n                                    a review for a reviewer of that tier: say what to\\n                                    review; findings back, no file changed\\n  cf task add --design \\\"…\\\"          an image from the image designer: what to draw, what\\n                                    to use as reference, where to save it\\n  cf task add --after T-3 \\\"…\\\"       a follow-up for the window that did T-3, which\\n                                    keeps its context; only when that context matters\\n  cf task add --self --needs T-3 \\\"…\\\" your own later step: its brief comes back to you when T-3 is accepted\\n  … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted\\n  … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task\\n  cf task list                      the board: what waits for a member, then every lane\\n  cf task get T-3                   one task and its whole thread\\n  cf task get T-3 --transcript      what its window did so far (the last 10 items; --last 30 for more)\\n  cf task done T-3 \\\"…\\\"              finish a task assigned to you (the chief)\\n  cf task accept|cancel T-3         move a task you asked for\\n  cf task reopen T-3 \\\"…\\\"            send a finished or failed task back with a follow-up\\n  cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait\\n  cf task resume T-3 \\\"…\\\"            go on with it: the same window, with your words\\n  cf tell T-3 \\\"…\\\"                   stop T-3 and put this to its window: its answer arrives as\\n                                    a message; then cf task resume T-3 \\\"…\\\"\\n  cf inbox [read m-12]              what is waiting for you, or one message in full\\n  cf ask \\\"…\\\"                        a question to the chief (a member's; the chief asks the\\n                                    human in its own terminal)\\n  cf note \\\"…\\\" [--human]             something they should know; nothing waits on it\\n  cf answer m-12 \\\"…\\\"                answer a question put to you\\n  cf staff                           the members: roles and tiers\\n  cf whoami                         your project, role and current task\\n  cf history [--page 2] [--find \\\"…\\\"] [--tools]\\n                                    the chief's: what the human and the chiefs before you\\n                                    said, newest page first (after the chief was switched)\\n\\nAny \\\"…\\\" can be - to read the text from standard input, as written:\\n  cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)\\n\\nAdd --json for machine output.\"\n}\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "task usage",
+    "args": [
+      "task",
+      "--help"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "  cf task add --tier <critical|complex|standard|light> \"…\"\n                                    work for a worker of that tier; ConsensFlow picks\n                                    the member (--purpose for critical work)\n  cf task add --advice --tier <tier> \"…\"\n                                    a question for an advisor of that tier: findings and\n                                    recommendations back, no file changed\n  cf task add --review --tier <tier> \"…\"\n                                    a review for a reviewer of that tier: say what to\n                                    review; findings back, no file changed\n  cf task add --design \"…\"          an image from the image designer: what to draw, what\n                                    to use as reference, where to save it\n  cf task add --after T-3 \"…\"       a follow-up for the window that did T-3, which\n                                    keeps its context; only when that context matters\n  cf task add --self --needs T-3 \"…\" your own later step: its brief comes back to you when T-3 is accepted\n  cf task list                      the board: what waits for a member, then every lane\n  cf task get T-3                   one task and its whole thread\n  cf task get T-3 --transcript      what its window did so far (the last 10 items; --last 30 for more)\n  cf task done T-3 \"…\"              finish a task assigned to you (the chief)\n  cf task accept|cancel T-3         move a task you asked for\n  cf task reopen T-3 \"…\"            send a finished or failed task back with a follow-up\n  cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait\n  cf task resume T-3 \"…\"            go on with it: the same window, with your words\n                                    a message; then cf task resume T-3 \"…\"\n                                    human in its own terminal)\n                                    the chief's: what the human and the chiefs before you\n                                    said, newest page first (after the chief was switched)\n  cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "task usage on help",
+    "args": [
+      "task",
+      "help"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "  cf task add --tier <critical|complex|standard|light> \"…\"\n                                    work for a worker of that tier; ConsensFlow picks\n                                    the member (--purpose for critical work)\n  cf task add --advice --tier <tier> \"…\"\n                                    a question for an advisor of that tier: findings and\n                                    recommendations back, no file changed\n  cf task add --review --tier <tier> \"…\"\n                                    a review for a reviewer of that tier: say what to\n                                    review; findings back, no file changed\n  cf task add --design \"…\"          an image from the image designer: what to draw, what\n                                    to use as reference, where to save it\n  cf task add --after T-3 \"…\"       a follow-up for the window that did T-3, which\n                                    keeps its context; only when that context matters\n  cf task add --self --needs T-3 \"…\" your own later step: its brief comes back to you when T-3 is accepted\n  cf task list                      the board: what waits for a member, then every lane\n  cf task get T-3                   one task and its whole thread\n  cf task get T-3 --transcript      what its window did so far (the last 10 items; --last 30 for more)\n  cf task done T-3 \"…\"              finish a task assigned to you (the chief)\n  cf task accept|cancel T-3         move a task you asked for\n  cf task reopen T-3 \"…\"            send a finished or failed task back with a follow-up\n  cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait\n  cf task resume T-3 \"…\"            go on with it: the same window, with your words\n                                    a message; then cf task resume T-3 \"…\"\n                                    human in its own terminal)\n                                    the chief's: what the human and the chiefs before you\n                                    said, newest page first (after the chief was switched)\n  cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "an unknown command",
+    "args": [
+      "frobnicate"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: unknown command \"frobnicate\": use task, inbox, ask, note, tell, answer, staff, whoami or history\n",
+    "code": 2
+  },
+  {
+    "name": "an unknown task command without a task",
+    "args": [
+      "task",
+      "frobnicate"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: not a task: \"\" (write T-3)\n",
+    "code": 2
+  },
+  {
+    "name": "an unknown task command",
+    "args": [
+      "task",
+      "frobnicate",
+      "T-3"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: unknown task command \"frobnicate\": use add, list, get, done, accept, reopen, cancel, pause or resume\n",
+    "code": 2
+  },
+  {
+    "name": "a task that is no number",
+    "args": [
+      "task",
+      "get",
+      "T-x"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: not a task: \"T-x\" (write T-3)\n",
+    "code": 2
+  },
+  {
+    "name": "a message that is no number",
+    "args": [
+      "inbox",
+      "read",
+      "T-3"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: not a message: \"T-3\" (write m-12)\n",
+    "code": 2
+  },
+  {
+    "name": "a note of nothing",
+    "args": [
+      "note"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: say what: cf note \"what to know\"\n",
+    "code": 2
+  },
+  {
+    "name": "asking the human",
+    "args": [
+      "ask",
+      "--human",
+      "may I?"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: the human is not asked with cf ask: the chief asks them in its own terminal\n",
+    "code": 2
+  },
+  {
+    "name": "asking nothing",
+    "args": [
+      "ask"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: say what: cf ask \"your question\"\n",
+    "code": 2
+  },
+  {
+    "name": "telling a window nothing",
+    "args": [
+      "tell",
+      "T-3"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: say what: cf tell T-<n> \"what to put to its window now\"\n",
+    "code": 2
+  },
+  {
+    "name": "answering no message",
+    "args": [
+      "answer",
+      "bogus",
+      "-"
+    ],
+    "env": {},
+    "stdin": "never read",
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: not a message: \"bogus\" (write m-12)\n",
+    "code": 2
+  },
+  {
+    "name": "adding work with no tier",
+    "args": [
+      "task",
+      "add",
+      "do it"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: cf task add --tier <critical|complex|standard|light> \"what to do\" (with --advice for an advisor or --review for a reviewer; or --design, --after T-3, or --self; --needs T-3,T-4 and --before T-9,T-10 order the board)\n",
+    "code": 2
+  },
+  {
+    "name": "adding own work with nothing to wait for",
+    "args": [
+      "task",
+      "add",
+      "--self",
+      "x"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: you are already at it: do it now, or give it --needs T-3 to be woken when T-3 is accepted\n",
+    "code": 2
+  },
+  {
+    "name": "adding work with no text",
+    "args": [
+      "task",
+      "add",
+      "--tier",
+      "light"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: say what: cf task add --tier <critical|complex|standard|light> \"what to do\" (with --advice for an advisor or --review for a reviewer; or --design, --after T-3, or --self; --needs T-3,T-4 and --before T-9,T-10 order the board)\n",
+    "code": 2
+  },
+  {
+    "name": "a needs list with a blank",
+    "args": [
+      "task",
+      "add",
+      "--self",
+      "--needs",
+      "T-3,",
+      "x"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: not a task: \"\" (write T-3)\n",
+    "code": 2
+  },
+  {
+    "name": "done with no result",
+    "args": [
+      "task",
+      "done",
+      "T-3"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: cf task done T-3 \"your result\"\n",
+    "code": 2
+  },
+  {
+    "name": "resume with blank words",
+    "args": [
+      "task",
+      "resume",
+      "t-3",
+      " "
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: cf task resume T-3 \"what to do now\"\n",
+    "code": 2
+  },
+  {
+    "name": "reopen with no follow-up",
+    "args": [
+      "task",
+      "reopen",
+      "3"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "cf: cf task reopen T-3 \"the follow-up\"\n",
+    "code": 2
+  },
+  {
+    "name": "a transcript of no items is asked for after the task",
+    "args": [
+      "task",
+      "get",
+      "T-3",
+      "--transcript",
+      "--last",
+      "0"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"task\":{\"number\":3,\"state\":\"working\",\"assignee\":\"zeus\",\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"worker\",\"tier\":\"standard\",\"deletedAt\":null,\"messages\":[]}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/tasks/3",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "",
+    "stderr": "cf: --last takes a number of items\n",
+    "code": 2
+  },
+  {
+    "name": "an empty inbox",
+    "args": [
+      "inbox"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"messages\":[]}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/inbox",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "Your inbox is empty.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "an inbox, a preview cut through an emoji among it",
+    "args": [
+      "inbox"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"messages\":[{\"id\":12,\"kind\":\"question\",\"state\":\"queued\",\"sender\":\"zeus\",\"recipient\":\"chief\",\"task\":3,\"preview\":\"Which one?\"},{\"id\":13,\"kind\":\"notice\",\"state\":\"read\",\"sender\":null,\"recipient\":\"chief\",\"task\":null,\"preview\":\"Which one?\",\"taskNumber\":4},{\"id\":14,\"kind\":\"note\",\"state\":\"queued\",\"sender\":\"zeus\",\"recipient\":\"chief\",\"task\":null,\"preview\":\"cut \\ud83d\"}]}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/inbox",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "m-12 [queued] question T-3 from @zeus: Which one?\nm-13 [read] notice T-4 from ConsensFlow: Which one?\nm-14 [queued] note from @zeus: cut �\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a message in full",
+    "args": [
+      "inbox",
+      "read",
+      "m-12"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"message\":{\"id\":12,\"kind\":\"question\",\"state\":\"queued\",\"sender\":\"zeus\",\"recipient\":\"chief\",\"task\":3,\"preview\":\"Which one?\",\"body\":\"Which one?\\nThe second line.\"}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/inbox/12",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "m-12 [queued] question T-3 from @zeus: Which one?\n\nWhich one?\nThe second line.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a note to the human",
+    "args": [
+      "note",
+      "the",
+      "build",
+      "is",
+      "green",
+      "--human"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"message\":{\"id\":20,\"kind\":\"question\",\"state\":\"queued\",\"sender\":\"zeus\",\"recipient\":\"human\",\"task\":3,\"preview\":\"Which one?\"}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/notes",
+        "authorization": "Bearer tok",
+        "body": "{\"body\":\"the build is green\",\"to\":\"human\"}"
+      }
+    ],
+    "stdout": "m-20 noted to @human; nothing waits on it.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a note from standard input, its last newline dropped",
+    "args": [
+      "note",
+      "-"
+    ],
+    "env": {},
+    "stdin": "line one\n  `$(not run)`\r\n\n",
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"message\":{\"id\":21,\"kind\":\"question\",\"state\":\"queued\",\"sender\":\"zeus\",\"recipient\":\"chief\",\"task\":3,\"preview\":\"Which one?\"}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/notes",
+        "authorization": "Bearer tok",
+        "body": "{\"body\":\"line one\\n  `$(not run)`\\r\\n\"}"
+      }
+    ],
+    "stdout": "m-21 noted to @chief; nothing waits on it.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a question to the chief",
+    "args": [
+      "ask",
+      "which",
+      "one?"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"message\":{\"id\":22,\"kind\":\"question\",\"state\":\"queued\",\"sender\":\"zeus\",\"recipient\":\"chief\",\"task\":3,\"preview\":\"Which one?\"}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/questions",
+        "authorization": "Bearer tok",
+        "body": "{\"body\":\"which one?\"}"
+      }
+    ],
+    "stdout": "m-22 asked @chief. The answer arrives as a message; end your turn now.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "telling a window something urgent",
+    "args": [
+      "tell",
+      "T-3",
+      "stop",
+      "that"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"message\":{\"id\":23,\"kind\":\"question\",\"state\":\"queued\",\"sender\":\"zeus\",\"recipient\":\"zeus\",\"task\":3,\"preview\":\"Which one?\"}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/tasks/3/tell",
+        "authorization": "Bearer tok",
+        "body": "{\"body\":\"stop that\"}"
+      }
+    ],
+    "stdout": "T-3 is paused and m-23 put to @zeus; its answer arrives as a message. Then: cf task resume T-3 \"…\"\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "an answer",
+    "args": [
+      "answer",
+      "m-12",
+      "the",
+      "second"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"message\":{\"id\":24,\"kind\":\"question\",\"state\":\"queued\",\"sender\":\"zeus\",\"recipient\":\"zeus\",\"task\":3,\"preview\":\"Which one?\"}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/answers",
+        "authorization": "Bearer tok",
+        "body": "{\"question\":12,\"body\":\"the second\"}"
+      }
+    ],
+    "stdout": "m-24 answered @zeus.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "an answer the human passes on first",
+    "args": [
+      "answer",
+      "12",
+      "yes"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"message\":{\"id\":25,\"kind\":\"question\",\"state\":\"gated\",\"sender\":\"zeus\",\"recipient\":\"zeus\",\"task\":3,\"preview\":\"Which one?\"}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/answers",
+        "authorization": "Bearer tok",
+        "body": "{\"question\":12,\"body\":\"yes\"}"
+      }
+    ],
+    "stdout": "m-25 answered @zeus; the human passes it on first.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "no staff",
+    "args": [
+      "staff"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"members\":[]}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/staff",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "No agents are on this project staff yet; the human adds them in the app.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "the staff",
+    "args": [
+      "staff"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"members\":[{\"handle\":\"zeus\",\"roles\":[\"worker\"],\"tier\":\"standard\"},{\"handle\":\"athena\",\"roles\":[\"advisor\",\"reviewer\"],\"tier\":\"critical\"}]}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/staff",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "@zeus · worker · standard\n@athena · advisor+reviewer · critical\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "who I am, on no task",
+    "args": [
+      "whoami"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"participant\":{\"handle\":\"chief\",\"role\":\"chief\"},\"project\":{\"name\":\"app\"},\"task\":null}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/whoami",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "@chief (chief) in project app\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "who I am, on a task",
+    "args": [
+      "whoami"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"participant\":{\"handle\":\"zeus\",\"role\":\"worker\"},\"project\":{\"name\":\"app\"},\"task\":{\"number\":3,\"title\":\"Parser\"}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/whoami",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "@zeus (worker) in project app, on T-3: Parser\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "the history",
+    "args": [
+      "history"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"text\":\"Human: hello\"}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/history",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "Human: hello\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "the history, a page of a search",
+    "args": [
+      "history",
+      "--page",
+      "2",
+      "--find",
+      "a b&c=d/é*~!",
+      "--tools"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"text\":\"Human: a b&c\"}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/history?page=2&find=a+b%26c%3Dd%2F%C3%A9*%7E%21&tools=1",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "Human: a b&c\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "an empty board",
+    "args": [
+      "task",
+      "list"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"open\":[],\"lanes\":[]}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/tasks",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "No tasks yet.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "the board, waiting work and lanes",
+    "args": [
+      "task"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"open\":[{\"number\":4,\"state\":\"open\",\"assignee\":null,\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[2,3],\"pool\":\"reviewer\",\"tier\":\"standard\",\"deletedAt\":null,\"messages\":[]},{\"number\":5,\"state\":\"open\",\"assignee\":null,\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"designer\",\"tier\":null,\"deletedAt\":null,\"messages\":[]}],\"lanes\":[{\"handle\":\"zeus\",\"role\":\"worker\",\"tasks\":[{\"number\":3,\"state\":\"working\",\"assignee\":\"zeus\",\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"worker\",\"tier\":\"standard\",\"deletedAt\":null,\"messages\":[]}]},{\"handle\":\"athena\",\"role\":\"advisor\",\"tasks\":[]}]}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/tasks",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "Waiting for a member\nT-4 [open] blocked by T-2, T-3 · for a standard reviewer ← @chief: Parser\nT-5 [open] for an image designer ← @chief: Parser\n@zeus (worker)\nT-3 [working] @zeus ← @chief: Parser\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "the board as JSON, keys as JavaScript orders them",
+    "args": [
+      "task",
+      "list",
+      "--json"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"open\":[],\"lanes\":[],\"counts\":{\"1\":4,\"2\":0,\"b\":1,\"a\":3}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/tasks",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "{\n  \"open\": [],\n  \"lanes\": [],\n  \"counts\": {\n    \"1\": 4,\n    \"2\": 0,\n    \"b\": 1,\n    \"a\": 3\n  }\n}\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "work for a tier",
+    "args": [
+      "task",
+      "add",
+      "--tier",
+      "standard",
+      "Write",
+      "the",
+      "--force",
+      "parser"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"task\":{\"number\":3,\"state\":\"open\",\"assignee\":null,\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"worker\",\"tier\":\"standard\",\"deletedAt\":null,\"messages\":[]}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/tasks",
+        "authorization": "Bearer tok",
+        "body": "{\"tier\":\"standard\",\"body\":\"Write the --force parser\"}"
+      }
+    ],
+    "stdout": "T-3 is on the board for a standard worker; the first free one gets it, and its result arrives in your inbox.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "work for the nearest tier, gated, waiting and holding",
+    "args": [
+      "task",
+      "add",
+      "--tier",
+      "critical",
+      "--purpose",
+      "x",
+      "--needs",
+      "T-1",
+      "--before",
+      "T-9,T-10",
+      "go"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"task\":{\"number\":3,\"state\":\"open\",\"assignee\":null,\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[1],\"pool\":\"worker\",\"tier\":\"complex\",\"deletedAt\":null,\"messages\":[]},\"asked\":\"critical\",\"gated\":true}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/tasks",
+        "authorization": "Bearer tok",
+        "body": "{\"tier\":\"critical\",\"purpose\":\"x\",\"needs\":[1],\"before\":[9,10],\"body\":\"go\"}"
+      }
+    ],
+    "stdout": "T-3 is on the board for a complex worker (no critical worker is on the staff, so the nearest tier); the first free one gets it, and its result arrives in your inbox. It waits until T-1 is accepted. T-9, T-10 wait for it. The human approves each message before it moves.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "advice, holding one",
+    "args": [
+      "task",
+      "add",
+      "--advice",
+      "--tier",
+      "complex",
+      "--before",
+      "T-9",
+      "which?"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"task\":{\"number\":3,\"state\":\"open\",\"assignee\":null,\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"advisor\",\"tier\":null,\"deletedAt\":null,\"messages\":[]}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/tasks",
+        "authorization": "Bearer tok",
+        "body": "{\"tier\":\"complex\",\"advice\":true,\"before\":[9],\"body\":\"which?\"}"
+      }
+    ],
+    "stdout": "T-3 is on the board for a complex advisor; the first free one gets it, and its result arrives in your inbox. T-9 waits for it.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a review",
+    "args": [
+      "task",
+      "add",
+      "--review",
+      "--tier",
+      "light",
+      "look"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"task\":{\"number\":3,\"state\":\"open\",\"assignee\":null,\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"reviewer\",\"tier\":\"light\",\"deletedAt\":null,\"messages\":[]}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/tasks",
+        "authorization": "Bearer tok",
+        "body": "{\"tier\":\"light\",\"review\":true,\"body\":\"look\"}"
+      }
+    ],
+    "stdout": "T-3 is on the board for a light reviewer; the first free one gets it, and its result arrives in your inbox.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a design",
+    "args": [
+      "task",
+      "add",
+      "--design",
+      "a",
+      "logo"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"task\":{\"number\":3,\"state\":\"open\",\"assignee\":null,\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"designer\",\"tier\":null,\"deletedAt\":null,\"messages\":[]}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/tasks",
+        "authorization": "Bearer tok",
+        "body": "{\"design\":true,\"body\":\"a logo\"}"
+      }
+    ],
+    "stdout": "T-3 is on the board for an image designer; the first free one gets it, and its result arrives in your inbox.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a follow-up in the same window, gated and waiting",
+    "args": [
+      "task",
+      "add",
+      "--after",
+      "T-3",
+      "--needs",
+      "T-1,T-2",
+      "more"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"task\":{\"number\":6,\"state\":\"working\",\"assignee\":\"zeus\",\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[1,2],\"pool\":\"worker\",\"tier\":\"standard\",\"deletedAt\":null,\"messages\":[]},\"gated\":true}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/tasks",
+        "authorization": "Bearer tok",
+        "body": "{\"after\":3,\"needs\":[1,2],\"body\":\"more\"}"
+      }
+    ],
+    "stdout": "T-6 continues in @zeus, the window that did T-3; its result arrives in your inbox. The human approves each message before it moves. It waits until T-1, T-2 are accepted.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "own work for later",
+    "args": [
+      "task",
+      "add",
+      "--self",
+      "--needs",
+      "T-3",
+      "later"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"task\":{\"number\":7,\"state\":\"working\",\"assignee\":\"chief\",\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[3],\"pool\":\"worker\",\"tier\":\"standard\",\"deletedAt\":null,\"messages\":[]},\"gated\":true}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/tasks",
+        "authorization": "Bearer tok",
+        "body": "{\"self\":true,\"needs\":[3],\"body\":\"later\"}"
+      }
+    ],
+    "stdout": "T-7 is yours; finish it with: cf task done T-7 \"what you did\". It waits until T-3 is accepted.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a task and its thread",
+    "args": [
+      "task",
+      "get",
+      "T-3"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"task\":{\"number\":3,\"state\":\"working\",\"assignee\":\"zeus\",\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"worker\",\"tier\":\"standard\",\"deletedAt\":null,\"messages\":[{\"id\":12,\"kind\":\"task\",\"state\":\"queued\",\"sender\":\"chief\",\"recipient\":\"zeus\",\"task\":3,\"preview\":\"Which one?\",\"body\":\"Parser\\nAll of it.\"},{\"id\":30,\"kind\":\"result\",\"state\":\"queued\",\"sender\":\"zeus\",\"recipient\":\"chief\",\"task\":3,\"preview\":\"Done\",\"body\":\"Done.\"}]}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/tasks/3",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "T-3 [working] @zeus ← @chief: Parser\n\nm-12 [queued] task T-3 from @chief: Which one?\nParser\nAll of it.\n\nm-30 [queued] result T-3 from @zeus: Done\nDone.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a task the human deleted",
+    "args": [
+      "task",
+      "get",
+      "T-3"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"task\":{\"number\":3,\"state\":\"accepted\",\"assignee\":\"zeus\",\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"worker\",\"tier\":\"standard\",\"deletedAt\":\"2026-10-04T09:00:00.000Z\",\"messages\":[]}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/tasks/3",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "T-3 [accepted] @zeus ← @chief: Parser\nDeleted from the board by the human at 2026-10-04T09:00:00.000Z.\n\n\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a task's transcript, an item cut through an emoji",
+    "args": [
+      "task",
+      "get",
+      "T-3",
+      "--transcript"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"task\":{\"number\":3,\"state\":\"working\",\"assignee\":\"zeus\",\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"worker\",\"tier\":\"standard\",\"deletedAt\":null,\"messages\":[]}}"
+      },
+      {
+        "status": 200,
+        "text": "{\"total\":14,\"items\":[{\"role\":\"user\",\"complete\":true,\"text\":\"Write the parser.\"},{\"role\":\"assistant\",\"complete\":false,\"text\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx😀 and more\"},{\"role\":\"tool\",\"complete\":true,\"text\":\"ok\"},{\"role\":\"custom\",\"complete\":true,\"text\":\"a note\"},{\"role\":\"system\",\"complete\":true,\"text\":\"cut \\ud83d\"}]}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/tasks/3",
+        "authorization": "Bearer tok",
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/tasks/3/transcript?last=10",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "T-3 [working] @zeus ← @chief: Parser\n\nWhat its window did, the last 5 of 14 items:\n\n[Sent to the window]\nWrite the parser.\n\n[The agent · still writing]\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx�…\n\n[Tool output]\nok\n\n[Note]\na note\n\n[system]\ncut �\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a transcript of the last items, the number as JavaScript reads it",
+    "args": [
+      "task",
+      "get",
+      "T-3",
+      "--transcript",
+      "--last",
+      "0x10"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"task\":{\"number\":3,\"state\":\"working\",\"assignee\":\"zeus\",\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"worker\",\"tier\":\"standard\",\"deletedAt\":null,\"messages\":[]}}"
+      },
+      {
+        "status": 200,
+        "text": "{\"total\":0,\"items\":[]}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/tasks/3",
+        "authorization": "Bearer tok",
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/tasks/3/transcript?last=16",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "T-3 [working] @zeus ← @chief: Parser\n\nIts window has written nothing yet.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a transcript as JSON",
+    "args": [
+      "task",
+      "get",
+      "T-3",
+      "--transcript",
+      "--json",
+      "--last",
+      "1"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"task\":{\"number\":3,\"state\":\"working\",\"assignee\":\"zeus\",\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"worker\",\"tier\":\"standard\",\"deletedAt\":null,\"messages\":[]}}"
+      },
+      {
+        "status": 200,
+        "text": "{\"task\":\"shadowed\",\"total\":1,\"items\":[]}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/tasks/3",
+        "authorization": "Bearer tok",
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/tasks/3/transcript?last=1",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "{\n  \"task\": \"shadowed\",\n  \"total\": 1,\n  \"items\": []\n}\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a task done",
+    "args": [
+      "task",
+      "done",
+      "T-3",
+      "it",
+      "works"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"task\":{\"number\":3,\"state\":\"done\",\"assignee\":\"zeus\",\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"worker\",\"tier\":\"standard\",\"deletedAt\":null,\"messages\":[]}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/tasks/3/done",
+        "authorization": "Bearer tok",
+        "body": "{\"body\":\"it works\"}"
+      }
+    ],
+    "stdout": "T-3 [done] @zeus ← @chief: Parser\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a task accepted",
+    "args": [
+      "task",
+      "accept",
+      "T-3"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"task\":{\"number\":3,\"state\":\"accepted\",\"assignee\":\"zeus\",\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"worker\",\"tier\":\"standard\",\"deletedAt\":null,\"messages\":[]}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/tasks/3/accept",
+        "authorization": "Bearer tok",
+        "body": "{}"
+      }
+    ],
+    "stdout": "T-3 [accepted] @zeus ← @chief: Parser\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a task paused",
+    "args": [
+      "task",
+      "pause",
+      "T-3"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"task\":{\"number\":3,\"state\":\"paused\",\"assignee\":\"zeus\",\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"worker\",\"tier\":\"standard\",\"deletedAt\":null,\"messages\":[]}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/tasks/3/pause",
+        "authorization": "Bearer tok",
+        "body": "{}"
+      }
+    ],
+    "stdout": "T-3 is paused: its window stops and its work waits. Resume it with: cf task resume T-3 \"what to do now\"\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a task resumed",
+    "args": [
+      "task",
+      "resume",
+      "T-3",
+      "go",
+      "on"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"task\":{\"number\":3,\"state\":\"working\",\"assignee\":\"zeus\",\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"worker\",\"tier\":\"standard\",\"deletedAt\":null,\"messages\":[]}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/tasks/3/resume",
+        "authorization": "Bearer tok",
+        "body": "{\"body\":\"go on\"}"
+      }
+    ],
+    "stdout": "T-3 resumes in @zeus with your words.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a task resumed after its window ended",
+    "args": [
+      "task",
+      "resume",
+      "T-3",
+      "go"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 200,
+        "text": "{\"task\":{\"number\":3,\"state\":\"open\",\"assignee\":null,\"requester\":\"chief\",\"title\":\"Parser\",\"blockedBy\":[],\"pool\":\"worker\",\"tier\":\"standard\",\"deletedAt\":null,\"messages\":[]}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/tasks/3/resume",
+        "authorization": "Bearer tok",
+        "body": "{\"body\":\"go\"}"
+      }
+    ],
+    "stdout": "T-3 is back on the board for a standard worker: the window that had it has ended.\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a refusal, in the API’s words",
+    "args": [
+      "task",
+      "accept",
+      "T-3"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 403,
+        "text": "{\"message\":\"T-3 is not yours to accept\"}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/tasks/3/accept",
+        "authorization": "Bearer tok",
+        "body": "{}"
+      }
+    ],
+    "stdout": "",
+    "stderr": "cf: T-3 is not yours to accept\n",
+    "code": 1
+  },
+  {
+    "name": "a refusal with no words",
+    "args": [
+      "task",
+      "cancel",
+      "T-3"
+    ],
+    "env": {},
+    "stdin": null,
+    "replies": [
+      {
+        "status": 500,
+        "text": "{}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/tasks/3/cancel",
+        "authorization": "Bearer tok",
+        "body": "{}"
+      }
+    ],
+    "stdout": "",
+    "stderr": "cf: ConsensFlow answered 500\n",
+    "code": 1
+  },
+  {
+    "name": "Claude's question answered from the board",
+    "args": [
+      "hook",
+      "claude"
+    ],
+    "env": {},
+    "stdin": "{\"session_id\":\"abc\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"AskUserQuestion\",\"tool_input\":{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiSelect\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiSelect\":true}],\"metadata\":{\"source\":\"test\"}}}",
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"message\":{\"id\":40}}"
+      },
+      {
+        "status": 200,
+        "text": "{\"question\":{},\"answer\":null}"
+      },
+      {
+        "status": 200,
+        "text": "{\"question\":{},\"answer\":{\"id\":13,\"from\":\"chief\",\"body\":\"blue\",\"choices\":[[\"blue\"],[\"vite\",\"esbuild\"]]}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/questions",
+        "authorization": "Bearer tok",
+        "body": "{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiple\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiple\":true}]}"
+      },
+      {
+        "method": "GET",
+        "path": "/api/questions/40?wait=20000",
+        "authorization": "Bearer tok",
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/questions/40?wait=20000",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"updatedInput\":{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiSelect\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiSelect\":true}],\"metadata\":{\"source\":\"test\"},\"answers\":{\"Which colour?\":\"blue\",\"Which tools?\":\"vite, esbuild\"}}}}\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "Devin's question answered from the board, --json and all",
+    "args": [
+      "--json",
+      "hook",
+      "devin"
+    ],
+    "env": {},
+    "stdin": "{\"session_id\":\"abc\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"ask_user_question\",\"tool_input\":{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiSelect\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiSelect\":true}],\"metadata\":{\"source\":\"test\"}}}",
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"message\":{\"id\":41}}"
+      },
+      {
+        "status": 200,
+        "text": "{\"question\":{},\"answer\":{\"id\":13,\"from\":\"chief\",\"body\":\"blue\",\"choices\":[[\"blue\"],[\"vite\",\"esbuild\"]]}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/questions",
+        "authorization": "Bearer tok",
+        "body": "{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiple\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiple\":true}]}"
+      },
+      {
+        "method": "GET",
+        "path": "/api/questions/41?wait=20000",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "{\"decision\":\"block\",\"reason\":\"ConsensFlow answered from the board: Which colour? blue · Which tools? vite, esbuild. Continue with that answer; do not ask again.\"}\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "Claude's question refused by the board",
+    "args": [
+      "hook",
+      "claude"
+    ],
+    "env": {},
+    "stdin": "{\"session_id\":\"abc\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"AskUserQuestion\",\"tool_input\":{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiSelect\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiSelect\":true}],\"metadata\":{\"source\":\"test\"}}}",
+    "replies": [
+      {
+        "status": 400,
+        "text": "{\"message\":\"questions: one to 4 questions\"}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/questions",
+        "authorization": "Bearer tok",
+        "body": "{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiple\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiple\":true}]}"
+      }
+    ],
+    "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"ConsensFlow could not put this question to the chief (questions: one to 4 questions). Ask with cf ask \\\"…\\\" instead.\"}}\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "Devin's question refused by the board",
+    "args": [
+      "hook",
+      "devin"
+    ],
+    "env": {},
+    "stdin": "{\"session_id\":\"abc\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"ask_user_question\",\"tool_input\":{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiSelect\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiSelect\":true}],\"metadata\":{\"source\":\"test\"}}}",
+    "replies": [
+      {
+        "status": 409,
+        "text": "{\"message\":\"T-3 was cancelled\"}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/questions",
+        "authorization": "Bearer tok",
+        "body": "{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiple\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiple\":true}]}"
+      }
+    ],
+    "stdout": "{\"decision\":\"block\",\"reason\":\"ConsensFlow could not put this question to the chief (T-3 was cancelled). Ask with cf ask \\\"…\\\" instead.\"}\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "questions whose texts are numbers, answered in the order JavaScript keeps",
+    "args": [
+      "hook",
+      "claude"
+    ],
+    "env": {},
+    "stdin": "{\"session_id\":\"abc\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"AskUserQuestion\",\"tool_input\":{\"questions\":[{\"question\":\"b\",\"options\":[{\"label\":\"x\"}]},{\"question\":\"2\",\"options\":[{\"label\":\"y\"}]},{\"question\":\"b\",\"options\":[{\"label\":\"z\"}]}]}}",
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"message\":{\"id\":42}}"
+      },
+      {
+        "status": 200,
+        "text": "{\"answer\":{\"choices\":[[\"x\"],[\"y\"],[\"z\"]]}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/questions",
+        "authorization": "Bearer tok",
+        "body": "{\"questions\":[{\"question\":\"b\",\"options\":[{\"label\":\"x\"}],\"multiple\":false},{\"question\":\"2\",\"options\":[{\"label\":\"y\"}],\"multiple\":false},{\"question\":\"b\",\"options\":[{\"label\":\"z\"}],\"multiple\":false}]}"
+      },
+      {
+        "method": "GET",
+        "path": "/api/questions/42?wait=20000",
+        "authorization": "Bearer tok",
+        "body": null
+      }
+    ],
+    "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"updatedInput\":{\"questions\":[{\"question\":\"b\",\"options\":[{\"label\":\"x\"}]},{\"question\":\"2\",\"options\":[{\"label\":\"y\"}]},{\"question\":\"b\",\"options\":[{\"label\":\"z\"}]}],\"answers\":{\"2\":\"y\",\"b\":\"z\"}}}}\n",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "another tool",
+    "args": [
+      "hook",
+      "claude"
+    ],
+    "env": {},
+    "stdin": "{\"session_id\":\"abc\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiSelect\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiSelect\":true}],\"metadata\":{\"source\":\"test\"}}}",
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "Claude's tool is not Devin's",
+    "args": [
+      "hook",
+      "devin"
+    ],
+    "env": {},
+    "stdin": "{\"session_id\":\"abc\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"AskUserQuestion\",\"tool_input\":{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiSelect\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiSelect\":true}],\"metadata\":{\"source\":\"test\"}}}",
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a harness with no hook",
+    "args": [
+      "hook",
+      "codex"
+    ],
+    "env": {},
+    "stdin": "{\"session_id\":\"abc\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"AskUserQuestion\",\"tool_input\":{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiSelect\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiSelect\":true}],\"metadata\":{\"source\":\"test\"}}}",
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "an event that is no JSON",
+    "args": [
+      "hook",
+      "claude"
+    ],
+    "env": {},
+    "stdin": "{\"tool_name\":",
+    "replies": [],
+    "requests": [],
+    "stdout": "",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a wait of nothing gives up at once",
+    "args": [
+      "hook",
+      "claude"
+    ],
+    "env": {
+      "CONSENSFLOW_QUESTION_WAIT_MS": "0"
+    },
+    "stdin": "{\"session_id\":\"abc\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"AskUserQuestion\",\"tool_input\":{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiSelect\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiSelect\":true}],\"metadata\":{\"source\":\"test\"}}}",
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"message\":{\"id\":43}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/questions",
+        "authorization": "Bearer tok",
+        "body": "{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiple\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiple\":true}]}"
+      }
+    ],
+    "stdout": "",
+    "stderr": "",
+    "code": 0
+  },
+  {
+    "name": "a wait that is no number waits not at all",
+    "args": [
+      "hook",
+      "claude"
+    ],
+    "env": {
+      "CONSENSFLOW_QUESTION_WAIT_MS": "soon"
+    },
+    "stdin": "{\"session_id\":\"abc\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"AskUserQuestion\",\"tool_input\":{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiSelect\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiSelect\":true}],\"metadata\":{\"source\":\"test\"}}}",
+    "replies": [
+      {
+        "status": 201,
+        "text": "{\"message\":{\"id\":44}}"
+      }
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/questions",
+        "authorization": "Bearer tok",
+        "body": "{\"questions\":[{\"question\":\"Which colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"red\",\"description\":\"Warm\"},{\"label\":\"blue\"}],\"multiple\":false},{\"question\":\"Which tools?\",\"header\":\"Tools\",\"options\":[{\"label\":\"vite\"},{\"label\":\"esbuild\"}],\"multiple\":true}]}"
+      }
+    ],
+    "stdout": "",
+    "stderr": "",
+    "code": 0
+  }
+]

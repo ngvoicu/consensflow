@@ -29,6 +29,7 @@
     "eval:windows": "node tests/live/windows-matrix.mjs",
     "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs",
     "build:bridge": "cargo build --release -p cf-panes --bin consensflow-bridge",
+    "goldens:cf": "node tests/goldens/cf-board.mjs",
     "smoke": "CONSENSFLOW_SMOKE=1 node --test tests/smoke.test.mjs",
     "load": "CONSENSFLOW_LOAD=1 node --test tests/load/*.test.mjs",
     "candidate": "node app/scripts/candidate.mjs",

@@ -1,0 +1,12 @@
+# Two rules of the Rust rewrite (consensflow-sme, decisions/2026-10-04-rust-rewrite.md)
+# that clippy keeps: the environment is read once, in main, and handed down
+# as cf_base::env::Env; and a process is started only through cf-process.
+# Code older than the rewrite (the Tauri app, the pane host's tests) says so
+# where it is exempt.
+disallowed-methods = [
+  { path = "std::env::var", reason = "read the environment once, in main: cf_base::env::Env" },
+  { path = "std::env::var_os", reason = "read the environment once, in main: cf_base::env::Env" },
+  { path = "std::env::vars", reason = "read the environment once, in main: cf_base::env::Env" },
+  { path = "std::env::vars_os", reason = "read the environment once, in main: cf_base::env::Env" },
+  { path = "std::process::Command::new", reason = "a process starts only through cf-process" },
+]

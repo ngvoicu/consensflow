@@ -1,5 +1,7 @@
 #![cfg(unix)]
 #![deny(clippy::undocumented_unsafe_blocks)]
+// The tests start the helper themselves, and read their own environment.
+#![allow(clippy::disallowed_methods)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, RawFd};
