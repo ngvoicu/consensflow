@@ -5,8 +5,7 @@
 //! Every scenario is read into the steps the player plays and the readings
 //! its looks are held to, and its looks are counted harness by harness, so a
 //! golden that shrinks or changes shape fails here. The player plays every
-//! scenario that looks at a harness whose reader is ported, and holds each
-//! such look to Node's reading; the look at no session waits for the switch.
+//! scenario through the switch, and holds each look to Node's reading.
 
 // The goldens' own reading: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -102,25 +101,15 @@ fn every_look_node_took_is_read_whole_and_counted_harness_by_harness() {
 }
 
 #[test]
-fn every_look_at_a_ported_harness_reads_what_node_read() {
+fn every_look_node_took_reads_through_the_switch_what_node_read() {
     let ours = our_reasons();
     let mut answered = 0;
-    let mut scenarios_played = 0;
+    let mut played = 0;
     for group in GROUPS {
         for scenario in scenarios(group) {
-            if looks(&scenario.steps).into_iter().any(play::ported) {
-                answered += play::play(&scenario, &ours).answered;
-                scenarios_played += 1;
-            }
+            answered += play::play(&scenario, &ours);
+            played += 1;
         }
     }
-    // Codex's 261 looks in 85 scenarios, Pi's 227 in 78, one scenario
-    // holding both, Devin's 273 in 18, OpenCode's 100 in 28, one of them a
-    // scenario of Codex's and Pi's too, and Claude's 650 in 193, that one
-    // among them: every look of the five but the one Codex look with no
-    // session, which the switch answers.
-    assert_eq!(
-        (scenarios_played, answered),
-        (162 + 18 + 27 + 193 - 1, 261 + 227 + 273 + 100 + 650)
-    );
+    assert_eq!((played, answered), (399, 1512));
 }

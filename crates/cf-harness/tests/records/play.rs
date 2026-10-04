@@ -1,6 +1,8 @@
 //! The player: a scenario's steps played against the Rust readers in a
 //! temporary root, as `runner.mjs` played them against Node's, each look
-//! held to the reading Node's look read.
+//! held to the reading Node's look read. A look goes through the switch, as
+//! the daemon's will: a cached one through a [`Cache`] that [`records::open`]
+//! opens readers for, a fresh one through [`records::answers`].
 //!
 //! Like the runner, the player owns time: the clock starts at [`START`] and
 //! moves only by a step, and each file step sets the file's times to the
@@ -17,7 +19,8 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use cf_base::env::Env;
 use cf_base::js;
-use cf_harness::records::{Cache, Look, Options, PiSettlement, Quota, Reading, IDLE_MS};
+use cf_harness::records::{self, Cache, Options, PiSettlement, Quota, Reading, IDLE_MS};
+use cf_proto::agents::Harness;
 use jiff::tz::{TimeZone, TimeZoneDatabase};
 use rusqlite::types::Value as Bound;
 use rusqlite::Connection;
@@ -40,40 +43,9 @@ static LOCAL_ZONE: LazyLock<TimeZone> = LazyLock::new(|| {
     TimeZoneDatabase::bundled().get(name).unwrap()
 });
 
-/// Whether this build reads what `look` looks at: a harness whose reader is
-/// ported, and a session to read. The switch that answers the others is still
-/// to come.
-pub fn ported(look: &crate::scenario::Look) -> bool {
-    matches!(
-        look.kind.as_str(),
-        "codex" | "claude-code" | "pi" | "devin" | "opencode"
-    ) && !look.session.is_empty()
-}
-
-/// A ported harness's reader of `session`, made afresh.
-fn reader(kind: &str, session: &str, env: &Env) -> Box<dyn Look + Send> {
-    match kind {
-        "codex" => cf_harness::codex::record::reader(session, env),
-        "claude-code" => cf_harness::claude::record::reader(session, env, &LOCAL_ZONE),
-        "pi" => cf_harness::pi::record::reader(session, env, &LOCAL_ZONE),
-        "devin" => cf_harness::devin::record::reader(session, env),
-        "opencode" => cf_harness::opencode::record::reader(session, env, &LOCAL_ZONE),
-        other => panic!("no reader of {other} yet"),
-    }
-}
-
-/// What playing a scenario did with its looks.
-#[derive(Debug, Default)]
-pub struct Played {
-    /// Held to what Node read.
-    pub answered: usize,
-    /// Left for the switch still to come: a look at no session.
-    pub pending: usize,
-}
-
-/// Plays `scenario`, holding each look of a ported harness to Node's.
+/// Plays `scenario`, holding each look to Node's: how many it held.
 /// `ours` are the beginnings of ConsensFlow's own reasons.
-pub fn play(scenario: &Scenario, ours: &[String]) -> Played {
+pub fn play(scenario: &Scenario, ours: &[String]) -> usize {
     let root = tempfile::tempdir().unwrap();
     let env = environment(root.path(), &scenario.env);
     let idle = scenario
@@ -86,19 +58,15 @@ pub fn play(scenario: &Scenario, ours: &[String]) -> Played {
         root,
         clock: START,
         env,
-        cache: Cache::new(
-            Box::new(|kind, session, env| Ok(reader(kind, session, env))),
-            idle,
-            START,
-        ),
+        cache: Cache::new(records::open(LOCAL_ZONE.clone()), idle, START),
         handed_out: Vec::new(),
         quotas: Vec::new(),
-        played: Played::default(),
+        answered: 0,
     };
     for (index, step) in scenario.steps.iter().enumerate() {
         stage.step(step, index);
     }
-    stage.played
+    stage.answered
 }
 
 /// A scenario being played.
@@ -116,7 +84,8 @@ struct Stage<'a> {
     handed_out: Vec<(Arc<Reading>, usize)>,
     /// Each quota a new reading held, and the step it first went to.
     quotas: Vec<(Arc<Quota>, usize)>,
-    played: Played,
+    /// The looks held to what Node read.
+    answered: usize,
 }
 
 impl Stage<'_> {
@@ -175,11 +144,8 @@ impl Stage<'_> {
     }
 
     fn look(&mut self, look: &crate::scenario::Look, index: usize) {
-        if !ported(look) {
-            self.played.pending += 1;
-            return;
-        }
         let name = format!("{}, step {index}", self.scenario.name);
+        let harness = Harness::from_kind(&look.kind).unwrap();
         let env = look.env.as_ref().map_or_else(
             || self.env.clone(),
             |env| environment(self.root.path(), env),
@@ -188,12 +154,19 @@ impl Stage<'_> {
         if matches!(look.look, Reader::Cached | Reader::Both) {
             let reading = self
                 .cache
-                .look(&look.kind, &look.session, &env, &options, self.clock);
+                .look(harness, &look.session, &env, &options, self.clock);
             self.hold(&reading, look.read.unwrap(), &format!("{name}, cached"));
             self.identity(&reading, look, index, &name);
         }
         if matches!(look.look, Reader::Fresh | Reader::Both) {
-            let reading = reader(&look.kind, &look.session, &env).look(&options, self.clock);
+            let reading = records::answers(
+                harness,
+                &look.session,
+                &env,
+                &options,
+                &LOCAL_ZONE,
+                self.clock,
+            );
             // A look of both readers records the fresh reading only where it differs.
             let at = look.fresh.or(look.read).unwrap();
             self.hold(&reading, at, &format!("{name}, fresh"));
@@ -205,7 +178,7 @@ impl Stage<'_> {
         for step in look.between.iter().flatten() {
             self.step(step, index);
         }
-        self.played.answered += 1;
+        self.answered += 1;
     }
 
     /// A writer's step: `new DatabaseSync(file)`, `.exec(sql)`,

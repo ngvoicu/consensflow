@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cf_base::env::Env;
+use cf_proto::agents::Harness;
 
 use super::reading::Reading;
 
@@ -43,11 +44,11 @@ pub trait Look {
     fn look(&mut self, options: &Options, now_ms: i64) -> Arc<Reading>;
 }
 
-/// How a cache opens the reader of a conversation, by its harness's kind,
-/// its session and the environment that says where the harness keeps it:
-/// the reader, or the reading of a conversation no reader reads (no
-/// session, a kind no harness is), which is never kept.
-pub type Open = Box<dyn Fn(&str, &str, &Env) -> Result<Box<dyn Look + Send>, Reading> + Send>;
+/// How a cache opens the reader of a conversation, by its harness, its
+/// session and the environment that says where the harness keeps it: the
+/// reader, or the reading of a conversation no reader reads (one with no
+/// session), which is never kept.
+pub type Open = Box<dyn Fn(Harness, &str, &Env) -> Result<Box<dyn Look + Send>, Reading> + Send>;
 
 /// How long a conversation nobody looks at keeps its reader: ten minutes.
 pub const IDLE_MS: i64 = 10 * 60_000;
@@ -58,7 +59,7 @@ pub struct Cache {
     idle_ms: i64,
     /// When the forgotten were last swept out.
     swept: i64,
-    known: HashMap<(String, String), Kept>,
+    known: HashMap<(Harness, String), Kept>,
 }
 
 /// A reader, and when it was last looked through.
@@ -79,13 +80,12 @@ impl Cache {
         }
     }
 
-    /// A look at `session` of the harness `kind`, at `now_ms`, told
-    /// `options`. The environment opens its reader on the first look; a later
+    /// A look at `session` of `harness`, at `now_ms`, told `options`. The environment opens its reader on the first look; a later
     /// look's is not read. Every `idle_ms`, the conversations unread that
     /// long are forgotten first, this one too: it is then read anew.
     pub fn look(
         &mut self,
-        kind: &str,
+        harness: Harness,
         session: &str,
         env: &Env,
         options: &Options,
@@ -96,9 +96,9 @@ impl Cache {
             let idle_ms = self.idle_ms;
             self.known.retain(|_, kept| now_ms - kept.read_at < idle_ms);
         }
-        let kept = match self.known.entry((kind.to_owned(), session.to_owned())) {
+        let kept = match self.known.entry((harness, session.to_owned())) {
             Entry::Occupied(kept) => kept.into_mut(),
-            Entry::Vacant(place) => match (self.open)(kind, session, env) {
+            Entry::Vacant(place) => match (self.open)(harness, session, env) {
                 Ok(reader) => place.insert(Kept {
                     reader,
                     read_at: now_ms,
@@ -141,13 +141,14 @@ mod tests {
         }
     }
 
-    /// A cache over counting readers, `none` a kind no reader reads.
+    /// A cache over counting readers, which reads no conversation without
+    /// a session.
     fn cache(idle_ms: i64) -> Cache {
         let opened = AtomicUsize::new(0);
         Cache::new(
-            Box::new(move |kind, _, _| {
-                if kind == "none" {
-                    return Err(Reading::Unknown(format!("unknown kind: {kind}")));
+            Box::new(move |_, session, _| {
+                if session.is_empty() {
+                    return Err(Reading::Unknown("missing session id".to_owned()));
                 }
                 let reader = opened.fetch_add(1, Ordering::Relaxed) + 1;
                 Ok(Box::new(Counting { reader, looks: 0 }))
@@ -169,12 +170,13 @@ mod tests {
         let env = Env::default();
         let mut cache = cache(IDLE_MS);
         let options = Options::default();
-        let mut look =
-            |kind, session, now| said(&cache.look(kind, session, &env, &options, now)).to_owned();
-        assert_eq!(look("codex", "a", 0), "reader 1 look 1");
-        assert_eq!(look("codex", "b", 1), "reader 2 look 1");
-        assert_eq!(look("pi", "a", 2), "reader 3 look 1");
-        assert_eq!(look("codex", "a", 3), "reader 1 look 2");
+        let mut look = |harness, session, now| {
+            said(&cache.look(harness, session, &env, &options, now)).to_owned()
+        };
+        assert_eq!(look(Harness::Codex, "a", 0), "reader 1 look 1");
+        assert_eq!(look(Harness::Codex, "b", 1), "reader 2 look 1");
+        assert_eq!(look(Harness::Pi, "a", 2), "reader 3 look 1");
+        assert_eq!(look(Harness::Codex, "a", 3), "reader 1 look 2");
     }
 
     #[test]
@@ -183,8 +185,9 @@ mod tests {
         let env = Env::default();
         let mut cache = cache(1000);
         let options = Options::default();
-        let mut look =
-            |session, now| said(&cache.look("codex", session, &env, &options, now)).to_owned();
+        let mut look = |session, now| {
+            said(&cache.look(Harness::Codex, session, &env, &options, now)).to_owned()
+        };
         assert_eq!(look("a", 0), "reader 1 look 1");
         assert_eq!(look("a", 999), "reader 1 look 2", "read again soon: kept");
         assert_eq!(
@@ -209,9 +212,9 @@ mod tests {
         let env = Env::default();
         let mut cache = cache(IDLE_MS);
         let options = Options::default();
-        let first = cache.look("none", "a", &env, &options, 0);
-        let second = cache.look("none", "a", &env, &options, 1);
-        assert_eq!(said(&first), "unknown kind: none");
+        let first = cache.look(Harness::Codex, "", &env, &options, 0);
+        let second = cache.look(Harness::Codex, "", &env, &options, 1);
+        assert_eq!(said(&first), "missing session id");
         assert_eq!(first, second);
         assert!(!Arc::ptr_eq(&first, &second), "another reading each time");
         assert!(cache.known.is_empty());
@@ -227,9 +230,9 @@ mod tests {
                 launch_id: Some(launch_id.to_owned()),
             }),
         };
-        let first = cache.look("pi", "a", &env, &settlement("one"), 5);
-        let second = cache.look("pi", "a", &env, &settlement("two"), 7);
-        let third = cache.look("pi", "a", &env, &Options::default(), 9);
+        let first = cache.look(Harness::Pi, "a", &env, &settlement("one"), 5);
+        let second = cache.look(Harness::Pi, "a", &env, &settlement("two"), 7);
+        let third = cache.look(Harness::Pi, "a", &env, &Options::default(), 9);
         assert_eq!(
             said(&first),
             r#"Options { pi_settlement: Some(PiSettlement { directory: None, launch_id: Some("one") }) } at 5"#

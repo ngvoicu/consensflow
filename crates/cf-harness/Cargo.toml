@@ -18,6 +18,8 @@ serde_json.workspace = true
 
 [dev-dependencies]
 flate2.workspace = true
+# `parity:records` digests each text as Node's half does.
+sha2.workspace = true
 tempfile.workspace = true
 
 [lints]
