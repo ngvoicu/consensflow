@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use cf_base::json::js_order_fields;
+use cf_base::json::as_parsed_fields;
 use cf_base::refusal::Refusal;
 use cf_proto::agents::{AgentView, Preferences};
 use serde_json::{Map, Value};
@@ -64,7 +64,11 @@ pub(crate) fn set_preferences(path: &Path, patch: Option<&Value>) -> Result<Pref
 /// preference has, so of a list or a text only the first entry is ever read.
 fn entries(patch: Option<&Value>) -> Vec<(String, Value)> {
     match patch {
-        Some(Value::Object(fields)) => js_order_fields(fields.clone()).into_iter().collect(),
+        Some(Value::Object(fields)) => {
+            let mut fields = fields.clone();
+            as_parsed_fields(&mut fields);
+            fields.into_iter().collect()
+        }
         Some(Value::Array(items)) => items
             .iter()
             .enumerate()

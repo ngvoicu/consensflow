@@ -4,7 +4,7 @@
 
 use std::ffi::OsString;
 use std::fs::{self, File};
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use super::errno::{errno_name, is_missing};
@@ -51,7 +51,7 @@ fn make_folder(folder: &Path) -> Result<(), FileError> {
         let Err(error) = fs::create_dir(&next) else {
             continue;
         };
-        let name = errno_name(&error);
+        let name = mkdir_error_name(&error);
         let above = next
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty());
@@ -77,6 +77,24 @@ fn make_folder(folder: &Path) -> Result<(), FileError> {
     Ok(())
 }
 
+/// What libuv's `mkdir` names a failure. On Windows a name the system will
+/// not make (`ERROR_INVALID_NAME`, `ERROR_DIRECTORY`) is `EINVAL` there
+/// (`fs__mkdir`, `src/win/fs.c`), where every other call says `ENOENT`: so
+/// the walk asks what is there instead of climbing above it forever.
+fn mkdir_error_name(error: &io::Error) -> Option<&'static str> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{ERROR_DIRECTORY, ERROR_INVALID_NAME};
+        let code = error
+            .raw_os_error()
+            .and_then(|code| u32::try_from(code).ok());
+        if matches!(code, Some(ERROR_INVALID_NAME | ERROR_DIRECTORY)) {
+            return Some("EINVAL");
+        }
+    }
+    errno_name(error)
+}
+
 /// What Node says of a level that is there and is no folder, after the system
 /// said `name` when the walk tried to make it. For the path asked for it is
 /// that the file exists. When levels below it were still to be made, a file is
@@ -92,11 +110,18 @@ fn not_a_folder(name: Option<&str>, levels_below: bool) -> &'static str {
 }
 
 /// `writeFileSync(temporary, text)`: the file made as the flag `w` makes it
-/// (`open`, with the temporary's path) and the bytes written to it.
+/// (`open`, with the temporary's path), the bytes written to it, and the
+/// file closed. Node checks the close, where a write the system deferred
+/// (a full disk, a network share) fails at last, and throws there. Rust's
+/// close says nothing of it, so the bytes are synced before the file is
+/// let go, and a failure there is said as Node says a failed close: the
+/// rename is never made over a file written short.
 fn write_new(temporary: &Path, bytes: &[u8]) -> Result<(), FileError> {
     let mut file =
         File::create(temporary).map_err(|error| FileError::call(error, "open", Some(temporary)))?;
-    write_all(&mut file, bytes)
+    write_all(&mut file, bytes)?;
+    file.sync_all()
+        .map_err(|error| FileError::call(error, "close", None))
 }
 
 /// The write of `writeFileSync`'s fast path for a string, which Node does in

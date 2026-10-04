@@ -120,17 +120,66 @@ fn a_directory_where_rm_was_to_remove_a_file_is_node_s_err_fs_eisdir() {
     );
 }
 
+#[cfg(unix)]
 #[test]
-fn a_removal_the_system_refuses_is_said_with_its_own_words_and_the_path_twice() {
-    let said = FileError::removal(failure(system::DENIED), Path::new("/a/t"));
-    let text = said.to_string();
-    assert!(text.starts_with("EACCES, "), "{text}");
-    assert!(text.ends_with(": /a/t '/a/t'"), "{text}");
-    assert!(!text.contains("os error"), "{text}");
-    // The words are the system's: macOS and Linux say them as `strerror` does.
-    #[cfg(unix)]
-    assert_eq!(text, "EACCES, Permission denied: /a/t '/a/t'");
-    assert_eq!(said.code(), "EACCES");
+fn a_removal_the_system_refuses_is_said_as_rm_syncs_cpp_says_it() {
+    // Node 26.7.0: a sentence for each of four refusals, else `Unknown
+    // error`, the system's words and no code.
+    let path = Path::new("/a/t");
+    for (errno, text, code) in [
+        (
+            libc::EACCES,
+            "EACCES, Permission denied: /a/t '/a/t'",
+            "EACCES",
+        ),
+        (
+            libc::EPERM,
+            "EPERM, Operation not permitted: /a/t '/a/t'",
+            "EPERM",
+        ),
+        (
+            libc::ENOTEMPTY,
+            "ENOTEMPTY, Directory not empty: /a/t '/a/t'",
+            "ENOTEMPTY",
+        ),
+        (
+            libc::ENOTDIR,
+            "ENOTDIR, Not a directory: /a/t '/a/t'",
+            "ENOTDIR",
+        ),
+        (
+            libc::EROFS,
+            ", Unknown error: Read-only file system '/a/t'",
+            "",
+        ),
+    ] {
+        let said = FileError::removal(io::Error::from_raw_os_error(errno), path);
+        assert_eq!((said.to_string().as_str(), said.code()), (text, code));
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn a_removal_windows_refuses_is_said_as_rm_syncs_cpp_says_it_there() {
+    let path = Path::new(r"C:\a\t");
+    let said = |code: i32| FileError::removal(io::Error::from_raw_os_error(code), path);
+    // Access denied and a sharing violation are `permission_denied`: EPERM there.
+    assert_eq!(
+        said(5).to_string(),
+        r"EPERM, Permission denied: \\?\C:\a\t '\\?\C:\a\t'"
+    );
+    assert_eq!(said(32).code(), "EPERM");
+    assert_eq!(
+        said(145).to_string(),
+        r"ENOTEMPTY, Directory not empty: \\?\C:\a\t '\\?\C:\a\t'"
+    );
+    // A lock violation is none of the four.
+    let unknown = said(33).to_string();
+    assert!(unknown.starts_with(", Unknown error: "), "{unknown}");
+    assert!(
+        unknown.ends_with(r" '\\?\C:\a\t'") && !unknown.contains("os error"),
+        "{unknown}"
+    );
 }
 
 #[test]

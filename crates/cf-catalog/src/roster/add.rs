@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use cf_base::js;
-use cf_base::json::js_order_fields;
+use cf_base::json::as_parsed_fields;
 use cf_base::refusal::Refusal;
 use cf_base::time::{iso, Clock};
 use cf_proto::agents::{AgentView, Harness};
@@ -20,15 +20,17 @@ impl Catalog {
     /// Adds the agent `input` defines to the file at `path`, and answers it
     /// as the page lists it. The time is read once, for both of its stamps.
     /// The request is read as `JSON.parse` handed it to Node, its keys in
-    /// JavaScript's order: a description is stored, and a name refused, as
-    /// Node wrote them.
+    /// JavaScript's order and its numbers JavaScript's: a description is
+    /// stored and answered, and a name refused, as Node wrote them.
     pub(crate) fn add(
         &self,
         path: &Path,
         input: &Map<String, Value>,
         clock: &mut dyn Clock,
     ) -> Result<AgentView, Refusal> {
-        let input = &js_order_fields(input.clone());
+        let mut input = input.clone();
+        as_parsed_fields(&mut input);
+        let input = &input;
         let (name, harness, model) = self.checked_new(input)?;
         validate_work_tier(input.get("workTier"))?;
         let mut document = load_document(path)?;

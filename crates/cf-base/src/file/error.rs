@@ -38,12 +38,14 @@ enum Said {
     /// call failed.
     Directory { path: PathBuf },
     /// What the C++ behind `rmSync` throws when the system refuses to remove
-    /// what is there: the code, the system's own words (`strerror`:
-    /// `Permission denied`) and the path twice. Node names the code from its
-    /// own table of the system's errnos, which may hold names libuv's does
-    /// not (`ESTALE`); those are said here as `UNKNOWN`. Probed on macOS
-    /// only; Linux and Windows may word it otherwise.
-    Removal { code: &'static str, path: PathBuf },
+    /// a file (`RmSync`, `src/node_file.cc` of Node 26.7.0, the Node the app
+    /// bundles): `<code>, <words> '<path>'`, its words a sentence of four it
+    /// knows, or `Unknown error` and the system's own with no code at all.
+    Removal {
+        code: &'static str,
+        words: String,
+        path: String,
+    },
 }
 
 impl FileError {
@@ -99,13 +101,14 @@ impl FileError {
 
     /// The system refused `rmSync` the removal of what is at `path`.
     pub(super) fn removal(source: io::Error, path: &Path) -> Self {
-        let code = error_code(&source);
+        let path = namespaced(path);
+        let (code, words) = match refused(&source) {
+            Some((code, sentence)) => (code, format!("{sentence}: {path}")),
+            None => ("", format!("Unknown error: {}", system_words(&source))),
+        };
         Self {
             source,
-            said: Said::Removal {
-                code,
-                path: path.to_path_buf(),
-            },
+            said: Said::Removal { code, words, path },
         }
     }
 
@@ -141,10 +144,7 @@ impl fmt::Display for FileError {
                 "Path is a directory: rm returned EISDIR (is a directory) {}",
                 path.display()
             ),
-            Said::Removal { code, path } => {
-                let path = path.display();
-                write!(f, "{code}, {}: {path} '{path}'", system_words(&self.source))
-            }
+            Said::Removal { code, words, path } => write!(f, "{code}, {words} '{path}'"),
         }
     }
 }
@@ -152,6 +152,71 @@ impl fmt::Display for FileError {
 impl Error for FileError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.source)
+    }
+}
+
+/// The code and the sentence `rmSync`'s C++ says a refusal of the removal
+/// in, for the four it knows, as the C++ library classes the system's
+/// error (`std::errc`); none for any other. On Unix the class is the errno.
+#[cfg(unix)]
+fn refused(error: &io::Error) -> Option<(&'static str, &'static str)> {
+    Some(match error.raw_os_error()? {
+        libc::EPERM => ("EPERM", "Operation not permitted"),
+        libc::ENOTEMPTY => ("ENOTEMPTY", "Directory not empty"),
+        libc::ENOTDIR => ("ENOTDIR", "Not a directory"),
+        libc::EACCES => ("EACCES", "Permission denied"),
+        _ => return None,
+    })
+}
+
+/// The code and the sentence of a refused removal on Windows. The Microsoft
+/// C++ library maps a Win32 code to its `std::errc` (`stl/src/syserror.cpp`),
+/// and none maps to `operation_not_permitted` or `not_a_directory`. Node
+/// says EPERM where it was denied there.
+#[cfg(windows)]
+fn refused(error: &io::Error) -> Option<(&'static str, &'static str)> {
+    use windows_sys::Win32::Foundation::{
+        ERROR_ACCESS_DENIED, ERROR_CANNOT_MAKE, ERROR_CURRENT_DIRECTORY, ERROR_DIR_NOT_EMPTY,
+        ERROR_INVALID_ACCESS, ERROR_NOACCESS, ERROR_SHARING_VIOLATION, ERROR_WRITE_PROTECT,
+    };
+    Some(match u32::try_from(error.raw_os_error()?).ok()? {
+        ERROR_ACCESS_DENIED
+        | ERROR_INVALID_ACCESS
+        | ERROR_CURRENT_DIRECTORY
+        | ERROR_WRITE_PROTECT
+        | ERROR_SHARING_VIOLATION
+        | ERROR_CANNOT_MAKE
+        | ERROR_NOACCESS => ("EPERM", "Permission denied"),
+        ERROR_DIR_NOT_EMPTY => ("ENOTEMPTY", "Directory not empty"),
+        _ => return None,
+    })
+}
+
+/// `path` as `rmSync`'s C++ names it: as it is on Unix; on Windows made
+/// whole (`ToNamespacedPath`): a drive's path after `\\?\`, a share's
+/// after `\\?\UNC\`.
+fn namespaced(path: &Path) -> String {
+    #[cfg(windows)]
+    {
+        let whole = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let whole = whole.to_string_lossy();
+        let bytes = whole.as_bytes();
+        if let Some(share) = whole.strip_prefix(r"\\") {
+            if !share.starts_with(['?', '.']) {
+                return format!(r"\\?\UNC\{share}");
+            }
+        } else if bytes.len() > 2
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && bytes[2] == b'\\'
+        {
+            return format!(r"\\?\{whole}");
+        }
+        whole.into_owned()
+    }
+    #[cfg(not(windows))]
+    {
+        path.display().to_string()
     }
 }
 

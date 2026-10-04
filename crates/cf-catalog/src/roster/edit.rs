@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use cf_base::js;
-use cf_base::json::js_order_fields;
+use cf_base::json::as_parsed_fields;
 use cf_base::refusal::Refusal;
 use cf_base::time::{iso, Clock};
 use cf_proto::agents::AgentView;
@@ -22,7 +22,7 @@ impl Catalog {
     /// Edits the agent named `name` in the file at `path` by `patch`, and
     /// answers it as the page lists it. The time is read after every
     /// refusal, once. The patch is read as `JSON.parse` handed it to Node,
-    /// its keys in JavaScript's order.
+    /// its keys in JavaScript's order and its numbers JavaScript's.
     pub(crate) fn edit(
         &self,
         path: &Path,
@@ -30,7 +30,9 @@ impl Catalog {
         patch: &Map<String, Value>,
         clock: &mut dyn Clock,
     ) -> Result<AgentView, Refusal> {
-        let patch = &js_order_fields(patch.clone());
+        let mut patch = patch.clone();
+        as_parsed_fields(&mut patch);
+        let patch = &patch;
         validate_work_tier(patch.get("workTier"))?;
         let mut document = load_document(path)?;
         let at = self.own_row(&document, name, || {

@@ -116,13 +116,12 @@ pub fn js_order(mut value: Value) -> Value {
     value
 }
 
-/// An object's `fields` in the order JavaScript enumerates them, and every
-/// object's within them: a request's body, read by serde_json in the order
-/// it was written, as `JSON.parse` would have handed it to Node.
-pub fn js_order_fields(mut fields: Map<String, Value>) -> Map<String, Value> {
-    in_enumeration_order(&mut fields);
-    fields.values_mut().for_each(order_keys);
-    fields
+/// A request's body, read by serde_json as it was written, made what
+/// `JSON.parse` would have handed Node, in place: every integer past 2^53
+/// the double it reads as, and every object's keys in JavaScript's order.
+pub fn as_parsed_fields(fields: &mut Map<String, Value>) {
+    in_enumeration_order(fields);
+    fields.values_mut().for_each(as_parsed);
 }
 
 fn order_keys(value: &mut Value) {
