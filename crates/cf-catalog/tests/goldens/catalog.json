@@ -1,0 +1,3933 @@
+{
+  "catalog": {
+    "devin": [
+      {
+        "name": "thoth",
+        "model": "claude-fable-5-1",
+        "effort": "max",
+        "description": "Devin Claude Fable 5.1 MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Devin account",
+          "workTier": "critical"
+        },
+        "preset": "thoth"
+      },
+      {
+        "name": "seshat",
+        "model": "claude-fable-5-1",
+        "effort": "xhigh",
+        "description": "Devin Claude Fable 5.1 XHIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "seshat"
+      },
+      {
+        "name": "maat",
+        "model": "claude-fable-5-1",
+        "effort": "high",
+        "description": "Devin Claude Fable 5.1 HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "maat"
+      },
+      {
+        "name": "khonsu",
+        "model": "claude-fable-5-1",
+        "effort": "medium",
+        "description": "Devin Claude Fable 5.1 MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "khonsu"
+      },
+      {
+        "name": "shu",
+        "model": "claude-fable-5-1",
+        "effort": "low",
+        "description": "Devin Claude Fable 5.1 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "shu"
+      },
+      {
+        "name": "osiris",
+        "model": "claude-opus-5-5",
+        "effort": "max",
+        "description": "Devin Claude Opus 5.5 MAX",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "critical"
+        },
+        "preset": "osiris"
+      },
+      {
+        "name": "isis",
+        "model": "claude-opus-5-5",
+        "effort": "xhigh",
+        "description": "Devin Claude Opus 5.5 XHIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "isis"
+      },
+      {
+        "name": "horus",
+        "model": "claude-opus-5-5",
+        "effort": "high",
+        "description": "Devin Claude Opus 5.5 HIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "horus"
+      },
+      {
+        "name": "anubis",
+        "model": "claude-opus-5-5",
+        "effort": "medium",
+        "description": "Devin Claude Opus 5.5 MEDIUM",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "anubis"
+      },
+      {
+        "name": "ptah",
+        "model": "claude-sonnet-5-5",
+        "effort": "max",
+        "description": "Devin Claude Sonnet 5.5 MAX",
+        "detail": "Everyday implementation and tests.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "ptah"
+      },
+      {
+        "name": "sekhmet",
+        "model": "claude-sonnet-5-5",
+        "effort": "xhigh",
+        "description": "Devin Claude Sonnet 5.5 XHIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "sekhmet"
+      },
+      {
+        "name": "bastet",
+        "model": "claude-sonnet-5-5",
+        "effort": "medium",
+        "description": "Devin Claude Sonnet 5.5 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "bastet"
+      },
+      {
+        "name": "amun",
+        "model": "gpt-6-astra",
+        "effort": "max",
+        "description": "Devin GPT 6 Astra MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Devin account",
+          "workTier": "critical"
+        },
+        "preset": "amun"
+      },
+      {
+        "name": "aten",
+        "model": "gpt-6-astra",
+        "effort": "xhigh",
+        "description": "Devin GPT 6 Astra XHIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "aten"
+      },
+      {
+        "name": "hathor",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "description": "Devin GPT 6 Astra HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "hathor"
+      },
+      {
+        "name": "nut",
+        "model": "gpt-6-astra",
+        "effort": "medium",
+        "description": "Devin GPT 6 Astra MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "nut"
+      },
+      {
+        "name": "geb",
+        "model": "gpt-6-astra",
+        "effort": "low",
+        "description": "Devin GPT 6 Astra LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "geb"
+      },
+      {
+        "name": "ra",
+        "model": "gpt-6-1-sol",
+        "effort": "max",
+        "description": "Devin GPT 6.1 Sol MAX",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "ra"
+      },
+      {
+        "name": "khepri",
+        "model": "gpt-6-1-sol",
+        "effort": "xhigh",
+        "description": "Devin GPT 6.1 Sol XHIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "khepri"
+      },
+      {
+        "name": "atum",
+        "model": "gpt-6-1-sol",
+        "effort": "high",
+        "description": "Devin GPT 6.1 Sol HIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "atum"
+      },
+      {
+        "name": "tefnut",
+        "model": "gpt-6-1-sol",
+        "effort": "medium",
+        "description": "Devin GPT 6.1 Sol MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "tefnut"
+      },
+      {
+        "name": "nephthys",
+        "model": "gpt-6-1-sol",
+        "effort": "low",
+        "description": "Devin GPT 6.1 Sol LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nephthys"
+      },
+      {
+        "name": "sobek",
+        "model": "swe-2",
+        "effort": "max",
+        "description": "Devin SWE-2 MAX",
+        "detail": "Devin’s own model at its deepest: hard problems and reviews.",
+        "profile": {
+          "modelKey": "swe-2",
+          "modelLabel": "SWE-2",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "sobek"
+      },
+      {
+        "name": "neith",
+        "model": "swe-2",
+        "effort": "high",
+        "description": "Devin SWE-2 HIGH",
+        "detail": "Devin’s own model: demanding implementation and reviews.",
+        "profile": {
+          "modelKey": "swe-2",
+          "modelLabel": "SWE-2",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "neith"
+      },
+      {
+        "name": "wadjet",
+        "model": "swe-2",
+        "effort": "medium",
+        "description": "Devin SWE-2 MEDIUM",
+        "detail": "Devin’s own model: everyday implementation and tests.",
+        "profile": {
+          "modelKey": "swe-2",
+          "modelLabel": "SWE-2",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "wadjet"
+      },
+      {
+        "name": "hapi",
+        "model": "swe-1-6",
+        "description": "Devin SWE-1.6",
+        "detail": "Devin’s own SWE-1.6: everyday implementation and tests.",
+        "profile": {
+          "modelKey": "swe-1-6",
+          "modelLabel": "SWE-1.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "hapi"
+      },
+      {
+        "name": "khnum",
+        "model": "swe-1-6-slow",
+        "description": "Devin SWE-1.6 Slow",
+        "detail": "Devin’s own SWE-1.6 Slow: everyday implementation and tests.",
+        "profile": {
+          "modelKey": "swe-1-6-slow",
+          "modelLabel": "SWE-1.6 Slow",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "khnum"
+      }
+    ],
+    "codex": [
+      {
+        "name": "hemera",
+        "model": "gpt-6.1-sol",
+        "effort": "low",
+        "description": "Codex GPT 6.1 Sol LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "hemera"
+      },
+      {
+        "name": "phaethon",
+        "model": "gpt-6.1-sol",
+        "effort": "medium",
+        "description": "Codex GPT 6.1 Sol MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "phaethon"
+      },
+      {
+        "name": "electra",
+        "model": "gpt-6-astra",
+        "effort": "low",
+        "description": "Codex GPT 6 Astra LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "electra"
+      },
+      {
+        "name": "maia",
+        "model": "gpt-6-astra",
+        "effort": "medium",
+        "description": "Codex GPT 6 Astra MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex login",
+          "workTier": "standard"
+        },
+        "preset": "maia"
+      },
+      {
+        "name": "hyperion",
+        "model": "gpt-6.1-sol",
+        "effort": "max",
+        "description": "Codex GPT 6.1 Sol MAX",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex login",
+          "workTier": "complex"
+        },
+        "preset": "hyperion"
+      },
+      {
+        "name": "phoebus",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh",
+        "description": "Codex GPT 6.1 Sol XHIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex login",
+          "workTier": "standard"
+        },
+        "preset": "phoebus"
+      },
+      {
+        "name": "theia",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "description": "Codex GPT 6.1 Sol HIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex login",
+          "workTier": "standard"
+        },
+        "preset": "theia"
+      },
+      {
+        "name": "gaia",
+        "model": "gpt-5.6-terra",
+        "effort": "xhigh",
+        "description": "Codex GPT 5.6 Terra XHIGH",
+        "detail": "Everyday implementation and tests.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "gaia"
+      },
+      {
+        "name": "tellus",
+        "model": "gpt-5.6-terra",
+        "effort": "max",
+        "description": "Codex GPT 5.6 Terra MAX",
+        "detail": "Everyday implementation and tests.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "tellus"
+      },
+      {
+        "name": "diana",
+        "model": "gpt-5.6-luna",
+        "effort": "xhigh",
+        "description": "Codex GPT 5.6 Luna XHIGH",
+        "detail": "Small fixes and focused coding tasks.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "diana"
+      },
+      {
+        "name": "cynthia",
+        "model": "gpt-5.6-luna",
+        "effort": "max",
+        "description": "Codex GPT 5.6 Luna MAX",
+        "detail": "Small fixes and focused coding tasks.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "cynthia"
+      },
+      {
+        "name": "astraeus",
+        "model": "gpt-6-astra",
+        "effort": "max",
+        "description": "Codex GPT 6 Astra MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex login",
+          "workTier": "critical"
+        },
+        "preset": "astraeus"
+      },
+      {
+        "name": "asteria",
+        "model": "gpt-6-astra",
+        "effort": "xhigh",
+        "description": "Codex GPT 6 Astra XHIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex login",
+          "workTier": "complex"
+        },
+        "preset": "asteria"
+      },
+      {
+        "name": "celaeno",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "description": "Codex GPT 6 Astra HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex login",
+          "workTier": "complex"
+        },
+        "preset": "celaeno"
+      },
+      {
+        "name": "pygmalion",
+        "designer": true,
+        "model": "codex-image",
+        "description": "Codex Images (via Codex login)",
+        "detail": "Generate illustrations and edit reference images through your existing Codex login.",
+        "profile": {
+          "modelKey": "codex-image",
+          "modelLabel": "Codex Images",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "pygmalion"
+      }
+    ],
+    "pi": [
+      {
+        "name": "leto",
+        "model": "openai-codex/gpt-6.1-sol",
+        "effort": "low",
+        "description": "Pi GPT 6.1 Sol LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex subscription",
+          "workTier": "light"
+        },
+        "preset": "leto"
+      },
+      {
+        "name": "asterope",
+        "model": "openai-codex/gpt-6.1-sol",
+        "effort": "medium",
+        "description": "Pi GPT 6.1 Sol MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex subscription",
+          "workTier": "light"
+        },
+        "preset": "asterope"
+      },
+      {
+        "name": "alcyone",
+        "model": "openai-codex/gpt-6-astra",
+        "effort": "low",
+        "description": "Pi GPT 6 Astra LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex subscription",
+          "workTier": "light"
+        },
+        "preset": "alcyone"
+      },
+      {
+        "name": "merope",
+        "model": "openai-codex/gpt-6-astra",
+        "effort": "medium",
+        "description": "Pi GPT 6 Astra MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex subscription",
+          "workTier": "standard"
+        },
+        "preset": "merope"
+      },
+      {
+        "name": "musaeus",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "low",
+        "description": "Pi Fable 5.1 LOW (OpenRouter API)",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "musaeus"
+      },
+      {
+        "name": "phosphoros",
+        "model": "openai-codex/gpt-6-astra",
+        "effort": "max",
+        "description": "Pi GPT 6 Astra MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex subscription",
+          "workTier": "critical"
+        },
+        "preset": "phosphoros"
+      },
+      {
+        "name": "hesperos",
+        "model": "openai-codex/gpt-6-astra",
+        "effort": "xhigh",
+        "description": "Pi GPT 6 Astra XHIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex subscription",
+          "workTier": "complex"
+        },
+        "preset": "hesperos"
+      },
+      {
+        "name": "taygete",
+        "model": "openai-codex/gpt-6-astra",
+        "effort": "high",
+        "description": "Pi GPT 6 Astra HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex subscription",
+          "workTier": "complex"
+        },
+        "preset": "taygete"
+      },
+      {
+        "name": "aether",
+        "model": "openai-codex/gpt-6.1-sol",
+        "effort": "xhigh",
+        "description": "Pi GPT 6.1 Sol XHIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex subscription",
+          "workTier": "standard"
+        },
+        "preset": "aether"
+      },
+      {
+        "name": "aurora",
+        "model": "openai-codex/gpt-6.1-sol",
+        "effort": "high",
+        "description": "Pi GPT 6.1 Sol HIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex subscription",
+          "workTier": "standard"
+        },
+        "preset": "aurora"
+      },
+      {
+        "name": "rhea",
+        "model": "openai-codex/gpt-5.6-terra",
+        "effort": "xhigh",
+        "description": "Pi GPT 5.6 Terra XHIGH",
+        "detail": "Everyday implementation and tests.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Codex subscription",
+          "workTier": "light"
+        },
+        "preset": "rhea"
+      },
+      {
+        "name": "phoebe",
+        "model": "openai-codex/gpt-5.6-luna",
+        "effort": "xhigh",
+        "description": "Pi GPT 5.6 Luna XHIGH",
+        "detail": "Small fixes and focused coding tasks.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Codex subscription",
+          "workTier": "light"
+        },
+        "preset": "phoebe"
+      },
+      {
+        "name": "orpheus",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "xhigh",
+        "description": "Pi Fable 5.1 XHIGH (OpenRouter API)",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "orpheus"
+      },
+      {
+        "name": "linus",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "high",
+        "description": "Pi Fable 5.1 HIGH (OpenRouter API)",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "linus"
+      },
+      {
+        "name": "erato",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "medium",
+        "description": "Pi Fable 5.1 MEDIUM (OpenRouter API)",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "standard"
+        },
+        "preset": "erato"
+      },
+      {
+        "name": "kronos",
+        "model": "openrouter/anthropic/claude-opus-5.5",
+        "effort": "xhigh",
+        "description": "Pi Opus 5.5 XHIGH (OpenRouter API)",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "kronos"
+      },
+      {
+        "name": "iapetus",
+        "model": "openrouter/anthropic/claude-opus-5.5",
+        "effort": "high",
+        "description": "Pi Opus 5.5 HIGH (OpenRouter API)",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "iapetus"
+      },
+      {
+        "name": "atlas",
+        "model": "openrouter/anthropic/claude-opus-5.5",
+        "effort": "medium",
+        "description": "Pi Opus 5.5 MEDIUM (OpenRouter API)",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "atlas"
+      },
+      {
+        "name": "nike",
+        "model": "openrouter/google/gemini-3.8-flash",
+        "effort": "high",
+        "description": "Pi Gemini 3.8 Flash HIGH (fast)",
+        "detail": "Routine coding and second opinions.",
+        "profile": {
+          "modelKey": "gemini-3.8-flash",
+          "modelLabel": "Gemini 3.8 Flash",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "nike"
+      },
+      {
+        "name": "zephyros",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "effort": "max",
+        "description": "Pi DeepSeek V4.1 Flash MAX (fast)",
+        "detail": "Routine coding and second opinions.",
+        "profile": {
+          "modelKey": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "zephyros"
+      },
+      {
+        "name": "hades",
+        "model": "openrouter/deepseek/deepseek-v4-pro-0813",
+        "effort": "max",
+        "description": "Pi DeepSeek V4 Pro MAX",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "deepseek-v4-pro-0813",
+          "modelLabel": "DeepSeek V4 Pro (0813)",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "hades"
+      },
+      {
+        "name": "ares",
+        "model": "openrouter/x-ai/grok-4.7",
+        "effort": "xhigh",
+        "description": "Pi Grok 4.7 XHIGH",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "grok-4.7",
+          "modelLabel": "Grok 4.7",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "ares"
+      },
+      {
+        "name": "hephaestus",
+        "model": "openrouter/qwen/qwen3.8-max",
+        "effort": "xhigh",
+        "description": "Pi Qwen3.8 Max XHIGH",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "qwen3.8-max",
+          "modelLabel": "Qwen 3.8 Max",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "hephaestus"
+      },
+      {
+        "name": "athena",
+        "model": "openrouter/qwen/qwen3.8-27b",
+        "effort": "xhigh",
+        "description": "Pi Qwen3.8 27B XHIGH",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "qwen3.8-27b",
+          "modelLabel": "Qwen 3.8 27B",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "athena"
+      },
+      {
+        "name": "metis",
+        "model": "openrouter/minimax/minimax-m3",
+        "description": "Pi MiniMax M3",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "minimax-m3",
+          "modelLabel": "MiniMax M3",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "metis"
+      },
+      {
+        "name": "selene",
+        "model": "openrouter/xiaomi/mimo-v2.6-pro",
+        "description": "Pi MiMo V2.6 Pro",
+        "detail": "Everyday coding and agent tasks at a low price.",
+        "profile": {
+          "modelKey": "mimo-v2.6-pro",
+          "modelLabel": "MiMo V2.6 Pro",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "selene"
+      },
+      {
+        "name": "prometheus",
+        "model": "openrouter/z-ai/glm-5.3",
+        "effort": "max",
+        "description": "Pi GLM 5.3 MAX",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "glm-5.3",
+          "modelLabel": "GLM 5.3",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "prometheus"
+      },
+      {
+        "name": "endymion",
+        "model": "openrouter/moonshotai/kimi-k3",
+        "effort": "max",
+        "description": "Pi Kimi K3 MAX",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "kimi-k3",
+          "modelLabel": "Kimi K3",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "endymion"
+      },
+      {
+        "name": "nyx",
+        "model": "openrouter/z-ai/glm-5.3-flash",
+        "effort": "max",
+        "description": "Pi GLM 5.3 Flash MAX",
+        "detail": "Routine coding and second opinions.",
+        "profile": {
+          "modelKey": "glm-5.3-flash",
+          "modelLabel": "GLM 5.3 Flash",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "nyx"
+      },
+      {
+        "name": "oceanus",
+        "model": "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+        "effort": "high",
+        "description": "Pi Nemotron 3 Ultra 550B FREE HIGH",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "nemotron-3-ultra-550b-a55b:free",
+          "modelLabel": "Nemotron 3 Ultra (free)",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "oceanus"
+      },
+      {
+        "name": "triton",
+        "model": "openrouter/poolside/laguna-s-2.1:free",
+        "description": "Pi Laguna S 2.1 FREE",
+        "detail": "Code changes and repository tasks.",
+        "profile": {
+          "modelKey": "laguna-s-2.1:free",
+          "modelLabel": "Laguna S 2.1 (free)",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "triton"
+      },
+      {
+        "name": "eos",
+        "model": "openrouter/meta/muse-spark-1.3",
+        "effort": "xhigh",
+        "description": "Pi Muse Spark 1.3 XHIGH",
+        "detail": "Collaborative coding and task breakdown.",
+        "profile": {
+          "modelKey": "muse-spark-1.3",
+          "modelLabel": "Muse Spark 1.3",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "eos"
+      }
+    ],
+    "opencode": [
+      {
+        "name": "arvakr",
+        "model": "openrouter/openai/gpt-6.1-sol",
+        "effort": "low",
+        "description": "OpenCode GPT 6.1 Sol LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "arvakr"
+      },
+      {
+        "name": "alsvidr",
+        "model": "openrouter/openai/gpt-6.1-sol",
+        "effort": "medium",
+        "description": "OpenCode GPT 6.1 Sol MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "alsvidr"
+      },
+      {
+        "name": "dagr",
+        "model": "openrouter/openai/gpt-6-astra",
+        "effort": "low",
+        "description": "OpenCode GPT 6 Astra LOW (OpenRouter API)",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "dagr"
+      },
+      {
+        "name": "skirnir",
+        "model": "openrouter/openai/gpt-6-astra",
+        "effort": "medium",
+        "description": "OpenCode GPT 6 Astra MEDIUM (OpenRouter API)",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "standard"
+        },
+        "preset": "skirnir"
+      },
+      {
+        "name": "suttung",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "low",
+        "description": "OpenCode Fable 5.1 LOW (OpenRouter API)",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "suttung"
+      },
+      {
+        "name": "aurvandil",
+        "model": "openrouter/openai/gpt-6-astra",
+        "effort": "max",
+        "description": "OpenCode GPT 6 Astra MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "critical"
+        },
+        "preset": "aurvandil"
+      },
+      {
+        "name": "delling",
+        "model": "openrouter/openai/gpt-6-astra",
+        "effort": "xhigh",
+        "description": "OpenCode GPT 6 Astra XHIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "delling"
+      },
+      {
+        "name": "vidar",
+        "model": "openrouter/openai/gpt-6-astra",
+        "effort": "high",
+        "description": "OpenCode GPT 6 Astra HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "vidar"
+      },
+      {
+        "name": "sunna",
+        "model": "openrouter/openai/gpt-6.1-sol",
+        "effort": "xhigh",
+        "description": "OpenCode GPT 6.1 Sol XHIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "standard"
+        },
+        "preset": "sunna"
+      },
+      {
+        "name": "skinfaxi",
+        "model": "openrouter/openai/gpt-6.1-sol",
+        "effort": "high",
+        "description": "OpenCode GPT 6.1 Sol HIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "standard"
+        },
+        "preset": "skinfaxi"
+      },
+      {
+        "name": "jord",
+        "model": "openrouter/openai/gpt-5.6-terra",
+        "effort": "xhigh",
+        "description": "OpenCode GPT 5.6 Terra XHIGH",
+        "detail": "Everyday implementation and tests.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "jord"
+      },
+      {
+        "name": "bil",
+        "model": "openrouter/openai/gpt-5.6-luna",
+        "effort": "xhigh",
+        "description": "OpenCode GPT 5.6 Luna XHIGH",
+        "detail": "Small fixes and focused coding tasks.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "bil"
+      },
+      {
+        "name": "saga",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "xhigh",
+        "description": "OpenCode Fable 5.1 XHIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "saga"
+      },
+      {
+        "name": "gunnlod",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "high",
+        "description": "OpenCode Fable 5.1 HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "gunnlod"
+      },
+      {
+        "name": "kvasir",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "medium",
+        "description": "OpenCode Fable 5.1 MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "standard"
+        },
+        "preset": "kvasir"
+      },
+      {
+        "name": "baldr",
+        "model": "openrouter/anthropic/claude-opus-5.5",
+        "effort": "xhigh",
+        "description": "OpenCode Opus 5.5 XHIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "baldr"
+      },
+      {
+        "name": "hodr",
+        "model": "openrouter/anthropic/claude-opus-5.5",
+        "effort": "high",
+        "description": "OpenCode Opus 5.5 HIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "hodr"
+      },
+      {
+        "name": "vali",
+        "model": "openrouter/anthropic/claude-opus-5.5",
+        "effort": "medium",
+        "description": "OpenCode Opus 5.5 MEDIUM",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "vali"
+      },
+      {
+        "name": "freya",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "effort": "max",
+        "description": "OpenCode DeepSeek V4.1 Flash MAX (fast)",
+        "detail": "Routine coding and second opinions.",
+        "profile": {
+          "modelKey": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "freya"
+      },
+      {
+        "name": "sif",
+        "model": "openrouter/google/gemini-3.8-flash",
+        "effort": "high",
+        "description": "OpenCode Gemini 3.8 Flash HIGH (fast)",
+        "detail": "Routine coding and second opinions.",
+        "profile": {
+          "modelKey": "gemini-3.8-flash",
+          "modelLabel": "Gemini 3.8 Flash",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "sif"
+      },
+      {
+        "name": "odin",
+        "model": "openrouter/deepseek/deepseek-v4-pro-0813",
+        "effort": "max",
+        "description": "OpenCode DeepSeek V4 Pro MAX",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "deepseek-v4-pro-0813",
+          "modelLabel": "DeepSeek V4 Pro (0813)",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "odin"
+      },
+      {
+        "name": "thor",
+        "model": "openrouter/x-ai/grok-4.7",
+        "effort": "xhigh",
+        "description": "OpenCode Grok 4.7 XHIGH",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "grok-4.7",
+          "modelLabel": "Grok 4.7",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "thor"
+      },
+      {
+        "name": "tyr",
+        "model": "openrouter/qwen/qwen3.8-max",
+        "effort": "xhigh",
+        "description": "OpenCode Qwen3.8 Max XHIGH",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "qwen3.8-max",
+          "modelLabel": "Qwen 3.8 Max",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "tyr"
+      },
+      {
+        "name": "bragi",
+        "model": "openrouter/qwen/qwen3.8-27b",
+        "effort": "xhigh",
+        "description": "OpenCode Qwen3.8 27B XHIGH",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "qwen3.8-27b",
+          "modelLabel": "Qwen 3.8 27B",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "bragi"
+      },
+      {
+        "name": "mimir",
+        "model": "openrouter/minimax/minimax-m3",
+        "description": "OpenCode MiniMax M3",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "minimax-m3",
+          "modelLabel": "MiniMax M3",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "mimir"
+      },
+      {
+        "name": "idun",
+        "model": "openrouter/xiaomi/mimo-v2.6-pro",
+        "description": "OpenCode MiMo V2.6 Pro",
+        "detail": "Everyday coding and agent tasks at a low price.",
+        "profile": {
+          "modelKey": "mimo-v2.6-pro",
+          "modelLabel": "MiMo V2.6 Pro",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "idun"
+      },
+      {
+        "name": "mani",
+        "model": "openrouter/moonshotai/kimi-k3",
+        "effort": "max",
+        "description": "OpenCode Kimi K3 MAX",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "kimi-k3",
+          "modelLabel": "Kimi K3",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "mani"
+      },
+      {
+        "name": "nott",
+        "model": "openrouter/z-ai/glm-5.3-flash",
+        "effort": "max",
+        "description": "OpenCode GLM 5.3 Flash MAX",
+        "detail": "Routine coding and second opinions.",
+        "profile": {
+          "modelKey": "glm-5.3-flash",
+          "modelLabel": "GLM 5.3 Flash",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "nott"
+      },
+      {
+        "name": "ymir",
+        "model": "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+        "effort": "high",
+        "description": "OpenCode Nemotron 3 Ultra 550B FREE HIGH",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "nemotron-3-ultra-550b-a55b:free",
+          "modelLabel": "Nemotron 3 Ultra (free)",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "ymir"
+      },
+      {
+        "name": "aegir",
+        "model": "openrouter/poolside/laguna-s-2.1:free",
+        "description": "OpenCode Laguna S 2.1 FREE",
+        "detail": "Code changes and repository tasks.",
+        "profile": {
+          "modelKey": "laguna-s-2.1:free",
+          "modelLabel": "Laguna S 2.1 (free)",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "aegir"
+      },
+      {
+        "name": "logi",
+        "model": "openrouter/meta/muse-spark-1.3",
+        "effort": "xhigh",
+        "description": "OpenCode Muse Spark 1.3 XHIGH",
+        "detail": "Collaborative coding and task breakdown.",
+        "profile": {
+          "modelKey": "muse-spark-1.3",
+          "modelLabel": "Muse Spark 1.3",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "logi"
+      },
+      {
+        "name": "audhumla",
+        "model": "opencode/nemotron-3-ultra-free",
+        "description": "OpenCode Zen Nemotron 3 Ultra 550B FREE",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "nemotron-3-ultra-free",
+          "modelLabel": "Nemotron 3 Ultra (Zen free)",
+          "routeLabel": "OpenCode Zen",
+          "workTier": "light"
+        },
+        "preset": "audhumla"
+      },
+      {
+        "name": "gefjon",
+        "model": "opencode/muse-spark-1.3-contributor-free",
+        "effort": "xhigh",
+        "description": "OpenCode Zen Muse Spark 1.3 Contributor FREE XHIGH",
+        "detail": "Collaborative coding and task breakdown.",
+        "profile": {
+          "modelKey": "muse-spark-1.3",
+          "modelLabel": "Muse Spark 1.3",
+          "routeLabel": "OpenCode Zen · Contributor · Free",
+          "routeNote": "Prompts and replies may train Meta models.",
+          "workTier": "light"
+        },
+        "preset": "gefjon"
+      }
+    ],
+    "claude": [
+      {
+        "name": "terpsichore",
+        "model": "claude-fable-5-1",
+        "effort": "low",
+        "description": "Claude Code Fable 5.1 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Claude Code account",
+          "workTier": "light"
+        },
+        "preset": "terpsichore"
+      },
+      {
+        "name": "calliope",
+        "model": "claude-fable-5-1",
+        "effort": "max",
+        "description": "Claude Code Fable 5.1 MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Claude Code account",
+          "workTier": "critical"
+        },
+        "preset": "calliope"
+      },
+      {
+        "name": "clio",
+        "model": "claude-fable-5-1",
+        "effort": "xhigh",
+        "description": "Claude Code Fable 5.1 XHIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Claude Code account",
+          "workTier": "complex"
+        },
+        "preset": "clio"
+      },
+      {
+        "name": "euterpe",
+        "model": "claude-fable-5-1",
+        "effort": "high",
+        "description": "Claude Code Fable 5.1 HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Claude Code account",
+          "workTier": "complex"
+        },
+        "preset": "euterpe"
+      },
+      {
+        "name": "thalia",
+        "model": "claude-fable-5-1",
+        "effort": "medium",
+        "description": "Claude Code Fable 5.1 MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Claude Code account",
+          "workTier": "standard"
+        },
+        "preset": "thalia"
+      },
+      {
+        "name": "zeus",
+        "model": "claude-opus-5-5",
+        "effort": "max",
+        "description": "Claude Code Opus 5.5 MAX",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "critical"
+        },
+        "preset": "zeus"
+      },
+      {
+        "name": "apollo",
+        "model": "claude-opus-5-5",
+        "effort": "xhigh",
+        "description": "Claude Code Opus 5.5 XHIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "complex"
+        },
+        "preset": "apollo"
+      },
+      {
+        "name": "poseidon",
+        "model": "claude-opus-5-5",
+        "effort": "high",
+        "description": "Claude Code Opus 5.5 HIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "complex"
+        },
+        "preset": "poseidon"
+      },
+      {
+        "name": "artemis",
+        "model": "claude-opus-5-5",
+        "effort": "medium",
+        "description": "Claude Code Opus 5.5 MEDIUM",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "complex"
+        },
+        "preset": "artemis"
+      },
+      {
+        "name": "hermod",
+        "model": "claude-sonnet-5-5",
+        "effort": "max",
+        "description": "Claude Code Sonnet 5.5 MAX",
+        "detail": "Everyday implementation and tests.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "complex"
+        },
+        "preset": "hermod"
+      },
+      {
+        "name": "forseti",
+        "model": "claude-sonnet-5-5",
+        "effort": "xhigh",
+        "description": "Claude Code Sonnet 5.5 XHIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "standard"
+        },
+        "preset": "forseti"
+      },
+      {
+        "name": "ullr",
+        "model": "claude-sonnet-5-5",
+        "effort": "medium",
+        "description": "Claude Code Sonnet 5.5 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "standard"
+        },
+        "preset": "ullr"
+      }
+    ]
+  },
+  "entries": [
+    {
+      "name": "thoth",
+      "entry": {
+        "name": "thoth",
+        "model": "claude-fable-5-1",
+        "effort": "max",
+        "description": "Devin Claude Fable 5.1 MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Devin account",
+          "workTier": "critical"
+        },
+        "preset": "thoth",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "seshat",
+      "entry": {
+        "name": "seshat",
+        "model": "claude-fable-5-1",
+        "effort": "xhigh",
+        "description": "Devin Claude Fable 5.1 XHIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "seshat",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "maat",
+      "entry": {
+        "name": "maat",
+        "model": "claude-fable-5-1",
+        "effort": "high",
+        "description": "Devin Claude Fable 5.1 HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "maat",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "khonsu",
+      "entry": {
+        "name": "khonsu",
+        "model": "claude-fable-5-1",
+        "effort": "medium",
+        "description": "Devin Claude Fable 5.1 MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "khonsu",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "shu",
+      "entry": {
+        "name": "shu",
+        "model": "claude-fable-5-1",
+        "effort": "low",
+        "description": "Devin Claude Fable 5.1 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "shu",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "osiris",
+      "entry": {
+        "name": "osiris",
+        "model": "claude-opus-5-5",
+        "effort": "max",
+        "description": "Devin Claude Opus 5.5 MAX",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "critical"
+        },
+        "preset": "osiris",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "isis",
+      "entry": {
+        "name": "isis",
+        "model": "claude-opus-5-5",
+        "effort": "xhigh",
+        "description": "Devin Claude Opus 5.5 XHIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "isis",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "horus",
+      "entry": {
+        "name": "horus",
+        "model": "claude-opus-5-5",
+        "effort": "high",
+        "description": "Devin Claude Opus 5.5 HIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "horus",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "anubis",
+      "entry": {
+        "name": "anubis",
+        "model": "claude-opus-5-5",
+        "effort": "medium",
+        "description": "Devin Claude Opus 5.5 MEDIUM",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "anubis",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "ptah",
+      "entry": {
+        "name": "ptah",
+        "model": "claude-sonnet-5-5",
+        "effort": "max",
+        "description": "Devin Claude Sonnet 5.5 MAX",
+        "detail": "Everyday implementation and tests.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "ptah",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "sekhmet",
+      "entry": {
+        "name": "sekhmet",
+        "model": "claude-sonnet-5-5",
+        "effort": "xhigh",
+        "description": "Devin Claude Sonnet 5.5 XHIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "sekhmet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "bastet",
+      "entry": {
+        "name": "bastet",
+        "model": "claude-sonnet-5-5",
+        "effort": "medium",
+        "description": "Devin Claude Sonnet 5.5 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "bastet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "amun",
+      "entry": {
+        "name": "amun",
+        "model": "gpt-6-astra",
+        "effort": "max",
+        "description": "Devin GPT 6 Astra MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Devin account",
+          "workTier": "critical"
+        },
+        "preset": "amun",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "aten",
+      "entry": {
+        "name": "aten",
+        "model": "gpt-6-astra",
+        "effort": "xhigh",
+        "description": "Devin GPT 6 Astra XHIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "aten",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "hathor",
+      "entry": {
+        "name": "hathor",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "description": "Devin GPT 6 Astra HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "hathor",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "nut",
+      "entry": {
+        "name": "nut",
+        "model": "gpt-6-astra",
+        "effort": "medium",
+        "description": "Devin GPT 6 Astra MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "nut",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "geb",
+      "entry": {
+        "name": "geb",
+        "model": "gpt-6-astra",
+        "effort": "low",
+        "description": "Devin GPT 6 Astra LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "geb",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "ra",
+      "entry": {
+        "name": "ra",
+        "model": "gpt-6-1-sol",
+        "effort": "max",
+        "description": "Devin GPT 6.1 Sol MAX",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "complex"
+        },
+        "preset": "ra",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "khepri",
+      "entry": {
+        "name": "khepri",
+        "model": "gpt-6-1-sol",
+        "effort": "xhigh",
+        "description": "Devin GPT 6.1 Sol XHIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "khepri",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "atum",
+      "entry": {
+        "name": "atum",
+        "model": "gpt-6-1-sol",
+        "effort": "high",
+        "description": "Devin GPT 6.1 Sol HIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "standard"
+        },
+        "preset": "atum",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "tefnut",
+      "entry": {
+        "name": "tefnut",
+        "model": "gpt-6-1-sol",
+        "effort": "medium",
+        "description": "Devin GPT 6.1 Sol MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "tefnut",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "nephthys",
+      "entry": {
+        "name": "nephthys",
+        "model": "gpt-6-1-sol",
+        "effort": "low",
+        "description": "Devin GPT 6.1 Sol LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "nephthys",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "sobek",
+      "entry": {
+        "name": "sobek",
+        "model": "swe-2",
+        "effort": "max",
+        "description": "Devin SWE-2 MAX",
+        "detail": "Devin’s own model at its deepest: hard problems and reviews.",
+        "profile": {
+          "modelKey": "swe-2",
+          "modelLabel": "SWE-2",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "sobek",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "neith",
+      "entry": {
+        "name": "neith",
+        "model": "swe-2",
+        "effort": "high",
+        "description": "Devin SWE-2 HIGH",
+        "detail": "Devin’s own model: demanding implementation and reviews.",
+        "profile": {
+          "modelKey": "swe-2",
+          "modelLabel": "SWE-2",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "neith",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "wadjet",
+      "entry": {
+        "name": "wadjet",
+        "model": "swe-2",
+        "effort": "medium",
+        "description": "Devin SWE-2 MEDIUM",
+        "detail": "Devin’s own model: everyday implementation and tests.",
+        "profile": {
+          "modelKey": "swe-2",
+          "modelLabel": "SWE-2",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "wadjet",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "hapi",
+      "entry": {
+        "name": "hapi",
+        "model": "swe-1-6",
+        "description": "Devin SWE-1.6",
+        "detail": "Devin’s own SWE-1.6: everyday implementation and tests.",
+        "profile": {
+          "modelKey": "swe-1-6",
+          "modelLabel": "SWE-1.6",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "hapi",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "khnum",
+      "entry": {
+        "name": "khnum",
+        "model": "swe-1-6-slow",
+        "description": "Devin SWE-1.6 Slow",
+        "detail": "Devin’s own SWE-1.6 Slow: everyday implementation and tests.",
+        "profile": {
+          "modelKey": "swe-1-6-slow",
+          "modelLabel": "SWE-1.6 Slow",
+          "routeLabel": "Devin account",
+          "workTier": "light"
+        },
+        "preset": "khnum",
+        "harness": "devin"
+      }
+    },
+    {
+      "name": "hemera",
+      "entry": {
+        "name": "hemera",
+        "model": "gpt-6.1-sol",
+        "effort": "low",
+        "description": "Codex GPT 6.1 Sol LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "hemera",
+        "harness": "codex"
+      }
+    },
+    {
+      "name": "phaethon",
+      "entry": {
+        "name": "phaethon",
+        "model": "gpt-6.1-sol",
+        "effort": "medium",
+        "description": "Codex GPT 6.1 Sol MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "phaethon",
+        "harness": "codex"
+      }
+    },
+    {
+      "name": "leto",
+      "entry": {
+        "name": "leto",
+        "model": "openai-codex/gpt-6.1-sol",
+        "effort": "low",
+        "description": "Pi GPT 6.1 Sol LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex subscription",
+          "workTier": "light"
+        },
+        "preset": "leto",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "asterope",
+      "entry": {
+        "name": "asterope",
+        "model": "openai-codex/gpt-6.1-sol",
+        "effort": "medium",
+        "description": "Pi GPT 6.1 Sol MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex subscription",
+          "workTier": "light"
+        },
+        "preset": "asterope",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "arvakr",
+      "entry": {
+        "name": "arvakr",
+        "model": "openrouter/openai/gpt-6.1-sol",
+        "effort": "low",
+        "description": "OpenCode GPT 6.1 Sol LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "arvakr",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "alsvidr",
+      "entry": {
+        "name": "alsvidr",
+        "model": "openrouter/openai/gpt-6.1-sol",
+        "effort": "medium",
+        "description": "OpenCode GPT 6.1 Sol MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "alsvidr",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "electra",
+      "entry": {
+        "name": "electra",
+        "model": "gpt-6-astra",
+        "effort": "low",
+        "description": "Codex GPT 6 Astra LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "electra",
+        "harness": "codex"
+      }
+    },
+    {
+      "name": "maia",
+      "entry": {
+        "name": "maia",
+        "model": "gpt-6-astra",
+        "effort": "medium",
+        "description": "Codex GPT 6 Astra MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex login",
+          "workTier": "standard"
+        },
+        "preset": "maia",
+        "harness": "codex"
+      }
+    },
+    {
+      "name": "alcyone",
+      "entry": {
+        "name": "alcyone",
+        "model": "openai-codex/gpt-6-astra",
+        "effort": "low",
+        "description": "Pi GPT 6 Astra LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex subscription",
+          "workTier": "light"
+        },
+        "preset": "alcyone",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "merope",
+      "entry": {
+        "name": "merope",
+        "model": "openai-codex/gpt-6-astra",
+        "effort": "medium",
+        "description": "Pi GPT 6 Astra MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex subscription",
+          "workTier": "standard"
+        },
+        "preset": "merope",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "dagr",
+      "entry": {
+        "name": "dagr",
+        "model": "openrouter/openai/gpt-6-astra",
+        "effort": "low",
+        "description": "OpenCode GPT 6 Astra LOW (OpenRouter API)",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "dagr",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "skirnir",
+      "entry": {
+        "name": "skirnir",
+        "model": "openrouter/openai/gpt-6-astra",
+        "effort": "medium",
+        "description": "OpenCode GPT 6 Astra MEDIUM (OpenRouter API)",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "standard"
+        },
+        "preset": "skirnir",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "terpsichore",
+      "entry": {
+        "name": "terpsichore",
+        "model": "claude-fable-5-1",
+        "effort": "low",
+        "description": "Claude Code Fable 5.1 LOW",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Claude Code account",
+          "workTier": "light"
+        },
+        "preset": "terpsichore",
+        "harness": "claude"
+      }
+    },
+    {
+      "name": "musaeus",
+      "entry": {
+        "name": "musaeus",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "low",
+        "description": "Pi Fable 5.1 LOW (OpenRouter API)",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "musaeus",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "suttung",
+      "entry": {
+        "name": "suttung",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "low",
+        "description": "OpenCode Fable 5.1 LOW (OpenRouter API)",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "suttung",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "calliope",
+      "entry": {
+        "name": "calliope",
+        "model": "claude-fable-5-1",
+        "effort": "max",
+        "description": "Claude Code Fable 5.1 MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Claude Code account",
+          "workTier": "critical"
+        },
+        "preset": "calliope",
+        "harness": "claude"
+      }
+    },
+    {
+      "name": "clio",
+      "entry": {
+        "name": "clio",
+        "model": "claude-fable-5-1",
+        "effort": "xhigh",
+        "description": "Claude Code Fable 5.1 XHIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Claude Code account",
+          "workTier": "complex"
+        },
+        "preset": "clio",
+        "harness": "claude"
+      }
+    },
+    {
+      "name": "euterpe",
+      "entry": {
+        "name": "euterpe",
+        "model": "claude-fable-5-1",
+        "effort": "high",
+        "description": "Claude Code Fable 5.1 HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Claude Code account",
+          "workTier": "complex"
+        },
+        "preset": "euterpe",
+        "harness": "claude"
+      }
+    },
+    {
+      "name": "thalia",
+      "entry": {
+        "name": "thalia",
+        "model": "claude-fable-5-1",
+        "effort": "medium",
+        "description": "Claude Code Fable 5.1 MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "Claude Code account",
+          "workTier": "standard"
+        },
+        "preset": "thalia",
+        "harness": "claude"
+      }
+    },
+    {
+      "name": "hyperion",
+      "entry": {
+        "name": "hyperion",
+        "model": "gpt-6.1-sol",
+        "effort": "max",
+        "description": "Codex GPT 6.1 Sol MAX",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex login",
+          "workTier": "complex"
+        },
+        "preset": "hyperion",
+        "harness": "codex"
+      }
+    },
+    {
+      "name": "phoebus",
+      "entry": {
+        "name": "phoebus",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh",
+        "description": "Codex GPT 6.1 Sol XHIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex login",
+          "workTier": "standard"
+        },
+        "preset": "phoebus",
+        "harness": "codex"
+      }
+    },
+    {
+      "name": "theia",
+      "entry": {
+        "name": "theia",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "description": "Codex GPT 6.1 Sol HIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex login",
+          "workTier": "standard"
+        },
+        "preset": "theia",
+        "harness": "codex"
+      }
+    },
+    {
+      "name": "gaia",
+      "entry": {
+        "name": "gaia",
+        "model": "gpt-5.6-terra",
+        "effort": "xhigh",
+        "description": "Codex GPT 5.6 Terra XHIGH",
+        "detail": "Everyday implementation and tests.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "gaia",
+        "harness": "codex"
+      }
+    },
+    {
+      "name": "tellus",
+      "entry": {
+        "name": "tellus",
+        "model": "gpt-5.6-terra",
+        "effort": "max",
+        "description": "Codex GPT 5.6 Terra MAX",
+        "detail": "Everyday implementation and tests.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "tellus",
+        "harness": "codex"
+      }
+    },
+    {
+      "name": "diana",
+      "entry": {
+        "name": "diana",
+        "model": "gpt-5.6-luna",
+        "effort": "xhigh",
+        "description": "Codex GPT 5.6 Luna XHIGH",
+        "detail": "Small fixes and focused coding tasks.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "diana",
+        "harness": "codex"
+      }
+    },
+    {
+      "name": "cynthia",
+      "entry": {
+        "name": "cynthia",
+        "model": "gpt-5.6-luna",
+        "effort": "max",
+        "description": "Codex GPT 5.6 Luna MAX",
+        "detail": "Small fixes and focused coding tasks.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "cynthia",
+        "harness": "codex"
+      }
+    },
+    {
+      "name": "astraeus",
+      "entry": {
+        "name": "astraeus",
+        "model": "gpt-6-astra",
+        "effort": "max",
+        "description": "Codex GPT 6 Astra MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex login",
+          "workTier": "critical"
+        },
+        "preset": "astraeus",
+        "harness": "codex"
+      }
+    },
+    {
+      "name": "asteria",
+      "entry": {
+        "name": "asteria",
+        "model": "gpt-6-astra",
+        "effort": "xhigh",
+        "description": "Codex GPT 6 Astra XHIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex login",
+          "workTier": "complex"
+        },
+        "preset": "asteria",
+        "harness": "codex"
+      }
+    },
+    {
+      "name": "celaeno",
+      "entry": {
+        "name": "celaeno",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "description": "Codex GPT 6 Astra HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex login",
+          "workTier": "complex"
+        },
+        "preset": "celaeno",
+        "harness": "codex"
+      }
+    },
+    {
+      "name": "phosphoros",
+      "entry": {
+        "name": "phosphoros",
+        "model": "openai-codex/gpt-6-astra",
+        "effort": "max",
+        "description": "Pi GPT 6 Astra MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex subscription",
+          "workTier": "critical"
+        },
+        "preset": "phosphoros",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "hesperos",
+      "entry": {
+        "name": "hesperos",
+        "model": "openai-codex/gpt-6-astra",
+        "effort": "xhigh",
+        "description": "Pi GPT 6 Astra XHIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex subscription",
+          "workTier": "complex"
+        },
+        "preset": "hesperos",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "taygete",
+      "entry": {
+        "name": "taygete",
+        "model": "openai-codex/gpt-6-astra",
+        "effort": "high",
+        "description": "Pi GPT 6 Astra HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "Codex subscription",
+          "workTier": "complex"
+        },
+        "preset": "taygete",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "aurvandil",
+      "entry": {
+        "name": "aurvandil",
+        "model": "openrouter/openai/gpt-6-astra",
+        "effort": "max",
+        "description": "OpenCode GPT 6 Astra MAX",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "critical"
+        },
+        "preset": "aurvandil",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "delling",
+      "entry": {
+        "name": "delling",
+        "model": "openrouter/openai/gpt-6-astra",
+        "effort": "xhigh",
+        "description": "OpenCode GPT 6 Astra XHIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "delling",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "vidar",
+      "entry": {
+        "name": "vidar",
+        "model": "openrouter/openai/gpt-6-astra",
+        "effort": "high",
+        "description": "OpenCode GPT 6 Astra HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "gpt-6-astra",
+          "modelLabel": "GPT-6 Astra",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "vidar",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "aether",
+      "entry": {
+        "name": "aether",
+        "model": "openai-codex/gpt-6.1-sol",
+        "effort": "xhigh",
+        "description": "Pi GPT 6.1 Sol XHIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex subscription",
+          "workTier": "standard"
+        },
+        "preset": "aether",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "aurora",
+      "entry": {
+        "name": "aurora",
+        "model": "openai-codex/gpt-6.1-sol",
+        "effort": "high",
+        "description": "Pi GPT 6.1 Sol HIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "Codex subscription",
+          "workTier": "standard"
+        },
+        "preset": "aurora",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "rhea",
+      "entry": {
+        "name": "rhea",
+        "model": "openai-codex/gpt-5.6-terra",
+        "effort": "xhigh",
+        "description": "Pi GPT 5.6 Terra XHIGH",
+        "detail": "Everyday implementation and tests.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "Codex subscription",
+          "workTier": "light"
+        },
+        "preset": "rhea",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "phoebe",
+      "entry": {
+        "name": "phoebe",
+        "model": "openai-codex/gpt-5.6-luna",
+        "effort": "xhigh",
+        "description": "Pi GPT 5.6 Luna XHIGH",
+        "detail": "Small fixes and focused coding tasks.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "Codex subscription",
+          "workTier": "light"
+        },
+        "preset": "phoebe",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "sunna",
+      "entry": {
+        "name": "sunna",
+        "model": "openrouter/openai/gpt-6.1-sol",
+        "effort": "xhigh",
+        "description": "OpenCode GPT 6.1 Sol XHIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "standard"
+        },
+        "preset": "sunna",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "skinfaxi",
+      "entry": {
+        "name": "skinfaxi",
+        "model": "openrouter/openai/gpt-6.1-sol",
+        "effort": "high",
+        "description": "OpenCode GPT 6.1 Sol HIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "gpt-6.1-sol",
+          "modelLabel": "GPT-6.1 Sol",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "standard"
+        },
+        "preset": "skinfaxi",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "jord",
+      "entry": {
+        "name": "jord",
+        "model": "openrouter/openai/gpt-5.6-terra",
+        "effort": "xhigh",
+        "description": "OpenCode GPT 5.6 Terra XHIGH",
+        "detail": "Everyday implementation and tests.",
+        "profile": {
+          "modelKey": "gpt-5.6-terra",
+          "modelLabel": "GPT-5.6 Terra",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "jord",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "bil",
+      "entry": {
+        "name": "bil",
+        "model": "openrouter/openai/gpt-5.6-luna",
+        "effort": "xhigh",
+        "description": "OpenCode GPT 5.6 Luna XHIGH",
+        "detail": "Small fixes and focused coding tasks.",
+        "profile": {
+          "modelKey": "gpt-5.6-luna",
+          "modelLabel": "GPT-5.6 Luna",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "bil",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "zeus",
+      "entry": {
+        "name": "zeus",
+        "model": "claude-opus-5-5",
+        "effort": "max",
+        "description": "Claude Code Opus 5.5 MAX",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "critical"
+        },
+        "preset": "zeus",
+        "harness": "claude"
+      }
+    },
+    {
+      "name": "apollo",
+      "entry": {
+        "name": "apollo",
+        "model": "claude-opus-5-5",
+        "effort": "xhigh",
+        "description": "Claude Code Opus 5.5 XHIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "complex"
+        },
+        "preset": "apollo",
+        "harness": "claude"
+      }
+    },
+    {
+      "name": "poseidon",
+      "entry": {
+        "name": "poseidon",
+        "model": "claude-opus-5-5",
+        "effort": "high",
+        "description": "Claude Code Opus 5.5 HIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "complex"
+        },
+        "preset": "poseidon",
+        "harness": "claude"
+      }
+    },
+    {
+      "name": "artemis",
+      "entry": {
+        "name": "artemis",
+        "model": "claude-opus-5-5",
+        "effort": "medium",
+        "description": "Claude Code Opus 5.5 MEDIUM",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "complex"
+        },
+        "preset": "artemis",
+        "harness": "claude"
+      }
+    },
+    {
+      "name": "orpheus",
+      "entry": {
+        "name": "orpheus",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "xhigh",
+        "description": "Pi Fable 5.1 XHIGH (OpenRouter API)",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "orpheus",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "linus",
+      "entry": {
+        "name": "linus",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "high",
+        "description": "Pi Fable 5.1 HIGH (OpenRouter API)",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "linus",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "erato",
+      "entry": {
+        "name": "erato",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "medium",
+        "description": "Pi Fable 5.1 MEDIUM (OpenRouter API)",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "standard"
+        },
+        "preset": "erato",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "saga",
+      "entry": {
+        "name": "saga",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "xhigh",
+        "description": "OpenCode Fable 5.1 XHIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "saga",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "gunnlod",
+      "entry": {
+        "name": "gunnlod",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "high",
+        "description": "OpenCode Fable 5.1 HIGH",
+        "detail": "Complex debugging, architecture and detailed review.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "gunnlod",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "kvasir",
+      "entry": {
+        "name": "kvasir",
+        "model": "openrouter/anthropic/claude-fable-5.1",
+        "effort": "medium",
+        "description": "OpenCode Fable 5.1 MEDIUM",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-fable-5.1",
+          "modelLabel": "Claude Fable 5.1",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "standard"
+        },
+        "preset": "kvasir",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "kronos",
+      "entry": {
+        "name": "kronos",
+        "model": "openrouter/anthropic/claude-opus-5.5",
+        "effort": "xhigh",
+        "description": "Pi Opus 5.5 XHIGH (OpenRouter API)",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "kronos",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "iapetus",
+      "entry": {
+        "name": "iapetus",
+        "model": "openrouter/anthropic/claude-opus-5.5",
+        "effort": "high",
+        "description": "Pi Opus 5.5 HIGH (OpenRouter API)",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "iapetus",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "atlas",
+      "entry": {
+        "name": "atlas",
+        "model": "openrouter/anthropic/claude-opus-5.5",
+        "effort": "medium",
+        "description": "Pi Opus 5.5 MEDIUM (OpenRouter API)",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "atlas",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "baldr",
+      "entry": {
+        "name": "baldr",
+        "model": "openrouter/anthropic/claude-opus-5.5",
+        "effort": "xhigh",
+        "description": "OpenCode Opus 5.5 XHIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "baldr",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "hodr",
+      "entry": {
+        "name": "hodr",
+        "model": "openrouter/anthropic/claude-opus-5.5",
+        "effort": "high",
+        "description": "OpenCode Opus 5.5 HIGH",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "hodr",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "vali",
+      "entry": {
+        "name": "vali",
+        "model": "openrouter/anthropic/claude-opus-5.5",
+        "effort": "medium",
+        "description": "OpenCode Opus 5.5 MEDIUM",
+        "detail": "Feature work, code review and technical planning.",
+        "profile": {
+          "modelKey": "claude-opus-5.5",
+          "modelLabel": "Claude Opus 5.5",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "vali",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "hermod",
+      "entry": {
+        "name": "hermod",
+        "model": "claude-sonnet-5-5",
+        "effort": "max",
+        "description": "Claude Code Sonnet 5.5 MAX",
+        "detail": "Everyday implementation and tests.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "complex"
+        },
+        "preset": "hermod",
+        "harness": "claude"
+      }
+    },
+    {
+      "name": "forseti",
+      "entry": {
+        "name": "forseti",
+        "model": "claude-sonnet-5-5",
+        "effort": "xhigh",
+        "description": "Claude Code Sonnet 5.5 XHIGH",
+        "detail": "Implementation, code review and planning.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "standard"
+        },
+        "preset": "forseti",
+        "harness": "claude"
+      }
+    },
+    {
+      "name": "ullr",
+      "entry": {
+        "name": "ullr",
+        "model": "claude-sonnet-5-5",
+        "effort": "medium",
+        "description": "Claude Code Sonnet 5.5 MEDIUM",
+        "detail": "Small code changes and focused reviews.",
+        "profile": {
+          "modelKey": "claude-sonnet-5.5",
+          "modelLabel": "Claude Sonnet 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "standard"
+        },
+        "preset": "ullr",
+        "harness": "claude"
+      }
+    },
+    {
+      "name": "nike",
+      "entry": {
+        "name": "nike",
+        "model": "openrouter/google/gemini-3.8-flash",
+        "effort": "high",
+        "description": "Pi Gemini 3.8 Flash HIGH (fast)",
+        "detail": "Routine coding and second opinions.",
+        "profile": {
+          "modelKey": "gemini-3.8-flash",
+          "modelLabel": "Gemini 3.8 Flash",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "nike",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "freya",
+      "entry": {
+        "name": "freya",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "effort": "max",
+        "description": "OpenCode DeepSeek V4.1 Flash MAX (fast)",
+        "detail": "Routine coding and second opinions.",
+        "profile": {
+          "modelKey": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "freya",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "zephyros",
+      "entry": {
+        "name": "zephyros",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "effort": "max",
+        "description": "Pi DeepSeek V4.1 Flash MAX (fast)",
+        "detail": "Routine coding and second opinions.",
+        "profile": {
+          "modelKey": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "zephyros",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "sif",
+      "entry": {
+        "name": "sif",
+        "model": "openrouter/google/gemini-3.8-flash",
+        "effort": "high",
+        "description": "OpenCode Gemini 3.8 Flash HIGH (fast)",
+        "detail": "Routine coding and second opinions.",
+        "profile": {
+          "modelKey": "gemini-3.8-flash",
+          "modelLabel": "Gemini 3.8 Flash",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "sif",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "hades",
+      "entry": {
+        "name": "hades",
+        "model": "openrouter/deepseek/deepseek-v4-pro-0813",
+        "effort": "max",
+        "description": "Pi DeepSeek V4 Pro MAX",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "deepseek-v4-pro-0813",
+          "modelLabel": "DeepSeek V4 Pro (0813)",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "hades",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "ares",
+      "entry": {
+        "name": "ares",
+        "model": "openrouter/x-ai/grok-4.7",
+        "effort": "xhigh",
+        "description": "Pi Grok 4.7 XHIGH",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "grok-4.7",
+          "modelLabel": "Grok 4.7",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "ares",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "hephaestus",
+      "entry": {
+        "name": "hephaestus",
+        "model": "openrouter/qwen/qwen3.8-max",
+        "effort": "xhigh",
+        "description": "Pi Qwen3.8 Max XHIGH",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "qwen3.8-max",
+          "modelLabel": "Qwen 3.8 Max",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "hephaestus",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "athena",
+      "entry": {
+        "name": "athena",
+        "model": "openrouter/qwen/qwen3.8-27b",
+        "effort": "xhigh",
+        "description": "Pi Qwen3.8 27B XHIGH",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "qwen3.8-27b",
+          "modelLabel": "Qwen 3.8 27B",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "athena",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "metis",
+      "entry": {
+        "name": "metis",
+        "model": "openrouter/minimax/minimax-m3",
+        "description": "Pi MiniMax M3",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "minimax-m3",
+          "modelLabel": "MiniMax M3",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "metis",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "selene",
+      "entry": {
+        "name": "selene",
+        "model": "openrouter/xiaomi/mimo-v2.6-pro",
+        "description": "Pi MiMo V2.6 Pro",
+        "detail": "Everyday coding and agent tasks at a low price.",
+        "profile": {
+          "modelKey": "mimo-v2.6-pro",
+          "modelLabel": "MiMo V2.6 Pro",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "selene",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "prometheus",
+      "entry": {
+        "name": "prometheus",
+        "model": "openrouter/z-ai/glm-5.3",
+        "effort": "max",
+        "description": "Pi GLM 5.3 MAX",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "glm-5.3",
+          "modelLabel": "GLM 5.3",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "prometheus",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "endymion",
+      "entry": {
+        "name": "endymion",
+        "model": "openrouter/moonshotai/kimi-k3",
+        "effort": "max",
+        "description": "Pi Kimi K3 MAX",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "kimi-k3",
+          "modelLabel": "Kimi K3",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "endymion",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "nyx",
+      "entry": {
+        "name": "nyx",
+        "model": "openrouter/z-ai/glm-5.3-flash",
+        "effort": "max",
+        "description": "Pi GLM 5.3 Flash MAX",
+        "detail": "Routine coding and second opinions.",
+        "profile": {
+          "modelKey": "glm-5.3-flash",
+          "modelLabel": "GLM 5.3 Flash",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "nyx",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "oceanus",
+      "entry": {
+        "name": "oceanus",
+        "model": "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+        "effort": "high",
+        "description": "Pi Nemotron 3 Ultra 550B FREE HIGH",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "nemotron-3-ultra-550b-a55b:free",
+          "modelLabel": "Nemotron 3 Ultra (free)",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "oceanus",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "triton",
+      "entry": {
+        "name": "triton",
+        "model": "openrouter/poolside/laguna-s-2.1:free",
+        "description": "Pi Laguna S 2.1 FREE",
+        "detail": "Code changes and repository tasks.",
+        "profile": {
+          "modelKey": "laguna-s-2.1:free",
+          "modelLabel": "Laguna S 2.1 (free)",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "triton",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "eos",
+      "entry": {
+        "name": "eos",
+        "model": "openrouter/meta/muse-spark-1.3",
+        "effort": "xhigh",
+        "description": "Pi Muse Spark 1.3 XHIGH",
+        "detail": "Collaborative coding and task breakdown.",
+        "profile": {
+          "modelKey": "muse-spark-1.3",
+          "modelLabel": "Muse Spark 1.3",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "eos",
+        "harness": "pi"
+      }
+    },
+    {
+      "name": "odin",
+      "entry": {
+        "name": "odin",
+        "model": "openrouter/deepseek/deepseek-v4-pro-0813",
+        "effort": "max",
+        "description": "OpenCode DeepSeek V4 Pro MAX",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "deepseek-v4-pro-0813",
+          "modelLabel": "DeepSeek V4 Pro (0813)",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "odin",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "thor",
+      "entry": {
+        "name": "thor",
+        "model": "openrouter/x-ai/grok-4.7",
+        "effort": "xhigh",
+        "description": "OpenCode Grok 4.7 XHIGH",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "grok-4.7",
+          "modelLabel": "Grok 4.7",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "thor",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "tyr",
+      "entry": {
+        "name": "tyr",
+        "model": "openrouter/qwen/qwen3.8-max",
+        "effort": "xhigh",
+        "description": "OpenCode Qwen3.8 Max XHIGH",
+        "detail": "Complex code changes and analysis.",
+        "profile": {
+          "modelKey": "qwen3.8-max",
+          "modelLabel": "Qwen 3.8 Max",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "tyr",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "bragi",
+      "entry": {
+        "name": "bragi",
+        "model": "openrouter/qwen/qwen3.8-27b",
+        "effort": "xhigh",
+        "description": "OpenCode Qwen3.8 27B XHIGH",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "qwen3.8-27b",
+          "modelLabel": "Qwen 3.8 27B",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "bragi",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "mimir",
+      "entry": {
+        "name": "mimir",
+        "model": "openrouter/minimax/minimax-m3",
+        "description": "OpenCode MiniMax M3",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "minimax-m3",
+          "modelLabel": "MiniMax M3",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "mimir",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "idun",
+      "entry": {
+        "name": "idun",
+        "model": "openrouter/xiaomi/mimo-v2.6-pro",
+        "description": "OpenCode MiMo V2.6 Pro",
+        "detail": "Everyday coding and agent tasks at a low price.",
+        "profile": {
+          "modelKey": "mimo-v2.6-pro",
+          "modelLabel": "MiMo V2.6 Pro",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "idun",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "mani",
+      "entry": {
+        "name": "mani",
+        "model": "openrouter/moonshotai/kimi-k3",
+        "effort": "max",
+        "description": "OpenCode Kimi K3 MAX",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "kimi-k3",
+          "modelLabel": "Kimi K3",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "complex"
+        },
+        "preset": "mani",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "nott",
+      "entry": {
+        "name": "nott",
+        "model": "openrouter/z-ai/glm-5.3-flash",
+        "effort": "max",
+        "description": "OpenCode GLM 5.3 Flash MAX",
+        "detail": "Routine coding and second opinions.",
+        "profile": {
+          "modelKey": "glm-5.3-flash",
+          "modelLabel": "GLM 5.3 Flash",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "nott",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "ymir",
+      "entry": {
+        "name": "ymir",
+        "model": "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+        "effort": "high",
+        "description": "OpenCode Nemotron 3 Ultra 550B FREE HIGH",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "nemotron-3-ultra-550b-a55b:free",
+          "modelLabel": "Nemotron 3 Ultra (free)",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "ymir",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "aegir",
+      "entry": {
+        "name": "aegir",
+        "model": "openrouter/poolside/laguna-s-2.1:free",
+        "description": "OpenCode Laguna S 2.1 FREE",
+        "detail": "Code changes and repository tasks.",
+        "profile": {
+          "modelKey": "laguna-s-2.1:free",
+          "modelLabel": "Laguna S 2.1 (free)",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "aegir",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "logi",
+      "entry": {
+        "name": "logi",
+        "model": "openrouter/meta/muse-spark-1.3",
+        "effort": "xhigh",
+        "description": "OpenCode Muse Spark 1.3 XHIGH",
+        "detail": "Collaborative coding and task breakdown.",
+        "profile": {
+          "modelKey": "muse-spark-1.3",
+          "modelLabel": "Muse Spark 1.3",
+          "routeLabel": "OpenRouter · API",
+          "workTier": "light"
+        },
+        "preset": "logi",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "audhumla",
+      "entry": {
+        "name": "audhumla",
+        "model": "opencode/nemotron-3-ultra-free",
+        "description": "OpenCode Zen Nemotron 3 Ultra 550B FREE",
+        "detail": "Coding and analysis across longer tasks.",
+        "profile": {
+          "modelKey": "nemotron-3-ultra-free",
+          "modelLabel": "Nemotron 3 Ultra (Zen free)",
+          "routeLabel": "OpenCode Zen",
+          "workTier": "light"
+        },
+        "preset": "audhumla",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "gefjon",
+      "entry": {
+        "name": "gefjon",
+        "model": "opencode/muse-spark-1.3-contributor-free",
+        "effort": "xhigh",
+        "description": "OpenCode Zen Muse Spark 1.3 Contributor FREE XHIGH",
+        "detail": "Collaborative coding and task breakdown.",
+        "profile": {
+          "modelKey": "muse-spark-1.3",
+          "modelLabel": "Muse Spark 1.3",
+          "routeLabel": "OpenCode Zen · Contributor · Free",
+          "routeNote": "Prompts and replies may train Meta models.",
+          "workTier": "light"
+        },
+        "preset": "gefjon",
+        "harness": "opencode"
+      }
+    },
+    {
+      "name": "pygmalion",
+      "entry": {
+        "name": "pygmalion",
+        "designer": true,
+        "model": "codex-image",
+        "description": "Codex Images (via Codex login)",
+        "detail": "Generate illustrations and edit reference images through your existing Codex login.",
+        "profile": {
+          "modelKey": "codex-image",
+          "modelLabel": "Codex Images",
+          "routeLabel": "Codex login",
+          "workTier": "light"
+        },
+        "preset": "pygmalion",
+        "harness": "codex"
+      }
+    },
+    {
+      "name": "nobody",
+      "entry": {
+        "$undefined": true
+      }
+    },
+    {
+      "name": "",
+      "entry": {
+        "$undefined": true
+      }
+    },
+    {
+      "name": "@thoth",
+      "entry": {
+        "$undefined": true
+      }
+    },
+    {
+      "name": "Thoth",
+      "entry": {
+        "$undefined": true
+      }
+    }
+  ],
+  "efforts": {
+    "claude": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "codex": [
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "pi": [
+      "off",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "opencode": [
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "devin": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ]
+  },
+  "workTiers": {
+    "critical": {
+      "label": "Critical work",
+      "description": "Important reviews, architecture, hard problems and important questions. No coding or routine advice."
+    },
+    "complex": {
+      "label": "Complex work",
+      "description": "Demanding implementation, investigation, planning and substantial reviews."
+    },
+    "standard": {
+      "label": "Standard work",
+      "description": "Feature work, tests, research, planning and ordinary reviews."
+    },
+    "light": {
+      "label": "Light work",
+      "description": "Bounded fixes, lookups and routine tasks; verify the model is suitable."
+    }
+  },
+  "harnesses": [
+    "claude",
+    "codex",
+    "pi",
+    "opencode",
+    "devin"
+  ],
+  "harnessForKind": [
+    {
+      "kind": "claude-code",
+      "harness": "claude"
+    },
+    {
+      "kind": "codex",
+      "harness": "codex"
+    },
+    {
+      "kind": "pi",
+      "harness": "pi"
+    },
+    {
+      "kind": "opencode",
+      "harness": "opencode"
+    },
+    {
+      "kind": "devin",
+      "harness": "devin"
+    },
+    {
+      "kind": "image",
+      "harness": null
+    },
+    {
+      "kind": "claude",
+      "harness": null
+    },
+    {
+      "kind": "",
+      "harness": null
+    }
+  ]
+}

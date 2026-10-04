@@ -1,0 +1,15 @@
+[package]
+name = "cf-catalog"
+description = "The catalog of ready-made agents, their profiles and tiers, and the human's roster in agents.json."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

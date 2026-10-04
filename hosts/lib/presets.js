@@ -1387,7 +1387,7 @@ export const AGENT_PRESETS = [
 
 // Reviewed 2026-09-10; source notes: the agent-catalog-redesign spec, in git history.
 // Keys describe exact model identities, not callsigns or saved preset provenance.
-const MODEL_LABELS = {
+export const MODEL_LABELS = {
   'gpt-6-astra': 'GPT-6 Astra',
   'gpt-6.1-sol': 'GPT-6.1 Sol',
   'gpt-5.6-terra': 'GPT-5.6 Terra',
