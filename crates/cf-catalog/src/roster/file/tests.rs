@@ -7,29 +7,61 @@ fn refused(path: &Path) -> Refusal {
     read_roster(path).unwrap_err()
 }
 
+/// The roster's path as text, which is what Node's `path.join` makes of it.
+fn text(path: Option<PathBuf>) -> Option<String> {
+    path.map(|path| path.to_string_lossy().into_owned())
+}
+
 #[test]
 fn the_roster_is_agents_json_in_the_configured_home() {
     let env = Env::from_vars([
         ("CONSENSFLOW_HOME", "/work/consensflow"),
         ("HOME", "/home/me"),
     ]);
-    assert_eq!(
-        roster_path(&env),
-        Some(Path::new("/work/consensflow").join("agents.json"))
-    );
+    let expected = if cfg!(windows) {
+        r"\work\consensflow\agents.json"
+    } else {
+        "/work/consensflow/agents.json"
+    };
+    assert_eq!(text(roster_path(&env)).as_deref(), Some(expected));
 }
 
 #[test]
 fn without_a_configured_home_it_is_in_the_dot_consensflow_of_the_users_home() {
     let env = Env::from_vars([("HOME", "/home/me")]);
+    let expected = if cfg!(windows) {
+        r"\home\me\.consensflow\agents.json"
+    } else {
+        "/home/me/.consensflow/agents.json"
+    };
+    assert_eq!(text(roster_path(&env)).as_deref(), Some(expected));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_home_ending_in_a_dot_dot_names_the_folder_above_the_one_before_it() {
+    let env = Env::from_vars([("CONSENSFLOW_HOME", "/base/missing/..")]);
     assert_eq!(
-        roster_path(&env),
-        Some(
-            Path::new("/home/me")
-                .join(".consensflow")
-                .join("agents.json")
-        )
+        text(roster_path(&env)).as_deref(),
+        Some("/base/agents.json")
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn a_drive_and_a_dot_dot_after_it_stay_as_node_joins_them() {
+    let env = Env::from_vars([("CONSENSFLOW_HOME", r"C:..\cf")]);
+    assert_eq!(
+        text(roster_path(&env)).as_deref(),
+        Some(r"C:..\cf\agents.json")
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn a_bare_drive_as_the_home_is_given_its_root() {
+    let env = Env::from_vars([("CONSENSFLOW_HOME", "C:")]);
+    assert_eq!(text(roster_path(&env)).as_deref(), Some(r"C:\agents.json"));
 }
 
 #[test]

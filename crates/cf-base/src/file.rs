@@ -245,7 +245,10 @@ mod tests {
         for (errno, name) in table {
             assert_eq!(errno_name(&io::Error::from_raw_os_error(errno)), Some(name));
         }
-        assert_eq!(errno_name(&io::Error::from_raw_os_error(libc::EHOSTUNREACH)), None);
+        assert_eq!(
+            errno_name(&io::Error::from_raw_os_error(libc::EHOSTUNREACH)),
+            None
+        );
     }
 
     #[cfg(windows)]

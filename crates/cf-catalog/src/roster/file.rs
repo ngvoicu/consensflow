@@ -9,17 +9,21 @@ use std::path::{Path, PathBuf};
 
 use cf_base::env::Env;
 use cf_base::file::{errno_name, is_missing};
-use cf_base::home::{config_root, normalized};
+use cf_base::home::config_root;
 use cf_base::json::from_slice_exact;
+use cf_base::path;
 use cf_base::refusal::Refusal;
 use serde_json::{Map, Value};
 
 /// The human's agents file, inside ConsensFlow's folder, joined as Node's
-/// `path.join` joins it: a `..` in `CONSENSFLOW_HOME` takes off the folder
-/// before it by the text alone, so `/base/missing/..` is `/base`. None when
-/// the environment names no folder to keep it in.
+/// `path.join` joins it (`rosterPath`): a `..` in `CONSENSFLOW_HOME` takes off
+/// the folder before it by the text alone, so `/base/missing/..` is `/base`,
+/// and on Windows `C:` is `C:\agents.json` and `C:..\cf` is `C:..\cf\agents.json`.
+/// None when the environment names no folder to keep it in.
 pub fn roster_path(env: &Env) -> Option<PathBuf> {
-    config_root(env).map(|root| normalized(&root.join("agents.json")))
+    // The folder is text `config_root` made a path of, so it reads back as that text.
+    config_root(env)
+        .map(|root| PathBuf::from(path::join(&[&root.to_string_lossy(), "agents.json"])))
 }
 
 /// The file as the human left it: the object it holds, its keys in the order
