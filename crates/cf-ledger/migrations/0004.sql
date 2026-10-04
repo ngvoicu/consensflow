@@ -1,0 +1,3 @@
+
+  ALTER TABLE message ADD COLUMN urgent INTEGER NOT NULL DEFAULT 0;
+  

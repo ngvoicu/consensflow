@@ -21,10 +21,13 @@ cf-base = { path = "crates/cf-base" }
 cf-board = { path = "crates/cf-board" }
 cf-harness = { path = "crates/cf-harness" }
 cf-process = { path = "crates/cf-process" }
+cf-ledger = { path = "crates/cf-ledger" }
 futures-channel = "0.3"
 futures-executor = "0.3"
 libc = "0.2"
 portable-pty = "0.9"
+# The ledger's SQLite, built in: every platform runs the same SQLite.
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 # Objects keep their keys in the order written, as JavaScript's do: JSON
 # that Node wrote reads back, and goes out again, as Node had it.

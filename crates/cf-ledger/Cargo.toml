@@ -1,0 +1,21 @@
+[package]
+name = "cf-ledger"
+description = "The ledger: the one durable record of every project, participant, task and message, in the home's consensflow.db."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+cf-base.workspace = true
+cf-proto.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+sha2 = "0.10"
+tempfile = "3"
+
+[lints]
+workspace = true

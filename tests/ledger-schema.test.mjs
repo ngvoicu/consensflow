@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readdirSync, readFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -97,6 +98,21 @@ function ledgerAt(dir, version, more = () => {}) {
 }
 
 describe('the schema', () => {
+  it("is the Rust ledger's, migration for migration and byte for byte", async () => {
+    // crates/cf-ledger runs these files; while both ledgers exist they are one schema.
+    const dir = new URL('../crates/cf-ledger/migrations/', import.meta.url)
+    const files = readdirSync(dir)
+      .filter((file) => file.endsWith('.sql'))
+      .sort()
+    assert.deepEqual(
+      files,
+      MIGRATIONS.map((_, at) => `${String(at + 1).padStart(4, '0')}.sql`),
+    )
+    for (const [at, file] of files.entries()) {
+      assert.equal(readFileSync(new URL(file, dir), 'utf8'), MIGRATIONS[at], file)
+    }
+  })
+
   it('turns a ledger written before the Chief of Staff into one that says chief, ids kept', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-ledger-chief-'))
     try {
