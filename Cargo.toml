@@ -28,6 +28,8 @@ libc = "0.2"
 portable-pty = "0.9"
 # The ledger's SQLite, built in: every platform runs the same SQLite.
 rusqlite = { version = "0.40", features = ["bundled"] }
+base64 = "0.22"
+flate2 = "1"
 form_urlencoded = "1"
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
