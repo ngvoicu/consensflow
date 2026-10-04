@@ -209,20 +209,29 @@ fn one_byte(text: &str) -> String {
 }
 
 /// `path` as `rmSync`'s C++ names it: as it is on Unix; on Windows made
-/// whole (`ToNamespacedPath`): a drive's path after `\\?\`, a share's
-/// after `\\?\UNC\`. A drive's path that is not whole (`D:cf\t`) is as it
-/// is: Node's resolver reads that drive's folder from an environment entry
-/// (`=D:`) this module does not read, and leaves the path when there is
-/// none.
+/// whole against the working folder (`ToNamespacedPath`), then a drive's
+/// path after `\\?\` and a share's after `\\?\UNC\`. A drive's path that is
+/// not whole (`D:cf\t`) is made whole only on the working folder's own
+/// drive: for another, Node's resolver reads that drive's folder from an
+/// environment entry (`=D:`) this module does not read, and leaves the
+/// path as it is when there is none.
 fn namespaced(path: &Path) -> String {
     #[cfg(windows)]
     {
         let given = path.to_string_lossy();
         let start = given.as_bytes();
-        if start.len() >= 2
+        let on_a_drive_not_whole = start.len() >= 2
             && start[0].is_ascii_alphabetic()
             && start[1] == b':'
-            && !matches!(start.get(2), Some(b'\\' | b'/'))
+            && !matches!(start.get(2), Some(b'\\' | b'/'));
+        let working_drive = std::env::current_dir().ok().and_then(|folder| {
+            folder
+                .to_string_lossy()
+                .get(..2)
+                .map(str::to_ascii_lowercase)
+        });
+        if on_a_drive_not_whole
+            && working_drive.as_deref() != given.get(..2).map(str::to_ascii_lowercase).as_deref()
         {
             return given.into_owned();
         }

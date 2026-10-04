@@ -179,11 +179,26 @@ fn a_removal_windows_refuses_is_said_as_rm_syncs_cpp_says_it_there() {
         said(145).to_string(),
         r"ENOTEMPTY, Directory not empty: \\?\C:\a\t '\\?\C:\a\t'"
     );
-    // A drive's path that is not whole is as it is.
-    let relative = FileError::removal(io::Error::from_raw_os_error(5), Path::new(r"D:cf\t"));
+    // A drive's path that is not whole is made whole on the working
+    // folder's own drive, and is as it is on another.
+    let working = std::env::current_dir().unwrap();
+    let own = working.to_string_lossy()[..2].to_owned();
+    let other = if own.eq_ignore_ascii_case("Q:") {
+        "R:"
+    } else {
+        "Q:"
+    };
+    let denied = |path: &str| {
+        FileError::removal(io::Error::from_raw_os_error(5), Path::new(path)).to_string()
+    };
+    let whole = format!(r"\\?\{}\cf\t", working.display());
     assert_eq!(
-        relative.to_string(),
-        r"EPERM, Permission denied: D:cf\t 'D:cf\t'"
+        denied(&format!(r"{own}cf\t")),
+        format!("EPERM, Permission denied: {whole} '{whole}'")
+    );
+    assert_eq!(
+        denied(&format!(r"{other}cf\t")),
+        format!(r"EPERM, Permission denied: {other}cf\t '{other}cf\t'")
     );
     // A lock violation is none of the four.
     let unknown = said(33).to_string();
