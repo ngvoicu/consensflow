@@ -296,26 +296,60 @@ pub fn number(text: &str) -> f64 {
         .map_or(f64::NAN, |value| sign * value)
 }
 
-/// `0x10`, `0o7`, `0b11`: unsigned numbers in another radix.
+/// `0x10`, `0o7`, `0b11`: unsigned numbers in another radix, as V8 reads
+/// them (`InternalStringToIntDouble`): exact to 53 bits, then rounded once to
+/// the nearest double, the even one of two as near, every digit after the
+/// 53 bits weighed.
 fn radix_number(text: &str) -> Option<f64> {
-    let radix = match text.get(..2)? {
-        "0x" | "0X" => 16,
-        "0o" | "0O" => 8,
-        "0b" | "0B" => 2,
+    let bits = match text.get(..2)? {
+        "0x" | "0X" => 4,
+        "0o" | "0O" => 3,
+        "0b" | "0B" => 1,
         _ => return None,
     };
+    let radix = 1 << bits;
     let digits = &text[2..];
     if digits.is_empty() || !digits.chars().all(|digit| digit.is_digit(radix)) {
         return Some(f64::NAN);
     }
-    Some(
-        digits
-            .chars()
-            .filter_map(|digit| digit.to_digit(radix))
-            .fold(0.0, |value, digit| {
-                value * f64::from(radix) + f64::from(digit)
-            }),
-    )
+    let mut digits = digits
+        .chars()
+        .filter_map(|digit| digit.to_digit(radix))
+        .map(u64::from)
+        .skip_while(|digit| *digit == 0);
+    let mut number: u64 = 0;
+    let mut exponent: i32 = 0;
+    while let Some(digit) = digits.next() {
+        number = number * u64::from(radix) + digit;
+        let over = number >> 53;
+        if over == 0 {
+            continue;
+        }
+        // Past 53 bits: the bits over them are dropped, and decide the rounding
+        // with every digit after them.
+        let dropped_bits = 64 - over.leading_zeros();
+        let dropped = number & ((1 << dropped_bits) - 1);
+        number >>= dropped_bits;
+        exponent = i32::try_from(dropped_bits).ok()?;
+        let mut zero_tail = true;
+        for digit in digits.by_ref() {
+            zero_tail &= digit == 0;
+            exponent += bits;
+        }
+        let half = 1 << (dropped_bits - 1);
+        if dropped > half || (dropped == half && (number & 1 == 1 || !zero_tail)) {
+            number += 1;
+        }
+        if number >> 53 != 0 {
+            number >>= 1;
+            exponent += 1;
+        }
+        break;
+    }
+    // Under 2^53, the number is a double as it is; a power of two scales it
+    // exactly, or past the largest double, to infinity.
+    #[allow(clippy::cast_precision_loss)]
+    Some(number as f64 * 2_f64.powi(exponent))
 }
 
 /// Digits with an optional fraction and exponent: `5`, `5.`, `.5`, `1e1`.
@@ -529,6 +563,44 @@ mod tests {
             "inf", "nan", "1_000", "5x", "0x", "+0x10", "1e", ".", "+-5", "\u{663}",
         ] {
             assert!(number(written).is_nan(), "{written:?} is no number");
+        }
+    }
+
+    #[test]
+    fn a_number_in_another_radix_is_rounded_once_as_v8_rounds_it() {
+        // Node 26's `String(Number(text))`.
+        let f = |count: usize| "f".repeat(count);
+        let cases = [
+            (format!("0b1{}101", "0".repeat(52)), "36028797018963976"),
+            ("0x1fffffffffffff".to_owned(), "9007199254740991"),
+            // Half way: to the even one.
+            ("0x20000000000001".to_owned(), "9007199254740992"),
+            ("0x20000000000003".to_owned(), "9007199254740996"),
+            // Half way but for a digit far after: up.
+            (
+                "0x200000000000010000000000000001".to_owned(),
+                "1.6615349947311452e+35",
+            ),
+            (
+                format!("0x20000000000001{}", "0".repeat(40)),
+                "1.3164036458569648e+64",
+            ),
+            (format!("0x{}", f(256)), "Infinity"),
+            (format!("0x{}7", f(255)), "Infinity"),
+            (format!("0x{}", f(300)), "Infinity"),
+            (format!("0o{}", "7".repeat(30)), "1.2379400392853803e+27"),
+            (format!("0o1{}1", "0".repeat(20)), "9223372036854776000"),
+            ("0X000".to_owned(), "0"),
+            ("0b0".to_owned(), "0"),
+            (
+                format!("0x{}1fffffffffffff8", "0".repeat(40)),
+                "144115188075855870",
+            ),
+            (format!("0B{}", "1".repeat(55)), "36028797018963970"),
+            ("0x12AbCdEf".to_owned(), "313249263"),
+        ];
+        for (written, read) in cases {
+            assert_eq!(number_text(number(&written)), read, "{written}");
         }
     }
 }

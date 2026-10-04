@@ -137,20 +137,25 @@ pub fn parse(text: &str) -> Option<i64> {
     (ms.abs() <= LAST_MS).then_some(ms)
 }
 
-/// `Date.UTC(year, month, day, hour, minute)` for whole numbers: the instant
+/// `Date.UTC(year, month, day, hour, minute)` for whole numbers, as V8
+/// computes it (`MakeDay`, `MakeTime`, `MakeDate`, `TimeClip`): the instant
 /// that wall clock reads in UTC, in milliseconds since the epoch.
 ///
-/// - The month counts from 0 and carries into the year, as `MakeDay` carries
-///   it: month 12 is January of the next year, month -1 December of the one
-///   before.
+/// - The month counts from 0 and carries into the year: month 12 is January
+///   of the next year, month -1 December of the one before.
 /// - A day past the month's end, an hour past 23 and a minute past 59 carry
 ///   on: February 31, 2026 is March 3, and 7:75pm is 8:15pm.
 /// - A year from 0 to 99 is that year of the 1900s.
+/// - The month's first day is counted in whole numbers, V8's way: before the
+///   year -399,999 its division cuts toward zero, a day off the calendar.
+///   The rest is in doubles, each product and sum rounded as JavaScript's.
 ///
 /// None where JavaScript gives NaN: past what a date holds, or, as V8 reads
 /// it, for a year more than a million either side of 0 or a month more than
-/// ten million. A difference kept: the days of a year before -399,999 are
-/// counted exactly, where V8's integer division counts them a day off.
+/// ten million.
+// Each whole number is a JavaScript number here: one past 2^53 is the double
+// it rounds to, as it was in JavaScript.
+#[allow(clippy::cast_precision_loss)]
 pub fn utc_ms(year: i64, month: i64, day: i64, hour: i64, minute: i64) -> Option<i64> {
     let year = if (0..=99).contains(&year) {
         1900 + year
@@ -160,13 +165,26 @@ pub fn utc_ms(year: i64, month: i64, day: i64, hour: i64, minute: i64) -> Option
     if !(-1_000_000..=1_000_000).contains(&year) || !(-10_000_000..=10_000_000).contains(&month) {
         return None;
     }
-    let year = year + month.div_euclid(12);
-    let first = days_from_civil(year, month.rem_euclid(12) + 1, 1);
-    // A day, hour or minute is any whole number: wide enough that none overflows.
-    let ms = (i128::from(first) + i128::from(day) - 1) * i128::from(MS_PER_DAY)
-        + i128::from(hour) * 3_600_000
-        + i128::from(minute) * 60_000;
-    i64::try_from(ms).ok().filter(|ms| ms.abs() <= LAST_MS)
+    let first = month_start(year + month.div_euclid(12), month.rem_euclid(12))?;
+    let days = (first - 1) as f64 + day as f64;
+    let time = hour as f64 * 3_600_000.0 + minute as f64 * 60_000.0;
+    time_clip(days * 86_400_000.0 + time)
+}
+
+/// The day of the first of `month` (from 0) in `year`, counted from the
+/// epoch's as V8 counts it: its year counted from a year 399,999 before 0,
+/// in whole numbers whose division cuts toward zero.
+fn month_start(year: i64, month: i64) -> Option<i64> {
+    const BEFORE: i64 = 399_999;
+    const COMMON: [i64; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+    const LEAP: [i64; 12] = [0, 31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335];
+    let days = |year: i64| {
+        let years = year + BEFORE;
+        365 * years + years / 4 - years / 100 + years / 400
+    };
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let before = if leap { LEAP } else { COMMON };
+    Some(days(year) - days(1970) + before.get(usize::try_from(month).ok()?)?)
 }
 
 fn take_year(rest: &mut &str) -> Option<i64> {
@@ -389,9 +407,15 @@ mod tests {
     fn a_year_or_a_month_past_what_v8_reads_is_none_though_the_days_would_bring_it_back() {
         // Node 26's Date.UTC(year, month, day): a year may be a million either
         // side of 0 and a month ten million, whatever the day then makes of them.
-        // (V8 counts the days of a year before -399,999 a day off, as its
-        // integer division cuts toward zero there: none of those is asserted.)
+        // V8 counts the days of a year before -399,999 a day off, as its
+        // integer division cuts toward zero there.
         let read = [
+            ((-1_000_000, 0, 365_242_500), "0000-01-01T00:00:00.000Z"),
+            ((-400_001, 0, 146_097_500), "0000-05-15T00:00:00.000Z"),
+            (
+                (-1_000_000, -10_000_000, 700_000_000),
+                "+083201-07-28T00:00:00.000Z",
+            ),
             ((999_999, 0, -300_000_000), "+178626-11-24T00:00:00.000Z"),
             ((1_000_000, 0, -300_000_000), "+178627-11-24T00:00:00.000Z"),
             ((-399_999, 0, 200_000_000), "+147582-05-27T00:00:00.000Z"),
@@ -420,6 +444,23 @@ mod tests {
                 "{year}, {month}, {day}"
             );
         }
+    }
+
+    #[test]
+    fn each_product_and_sum_is_rounded_as_javascript_rounds_it() {
+        // Node 26: the minutes' product is no double, and rounds before the sum.
+        assert_eq!(
+            utc_ms(1970, 0, 1, 100_000_000_000, -5_999_999_999_999),
+            Some(60_032)
+        );
+        assert_eq!(
+            utc_ms(1970, 0, 1, 2_400_000_000, 0),
+            Some(8_640_000_000_000_000)
+        );
+        assert_eq!(
+            utc_ms(1970, 0, 100_000_001, 0, 0),
+            Some(8_640_000_000_000_000)
+        );
     }
 
     #[test]
