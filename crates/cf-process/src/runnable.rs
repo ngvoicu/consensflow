@@ -299,7 +299,10 @@ mod tests {
         /// A folder of shims: npm's for a package whose script is there.
         fn npm(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
             let bin = root.join("bin");
-            let script = bin.join("node_modules/@x/cli/bin/cli.js");
+            // Built of its parts: the shim's path is expanded with the platform's separators.
+            let script = ["node_modules", "@x", "cli", "bin", "cli.js"]
+                .iter()
+                .fold(bin.clone(), |path, part| path.join(part));
             fs::create_dir_all(script.parent().unwrap()).unwrap();
             fs::write(&script, "").unwrap();
             let shim = bin.join("cli.cmd");
