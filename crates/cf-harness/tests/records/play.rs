@@ -41,16 +41,20 @@ static LOCAL_ZONE: LazyLock<TimeZone> = LazyLock::new(|| {
 });
 
 /// Whether this build reads what `look` looks at: a harness whose reader is
-/// ported, and a session to read. The others wait for the readers and the
-/// switch still to come.
+/// ported, and a session to read. The switch that answers the others is still
+/// to come.
 pub fn ported(look: &crate::scenario::Look) -> bool {
-    matches!(look.kind.as_str(), "codex" | "pi" | "devin" | "opencode") && !look.session.is_empty()
+    matches!(
+        look.kind.as_str(),
+        "codex" | "claude-code" | "pi" | "devin" | "opencode"
+    ) && !look.session.is_empty()
 }
 
 /// A ported harness's reader of `session`, made afresh.
 fn reader(kind: &str, session: &str, env: &Env) -> Box<dyn Look + Send> {
     match kind {
         "codex" => cf_harness::codex::record::reader(session, env),
+        "claude-code" => cf_harness::claude::record::reader(session, env, &LOCAL_ZONE),
         "pi" => cf_harness::pi::record::reader(session, env, &LOCAL_ZONE),
         "devin" => cf_harness::devin::record::reader(session, env),
         "opencode" => cf_harness::opencode::record::reader(session, env, &LOCAL_ZONE),
@@ -63,7 +67,7 @@ fn reader(kind: &str, session: &str, env: &Env) -> Box<dyn Look + Send> {
 pub struct Played {
     /// Held to what Node read.
     pub answered: usize,
-    /// Left for the readers still to come.
+    /// Left for the switch still to come: a look at no session.
     pub pending: usize,
 }
 

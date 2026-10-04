@@ -61,6 +61,9 @@ pub(crate) enum Stop {
     Failed(String),
     /// The file could not be read.
     Io(io::Error),
+    /// What a parser's `visit` returns to have the transcript read again from
+    /// its start (`REREAD`): not a failure, and no reading says it.
+    Reread,
 }
 
 impl Stop {
@@ -69,6 +72,7 @@ impl Stop {
         match self {
             Stop::Failed(reason) => reason.clone(),
             Stop::Io(error) => error.to_string(),
+            Stop::Reread => "read the transcript again".to_owned(),
         }
     }
 }
