@@ -421,12 +421,13 @@ mod tests {
 
     use crate::arbiter::SanitizeError;
     #[cfg(unix)]
-    use crate::bridge::BridgeBuilder;
-    #[cfg(unix)]
     use crate::output_hub::OutputHub;
     #[cfg(unix)]
     use crate::pane_handlers::register_pane_handlers;
     use crate::pty::PaneError;
+    #[cfg(unix)]
+    use cf_bridge::BridgeBuilder;
+    use cf_proto::bridge::Role;
 
     /// A pane's input lives as long as the pane: killed, or ended on its own,
     /// it takes its input worker and queue, its page sequence and its arbiter
@@ -442,7 +443,7 @@ mod tests {
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
-        let mut builder = BridgeBuilder::new(1024 * 1024);
+        let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
         register_pane_handlers(
             &mut builder,
             Arc::clone(&panes),

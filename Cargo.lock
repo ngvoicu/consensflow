@@ -51,6 +51,8 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 name = "app"
 version = "3.0.0-alpha.72"
 dependencies = [
+ "cf-bridge",
+ "cf-proto",
  "flate2",
  "futures-channel",
  "libc",
@@ -313,6 +315,22 @@ name = "cesu8"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
+
+[[package]]
+name = "cf-bridge"
+version = "3.0.0-alpha.72"
+dependencies = [
+ "cf-proto",
+ "serde_json",
+]
+
+[[package]]
+name = "cf-proto"
+version = "3.0.0-alpha.72"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "cfb"

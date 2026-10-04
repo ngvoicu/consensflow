@@ -1,3 +1,10 @@
+//! The bridge's transport on threads: one end of the JSON-lines protocol
+//! (`cf_proto::bridge`) over a reader and a writer, with requests matched to
+//! their responses, handlers run off the reader's thread, a bounded writer
+//! queue, frame size limits and an orderly shutdown. The pane host runs it as
+//! [`Role::Host`]; which end a program is decides the ids it mints and the
+//! ones it accepts.
+
 use std::collections::HashMap;
 use std::fmt;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -8,12 +15,9 @@ use std::sync::{mpsc, Arc, Condvar, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
+use cf_proto::bridge::{too_large_body, unknown_op_body, Frame, Role, PROTOCOL_VERSION};
 use serde_json::{json, Value};
 
-const PROTOCOL_VERSION: u8 = 1;
-const RUST_ID_PREFIX: &str = "r-";
-const NODE_ID_PREFIX: &str = "n-";
 const WRITER_QUEUE_CAPACITY: usize = 32;
 /// The most of the writer queue a stream may fill, so a response always finds
 /// room behind a burst of pane output.
@@ -54,15 +58,6 @@ impl From<std::io::Error> for BridgeError {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct Frame {
-    v: u8,
-    id: String,
-    kind: String,
-    op: String,
-    body: Value,
-}
-
 struct PendingRequest {
     op: String,
     sender: mpsc::Sender<Result<Value, BridgeError>>,
@@ -94,6 +89,7 @@ struct TransportShutdown {
 }
 
 struct BridgeInner {
+    role: Role,
     writer: Mutex<Option<mpsc::SyncSender<WriteJob>>>,
     /// Frames in the writer queue the writer has not taken yet.
     queued: AtomicUsize,
@@ -122,6 +118,7 @@ pub struct ConnectedBridge {
 }
 
 pub struct BridgeBuilder {
+    role: Role,
     handlers: HashMap<String, RequestHandlerEntry>,
     event_handlers: HashMap<String, Vec<Arc<EventHandler>>>,
     on_error: Option<Arc<ErrorHandler>>,
@@ -131,8 +128,10 @@ pub struct BridgeBuilder {
 }
 
 impl BridgeBuilder {
-    pub fn new(max_frame_bytes: usize) -> Self {
+    /// A bridge for the `role` end, refusing frames over `max_frame_bytes`.
+    pub fn new(role: Role, max_frame_bytes: usize) -> Self {
         Self {
+            role,
             handlers: HashMap::new(),
             event_handlers: HashMap::new(),
             on_error: None,
@@ -330,6 +329,7 @@ impl BridgeBuilder {
         let (writer, jobs) = mpsc::sync_channel(WRITER_QUEUE_CAPACITY);
         let bridge = Bridge {
             inner: Arc::new(BridgeInner {
+                role: self.role,
                 writer: Mutex::new(Some(writer)),
                 queued: AtomicUsize::new(0),
                 pending: Mutex::new(HashMap::new()),
@@ -517,7 +517,7 @@ impl Bridge {
 
     fn next_id(&self) -> String {
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed) + 1;
-        format!("{RUST_ID_PREFIX}{id}")
+        format!("{}{id}", self.inner.role.prefix())
     }
 
     fn start_reader<R>(&self, reader: BufReader<R>)
@@ -597,7 +597,7 @@ impl Bridge {
             return;
         }
         let frame = match serde_json::from_slice::<Frame>(raw) {
-            Ok(frame) if valid_frame(&frame) => frame,
+            Ok(frame) if frame.is_well_formed() => frame,
             Ok(_) => {
                 self.report(BridgeError::MalformedFrame(
                     String::from_utf8_lossy(raw).into_owned(),
@@ -611,8 +611,8 @@ impl Bridge {
         };
 
         let valid_namespace = match frame.kind.as_str() {
-            "res" => frame.id.starts_with(RUST_ID_PREFIX),
-            "req" | "evt" => frame.id.starts_with(NODE_ID_PREFIX),
+            "res" => frame.id.starts_with(self.inner.role.prefix()),
+            "req" | "evt" => frame.id.starts_with(self.inner.role.peer().prefix()),
             _ => false,
         };
         if !valid_namespace {
@@ -1113,12 +1113,6 @@ fn set_nonblocking(file_descriptor: RawFd) -> std::io::Result<()> {
     Ok(())
 }
 
-fn valid_frame(frame: &Frame) -> bool {
-    frame.v == PROTOCOL_VERSION
-        && !frame.id.is_empty()
-        && matches!(frame.kind.as_str(), "req" | "res" | "evt")
-}
-
 enum BoundedLine {
     Complete(Vec<u8>),
     Overflow,
@@ -1188,14 +1182,6 @@ fn trim_line_ending(line: &mut Vec<u8>) {
     }
 }
 
-fn too_large_body() -> Value {
-    json!({"ok":false,"error":"too-large"})
-}
-
-fn unknown_op_body() -> Value {
-    json!({"ok":false,"error":"unknown-op"})
-}
-
 #[cfg(test)]
 mod tests {
     #[cfg(unix)]
@@ -1207,6 +1193,7 @@ mod tests {
         use std::thread;
         use std::time::{Duration, Instant};
 
+        use cf_proto::bridge::Role;
         use serde_json::{json, Value};
 
         use super::super::{
@@ -1608,7 +1595,7 @@ mod tests {
                 drop_started: Some(drop_started),
                 drop_release: drop_release_receiver,
             };
-            let connected = BridgeBuilder::new(1024)
+            let connected = BridgeBuilder::new(Role::Host, 1024)
                 .connect(reader, rust_output)
                 .expect("connect bridge with gated reader destruction");
             (
@@ -1774,7 +1761,7 @@ mod tests {
 
         #[test]
         fn handle_and_first_frame_in_one_read_keep_the_frame_buffered() {
-            let mut builder = BridgeBuilder::new(1024);
+            let mut builder = BridgeBuilder::new(Role::Host, 1024);
             builder.on("ping", |_bridge, body| Ok(json!({"echo":body})));
             let first = json!({
                 "v":1,
@@ -1804,7 +1791,7 @@ mod tests {
                 UnixStream::pair().expect("create handshake socket pair");
             let (result_sender, result_receiver) = std::sync::mpsc::channel();
             let connector = thread::spawn(move || {
-                let result = BridgeBuilder::new(32)
+                let result = BridgeBuilder::new(Role::Host, 32)
                     .connect_uninterruptible(rust_input, Vec::<u8>::new())
                     .map(|_| ());
                 let _ = result_sender.send(result);
@@ -1831,7 +1818,7 @@ mod tests {
         #[test]
         fn fragmented_oversized_frame_is_discarded_through_newline_then_reader_recovers() {
             let (error_sender, error_receiver) = std::sync::mpsc::channel();
-            let mut builder = BridgeBuilder::new(128);
+            let mut builder = BridgeBuilder::new(Role::Host, 128);
             builder.on("ping", |_bridge, _body| Ok(json!({"ok":true})));
             builder.on_error(move |error| {
                 let _ = error_sender.send(error);
@@ -1874,7 +1861,7 @@ mod tests {
         #[test]
         fn rust_requests_events_and_responses_have_the_exact_frame_shape() {
             let (event_sender, event_receiver) = std::sync::mpsc::channel();
-            let mut builder = BridgeBuilder::new(1024);
+            let mut builder = BridgeBuilder::new(Role::Host, 1024);
             builder.on_event("state.changed", move |body| {
                 event_sender.send(body).expect("record event");
             });
@@ -1942,7 +1929,7 @@ mod tests {
 
         #[test]
         fn deadline_returns_error_body_and_late_response_is_dropped() {
-            let (connected, mut peer) = connect(BridgeBuilder::new(1024), None);
+            let (connected, mut peer) = connect(BridgeBuilder::new(Role::Host, 1024), None);
 
             assert_eq!(
                 connected
@@ -1980,7 +1967,8 @@ mod tests {
         #[test]
         fn request_deadline_starts_before_a_blocked_writer() {
             let (writer, gate) = gated_writer();
-            let (connected, peer) = connect_with_writer(BridgeBuilder::new(1024), writer);
+            let (connected, peer) =
+                connect_with_writer(BridgeBuilder::new(Role::Host, 1024), writer);
             let first_bridge = connected.bridge.clone();
             let first = thread::spawn(move || first_bridge.request("first", json!(null), None));
             gate.wait_until_entered();
@@ -2016,7 +2004,8 @@ mod tests {
         #[test]
         fn blocked_unknown_and_oversized_replies_do_not_stall_input_dispatch() {
             let (writer, gate) = gated_writer();
-            let (connected, mut peer) = connect_with_writer(BridgeBuilder::new(256), writer);
+            let (connected, mut peer) =
+                connect_with_writer(BridgeBuilder::new(Role::Host, 256), writer);
             let requester = connected.bridge.clone();
             let (result_sender, result_receiver) = std::sync::mpsc::channel();
             let request = thread::spawn(move || {
@@ -2071,7 +2060,7 @@ mod tests {
         fn saturated_response_queue_closes_instead_of_accumulating_waiters() {
             let max_frame_bytes = 9 * 1024 * 1024;
             let (connected, mut peer_input, peer_output, input_probe, mut output_probe) =
-                connect_tracked_split(BridgeBuilder::new(max_frame_bytes));
+                connect_tracked_split(BridgeBuilder::new(Role::Host, max_frame_bytes));
             occupy_real_output(&connected.bridge, &mut output_probe);
 
             for index in 0..=WRITER_QUEUE_CAPACITY {
@@ -2113,7 +2102,8 @@ mod tests {
         #[test]
         fn stream_events_wait_for_a_busy_peer_and_leave_room_for_responses() {
             let (writer, gate) = gated_writer();
-            let (connected, mut peer) = connect_with_writer(BridgeBuilder::new(1024), writer);
+            let (connected, mut peer) =
+                connect_with_writer(BridgeBuilder::new(Role::Host, 1024), writer);
             assert!(connected
                 .bridge
                 .event("occupy", json!(null))
@@ -2173,7 +2163,7 @@ mod tests {
         fn eof_interrupts_blocked_real_output_and_releases_both_endpoints() {
             let max_frame_bytes = 9 * 1024 * 1024;
             let (connected, peer_input, peer_output, input_probe, mut output_probe) =
-                connect_tracked_split(BridgeBuilder::new(max_frame_bytes));
+                connect_tracked_split(BridgeBuilder::new(Role::Host, max_frame_bytes));
             occupy_real_output(&connected.bridge, &mut output_probe);
 
             drop(peer_input);
@@ -2219,7 +2209,8 @@ mod tests {
         #[test]
         fn eof_rejects_a_request_while_its_output_write_is_blocked() {
             let (writer, gate) = gated_writer();
-            let (connected, peer) = connect_with_writer(BridgeBuilder::new(1024), writer);
+            let (connected, peer) =
+                connect_with_writer(BridgeBuilder::new(Role::Host, 1024), writer);
             let requester = connected.bridge.clone();
             let (result_sender, result_receiver) = std::sync::mpsc::channel();
             let request = thread::spawn(move || {
@@ -2246,7 +2237,7 @@ mod tests {
 
         #[test]
         fn outgoing_oversized_frames_are_refused_without_crossing_the_wire() {
-            let mut builder = BridgeBuilder::new(160);
+            let mut builder = BridgeBuilder::new(Role::Host, 160);
             builder.on("echo", |_bridge, body| Ok(body));
             let (connected, mut peer) = connect(builder, None);
             peer.set_read_timeout(Duration::from_millis(30));
@@ -2270,7 +2261,7 @@ mod tests {
         #[test]
         fn fragmented_valid_oversized_request_is_discarded_and_reader_recovers() {
             let handled = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-            let mut builder = BridgeBuilder::new(128);
+            let mut builder = BridgeBuilder::new(Role::Host, 128);
             let handled_by_handler = Arc::clone(&handled);
             builder.on("large", move |_bridge, _body| {
                 handled_by_handler.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -2333,7 +2324,8 @@ mod tests {
         #[test]
         fn fragmented_oversized_response_is_discarded_then_defaults_to_deadline() {
             assert_eq!(DEFAULT_REQUEST_DEADLINE_MS, 30_000);
-            let mut builder = BridgeBuilder::new(128).with_default_request_deadline_ms(25);
+            let mut builder =
+                BridgeBuilder::new(Role::Host, 128).with_default_request_deadline_ms(25);
             builder.on("ping", |_bridge, _body| Ok(json!({"ok":true})));
             let (connected, chunks, mut output) = connect_fragmented(builder);
             output
@@ -2399,7 +2391,7 @@ mod tests {
 
         #[test]
         fn oversized_handler_result_gets_a_bounded_reply_or_fails_the_transport() {
-            let mut builder = BridgeBuilder::new(160);
+            let mut builder = BridgeBuilder::new(Role::Host, 160);
             builder.on("large", |_bridge, _body| {
                 Ok(json!({"payload":"x".repeat(500)}))
             });
@@ -2423,7 +2415,7 @@ mod tests {
                 })
             );
 
-            let mut builder = BridgeBuilder::new(64);
+            let mut builder = BridgeBuilder::new(Role::Host, 64);
             builder.on("x", |_bridge, _body| Ok(json!({"payload":"x".repeat(100)})));
             let (connected, mut peer) = connect(builder, None);
             peer.send(json!({"v":1,"id":"n-","kind":"req","op":"x","body":null}));
@@ -2445,7 +2437,7 @@ mod tests {
 
         #[test]
         fn unrepresentable_fallback_closes_the_output_seen_by_the_live_peer() {
-            let mut builder = BridgeBuilder::new(64);
+            let mut builder = BridgeBuilder::new(Role::Host, 64);
             builder.on("x", |_bridge, _body| Ok(json!({"payload":"x".repeat(100)})));
             let (connected, mut peer) = connect_split(builder);
             peer.set_read_timeout(Duration::from_millis(250));
@@ -2467,7 +2459,7 @@ mod tests {
 
         #[test]
         fn blocked_reader_does_not_keep_a_failed_transport_alive() {
-            let mut builder = BridgeBuilder::new(64);
+            let mut builder = BridgeBuilder::new(Role::Host, 64);
             builder.on("x", |_bridge, _body| Ok(json!({"payload":"x".repeat(100)})));
             let (connected, mut peer) = connect_split(builder);
             let bridge_lifetime = Arc::downgrade(&connected.bridge.inner);
@@ -2495,7 +2487,8 @@ mod tests {
         #[test]
         fn partial_output_failure_closes_and_rejects_all_pending_requests() {
             let (writer, gate) = partial_fail_writer();
-            let (connected, peer) = connect_with_writer(BridgeBuilder::new(1024), writer);
+            let (connected, peer) =
+                connect_with_writer(BridgeBuilder::new(Role::Host, 1024), writer);
             let first_bridge = connected.bridge.clone();
             let (first_sender, first_receiver) = std::sync::mpsc::channel();
             let first = thread::spawn(move || {
@@ -2536,7 +2529,7 @@ mod tests {
         #[test]
         fn the_close_is_told_once_whatever_closed_it() {
             let (closes, closed) = std::sync::mpsc::channel();
-            let mut builder = BridgeBuilder::new(1024);
+            let mut builder = BridgeBuilder::new(Role::Host, 1024);
             builder.on_close(move || {
                 let _ = closes.send(());
             });
@@ -2548,7 +2541,7 @@ mod tests {
             connected.bridge.wait_closed().expect("bridge closes");
 
             let (closes, closed) = std::sync::mpsc::channel();
-            let mut builder = BridgeBuilder::new(1024);
+            let mut builder = BridgeBuilder::new(Role::Host, 1024);
             builder.on_close(move || {
                 let _ = closes.send(());
             });
@@ -2572,7 +2565,7 @@ mod tests {
 
         #[test]
         fn eof_rejects_every_outstanding_and_future_request() {
-            let (connected, mut peer) = connect(BridgeBuilder::new(1024), None);
+            let (connected, mut peer) = connect(BridgeBuilder::new(Role::Host, 1024), None);
             let first_bridge = connected.bridge.clone();
             let first = thread::spawn(move || first_bridge.request("one", json!(null), None));
             let second_bridge = connected.bridge.clone();
@@ -2605,11 +2598,12 @@ mod tests {
                 .expect("write unterminated handle");
             drop(peer_input);
             assert!(matches!(
-                BridgeBuilder::new(1024).connect_uninterruptible(rust_input, Vec::<u8>::new()),
+                BridgeBuilder::new(Role::Host, 1024)
+                    .connect_uninterruptible(rust_input, Vec::<u8>::new()),
                 Err(BridgeError::InvalidHandle(_))
             ));
 
-            let (connected, peer) = connect(BridgeBuilder::new(1024), None);
+            let (connected, peer) = connect(BridgeBuilder::new(Role::Host, 1024), None);
             drop(peer);
             connected
                 .bridge
@@ -2617,7 +2611,7 @@ mod tests {
                 .expect("EOF immediately after handle");
 
             let dispatched = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-            let mut builder = BridgeBuilder::new(1024);
+            let mut builder = BridgeBuilder::new(Role::Host, 1024);
             let handler_dispatched = Arc::clone(&dispatched);
             builder.on("ping", move |_bridge, _body| {
                 handler_dispatched.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -2636,7 +2630,7 @@ mod tests {
             assert_eq!(dispatched.load(std::sync::atomic::Ordering::SeqCst), 0);
 
             let (dispatched_sender, dispatched_receiver) = std::sync::mpsc::channel();
-            let mut builder = BridgeBuilder::new(1024);
+            let mut builder = BridgeBuilder::new(Role::Host, 1024);
             builder.on("ping", move |_bridge, _body| {
                 dispatched_sender.send(()).expect("record dispatched frame");
                 Ok(json!({"ok":true}))
@@ -2665,7 +2659,7 @@ mod tests {
             let release_launch = Arc::new(Barrier::new(2));
             let (admitted_sender, admitted_receiver) = std::sync::mpsc::channel();
             let (finished_sender, finished_receiver) = std::sync::mpsc::channel();
-            let mut builder = BridgeBuilder::new(1024);
+            let mut builder = BridgeBuilder::new(Role::Host, 1024);
             let handler_panes = Arc::clone(&panes);
             let handler_release = Arc::clone(&release_launch);
             builder.on_launch("pane.open", move |_bridge, _body| {
@@ -2721,7 +2715,7 @@ mod tests {
 
         #[test]
         fn nested_reverse_request_does_not_block_dispatch() {
-            let mut builder = BridgeBuilder::new(1024);
+            let mut builder = BridgeBuilder::new(Role::Host, 1024);
             builder.on("consult", |bridge, body| {
                 let opened = bridge
                     .request("pane.open", body, Some(500))
@@ -2763,7 +2757,7 @@ mod tests {
 
         #[test]
         fn unknown_operation_gets_the_agreed_error_response() {
-            let (_connected, mut peer) = connect(BridgeBuilder::new(1024), None);
+            let (_connected, mut peer) = connect(BridgeBuilder::new(Role::Host, 1024), None);
 
             peer.send(json!({
                 "v":1,
@@ -2784,6 +2778,46 @@ mod tests {
                 })
             );
         }
+
+        #[test]
+        fn a_host_and_a_daemon_bridge_answer_each_other_each_with_its_own_ids() {
+            // Each end refuses a request whose id is not the other's prefix and a
+            // response whose id is not its own: both directions answering is the
+            // proof that each mints its own and accepts the other's.
+            let (host_end, daemon_end) = UnixStream::pair().expect("create bridge socket pair");
+            let mut daemon = BridgeBuilder::new(Role::Daemon, 1024);
+            daemon.on("board.get", |_bridge, body| {
+                Ok(json!({ "ok": true, "asked": body }))
+            });
+            let daemon = daemon
+                .serve(
+                    daemon_end.try_clone().expect("clone daemon end"),
+                    daemon_end,
+                    &json!({ "url": "http://127.0.0.1:1", "token": "t" }),
+                )
+                .expect("serve the daemon end");
+            let mut host = BridgeBuilder::new(Role::Host, 1024);
+            host.on("pane.open", |_bridge, body| {
+                Ok(json!({ "ok": true, "opened": body }))
+            });
+            let connected = host
+                .connect(host_end.try_clone().expect("clone host end"), host_end)
+                .expect("connect the host end");
+            assert_eq!(connected.handle["token"], "t");
+            assert_eq!(
+                connected
+                    .bridge
+                    .request("board.get", json!({ "project": 1 }), Some(5_000))
+                    .unwrap(),
+                json!({ "ok": true, "asked": { "project": 1 } })
+            );
+            assert_eq!(
+                daemon
+                    .request("pane.open", json!({ "id": "p1" }), Some(5_000))
+                    .unwrap(),
+                json!({ "ok": true, "opened": { "id": "p1" } })
+            );
+        }
     }
 
     #[cfg(windows)]
@@ -2791,6 +2825,7 @@ mod tests {
         use std::io::{BufRead, BufReader, Write};
         use std::time::{Duration, Instant};
 
+        use cf_proto::bridge::Role;
         use serde_json::{json, Value};
 
         use super::super::BridgeBuilder;
@@ -2803,7 +2838,7 @@ mod tests {
             let (from_bridge, bridge_output) = std::io::pipe().expect("output pipe");
             let handle = json!({"url":"http://127.0.0.1:1234","token":"secret"});
             writeln!(to_bridge, "{handle}").expect("send the handle");
-            let connected = BridgeBuilder::new(1024)
+            let connected = BridgeBuilder::new(Role::Host, 1024)
                 .connect(bridge_input, bridge_output)
                 .expect("connect over pipes");
             assert_eq!(connected.handle, handle);

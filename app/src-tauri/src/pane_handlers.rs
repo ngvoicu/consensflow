@@ -13,11 +13,11 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::arbiter::{InputArbiter, OutputClock};
-use crate::bridge::{Bridge, BridgeBuilder};
 use crate::input_queue::{wait_for_input_blocking, InputError, InputQueue};
 use crate::output_hub::OutputHub;
 use crate::pty::{validate_drop_env, PaneEnvironment, PaneKey, PaneTable, StreamedPane};
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
+use cf_bridge::{Bridge, BridgeBuilder};
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
 
@@ -321,6 +321,7 @@ mod tests {
     use super::*;
     #[cfg(unix)]
     use crate::arbiter::EnterTiming;
+    use cf_proto::bridge::Role;
     #[cfg(unix)]
     use std::sync::mpsc;
     #[cfg(unix)]
@@ -413,7 +414,7 @@ mod tests {
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
-        let mut builder = BridgeBuilder::new(1024 * 1024);
+        let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
         register_pane_handlers(
             &mut builder,
             Arc::clone(&panes),
@@ -500,7 +501,7 @@ mod tests {
         let key = PaneKey::new("p1-zeus", 1);
         arbiter.register(&key).expect("register the pane");
         inputs.open(&key).expect("open the pane's input");
-        let mut builder = BridgeBuilder::new(1024 * 1024);
+        let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
         register_pane_handlers(
             &mut builder,
             Arc::clone(&panes),
@@ -574,7 +575,7 @@ mod tests {
         output.register_sink(Arc::new(move |message: PaneOutputMessage| {
             printed.send(message.bytes).is_ok()
         }));
-        let mut builder = BridgeBuilder::new(MAX_FRAME_BYTES);
+        let mut builder = BridgeBuilder::new(Role::Host, MAX_FRAME_BYTES);
         register_pane_handlers(
             &mut builder,
             Arc::clone(&panes),

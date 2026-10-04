@@ -1,0 +1,14 @@
+[package]
+name = "cf-proto"
+description = "Every shape that crosses a process boundary between ConsensFlow's programs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

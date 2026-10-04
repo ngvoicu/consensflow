@@ -8,12 +8,12 @@ use serde_json::{json, Value};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-use crate::bridge::Bridge;
 use crate::daemon::RosterHandle;
 use crate::input_queue::{wait_for_input, InputWork, PageInputCompletion};
 use crate::output_hub::PaneOutputMessage;
 use crate::runtime::{AppRuntime, PAGE_STATE_EVENT};
 use crate::validation::{pane_key, validate_seq, validate_size, validate_text};
+use cf_bridge::Bridge;
 
 pub(crate) fn window_command_allowed(window: &str, _command: &str) -> bool {
     window == "main"
@@ -345,8 +345,6 @@ mod tests {
     #[cfg(unix)]
     use crate::arbiter::{EnterTiming, InputArbiter};
     #[cfg(unix)]
-    use crate::bridge::BridgeBuilder;
-    #[cfg(unix)]
     use crate::input_queue::InputQueue;
     #[cfg(unix)]
     use crate::pty::{PaneEnvironment, PaneKey, PaneTable};
@@ -354,6 +352,9 @@ mod tests {
     use crate::runtime::test_runtime;
     #[cfg(unix)]
     use crate::validation::MAX_INPUT_BYTES;
+    #[cfg(unix)]
+    use cf_bridge::BridgeBuilder;
+    use cf_proto::bridge::Role;
 
     #[test]
     fn only_main_window_has_application_command_authority() {
@@ -1013,7 +1014,7 @@ mod tests {
             .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
             .expect("write bridge handle");
         node_stream.flush().expect("flush bridge handle");
-        let connected = BridgeBuilder::new(1024 * 1024)
+        let connected = BridgeBuilder::new(Role::Host, 1024 * 1024)
             .connect(
                 rust_stream.try_clone().expect("clone bridge socket"),
                 rust_stream,

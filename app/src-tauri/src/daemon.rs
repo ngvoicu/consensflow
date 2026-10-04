@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::bridge::{Bridge, BridgeBuilder, BridgeError};
 use crate::pty::PaneTable;
+use cf_bridge::{Bridge, BridgeBuilder, BridgeError};
 
 /// How long the daemon gets to stop on its own before it is killed.
 pub(crate) const DAEMON_STOP_GRACE: Duration = Duration::from_secs(2);
@@ -495,6 +495,7 @@ impl Daemon {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cf_proto::bridge::Role;
     #[cfg(unix)]
     use std::collections::HashMap;
     #[cfg(unix)]
@@ -545,7 +546,7 @@ mod tests {
         command
             .arg("-c")
             .arg(format!("{}{then}", if ready { handle } else { "" }));
-        let mut builder = BridgeBuilder::new(1024);
+        let mut builder = BridgeBuilder::new(Role::Host, 1024);
         builder.on_close(closed);
         connect_daemon(command, builder, Duration::from_secs(5))
     }
@@ -617,7 +618,7 @@ mod tests {
                 "echo $$ > '{}'; exec /bin/sleep 60",
                 hung.display()
             ));
-            let mut builder = BridgeBuilder::new(1024);
+            let mut builder = BridgeBuilder::new(Role::Host, 1024);
             builder.on_close(closed);
             connect_daemon(command, builder, Duration::from_millis(300))
         });

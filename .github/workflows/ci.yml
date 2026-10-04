@@ -39,9 +39,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ". -> app/src-tauri/target"
-      # The Rust laid out as rustfmt lays it out, checked before anything builds.
-      - run: cargo fmt --check
-        working-directory: app/src-tauri
+      # The Rust laid out as rustfmt lays it out, every crate of the
+      # workspace, checked before anything builds.
+      - run: cargo fmt --all --check
 
       - run: npm ci
       - run: npm ci --prefix app
@@ -67,8 +67,10 @@ jobs:
       - run: cargo test --features test-helper
         working-directory: app/src-tauri
         timeout-minutes: 15
-      # Linted with the helper, and as the app builds: without it.
-      - run: cargo clippy --all-targets --features test-helper -- -D warnings
-        working-directory: app/src-tauri
-      - run: cargo clippy --all-targets -- -D warnings
-        working-directory: app/src-tauri
+      # The workspace's other crates, from its root, where the app's Windows
+      # runner does not apply: they link no dialog code.
+      - run: cargo test --workspace --exclude app
+        timeout-minutes: 15
+      # Every crate linted with the helper, and as the app builds: without it.
+      - run: cargo clippy --workspace --all-targets --features app/test-helper -- -D warnings
+      - run: cargo clippy --workspace --all-targets -- -D warnings

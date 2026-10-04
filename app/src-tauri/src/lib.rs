@@ -4,7 +4,6 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 pub mod arbiter;
-pub mod bridge;
 pub mod commands;
 mod daemon;
 mod daemon_command;

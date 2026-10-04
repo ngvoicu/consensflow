@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-use app_lib::bridge::{BridgeBuilder, BridgeError};
+use cf_bridge::{BridgeBuilder, BridgeError};
+use cf_proto::bridge::Role;
 
 const FRAME_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -1055,7 +1056,7 @@ process.stdin.resume()
     let (error_sender, error_receiver) = mpsc::channel();
     let (open_sender, open_receiver) = mpsc::channel();
     let (node_error_sender, node_error_receiver) = mpsc::channel();
-    let mut builder = BridgeBuilder::new(1024 * 1024);
+    let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
     builder.on_error(move |error| {
         let _ = error_sender.send(error);
     });

@@ -3,7 +3,7 @@
 # 2026-10-04; the plan is in the consensflow-sme brain).
 [workspace]
 resolver = "2"
-members = ["app/src-tauri"]
+members = ["app/src-tauri", "crates/*"]
 # The Windows `cf` launcher goes when the native `cf` replaces it.
 exclude = ["app/cf-launcher"]
 
@@ -11,6 +11,14 @@ exclude = ["app/cf-launcher"]
 version = "3.0.0-alpha.72"
 edition = "2021"
 rust-version = "1.95"
+
+# One version of each dependency for every crate; a crate names it with
+# `name.workspace = true`.
+[workspace.dependencies]
+cf-proto = { path = "crates/cf-proto" }
+cf-bridge = { path = "crates/cf-bridge" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

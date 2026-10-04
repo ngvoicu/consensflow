@@ -1,0 +1,14 @@
+[package]
+name = "cf-bridge"
+description = "The bridge's JSON-lines transport between the pane host and the daemon."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+cf-proto.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

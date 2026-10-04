@@ -10,7 +10,6 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 use crate::arbiter::{EnterTiming, InputArbiter};
-use crate::bridge::BridgeBuilder;
 use crate::daemon::{
     connect_daemon, stop_daemon, Daemon, DaemonStarter, DaemonStatus, DAEMON_READY_TIMEOUT,
     DAEMON_RESTART, DAEMON_STATUS_EVENT,
@@ -20,6 +19,8 @@ use crate::input_queue::InputQueue;
 use crate::output_hub::{OutputHub, PaneOutputMessage};
 use crate::pane_handlers::register_pane_handlers;
 use crate::pty::{PaneKey, PaneTable};
+use cf_bridge::BridgeBuilder;
+use cf_proto::bridge::Role;
 
 pub(crate) const MAX_FRAME_BYTES: usize = 1024 * 1024;
 /// How long quitting, or installing an update, waits for what was admitted
@@ -68,7 +69,7 @@ impl AppRuntime {
             let inputs = Arc::clone(&inputs);
             Arc::new(move |closed| {
                 let command = daemon_command(&app)?;
-                let mut builder = BridgeBuilder::new(MAX_FRAME_BYTES);
+                let mut builder = BridgeBuilder::new(Role::Host, MAX_FRAME_BYTES);
                 let page_app = app.clone();
                 let page_events: PageEventSink = Arc::new(move |name, body| {
                     if let Err(error) = page_app.emit(name, body) {
@@ -197,7 +198,7 @@ pub fn run_headless() -> Result<(), String> {
     let arbiter = Arc::new(InputArbiter::new(ENTER));
     let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
 
-    let mut builder = BridgeBuilder::new(MAX_FRAME_BYTES);
+    let mut builder = BridgeBuilder::new(Role::Host, MAX_FRAME_BYTES);
     register_pane_handlers(
         &mut builder,
         Arc::clone(&panes),
@@ -243,7 +244,7 @@ pub(crate) fn test_runtime(
     panes: Arc<PaneTable>,
     inputs: Arc<InputQueue>,
     daemon: Option<std::process::Child>,
-    bridge: Option<crate::bridge::Bridge>,
+    bridge: Option<cf_bridge::Bridge>,
 ) -> AppRuntime {
     AppRuntime {
         panes,
@@ -282,7 +283,7 @@ mod tests {
                 .send((name.to_string(), body))
                 .expect("record page event");
         });
-        let mut builder = BridgeBuilder::new(1024);
+        let mut builder = BridgeBuilder::new(Role::Host, 1024);
         register_page_events(&mut builder, sink);
         let connected = builder
             .connect(
@@ -322,7 +323,7 @@ mod tests {
         let handler_release = Arc::clone(&release);
         let handler_panes = Arc::clone(&panes);
         let (admitted_sender, admitted_receiver) = mpsc::channel();
-        let mut builder = BridgeBuilder::new(1024);
+        let mut builder = BridgeBuilder::new(Role::Host, 1024);
         builder.on_launch("pane.open", move |_bridge, _body| {
             admitted_sender.send(()).expect("announce admitted launch");
             handler_release.wait();
@@ -431,7 +432,7 @@ mod tests {
         let release = Arc::new(Barrier::new(2));
         let handler_release = Arc::clone(&release);
         let (admitted_sender, admitted_receiver) = mpsc::channel();
-        let mut builder = BridgeBuilder::new(1024);
+        let mut builder = BridgeBuilder::new(Role::Host, 1024);
         builder.on_launch("pane.open", move |_bridge, _body| {
             admitted_sender.send(()).expect("announce admitted launch");
             handler_release.wait();
@@ -494,7 +495,7 @@ mod tests {
         let handler_release = Arc::clone(&release);
         let handler_panes = Arc::clone(&panes);
         let (admitted_sender, admitted_receiver) = mpsc::channel();
-        let mut builder = BridgeBuilder::new(MAX_FRAME_BYTES);
+        let mut builder = BridgeBuilder::new(Role::Host, MAX_FRAME_BYTES);
         builder.on_launch("pane.open", move |_bridge, _body| {
             admitted_sender.send(()).expect("announce admitted launch");
             handler_release.wait();
@@ -641,7 +642,7 @@ mod tests {
         use std::io::Write;
         use std::os::unix::net::UnixStream;
 
-        let mut builder = BridgeBuilder::new(1024);
+        let mut builder = BridgeBuilder::new(Role::Host, 1024);
         builder.on("noop", |_bridge, _body| Ok(json!({"ok":true})));
         let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
         node_stream
