@@ -2,9 +2,35 @@
 //! the dispatcher's terms. Codex reports its usage ahead of time; the
 //! others say so only once a request is refused (a 429, or a 402 for spent
 //! credit), so for them the daemon learns at the first refusal.
+//!
+//! A reset that names a time of day and a zone is read in jiff's copy of the
+//! time zone database, bundled into the program (`tzdb-bundle-always`) and not
+//! read from the system's files: the same data on every platform, and no file
+//! or environment variable (`TZDIR`) behind the caller's back. jiff serves only
+//! as that database: it finds a zone, tells the offset at an instant, and the
+//! date an instant has in a zone. What is kept from Node on purpose:
+//! - a zone name is found in any ASCII case, as `Intl` finds it, but an
+//!   offset such as `+03:00`, which Node 26 takes for a zone, is unknown
+//!   here, and `Factory`, which Node refuses, is a zone;
+//! - the data is tzdata 2026c where Node's ICU holds 2026a, so a zone whose
+//!   rules changed between the two is read by the newer;
+//! - an instant past the years jiff holds, 9999 either way, is none to it, so
+//!   a reset at a time of day, asked of one, names no reset where Node would
+//!   give one.
 
+mod patterns;
+mod reset;
+#[cfg(test)]
+mod tests;
+
+use cf_base::js;
+use cf_base::time::{iso, time_clip};
+use jiff::tz::TimeZone;
 use serde::ser::{SerializeMap, Serializer};
 use serde::Serialize;
+use serde_json::Value;
+
+use patterns::REFUSED;
 
 /// What a record says of the account's quota.
 #[derive(Debug, Clone, PartialEq)]
@@ -67,28 +93,46 @@ impl Serialize for Quota {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// The statuses that mean an account takes no more for now: a rate or usage
+/// limit (429), or its credit spent (402, OpenRouter's "requires more
+/// credits").
+const QUOTA_STATUSES: [f64; 2] = [402.0, 429.0];
 
-    #[test]
-    fn a_quota_is_written_as_node_wrote_it() {
-        let refused = Quota::Exhausted {
-            at: Some("2026-09-19T10:00:00.000Z".to_owned()),
-            resets_at: None,
-        };
-        assert_eq!(
-            serde_json::to_string(&refused).unwrap(),
-            r#"{"state":"exhausted","at":"2026-09-19T10:00:00.000Z","resetsAt":null}"#
-        );
-        let usage = Quota::Usage {
-            level: Level::Low,
-            used_percent: Some(serde_json::Number::from(97)),
-            resets_at: Some("2026-09-26T11:49:53.000Z".to_owned()),
-        };
-        assert_eq!(
-            serde_json::to_string(&usage).unwrap(),
-            r#"{"state":"low","usedPercent":97,"resetsAt":"2026-09-26T11:49:53.000Z"}"#
-        );
-    }
+/// Whether a provider's status is a refusal for quota: any value that
+/// `Number` reads as one of them, none being `undefined`.
+pub(crate) fn quota_status(status: Option<&Value>) -> bool {
+    QUOTA_STATUSES.contains(&js::to_number(status))
+}
+
+/// Whether a provider's error text opens on a quota status: "429: …", or
+/// "OpenAI API error (429): …", Pi's two shapes (seen on Pi, 2026-09).
+pub(crate) fn refused_for_quota(text: &str) -> bool {
+    REFUSED
+        .captures(text)
+        .is_some_and(|found| quota_status(Some(&Value::from(&found[1]))))
+}
+
+/// A refused request: exhausted, with the reset the text names when it names
+/// one, and when it happened (`at_ms`, none when it is no number), so the
+/// daemon can tell an old refusal still in the record from a new one. A reset
+/// at a time of day that names no zone is read in `local`, the machine's.
+/// Fails where `toISOString` throws: for a time, or a span from it, past what
+/// a date holds.
+pub(crate) fn exhausted_quota(text: &str, at_ms: f64, local: &TimeZone) -> Result<Quota, String> {
+    let at = if at_ms.is_finite() {
+        Some(date(at_ms)?)
+    } else {
+        None
+    };
+    Ok(Quota::Exhausted {
+        at,
+        resets_at: reset::named_reset(text, at_ms, local)?,
+    })
+}
+
+/// `new Date(ms).toISOString()`, or the failure that throws.
+fn date(ms: f64) -> Result<String, String> {
+    time_clip(ms)
+        .map(iso)
+        .ok_or_else(|| "Invalid time value".to_owned())
 }
