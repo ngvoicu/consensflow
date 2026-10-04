@@ -18,12 +18,16 @@
 mod conversations;
 /// The ledger's vocabulary: the words its records hold, their limits, and
 /// the parsers a caller reading JSON (the API, the page) checks a request with.
+mod messages;
 pub mod model;
+mod names;
 mod projects;
+mod questions;
 mod queue;
 mod schema;
 mod staff;
 mod store;
+mod tasks;
 mod views;
 
 use std::path::Path;
@@ -35,13 +39,16 @@ use serde_json::Value;
 
 pub use cf_proto::ledger::{
     Candidate, ChiefConversation, ChiefOpenWork, ConversationView, DeletedProject, EventView,
-    LastSwitch, MemberView, MessageView, ParticipantView, ProjectView, RemovedMember, StaffMember,
-    TaskTranscript, TierChange,
+    HeldTask, LastSwitch, MemberView, MessageView, ParticipantView, ProjectView, Question,
+    QuestionOption, RemovedMember, StaffMember, TaskCreated, TaskMoved, TaskReleased, TaskThread,
+    TaskTranscript, TaskView, TierChange,
 };
 pub use conversations::{ChiefSwitch, TRANSCRIPT_ITEM_MAX};
+pub use messages::{NewNote, NewQuestion};
 pub use model::LedgerError;
 pub use projects::{NewChief, NewMember, NewProject};
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
+pub use tasks::{NewTask, RESUME_WORDS};
 
 use store::Store;
 
@@ -54,9 +61,11 @@ pub struct Event {
     pub data: Value,
 }
 
-/// What a ledger is given: the time, and someone told every event as it is logged.
+/// What a ledger is given: the time, a fresh name for each session, and
+/// someone told every event as it is logged.
 pub struct Options {
     pub clock: Box<dyn Clock>,
+    pub names: Box<dyn FnMut() -> String>,
     pub trace: Box<dyn FnMut(&Event)>,
 }
 
@@ -64,6 +73,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             clock: Box::new(SystemClock),
+            names: Box::new(|| names::session_name(names::random_unit)),
             trace: Box::new(|_| {}),
         }
     }
@@ -98,7 +108,7 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
         return Err(opening_refusal(file, cause));
     }
     Ok(Ledger {
-        store: Store::new(db, options.clock, options.trace),
+        store: Store::new(db, options.clock, options.names, options.trace),
     })
 }
 
@@ -367,6 +377,291 @@ impl Ledger {
     /// One message, or none.
     pub fn message(&self, id: i64) -> Result<Option<MessageView>, LedgerError> {
         self.store.message(id)
+    }
+
+    /// A task from the chief or the human, by name or for a pool and tier.
+    pub fn create_task(
+        &mut self,
+        project_id: i64,
+        request: &NewTask,
+    ) -> Result<TaskCreated, LedgerError> {
+        tasks::create_task(&mut self.store, project_id, request)
+    }
+
+    /// The daemon gives an open task to a new session of a member.
+    pub fn assign_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        participant_id: i64,
+    ) -> Result<TaskMoved, LedgerError> {
+        tasks::assign_task(&mut self.store, project_id, number, participant_id)
+    }
+
+    /// A task given by tier goes back to the board for another member of that tier.
+    pub fn release_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        because: &str,
+    ) -> Result<TaskReleased, LedgerError> {
+        tasks::release_task(&mut self.store, project_id, number, because)
+    }
+
+    /// Whether a task may go back to the board for its tier, without moving it; says why not.
+    pub fn check_release(&self, project_id: i64, number: i64) -> Result<(), LedgerError> {
+        tasks::check_release(&self.store, project_id, number)
+    }
+
+    /// The assignee's answer finishes the task.
+    pub fn record_result(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        body: &str,
+    ) -> Result<TaskMoved, LedgerError> {
+        tasks::record_result(&mut self.store, project_id, number, body)
+    }
+
+    /// A coordinator accepts a task's result.
+    pub fn accept_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        by: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::accept_task(&mut self.store, project_id, number, by)
+    }
+
+    /// A worker's task stops without ending; `by` none when ConsensFlow pauses it.
+    pub fn pause_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        by: Option<&str>,
+        because: Option<&str>,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::pause_task(&mut self.store, project_id, number, by, because)
+    }
+
+    /// The daemon holds a task while its member is out of quota, until `until`.
+    pub fn hold_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        until: &str,
+        because: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::hold_task(&mut self.store, project_id, number, until, because)
+    }
+
+    /// The held tasks whose time has come at `now`, an ISO time.
+    pub fn held_tasks_due(&self, now: &str) -> Result<Vec<HeldTask>, LedgerError> {
+        tasks::held_tasks_due(&self.store, now)
+    }
+
+    /// The paused task a participant still holds, or none.
+    pub fn paused_task(&self, participant_id: i64) -> Result<Option<TaskThread>, LedgerError> {
+        tasks::paused_task(&self.store, participant_id)
+    }
+
+    /// Whether a tell for the task reached the participant's window since the task was paused.
+    pub fn told_since_paused(
+        &self,
+        participant_id: i64,
+        task_id: i64,
+    ) -> Result<bool, LedgerError> {
+        tasks::told_since_paused(&self.store, participant_id, task_id)
+    }
+
+    /// A paused task goes on with the words that resume it; `by` none when the daemon does.
+    pub fn resume_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        by: Option<&str>,
+        body: &str,
+    ) -> Result<TaskMoved, LedgerError> {
+        tasks::resume_task(&mut self.store, project_id, number, by, body)
+    }
+
+    /// A follow-up on a finished or failed task, back to its assignee.
+    pub fn reopen_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        by: &str,
+        body: &str,
+    ) -> Result<TaskMoved, LedgerError> {
+        tasks::reopen_task(&mut self.store, project_id, number, by, body)
+    }
+
+    /// A task is called off, its requester told.
+    pub fn cancel_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        by: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::cancel_task(&mut self.store, project_id, number, by)
+    }
+
+    /// The daemon gives up on a task.
+    pub fn fail_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        reason: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::fail_task(&mut self.store, project_id, number, reason)
+    }
+
+    /// The human takes finished tasks off the board for good, all or none.
+    pub fn delete_tasks(
+        &mut self,
+        project_id: i64,
+        numbers: &[i64],
+    ) -> Result<Vec<TaskView>, LedgerError> {
+        tasks::delete_tasks(&mut self.store, project_id, numbers)
+    }
+
+    /// A task and its whole thread; none when there is no such task.
+    pub fn task(&self, project_id: i64, number: i64) -> Result<Option<TaskThread>, LedgerError> {
+        tasks::task(&self.store, project_id, number)
+    }
+
+    /// The task a participant has in progress; with `queued`, one still arriving too.
+    pub fn active_task(
+        &self,
+        participant_id: i64,
+        queued: bool,
+    ) -> Result<Option<TaskThread>, LedgerError> {
+        tasks::active_task(&self.store, participant_id, queued)
+    }
+
+    /// The task of the newest message for a participant, whatever its state now.
+    pub fn last_task(&self, participant_id: i64) -> Result<Option<TaskThread>, LedgerError> {
+        tasks::last_task(&self.store, participant_id)
+    }
+
+    /// A note from a participant, or from ConsensFlow itself.
+    pub fn note(&mut self, project_id: i64, note: &NewNote) -> Result<MessageView, LedgerError> {
+        messages::note(&mut self.store, project_id, note)
+    }
+
+    /// A question for a coordinator; the asker's task waits for the answer.
+    pub fn ask(
+        &mut self,
+        project_id: i64,
+        question: &NewQuestion,
+    ) -> Result<MessageView, LedgerError> {
+        messages::ask(&mut self.store, project_id, question)
+    }
+
+    /// The answer to a question, from participant `from`: in words (`body`) or by `choices`.
+    pub fn answer(
+        &mut self,
+        question_id: i64,
+        from: i64,
+        body: Option<&Value>,
+        choices: Option<&Value>,
+    ) -> Result<MessageView, LedgerError> {
+        messages::answer(&mut self.store, question_id, from, body, choices)
+    }
+
+    /// The answer to a question, or none while it waits.
+    pub fn answer_to(&self, question_id: i64) -> Result<Option<MessageView>, LedgerError> {
+        messages::answer_to(&self.store, question_id)
+    }
+
+    /// The participants something waits on, each once.
+    pub fn with_work(&self, project_id: i64) -> Result<Vec<i64>, LedgerError> {
+        messages::with_work(&self.store, project_id)
+    }
+
+    /// The head of a participant's queue that may go now, or none.
+    pub fn next_delivery(&self, participant_id: i64) -> Result<Option<MessageView>, LedgerError> {
+        messages::next_delivery(&self.store, participant_id)
+    }
+
+    /// A message's delivery into its window begins.
+    pub fn begin_delivery(&mut self, message_id: i64) -> Result<MessageView, LedgerError> {
+        messages::begin_delivery(&mut self.store, message_id)
+    }
+
+    /// The harness's own record proves the message arrived.
+    pub fn confirm_delivery(
+        &mut self,
+        message_id: i64,
+        receipt: Option<&Value>,
+    ) -> Result<MessageView, LedgerError> {
+        messages::confirm_delivery(&mut self.store, message_id, receipt)
+    }
+
+    /// A message not yet delivered that no longer applies.
+    pub fn cancel_message(
+        &mut self,
+        message_id: i64,
+        reason: &str,
+    ) -> Result<MessageView, LedgerError> {
+        messages::cancel_message(&mut self.store, message_id, reason)
+    }
+
+    /// A delivery queued again; `refund` gives back its attempt.
+    pub fn retry_delivery(
+        &mut self,
+        message_id: i64,
+        reason: &str,
+        refund: bool,
+    ) -> Result<MessageView, LedgerError> {
+        messages::retry_delivery(&mut self.store, message_id, reason, refund)
+    }
+
+    /// A delivery given up.
+    pub fn fail_delivery(
+        &mut self,
+        message_id: i64,
+        reason: &str,
+    ) -> Result<MessageView, LedgerError> {
+        messages::fail_delivery(&mut self.store, message_id, reason)
+    }
+
+    /// Every message on its way to a window, oldest first.
+    pub fn in_flight(&self) -> Result<Vec<MessageView>, LedgerError> {
+        messages::in_flight(&self.store)
+    }
+
+    /// What is on its way to a participant, oldest first.
+    pub fn pending(&self, participant_id: i64) -> Result<Vec<MessageView>, LedgerError> {
+        messages::pending(&self.store, participant_id)
+    }
+
+    /// The human read a message in the app.
+    pub fn mark_read(&mut self, message_id: i64) -> Result<MessageView, LedgerError> {
+        messages::mark_read(&mut self.store, message_id)
+    }
+
+    /// The human passes a gated message on.
+    pub fn approve_message(
+        &mut self,
+        message_id: i64,
+        by: &str,
+    ) -> Result<MessageView, LedgerError> {
+        messages::approve_message(&mut self.store, message_id, by)
+    }
+
+    /// The human declines a gated message.
+    pub fn decline_message(
+        &mut self,
+        message_id: i64,
+        by: &str,
+    ) -> Result<MessageView, LedgerError> {
+        messages::decline_message(&mut self.store, message_id, by)
+    }
+
+    /// A participant's messages, newest first, at most `limit` (Node's default: 100).
+    pub fn inbox(&self, participant_id: i64, limit: i64) -> Result<Vec<MessageView>, LedgerError> {
+        messages::inbox(&self.store, participant_id, limit)
     }
 
     /// A project's events after the one numbered `after`, oldest first, at most `limit` (Node's defaults: 0 and 500).

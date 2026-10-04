@@ -122,11 +122,16 @@ pub(crate) struct TaskRow {
     pub(crate) id: i64,
     pub(crate) project_id: i64,
     pub(crate) number: i64,
+    pub(crate) title: String,
+    pub(crate) body: String,
+    pub(crate) requester_id: i64,
     pub(crate) assignee_id: Option<i64>,
     pub(crate) state: String,
     pub(crate) pool: Option<String>,
     pub(crate) tier: Option<String>,
+    pub(crate) purpose: Option<String>,
     pub(crate) taken_from_id: Option<i64>,
+    pub(crate) deleted_at: Option<String>,
 }
 
 impl TaskRow {
@@ -135,11 +140,16 @@ impl TaskRow {
             id: row.get("id")?,
             project_id: row.get("project_id")?,
             number: row.get("number")?,
+            title: row.get("title")?,
+            body: row.get("body")?,
+            requester_id: row.get("requester_id")?,
             assignee_id: row.get("assignee_id")?,
             state: row.get("state")?,
             pool: row.get("pool")?,
             tier: row.get("tier")?,
+            purpose: row.get("purpose")?,
             taken_from_id: row.get("taken_from_id")?,
+            deleted_at: row.get("deleted_at")?,
         })
     }
 }

@@ -18,10 +18,10 @@ use crate::queue::{drop_queued, send, Sent};
 use crate::store::Store;
 use crate::views::{participant_view, ParticipantRow, TaskRow, PARTICIPANT_SELECT};
 
-pub(crate) use pools::{candidates, members};
+pub(crate) use pools::{candidates, has_members_of_tier, members, nearest_tier};
 pub(crate) use quota::{mark_back, mark_out};
 use sessions::close_session;
-pub(crate) use sessions::{end_session, holds_work};
+pub(crate) use sessions::{continuable_session, end_session, holds_work, start_session};
 
 /// A participant joining a project: its handle, its role or its roles (the
 /// first leading), the agent and harness it runs on, and its tier.
@@ -437,11 +437,10 @@ fn tell_if_running(
         store,
         project_id,
         &Sent {
-            from: None,
             to: handle,
             body,
-            task: None,
             kind: "note",
+            ..Sent::default()
         },
     )?;
     Ok(())

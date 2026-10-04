@@ -19,6 +19,7 @@ use crate::Event;
 pub(crate) struct Store {
     pub(crate) db: Connection,
     clock: Box<dyn Clock>,
+    names: Box<dyn FnMut() -> String>,
     /// Told every event as it is logged.
     trace: Box<dyn FnMut(&Event)>,
 }
@@ -27,9 +28,20 @@ impl Store {
     pub(crate) fn new(
         db: Connection,
         clock: Box<dyn Clock>,
+        names: Box<dyn FnMut() -> String>,
         trace: Box<dyn FnMut(&Event)>,
     ) -> Self {
-        Self { db, clock, trace }
+        Self {
+            db,
+            clock,
+            names,
+            trace,
+        }
+    }
+
+    /// A fresh session name: two words.
+    pub(crate) fn name(&mut self) -> String {
+        (self.names)()
     }
 
     /// One transaction around `work`; an operation called inside another
@@ -95,6 +107,18 @@ impl Store {
             })
     }
 
+    /// The participant a row names, which may be none: `no participant null`, as JavaScript said it.
+    pub(crate) fn participant_of(&self, id: Option<i64>) -> Result<ParticipantRow, LedgerError> {
+        match id {
+            Some(id) => self.participant_row(id),
+            None => Err(LedgerError::refused_with(
+                "unknown-participant",
+                "no participant null",
+                404,
+            )),
+        }
+    }
+
     /// A participant still in the project, by its handle; one that left is refused.
     pub(crate) fn participant_by_handle(
         &self,
@@ -117,7 +141,8 @@ impl Store {
                     404,
                 )
             })?;
-        require_active(row)
+        require_active(&row)?;
+        Ok(row)
     }
 
     /// A task of the project by its number, or a refusal naming it.
@@ -150,14 +175,25 @@ impl Store {
             .optional()?)
     }
 
-    /// A task moves to another state, and the log says so, `detail` after
-    /// the move. A member leaving, a delivery and a decision all move tasks,
-    /// so the move lives here, under every concern that makes one.
+    /// A task moves to another state, and the log says so (`task.state`),
+    /// `detail` after the move. A member leaving, a delivery and a decision
+    /// all move tasks, so the move lives here, under every concern that makes one.
     pub(crate) fn move_task(
         &mut self,
         task: &TaskRow,
         to: &str,
         detail: Value,
+    ) -> Result<(), LedgerError> {
+        self.move_task_as(task, to, detail, "task.state")
+    }
+
+    /// A task's move, logged as `kind`.
+    pub(crate) fn move_task_as(
+        &mut self,
+        task: &TaskRow,
+        to: &str,
+        detail: Value,
+        kind: &str,
     ) -> Result<(), LedgerError> {
         let at = self.at();
         self.db.execute(
@@ -168,7 +204,7 @@ impl Store {
         if let (Value::Object(data), Value::Object(detail)) = (&mut data, detail) {
             data.extend(detail);
         }
-        self.log(task.project_id, "task.state", data)
+        self.log(task.project_id, kind, data)
     }
 
     /// Logs an event of the project, and tells the trace.
@@ -216,7 +252,8 @@ mod tests {
         let events = Rc::new(RefCell::new(Vec::new()));
         let told = Rc::clone(&events);
         let trace = Box::new(move |event: &Event| told.borrow_mut().push(event.clone()));
-        (Store::new(db, Box::new(Ticks(0)), trace), events)
+        let names = Box::new(|| "amber-pine".to_string());
+        (Store::new(db, Box::new(Ticks(0)), names, trace), events)
     }
 
     fn logged(store: &Store) -> i64 {

@@ -244,6 +244,65 @@ pub struct MessageView {
     pub delivered_at: Option<String>,
 }
 
+/// A task with its whole thread, oldest first.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TaskThread {
+    #[serde(flatten)]
+    pub task: TaskView,
+    pub messages: Vec<MessageView>,
+}
+
+/// A new task, the message that took it to its window (none while it waits
+/// on the board), and the tier asked when the task went to the nearest one
+/// somebody on the staff holds.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TaskCreated {
+    pub task: TaskView,
+    pub message: Option<MessageView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asked: Option<String>,
+}
+
+/// A task that moved, and the message that moves it on (none when it went
+/// back to the board).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TaskMoved {
+    pub task: TaskView,
+    pub message: Option<MessageView>,
+}
+
+/// A task taken back to the board.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TaskReleased {
+    pub task: TaskView,
+}
+
+/// A held task whose time has come.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeldTask {
+    pub project_id: i64,
+    pub number: i64,
+    pub assignee_id: Option<i64>,
+}
+
+/// One option of a question, as a harness's own question tool offers it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QuestionOption {
+    pub label: String,
+    pub description: Option<String>,
+}
+
+/// A question with options, as a harness's own question tool asks it: its
+/// text, a short header, its options, and whether several may be picked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Question {
+    pub question: String,
+    pub header: String,
+    pub options: Vec<QuestionOption>,
+    pub multiple: bool,
+}
+
 /// What waits on the chief, for a chief that takes over: members' questions
 /// to it without an answer, results it has not decided on, and its own
 /// unfinished tasks.

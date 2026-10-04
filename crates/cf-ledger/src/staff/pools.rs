@@ -1,11 +1,63 @@
 //! Who may take a task: the active members of a pool and tier, with what
-//! the daemon ranks them by. The tier a task goes to comes with the tasks.
+//! the daemon ranks them by, and the tier a task for a pool goes to.
 
 use cf_proto::ledger::{Candidate, MemberView};
 use rusqlite::params;
 
-use crate::model::{sql_list, LedgerError, HELD_TASK_STATES};
+use crate::model::{sql_list, LedgerError, HELD_TASK_STATES, TIERS};
 use crate::store::Store;
+
+/// The tier a task for `pool` goes to: the one asked, when somebody holds
+/// it; else the nearest one somebody does, the next one up before the next
+/// one down. A pool with no tier (the designer) keeps none.
+pub(crate) fn nearest_tier(
+    store: &Store,
+    project_id: i64,
+    pool: &str,
+    tier: Option<&str>,
+) -> Result<Option<String>, LedgerError> {
+    let Some(asked) = tier else { return Ok(None) };
+    if has_members_of_tier(store, project_id, pool, Some(asked))? {
+        return Ok(Some(asked.to_string()));
+    }
+    let at = TIERS
+        .iter()
+        .position(|tier| *tier == asked)
+        .unwrap_or_default();
+    let mut near: Vec<(usize, &str)> = TIERS
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(_, other)| *other != asked)
+        .collect();
+    near.sort_by_key(|(index, _)| (index.abs_diff(at), *index));
+    for (_, other) in near {
+        if has_members_of_tier(store, project_id, pool, Some(other))? {
+            return Ok(Some(other.to_string()));
+        }
+    }
+    Ok(Some(asked.to_string()))
+}
+
+/// Whether the staff has members of one role and tier (any tier when none),
+/// whatever role they were saved with first.
+pub(crate) fn has_members_of_tier(
+    store: &Store,
+    project_id: i64,
+    pool: &str,
+    tier: Option<&str>,
+) -> Result<bool, LedgerError> {
+    let found = store
+        .db
+        .prepare(
+            "SELECT * FROM participant p
+       WHERE p.project_id = ? AND (? IS NULL OR p.tier = ?) AND p.left_at IS NULL AND p.member_id IS NULL
+         AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value = ?)
+       ORDER BY p.id",
+        )?
+        .exists(params![project_id, tier, tier, pool])?;
+    Ok(found)
+}
 
 /// The active members an open task may go to, with what the daemon ranks them by.
 pub(crate) fn candidates(

@@ -80,7 +80,7 @@ pub(crate) fn sql_list(words: &[&str]) -> String {
 }
 
 /// A participant that is still in the project; a member who left is refused.
-pub(crate) fn require_active(row: ParticipantRow) -> Result<ParticipantRow, LedgerError> {
+pub(crate) fn require_active(row: &ParticipantRow) -> Result<(), LedgerError> {
     if row.left_at.is_some() {
         return Err(LedgerError::refused_with(
             "member-left",
@@ -88,7 +88,7 @@ pub(crate) fn require_active(row: ParticipantRow) -> Result<ParticipantRow, Ledg
             409,
         ));
     }
-    Ok(row)
+    Ok(())
 }
 
 /// `value` as `JSON.stringify` printed it in a refusal: "undefined" for a value not given.

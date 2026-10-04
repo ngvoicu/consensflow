@@ -30,7 +30,7 @@ impl Clock for Ticks {
 fn options() -> Options {
     Options {
         clock: Box::new(Ticks(1_789_812_000_000)),
-        trace: Box::new(|_| {}),
+        ..Options::default()
     }
 }
 

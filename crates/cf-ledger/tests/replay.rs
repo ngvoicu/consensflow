@@ -19,7 +19,8 @@ use cf_base::js;
 use cf_base::time::{parse, Clock};
 use cf_ledger::model::{parse_gate, parse_roles};
 use cf_ledger::{
-    open_ledger, ChiefSwitch, Event, Ledger, LedgerError, NewMember, NewProject, Options,
+    open_ledger, ChiefSwitch, Event, Ledger, LedgerError, NewMember, NewNote, NewProject,
+    NewQuestion, NewTask, Options,
 };
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
@@ -34,18 +35,52 @@ enum Outcome {
     Failed(String),
 }
 
-/// A clock that answers the readings Node recorded, in order.
-struct Recorded {
-    readings: Rc<RefCell<VecDeque<i64>>>,
+/// What Node's ledger drew in each call (the clock's readings, session
+/// names), answered here in the same order; drawing past them is noted.
+struct Draws<T> {
+    left: Rc<RefCell<VecDeque<T>>>,
     overdrawn: Rc<Cell<bool>>,
 }
 
+impl<T> Draws<T> {
+    fn new() -> Self {
+        Self {
+            left: Rc::new(RefCell::new(VecDeque::new())),
+            overdrawn: Rc::new(Cell::new(false)),
+        }
+    }
+
+    fn share(&self) -> Self {
+        Self {
+            left: Rc::clone(&self.left),
+            overdrawn: Rc::clone(&self.overdrawn),
+        }
+    }
+
+    fn draw(&self) -> Option<T> {
+        let next = self.left.borrow_mut().pop_front();
+        if next.is_none() {
+            self.overdrawn.set(true);
+        }
+        next
+    }
+
+    /// After a call: why not, when it did not draw what Node's call drew.
+    fn settle(&self, what: &str, recorded: usize) -> Option<String> {
+        let left = self.left.borrow_mut().drain(..).count();
+        if self.overdrawn.replace(false) {
+            return Some(format!("{what} more than Node's {recorded} times"));
+        }
+        (left > 0).then(|| format!("{what} {} times, Node {recorded}", recorded - left))
+    }
+}
+
+/// A clock that answers the readings Node recorded, in order.
+struct Recorded(Draws<i64>);
+
 impl Clock for Recorded {
     fn now_ms(&mut self) -> i64 {
-        self.readings.borrow_mut().pop_front().unwrap_or_else(|| {
-            self.overdrawn.set(true);
-            0
-        })
+        self.0.draw().unwrap_or_default()
     }
 }
 
@@ -119,17 +154,16 @@ fn replay(text: &str) -> Outcome {
         return Outcome::Skipped(unknown);
     }
     let held = start_from(&trace["initial"], &file);
-    let readings = Rc::new(RefCell::new(VecDeque::new()));
-    let overdrawn = Rc::new(Cell::new(false));
+    let readings = Draws::<i64>::new();
+    let names = Draws::<String>::new();
     let told = Rc::new(RefCell::new(Vec::<Event>::new()));
     let events = Rc::clone(&told);
+    let drawn = names.share();
     let opened = open_ledger(
         &file,
         Options {
-            clock: Box::new(Recorded {
-                readings: Rc::clone(&readings),
-                overdrawn: Rc::clone(&overdrawn),
-            }),
+            clock: Box::new(Recorded(readings.share())),
+            names: Box::new(move || drawn.draw().unwrap_or_default()),
             trace: Box::new(move |event| events.borrow_mut().push(event.clone())),
         },
     );
@@ -154,10 +188,16 @@ fn replay(text: &str) -> Outcome {
     for (at, call) in calls.iter().enumerate() {
         let method = call["method"].as_str().unwrap_or_default();
         let recorded = call["clock"].as_array().unwrap();
-        readings.borrow_mut().extend(
+        readings.left.borrow_mut().extend(
             recorded
                 .iter()
                 .map(|at| parse(at.as_str().unwrap()).expect("a clock reading Node wrote")),
+        );
+        let named = call["names"].as_array().unwrap();
+        names.left.borrow_mut().extend(
+            named
+                .iter()
+                .map(|name| name.as_str().expect("a name Node drew").to_string()),
         );
         let answer = match (method, ledger.take()) {
             (_, None) => {
@@ -175,19 +215,12 @@ fn replay(text: &str) -> Outcome {
                 }
             }
         };
-        let left = readings.borrow_mut().drain(..).count();
-        if overdrawn.replace(false) {
-            return Outcome::Failed(format!(
-                "call {at} ({method}) read the clock more than Node's {} times",
-                recorded.len()
-            ));
-        }
-        if left > 0 {
-            return Outcome::Failed(format!(
-                "call {at} ({method}) read the clock {} times, Node {}",
-                recorded.len() - left,
-                recorded.len()
-            ));
+        let settled = [
+            readings.settle("read the clock", recorded.len()),
+            names.settle("drew a session name", named.len()),
+        ];
+        if let Some(why) = settled.into_iter().flatten().next() {
+            return Outcome::Failed(format!("call {at} ({method}) {why}"));
         }
         let logged: Vec<Value> = told
             .borrow_mut()
@@ -258,6 +291,42 @@ fn unsupported(call: &Value) -> Option<String> {
         "copiedItemWith",
         "followConversation",
         "message",
+        "createTask",
+        "assignTask",
+        "releaseTask",
+        "checkRelease",
+        "recordResult",
+        "acceptTask",
+        "pauseTask",
+        "holdTask",
+        "heldTasksDue",
+        "pausedTask",
+        "toldSincePaused",
+        "resumeTask",
+        "reopenTask",
+        "cancelTask",
+        "failTask",
+        "deleteTasks",
+        "task",
+        "activeTask",
+        "lastTask",
+        "note",
+        "ask",
+        "answer",
+        "answerTo",
+        "nextDelivery",
+        "withWork",
+        "beginDelivery",
+        "confirmDelivery",
+        "cancelMessage",
+        "retryDelivery",
+        "failDelivery",
+        "inFlight",
+        "pending",
+        "markRead",
+        "approveMessage",
+        "declineMessage",
+        "inbox",
     ];
     if !DONE.contains(&method) {
         return Some(format!("calls {method}"));
@@ -266,12 +335,6 @@ fn unsupported(call: &Value) -> Option<String> {
     // signature rules out.
     if method == "copyTranscript" && !call["args"][1].is_array() {
         return Some("hands copyTranscript items that are no list".into());
-    }
-    if call["names"]
-        .as_array()
-        .is_some_and(|names| !names.is_empty())
-    {
-        return Some(format!("{method} draws session names"));
     }
     None
 }
@@ -404,6 +467,145 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
             text(field(args, 1, "nativeSession")),
         )),
         "message" => encode(ledger.message(id())),
+        "createTask" => NewTask::from_json(arg(args, 1).expect("a task"))
+            .and_then(|task| encode(ledger.create_task(id(), &task))),
+        "assignTask" => {
+            encode(ledger.assign_task(id(), integer(arg(args, 1)), integer(arg(args, 2))))
+        }
+        "releaseTask" => encode(ledger.release_task(
+            id(),
+            integer(arg(args, 1)),
+            text(field(args, 2, "because")),
+        )),
+        "checkRelease" => ledger
+            .check_release(id(), integer(arg(args, 1)))
+            .map(|()| undefined()),
+        "recordResult" => {
+            encode(ledger.record_result(id(), integer(arg(args, 1)), text(field(args, 2, "body"))))
+        }
+        "acceptTask" => {
+            encode(ledger.accept_task(id(), integer(arg(args, 1)), text(field(args, 2, "by"))))
+        }
+        "pauseTask" => encode(ledger.pause_task(
+            id(),
+            integer(arg(args, 1)),
+            field(args, 2, "by").and_then(Value::as_str),
+            field(args, 2, "because").and_then(Value::as_str),
+        )),
+        "holdTask" => encode(ledger.hold_task(
+            id(),
+            integer(arg(args, 1)),
+            text(field(args, 2, "until")),
+            text(field(args, 2, "because")),
+        )),
+        "heldTasksDue" => encode(ledger.held_tasks_due(text(arg(args, 0)))),
+        "pausedTask" => encode(ledger.paused_task(id())),
+        "toldSincePaused" => encode(ledger.told_since_paused(id(), integer(arg(args, 1)))),
+        "resumeTask" => encode(ledger.resume_task(
+            id(),
+            integer(arg(args, 1)),
+            field(args, 2, "by").and_then(Value::as_str),
+            text(field(args, 2, "body")),
+        )),
+        "reopenTask" => encode(ledger.reopen_task(
+            id(),
+            integer(arg(args, 1)),
+            text(field(args, 2, "by")),
+            text(field(args, 2, "body")),
+        )),
+        "cancelTask" => {
+            encode(ledger.cancel_task(id(), integer(arg(args, 1)), text(field(args, 2, "by"))))
+        }
+        "failTask" => {
+            encode(ledger.fail_task(id(), integer(arg(args, 1)), text(field(args, 2, "reason"))))
+        }
+        "deleteTasks" => {
+            let numbers: Vec<i64> = arg(args, 1)
+                .and_then(Value::as_array)
+                .expect("task numbers")
+                .iter()
+                .map(|number| integer(Some(number)))
+                .collect();
+            encode(ledger.delete_tasks(id(), &numbers))
+        }
+        "task" => encode(ledger.task(id(), integer(arg(args, 1)))),
+        "activeTask" => encode(
+            ledger.active_task(
+                id(),
+                field(args, 1, "queued")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            ),
+        ),
+        "lastTask" => encode(ledger.last_task(id())),
+        "note" => encode(
+            ledger.note(
+                id(),
+                &NewNote {
+                    from: field(args, 1, "from")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    to: text(field(args, 1, "to")).to_string(),
+                    body: text(field(args, 1, "body")).to_string(),
+                    task: field(args, 1, "task").and_then(Value::as_i64),
+                },
+            ),
+        ),
+        "ask" => encode(
+            ledger.ask(
+                id(),
+                &NewQuestion {
+                    from: field(args, 1, "from")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    to: text(field(args, 1, "to")).to_string(),
+                    body: field(args, 1, "body")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    task: field(args, 1, "task").and_then(Value::as_i64),
+                    questions: field(args, 1, "questions").cloned(),
+                    urgent: field(args, 1, "urgent")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                },
+            ),
+        ),
+        "answer" => encode(ledger.answer(
+            id(),
+            integer(field(args, 1, "from")),
+            field(args, 1, "body"),
+            field(args, 1, "choices"),
+        )),
+        "answerTo" => encode(ledger.answer_to(id())),
+        "nextDelivery" => encode(ledger.next_delivery(id())),
+        // A Set, as the recorder wrote it.
+        "withWork" => ledger.with_work(id()).map(|ids| json!({ "$set": ids })),
+        "beginDelivery" => encode(ledger.begin_delivery(id())),
+        "confirmDelivery" => encode(ledger.confirm_delivery(id(), arg(args, 1))),
+        "cancelMessage" => encode(ledger.cancel_message(id(), text(arg(args, 1)))),
+        "retryDelivery" => encode(
+            ledger.retry_delivery(
+                id(),
+                text(arg(args, 1)),
+                field(args, 2, "refund")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            ),
+        ),
+        "failDelivery" => encode(ledger.fail_delivery(id(), text(arg(args, 1)))),
+        "inFlight" => encode(ledger.in_flight()),
+        "pending" => encode(ledger.pending(id())),
+        "markRead" => encode(ledger.mark_read(id())),
+        "approveMessage" => encode(ledger.approve_message(id(), text(field(args, 1, "by")))),
+        "declineMessage" => encode(ledger.decline_message(id(), text(field(args, 1, "by")))),
+        "inbox" => encode(
+            ledger.inbox(
+                id(),
+                field(args, 1, "limit")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(100),
+            ),
+        ),
         other => unreachable!("{other} is checked before the replay"),
     };
     Ok(answered.unwrap_or_else(|error| failure(&error)))
