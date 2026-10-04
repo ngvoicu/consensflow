@@ -11,18 +11,10 @@ use cf_base::env::Env;
 /// (`.JS`, `.PS1`) names nothing a process can start.
 const STARTABLE: [&str; 4] = [".com", ".exe", ".bat", ".cmd"];
 
-/// Whether `env` is Windows's.
-pub fn on_windows(env: &Env) -> bool {
-    cfg!(windows)
-        || env
-            .text("OS")
-            .is_some_and(|os| os.to_lowercase().contains("windows"))
-}
-
 /// The names `command` may have on disk: with each startable PATHEXT
 /// extension on Windows, as it is elsewhere.
 fn candidate_names(command: &str, env: &Env) -> Vec<String> {
-    if !on_windows(env) {
+    if !env.on_windows() {
         return vec![command.to_string()];
     }
     env.text("PATHEXT")
@@ -69,8 +61,6 @@ mod tests {
 
     #[test]
     fn looks_as_windows_does_on_windows_or_when_the_environment_says_so() {
-        assert!(on_windows(&Env::from_vars([("OS", "Windows_NT")])));
-        assert_eq!(on_windows(&Env::default()), cfg!(windows));
         let windows = Env::from_vars([("OS", "Windows_NT"), ("PATHEXT", ".JS;.EXE;.Cmd;.PS1")]);
         assert_eq!(candidate_names("node", &windows), ["node.exe", "node.cmd"]);
         let default = Env::from_vars([("OS", "Windows_NT")]);

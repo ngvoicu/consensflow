@@ -50,6 +50,16 @@ impl Env {
             .filter(|value| !value.is_empty())
     }
 
+    /// Whether this is Windows's environment (`onWindows`, `src/harnesses.js`):
+    /// built for Windows, or saying so in its `OS` variable, read as Node read
+    /// it, a byte that is no UTF-8 as U+FFFD.
+    pub fn on_windows(&self) -> bool {
+        cfg!(windows)
+            || self
+                .os("OS")
+                .is_some_and(|os| os.to_string_lossy().to_lowercase().contains("windows"))
+    }
+
     /// Every variable, by name in order: what `Object.keys(process.env)` listed.
     /// Windows names are in upper case, as `os` and `text` look them up.
     pub fn iter(&self) -> impl Iterator<Item = (&OsStr, &OsStr)> {
@@ -71,6 +81,26 @@ fn key(name: OsString) -> OsString {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_windows_when_built_for_it_or_when_the_environment_says_so() {
+        assert!(Env::from_vars([("OS", "Windows_NT")]).on_windows());
+        assert!(Env::from_vars([("OS", "MY WINDOWS")]).on_windows());
+        assert_eq!(Env::default().on_windows(), cfg!(windows));
+        assert_eq!(Env::from_vars([("OS", "")]).on_windows(), cfg!(windows));
+        assert_eq!(
+            Env::from_vars([("OS", "Darwin")]).on_windows(),
+            cfg!(windows)
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_os_that_is_no_utf8_still_says_windows() {
+        use std::os::unix::ffi::OsStringExt;
+        let os = OsString::from_vec(b"\xffWindows_NT".to_vec());
+        assert!(Env::from_vars([(OsString::from("OS"), os)]).on_windows());
+    }
 
     #[test]
     fn a_variable_set_to_nothing_is_no_text() {

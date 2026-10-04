@@ -1,8 +1,10 @@
 //! A session's file found under a harness's folder (`findFile`,
 //! `hosts/lib/completion/shared.js`): depth first, the first match winning,
-//! every store read-only.
+//! every store read-only. A folder's entries are listed in the order Node's
+//! `readdir` lists them.
 
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use cf_base::path;
@@ -23,7 +25,7 @@ pub(crate) fn find_file(
     depth: u32,
 ) -> Option<PathBuf> {
     let folder = root.to_string_lossy();
-    for entry in entries(root) {
+    for entry in entries(root).unwrap_or_default() {
         let Ok(kind) = entry.file_type() else {
             continue;
         };
@@ -44,12 +46,9 @@ pub(crate) fn find_file(
 
 /// A folder's entries in the order Node's `readdir` lists them: libuv sorts
 /// them by name on Unix, and takes the system's order on Windows.
-fn entries(folder: &Path) -> Vec<fs::DirEntry> {
-    let Ok(listed) = fs::read_dir(folder) else {
-        return Vec::new();
-    };
+pub(crate) fn entries(folder: &Path) -> io::Result<Vec<fs::DirEntry>> {
     #[allow(unused_mut)] // Sorted on Unix alone.
-    let mut entries: Vec<fs::DirEntry> = listed.filter_map(Result::ok).collect();
+    let mut entries: Vec<fs::DirEntry> = fs::read_dir(folder)?.filter_map(Result::ok).collect();
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
@@ -59,7 +58,7 @@ fn entries(folder: &Path) -> Vec<fs::DirEntry> {
                 .cmp(right.file_name().as_bytes())
         });
     }
-    entries
+    Ok(entries)
 }
 
 #[cfg(test)]

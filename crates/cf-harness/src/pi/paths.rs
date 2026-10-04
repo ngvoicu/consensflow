@@ -1,18 +1,14 @@
 //! Where Pi keeps its things (`piSessionDir`, `piPath` and `piAgentDir`,
 //! `src/harnesses.js`, and `piTranscript`, `hosts/lib/completion/pi.js`).
 //!
-//! Kept from Node on purpose: Node's `home(env)` there is `HOME`, else
-//! `USERPROFILE`, else `os.homedir()`, which reads the process's own
-//! environment. A Rust module may not, so an environment with neither fails
-//! the locator, with `missing home in env`, the sentence of
-//! `shared::record::home`. An empty `HOME` is still a home, as `??` took it,
-//! where that function takes it for none.
+//! The home is `shared::paths::home`, `src/harnesses.js`'s.
 
 use std::path::{Path, PathBuf};
 
 use cf_base::env::Env;
 use cf_base::path;
 
+use crate::shared::paths::home;
 use crate::shared::record::find::{find_file, DEPTH};
 
 /// Where Pi keeps the file of the session `session`: the first file under
@@ -68,15 +64,6 @@ fn expand(configured: &str, env: &Env) -> Result<String, String> {
 fn set(env: &Env, name: &str) -> Option<String> {
     env.path(name)
         .map(|value| value.to_string_lossy().into_owned())
-}
-
-/// The user's home (`home`, `src/harnesses.js`): `HOME`, else `USERPROFILE`,
-/// whichever is set, empty or not.
-fn home(env: &Env) -> Result<String, String> {
-    env.os("HOME")
-        .or_else(|| env.os("USERPROFILE"))
-        .map(|home| home.to_string_lossy().into_owned())
-        .ok_or_else(|| "missing home in env".to_owned())
 }
 
 #[cfg(test)]

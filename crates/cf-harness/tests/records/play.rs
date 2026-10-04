@@ -4,8 +4,11 @@
 //!
 //! Like the runner, the player owns time: the clock starts at [`START`] and
 //! moves only by a step, and each file step sets the file's times to the
-//! clock, a millisecond after the step before it.
+//! clock, a millisecond after the step before it. A store's writer is a
+//! connection of the player's, kept open across looks as a harness keeps its
+//! own.
 
+use std::collections::HashMap;
 use std::fs::{self, File, FileTimes};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -16,11 +19,13 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_harness::records::{Cache, Look, Options, PiSettlement, Quota, Reading, IDLE_MS};
 use jiff::tz::{TimeZone, TimeZoneDatabase};
+use rusqlite::types::Value as Bound;
+use rusqlite::Connection;
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
 use crate::scenario::{
-    goldens, Append, Clock, Mkdir, Move, Mtime, Reader, Remove, Replace, Scenario, Step, Write,
+    goldens, Append, Clock, Db, Mkdir, Move, Mtime, Reader, Remove, Replace, Scenario, Step, Write,
 };
 
 /// Where every scenario's clock starts: 2026-09-21T12:26:40.000Z.
@@ -39,7 +44,7 @@ static LOCAL_ZONE: LazyLock<TimeZone> = LazyLock::new(|| {
 /// ported, and a session to read. The others wait for the readers and the
 /// switch still to come.
 pub fn ported(look: &crate::scenario::Look) -> bool {
-    matches!(look.kind.as_str(), "codex" | "pi") && !look.session.is_empty()
+    matches!(look.kind.as_str(), "codex" | "pi" | "devin") && !look.session.is_empty()
 }
 
 /// A ported harness's reader of `session`, made afresh.
@@ -47,6 +52,7 @@ fn reader(kind: &str, session: &str, env: &Env) -> Box<dyn Look + Send> {
     match kind {
         "codex" => cf_harness::codex::record::reader(session, env),
         "pi" => cf_harness::pi::record::reader(session, env, &LOCAL_ZONE),
+        "devin" => cf_harness::devin::record::reader(session, env),
         other => panic!("no reader of {other} yet"),
     }
 }
@@ -71,6 +77,7 @@ pub fn play(scenario: &Scenario, ours: &[String]) -> Played {
     let mut stage = Stage {
         scenario,
         ours,
+        writers: HashMap::new(),
         root,
         clock: START,
         env,
@@ -93,6 +100,9 @@ pub fn play(scenario: &Scenario, ours: &[String]) -> Played {
 struct Stage<'a> {
     scenario: &'a Scenario,
     ours: &'a [String],
+    /// The stores' writers, by the scenario's name for each: closed before
+    /// the root is removed.
+    writers: HashMap<String, Connection>,
     root: TempDir,
     clock: i64,
     env: Env,
@@ -154,7 +164,7 @@ impl Stage<'_> {
             Step::Move(Move { from, to }) => fs::rename(self.path(from), self.path(to)).unwrap(),
             Step::Mtime(Mtime { mtime, ago }) => stamp(&self.path(mtime), self.clock - ago),
             Step::Clock(Clock { clock }) => self.clock += i64::try_from(*clock).unwrap(),
-            Step::Db(_) => panic!("{}: a store no ported reader reads", self.scenario.name),
+            Step::Db(db) => self.db(db),
             Step::Look(look) => self.look(look, index),
         }
     }
@@ -188,6 +198,32 @@ impl Stage<'_> {
             self.hold(&reading, at, &format!("{name}, fresh"));
         }
         self.played.answered += 1;
+    }
+
+    /// A writer's step: `new DatabaseSync(file)`, `.exec(sql)`,
+    /// `.prepare(sql).run(...params)` or `.close()`.
+    fn db(&mut self, step: &Db) {
+        let Db {
+            db,
+            open,
+            exec,
+            run,
+            params,
+            close,
+        } = step;
+        if let Some(open) = open {
+            let writer = Connection::open(self.path(open)).unwrap();
+            self.writers.insert(db.clone(), writer);
+        } else if let Some(exec) = exec {
+            self.writers[db].execute_batch(exec).unwrap();
+        } else if let Some(run) = run {
+            let params = params.iter().flatten().map(bound);
+            self.writers[db]
+                .execute(run, rusqlite::params_from_iter(params))
+                .unwrap();
+        } else if close.is_some() {
+            self.writers.remove(db).unwrap().close().unwrap();
+        }
     }
 
     /// Holds `reading` to the reading Node's look read, as text. A
@@ -376,6 +412,17 @@ fn fixture_text(fixture: &str, line: usize, text: &str) -> String {
         .collect();
     lines[line] = text;
     format!("{}\n", lines.join("\n"))
+}
+
+/// A parameter as `node:sqlite` binds the JavaScript value: a number as a
+/// double, whatever it holds, text as text, null as NULL.
+fn bound(param: &Value) -> Bound {
+    match param {
+        Value::Null => Bound::Null,
+        Value::Number(number) => Bound::Real(number.as_f64().unwrap()),
+        Value::String(text) => Bound::Text(text.clone()),
+        other => panic!("a parameter no step binds: {other}"),
+    }
 }
 
 /// Sets a file's times to `ms`, the clock's reading.

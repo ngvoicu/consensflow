@@ -425,6 +425,7 @@ dependencies = [
  "flate2",
  "jiff",
  "regex",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

@@ -47,6 +47,13 @@ pub(crate) struct Seen {
     records: usize,
 }
 
+impl Seen {
+    /// When the file was last written, as the look found it (`mtimeMs`).
+    pub(crate) fn mtime_ms(&self) -> f64 {
+        self.mtime_ms
+    }
+}
+
 /// Why a look stopped short.
 #[derive(Debug)]
 pub(crate) enum Stop {

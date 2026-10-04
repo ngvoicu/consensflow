@@ -1,6 +1,9 @@
-//! Devin for Terminal.
+//! Devin for Terminal: its hooks, where it keeps its sessions, and what a
+//! session's store and its launches' wire logs say of the conversation.
 
+mod paths;
 mod question_hook;
+pub mod record;
 mod session_hook;
 mod wire;
 
