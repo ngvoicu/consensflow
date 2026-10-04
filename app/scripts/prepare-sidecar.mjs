@@ -27,12 +27,14 @@ const BINARIES = join(APP, 'src-tauri', 'binaries')
 const RESOURCES = join(APP, 'src-tauri', 'resources', 'cli')
 
 /**
- * The Node the app ships, pinned so a build is reproducible, and each
- * archive's SHA-256 as nodejs.org publishes it (its SHASUMS256.txt): the
- * app runs this binary with the human's full permissions, so one that is
- * not the published build is never bundled.
+ * The Node the app ships, pinned so a build is reproducible: its version is
+ * the repository's `.node-version`, which CI runs too, so the goldens that
+ * hold Node's words are held to this Node's. Each archive's SHA-256 is as
+ * nodejs.org publishes it (its SHASUMS256.txt): the app runs this binary
+ * with the human's full permissions, so one that is not the published build
+ * is never bundled, and a version moved without its hashes is refused.
  */
-const NODE_VERSION = 'v26.7.0'
+const NODE_VERSION = `v${readFileSync(join(REPO, '.node-version'), 'utf8').trim()}`
 const NODE_SHA256 = {
   'darwin-arm64': '7ee659a7768e641bbfd5360940660b8e8fd0052f77488f365562bac522fc15d4',
   'darwin-x64': 'f279d1ed28ce57f7788bf23435d2ad7fdd7438904ad5c4d8a1081a7cde3d4b96',
