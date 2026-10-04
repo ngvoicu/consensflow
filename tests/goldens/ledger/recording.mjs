@@ -177,6 +177,9 @@ export function openLedger(file, options = {}) {
     get(target, property, receiver) {
       const value = Reflect.get(target, property, receiver)
       if (typeof value !== 'function' || typeof property !== 'string') return value
+      // A method a test put in the ledger's place (one that fails once, say)
+      // answers for the test: what it calls of the ledger is recorded, not it.
+      if (Object.hasOwn(target, property)) return value
       return (...args) => {
         const callbacks = callbacksFor()
         const call = {

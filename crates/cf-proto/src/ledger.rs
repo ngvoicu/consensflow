@@ -303,6 +303,120 @@ pub struct Question {
     pub multiple: bool,
 }
 
+/// A task as its card on the board shows it: the task without its brief
+/// (the drawer reads that with the task), and the first line of its latest
+/// result, none before there is one.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskCard {
+    pub id: i64,
+    pub project_id: i64,
+    pub number: i64,
+    pub title: String,
+    pub state: String,
+    pub requester: String,
+    pub assignee: Option<String>,
+    pub pool: Option<String>,
+    pub tier: Option<String>,
+    pub purpose: Option<String>,
+    pub session: Option<String>,
+    pub needs: Vec<Need>,
+    pub blocked_by: Vec<i64>,
+    pub held_until: Option<String>,
+    pub paused_at: Option<String>,
+    pub deleted_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub result: Option<String>,
+}
+
+impl TaskCard {
+    /// `task`'s card, `result` the first line of its latest result.
+    pub fn of(task: TaskView, result: Option<String>) -> Self {
+        Self {
+            id: task.id,
+            project_id: task.project_id,
+            number: task.number,
+            title: task.title,
+            state: task.state,
+            requester: task.requester,
+            assignee: task.assignee,
+            pool: task.pool,
+            tier: task.tier,
+            purpose: task.purpose,
+            session: task.session,
+            needs: task.needs,
+            blocked_by: task.blocked_by,
+            held_until: task.held_until,
+            paused_at: task.paused_at,
+            deleted_at: task.deleted_at,
+            created_at: task.created_at,
+            updated_at: task.updated_at,
+            result,
+        }
+    }
+}
+
+/// One participant's lane on the board, with the tasks on it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Lane {
+    pub participant: ParticipantView,
+    pub tasks: Vec<TaskCard>,
+}
+
+/// The board as the page reads it: the project, the tasks on the board for a
+/// member, each participant's lane, and what waits for the human's approval.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Board {
+    pub project: ProjectView,
+    pub open: Vec<TaskCard>,
+    pub lanes: Vec<Lane>,
+    pub gated: Vec<MessageView>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
+/// A view whose body may have been cut to fit a frame, and says so.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Cut<T> {
+    #[serde(flatten)]
+    pub view: T,
+    #[serde(rename = "bodyCut", skip_serializing_if = "is_false")]
+    pub body_cut: bool,
+}
+
+/// A task with its thread as the page reads it in one frame: bodies cut
+/// to fit, and how many of its earliest messages were left out, if any.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskThatFits {
+    #[serde(flatten)]
+    pub task: Cut<TaskView>,
+    pub messages: Vec<Cut<MessageView>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub messages_left_out: Option<usize>,
+}
+
+/// The newest of a window's transcript that fit in a frame, in order: how
+/// many items there are, and how many came.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LatestTranscript {
+    pub items: Vec<TranscriptItem>,
+    pub total: usize,
+    pub shown: usize,
+}
+
+/// A participant's newest messages that fit in a frame, newest first: how
+/// many there are, and how many came.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LatestMessages {
+    pub messages: Vec<MessageView>,
+    pub total: i64,
+    pub shown: usize,
+}
+
 /// What waits on the chief, for a chief that takes over: members' questions
 /// to it without an answer, results it has not decided on, and its own
 /// unfinished tasks.

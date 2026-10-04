@@ -327,6 +327,11 @@ fn unsupported(call: &Value) -> Option<String> {
         "approveMessage",
         "declineMessage",
         "inbox",
+        "board",
+        "openTasks",
+        "taskThatFits",
+        "latestTranscript",
+        "latestMessages",
     ];
     if !DONE.contains(&method) {
         return Some(format!("calls {method}"));
@@ -604,6 +609,25 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
                 field(args, 1, "limit")
                     .and_then(Value::as_i64)
                     .unwrap_or(100),
+            ),
+        ),
+        "board" => encode(ledger.board(id())),
+        "openTasks" => encode(ledger.open_tasks(id())),
+        "taskThatFits" => encode(ledger.task_that_fits(id(), integer(arg(args, 1)))),
+        "latestTranscript" => {
+            let limit = field(args, 2, "limit").and_then(Value::as_u64);
+            encode(ledger.latest_transcript(
+                id(),
+                integer(arg(args, 1)),
+                limit.map(|limit| usize::try_from(limit).unwrap()),
+            ))
+        }
+        "latestMessages" => encode(
+            ledger.latest_messages(
+                id(),
+                field(args, 1, "unread")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             ),
         ),
         other => unreachable!("{other} is checked before the replay"),
