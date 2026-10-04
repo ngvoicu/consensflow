@@ -238,7 +238,9 @@ test('Harnesses reports a failed initial check and allows retry', async ({ page 
     await expect(page.getByRole('status')).toContainText('Harness check failed')
     fail = false
     await page.getByRole('button', { name: 'Check all harnesses' }).click()
-    await expect(page.locator('.host')).toHaveCount(5)
+    // The retry runs the real check, which probes every harness on this
+    // machine: on a busy CI runner that took longer than the 5 s default.
+    await expect(page.locator('.host')).toHaveCount(5, { timeout: 30_000 })
     await expect(page.getByRole('status')).toBeEmpty()
   } finally {
     await server.close()

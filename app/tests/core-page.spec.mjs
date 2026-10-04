@@ -4046,6 +4046,10 @@ test('resizes a terminal once, when a drag that narrows it holds still', async (
   const grip = await page.locator('#board-resize').boundingBox()
   const x = grip.x + grip.width / 2
   const y = grip.y + 60
+  await page.evaluate(() => {
+    window.__moves = []
+    window.addEventListener('pointermove', () => window.__moves.push(performance.now()), true)
+  })
   await page.mouse.move(x, y)
   await page.mouse.down()
   // A slow drag to the right, the windows narrowing: every step outlasts a
@@ -4055,6 +4059,12 @@ test('resizes a terminal once, when a drag that narrows it holds still', async (
     await page.waitForTimeout(40)
   }
   await page.mouse.up()
+  // A runner too busy to keep each step under the 200 ms settle drags in
+  // pauses, and the page rightly sends a size at each: not this case.
+  const longest = await page.evaluate(() =>
+    Math.max(...window.__moves.slice(1).map((at, step) => at - window.__moves[step])),
+  )
+  test.skip(longest >= 200, `a step took ${Math.round(longest)} ms, past the settle`)
   await expect.poll(async () => (await sizes()).length, { timeout: 3_000 }).toBe(2)
   await page.waitForTimeout(600)
   const after = await sizes()
