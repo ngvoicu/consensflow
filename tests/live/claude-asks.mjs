@@ -80,7 +80,9 @@ try {
         ? `did not open: ${bare.screen}`
         : bare.asked
           ? `it stops and asks: ${bare.why ?? bare.screen}`
-          : `it ran without asking: ${bare.screen}`,
+          : bare.gone
+            ? `it ran without asking: ${bare.screen}`
+            : `in ${ASK_MS / 1000} s it neither asked nor ran it: ${bare.screen}`,
     },
     {
       name: `rm -rf on "\${W:?}/\${d:?}"`,
@@ -91,7 +93,7 @@ try {
           ? `it stops and asks: ${guarded.why ?? guarded.screen}`
           : guarded.gone
             ? 'it runs without asking'
-            : `the folders are still there: ${guarded.screen}`,
+            : `in ${ASK_MS / 1000} s it neither asked nor ran it: ${guarded.screen}`,
     },
   ]
 } finally {
