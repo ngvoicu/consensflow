@@ -32,6 +32,8 @@
     "goldens:catalog": "node tests/goldens/catalog/record.mjs",
     "goldens:path": "node tests/goldens/path/record.mjs",
     "goldens:records": "node tests/goldens/records/record.mjs",
+    "goldens:errno": "node tests/goldens/errno/record.mjs",
+    "goldens:unwritable": "node tests/goldens/unwritable/record.mjs",
     "parity:ledger": "npm run goldens:ledger && cargo test -p cf-ledger --test replay",
     "build:bridge": "cargo build --release -p cf-panes --bin consensflow-bridge",
     "build:cf": "node app/scripts/build-cf.mjs",

@@ -35,26 +35,44 @@ fn a_save_makes_the_folder_and_leaves_nothing_beside_the_file() {
 }
 
 #[test]
-fn a_save_that_cannot_write_says_the_failure_by_nodes_name() {
+fn a_save_that_cannot_write_says_what_node_says_of_the_call_that_failed() {
     let home = tempfile::tempdir().unwrap();
     // The folder the file should go in is a file.
-    fs::write(home.path().join("consensflow"), "a file").unwrap();
-    let path = home.path().join("consensflow").join("agents.json");
-    let mut document = load_document(&path)
-        .unwrap_or_else(|_| load_document(&home.path().join("none").join("agents.json")).unwrap());
+    let folder = home.path().join("consensflow");
+    fs::write(&folder, "a file").unwrap();
+    let mut document = load_document(&home.path().join("none").join("agents.json")).unwrap();
+    let refusal = save_document(&folder.join("agents.json"), &mut document).unwrap_err();
+    assert_eq!(
+        (refusal.code, refusal.status),
+        ("agents-file-unwritable", 400)
+    );
+    assert_eq!(
+        refusal.message,
+        format!("EEXIST: file already exists, mkdir '{}'", folder.display())
+    );
+    assert_eq!(fs::read_to_string(&folder).unwrap(), "a file");
+}
+
+#[test]
+fn a_directory_at_the_temporary_is_refused_in_the_words_of_the_removal_node_throws_instead() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("agents.json");
+    let temporary = home
+        .path()
+        .join(format!("agents.json.{}.tmp", std::process::id()));
+    fs::create_dir(&temporary).unwrap();
+    let mut document = load_document(&path).unwrap();
     let refusal = save_document(&path, &mut document).unwrap_err();
     assert_eq!(
         (refusal.code, refusal.status),
         ("agents-file-unwritable", 400)
     );
-    let (name, _) = refusal.message.split_once(": ").unwrap();
-    assert!(
-        name.starts_with('E') && name.chars().all(|c| c.is_ascii_uppercase()),
-        "{}",
-        refusal.message
-    );
     assert_eq!(
-        fs::read_to_string(home.path().join("consensflow")).unwrap(),
-        "a file"
+        refusal.message,
+        format!(
+            "Path is a directory: rm returned EISDIR (is a directory) {}",
+            temporary.display()
+        )
     );
+    assert!(temporary.is_dir(), "left as it is");
 }
