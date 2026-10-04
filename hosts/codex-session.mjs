@@ -80,7 +80,7 @@ export async function startBroker({
       control.terminate()
       return
     }
-    pending.get(value.id)?.(value)
+    if (value.method === undefined) pending.get(value.id)?.(value)
     observeStatus(value)
     if (value.method === 'turn/started' && value.params?.threadId === selected) empty = false
   })
@@ -336,8 +336,10 @@ export async function startBroker({
           retire()
           return
         }
-        const selection = requests.get(message.id)
-        requests.delete(message.id)
+        // Only a response answers a request of the TUI's: the server numbers
+        // the requests it sends on its own, and one may carry the same id.
+        const selection = message.method === undefined ? requests.get(message.id) : undefined
+        if (selection !== undefined) requests.delete(message.id)
         if (selection?.permissionChange && !message.error) freshBypass = false
         if (selection && owner === client && selection.revision === revision) {
           const candidate = message.result?.thread?.id

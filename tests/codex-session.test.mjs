@@ -422,6 +422,40 @@ it('a delivery whose turn Codex refuses, a turn having just started, waits in th
   assert.deepEqual(await delivery, { ok: true, admitted: true })
 })
 
+it("a request of Codex's own that shares an id with the TUI's thread switch is not its answer", async (t) => {
+  // The server numbers the requests it sends the TUI on its own; one may
+  // carry the id of a switch the TUI is waiting on.
+  const f = await fixture(t)
+  const tui = await f.connect()
+  tui.send(
+    JSON.stringify({
+      id: 1,
+      method: 'thread/start',
+      params: { ephemeral: false, threadSource: 'user' },
+    }),
+  )
+  await f.wait(() => f.pending.some((p) => p.message.method === 'thread/start'))
+  const { socket } = f.pending.find((p) => p.message.method === 'thread/start')
+  const asked = new Promise((resolve) =>
+    tui.on('message', (raw) => {
+      if (JSON.parse(raw).method === 'item/commandExecution/requestApproval') resolve()
+    }),
+  )
+  socket.send(
+    JSON.stringify({ id: 1, method: 'item/commandExecution/requestApproval', params: {} }),
+  )
+  await asked
+  const answered = new Promise((resolve) =>
+    tui.on('message', (raw) => {
+      const message = JSON.parse(raw)
+      if (message.id === 1 && message.result !== undefined) resolve()
+    }),
+  )
+  await f.respond('thread/start', { thread: { id: A, status: { type: 'idle' }, turns: [] } })
+  await answered
+  assert.equal((await f.read()).sessionId, A)
+})
+
 it('a refused turn is never queued on a thread the window moved to meanwhile', async (t) => {
   // A delivery to idle thread A starts a turn; while Codex weighs it, the
   // window opens thread B. A's refusal must not put A's message in B's queue.
