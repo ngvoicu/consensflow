@@ -310,15 +310,19 @@ impl Rollout {
                 if let Some(open) = self.turn(turn) {
                     open.tools.remove(&command);
                 }
+                // `String(output)`, where V8 throws on an object with a
+                // `toString` of its own.
                 let output = match nullish_or(
                     field(native, "aggregated_output"),
                     field(native, "formatted_output"),
                 ) {
-                    Some(output) if !output.is_null() => js::text(Some(output)).into_owned(),
+                    Some(output) if !output.is_null() => {
+                        js::string(Some(output)).map_err(Stop::Failed)?.into_owned()
+                    }
                     _ => format!(
                         "{}{}",
-                        or_empty(field(native, "stdout")),
-                        or_empty(field(native, "stderr"))
+                        or_empty(field(native, "stdout"))?,
+                        or_empty(field(native, "stderr"))?
                     ),
                 };
                 self.add_item(field(native, "id"), Role::Tool, output, true, at, seq)?;
@@ -495,11 +499,11 @@ fn nullish_or<'a>(first: Option<&'a Value>, second: Option<&'a Value>) -> Option
     }
 }
 
-/// `${value ?? ''}`.
-fn or_empty(value: Option<&Value>) -> String {
+/// `${value ?? ''}`, or the failure V8 threw.
+fn or_empty(value: Option<&Value>) -> Result<String, Stop> {
     match value {
-        None | Some(Value::Null) => String::new(),
-        value => js::text(value).into_owned(),
+        None | Some(Value::Null) => Ok(String::new()),
+        value => Ok(js::string(value).map_err(Stop::Failed)?.into_owned()),
     }
 }
 

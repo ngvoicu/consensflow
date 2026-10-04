@@ -8,12 +8,10 @@
 //! far is read again from its start, into a fresh state. One that could not
 //! be read is not read again until it changes.
 
-use std::fs::File;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use cf_base::file::{identity, mtime_ms, Identity};
+use cf_base::file::{stat, Stat};
 use serde_json::Value;
 
 use super::cache::Look;
@@ -31,24 +29,6 @@ pub(crate) trait Parser {
     }
 }
 
-/// What a file is now, as `sameFile` compares it.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Stat {
-    identity: Identity,
-    size: u64,
-    mtime_ms: f64,
-}
-
-fn stat(path: &Path) -> io::Result<Stat> {
-    let file = File::open(path)?;
-    let metadata = file.metadata()?;
-    Ok(Stat {
-        identity: identity(&file)?,
-        size: metadata.len(),
-        mtime_ms: mtime_ms(&metadata)?,
-    })
-}
-
 /// Where the transcript is, if the harness keeps one yet: or why it cannot
 /// be looked for.
 pub(crate) type Locate = Box<dyn FnMut() -> Result<Option<PathBuf>, String> + Send>;
@@ -60,7 +40,7 @@ pub(crate) struct Followed<P> {
     file: Option<PathBuf>,
     seen: Option<Seen>,
     state: Option<P>,
-    /// A failure, kept until the file changes.
+    /// A failure, kept until the file changes (`sameFile`).
     broken: Option<(Stat, String)>,
 }
 
@@ -203,5 +183,54 @@ impl<P: Parser + Answer> Look for TranscriptReader<P> {
                 Arc::new(Reading::unreadable(&stop.reason()))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A parser that counts the records it is given.
+    struct Counting(Arc<AtomicUsize>);
+
+    impl Parser for Counting {
+        fn visit(&mut self, _: Value, _: usize) -> Result<(), Stop> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_transcript_that_could_not_be_read_is_not_read_again_until_it_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("t.jsonl");
+        fs::write(&file, "{\"a\":1}\n{bad}\n").unwrap();
+        let made = Arc::new(AtomicUsize::new(0));
+        let visits = Arc::new(AtomicUsize::new(0));
+        let located = file.clone();
+        let (making, visiting) = (Arc::clone(&made), Arc::clone(&visits));
+        let mut followed = Followed::new(
+            Box::new(move || Ok(Some(located.clone()))),
+            Box::new(move || {
+                making.fetch_add(1, Ordering::Relaxed);
+                Counting(Arc::clone(&visiting))
+            }),
+        );
+        let counts = || (made.load(Ordering::Relaxed), visits.load(Ordering::Relaxed));
+        let failed = followed.read().err().unwrap().reason();
+        assert_eq!(failed, "malformed JSONL at record 1");
+        assert_eq!(counts(), (1, 1));
+        assert_eq!(followed.read().err().unwrap().reason(), failed);
+        assert_eq!(
+            counts(),
+            (1, 1),
+            "unchanged: the same failure, nothing read"
+        );
+        let mut appended = fs::OpenOptions::new().append(true).open(&file).unwrap();
+        std::io::Write::write_all(&mut appended, b"{\"b\":2}\n").unwrap();
+        assert_eq!(followed.read().err().unwrap().reason(), failed);
+        assert_eq!(counts(), (2, 2), "changed: read again from its start");
     }
 }

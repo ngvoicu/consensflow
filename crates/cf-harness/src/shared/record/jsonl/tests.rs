@@ -70,6 +70,32 @@ fn read_on_passes_over_unparsed_the_lines_that_do_not_hold_only() {
 }
 
 #[test]
+fn a_look_reads_the_bytes_after_where_the_last_stopped_and_no_others() {
+    // A record rewritten in place before the edge the next look checks is
+    // not read again: only bytes past where the last look stopped are.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let padding = "x".repeat(40);
+    let mut text = format!("{{\"a\":0,\"pad\":\"{padding}\"}}\n");
+    for n in 0..40 {
+        text.push_str(&format!("{{\"n\":{n},\"pad\":\"{padding}\"}}\n"));
+    }
+    fs::write(&file, &text).unwrap();
+    stamp(&file, 1_000);
+    let seen = read(collect(&file, None, None).0);
+    assert_eq!(seen.records, 41);
+    let mut rewritten = fs::File::options().write(true).open(&file).unwrap();
+    std::io::Write::write_all(&mut rewritten, b"{\"a\":9").unwrap();
+    drop(rewritten);
+    let mut appended = fs::OpenOptions::new().append(true).open(&file).unwrap();
+    std::io::Write::write_all(&mut appended, b"{\"n\":99}\n").unwrap();
+    stamp(&file, 2_000);
+    let (looked, visited) = collect(&file, Some(&seen), None);
+    assert_eq!(visited, [(serde_json::json!({ "n": 99 }), 41)]);
+    assert_eq!(read(looked).records, 42);
+}
+
+#[test]
 fn an_unchanged_file_is_unchanged_and_an_appended_one_reads_its_new_lines_alone() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("t.jsonl");
@@ -284,4 +310,41 @@ fn reading_on_through_appends_truncations_and_replacements_reads_what_a_whole_re
             }
         }
     }
+}
+
+#[test]
+fn json_this_build_cannot_hold_fails_its_look_in_a_sentence_of_its_own() {
+    // Node reads both lines; serde_json reads neither. Kept on purpose.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let deep = format!("{}{}", "[".repeat(128), "]".repeat(128));
+    for (line, said) in [
+        (
+            "{\"x\":1e400}".to_owned(),
+            "JSON this build cannot hold at record 1",
+        ),
+        (deep, "JSON this build cannot hold at record 1"),
+        ("{bad}".to_owned(), "malformed JSONL at record 1"),
+    ] {
+        for ended in ["\n", ""] {
+            fs::write(&file, format!("{{\"a\":1}}\n{line}{ended}")).unwrap();
+            let Err(Stop::Failed(reason)) = collect(&file, None, None).0 else {
+                panic!("{line}: read");
+            };
+            assert!(reason.starts_with(said), "{line:?}{ended:?}: {reason}");
+        }
+    }
+}
+
+#[test]
+fn a_lone_surrogate_reads_as_the_replacement_character_and_two_halves_as_one_text() {
+    // Kept on purpose: JavaScript holds each half apart, Rust text cannot.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    fs::write(&file, "{\"a\":\"\\ud800\",\"b\":\"x\\udfff\"}\n").unwrap();
+    let (_, visited) = collect(&file, None, None);
+    assert_eq!(
+        visited,
+        [(serde_json::json!({ "a": "\u{FFFD}", "b": "x\u{FFFD}" }), 0)]
+    );
 }

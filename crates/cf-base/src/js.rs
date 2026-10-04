@@ -12,7 +12,9 @@ use serde_json::{Map, Value};
 
 use crate::json::array_index;
 
-/// `value` as `${value}` wrote it; `None` is a field that was not there.
+/// `value` as `${value}` wrote it; `None` is a field that was not there. For
+/// a value that may hold an object with a `toString` of its own, where
+/// JavaScript threw, see [`string`].
 pub fn text(value: Option<&Value>) -> Cow<'_, str> {
     match value {
         None => Cow::Borrowed("undefined"),
@@ -22,6 +24,26 @@ pub fn text(value: Option<&Value>) -> Cow<'_, str> {
         Some(Value::Object(_)) => Cow::Borrowed("[object Object]"),
         Some(Value::Number(number)) => Cow::Owned(number_text(number.as_f64().unwrap_or(f64::NAN))),
         Some(Value::Bool(flag)) => Cow::Borrowed(if *flag { "true" } else { "false" }),
+    }
+}
+
+/// `String(value)`, and `${value}`, or why JavaScript threw instead. An
+/// object with a `toString` of its own, which JSON can make only something
+/// that is no function, has no way to be text: V8 throws `Cannot convert
+/// object to primitive value`. So does a list that holds one at any depth,
+/// whose `join` makes each item text.
+pub fn string(value: Option<&Value>) -> Result<Cow<'_, str>, String> {
+    if value.is_some_and(holds_its_own_to_string) {
+        return Err("an object with a toString of its own cannot be made text".to_owned());
+    }
+    Ok(text(value))
+}
+
+fn holds_its_own_to_string(value: &Value) -> bool {
+    match value {
+        Value::Object(fields) => fields.contains_key("toString"),
+        Value::Array(items) => items.iter().any(holds_its_own_to_string),
+        _ => false,
     }
 }
 
@@ -379,6 +401,22 @@ mod tests {
         );
         assert_eq!(stringify_indented(&read("[]"), 2), "[]");
         assert_eq!(stringify_indented(&json!("x"), 2), "\"x\"");
+    }
+
+    #[test]
+    fn a_value_is_text_as_string_makes_it_or_fails_where_v8_threw() {
+        let made = |value: Value| string(Some(&value)).map(Cow::into_owned);
+        // Node: String(JSON.parse(text)) for each.
+        assert_eq!(made(json!([1, [2, null], "x"])).unwrap(), "1,2,,x");
+        assert_eq!(made(json!({ "valueOf": 1 })).unwrap(), "[object Object]");
+        assert_eq!(string(None).unwrap(), "undefined");
+        for thrown in [
+            json!({ "toString": null }),
+            json!({ "toString": "x" }),
+            json!([1, [{ "toString": 0 }]]),
+        ] {
+            assert!(made(thrown.clone()).is_err(), "{thrown}");
+        }
     }
 
     #[test]

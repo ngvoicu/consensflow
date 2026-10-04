@@ -129,3 +129,17 @@ fn a_null_record_and_a_turn_event_that_names_no_turn_fail_the_look() {
     }
     assert_eq!(read(&[]).unwrap_err(), "empty codex rollout for s");
 }
+
+#[test]
+fn a_command_output_javascript_cannot_make_text_fails_the_look() {
+    let command = |native: Value| event(json!({ "type": "item_completed", "item": native }));
+    for native in [
+        json!({ "type": "CommandExecution", "id": "c", "aggregated_output": { "toString": null } }),
+        json!({ "type": "CommandExecution", "id": "c", "formatted_output": [{ "toString": 1 }] }),
+        json!({ "type": "CommandExecution", "id": "c", "stdout": "ok", "stderr": { "toString": "x" } }),
+    ] {
+        assert!(read(&[command(native.clone())]).is_err(), "{native}");
+    }
+    let text = read(&[command(json!({ "type": "CommandExecution", "id": "c", "aggregated_output": [1, { "valueOf": 2 }] }))]).unwrap();
+    assert_eq!(&*text.items[0].text, "1,[object Object]");
+}

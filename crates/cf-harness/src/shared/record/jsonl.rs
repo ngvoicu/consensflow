@@ -21,7 +21,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use cf_base::file::{identity, mtime_ms, Identity};
-use cf_base::json::from_slice_lossy;
+use cf_base::json::{from_slice_lossy, is_json_lossy, DEEPEST};
 use serde_json::Value;
 
 use prefix::{json_prefix_state, Prefix};
@@ -166,7 +166,7 @@ pub(crate) fn read_on(
             }
             // A live writer may have left only the final, unterminated append.
             Err(_) if json_prefix_state(&text) == Prefix::Incomplete => {}
-            Err(_) => return Err(Stop::Failed(format!("malformed JSONL at record {records}"))),
+            Err(_) => return Err(unread(&line, records)),
         }
     }
     let edge = match seen {
@@ -195,10 +195,24 @@ fn consume_line(
     if is_blank(raw) {
         return Ok(index);
     }
-    let record = from_slice_lossy(raw)
-        .map_err(|_| Stop::Failed(format!("malformed JSONL at record {index}")))?;
+    let record = from_slice_lossy(raw).map_err(|_| unread(raw, index))?;
     visit(record, index)?;
     Ok(index + 1)
+}
+
+/// Why the line at `index`, which is no record here, fails its look: it is
+/// malformed, as Node said; or it is JSON a value here cannot hold, nested
+/// past [`DEEPEST`] levels or with a number past a double's range. Node
+/// read such a line, and this does not: a difference kept on purpose, said
+/// in a sentence of its own so that a store holding one can be counted.
+fn unread(line: &[u8], index: usize) -> Stop {
+    if is_json_lossy(line) {
+        Stop::Failed(format!(
+            "JSON this build cannot hold at record {index}: nested past {DEEPEST} levels, or a number past a double's range"
+        ))
+    } else {
+        Stop::Failed(format!("malformed JSONL at record {index}"))
+    }
 }
 
 /// JSON's own white space: four bytes, where JavaScript's `trim` takes many more.

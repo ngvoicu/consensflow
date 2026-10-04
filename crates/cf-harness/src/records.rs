@@ -2,7 +2,9 @@
 //! (`hosts/lib/completion.js`): read from its native store, never written,
 //! read on from where the last look stopped. A reading is what a reading of
 //! the whole record would say: a record that shrank or was replaced is read
-//! again from its start. A final unterminated JSONL append may be
+//! again from its start. One rewritten in place before its last kilobyte,
+//! that kilobyte and its unterminated last line kept, is not seen to change,
+//! as Node did not see it either. A final unterminated JSONL append may be
 //! incomplete; a malformed whole line fails the look.
 //!
 //! Each harness's reader is in its own module; the readers kept from look

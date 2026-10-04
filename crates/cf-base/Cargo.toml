@@ -18,7 +18,7 @@ libc.workspace = true
 # Win32_Networking_WinSock: libuv's table also names the `WSAE…` codes.
 [target.'cfg(windows)'.dependencies]
 winapi-util.workspace = true
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Networking_WinSock"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Networking_WinSock", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tempfile.workspace = true

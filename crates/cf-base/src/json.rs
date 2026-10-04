@@ -8,7 +8,7 @@
 
 use std::borrow::Cow;
 
-use serde_json::{Map, Value};
+use serde_json::{Map, Number, Value};
 
 /// The most levels of arrays and objects serde_json reads, the root's own
 /// included: JSON nested deeper is no value here.
@@ -24,13 +24,17 @@ pub fn nesting(value: &Value) -> usize {
     }
 }
 
-/// The JSON in `bytes`, invalid UTF-8 and lone surrogate escapes read as U+FFFD.
-/// serde_json reads no further than [`DEEPEST`] levels of nesting, where
-/// JavaScript's `JSON.parse` has no such limit: [`is_json_lossy`] tells what is
-/// too deep to read from what is no JSON.
+/// The JSON in `bytes` as `JSON.parse` holds it: every number the double it
+/// reads as, keys in the order JavaScript enumerates them; invalid UTF-8 and
+/// lone surrogate escapes read as U+FFFD. serde_json reads no further than
+/// [`DEEPEST`] levels of nesting, where JavaScript's `JSON.parse` has no such
+/// limit: [`is_json_lossy`] tells what is too deep to read from what is no
+/// JSON.
 pub fn from_slice_lossy(bytes: &[u8]) -> serde_json::Result<Value> {
     let text = String::from_utf8_lossy(bytes);
-    serde_json::from_str(&without_lone_surrogates(&text))
+    let mut value = serde_json::from_str(&without_lone_surrogates(&text))?;
+    as_parsed(&mut value);
+    Ok(value)
 }
 
 /// What [`from_slice_exact`] will not read: JSON a value here cannot hold as
@@ -57,37 +61,42 @@ pub fn from_slice_exact(bytes: &[u8]) -> Result<Value, Inexact> {
     if matches!(without_lone_surrogates(&text), Cow::Owned(_)) {
         return Err(Inexact::LoneSurrogate);
     }
-    let value = serde_json::from_str(&text).map_err(Inexact::Json)?;
-    Ok(js_order(as_doubles(value)))
+    let mut value = serde_json::from_str(&text).map_err(Inexact::Json)?;
+    as_parsed(&mut value);
+    Ok(value)
 }
 
-/// `value` with every integer past 2^53 the double JavaScript reads it as.
-fn as_doubles(value: Value) -> Value {
-    const SAFE: u64 = 1 << 53;
+/// `value` as `JSON.parse` holds the same JSON, in place: every integer
+/// past 2^53 the double it reads as, and each object's keys in the order
+/// JavaScript enumerates them.
+fn as_parsed(value: &mut Value) {
     match value {
         Value::Number(number) => {
-            let beyond = number.as_u64().is_some_and(|whole| whole > SAFE)
-                || number
-                    .as_i64()
-                    .is_some_and(|whole| whole.unsigned_abs() > SAFE);
-            match number
-                .as_f64()
-                .filter(|_| beyond)
-                .and_then(serde_json::Number::from_f64)
-            {
-                Some(double) => Value::Number(double),
-                None => Value::Number(number),
+            if let Some(double) = past_safe(number) {
+                *number = double;
             }
         }
-        Value::Array(items) => Value::Array(items.into_iter().map(as_doubles).collect()),
-        Value::Object(fields) => Value::Object(
-            fields
-                .into_iter()
-                .map(|(key, item)| (key, as_doubles(item)))
-                .collect(),
-        ),
-        other => other,
+        Value::Array(items) => items.iter_mut().for_each(as_parsed),
+        Value::Object(fields) => {
+            in_enumeration_order(fields);
+            fields.values_mut().for_each(as_parsed);
+        }
+        _ => {}
     }
+}
+
+/// The double JavaScript reads an integer past 2^53 as; none for any other
+/// number, which it reads as it is.
+fn past_safe(number: &Number) -> Option<Number> {
+    const SAFE: u64 = 1 << 53;
+    let beyond = number.as_u64().is_some_and(|whole| whole > SAFE)
+        || number
+            .as_i64()
+            .is_some_and(|whole| whole.unsigned_abs() > SAFE);
+    number
+        .as_f64()
+        .filter(|_| beyond)
+        .and_then(Number::from_f64)
 }
 
 /// Whether `bytes` are JSON nested to any depth, which [`from_slice_lossy`]
@@ -102,24 +111,43 @@ pub fn is_json_lossy(bytes: &[u8]) -> bool {
 /// the keys that are array indices first, ascending, then the others as
 /// written. `JSON.stringify` writes them so, and what Node printed is printed
 /// so again.
-pub fn js_order(value: Value) -> Value {
-    match value {
-        Value::Array(items) => Value::Array(items.into_iter().map(js_order).collect()),
-        Value::Object(fields) => Value::Object(js_order_fields(fields)),
-        other => other,
-    }
+pub fn js_order(mut value: Value) -> Value {
+    order_keys(&mut value);
+    value
 }
 
 /// An object's `fields` in the order JavaScript enumerates them, and every
 /// object's within them: a request's body, read by serde_json in the order
 /// it was written, as `JSON.parse` would have handed it to Node.
-pub fn js_order_fields(fields: Map<String, Value>) -> Map<String, Value> {
-    let (mut indices, named): (Vec<_>, Vec<_>) = fields
+pub fn js_order_fields(mut fields: Map<String, Value>) -> Map<String, Value> {
+    in_enumeration_order(&mut fields);
+    fields.values_mut().for_each(order_keys);
+    fields
+}
+
+fn order_keys(value: &mut Value) {
+    match value {
+        Value::Array(items) => items.iter_mut().for_each(order_keys),
+        Value::Object(fields) => {
+            in_enumeration_order(fields);
+            fields.values_mut().for_each(order_keys);
+        }
+        _ => {}
+    }
+}
+
+/// `fields` in the order JavaScript enumerates them, their values as they
+/// are: the keys that are array indices first, ascending, then the others
+/// as written. Most objects hold no such key, and are left as they are.
+fn in_enumeration_order(fields: &mut Map<String, Value>) {
+    if !fields.keys().any(|key| array_index(key).is_some()) {
+        return;
+    }
+    let (mut indices, named): (Vec<_>, Vec<_>) = std::mem::take(fields)
         .into_iter()
-        .map(|(key, value)| (key, js_order(value)))
         .partition(|(key, _)| array_index(key).is_some());
     indices.sort_by_key(|(key, _)| array_index(key));
-    indices.into_iter().chain(named).collect()
+    *fields = indices.into_iter().chain(named).collect();
 }
 
 /// The array index a key is: digits with no leading zero, below 2^32 - 1.
@@ -235,6 +263,27 @@ mod tests {
             let read = from_slice_exact(text.as_bytes()).unwrap();
             assert_eq!(crate::js::stringify(&read), node, "{text}");
         }
+    }
+
+    #[test]
+    fn json_read_lossily_holds_numbers_and_keys_as_json_parse_does() {
+        let read = from_slice_lossy(
+            br#"{"b":9007199254740993,"2":[-9007199254740993,7],"a":{"z":0,"1":1}}"#,
+        )
+        .unwrap();
+        // Node: JSON.parse(text), whose keys enumerate as Object.keys lists them.
+        assert!(read["b"].is_f64() && read["b"] == json!(9_007_199_254_740_992.0));
+        assert_eq!(read["2"], json!([-9_007_199_254_740_992.0, 7]));
+        let keys = |value: &Value| {
+            value
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(keys(&read), ["2", "b", "a"]);
+        assert_eq!(keys(&read["a"]), ["1", "z"]);
     }
 
     #[test]

@@ -191,6 +191,13 @@ impl Stage<'_> {
             }
             reading => serde_json::to_value(reading).unwrap(),
         };
+        // Text is compared below, where every number is written as
+        // JavaScript writes it: first, every number of the reading itself is
+        // one JavaScript holds, an integer past 2^53 a double.
+        assert!(
+            holds_js_numbers(&read),
+            "{name}: a number JavaScript rounds"
+        );
         let mut expected = self.scenario.readings[at].clone();
         if let Some(items) = expected.get_mut("items").and_then(Value::as_array_mut) {
             for item in items {
@@ -246,6 +253,23 @@ impl Stage<'_> {
 
     fn path(&self, at: &str) -> PathBuf {
         PathBuf::from(resolve(self.root.path(), at))
+    }
+}
+
+/// Whether every number in `value` is one a JavaScript number holds as it
+/// is: no integer past 2^53 kept whole.
+fn holds_js_numbers(value: &Value) -> bool {
+    const SAFE: u64 = 1 << 53;
+    match value {
+        Value::Number(number) => {
+            number.as_u64().is_none_or(|whole| whole <= SAFE)
+                && number
+                    .as_i64()
+                    .is_none_or(|whole| whole.unsigned_abs() <= SAFE)
+        }
+        Value::Array(items) => items.iter().all(holds_js_numbers),
+        Value::Object(fields) => fields.values().all(holds_js_numbers),
+        _ => true,
     }
 }
 

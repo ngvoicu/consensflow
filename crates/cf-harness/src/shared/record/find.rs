@@ -5,27 +5,36 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use cf_base::path;
+
 /// How deep under its root a lookup goes.
 pub(crate) const DEPTH: u32 = 6;
 
 /// The first file under `root`, `depth` folders down at most, whose name
 /// `matches`. A folder that cannot be read holds nothing; a link is neither
 /// a file nor a folder, as `readdir`'s entries say.
+///
+/// Node reads an entry's name as UTF-8, a byte that is none as U+FFFD, and
+/// joins that text to the folder (`path.join`): so does this. A name that is
+/// no UTF-8 then names a path that is not there, as it did for Node.
 pub(crate) fn find_file(
     root: &Path,
     matches: &dyn Fn(&str) -> bool,
     depth: u32,
 ) -> Option<PathBuf> {
+    let folder = root.to_string_lossy();
     for entry in entries(root) {
         let Ok(kind) = entry.file_type() else {
             continue;
         };
         let name = entry.file_name();
-        if kind.is_file() && matches(&name.to_string_lossy()) {
-            return Some(entry.path());
+        let name = name.to_string_lossy();
+        let full = PathBuf::from(path::join(&[&folder, &name]));
+        if kind.is_file() && matches(&name) {
+            return Some(full);
         }
         if kind.is_dir() && depth > 0 {
-            if let Some(found) = find_file(&entry.path(), matches, depth - 1) {
+            if let Some(found) = find_file(&full, matches, depth - 1) {
                 return Some(found);
             }
         }
