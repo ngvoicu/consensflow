@@ -4,11 +4,12 @@
 
 use cf_base::js;
 use cf_base::time::{time_clip, utc_ms};
-use jiff::tz::{TimeZone, TimeZoneDatabase};
+use jiff::tz::TimeZone;
 use jiff::Timestamp;
 
 use super::date;
 use super::patterns::{AT, SPAN, UNIT};
+use super::zone::time_zone;
 
 /// A day, in milliseconds: what a span of days adds, and how long a date may
 /// be gone by before it is next year's.
@@ -165,25 +166,17 @@ struct WallClock {
 }
 
 /// What `instant` (milliseconds since the epoch) reads on the wall of
-/// `zone`. None for an instant past the years jiff holds, 9999 either way,
-/// where `Intl` still formats one.
+/// `zone`, as `Intl` writes its parts: a year before 1 as the year of its
+/// era, before Christ (1 for the year 0, 2 for -1). None for an instant past
+/// the years jiff holds, 9999 either way, where `Intl` still formats one.
 fn wall_clock(zone: &TimeZone, instant: i64) -> Option<WallClock> {
     let shown = zone.to_datetime(Timestamp::from_millisecond(instant).ok()?);
+    let year = i64::from(shown.year());
     Some(WallClock {
-        year: i64::from(shown.year()),
+        year: if year < 1 { 1 - year } else { year },
         month: i64::from(shown.month()),
         day: i64::from(shown.day()),
         hour: i64::from(shown.hour()),
         minute: i64::from(shown.minute()),
     })
-}
-
-/// The zone `name` names, in any ASCII case as `Intl` takes it, and not
-/// trimmed: none for a name no zone has, and for `Etc/Unknown`, which jiff
-/// answers with a zone that has no offset and Node refuses.
-pub(super) fn time_zone(name: &str) -> Option<TimeZone> {
-    TimeZoneDatabase::bundled()
-        .get(name)
-        .ok()
-        .filter(|zone| !zone.is_unknown())
 }

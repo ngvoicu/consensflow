@@ -8,12 +8,13 @@
 //! read from the system's files: the same data on every platform, and no file
 //! or environment variable (`TZDIR`) behind the caller's back. jiff serves only
 //! as that database: it finds a zone, tells the offset at an instant, and the
-//! date an instant has in a zone. What is kept from Node on purpose:
-//! - a zone name is found in any ASCII case, as `Intl` finds it, but an
-//!   offset such as `+03:00`, which Node 26 takes for a zone, is unknown
-//!   here, and `Factory`, which Node refuses, is a zone;
+//! date an instant has in a zone. A zone is named as `Intl` names one, ICU's
+//! names and offsets too (the `zone` module). What is kept from Node on
+//! purpose:
 //! - the data is tzdata 2026c where Node's ICU holds 2026a, so a zone whose
 //!   rules changed between the two is read by the newer;
+//! - a SystemV zone keeps its daylight time in 1974 and 1975 as in every
+//!   other year (`zone`);
 //! - an instant past the years jiff holds, 9999 either way, is none to it, so
 //!   a reset at a time of day, asked of one, names no reset where Node would
 //!   give one.
@@ -22,6 +23,7 @@ mod patterns;
 mod reset;
 #[cfg(test)]
 mod tests;
+mod zone;
 
 use cf_base::js;
 use cf_base::time::{iso, time_clip};

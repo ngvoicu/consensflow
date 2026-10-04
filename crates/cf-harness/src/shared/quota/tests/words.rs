@@ -1,21 +1,12 @@
 //! The words of a refusal that no table row reads: where JavaScript's `\d`,
 //! `\s`, `\b` and `/i` differ from the regex crate's, the carry of a day, an
-//! hour or a minute, the edges of what a date holds, and the zones Node and
-//! jiff take differently. Each answer is Node 26's (`TZ` set to
-//! `America/Los_Angeles`, the instant `2026-10-03T12:00:00.000Z` unless said).
+//! hour or a minute, and the edges of what a date holds. Each answer is
+//! Node 26's (`TZ` set to `America/Los_Angeles`, the instant `AT` unless
+//! said).
 
 use serde_json::json;
 
 use super::*;
-
-const AT: &str = "2026-10-03T12:00:00.000Z";
-
-/// Each text's reset, read at `AT`.
-fn assert_resets(cases: &[(String, Option<&str>)]) {
-    for (text, expected) in cases {
-        assert_eq!(resets(text, instant(AT)).as_deref(), *expected, "{text:?}");
-    }
-}
 
 /// A span of two days, `character` for the space after `resets`.
 fn between(character: char) -> String {
@@ -224,45 +215,7 @@ fn a_status_is_what_number_reads_of_it() {
 }
 
 #[test]
-fn the_zone_is_named_in_any_ascii_case_and_never_trimmed() {
-    for name in [
-        "europe/BUCHAREST",
-        "UTC",
-        "utc",
-        "Asia/Calcutta",
-        "US/Pacific",
-    ] {
-        assert!(time_zone(name).is_some(), "{name}");
-    }
-    for name in [
-        " Europe/Bucharest",
-        "Europe/Bucharest ",
-        "Mars/Olympus",
-        "",
-        "Etc/Unknown",
-        "etc/unknown",
-    ] {
-        assert!(time_zone(name).is_none(), "{name:?}");
-    }
-    assert_resets(&[
-        ("resets 3pm (utc)".into(), Some("2026-10-03T15:00:00.000Z")),
-        ("resets 3pm (Etc/Unknown)".into(), None),
-        ("resets 3pm (UTC\n)".into(), None),
-        // The first of two parentheses is the zone.
-        (
-            "resets 3pm (UTC) (Asia/Tokyo)".into(),
-            Some("2026-10-03T15:00:00.000Z"),
-        ),
-        // A zone that is empty, or never closed, is none named: the machine's is read.
-        ("resets 3pm ()".into(), Some("2026-10-03T22:00:00.000Z")),
-        ("resets 3pm (UTC".into(), Some("2026-10-03T22:00:00.000Z")),
-    ]);
-}
-
-#[test]
 fn what_jiff_cannot_hold_is_a_difference_kept_from_node() {
-    // Node 26 takes an offset for a zone, and answers 2026-10-04T12:00:00.000Z.
-    assert_resets(&[("resets 3pm (+03:00)".into(), None)]);
     // The last instant jiff holds is 9999-12-30T22:00:00Z. Node answers the
     // times of day it is asked of past it, "+010000-01-01T15:00:00.000Z" for
     // 253402300799000; a span needs no zone, and is answered.

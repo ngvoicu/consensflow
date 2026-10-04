@@ -2,18 +2,29 @@
 //! `tests/goldens/records/tables.json`, the sentences of `tests/quota.test.mjs`,
 //! and the readings no table has a row for.
 
-use super::reset::time_zone;
+use super::zone::time_zone;
 use super::*;
 use cf_base::time::parse;
 
 mod a_quota_refusal;
 mod tables;
 mod words;
+mod zones;
 
 /// The zone a reset that names none is read in, as the tables were made:
 /// Node ran with `TZ` set to it.
 fn local() -> TimeZone {
     time_zone("America/Los_Angeles").unwrap()
+}
+
+/// The instant a refusal is read at, unless a test says another.
+const AT: &str = "2026-10-03T12:00:00.000Z";
+
+/// Each text's reset, read at `AT`.
+fn assert_resets(cases: &[(String, Option<&str>)]) {
+    for (text, expected) in cases {
+        assert_eq!(resets(text, instant(AT)).as_deref(), *expected, "{text:?}");
+    }
 }
 
 /// `Date.parse(text)`, the instant a refusal is read at.
