@@ -13,8 +13,8 @@
 //! purpose:
 //! - the data is tzdata 2026c where Node's ICU holds 2026a, so a zone whose
 //!   rules changed between the two is read by the newer;
-//! - a SystemV zone keeps its daylight time in 1974 and 1975 as in every
-//!   other year (`zone`);
+//! - a SystemV zone with daylight time reads it by one rule every year,
+//!   where ICU's history differs before 1902 and in 1974 and 1975 (`zone`);
 //! - an instant past the years jiff holds, 9999 either way, is none to it, so
 //!   a reset at a time of day, asked of one, names no reset where Node would
 //!   give one.

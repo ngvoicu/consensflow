@@ -8,9 +8,15 @@
 //! `Etc/Unknown`, which jiff answers with a zone of no offset. Each list here
 //! is what Node 26 (ICU 78) takes that jiff's tzdata 2026c has not.
 //!
-//! Kept from Node on purpose: a SystemV zone with daylight time keeps it from
-//! the last Sunday in April to the last in October, every year; ICU's start
-//! it on January 6 in 1974 and February 23 in 1975.
+//! Kept from Node on purpose (decided with Calliope, 2026-10-05): the six
+//! SystemV zones with daylight time read it every year from April's last
+//! Sunday to October's last, at 02:00, where Node's ICU 78 (probed on Node
+//! 26.8.1, through 2040) keeps standard time all year before 1902, and runs
+//! daylight time from January 6 to November 24 in 1974 and from February 23
+//! to October 26 in 1975. A reset is computed from the refusal's own
+//! timestamp, so none falls in those years (one stamped in 1973 at the
+//! latest, its date gone by, rolls into 1974), and no provider writes these
+//! names.
 
 use jiff::tz::{Offset, TimeZone, TimeZoneDatabase};
 

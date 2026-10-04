@@ -176,3 +176,22 @@ fn a_year_before_1_is_the_year_of_its_era_as_intl_writes_it() {
         );
     }
 }
+
+#[test]
+fn a_systemv_zone_s_history_is_a_difference_kept_from_node() {
+    // Node 26.8.1 (ICU 78) reads standard time before 1902, and daylight
+    // time on January 10 and in November 1974 and on March 1, 1975: the
+    // first reset is 20:00Z there, the others 19:00Z.
+    for (at, read) in [
+        ("1800-07-01T12:00:00.000Z", "1800-07-01T19:00:00.000Z"),
+        ("1974-01-10T12:00:00.000Z", "1974-01-10T20:00:00.000Z"),
+        ("1974-10-28T12:00:00.000Z", "1974-10-28T20:00:00.000Z"),
+        ("1975-03-01T12:00:00.000Z", "1975-03-01T20:00:00.000Z"),
+    ] {
+        assert_eq!(
+            resets("resets 3pm (SystemV/EST5EDT)", instant(at)).as_deref(),
+            Some(read),
+            "{at}"
+        );
+    }
+}
