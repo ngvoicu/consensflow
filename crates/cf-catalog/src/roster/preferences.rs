@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use cf_base::json::js_order;
+use cf_base::json::js_order_fields;
 use cf_base::refusal::Refusal;
 use cf_proto::agents::{AgentView, Preferences};
 use serde_json::{Map, Value};
@@ -29,28 +29,23 @@ const PREFERENCE_KEYS: [&str; 1] = ["ownHarnessOnly"];
 /// in the file: a write even when nothing changes, and a file made when
 /// there is none. A key the file kept that this build does not know is
 /// dropped from it.
-pub(crate) fn set_preferences(
-    path: &Path,
-    patch: Option<&Map<String, Value>>,
-) -> Result<Preferences, Refusal> {
+pub(crate) fn set_preferences(path: &Path, patch: Option<&Value>) -> Result<Preferences, Refusal> {
     let mut document = load_document(path)?;
     let mut next = preferences_of(&document);
-    if let Some(Value::Object(patch)) = patch.map(|patch| js_order(Value::Object(patch.clone()))) {
-        for (key, value) in &patch {
-            if !PREFERENCE_KEYS.contains(&key.as_str()) {
-                return Err(Refusal::new(
-                    "preference-unknown",
-                    format!("no preference named {key}"),
-                ));
-            }
-            let Value::Bool(on) = value else {
-                return Err(Refusal::new(
-                    "preference-switch",
-                    format!("{key} is on or off"),
-                ));
-            };
-            next.own_harness_only = *on;
+    for (key, value) in entries(patch) {
+        if !PREFERENCE_KEYS.contains(&key.as_str()) {
+            return Err(Refusal::new(
+                "preference-unknown",
+                format!("no preference named {key}"),
+            ));
         }
+        let Value::Bool(on) = value else {
+            return Err(Refusal::new(
+                "preference-switch",
+                format!("{key} is on or off"),
+            ));
+        };
+        next.own_harness_only = on;
     }
     document.set(
         "preferences",
@@ -61,6 +56,27 @@ pub(crate) fn set_preferences(
     );
     save_document(path, &mut document)?;
     Ok(next)
+}
+
+/// `Object.entries(patch ?? {})`: an object's fields in the order JavaScript
+/// enumerates them, a list's items under their indices, a text's characters
+/// under theirs, and nothing of a number or a flag. Every index is a key no
+/// preference has, so of a list or a text only the first entry is ever read.
+fn entries(patch: Option<&Value>) -> Vec<(String, Value)> {
+    match patch {
+        Some(Value::Object(fields)) => js_order_fields(fields.clone()).into_iter().collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| (index.to_string(), item.clone()))
+            .collect(),
+        Some(Value::String(text)) => text
+            .chars()
+            .enumerate()
+            .map(|(index, character)| (index.to_string(), Value::from(character.to_string())))
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// The harnesses that reach other makers' models.

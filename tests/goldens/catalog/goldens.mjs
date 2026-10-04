@@ -54,8 +54,21 @@ const HARNESS_OF = {
 }
 
 /** `value` with every `undefined` it holds written as the marker. */
+/**
+ * A request as the text the API reads, its keys in the order written: Node
+ * is handed what `JSON.parse` makes of it, keys in JavaScript's order; the
+ * Rust reads the text as serde_json does. The golden holds `{"$json": text}`.
+ */
+class Raw {
+  constructor(text) {
+    this.text = text
+  }
+}
+const raw = (text) => new Raw(text)
+
 function encode(value) {
   if (value === undefined) return { $undefined: true }
+  if (value instanceof Raw) return { $json: value.text }
   if (Array.isArray(value)) return value.map(encode)
   if (value !== null && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, encode(item)]))
@@ -256,8 +269,9 @@ function documents() {
         { ...pip, custom: 'yes' },
       ],
     }),
-    // Numbers as JSON.parse reads them: a whole double, past 2^53, past 1e21.
-    numbers: `{"schemaVersion":1.0,"agents":[{"id":"nova","kind":"codex","model":"m","x":9007199254740993,"y":1e21,"z":2.50}],"w":-0.0}\n`,
+    // Numbers as JSON.parse reads them: a whole double, past 2^53, past 1e21,
+    // and those only a correctly rounded reading reads as Node does.
+    numbers: `{"schemaVersion":1.0,"agents":[{"id":"nova","kind":"codex","model":"m","x":9007199254740993,"y":1e21,"z":2.50,"p":1000000000000000.1,"q":1.7976931348623157000e308,"r":4.9406564584124654e-324,"s":123456789012345678901234567890,"t":1e-400}],"w":-0.0}\n`,
   }
 }
 
@@ -345,6 +359,15 @@ const WRITES = [
   ['setPreferences', { ownHarnessOnly: 'yes' }],
   ['setPreferences', { other: true, ownHarnessOnly: false }],
   ['setPreferences', null],
+  ['setPreferences', undefined],
+  // What `Object.entries` makes of a patch that is no object.
+  ['setPreferences', ['x']],
+  ['setPreferences', 'x'],
+  ['setPreferences', ''],
+  ['setPreferences', 5],
+  ['setPreferences', true],
+  ['setPreferences', []],
+  ['setPreferences', raw('{"ownHarnessOnly":"yes","2":false}')],
   [
     'addAgent',
     {
@@ -367,6 +390,15 @@ const WRITES = [
   ['addAgent', { name: 'zed', harness: 'codex', model: 'm', workTier: 'huge' }],
   ['addAgent', { harness: 'codex', model: 'm' }],
   ['addAgent', { name: 'nova', harness: 'codex', model: 'm' }],
+  // Requests whose keys are written out of JavaScript's order.
+  [
+    'addAgent',
+    raw(
+      '{"name":"zed","harness":"codex","model":"m","description":{"z":0,"2":"b","1":"a","x":{"b":1,"10":2,"9":3}}}',
+    ),
+  ],
+  ['addAgent', raw('{"name":{"b":1,"1":2},"harness":"codex","model":"m"}')],
+  ['addAgent', raw('{"name":"zed","harness":{"x":1,"0":2},"model":"m"}')],
   ['editAgent', 'thoth', { model: 'x' }],
   ['editAgent', 'nobody', { model: '' }],
   ['editAgent', 'nova', { model: 'gpt-x' }],
@@ -382,6 +414,7 @@ const WRITES = [
   ['editAgent', 'painter', { effort: 'high' }],
   ['editAgent', 'painter', { model: 'gpt-image-3' }],
   ['editAgent', 'kim', { effort: 'high' }],
+  ['editAgent', 'nova', raw('{"description":{"b":1,"10":2,"2":[{"y":1,"3":0}]}}')],
   ['removeAgent', 'thoth'],
   ['removeAgent', 'nobody'],
   ['removeAgent', 'nova'],
@@ -422,7 +455,8 @@ function rosterCase(before, call, now, skipped) {
   globalThis.Date = fixedDate(now)
   let outcome
   try {
-    outcome = { result: encode(OPERATIONS[name](...args, { CONSENSFLOW_HOME: home })) }
+    const parsed = args.map((arg) => (arg instanceof Raw ? JSON.parse(arg.text) : arg))
+    outcome = { result: encode(OPERATIONS[name](...parsed, { CONSENSFLOW_HOME: home })) }
   } catch (cause) {
     if (cause instanceof TypeError) outcome = null
     // The file's path, whatever the platform writes it as, is «home»/agents.json.

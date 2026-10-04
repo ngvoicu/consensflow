@@ -78,9 +78,24 @@ impl Clock for At {
     }
 }
 
-/// A request's body as the golden holds it.
-fn object(value: &Value) -> &Map<String, Value> {
-    value.as_object().unwrap()
+/// A request's body as the golden holds it: a value, or the text the API
+/// read (`{"$json": text}`), read as serde_json reads a request, its keys in
+/// the order written, where `JSON.parse` handed Node JavaScript's order.
+/// None for a body that is not there (`{"$undefined": true}`).
+fn request(value: &Value) -> Option<Value> {
+    match value.get("$json") {
+        Some(Value::String(text)) => Some(serde_json::from_str(text).unwrap()),
+        _ if value.get("$undefined").is_some() => None,
+        _ => Some(value.clone()),
+    }
+}
+
+/// A request that is an object, as `addAgent` and `editAgent` are given one.
+fn object(value: &Value) -> Map<String, Value> {
+    match request(value) {
+        Some(Value::Object(fields)) => fields,
+        other => panic!("no object: {other:?}"),
+    }
 }
 
 /// A value as the JSON it serializes to.
@@ -101,12 +116,12 @@ fn answered(roster: &Roster<'_>, call: &[Value], clock: &mut At) -> Result<Value
         }
         "preferences" => roster.preferences().map(|choices| json(&choices)),
         "setPreferences" => roster
-            .set_preferences(call[1].as_object())
+            .set_preferences(request(&call[1]).as_ref())
             .map(|choices| json(&choices)),
         "normalizeRoster" => roster.normalize().map(Value::Bool),
-        "addAgent" => roster.add(object(&call[1]), clock).map(|view| json(&view)),
+        "addAgent" => roster.add(&object(&call[1]), clock).map(|view| json(&view)),
         "editAgent" => roster
-            .edit(call[1].as_str().unwrap(), object(&call[2]), clock)
+            .edit(call[1].as_str().unwrap(), &object(&call[2]), clock)
             .map(|view| json(&view)),
         "removeAgent" => roster
             .remove(call[1].as_str().unwrap())
@@ -207,15 +222,15 @@ fn every_operation_on_the_roster_answers_as_node_answered_and_leaves_the_file_no
     assert_eq!(
         calls.into_iter().collect::<Vec<_>>(),
         [
-            ("addAgent".to_owned(), 385),
-            ("agentRow".to_owned(), 151),
-            ("editAgent".to_owned(), 467),
+            ("addAgent".to_owned(), 455),
+            ("agentRow".to_owned(), 143),
+            ("editAgent".to_owned(), 474),
             ("listAgents".to_owned(), 48),
-            ("normalizeRoster".to_owned(), 31),
-            ("preferences".to_owned(), 27),
-            ("removeAgent".to_owned(), 114),
-            ("setPreferences".to_owned(), 157),
+            ("normalizeRoster".to_owned(), 27),
+            ("preferences".to_owned(), 30),
+            ("removeAgent".to_owned(), 109),
+            ("setPreferences".to_owned(), 382),
         ]
     );
-    assert_eq!((answers, refusals, wrote, from_steps), (528, 852, 323, 60));
+    assert_eq!((answers, refusals, wrote, from_steps), (691, 977, 495, 60));
 }

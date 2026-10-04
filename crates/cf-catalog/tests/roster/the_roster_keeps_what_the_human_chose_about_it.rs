@@ -16,7 +16,7 @@ fn hides_claude_and_openai_models_on_pi_and_opencode_when_they_are_kept_to_their
     );
     assert!(
         roster
-            .set_preferences(Some(&body(json!({ "ownHarnessOnly": true }))))
+            .set_preferences(Some(&json!({ "ownHarnessOnly": true })))
             .unwrap()
             .own_harness_only
     );
@@ -45,17 +45,17 @@ fn hides_claude_and_openai_models_on_pi_and_opencode_when_they_are_kept_to_their
         "a fold at start keeps it"
     );
     assert!(roster
-        .set_preferences(Some(&body(json!({ "ownHarnessOnly": "yes" }))))
+        .set_preferences(Some(&json!({ "ownHarnessOnly": "yes" })))
         .unwrap_err()
         .message
         .contains("is on or off"));
     assert!(roster
-        .set_preferences(Some(&body(json!({ "colour": true }))))
+        .set_preferences(Some(&json!({ "colour": true })))
         .unwrap_err()
         .message
         .contains("no preference named colour"));
     roster
-        .set_preferences(Some(&body(json!({ "ownHarnessOnly": false }))))
+        .set_preferences(Some(&json!({ "ownHarnessOnly": false })))
         .unwrap();
     assert!(!roster.list().unwrap().iter().any(|agent| agent.hidden));
 }

@@ -141,11 +141,17 @@ fn validates_adds_bad_names_unknown_harnesses_empty_models_duplicates() {
             &mut Now,
         )
         .unwrap();
-    // No other Codex agent designs.
-    assert!(home
-        .by_name(&catalog)
-        .get("freya-2")
-        .is_none_or(|freya| !freya.designer));
+    // No other Codex agent designs: the catalog's image agent and this one
+    // are the only designers. (The JS asked it of `freya-2`, which the next
+    // test adds: there it held of nothing.)
+    let designers: Vec<_> = roster
+        .list()
+        .unwrap()
+        .into_iter()
+        .filter(|agent| agent.harness.as_deref() == Some("codex") && agent.designer)
+        .filter_map(|agent| agent.name)
+        .collect();
+    assert_eq!(designers, ["pygmalion", "my-image"]);
 }
 
 #[test]

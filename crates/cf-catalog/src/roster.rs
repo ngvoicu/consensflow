@@ -107,13 +107,11 @@ impl<'a> Roster<'a> {
             .collect()
     }
 
-    /// Sets what the human chose, from a request's `patch` (`null` naming
-    /// nothing), and answers the choices as kept: the file is written even
-    /// when nothing changes, and made when there is none.
-    pub fn set_preferences(
-        &self,
-        patch: Option<&Map<String, Value>>,
-    ) -> Result<Preferences, Refusal> {
+    /// Sets what the human chose, from a request's `patch` (none, `null`,
+    /// a number or a flag naming nothing; a list or a text naming the
+    /// indices JavaScript gives it), and answers the choices as kept: the
+    /// file is written even when nothing changes, and made when there is none.
+    pub fn set_preferences(&self, patch: Option<&Value>) -> Result<Preferences, Refusal> {
         set_preferences(&self.path, patch)
     }
 

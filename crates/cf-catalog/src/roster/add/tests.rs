@@ -150,3 +150,33 @@ fn the_request_is_refused_before_the_file_is_read_and_a_duplicate_after() {
         sentence(&path, "is not valid JSON")
     );
 }
+
+#[test]
+fn a_description_nested_past_what_this_build_reads_back_is_refused_and_nothing_is_saved() {
+    // Node saved any depth. The file holds a description under three levels
+    // of its own (the document, its list of agents, the row): one of 124
+    // levels reads back, one of 125 would not.
+    let input = |depth: usize| {
+        let mut input = body(json!({ "name": "zed", "harness": "codex", "model": "m" }));
+        let nested = format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+        input.insert(
+            "description".to_owned(),
+            serde_json::from_str(&nested).unwrap(),
+        );
+        serde_json::Value::Object(input)
+    };
+    let (answer, file, _) = added(br#"{"agents":[]}"#, input(124));
+    assert!(answer.is_ok());
+    assert!(cf_base::json::from_slice_exact(file.as_bytes()).is_ok());
+    let (answer, file, readings) = added(br#"{"agents":[]}"#, input(125));
+    let refusal = answer.unwrap_err();
+    assert_eq!(
+        (refusal.code, refusal.message.as_str()),
+        (
+            "agents-file-too-deep",
+            "the agents file would nest deeper than ConsensFlow reads it back (127 levels): nothing was saved"
+        )
+    );
+    assert_eq!(file, r#"{"agents":[]}"#);
+    assert_eq!(readings, 1, "the refusal comes at the save");
+}

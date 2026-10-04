@@ -55,7 +55,22 @@ fn a_null_or_empty_effort_takes_the_effort_off_and_a_null_tier_the_tier() {
         .contains_key("thinking"));
     let (_, file, _) = edited("pip", json!({ "effort": null, "workTier": "light" }));
     assert_eq!(rows_of(&file)[1]["workTier"], "light");
-    let (_, file, _) = edited("pip", json!({ "workTier": null }));
+    // A tier taken off: on a row that has one.
+    let (_home, path) = file_with(FILE);
+    let catalog = catalog();
+    let mut clock = Counted::new();
+    catalog
+        .edit(
+            &path,
+            "pip",
+            &body(json!({ "workTier": "light" })),
+            &mut clock,
+        )
+        .unwrap();
+    catalog
+        .edit(&path, "pip", &body(json!({ "workTier": null })), &mut clock)
+        .unwrap();
+    let file = fs::read_to_string(&path).unwrap();
     assert!(!rows_of(&file)[1]
         .as_object()
         .unwrap()

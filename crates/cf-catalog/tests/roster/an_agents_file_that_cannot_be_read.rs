@@ -32,7 +32,7 @@ fn is_said_never_read_as_an_empty_roster_and_never_saved_over() {
     said(roster.normalize().unwrap_err().message);
     said(
         roster
-            .set_preferences(Some(&body(json!({ "ownHarnessOnly": true }))))
+            .set_preferences(Some(&json!({ "ownHarnessOnly": true })))
             .unwrap_err()
             .message,
     );
@@ -80,7 +80,7 @@ fn is_written_whole_or_not_at_all_beside_itself_and_then_in_its_place() {
     let identity = || cf_base::file::identity(&fs::File::open(&file).unwrap()).unwrap();
     let before = identity();
     roster
-        .set_preferences(Some(&body(json!({ "ownHarnessOnly": true }))))
+        .set_preferences(Some(&json!({ "ownHarnessOnly": true })))
         .unwrap();
     assert_ne!(identity(), before, "a new file took its place");
     let left: Vec<_> = fs::read_dir(file.parent().unwrap())

@@ -8,12 +8,26 @@
 
 use std::borrow::Cow;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
+
+/// The most levels of arrays and objects serde_json reads, the root's own
+/// included: JSON nested deeper is no value here.
+pub const DEEPEST: usize = 127;
+
+/// How many levels of arrays and objects `value` nests, its own included:
+/// none for a number, a text, a flag or null.
+pub fn nesting(value: &Value) -> usize {
+    match value {
+        Value::Array(items) => 1 + items.iter().map(nesting).max().unwrap_or(0),
+        Value::Object(fields) => 1 + fields.values().map(nesting).max().unwrap_or(0),
+        _ => 0,
+    }
+}
 
 /// The JSON in `bytes`, invalid UTF-8 and lone surrogate escapes read as U+FFFD.
-/// serde_json reads no further than 128 levels of nesting, where JavaScript's
-/// `JSON.parse` has no such limit: [`is_json_lossy`] tells what is too deep to
-/// read from what is no JSON.
+/// serde_json reads no further than [`DEEPEST`] levels of nesting, where
+/// JavaScript's `JSON.parse` has no such limit: [`is_json_lossy`] tells what is
+/// too deep to read from what is no JSON.
 pub fn from_slice_lossy(bytes: &[u8]) -> serde_json::Result<Value> {
     let text = String::from_utf8_lossy(bytes);
     serde_json::from_str(&without_lone_surrogates(&text))
@@ -23,8 +37,9 @@ pub fn from_slice_lossy(bytes: &[u8]) -> serde_json::Result<Value> {
 /// `JSON.parse` would, without losing some of it.
 #[derive(Debug)]
 pub enum Inexact {
-    /// No JSON, or JSON serde_json does not read: nested past 128 levels, or a
-    /// number past a double's range, where JavaScript reads `Infinity`.
+    /// No JSON, or JSON serde_json does not read: nested past [`DEEPEST`]
+    /// levels, or a number past a double's range, where JavaScript reads
+    /// `Infinity`.
     Json(serde_json::Error),
     /// A lone surrogate's escape, which a JavaScript string holds and a Rust
     /// one cannot: read as U+FFFD, two keys could become one.
@@ -52,8 +67,14 @@ fn as_doubles(value: Value) -> Value {
     match value {
         Value::Number(number) => {
             let beyond = number.as_u64().is_some_and(|whole| whole > SAFE)
-                || number.as_i64().is_some_and(|whole| whole.unsigned_abs() > SAFE);
-            match number.as_f64().filter(|_| beyond).and_then(serde_json::Number::from_f64) {
+                || number
+                    .as_i64()
+                    .is_some_and(|whole| whole.unsigned_abs() > SAFE);
+            match number
+                .as_f64()
+                .filter(|_| beyond)
+                .and_then(serde_json::Number::from_f64)
+            {
                 Some(double) => Value::Number(double),
                 None => Value::Number(number),
             }
@@ -70,8 +91,8 @@ fn as_doubles(value: Value) -> Value {
 }
 
 /// Whether `bytes` are JSON nested to any depth, which [`from_slice_lossy`]
-/// reads to 128 levels only: JSON that is skipped, never built into a value, so
-/// it cannot overflow a stack.
+/// reads to [`DEEPEST`] levels only: JSON that is skipped, never built into a
+/// value, so it cannot overflow a stack.
 pub fn is_json_lossy(bytes: &[u8]) -> bool {
     let text = String::from_utf8_lossy(bytes);
     serde_json::from_str::<serde::de::IgnoredAny>(&text).is_ok()
@@ -84,16 +105,21 @@ pub fn is_json_lossy(bytes: &[u8]) -> bool {
 pub fn js_order(value: Value) -> Value {
     match value {
         Value::Array(items) => Value::Array(items.into_iter().map(js_order).collect()),
-        Value::Object(map) => {
-            let (mut indices, named): (Vec<_>, Vec<_>) = map
-                .into_iter()
-                .map(|(key, value)| (key, js_order(value)))
-                .partition(|(key, _)| array_index(key).is_some());
-            indices.sort_by_key(|(key, _)| array_index(key));
-            Value::Object(indices.into_iter().chain(named).collect())
-        }
+        Value::Object(fields) => Value::Object(js_order_fields(fields)),
         other => other,
     }
+}
+
+/// An object's `fields` in the order JavaScript enumerates them, and every
+/// object's within them: a request's body, read by serde_json in the order
+/// it was written, as `JSON.parse` would have handed it to Node.
+pub fn js_order_fields(fields: Map<String, Value>) -> Map<String, Value> {
+    let (mut indices, named): (Vec<_>, Vec<_>) = fields
+        .into_iter()
+        .map(|(key, value)| (key, js_order(value)))
+        .partition(|(key, _)| array_index(key).is_some());
+    indices.sort_by_key(|(key, _)| array_index(key));
+    indices.into_iter().chain(named).collect()
 }
 
 /// The array index a key is: digits with no leading zero, below 2^32 - 1.
@@ -174,7 +200,10 @@ mod tests {
             crate::js::stringify(&read("[-9007199254740993, 9007199254740992, 5]").unwrap()),
             "[-9007199254740992,9007199254740992,5]"
         );
-        assert!(matches!(read(r#"{"\ud800":1,"\ud801":2}"#), Err(Inexact::LoneSurrogate)));
+        assert!(matches!(
+            read(r#"{"\ud800":1,"\ud801":2}"#),
+            Err(Inexact::LoneSurrogate)
+        ));
         assert!(matches!(read(r#"["\udc00"]"#), Err(Inexact::LoneSurrogate)));
         assert_eq!(read(r#"["\ud83d\ude00"]"#).unwrap(), json!(["\u{1F600}"]));
         assert!(matches!(read(r#"{"x":1e400}"#), Err(Inexact::Json(_))));
@@ -182,7 +211,37 @@ mod tests {
         assert!(matches!(read(&deep), Err(Inexact::Json(_))));
         assert!(matches!(read("{,}"), Err(Inexact::Json(_))));
         // Bytes that are no UTF-8 are U+FFFD, as Node decoded the file.
-        assert_eq!(from_slice_exact(b"[\"\xff\"]").unwrap(), json!(["\u{FFFD}"]));
+        assert_eq!(
+            from_slice_exact(b"[\"\xff\"]").unwrap(),
+            json!(["\u{FFFD}"])
+        );
+    }
+
+    #[test]
+    fn every_number_reads_as_the_double_json_parse_reads() {
+        // Node: JSON.stringify(JSON.parse(text)) for each. serde_json reads
+        // the first two wrong without `float_roundtrip`.
+        for (text, node) in [
+            ("1000000000000000.1", "1000000000000000.1"),
+            ("1.7976931348623157000e308", "1.7976931348623157e+308"),
+            ("5e-324", "5e-324"),
+            ("4.9406564584124654e-324", "5e-324"),
+            ("2.2250738585072011e-308", "2.225073858507201e-308"),
+            ("123456789012345678901234567890", "1.2345678901234568e+29"),
+            ("0.30000000000000004", "0.30000000000000004"),
+            ("9007199254740993.0", "9007199254740992"),
+            ("1e-400", "0"),
+        ] {
+            let read = from_slice_exact(text.as_bytes()).unwrap();
+            assert_eq!(crate::js::stringify(&read), node, "{text}");
+        }
+    }
+
+    #[test]
+    fn nesting_counts_the_levels_of_arrays_and_objects() {
+        assert_eq!(nesting(&json!(1)), 0);
+        assert_eq!(nesting(&json!([])), 1);
+        assert_eq!(nesting(&json!({ "a": [1, { "b": {} }], "c": "x" })), 4);
     }
 
     #[test]
@@ -236,8 +295,9 @@ mod tests {
     fn json_nested_deeper_than_serde_json_reads_is_json_all_the_same() {
         let nested = |depth: usize| format!("{}{}", "[".repeat(depth), "]".repeat(depth));
         // What `JSON.parse` reads at any depth is read here to 127 levels (the root is the first).
-        assert!(from_slice_lossy(nested(127).as_bytes()).is_ok());
-        for depth in [128, 200, 100_000] {
+        let deepest = from_slice_lossy(nested(DEEPEST).as_bytes()).unwrap();
+        assert_eq!(nesting(&deepest), DEEPEST);
+        for depth in [DEEPEST + 1, 200, 100_000] {
             let deep = nested(depth);
             assert!(from_slice_lossy(deep.as_bytes()).is_err(), "{depth}");
             assert!(is_json_lossy(deep.as_bytes()), "{depth}");
