@@ -160,7 +160,7 @@ impl Session {
             role,
             text: Arc::from(text),
             complete,
-            at,
+            at: Some(at),
             commentary: false,
         });
     }

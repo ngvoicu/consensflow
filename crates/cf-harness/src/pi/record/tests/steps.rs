@@ -162,7 +162,7 @@ fn the_time_of_a_refusal_is_what_number_makes_of_the_message_time() {
 fn an_item_is_at_the_time_of_its_record_else_of_its_message_else_at_its_place() {
     let at_of = |record: Value| {
         let mut stage = Stage::with(&[header(), record]);
-        stage.at(0).items[0].at.clone()
+        stage.at(0).items[0].at.clone().unwrap()
     };
     let with = |mut record: Value, at: Value| {
         record["message"]["timestamp"] = at;

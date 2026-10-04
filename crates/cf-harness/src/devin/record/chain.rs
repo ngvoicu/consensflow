@@ -84,7 +84,7 @@ impl Chain {
                     role,
                     text: Arc::from(text),
                     complete: role != Role::Assistant,
-                    at,
+                    at: Some(at),
                     commentary: false,
                 },
                 request: request.clone(),

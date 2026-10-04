@@ -113,7 +113,9 @@ pub struct Item {
     pub role: Role,
     pub text: Arc<str>,
     pub complete: bool,
-    pub at: Value,
+    /// None where JavaScript held `undefined`: a column the store has not.
+    /// A reading leaves it out, as `JSON.stringify` does.
+    pub at: Option<Value>,
     /// A progress note, as Codex marks one: said only when true.
     pub commentary: bool,
 }
@@ -125,7 +127,9 @@ impl Serialize for Item {
         map.serialize_entry("role", &self.role)?;
         map.serialize_entry("text", &*self.text)?;
         map.serialize_entry("complete", &self.complete)?;
-        map.serialize_entry("at", &self.at)?;
+        if let Some(at) = &self.at {
+            map.serialize_entry("at", at)?;
+        }
         if self.commentary {
             map.serialize_entry("commentary", &true)?;
         }
@@ -191,7 +195,7 @@ mod tests {
             role: Role::Assistant,
             text: Arc::from("Done."),
             complete: true,
-            at: json!("2026-09-06T17:27:06.000Z"),
+            at: Some(json!("2026-09-06T17:27:06.000Z")),
             commentary: false,
         });
         record.items.push(Item {
@@ -199,13 +203,13 @@ mod tests {
             role: Role::Assistant,
             text: Arc::from("Reading the diff"),
             complete: false,
-            at: json!(7),
+            at: None,
             commentary: true,
         });
         record.settlement = Settlement::InFlight;
         assert_eq!(
             serde_json::to_string(&Reading::Known(record)).unwrap(),
-            r#"{"items":[{"id":"msg_1","role":"assistant","text":"Done.","complete":true,"at":"2026-09-06T17:27:06.000Z"},{"id":"msg_2","role":"assistant","text":"Reading the diff","complete":false,"at":7,"commentary":true}],"inFlight":false,"asking":false,"failed":false,"quota":null,"settlement":{"state":"in-flight"}}"#
+            r#"{"items":[{"id":"msg_1","role":"assistant","text":"Done.","complete":true,"at":"2026-09-06T17:27:06.000Z"},{"id":"msg_2","role":"assistant","text":"Reading the diff","complete":false,"commentary":true}],"inFlight":false,"asking":false,"failed":false,"quota":null,"settlement":{"state":"in-flight"}}"#
         );
         assert_eq!(
             serde_json::to_string(&Reading::unreadable("no codex rollout for s")).unwrap(),

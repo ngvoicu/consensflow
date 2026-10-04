@@ -380,7 +380,7 @@ impl Rollout {
                 kept.item.text = Arc::from(text);
             }
             kept.item.complete |= complete;
-            kept.item.at = at;
+            kept.item.at = Some(at);
             return Ok(place);
         }
         let place = self.items.len();
@@ -391,7 +391,7 @@ impl Rollout {
                 role,
                 text: Arc::from(text),
                 complete,
-                at,
+                at: Some(at),
                 commentary: false,
             },
             final_text: None,

@@ -248,3 +248,40 @@ fn a_refusal_s_words_are_its_message_s_not_its_error_s() {
         )
     );
 }
+
+#[test]
+fn a_time_of_a_column_the_store_has_not_is_left_out_as_json_leaves_it() {
+    let staged = Staged::new();
+    staged
+        .store
+        .execute_batch(
+            "drop table part;
+             create table part (id text primary key, message_id text not null,
+               session_id text not null, time_created integer not null, data text not null);",
+        )
+        .unwrap();
+    let completed = json!({ "created": 3, "completed": 9 });
+    staged.message(
+        "m",
+        3,
+        &json!({ "role": "assistant", "time": completed, "finish": "stop" }),
+    );
+    staged
+        .store
+        .execute(
+            "insert into part values ('p', 'm', ?, 4, ?)",
+            (
+                SESSION,
+                json!({ "type": "tool", "tool": "bash", "callID": "c", "state": { "status": "completed", "output": "ok" } })
+                    .to_string(),
+            ),
+        )
+        .unwrap();
+    staged.event(1, "message.updated.1", &info("m", Some(&completed)));
+    staged.event(2, "message.part.updated.1", &part_of("p", "m"));
+    // Node 26's `JSON.stringify` of its reading: the tool's `at` undefined.
+    assert_eq!(
+        serde_json::to_string(&*look(&mut staged.reader())).unwrap(),
+        r#"{"items":[{"id":"m","role":"assistant","text":"","complete":true,"at":9},{"id":"p","role":"tool","text":"ok","complete":true}],"inFlight":false,"asking":false,"failed":false,"quota":null,"settlement":{"state":"settled"}}"#
+    );
+}

@@ -70,8 +70,7 @@ pub(super) fn answer(read: &Read, local: &TimeZone, keys: &mut Keys) -> Result<R
         let at = completed_at
             .or_else(|| optional(time, "created").filter(|at| !at.is_null()))
             .cloned()
-            // OpenCode's every row has a `time_created`.
-            .unwrap_or_else(|| row.cell("time_created").map_or(Value::Null, Cell::json));
+            .or_else(|| row.cell("time_created").map(Cell::json));
         let completed = completed_at.is_some();
         let completion_seq = if completed {
             Some(position(
@@ -139,11 +138,9 @@ pub(super) fn answer(read: &Read, local: &TimeZone, keys: &mut Keys) -> Result<R
             }
             let state = part.get("state");
             let ended = optional(optional(state, "time"), "end").filter(|end| !end.is_null());
-            let at = ended.cloned().unwrap_or_else(|| {
-                part_row
-                    .cell("time_updated")
-                    .map_or(Value::Null, Cell::json)
-            });
+            let at = ended
+                .cloned()
+                .or_else(|| part_row.cell("time_updated").map(Cell::json));
             let tool_item = item(part_row, Role::Tool, tool_text(state), true, at)?;
             items.push(Placed {
                 item: tool_item,
@@ -292,7 +289,13 @@ fn tool_text(state: Option<&Value>) -> String {
 /// (a blob, a number or null, which OpenCode's text column holds only when
 /// another writer put it there) fails the look, where Node answered with it:
 /// a reading's ids are text.
-fn item(row: &Stored, role: Role, text: String, complete: bool, at: Value) -> Result<Item, String> {
+fn item(
+    row: &Stored,
+    role: Role,
+    text: String,
+    complete: bool,
+    at: Option<Value>,
+) -> Result<Item, String> {
     let Some(Cell::Text(id)) = row.cell("id") else {
         return Err(format!(
             "an OpenCode row's id is no text: {}",
