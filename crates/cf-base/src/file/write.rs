@@ -111,17 +111,39 @@ fn not_a_folder(name: Option<&str>, levels_below: bool) -> &'static str {
 
 /// `writeFileSync(temporary, text)`: the file made as the flag `w` makes it
 /// (`open`, with the temporary's path), the bytes written to it, and the
-/// file closed. Node checks the close, where a write the system deferred
-/// (a full disk, a network share) fails at last, and throws there. Rust's
-/// close says nothing of it, so the bytes are synced before the file is
-/// let go, and a failure there is said as Node says a failed close: the
-/// rename is never made over a file written short.
+/// file closed, its close checked as Node checks it: the rename is never
+/// made over a file written short.
 fn write_new(temporary: &Path, bytes: &[u8]) -> Result<(), FileError> {
     let mut file =
         File::create(temporary).map_err(|error| FileError::call(error, "open", Some(temporary)))?;
     write_all(&mut file, bytes)?;
-    file.sync_all()
-        .map_err(|error| FileError::call(error, "close", None))
+    close(file)
+}
+
+/// The close Node checks, where a write the system deferred (to a network
+/// share) fails at last: `EIO: i/o error, close`. Rust's own close says
+/// nothing of it. As libuv's close, an interrupted one is no failure: the
+/// file is closed all the same.
+#[cfg(unix)]
+fn close(file: File) -> Result<(), FileError> {
+    use std::os::fd::IntoRawFd;
+    match nix::unistd::close(file.into_raw_fd()) {
+        Ok(()) | Err(nix::errno::Errno::EINTR | nix::errno::Errno::EINPROGRESS) => Ok(()),
+        Err(errno) => Err(FileError::call(
+            io::Error::from_raw_os_error(errno as i32),
+            "close",
+            None,
+        )),
+    }
+}
+
+/// The close on Windows: `CloseHandle` gives no deferred write's failure,
+/// which its cache makes later and says in no call, so the file is let go
+/// as Rust lets it go.
+#[cfg(windows)]
+fn close(file: File) -> Result<(), FileError> {
+    drop(file);
+    Ok(())
 }
 
 /// The write of `writeFileSync`'s fast path for a string, which Node does in

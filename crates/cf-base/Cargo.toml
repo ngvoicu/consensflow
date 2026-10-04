@@ -14,6 +14,7 @@ serde_json.workspace = true
 # systems, the constants do not.
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+nix.workspace = true
 
 # Win32_Networking_WinSock: libuv's table also names the `WSAE…` codes.
 [target.'cfg(windows)'.dependencies]

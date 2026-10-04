@@ -156,6 +156,12 @@ fn a_removal_the_system_refuses_is_said_as_rm_syncs_cpp_says_it() {
         let said = FileError::removal(io::Error::from_raw_os_error(errno), path);
         assert_eq!((said.to_string().as_str(), said.code()), (text, code));
     }
+    // ErrnoException reads the words as Latin-1, the path after them as UTF-8.
+    let said = FileError::removal(
+        io::Error::from_raw_os_error(libc::EACCES),
+        Path::new("/a/é"),
+    );
+    assert_eq!(said.to_string(), "EACCES, Permission denied: /a/Ã© '/a/é'");
 }
 
 #[cfg(windows)]
@@ -172,6 +178,12 @@ fn a_removal_windows_refuses_is_said_as_rm_syncs_cpp_says_it_there() {
     assert_eq!(
         said(145).to_string(),
         r"ENOTEMPTY, Directory not empty: \\?\C:\a\t '\\?\C:\a\t'"
+    );
+    // A drive's path that is not whole is as it is.
+    let relative = FileError::removal(io::Error::from_raw_os_error(5), Path::new(r"D:cf\t"));
+    assert_eq!(
+        relative.to_string(),
+        r"EPERM, Permission denied: D:cf\t 'D:cf\t'"
     );
     // A lock violation is none of the four.
     let unknown = said(33).to_string();

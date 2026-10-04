@@ -36,6 +36,8 @@ http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 libc = "0.2"
+# A checked close, which std does not give (cf-base forbids unsafe code).
+nix = { version = "0.28", default-features = false }
 portable-pty = "0.9"
 # The ledger's SQLite, built in: every platform runs the same SQLite.
 rusqlite = { version = "0.40", features = ["bundled"] }

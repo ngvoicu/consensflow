@@ -41,6 +41,12 @@ enum Said {
     /// a file (`RmSync`, `src/node_file.cc` of Node 26.7.0, the Node the app
     /// bundles): `<code>, <words> '<path>'`, its words a sentence of four it
     /// knows, or `Unknown error` and the system's own with no code at all.
+    /// `ErrnoException` reads the words as Latin-1 and the path as UTF-8, so
+    /// a path outside ASCII is garbled in the words and not after them: so
+    /// it is here. Kept apart on Windows: Node's C++ has the path in the
+    /// system's ANSI code page there, and the C++ library asks for the
+    /// system's words in US English first, where these are the path's
+    /// UTF-8 and the words in the system's own language.
     Removal {
         code: &'static str,
         words: String,
@@ -108,7 +114,11 @@ impl FileError {
         };
         Self {
             source,
-            said: Said::Removal { code, words, path },
+            said: Said::Removal {
+                code,
+                words: one_byte(&words),
+                path,
+            },
         }
     }
 
@@ -192,12 +202,30 @@ fn refused(error: &io::Error) -> Option<(&'static str, &'static str)> {
     })
 }
 
+/// Text as V8's `OneByteString` makes it of C++ bytes: each byte of its
+/// UTF-8 a character of Latin-1.
+fn one_byte(text: &str) -> String {
+    text.bytes().map(char::from).collect()
+}
+
 /// `path` as `rmSync`'s C++ names it: as it is on Unix; on Windows made
 /// whole (`ToNamespacedPath`): a drive's path after `\\?\`, a share's
-/// after `\\?\UNC\`.
+/// after `\\?\UNC\`. A drive's path that is not whole (`D:cf\t`) is as it
+/// is: Node's resolver reads that drive's folder from an environment entry
+/// (`=D:`) this module does not read, and leaves the path when there is
+/// none.
 fn namespaced(path: &Path) -> String {
     #[cfg(windows)]
     {
+        let given = path.to_string_lossy();
+        let start = given.as_bytes();
+        if start.len() >= 2
+            && start[0].is_ascii_alphabetic()
+            && start[1] == b':'
+            && !matches!(start.get(2), Some(b'\\' | b'/'))
+        {
+            return given.into_owned();
+        }
         let whole = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
         let whole = whole.to_string_lossy();
         let bytes = whole.as_bytes();

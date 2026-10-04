@@ -352,6 +352,7 @@ name = "cf-base"
 version = "3.0.0-alpha.73"
 dependencies = [
  "libc",
+ "nix",
  "serde",
  "serde_json",
  "tempfile",
