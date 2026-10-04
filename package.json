@@ -29,7 +29,7 @@
     "eval:windows": "node tests/live/windows-matrix.mjs",
     "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.mjs",
     "build:bridge": "cargo build --release -p cf-panes --bin consensflow-bridge",
-    "goldens:cf": "node tests/goldens/cf-board.mjs",
+    "build:cf": "node app/scripts/build-cf.mjs",
     "smoke": "CONSENSFLOW_SMOKE=1 node --test tests/smoke.test.mjs",
     "load": "CONSENSFLOW_LOAD=1 node --test tests/load/*.test.mjs",
     "candidate": "node app/scripts/candidate.mjs",
@@ -39,7 +39,7 @@
     "live:asks": "node tests/live/claude-asks.mjs",
     "live:codex-resume": "node tests/live/codex-resume.mjs",
     "windows": "node tests/live/windows.mjs",
-    "check:all": "npm run check && cargo fmt --all --check && cargo test --offline --workspace && cargo clippy --offline --workspace --all-targets -- -D warnings && cargo fmt --check --manifest-path app/cf-launcher/Cargo.toml && cargo clippy --offline --manifest-path app/cf-launcher/Cargo.toml -- -D warnings && npm --prefix app run test:ui && npm run build:bridge -- --offline && npm run test:integration && npm run smoke"
+    "check:all": "npm run check && cargo fmt --all --check && cargo test --offline --workspace && cargo clippy --offline --workspace --all-targets -- -D warnings && npm --prefix app run test:ui && npm run build:bridge -- --offline && npm run build:cf -- --offline && npm run test:integration && npm run smoke"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.8"

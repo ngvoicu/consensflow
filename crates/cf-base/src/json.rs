@@ -1,8 +1,10 @@
 //! JSON as Node writes it. `JSON.stringify` writes a string holding half of
 //! a surrogate pair (a preview `.slice` cut through an emoji) as a lone
-//! `\ud83d` escape, which serde_json refuses; and Node reads invalid UTF-8 as
-//! U+FFFD where serde_json refuses that too. Read here, both become U+FFFD,
-//! as Node prints them.
+//! surrogate's escape, which serde_json refuses; and Node reads invalid UTF-8
+//! as U+FFFD where serde_json refuses that too. Read here, both become U+FFFD,
+//! as Node prints them in text. Written back out as JSON (cf's `--json`), the
+//! half emoji is U+FFFD too, where Node wrote the lone escape again: valid
+//! JSON for invalid, on purpose.
 
 use std::borrow::Cow;
 

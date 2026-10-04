@@ -23,6 +23,8 @@ const CURSOR_QUERY = Buffer.from('\u001b[6n')
 const CURSOR_REPLY = [...Buffer.from('\u001b[1;1R')]
 const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fake-agent.mjs')
+/** The `cf` first on every window's PATH: the native one, beside cf.mjs. */
+const CF = join(REPO, 'bin', WINDOWS ? 'cf.exe' : 'cf')
 
 function parser(onLine) {
   let carry = Buffer.alloc(0)
@@ -182,6 +184,7 @@ export async function startIntegration({
     true,
     `missing built bridge: ${BRIDGE}; build it with npm run build:bridge`,
   )
+  assert.equal(existsSync(CF), true, `missing built cf: ${CF}; build it with npm run build:cf`)
   const root = existingRoot ?? mkdtempSync(join(tmpdir(), 'consensflow-integration-'))
   const workspace = join(root, 'workspace')
   mkdirSync(workspace, { recursive: true })

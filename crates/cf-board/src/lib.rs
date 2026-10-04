@@ -18,8 +18,6 @@ use serde_json::{json, Value};
 /// How long one request may take. Node's `fetch`, which this replaces, gave a
 /// response five minutes; the longest poll the API holds is 25 seconds.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
-/// The most a response body may hold: two of the API's 2 MiB requests.
-const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BoardError {
@@ -105,11 +103,12 @@ impl Board {
             cause: cause.to_string(),
         })?;
         let status = response.status().as_u16();
-        // A body that is no JSON reads as none, as Node's `response.json()` did.
+        // A body of any size, as Node read one (a task's whole thread can run
+        // to megabytes); one that is no JSON reads as none, as Node's did.
         let value = response
             .body_mut()
             .with_config()
-            .limit(MAX_RESPONSE_BYTES)
+            .limit(u64::MAX)
             .read_to_vec()
             .ok()
             .and_then(|bytes| cf_base::json::from_slice_lossy(&bytes).ok())
@@ -305,6 +304,19 @@ mod tests {
         assert_eq!(
             board.call(Method::Get, "/api/inbox", None).unwrap(),
             json!({})
+        );
+    }
+
+    #[test]
+    fn an_answer_of_many_megabytes_is_read_whole() {
+        let body = "x".repeat(12 * 1024 * 1024);
+        let api = scripted(vec![reply(200, json!({ "task": { "body": body } }))]);
+        let answer = Board::new(Some(&api.url), "tok")
+            .call(Method::Get, "/api/tasks/3", None)
+            .unwrap();
+        assert_eq!(
+            answer["task"]["body"].as_str().map(str::len),
+            Some(12 * 1024 * 1024)
         );
     }
 

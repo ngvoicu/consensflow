@@ -12,8 +12,9 @@ use std::time::Duration;
 
 use cf_base::js;
 use cf_base::json::from_slice_lossy;
-use cf_board::door::{ask_the_board, refusal_reason, Choice, Question};
+use cf_board::door::{ask_the_board, refusal_reason};
 use cf_board::Board;
+use cf_proto::questions::{Choice, Question};
 use serde_json::{Map, Value};
 
 /// How one harness's question tool is named, and how its hook answers.

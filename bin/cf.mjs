@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** App-scoped conversation commands, saved roster administration and runtime diagnostics. */
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -247,13 +247,14 @@ function doctor() {
 async function main() {
   const [command, ...rest] = process.argv.slice(2)
   // A window the daemon opened carries its participant's token; there, `cf`
-  // is the agents' command set (src/core/cli.js).
+  // is the board's commands, which the native `cf` beside this file answers
+  // (crates/cf). A window finds that one first on its PATH; this is for
+  // whoever runs cf.mjs itself, as the terminal's launcher does.
   if (env.CONSENSFLOW_TOKEN) {
-    const { runCoreCli } = await import('../src/core/cli.js')
-    process.exitCode = await runCoreCli([command, ...rest], env, {
-      out,
-      err: (line) => process.stderr.write(`${line}\n`),
-    })
+    const native = join(HERE, process.platform === 'win32' ? 'cf.exe' : 'cf')
+    const ran = spawnSync(native, process.argv.slice(2), { stdio: 'inherit' })
+    if (ran.error) return fail(`${native} did not start: ${ran.error.message}`)
+    process.exitCode = ran.status ?? 1
     return
   }
 

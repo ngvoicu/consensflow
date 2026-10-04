@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { createAdapters } from '../adapters/index.js'
 import { Bridge } from '../bridge.js'
 import { openLedger } from '../ledger/index.js'
@@ -12,6 +11,7 @@ import { Dispatcher } from './dispatcher.js'
 import { forgetLaunch, sweepLaunches } from './launch-files.js'
 import { daemonLog } from './log.js'
 import { pageOperations } from './page.js'
+import { BUNDLE_BIN, PANE_CF } from './pane-cf.js'
 import { PaneHost } from './pane-host.js'
 import { roleInstructions, staffOf } from './roles.js'
 import { eventTrace } from './trace.js'
@@ -27,18 +27,6 @@ import { eventTrace } from './trace.js'
  * whenever something changes. Closing stdin ends it.
  */
 
-const BUNDLE_BIN = fileURLToPath(new URL('../../bin', import.meta.url))
-/**
- * The `cf` a window's role text names. On Windows it is bin/cf.exe, built by
- * app/scripts/prepare-sidecar.mjs: a `.cmd` runs through cmd.exe, which ends
- * a command at its first line break, so a question of many lines reached the
- * chief as its first. Its path has forward slashes, which Git Bash keeps
- * where it drops backslashes, and PowerShell reads alike.
- */
-const PANE_CF =
-  process.platform === 'win32'
-    ? join(BUNDLE_BIN, 'cf.exe').replaceAll('\\', '/')
-    : join(BUNDLE_BIN, 'cf')
 const PASS_MS = 1000
 const STATE_EVENT_MS = 100
 /** A pass this long is worth a line in the log. */

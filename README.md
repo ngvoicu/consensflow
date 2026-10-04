@@ -152,6 +152,7 @@ projects.
 
     npm run check          lint and the Node suite
     npm run build:bridge   the headless pane host the integration suite drives (a test helper no app ships)
+    npm run build:cf       the native cf every window runs, into bin/ (the integration suite needs it too)
     npm run test:integration   the daemon against the real pane host with fake agents
     npm --prefix app run test:ui   the board and the Agents screen in a browser
     npm run smoke          the packaged app
@@ -167,8 +168,8 @@ means something outside the app killed it.
 
 Requirements, decisions, status and the release runbook live in the
 `consensflow-sme` brain. A release is one tag: set the version in
-`package.json`, `package-lock.json`, `app/src-tauri/Cargo.toml`,
-`app/src-tauri/Cargo.lock` and `app/src-tauri/tauri.conf.json`, then push an
+`package.json`, `package-lock.json`, the root `Cargo.toml`
+(`[workspace.package]`), `Cargo.lock` and `app/src-tauri/tauri.conf.json`, then push an
 annotated `v<version>` tag to GitHub, its message the release notes;
 `.github/workflows/release.yml` builds, checks and publishes the DMG, the
 signed update bundle, the Windows installer and the portable exe.

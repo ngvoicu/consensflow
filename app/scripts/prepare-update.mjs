@@ -152,6 +152,7 @@ function bundleInfo(app) {
     ['native executable', binary],
     ['bundled CLI package', packagePath],
     ['bundled CLI entrypoint', join(cli, 'bin', 'cf.mjs')],
+    ["a window's cf", join(cli, 'bin', 'cf')],
     ['bundled CLI hosts', join(cli, 'hosts')],
     ['bundled CLI source', join(cli, 'src')],
   ]) {

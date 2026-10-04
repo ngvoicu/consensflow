@@ -3,7 +3,6 @@ import { execFileSync } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { USAGE } from '../src/core/cli.js'
 
 /**
  * Every `cf …` that ConsensFlow's own words name is a command cf has: a
@@ -14,6 +13,8 @@ import { USAGE } from '../src/core/cli.js'
  * model.
  */
 const REPO = fileURLToPath(new URL('..', import.meta.url))
+/** The window's usage, the text the native cf prints. */
+const USAGE = readFileSync(`${REPO}crates/cf/src/board/usage.txt`, 'utf8')
 
 /** Each command and its verbs (null: it takes arguments, not a verb), from a usage's lines. */
 function commandsOf(usage, prefix) {

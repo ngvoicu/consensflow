@@ -9,7 +9,7 @@
 
 use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
+use cf_proto::questions::{Answer, Question};
 use serde_json::{json, Value};
 
 use crate::{Board, BoardError, Method};
@@ -18,45 +18,6 @@ use crate::{Board, BoardError, Method};
 pub const DOOR_WAIT: Duration = Duration::from_millis(3_500_000);
 /// One request's share of that wait; the API holds a request 25 seconds at most.
 const POLL_WAIT: Duration = Duration::from_secs(20);
-
-/// One question in the board's shape. Its texts are what the harness gave,
-/// passed through as they came; one it did not give is left out.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Question {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub question: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub header: Option<Value>,
-    pub options: Vec<Choice>,
-    /// Whether more than one option may be picked.
-    pub multiple: bool,
-}
-
-/// An option a question offers.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Choice {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub label: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<Value>,
-}
-
-/// The chief's answer: the labels picked, one list per question.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct Answer {
-    #[serde(default)]
-    choices: Option<Vec<Vec<String>>>,
-}
-
-impl Answer {
-    /// The labels picked for the question at `at`; none when it has none.
-    pub fn picks(&self, at: usize) -> &[String] {
-        self.choices
-            .as_ref()
-            .and_then(|choices| choices.get(at))
-            .map_or(&[], Vec::as_slice)
-    }
-}
 
 /// What a member's window tells its model when the board refuses its
 /// question: nobody watches a member's window, so its own dialog would hold
@@ -120,6 +81,7 @@ pub fn ask_the_board(
 mod tests {
     use super::*;
     use crate::scripted::{reply, scripted};
+    use cf_proto::questions::Choice;
 
     fn one_question() -> Vec<Question> {
         vec![Question {

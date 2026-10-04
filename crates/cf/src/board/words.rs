@@ -89,7 +89,8 @@ pub fn require_text(text: String, example: &str) -> Result<String, Failure> {
     Ok(text)
 }
 
-/// The digits after an optional `prefix` (any case), as a number.
+/// The digits after an optional `prefix` (any case), as a number: read
+/// exactly, where JavaScript rounded one past 2^53, which no ledger reaches.
 fn numbered(word: Option<&str>, prefix: &str) -> Option<u64> {
     let word = word?;
     let digits = match word.get(..prefix.len()) {

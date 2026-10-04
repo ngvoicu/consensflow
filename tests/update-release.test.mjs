@@ -35,9 +35,11 @@ function writeApp(parent, appName, version, cliVersion = version) {
   )
   writeFileSync(join(cli, 'package.json'), JSON.stringify({ version: cliVersion }))
   writeFileSync(join(cli, 'bin', 'cf.mjs'), '#!/usr/bin/env node\n')
+  writeFileSync(join(cli, 'bin', 'cf'), 'native\n')
   writeFileSync(join(cli, 'hosts', 'probe.txt'), 'hosts\n')
   writeFileSync(join(app, 'Contents', 'MacOS', 'ConsensFlow'), 'binary\n')
   chmodSync(join(cli, 'bin', 'cf.mjs'), 0o755)
+  chmodSync(join(cli, 'bin', 'cf'), 0o755)
   chmodSync(join(app, 'Contents', 'MacOS', 'ConsensFlow'), 0o755)
   return app
 }
@@ -188,6 +190,18 @@ describe('TEST-PANE-150 prepare-update metadata', {
     const fx = fixture({ cliVersion: '3.0.0-alpha.98' })
     try {
       assert.notEqual(run(baseArgs(fx)).code, 0)
+    } finally {
+      rmSync(fx.root, { recursive: true, force: true })
+    }
+  })
+
+  it("rejects a bundle without a window's cf", () => {
+    const fx = fixture()
+    try {
+      rmSync(join(fx.bundle, 'Contents', 'Resources', 'cli', 'bin', 'cf'))
+      const ran = run(baseArgs(fx))
+      assert.notEqual(ran.code, 0)
+      assert.match(ran.stderr, /bundle is missing a window's cf/)
     } finally {
       rmSync(fx.root, { recursive: true, force: true })
     }

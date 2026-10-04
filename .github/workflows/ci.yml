@@ -45,7 +45,8 @@ jobs:
 
       - run: npm ci
       - run: npm ci --prefix app
-      # The page and the Node sidecar the Rust build expects beside it.
+      # The page and the Node sidecar the Rust build expects beside it, and the
+      # native cf a window runs, built into bin/ for the integration suite.
       - run: npm --prefix app run bundle:ui
       - run: npm --prefix app run prepare-sidecar
 

@@ -1,16 +1,16 @@
-//! The Rust `cf` held to what Node's board commands said and asked
-//! (tests/goldens/cf-board.mjs wrote goldens/board.json): each case's replies
-//! served by a scripted API, the binary run as a window runs it, and its
-//! requests, output, errors and exit code compared byte for byte.
+//! The Rust `cf` held to what Node's board commands said and asked: Node's
+//! `runCoreCli` (src/core/cli.js) ran each case of goldens/board.json against
+//! a scripted API (tests/goldens/cf-board.mjs, both in the history at
+//! b54361c), and recorded it. Each case's replies are served again, the
+//! binary run as a window runs it, and its requests, output, errors and exit
+//! code compared byte for byte.
 
-// The tests start cf themselves, keeping their own window's variables from it.
-#![allow(clippy::disallowed_methods)]
+mod common;
 
 use std::collections::BTreeMap;
-use std::io::Write;
-use std::process::{Command, Stdio};
 
 use cf_board::scripted::{reply_text, scripted};
+use common::cf;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -55,35 +55,24 @@ fn run(golden: &Golden) -> Ran {
         .iter()
         .map(|reply| reply_text(reply.status, reply.text.clone()));
     let api = scripted(replies.collect());
-    let mut command = Command::new(env!("CARGO_BIN_EXE_cf"));
-    // Nothing of a window this test may itself run in reaches the case.
-    for (name, _) in std::env::vars_os() {
-        let name = name.to_string_lossy();
-        if ["CONSENSFLOW_", "CF_", "CHISEL_"]
-            .iter()
-            .any(|prefix| name.starts_with(prefix))
-        {
-            command.env_remove(&*name);
-        }
-    }
-    let mut child = command
-        .args(&golden.args)
-        .env("CONSENSFLOW_URL", &api.url)
-        .env("CONSENSFLOW_TOKEN", "tok")
+    let mut env: Vec<(&str, &str)> = vec![
+        ("CONSENSFLOW_URL", &api.url),
+        ("CONSENSFLOW_TOKEN", "tok"),
         // A proxy in the window's environment has no part in a call on loopback.
-        .env("HTTP_PROXY", "http://127.0.0.1:9")
-        .env("ALL_PROXY", "http://127.0.0.1:9")
-        .envs(&golden.env)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("cf starts");
-    let mut stdin = child.stdin.take().expect("its standard input");
-    // A command that reads no input may have ended before it is written.
-    let _ = stdin.write_all(golden.stdin.as_deref().unwrap_or_default().as_bytes());
-    drop(stdin);
-    let output = child.wait_with_output().expect("cf ends");
+        ("HTTP_PROXY", "http://127.0.0.1:9"),
+        ("ALL_PROXY", "http://127.0.0.1:9"),
+    ];
+    env.extend(
+        golden
+            .env
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    );
+    let output = cf(
+        &golden.args,
+        &env,
+        golden.stdin.as_deref().unwrap_or_default(),
+    );
     Ran {
         requests: api
             .received()
@@ -105,7 +94,13 @@ fn run(golden: &Golden) -> Ran {
 fn every_case_asks_says_and_exits_as_node_did() {
     let goldens: Vec<Golden> =
         serde_json::from_str(include_str!("goldens/board.json")).expect("the goldens");
-    assert!(goldens.len() > 60, "the goldens are all there");
+    // Every case, each once: a case is added or dropped here on purpose.
+    let names: std::collections::HashSet<_> = goldens.iter().map(|golden| &golden.name).collect();
+    assert_eq!(
+        (goldens.len(), names.len()),
+        (72, 72),
+        "the goldens are all there, each once"
+    );
     let mut differ = Vec::new();
     for golden in &goldens {
         let ran = run(golden);

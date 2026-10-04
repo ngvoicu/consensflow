@@ -1,27 +1,24 @@
 import assert from 'node:assert/strict'
-import { execFileSync, spawnSync } from 'node:child_process'
-import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { outsideAWindow } from '../core-api-fixture.mjs'
 
 /**
- * A pane's `cf` on Windows, bin/cf.exe (app/cf-launcher): ConsensFlow's CLI
- * on the app's runtime, with its arguments as they came. The `.cmd` it
- * replaced ran through cmd.exe, which ends a command at its first line
- * break: a reviewer's 6,250-character question reached the chief as its
+ * A command `cf` does not answer itself goes to the CLI beside it, `cf.mjs`,
+ * on the runtime the app names, with its arguments as they came. The Windows
+ * `.cmd` this replaced ran through cmd.exe, which ends a command at its first
+ * line break: a reviewer's 6,250-character question reached the chief as its
  * first line, 528 characters, and `cf` said it was asked (2026-10-03). The
- * launcher is built here as Windows' app build builds it, and runs beside a
- * `cf.mjs` that says what it was given.
+ * native `cf` npm run build:cf built runs here beside a `cf.mjs` that says
+ * what it was given, outside any window: a window's token makes `cf` the board.
  */
 
 const WINDOWS = process.platform === 'win32'
-const CRATE = fileURLToPath(new URL('../../app/cf-launcher/', import.meta.url))
-// The workspace's one build folder (.cargo/config.toml) holds every crate's output.
-const BUILT = fileURLToPath(
-  new URL(`../../app/src-tauri/target/release/${WINDOWS ? 'cf.exe' : 'cf'}`, import.meta.url),
-)
+const BUILT = fileURLToPath(new URL(`../../bin/${WINDOWS ? 'cf.exe' : 'cf'}`, import.meta.url))
 /** Line breaks, quotes, a variable cmd.exe would expand, its operators, diacritics. */
 const TEXT = [
   'Întrebarea 1: verific și versiunea în engleză?',
@@ -33,12 +30,8 @@ const TEXT = [
 let dir
 let cf
 before(() => {
-  execFileSync(
-    'cargo',
-    ['build', '--release', '--locked', '--manifest-path', join(CRATE, 'Cargo.toml')],
-    { stdio: 'inherit' },
-  )
-  dir = mkdtempSync(join(tmpdir(), 'cf-launcher-'))
+  assert.ok(existsSync(BUILT), `missing built cf: ${BUILT}; build it with npm run build:cf`)
+  dir = mkdtempSync(join(tmpdir(), 'cf-native-'))
   cf = join(dir, WINDOWS ? 'cf.exe' : 'cf')
   copyFileSync(BUILT, cf)
   // What it was given, in ASCII, so no console's code page bends it on the
@@ -58,11 +51,11 @@ after(() => rmSync(dir, { recursive: true, force: true }))
 const run = (file, args, options = {}) =>
   spawnSync(file, args, {
     encoding: 'utf8',
-    env: { ...process.env, CONSENSFLOW_NODE: process.execPath },
+    env: { ...outsideAWindow(), CONSENSFLOW_NODE: process.execPath },
     ...options,
   })
 
-describe("a pane's cf.exe", () => {
+describe("cf's commands outside a window", () => {
   it('gives the CLI every argument whole: line breaks, quotes, % and & and ^, diacritics', () => {
     const ran = run(cf, ['ask', TEXT])
     assert.equal(ran.status, 0, ran.stderr)
@@ -76,8 +69,7 @@ describe("a pane's cf.exe", () => {
   })
 
   it('refuses to run on any Node but the one the app names', () => {
-    const { CONSENSFLOW_NODE, ...env } = process.env
-    const ran = run(cf, ['ask', 'x'], { env })
+    const ran = run(cf, ['ask', 'x'], { env: outsideAWindow() })
     assert.equal(ran.status, 1)
     assert.match(ran.stderr, /CONSENSFLOW_NODE is not set/)
     assert.equal(ran.stdout, '')

@@ -96,10 +96,12 @@ function locateApp() {
   const staged = join(app, 'Contents', 'Resources', 'binaries', 'node')
   const node = existsSync(sidecar) ? sidecar : staged
   const cli = join(app, 'Contents', 'Resources', 'cli', 'bin', 'cf.mjs')
+  const cf = join(app, 'Contents', 'Resources', 'cli', 'bin', 'cf')
   for (const [what, path] of [
     ['executable', binary],
     ['bundled node', node],
     ['bundled CLI', cli],
+    ["a window's cf", cf],
   ]) {
     if (!existsSync(path)) {
       return {

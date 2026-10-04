@@ -1,12 +1,12 @@
 import { open } from 'node:fs/promises'
 import { setTimeout as wait } from 'node:timers/promises'
-import { selectedSession, shownIn } from '../../hosts/devin-hooks.mjs'
 import { cachedAnswers } from '../../hosts/lib/completion.js'
 import { DEVIN_REFUSAL, exhaustedQuota } from '../../hosts/lib/quota.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
 import { send as sendDevin } from '../channels/devin.js'
 import { consoleText } from '../console-text.js'
 import { prepareDevinIntegration, prepareDevinPrompt } from '../devin-install.js'
+import { selectedSession, shownIn } from '../devin-wire.js'
 import { onWindows } from '../harnesses.js'
 import { roleConfiguration } from '../role-skills.js'
 import {
@@ -64,7 +64,6 @@ export function devinAdapter({
       const executable = executableFor('devin', env)
       const configuration = await prepareDevinIntegration(env, {
         launchId,
-        node: env.CONSENSFLOW_NODE ?? process.execPath,
         executable,
         boardQuestions: role !== 'chief',
       })

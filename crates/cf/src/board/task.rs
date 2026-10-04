@@ -7,10 +7,10 @@ use cf_base::text::{utf16_len, utf16_prefix};
 use cf_board::{Board, Method};
 use serde_json::{json, Map, Value};
 
-use super::lines::{a_pool, list, message_line, numbers, task_head, task_line, tasks};
+use super::lines::{a_pool, message_line, numbers, task_head, task_line, tasks};
 use super::usage::{task_usage, ADD_USAGE};
 use super::words::{quoted, require_text, split, task_number, task_numbers};
-use super::{field, part, text_of, Failure, Said};
+use super::{field, items, part, text_of, Failure, Said};
 
 /// How much of one transcript item `cf task get --transcript` shows, in UTF-16 units.
 const ITEM_CHARS: usize = 600;
@@ -110,7 +110,7 @@ fn add(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
     } else {
         ""
     };
-    let blocked = list(task.get("blockedBy"));
+    let blocked = items(task.get("blockedBy"), "/api/tasks", "blockedBy")?;
     let waits = match blocked.len() {
         0 => String::new(),
         1 => format!(" It waits until {} is accepted.", tasks(numbers(blocked))),
@@ -160,13 +160,13 @@ fn add(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
 fn board_list(board: &Board) -> Result<Said, Failure> {
     let board = board.call(Method::Get, "/api/tasks", None)?;
     let mut lines = Vec::new();
-    let open = list(board.get("open"));
+    let open = items(board.get("open"), "/api/tasks", "open")?;
     if !open.is_empty() {
         lines.push("Waiting for a member".to_string());
         lines.extend(open.iter().map(task_line));
     }
-    for lane in list(board.get("lanes")) {
-        let lane_tasks = list(lane.get("tasks"));
+    for lane in items(board.get("lanes"), "/api/tasks", "lanes")? {
+        let lane_tasks = items(lane.get("tasks"), "/api/tasks", "tasks")?;
         if !lane_tasks.is_empty() {
             lines.push(format!(
                 "@{} ({})",
@@ -189,7 +189,7 @@ fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
     let path = format!("/api/tasks/{number}");
     let task = field(board.call(Method::Get, &path, None)?, "task", &path)?;
     if !words.on("--transcript") {
-        let thread = list(task.get("messages"))
+        let thread = items(task.get("messages"), &path, "messages")?
             .iter()
             .map(|message| {
                 format!(
@@ -207,17 +207,14 @@ fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
     if last.fract() != 0.0 || !last.is_finite() || last < 1.0 {
         return Err(Failure::Usage("--last takes a number of items".into()));
     }
-    let copy = board.call(
-        Method::Get,
-        &format!("/api/tasks/{number}/transcript?last={last}"),
-        None,
-    )?;
-    let items = list(copy.get("items"));
+    let transcript = format!("/api/tasks/{number}/transcript?last={last}");
+    let copy = board.call(Method::Get, &transcript, None)?;
+    let listed = items(copy.get("items"), &transcript, "items")?;
     let total = copy.get("total");
     let text = if total.and_then(Value::as_f64) == Some(0.0) {
         "Its window has written nothing yet.".to_string()
     } else {
-        let shown = items
+        let shown = listed
             .iter()
             .map(|item| {
                 let role = match item.get("role").and_then(Value::as_str) {
@@ -241,7 +238,7 @@ fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
             .join("\n\n");
         format!(
             "What its window did, the last {} of {} items:\n\n{shown}",
-            items.len(),
+            listed.len(),
             js::text(total)
         )
     };

@@ -5,4 +5,7 @@ node_modules/
 test-results/
 .idea
 evals/reports/
+# The native cf, built into bin/ by npm run build:cf (and set aside there on Windows while one ran).
+/bin/cf
 /bin/cf.exe
+/bin/cf.exe.old-*

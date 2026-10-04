@@ -119,7 +119,7 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
         "messages",
         "/api/inbox",
     )?;
-    let text = match list(Some(&messages)) {
+    let text = match items(Some(&messages), "/api/inbox", "messages")? {
         [] => "Your inbox is empty.".to_string(),
         all => all.iter().map(message_line).collect::<Vec<_>>().join("\n"),
     };
@@ -224,7 +224,7 @@ fn staff(board: &Board) -> Result<Said, Failure> {
         "members",
         "/api/staff",
     )?;
-    let text = match list(Some(&members)) {
+    let text = match items(Some(&members), "/api/staff", "members")? {
         [] => {
             "No agents are on this project staff yet; the human adds them in the app.".to_string()
         }
@@ -329,6 +329,25 @@ fn posted(board: &Board, path: &str, body: Map<String, Value>) -> Result<Value, 
         "message",
         path,
     )
+}
+
+/// The list `value` is, from the API's answer to `path`: what Node read
+/// `.length` or `.map` of, and so threw on when the answer had none.
+fn items<'a>(
+    value: Option<&'a Value>,
+    path: &str,
+    what: &'static str,
+) -> Result<&'a [Value], Failure> {
+    value
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .ok_or_else(|| {
+            BoardError::Malformed {
+                path: path.to_string(),
+                what,
+            }
+            .into()
+        })
 }
 
 /// The field `key` of the API's answer to `path`, borrowed.

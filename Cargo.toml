@@ -4,8 +4,6 @@
 [workspace]
 resolver = "2"
 members = ["app/src-tauri", "crates/*"]
-# The Windows `cf` launcher goes when the native `cf` replaces it.
-exclude = ["app/cf-launcher"]
 
 [workspace.package]
 version = "3.0.0-alpha.72"

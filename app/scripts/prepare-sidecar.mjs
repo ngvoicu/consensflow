@@ -5,7 +5,8 @@
  * The app is the whole installation: someone who downloads it should not
  * then have to install Node, npm, or the CLI. So the bundle carries an
  * official Node build as a Tauri sidecar and the CLI's own sources as
- * resources, and the app runs the same code the terminal would.
+ * resources, the native `cf` a window runs among them, and the app runs the
+ * same code the terminal would.
  *
  * The system's Node is deliberately not copied: package-manager builds link
  * against libraries that only exist on the machine that installed them, so a
@@ -17,6 +18,7 @@ import { createHash } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildCf } from './build-cf.mjs'
 
 const APP = dirname(dirname(fileURLToPath(import.meta.url)))
 const REPO = dirname(APP)
@@ -99,23 +101,6 @@ function verify(archive, expected) {
   )
 }
 
-/**
- * A pane's `cf` on Windows is bin/cf.exe (app/cf-launcher): a `.cmd` runs
- * through cmd.exe, which ends a command at its first line break, so a
- * question or brief of many lines arrived cut. Built here into bin/, which
- * the CLI resources carry and a run from this checkout uses.
- */
-function buildLauncher() {
-  const crate = join(APP, 'cf-launcher')
-  execFileSync(
-    'cargo',
-    ['build', '--release', '--locked', '--manifest-path', join(crate, 'Cargo.toml')],
-    { stdio: 'inherit' },
-  )
-  // The workspace's one build folder (.cargo/config.toml) holds every crate's output.
-  cpSync(join(APP, 'src-tauri', 'target', 'release', 'cf.exe'), join(REPO, 'bin', 'cf.exe'))
-}
-
 function copyCli() {
   rmSync(RESOURCES, { recursive: true, force: true })
   mkdirSync(RESOURCES, { recursive: true })
@@ -141,7 +126,8 @@ mkdirSync(BINARIES, { recursive: true })
 const sidecar = join(BINARIES, `node-${triple}${WINDOWS ? '.exe' : ''}`)
 cpSync(node, sidecar)
 if (!WINDOWS) execFileSync('chmod', ['+x', sidecar])
-if (WINDOWS) buildLauncher()
+// A window's `cf`, native, in bin/ before bin/ is copied.
+buildCf()
 const version = copyCli()
 
 process.stdout.write(`sidecar: ${sidecar}\n`)

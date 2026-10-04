@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use super::wire::selected_session;
 
 /// The most of an event the hook reads; past it, the event is not read at all.
-pub const SESSION_EVENT_LIMIT: u64 = 1024 * 1024;
+const SESSION_EVENT_LIMIT: u64 = 1024 * 1024;
 
 /// What `cf hook devin-session` says to the event on `input`: the role text
 /// in `role_file`, as the context a session starts with, when the event

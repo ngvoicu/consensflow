@@ -2,38 +2,11 @@
 //! hooks with or without one, and everything else handed to the CLI's Node
 //! sources, here refused because no runtime is named or it cannot start.
 
-// The tests start cf themselves, keeping their own window's variables from it.
-#![allow(clippy::disallowed_methods)]
+mod common;
 
 use std::fs;
-use std::io::Write;
-use std::process::{Command, Output, Stdio};
 
-/// `cf args`, with only `env` of ConsensFlow's variables, `input` on its stdin.
-fn cf(args: &[&str], env: &[(&str, &str)], input: &str) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_cf"));
-    for (name, _) in std::env::vars_os() {
-        let name = name.to_string_lossy();
-        if ["CONSENSFLOW_", "CF_", "CHISEL_"]
-            .iter()
-            .any(|prefix| name.starts_with(prefix))
-        {
-            command.env_remove(&*name);
-        }
-    }
-    let mut child = command
-        .args(args)
-        .envs(env.iter().copied())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("cf starts");
-    let mut stdin = child.stdin.take().expect("its standard input");
-    let _ = stdin.write_all(input.as_bytes());
-    drop(stdin);
-    child.wait_with_output().expect("cf ends")
-}
+use common::cf;
 
 #[test]
 fn devins_session_hook_answers_without_a_token_and_with_no_line_break() {

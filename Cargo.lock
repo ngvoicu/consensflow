@@ -348,6 +348,7 @@ name = "cf-board"
 version = "3.0.0-alpha.72"
 dependencies = [
  "cf-base",
+ "cf-proto",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -368,6 +369,7 @@ version = "3.0.0-alpha.72"
 dependencies = [
  "cf-base",
  "cf-board",
+ "cf-proto",
  "serde_json",
  "tempfile",
 ]

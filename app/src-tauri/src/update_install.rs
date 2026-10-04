@@ -38,6 +38,7 @@ fn validate_bundle(app: &Path, version: &str) -> Result<(), String> {
         || package["name"] != "consensflow"
         || package["version"] != version
         || !cli.join("bin/cf.mjs").is_file()
+        || !cli.join("bin/cf").is_file()
         || !cli.join("hosts").is_dir()
         || !cli.join("src").is_dir()
     {
@@ -171,6 +172,16 @@ mod tests {
         )
         .unwrap();
         fs::write(app.join("Contents/Resources/cli/bin/cf.mjs"), "test CLI").unwrap();
+        // A window's cf: native code under Resources, signed ad hoc before the
+        // bundle around it is, as app/scripts/build-cf.mjs signs it.
+        let cf = app.join("Contents/Resources/cli/bin/cf");
+        fs::copy("/bin/echo", &cf).unwrap();
+        assert!(Command::new("/usr/bin/codesign")
+            .args(["--force", "--sign", "-"])
+            .arg(&cf)
+            .status()
+            .unwrap()
+            .success());
         fs::write(
             app.join("Contents/Resources/cli/hosts/adapter.js"),
             "test adapter",

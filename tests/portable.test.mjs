@@ -25,7 +25,7 @@ function release(dir, { missing = [] } = {}) {
     'consensflow-bridge.exe': 'bridge',
     'node.exe': 'node',
     'cli/bin/cf.exe': 'cf',
-    'cli/src/core/cli.js': 'cli',
+    'cli/src/core/daemon.js': 'cli',
     'app.pdb': 'debug',
     'deps/app.d': 'dep',
     'nsis/installer.nsi': 'nsis',
@@ -68,7 +68,7 @@ describe('the portable Windows exe', () => {
         .split(/\r?\n/) // Windows' tar ends its lines with CRLF
         .filter((line) => line !== '' && !line.endsWith('/'))
         .sort()
-      assert.deepEqual(listed, ['cli/bin/cf.exe', 'cli/src/core/cli.js', 'node.exe'])
+      assert.deepEqual(listed, ['cli/bin/cf.exe', 'cli/src/core/daemon.js', 'node.exe'])
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

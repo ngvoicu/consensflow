@@ -1,10 +1,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { PANE_CF } from './core/pane-cf.js'
 import { devinFolders, probeExecutable } from './harnesses.js'
-import { preparePrivateIntegration } from './private-integration.js'
 import { configRoot } from './roster.js'
 
-const FILES = ['hosts/devin-hooks.mjs']
 const quote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`
 
 export const DEVIN_MINIMUM_VERSION = '3000.10.21'
@@ -50,11 +49,9 @@ async function nativeConfiguration(env) {
 /** Mutable native preferences are per launch; loaded helper code is immutable. */
 export async function prepareDevinIntegration(
   env,
-  { launchId, node, executable, boardQuestions = true },
+  { launchId, executable, boardQuestions = true },
 ) {
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(launchId ?? '')) throw new Error('invalid Devin launch')
-  if (typeof node !== 'string' || !isAbsolute(node))
-    throw new Error('Devin requires an absolute runtime')
   if (executable) {
     // Asked once per executable as it is on disk, not at every launch.
     const { stdout } = await probeExecutable(executable, ['--version'], env)
@@ -64,12 +61,13 @@ export async function prepareDevinIntegration(
       )
   }
   const configuration = await nativeConfiguration(env)
-  const destination = preparePrivateIntegration(env, 'devin', FILES)
   const root = join(configRoot(env), 'integrations', 'devin', launchId)
   await mkdir(root, { recursive: true, mode: 0o700 })
-  const command = `${quote(node)} ${quote(join(destination, FILES[0]))}`
   configuration.hooks ??= {}
-  // A session the window shows starts with its role text.
+  // A session the window shows starts with its role text (`cf hook
+  // devin-session`), from the bundle's own cf: named in full, as a shell
+  // that re-reads the user's profile can find another cf first.
+  const command = `${quote(PANE_CF)} hook devin-session`
   const starts = configuration.hooks.SessionStart ?? []
   if (!Array.isArray(starts)) throw new Error('Invalid native Devin hook configuration')
   configuration.hooks.SessionStart = [

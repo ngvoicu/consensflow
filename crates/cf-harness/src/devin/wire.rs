@@ -4,7 +4,7 @@
 //! it opens, at start and at every /new or /resume.
 
 use std::fs::{self, File};
-use std::io::{self, Read};
+use std::io::{self, BufRead, BufReader, Read};
 use std::path::Path;
 
 use cf_base::js;
@@ -56,25 +56,28 @@ pub(crate) fn shown_in(record: &Value) -> Result<Option<&str>, Unreadable> {
 }
 
 /// The conversation the window shows, as the log has it so far: the last
-/// complete record that names one. What follows the last newline is a
+/// complete record that names one. The log is read a record at a time, as
+/// long a conversation's log grows; what follows its last newline is a
 /// record still being written, and is not read.
 pub(crate) fn selected_session(file: &Path) -> Result<Option<String>, Unreadable> {
     let size = fs::metadata(file)?.len();
-    let mut bytes = Vec::new();
-    File::open(file)?.take(size).read_to_end(&mut bytes)?;
-    let mut lines = bytes.split(|byte| *byte == b'\n');
-    lines.next_back();
+    let mut log = BufReader::new(File::open(file)?.take(size));
     let mut session = None;
-    for line in lines {
-        if js::trim(&String::from_utf8_lossy(line)).is_empty() {
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        log.read_until(b'\n', &mut line)?;
+        let Some(record) = line.strip_suffix(b"\n") else {
+            return Ok(session);
+        };
+        if js::trim(&String::from_utf8_lossy(record)).is_empty() {
             continue;
         }
-        let record = from_slice_lossy(line).map_err(|_| Unreadable)?;
+        let record = from_slice_lossy(record).map_err(|_| Unreadable)?;
         if let Some(shown) = shown_in(&record)? {
             session = Some(shown.to_string());
         }
     }
-    Ok(session)
 }
 
 #[cfg(test)]

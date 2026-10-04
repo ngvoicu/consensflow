@@ -1,4 +1,4 @@
-import { selectedSession } from '../../hosts/devin-hooks.mjs'
+import { selectedSession } from '../devin-wire.js'
 import { writePaste } from './pty.js'
 
 /** A message pasted into Devin's window, only while it shows the conversation it is for. */
