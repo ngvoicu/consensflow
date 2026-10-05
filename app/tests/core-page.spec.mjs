@@ -2058,7 +2058,10 @@ test('a redraw leaves the keyboard where it was, on the board, the projects and 
 
 test('a click whose press and release straddle a redraw still lands', async ({ page }) => {
   await open(page)
-  const card = await page.locator('button.card[data-task="2"]').boundingBox()
+  const task = page.locator('button.card[data-task="2"]')
+  // Beside the windows the board may scroll sideways: the card comes into view first.
+  await task.scrollIntoViewIfNeeded()
+  const card = await task.boundingBox()
   await page.mouse.move(card.x + 20, card.y + 10)
   await page.mouse.down()
   // zeus's own row changes under the press: its lamp and its status.
@@ -4230,15 +4233,13 @@ test('opens a terminal shown to the right of the open ones, in view and with the
   page,
 }) => {
   await page.setViewportSize({ width: 1600, height: 900 })
-  // The board at its narrowest leaves the dock wide: half of it is more than
-  // the 420px a card is at least.
-  await page.addInitScript(() => localStorage.setItem('cf.layout.board-width', '280'))
   await open(page, { ...threeSessions(), realTerminals: true })
   await unfold(page)
   await watchStage(page)
   const room = await roomOf(page)
-  const half = (room.width - room.gap) / 2
-  expect(half).toBeGreaterThan(420)
+  // Beside the board each card but the chief's is two-thirds of the dock.
+  const other = ((room.width - room.gap) * 2) / 3
+  expect(other).toBeGreaterThan(320)
   const show = async (name) => {
     await page.getByRole('button', { name: `Show @zeus · ${name}'s terminal` }).click()
     await expect(page.locator(`#stage .terminal-card[data-handle="zeus-${name}"]`)).toHaveAttribute(
@@ -4248,40 +4249,38 @@ test('opens a terminal shown to the right of the open ones, in view and with the
     await expect.poll(() => typingIn(page)).toBe(`zeus-${name}`)
     return cardsOf(page)
   }
-  // The chief alone: as tall as the dock and half as wide, the right half empty.
+  // The chief alone: as tall and as wide as the dock.
   const [chief, ...others] = await cardsOf(page)
   expect([chief.handle, others]).toEqual(['chief', []])
   expect(chief.height).toBeCloseTo(room.height, 0)
-  expect(chief.width).toBeCloseTo(half, 0)
-  // A session shown opens to the chief's right, as big, in view and with the
-  // keyboard; the chief keeps its size and its place.
+  expect(chief.width).toBeCloseTo(room.width, 0)
+  // A session shown opens to the chief's right, two-thirds as wide, in view
+  // and with the keyboard; the chief keeps its size and its place.
   const two = await show('amber-pine')
-  expect(sizesOf(two)).toEqual([
-    ['chief', chief.width, chief.height],
-    ['zeus-amber-pine', chief.width, chief.height],
-  ])
+  expect(sizesOf(two)[0]).toEqual(['chief', chief.width, chief.height])
+  expect(two[1].width).toBeCloseTo(other, 0)
+  expect(two[1].height).toBe(chief.height)
   expectPlace(two[0], chief.x)
   expectPlace(two[1], chief.x + chief.width + room.gap)
   expect(two[1].inView).toBe(true)
   // A third, whose lane comes before the second's: still to the right of both,
-  // the row scrolled to it, and the others where they were.
+  // the row scrolled to it, and the others where they were, as big as they were.
   const three = await show('brisk-birch')
   expect(sizesOf(three)).toEqual([
     ['chief', chief.width, chief.height],
-    ['zeus-amber-pine', chief.width, chief.height],
-    ['zeus-brisk-birch', chief.width, chief.height],
+    ['zeus-amber-pine', two[1].width, chief.height],
+    ['zeus-brisk-birch', two[1].width, chief.height],
   ])
   expectPlace(three[0], chief.x)
   expectPlace(three[1], two[1].x)
-  expectPlace(three[2], two[1].x + chief.width + room.gap)
-  expect(three.map((card) => card.inView)).toEqual([false, true, true])
+  expectPlace(three[2], two[1].x + two[1].width + room.gap)
+  expect(three.map((card) => card.inView)).toEqual([false, false, true])
   // Each card that came in was put into the row, and none was taken out and put back.
   expect(await touched(page)).toEqual(['in zeus-amber-pine', 'in zeus-brisk-birch'])
 })
 
 test('sends no resize to a terminal already open when another is shown', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 })
-  await page.addInitScript(() => localStorage.setItem('cf.layout.board-width', '280'))
   await open(page, { ...threeSessions(), realTerminals: true })
   await unfold(page)
   const sent = () =>
@@ -4361,7 +4360,7 @@ test('keeps the order the cards came into the dock in across a switch to another
   await expect.poll(() => docked(page)).toEqual(shown)
 })
 
-test('makes a card half the dock wide, at least 420px, and the whole dock when it is narrower', async ({
+test("sizes the dock's cards: beside the board the chief's the whole dock and each other two-thirds of it, with the board folded two-thirds and the last third", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1600, height: 900 })
@@ -4376,34 +4375,87 @@ test('makes a card half the dock wide, at least 420px, and the whole dock when i
   const measure = async () => ({
     dock: (await dock.boundingBox()).width,
     room: await roomOf(page),
-    widths: (await cardsOf(page)).map((card) => card.width),
+    cards: await cardsOf(page),
   })
-  // A dock under 840px, whatever its width: 420px cards, the chief's alone as well.
-  let now = await measure()
-  expect(now.dock).toBeLessThan(840)
-  expect(now.widths).toEqual([420])
   await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  // Half the window: the chief's the whole dock, the other two-thirds of it.
+  let now = await measure()
+  expect(now.dock).toBeCloseTo((1600 - 18) / 2, 0)
+  expect(now.cards[0].width).toBeCloseTo(now.room.width, 0)
+  expect(now.cards[1].width).toBeCloseTo(((now.room.width - now.room.gap) * 2) / 3, 0)
+  // A dock whose two-thirds is under 320px: the other keeps 320px.
+  await squeeze('ArrowRight', 12)
   now = await measure()
-  expect(now.widths).toEqual([420, 420])
-  const first = now.dock
-  await squeeze('ArrowLeft', 7)
-  now = await measure()
-  expect(now.dock).toBeGreaterThan(first)
-  expect(now.dock).toBeLessThan(840)
-  expect(now.widths).toEqual([420, 420])
-  // A dock under 420px: the cards are as wide as it is.
+  expect(((now.room.width - now.room.gap) * 2) / 3).toBeLessThan(320)
+  expect(now.room.width).toBeGreaterThan(320)
+  expect(now.cards.map((card) => Math.round(card.width))).toEqual([Math.round(now.room.width), 320])
+  // A dock under 320px: every card as wide as it is.
   await squeeze('ArrowRight', 40)
   now = await measure()
-  expect(now.dock).toBeLessThan(420)
-  for (const width of now.widths) expect(width).toBeCloseTo(now.room.width, 0)
-  // A dock past 840px: half of it, less half the gap between two.
+  expect(now.room.width).toBeLessThan(320)
+  for (const card of now.cards) expect(card.width).toBeCloseTo(now.room.width, 0)
+  // The board folded: the chief's two-thirds of the row, the other the last
+  // third, whole beside it.
   await squeeze('ArrowLeft', 40)
+  await page.getByRole('button', { name: 'Hide board' }).click()
+  await expect.poll(async () => (await measure()).dock).toBeGreaterThan(1200)
   now = await measure()
-  expect(now.dock).toBeGreaterThan(840)
-  for (const width of now.widths) {
-    expect(width).toBeCloseTo((now.room.width - now.room.gap) / 2, 0)
+  const [chief, other] = now.cards
+  expect(chief.width).toBeCloseTo(((now.room.width - now.room.gap) * 2) / 3, 0)
+  expect(other.width).toBeCloseTo((now.room.width - now.room.gap) / 3, 0)
+  expect(other.inView).toBe(true)
+  // Back beside the board, the cards are as they were.
+  await page.getByRole('button', { name: 'Show board' }).click()
+  await expect
+    .poll(async () => (await cardsOf(page))[0].width)
+    .toBeCloseTo((await roomOf(page)).width, 0)
+})
+
+test('snaps the row of terminals to its padding: scrolled to its start, no sliver of the next card shows', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await open(page, threeSessions())
+  await unfold(page)
+  for (const name of ['amber-pine', 'brisk-birch']) {
+    await page.getByRole('button', { name: `Show @zeus · ${name}'s terminal` }).click()
   }
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine', 'zeus-brisk-birch'])
+  const stage = page.getByRole('region', { name: 'Terminals' })
+  // Snapped to the row's edge, the row sat 8px along, the next card's edge in view.
+  await stage.evaluate((node) => {
+    node.scrollLeft = 0
+  })
+  await page.waitForTimeout(300)
+  expect(await stage.evaluate((node) => node.scrollLeft)).toBe(0)
+  const [chief, next] = await cardsOf(page)
+  expect(chief.inView).toBe(true)
+  expect(next.inView).toBe(false)
+})
+
+test('gives the projects and the board half the window and the terminals the other half, whatever an older build kept', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  // What an older build kept was a share of another room: the windows start at half all the same.
+  await page.addInitScript(() => {
+    localStorage.setItem('cf.layout.dock-share', '0.3')
+    localStorage.setItem('cf.layout.board-width', '900')
+  })
+  await open(page)
+  const widths = () =>
+    page.evaluate(() =>
+      ['.sidebar', '#board', '.dock'].map(
+        (selector) => document.querySelector(selector).getBoundingClientRect().width,
+      ),
+    )
+  const [projects, board, dock] = await widths()
+  expect(dock).toBeCloseTo((1600 - 18) / 2, 0)
+  expect(projects + board).toBeCloseTo((1600 - 18) / 2, 0)
+  // The terminals folded: the board takes the whole width beside the projects.
+  await page.getByRole('button', { name: 'Hide terminals' }).click()
+  await expect.poll(async () => (await widths())[1]).toBeCloseTo(1600 - projects - 34, 0)
 })
 
 test("makes a card the dock's whole width on a narrow window, the next one opening to its right", async ({
@@ -4434,7 +4486,6 @@ test('keeps every card as tall as it was when the row first scrolls, where a scr
   const browser = await chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'] })
   try {
     const page = await browser.newPage({ viewport: { width: 1600, height: 900 } })
-    await page.addInitScript(() => localStorage.setItem('cf.layout.board-width', '280'))
     await open(page, threeSessions())
     await unfold(page)
     const [chief] = await cardsOf(page)
@@ -4442,8 +4493,8 @@ test('keeps every card as tall as it was when the row first scrolls, where a scr
       await page.getByRole('button', { name: `Show @zeus · ${name}'s terminal` }).click()
       await expect.poll(() => docked(page)).toContain(`zeus-${name}`)
     }
-    // Two cards fill the dock and the third makes it scroll: a scrollbar that
-    // came with the third would take room from every card, a resize of each terminal.
+    // The chief's card fills the dock and the next makes it scroll: a scrollbar
+    // that came with it would take room from every card, a resize of each terminal.
     const taken = await page
       .locator('#stage')
       .evaluate((stage) => stage.offsetHeight - stage.clientHeight)
@@ -4607,9 +4658,14 @@ test("gives a card's title room to read, at the default window and on a wider sc
       .poll(async () => Math.min(...(await titles())), { message: `titles at ${width}px` })
       .toBeGreaterThanOrEqual(60)
   }
-  // At 1440 the board, beside the windows, still has every column without scrolling.
+  // At 1440 the board beside the windows has half the window, the projects'
+  // panel in it, and scrolls sideways; with the windows folded it has every
+  // column without scrolling.
   const board = page.getByRole('region', { name: 'Board' })
-  expect(await board.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0)
+  await page.getByRole('button', { name: 'Hide terminals' }).click()
+  await expect
+    .poll(() => board.evaluate((node) => node.scrollWidth - node.clientWidth))
+    .toBeLessThanOrEqual(0)
 })
 
 /**
@@ -4791,13 +4847,19 @@ test("gives For you's strips room to read, at the default window and on wider sc
         }
       }),
     )
-  for (const width of [880, 1440, 2200]) {
+  // At the default window the board is at its narrowest, 280px, beside the
+  // projects' panel and the windows' half.
+  for (const [width, least] of [
+    [880, 200],
+    [1440, 240],
+    [2200, 240],
+  ]) {
     await page.setViewportSize({ width, height: 900 })
     await expect
       .poll(async () => Math.min(...(await strips()).map((strip) => strip.text)), {
         message: `strip text at ${width}px`,
       })
-      .toBeGreaterThanOrEqual(240)
+      .toBeGreaterThanOrEqual(least)
     expect(
       (await strips()).every((strip) => strip.inside),
       `buttons at ${width}px`,
