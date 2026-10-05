@@ -431,6 +431,7 @@ dependencies = [
  "flate2",
  "getrandom 0.4.3",
  "jiff",
+ "nix",
  "regex",
  "rusqlite",
  "serde",

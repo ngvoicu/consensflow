@@ -17,21 +17,33 @@ rusqlite.workspace = true
 # `rc`: a reading's quota is shared, as Node shared the object.
 serde = { workspace = true, features = ["rc"] }
 serde_json.workspace = true
+# A bundle's folder is named by the hash of its files, as Node names it
+# (`parity:records` digests each text the same way).
+sha2.workspace = true
 # The engine's timer, which a window's waits sleep on.
 tokio = { workspace = true, features = ["time"] }
 uuid.workspace = true
 
 [features]
 # The fakes of `testing`, for tests of other crates and of this one's
-# `tests/`, which turn it on through the dev-dependency below.
-test-support = []
+# `tests/`, which turn it on through the dev-dependency below, and the
+# binary `pi-send`, which runs the channel's send on a runtime of its own.
+test-support = ["tokio/rt"]
+
+# Pi's channel on the system's clock, for `tests/pi-message.test.mjs`.
+[[bin]]
+name = "pi-send"
+path = "src/bin/pi_send.rs"
+required-features = ["test-support"]
 
 [dev-dependencies]
 cf-harness = { path = ".", features = ["test-support"] }
 flate2.workspace = true
-# `parity:records` digests each text as Node's half does.
-sha2.workspace = true
 tempfile.workspace = true
+
+# The mask the goldens' scenarios make their files under, which std cannot set.
+[target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true, features = ["fs"] }
 
 [lints]
 workspace = true

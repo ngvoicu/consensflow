@@ -10,5 +10,6 @@
 
 mod claude;
 mod coverage;
+mod pi;
 mod scenarios;
 mod tables;

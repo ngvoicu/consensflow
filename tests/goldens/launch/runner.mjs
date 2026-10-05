@@ -9,7 +9,8 @@
  * wait to be released (`holdLooks`). The others are recorded:
  * - `prepare`, `observe`, `ready`, `deliver`, `started` begin that work on
  *   the adapter or its window, through a pane host that answers each
- *   request as the step scripts it, at once or held (`{held: true}`);
+ *   request as the step scripts it, at once or held (`{held: true}`), and
+ *   for the pane `p1-zeus` of generation 1, unless the step names its `pane`;
  * - `release` answers a held host request (`release: op, answer`) or a
  *   held look (`release: 'look'`);
  * - `advance` moves the clock by that many milliseconds, firing the timers
@@ -24,7 +25,9 @@
  * of `node:timers/promises` and `AbortSignal.timeout`) starts at
  * 2026-09-19T12:00:00Z and moves only when a step advances it, and
  * randomness (`randomUUID`, `randomBytes`) is the stream the Rust fakes
- * hand out, byte `i` being `(i * 7 + 3) % 256`.
+ * hand out, byte `i` being `(i * 7 + 3) % 256`. What an adapter makes with
+ * the system's default modes comes out as the mask 022 leaves it, on every
+ * machine.
  *
  * Timers fire when due, one at a time, the first armed of those due
  * together first, each in a turn of the loop of its own, and the work runs
@@ -59,6 +62,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { cachedAnswers } from '../../../hosts/lib/completion.js'
 import { claudeCodeAdapter } from '../../../src/adapters/claude-code.js'
+import { piAdapter } from '../../../src/adapters/pi.js'
 import { forgetLaunch } from '../../../src/core/launch-files.js'
 import { fakeExecutable } from '../../helpers.mjs'
 
@@ -84,8 +88,11 @@ const TIMEOUT_MAX = 2 ** 31 - 1
  */
 const MACHINE_WAITS = new Set(['FSREQCALLBACK', 'FSREQPROMISE', 'FILEHANDLECLOSEREQ', 'Immediate'])
 
-const ADAPTERS = { 'claude-code': claudeCodeAdapter }
+const ADAPTERS = { 'claude-code': claudeCodeAdapter, pi: piAdapter }
 const WINDOWS = process.platform === 'win32'
+
+/** The mask files and folders are made under: the one nearly every machine has. */
+const UMASK = 0o022
 
 /** The machine's own timers, which the runner turns the loop with. */
 const real = { setTimeout: globalThis.setTimeout, setImmediate: globalThis.setImmediate }
@@ -521,7 +528,7 @@ function beginOwn(context, index, step) {
     context.host.script(step.answers)
     const target = {
       launch: context.launch,
-      pane: { id: 'p1-zeus', generation: 1 },
+      pane: step.pane ?? { id: 'p1-zeus', generation: 1 },
       host: context.host,
     }
     const same = (value) => value ?? { undefined: true }
@@ -671,6 +678,7 @@ export async function play(scenario, adapters = ADAPTERS) {
     () => context.clock.machineLands(),
   )
   const restore = install(context)
+  const umask = process.umask(UMASK)
   try {
     if (JSON.stringify(scenario).includes('$OTHER')) context.other = startOther()
     context.env = realValue(context, scenario.env)
@@ -699,6 +707,7 @@ export async function play(scenario, adapters = ADAPTERS) {
     }
     return { ...scenario, records }
   } finally {
+    process.umask(umask)
     restore()
     context.machine.stop()
     context.other?.kill()

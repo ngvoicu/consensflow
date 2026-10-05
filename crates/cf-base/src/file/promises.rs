@@ -13,6 +13,12 @@ use super::error::FileError;
 /// `readFile(path)`: the file's bytes, or the failure of its `open`, or of
 /// its `read` (a folder, which opens), each with the path.
 pub fn read_file(path: &Path) -> Result<Vec<u8>, FileError> {
+    read_whole(path, Some(path))
+}
+
+/// A file's bytes, the failure of its `read` naming `read_path`: the promised
+/// call names the file, and the synchronous one names nothing.
+pub(super) fn read_whole(path: &Path, read_path: Option<&Path>) -> Result<Vec<u8>, FileError> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
     // libuv opens a folder on Windows too, with backup semantics, and its
@@ -27,7 +33,7 @@ pub fn read_file(path: &Path) -> Result<Vec<u8>, FileError> {
         .map_err(|failed| FileError::call(failed, "open", Some(path)))?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)
-        .map_err(|failed| FileError::call(failed, "read", Some(path)))?;
+        .map_err(|failed| FileError::call(failed, "read", read_path))?;
     Ok(bytes)
 }
 

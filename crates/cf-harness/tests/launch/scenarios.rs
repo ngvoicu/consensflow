@@ -22,6 +22,7 @@ use cf_harness::contract::{
     Adapter, Admission, Agent, HostError, Launch, LaunchId, Observed, Pane, Readiness, Window,
 };
 use cf_harness::forget_launch;
+use cf_harness::pi::PiAdapter;
 use cf_harness::seams::{Services, Time};
 use cf_harness::testing::{fake_executable, Answer, Driver, Fakes, OtherProcess, ScriptedHost};
 use serde_json::{json, Map, Value};
@@ -363,10 +364,16 @@ fn begin_asking(played: &mut Played, id: usize, step: &Value) {
     }
     let window = Rc::clone(played.window.as_ref().expect("a window prepared"));
     let host = Rc::clone(&played.host);
-    let pane = Pane {
-        id: "p1-zeus".to_owned(),
-        generation: 1,
-    };
+    let pane = step.get("pane").map_or_else(
+        || Pane {
+            id: "p1-zeus".to_owned(),
+            generation: 1,
+        },
+        |given| Pane {
+            id: text(&given["id"]).unwrap(),
+            generation: given["generation"].as_u64().unwrap(),
+        },
+    );
     if step.get("observe").is_some() {
         played.driver.begin(id, async move {
             (
@@ -614,12 +621,38 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
 fn adapter(harness: &str, services: &Services) -> Rc<dyn Adapter> {
     match harness {
         "claude-code" => Rc::new(ClaudeAdapter::new(services)),
+        "pi" => Rc::new(PiAdapter::new(services)),
         other => panic!("no adapter for {other}"),
+    }
+}
+
+/// The mask the files of a scenario are made under (`UMASK`, `runner.mjs`),
+/// held for as long as this is: what a default mode comes out as is then
+/// the same on every machine. Windows has no mask.
+struct Umask(#[cfg(unix)] nix::sys::stat::Mode);
+
+impl Umask {
+    fn pin() -> Self {
+        #[cfg(unix)]
+        {
+            use nix::sys::stat::{umask, Mode};
+            Self(umask(Mode::from_bits_truncate(0o022)))
+        }
+        #[cfg(not(unix))]
+        Self()
+    }
+}
+
+impl Drop for Umask {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        nix::sys::stat::umask(self.0);
     }
 }
 
 /// Plays `scenario` in a root of its own: each recorded step's record.
 fn play(scenario: &Value) -> Vec<Value> {
+    let _mask = Umask::pin();
     let dir = tempfile::Builder::new()
         .prefix("cf-launch-golden-")
         .tempdir()
