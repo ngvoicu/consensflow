@@ -409,11 +409,42 @@ const ours = JSON.parse(
   ),
 ).reasons.ours
 
-/** What the Rust half compares of a reading: never the text itself. */
-function digest(reading) {
+/**
+ * `value` with each text in it made whole (`toWellFormed`: a lone surrogate
+ * is U+FFFD, as the Rust readers hold it), and whether each already was.
+ */
+function wellFormed(value) {
+  let whole = true
+  const walk = (value) => {
+    if (typeof value === 'string') {
+      const made = value.toWellFormed()
+      whole &&= made === value
+      return made
+    }
+    if (Array.isArray(value)) return value.map(walk)
+    if (value !== null && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value).map(([name, field]) => [name, walk(field)]))
+    }
+    return value
+  }
+  return [walk(value), whole]
+}
+
+/**
+ * What the Rust half compares of a reading: never the text itself. Its texts
+ * are made whole first, and `wellFormed` says whether they were: a lone
+ * surrogate, which the Rust readers read as U+FFFD, is a difference kept on
+ * purpose, and the Rust half counts it so, never as the same.
+ */
+function digest(raw) {
+  const [reading, whole] = wellFormed(raw)
   if (reading.unknown) {
     const own = ours.some((prefix) => reading.reason.startsWith(prefix))
-    return { unknown: true, reason: own ? reading.reason : 'unreadable: «platform»' }
+    return {
+      unknown: true,
+      reason: own ? reading.reason : 'unreadable: «platform»',
+      wellFormed: whole,
+    }
   }
   return {
     items: reading.items.map((item) => [
@@ -431,6 +462,7 @@ function digest(reading) {
     failed: reading.failed,
     quota: reading.quota,
     settlement: reading.settlement.state,
+    wellFormed: whole,
   }
 }
 

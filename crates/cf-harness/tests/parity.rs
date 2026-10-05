@@ -6,8 +6,10 @@
 //! the snapshot and the digests first and names their file in
 //! `CF_PARITY_RECORDS`, runs it.
 //!
-//! A line of JSON this build cannot hold is a difference kept on purpose:
-//! counted, as the records' decision asks, and not failed.
+//! Two differences kept on purpose are counted, as the records' decision
+//! asks, and not failed: a line of JSON this build cannot hold, and a lone
+//! surrogate, which the Rust readers read as U+FFFD (Node's half makes its
+//! digest's texts whole and says whether they were).
 //!
 //! The looks are timed on the live stores, as the daemon will read them, for
 //! step 3.5 to decide where a look runs: a first look, beside Node's, a look
@@ -55,7 +57,7 @@ struct Read {
 #[derive(Default)]
 struct Tally {
     same: usize,
-    /// Holding JSON this build cannot hold.
+    /// Holding JSON this build cannot hold, or a lone surrogate.
     kept: usize,
     first: Vec<Duration>,
     node: Vec<Duration>,
@@ -116,16 +118,22 @@ fn every_conversation_node_read_here_reads_the_same() {
             }
         }
         let looks = [(&reading, &read.reading), (&again, &read.again)];
-        let differ: Vec<String> = looks
+        let agreements: Vec<Agreement> = looks
             .iter()
             .zip(["first look", "look after it"])
-            .filter_map(|((rust, node), which)| {
-                let rust = js::stringify(&digest(rust, &ours));
-                let node = js::stringify(node);
-                (rust != node).then(|| format!("  {which}:\n    node: {node}\n    rust: {rust}"))
+            .map(|((rust, node), which)| agreement(&digest(rust, &ours), node, which))
+            .collect();
+        let differ: Vec<&str> = agreements
+            .iter()
+            .filter_map(|agreement| match agreement {
+                Agreement::Differs(how) => Some(how.as_str()),
+                _ => None,
             })
             .collect();
-        if differ.is_empty() {
+        if differ.is_empty() && agreements.contains(&Agreement::Kept) {
+            println!("kept: {} {}: a lone surrogate", read.kind, read.session);
+            tally.kept += 1;
+        } else if differ.is_empty() {
             tally.same += 1;
         } else {
             differences.push(format!(
@@ -138,7 +146,11 @@ fn every_conversation_node_read_here_reads_the_same() {
     }
     println!("\n{}", report(&tallies));
     assert!(
-        tallies.values().map(|tally| tally.same).sum::<usize>() > 0,
+        tallies
+            .values()
+            .map(|tally| tally.same + tally.kept)
+            .sum::<usize>()
+            > 0,
         "no conversation compared: Node's half found none here"
     );
     assert!(
@@ -147,6 +159,23 @@ fn every_conversation_node_read_here_reads_the_same() {
         differences.len(),
         differences.join("\n")
     );
+}
+
+#[test]
+fn a_lone_surrogate_node_held_is_kept_and_never_the_same() {
+    let rust = json!({
+        "items": [["u1", "user", true, ["2026-10-05T00:00:00.000Z"], 3, "abc", false]],
+        "wellFormed": true,
+    });
+    let mut node = rust.clone();
+    assert_eq!(agreement(&rust, &node, "look"), Agreement::Same);
+    node["wellFormed"] = Value::Bool(false);
+    assert_eq!(agreement(&rust, &node, "look"), Agreement::Kept);
+    node["items"][0][4] = json!(4);
+    assert!(matches!(
+        agreement(&rust, &node, "look"),
+        Agreement::Differs(_)
+    ));
 }
 
 /// The beginnings of ConsensFlow's own reasons, which are compared whole: a
@@ -165,6 +194,31 @@ fn environment(vars: &Map<String, Value>) -> Env {
     )
 }
 
+/// How a Rust look's digest stands to Node's.
+#[derive(Debug, PartialEq)]
+enum Agreement {
+    Same,
+    /// The same but where Node's held a lone surrogate, read here as U+FFFD.
+    Kept,
+    Differs(String),
+}
+
+fn agreement(rust: &Value, node: &Value, which: &str) -> Agreement {
+    let written = js::stringify(rust);
+    if written == js::stringify(node) {
+        return Agreement::Same;
+    }
+    let mut whole = node.clone();
+    whole["wellFormed"] = Value::Bool(true);
+    if node["wellFormed"] == Value::Bool(false) && written == js::stringify(&whole) {
+        return Agreement::Kept;
+    }
+    Agreement::Differs(format!(
+        "  {which}:\n    node: {}\n    rust: {written}",
+        js::stringify(node)
+    ))
+}
+
 /// What Node's half wrote of a reading (`digest`): each item's id, role,
 /// completeness, time (none, or one), its text's UTF-16 length and SHA-256,
 /// and whether it is commentary; then the reading's flags, quota and
@@ -177,7 +231,7 @@ fn digest(reading: &Reading, ours: &[String]) -> Value {
         } else {
             "unreadable: «platform»"
         };
-        return json!({ "unknown": true, "reason": reason });
+        return json!({ "unknown": true, "reason": reason, "wellFormed": true });
     }
     let read = serde_json::to_value(reading).unwrap();
     let items: Vec<Value> = read["items"]
@@ -204,6 +258,7 @@ fn digest(reading: &Reading, ours: &[String]) -> Value {
         "failed": read["failed"],
         "quota": read["quota"],
         "settlement": read["settlement"]["state"],
+        "wellFormed": true,
     })
 }
 
