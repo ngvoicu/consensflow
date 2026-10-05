@@ -188,13 +188,13 @@ fn command_line(run: &Run) -> String {
 
 /// No console window opens for the program on Windows.
 #[cfg(windows)]
-fn hide_window(command: &mut tokio::process::Command) {
+pub(crate) fn hide_window(command: &mut tokio::process::Command) {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     command.creation_flags(CREATE_NO_WINDOW);
 }
 
 #[cfg(not(windows))]
-fn hide_window(_command: &mut tokio::process::Command) {}
+pub(crate) fn hide_window(_command: &mut tokio::process::Command) {}
 
 #[cfg(test)]
 mod tests {
