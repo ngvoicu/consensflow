@@ -79,7 +79,12 @@ impl ManualTime {
     /// Ends the sleep due first, if one is due by `until`, the one armed
     /// first of those due together, moving the clock to when it was due:
     /// whether there was one. A test runs its work between one firing and
-    /// the next, as Node runs a timer's continuations before the next timer.
+    /// the next, file work included, as Rust does file work where it is
+    /// asked for. The Node recorder fires its timers the same way, and
+    /// refuses a scenario where Node itself would not: timers of different
+    /// lengths due together, which Node orders by its timer lists, or file
+    /// work landing while a timer due with the one that began it waits,
+    /// which Node would have fired first.
     pub fn fire_next(&self, until: i64) -> bool {
         let mut sleepers = self.sleepers.borrow_mut();
         sleepers.retain(|sleeper| sleeper.flag.strong_count() > 0);

@@ -3,7 +3,7 @@
 //! Node v26.8.1 (`lib/internal/fs/promises.js`, `lib/internal/fs/rimraf.js`)
 //! and probed there.
 
-use std::fs::{self, File};
+use std::fs;
 use std::io::Read;
 use std::path::Path;
 
@@ -11,10 +11,20 @@ use super::errno::{errno_name, is_missing};
 use super::error::FileError;
 
 /// `readFile(path)`: the file's bytes, or the failure of its `open`, or of
-/// its `read` (a folder opened on Unix), each with the path.
+/// its `read` (a folder, which opens), each with the path.
 pub fn read_file(path: &Path) -> Result<Vec<u8>, FileError> {
-    let mut file =
-        File::open(path).map_err(|failed| FileError::call(failed, "open", Some(path)))?;
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    // libuv opens a folder on Windows too, with backup semantics, and its
+    // read then fails; Rust's own open would refuse the folder.
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS,
+    );
+    let mut file = options
+        .open(path)
+        .map_err(|failed| FileError::call(failed, "open", Some(path)))?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)
         .map_err(|failed| FileError::call(failed, "read", Some(path)))?;
@@ -92,9 +102,8 @@ mod tests {
         assert_eq!(read_file(&dir.path().join("file")).unwrap(), b"text");
     }
 
-    #[cfg(unix)]
     #[test]
-    fn a_folder_opens_on_unix_and_its_read_fails_with_its_path() {
+    fn a_folder_opens_and_its_read_fails_with_its_path() {
         let dir = tempfile::tempdir().unwrap();
         // Probed on Node v26.8.1: `fs.promises.readFile` of a folder.
         assert_eq!(

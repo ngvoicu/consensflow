@@ -111,11 +111,12 @@ impl Names {
                 live.map_or_else(|| value.clone(), |(name, _)| json!(name))
             }
             Value::String(text) => {
-                let mut text = text.replace(&self.root, "$ROOT");
+                let text = text.replace(&self.root, "$ROOT");
                 if text.starts_with("$ROOT") {
-                    text = text.replace('\\', "/");
+                    json!(posix(text))
+                } else {
+                    json!(text)
                 }
-                json!(text)
             }
             other => other.clone(),
         }
@@ -163,6 +164,16 @@ fn response(names: &Names, given: &Value) -> Result<Value, HostError> {
     }
 }
 
+/// A path under the root with Windows' separators as POSIX's; on POSIX a
+/// backslash is a name's own.
+fn posix(path: String) -> String {
+    if cfg!(windows) {
+        path.replace('\\', "/")
+    } else {
+        path
+    }
+}
+
 /// Every file, folder and link under `root`, by its path there: a file's
 /// and a folder's mode (none on Windows), a file's text, a link's target,
 /// never followed.
@@ -170,11 +181,12 @@ fn tree(root: &Path) -> Vec<(String, Value)> {
     fn walk(root: &Path, folder: &Path, found: &mut Vec<(String, Value)>) {
         for entry in fs::read_dir(folder).unwrap() {
             let full = entry.unwrap().path();
-            let relative = full
-                .strip_prefix(root)
-                .unwrap()
-                .to_string_lossy()
-                .replace('\\', "/");
+            let relative = posix(
+                full.strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+            );
             if fs::symlink_metadata(&full).unwrap().is_symlink() {
                 let target = fs::read_link(&full).unwrap();
                 found.push((relative, json!({ "link": target.to_string_lossy() })));
@@ -384,18 +396,38 @@ fn run(played: &mut Played, advance: Option<i64>) -> Vec<Value> {
         }
         played.fakes.time.settle_at(until);
     }
-    // In the order the work was begun, as Node's runner writes it.
-    settled.sort_by_key(|(op, _)| *op);
-    settled
+    in_order_begun(settled, &mut played.window)
+}
+
+/// The work settled, in the order it settled, written in the order begun.
+/// A window prepared is the engine's as its preparation finishes, as Node's
+/// runner keeps it: of two, the one that finished last.
+fn in_order_begun<W>(
+    settled: Vec<(usize, (Value, Option<W>))>,
+    window: &mut Option<W>,
+) -> Vec<Value> {
+    let mut records: Vec<(usize, Value)> = settled
         .into_iter()
-        .map(|(op, (mut record, window))| {
-            if let Some(window) = window {
-                played.window = Some(window);
+        .map(|(op, (mut record, opened))| {
+            if let Some(opened) = opened {
+                *window = Some(opened);
             }
             record["op"] = json!(op);
-            record
+            (op, record)
         })
-        .collect()
+        .collect();
+    records.sort_by_key(|(op, _)| *op);
+    records.into_iter().map(|(_, record)| record).collect()
+}
+
+#[test]
+fn the_window_kept_is_the_one_prepared_last_and_records_go_in_the_order_begun() {
+    // A begun first and B second, B finished first.
+    let settled = vec![(1, (json!({}), Some("B"))), (0, (json!({}), Some("A")))];
+    let mut window = None;
+    let records = in_order_begun(settled, &mut window);
+    assert_eq!(window, Some("A"));
+    assert_eq!(records, [json!({"op": 0}), json!({"op": 1})]);
 }
 
 /// The work still waiting, each with what it waits on: its timers (how long

@@ -17,13 +17,25 @@
  * - `close` closes the window as the engine does: its launch's files go,
  *   and the work still waiting on it keeps its hold.
  * After each, the work begun runs until it settles or waits on something a
- * step controls: a held request, a held look, a timer.
+ * step controls: a held request, a held look, a timer. Its file work is
+ * done by then, none left in flight.
  *
  * Nothing waits on the machine: the clock (`Date.now`, timers, the timers
  * of `node:timers/promises` and `AbortSignal.timeout`) starts at
  * 2026-09-19T12:00:00Z and moves only when a step advances it, and
  * randomness (`randomUUID`, `randomBytes`) is the stream the Rust fakes
  * hand out, byte `i` being `(i * 7 + 3) % 256`.
+ *
+ * Timers fire when due, one at a time, the first armed of those due
+ * together first, and the work runs until it holds still before the next
+ * fires: file work included, as Rust does file work where it is asked for
+ * (`ManualTime` in `crates/cf-harness/src/testing.rs`). Node itself fires
+ * timers due together in one go, the continuations of each run before the
+ * next but no file work, and orders those of different lengths by its
+ * timer lists. A scenario where that would differ is refused: timers of
+ * different lengths due together, or file work that lands while one due
+ * with the timer that began it still waits. Every scenario recorded is one
+ * Node plays the same way.
  *
  * A step's record is written so that it is the same on every run: every
  * path under the root is `$ROOT/…`; the process this runs as is `$PID`,
@@ -35,7 +47,7 @@
  * A step may carry `kept`: a difference Rust keeps from Node on purpose,
  * why, and how Rust's own work settles instead.
  */
-import { AsyncLocalStorage } from 'node:async_hooks'
+import { AsyncLocalStorage, createHook } from 'node:async_hooks'
 import { spawn } from 'node:child_process'
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from 'node:fs'
 import fs from 'node:fs/promises'
@@ -57,8 +69,16 @@ export const DEAD = 999_999
 /** When a scenario's clock starts. */
 const EPOCH = Date.parse('2026-09-19T12:00:00Z')
 
-/** Half a surrogate pair, its other half missing. */
-const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g
+/** The longest a Node timer waits; it takes any other length as 1 ms. */
+const TIMEOUT_MAX = 2 ** 31 - 1
+
+/**
+ * The async resources a file system request makes, one each, from its start
+ * until its callback or promise has run, probed on Node v26.8.1: a call's
+ * (`FSREQCALLBACK`), a promise's (`FSREQPROMISE`), a file handle's close
+ * (`FILEHANDLECLOSEREQ`). A watcher's would last, and none is used.
+ */
+const FILE_REQUESTS = new Set(['FSREQCALLBACK', 'FSREQPROMISE', 'FILEHANDLECLOSEREQ'])
 
 const ADAPTERS = { 'claude-code': claudeCodeAdapter }
 const WINDOWS = process.platform === 'win32'
@@ -66,14 +86,63 @@ const WINDOWS = process.platform === 'win32'
 /** The machine's own timers, which the runner turns the loop with. */
 const real = { setTimeout: globalThis.setTimeout, setImmediate: globalThis.setImmediate }
 
-/** A clock that moves only when told, and its timers, each the work of the step that armed it (`owner`). */
+/** A path under the root with Windows' separators as POSIX's; on POSIX a backslash is a name's own. */
+const posix = (text) => (WINDOWS ? text.replaceAll('\\', '/') : text)
+
+/**
+ * The file work Node's thread pool does, which no step controls: how many
+ * requests are in flight, and how many ever began. `lands` is told as each
+ * one's callback or promise is about to run.
+ */
+function fileWork(lands) {
+  const inFlight = new Set()
+  let begun = 0
+  const hook = createHook({
+    init(id, type) {
+      if (!FILE_REQUESTS.has(type)) return
+      inFlight.add(id)
+      begun += 1
+    },
+    before(id) {
+      if (inFlight.has(id)) lands()
+    },
+    after: (id) => inFlight.delete(id),
+    destroy: (id) => inFlight.delete(id),
+  }).enable()
+  return { inFlight: () => inFlight.size, begun: () => begun, stop: () => hook.disable() }
+}
+
+/**
+ * A clock that moves only when told, and its timers, each the work of the
+ * step that armed it (`owner`), its callback run in the async context it
+ * was armed in, as Node runs it.
+ */
 function fakeClock(owner) {
   const timers = []
   let now = EPOCH
   let next = 1
-  const setTimeout = (callback, ms = 0, ...args) => {
-    const due = now + Math.max(0, Number(ms) || 0)
-    const timer = { id: next++, due, callback, args, work: owner() }
+  // When the timer fired last was due, and whether file work landed while
+  // another due then still waited: Node would have fired that one first.
+  let firing = null
+  let raced = false
+  const refuseRace = () => {
+    if (raced) {
+      throw new Error(
+        'file work landed between two timers due together: Node fires the second before it lands',
+      )
+    }
+  }
+  const setTimeout = (callback, delay, ...args) => {
+    const asked = Number(delay)
+    const ms = asked >= 1 && asked <= TIMEOUT_MAX ? Math.trunc(asked) : 1
+    const timer = {
+      id: next++,
+      due: now + ms,
+      ms,
+      callback: AsyncLocalStorage.bind(callback),
+      args,
+      work: owner(),
+    }
     timers.push(timer)
     const handle = { unref: () => handle, ref: () => handle, hasRef: () => true, id: timer.id }
     handle[Symbol.toPrimitive] = () => timer.id
@@ -87,25 +156,38 @@ function fakeClock(owner) {
     now: () => now,
     setTimeout,
     clearTimeout,
-    armed: () => timers.length,
     /** How long until each timer `work` armed is due, in the order armed. */
     waits: (work) => timers.filter((timer) => timer.work === work).map((timer) => timer.due - now),
+    /** File work landing: a race, if a timer due with the one fired last still waits. */
+    fileWorkLands() {
+      if (timers.some((timer) => timer.due === firing)) raced = true
+    },
     /**
      * Fires the timer due first, if by `until`, the one armed first of those
-     * due together: whether there was one. The runner turns the loop before
-     * the next, as Node runs a timer's continuations before the next timer.
+     * due together: whether there was one. The runner lets the work hold
+     * still before the next. Throws where Node would fire them otherwise.
      */
     fireNext(until) {
+      refuseRace()
       if (timers.length === 0) return false
       const due = Math.min(...timers.map((timer) => timer.due))
       if (due > until) return false
+      const together = timers.filter((timer) => timer.due === due)
+      if (new Set(together.map((timer) => timer.ms)).size > 1) {
+        const lengths = together.map((timer) => `${timer.ms} ms`).join(', ')
+        throw new Error(
+          `timers of different lengths due together (${lengths}): Node orders them by its timer lists, not as armed`,
+        )
+      }
       now = Math.max(now, due)
-      const timer = timers.find((each) => each.due === due)
+      const [timer] = together
       timers.splice(timers.indexOf(timer), 1)
+      firing = due
       timer.callback(...timer.args)
       return true
     },
     settleAt(until) {
+      refuseRace()
       now = Math.max(now, until)
     },
   }
@@ -211,14 +293,14 @@ function written(context, value) {
     return live === undefined ? value : live[0]
   }
   if (typeof value !== 'string') return value
-  // Half a surrogate pair is no text JSON's readers all hold: written as its escape, in words.
-  let text = value.replace(
-    LONE_SURROGATE,
-    (unit) => `\\u${unit.charCodeAt(0).toString(16).toUpperCase()}`,
-  )
-  const slashed = (text) => text.replaceAll('\\', '/')
-  if (text.includes(context.root)) text = text.replaceAll(context.root, '$ROOT')
-  return text.startsWith('$ROOT') ? slashed(text) : text
+  let text = value.replaceAll(context.root, '$ROOT')
+  if (text.startsWith('$ROOT')) text = posix(text)
+  // Half a surrogate pair is no text every JSON reader holds, and Rust's
+  // strings never do: such a string is written as its UTF-16 code units.
+  if (!text.isWellFormed()) {
+    return { utf16: Array.from({ length: text.length }, (_, at) => text.charCodeAt(at)) }
+  }
+  return text
 }
 
 /**
@@ -230,7 +312,7 @@ function tree(root) {
   const walk = (folder) => {
     for (const entry of readdirSync(folder, { withFileTypes: true })) {
       const full = path.join(folder, entry.name)
-      const relative = path.relative(root, full).replaceAll('\\', '/')
+      const relative = posix(path.relative(root, full))
       if (lstatSync(full).isSymbolicLink()) {
         found.set(relative, { link: readlinkSync(full) })
         continue
@@ -325,7 +407,8 @@ function scriptedLooks(context) {
         ? new Promise((resolve, reject) =>
             held.push({
               work: context.als.getStore(),
-              release: () => answers(...args).then(resolve, reject),
+              // Released in the async context of the work that looked.
+              release: AsyncLocalStorage.bind(() => answers(...args).then(resolve, reject)),
             }),
           )
         : answers(...args),
@@ -468,30 +551,29 @@ function signature(context) {
     pending(context),
     context.requests.length,
     context.draws.length,
+    context.files.begun(),
   ])
 }
 
 /**
- * Turns the event loop until the scene holds still: every work begun
- * settled or waiting on something a step controls, and nothing changed for
- * a while, as file system work finishes on Node's thread pool. Work that
- * waits on nothing a step controls for ten seconds fails the scenario.
+ * Turns the event loop until the scene holds still: no file work in flight,
+ * every work begun settled or waiting on something a step controls, and
+ * nothing changed, two turns running. A file request's callbacks and
+ * continuations run before the loop turns again, so a turn that finds none
+ * in flight finds none about to begin. What it cannot see is work waiting
+ * on a step and on something else besides, no file work: no adapter's is.
+ * Work that does not hold still in ten seconds fails the scenario.
  */
 async function settleDown(context) {
-  const blocked = () => pending(context).every((entry) => entry.waits.length > 0)
-  let last = signature(context)
-  let since = performance.now()
-  const started = since
+  const started = performance.now()
+  let still = null
   for (;;) {
     await new Promise((resolve) => real.setImmediate(resolve))
-    await new Promise((resolve) => real.setTimeout(resolve, 2))
     const now = signature(context)
-    if (now !== last) {
-      last = now
-      since = performance.now()
-      continue
-    }
-    if (performance.now() - since >= 40 && blocked()) return
+    const quiet =
+      context.files.inFlight() === 0 && pending(context).every((entry) => entry.waits.length > 0)
+    if (quiet && still === now) return
+    still = quiet ? now : null
     if (performance.now() - started > 10_000) {
       throw new Error(`work waits on nothing a step controls: ${JSON.stringify(pending(context))}`)
     }
@@ -538,8 +620,11 @@ async function record(context, index, step) {
   })
 }
 
-/** Plays `scenario` in a root of its own: each recorded step's record. */
-export async function play(scenario) {
+/**
+ * Plays `scenario` in a root of its own, against the adapter its harness
+ * names among `adapters`: each recorded step's record.
+ */
+export async function play(scenario, adapters = ADAPTERS) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-launch-golden-'))
   const context = {
     root,
@@ -552,6 +637,7 @@ export async function play(scenario) {
     als: new AsyncLocalStorage(),
   }
   context.clock = fakeClock(() => context.als.getStore())
+  context.files = fileWork(() => context.clock.fileWorkLands())
   const restore = install(context)
   try {
     if (JSON.stringify(scenario).includes('$OTHER')) context.other = startOther()
@@ -559,7 +645,7 @@ export async function play(scenario) {
     await fs.mkdir(path.join(root, 'bin'), { recursive: true })
     context.host = scriptedHost(context)
     context.looks = scriptedLooks(context)
-    context.adapter = ADAPTERS[scenario.harness]({
+    context.adapter = adapters[scenario.harness]({
       env: context.env,
       answers: context.looks.answers,
     })
@@ -582,6 +668,7 @@ export async function play(scenario) {
     return { ...scenario, records }
   } finally {
     restore()
+    context.files.stop()
     context.other?.kill()
     await fs.rm(root, { recursive: true, force: true })
   }
