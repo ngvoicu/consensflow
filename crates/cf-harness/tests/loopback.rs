@@ -5,7 +5,8 @@
 //! Node is `CONSENSFLOW_NODE`, or `node` on the PATH, as the ledger's
 //! tests find it.
 
-#![allow(clippy::disallowed_methods)] // The test starts the peer it asks.
+// The test starts the peer it asks; a failure in its helpers is the test's.
+#![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
