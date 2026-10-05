@@ -11,6 +11,7 @@ use std::time::Duration;
 use cf_proto::bridge::{Frame, Role};
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, oneshot, Notify};
+use tokio::time::Instant;
 
 use super::registry::Registry;
 use crate::BridgeError;
@@ -20,9 +21,10 @@ pub(super) type Answer = Result<Value, BridgeError>;
 
 pub(super) type ErrorHandler = dyn Fn(BridgeError);
 
-/// A request sent and not answered yet.
+/// A request sent and not answered yet, and when it stops waiting.
 struct Pending {
     op: String,
+    until: Instant,
     answer: oneshot::Sender<Answer>,
 }
 
@@ -108,12 +110,14 @@ impl Inner {
         }
     }
 
-    /// Puts a request on the waiting list; what it ends in comes on the
-    /// receiver.
-    pub(super) fn expect(&self, id: String, op: &str) -> oneshot::Receiver<Answer> {
+    /// Puts a request on the waiting list until `until`; what it ends in
+    /// comes on the receiver.
+    pub(super) fn expect(&self, id: String, op: &str, until: Instant) -> oneshot::Receiver<Answer> {
         let (answer, answered) = oneshot::channel();
         let op = op.to_owned();
-        self.pending.borrow_mut().insert(id, Pending { op, answer });
+        self.pending
+            .borrow_mut()
+            .insert(id, Pending { op, until, answer });
         answered
     }
 
@@ -131,7 +135,9 @@ impl Inner {
 
     /// Hands the peer's answer to the request waiting for it. An answer for
     /// no request is dropped: the request is gone, past its deadline. One
-    /// that names another op leaves the request waiting.
+    /// that comes past the request's deadline, though nobody has looked at
+    /// the request since, settles it as `deadline`, as JavaScript's timer did
+    /// on its own. One that names another op leaves the request waiting.
     pub(super) fn settle(&self, id: &str, op: &str, body: Value) {
         let Some(request) = self.pending.borrow_mut().remove(id) else {
             return;
@@ -144,7 +150,12 @@ impl Inner {
             )));
             return;
         }
-        let _ = request.answer.send(Ok(body));
+        let answer = if Instant::now() >= request.until {
+            refusal("deadline")
+        } else {
+            body
+        };
+        let _ = request.answer.send(Ok(answer));
     }
 
     /// Tells `on_error` of something that did not stop the bridge.

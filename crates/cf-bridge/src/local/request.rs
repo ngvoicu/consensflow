@@ -97,7 +97,7 @@ impl Bridge {
         let until = now
             .checked_add(deadline.unwrap_or(inner.default_deadline))
             .unwrap_or_else(|| now + FAR_FUTURE);
-        let answered = inner.expect(id.clone(), op);
+        let answered = inner.expect(id.clone(), op, until);
         inner.write(line);
         Sent::Waiting {
             answered,

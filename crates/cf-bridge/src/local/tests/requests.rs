@@ -219,6 +219,39 @@ fn ignores_a_response_arriving_after_its_deadline() {
 }
 
 #[test]
+fn an_answer_past_its_deadline_is_no_answer_though_nobody_awaited_the_request_meanwhile() {
+    run(async {
+        let (bridge, mut wire) = lonely();
+        let pending = bridge.request("slow", json!({}), Some(Duration::from_millis(10)));
+        wire.wait_for_frames(1).await;
+        // The deadline passes while the bridge runs and nobody looks at the
+        // request; then its answer comes, and is read.
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        wire.send(frame("res", "n-1", "slow", json!({ "late": true })))
+            .await;
+        quiet().await;
+        assert_eq!(
+            within(pending).await,
+            Ok(json!({ "ok": false, "error": "deadline" }))
+        );
+    });
+}
+
+#[test]
+fn an_answer_in_time_is_the_answer_though_the_request_is_awaited_past_its_deadline() {
+    run(async {
+        let (bridge, mut wire) = lonely();
+        let pending = bridge.request("quick", json!({}), Some(Duration::from_millis(10)));
+        wire.wait_for_frames(1).await;
+        wire.send(frame("res", "n-1", "quick", json!({ "ok": true })))
+            .await;
+        quiet().await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(within(pending).await, Ok(json!({ "ok": true })));
+    });
+}
+
+#[test]
 fn a_request_given_up_before_its_answer_is_forgotten_and_the_answer_dropped() {
     run(async {
         let (errors, on_error) = collector();

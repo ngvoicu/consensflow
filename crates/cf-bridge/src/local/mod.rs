@@ -48,6 +48,13 @@
 //! - The frames waiting for the output are not bounded, as the buffer of
 //!   `bridge.js`'s stream was not. A peer that stops reading shows as requests
 //!   that end at their deadlines.
+//! - A handler done at its first poll is answered there, where JavaScript
+//!   answered on a later microtask: the answers to requests read together may
+//!   go out in another order (an `unknown-op` no longer overtakes a ready
+//!   handler's). Each answer names its request, so none is mismatched.
+//! - A [`Connection`] dropped before it was ever polled has not started its
+//!   reader, so nothing refuses the requests made meanwhile: they end at
+//!   their deadlines. A running daemon polls its connection from the start.
 //!
 //! Everything runs on one thread, as the daemon does: state sits in cells,
 //! and no borrow is held while a handler or a callback runs.
