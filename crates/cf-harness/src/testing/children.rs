@@ -29,6 +29,7 @@ fn named(program: &Program) -> String {
 #[derive(Default)]
 pub struct ScriptedProcesses {
     runs: RefCell<HashMap<String, VecDeque<Result<String, Failed>>>>,
+    every: RefCell<HashMap<String, Result<String, Failed>>>,
     children: RefCell<HashMap<String, VecDeque<Vec<String>>>>,
     ran: RefCell<Vec<String>>,
     written: Rc<RefCell<Vec<String>>>,
@@ -42,6 +43,13 @@ impl ScriptedProcesses {
             .entry(named.to_owned())
             .or_default()
             .push_back(answer);
+    }
+
+    /// Scripts what every run of the executable `name` answers whatever it
+    /// is asked, as a stand-in that says one thing (`fakeExecutable`'s
+    /// `output`): when no answer to the exact arguments is left.
+    pub fn every_answer(&self, name: &str, answer: Result<String, Failed>) {
+        self.every.borrow_mut().insert(name.to_owned(), answer);
     }
 
     /// Scripts the lines a child started as `named` writes, in order, its
@@ -74,11 +82,13 @@ impl Processes for ScriptedProcesses {
     fn run(&self, program: Program, _limits: Limits) -> Work<'_, Result<String, Failed>> {
         let named = named(&program);
         self.ran.borrow_mut().push(named.clone());
+        let name = named.split(' ').next().unwrap_or_default().to_owned();
         let answer = self
             .runs
             .borrow_mut()
             .get_mut(&named)
             .and_then(VecDeque::pop_front)
+            .or_else(|| self.every.borrow().get(&name).cloned())
             .unwrap_or_else(|| {
                 Err(Failed {
                     message: missing(&named),
