@@ -25,18 +25,26 @@ pub struct Request {
     pub body: Option<Vec<u8>>,
 }
 
+/// What undici says of a request no head came for: the sentence two of
+/// its callers pass on (`started` of OpenCode's window).
+pub const FETCH_FAILED: &str = "fetch failed";
+
+/// What undici says of a body the connection broke or ended before it was
+/// whole.
+pub const TERMINATED: &str = "terminated";
+
 /// Why a reply's body could not be read whole.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BodyFailed {
     /// It went past the size asked for.
     TooLarge,
-    /// The connection broke or ended before it did.
-    Cut(String),
+    /// The connection broke or ended before it did ([`TERMINATED`]).
+    Cut,
 }
 
 /// Where an adapter's requests go.
 pub trait Loopback {
-    /// Sends `request`: its reply once a head came, or why none did.
+    /// Sends `request`: its reply once a head came, or [`FETCH_FAILED`].
     fn send(&self, request: Request) -> Work<'_, Result<Box<dyn Reply>, String>>;
 }
 

@@ -15,7 +15,7 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 use url::{Position, Url};
 
-use crate::seams::loopback::{BodyFailed, Method, Request};
+use crate::seams::loopback::{BodyFailed, Method, Request, FETCH_FAILED};
 
 /// The connection a reply comes over, driven while its head and its body
 /// are awaited: hyper's client needs it polled, and nothing here spawns.
@@ -30,6 +30,11 @@ pub struct Reply {
 
 /// Sends `request`: its reply once a head came, or why none did.
 pub async fn send(request: Request) -> Result<Reply, String> {
+    exchange(request).await.map_err(|_| FETCH_FAILED.to_owned())
+}
+
+/// The request sent and its head read, or what failed on the way.
+async fn exchange(request: Request) -> Result<Reply, String> {
     let url = Url::parse(&request.url).map_err(|failed| failed.to_string())?;
     let addresses = url
         .socket_addrs(|| None)
@@ -83,9 +88,7 @@ impl Reply {
         poll_fn(|context| loop {
             match Pin::new(&mut self.body).poll_frame(context) {
                 Poll::Ready(None) => return Poll::Ready(Ok(std::mem::take(&mut bytes))),
-                Poll::Ready(Some(Err(failed))) => {
-                    return Poll::Ready(Err(BodyFailed::Cut(failed.to_string())))
-                }
+                Poll::Ready(Some(Err(_))) => return Poll::Ready(Err(BodyFailed::Cut)),
                 Poll::Ready(Some(Ok(frame))) => {
                     if let Ok(data) = frame.into_data() {
                         if bytes.len() + data.len() > limit {
@@ -209,7 +212,7 @@ mod tests {
             },
         );
         assert_eq!(status, 200);
-        assert!(matches!(body, Err(BodyFailed::Cut(_))), "{body:?}");
+        assert_eq!(body, Err(BodyFailed::Cut));
     }
 
     #[test]
@@ -240,6 +243,6 @@ mod tests {
                 drop(listener);
                 send(get(format!("http://127.0.0.1:{port}/"))).await.err()
             });
-        assert!(failed.is_some());
+        assert_eq!(failed.as_deref(), Some("fetch failed"));
     }
 }

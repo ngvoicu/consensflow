@@ -13,15 +13,15 @@ use std::task::{Context, Poll};
 
 use super::polling;
 use crate::contract::Work;
-use crate::seams::loopback::{BodyFailed, Loopback, Method, Reply, Request};
+use crate::seams::loopback::{BodyFailed, Loopback, Method, Reply, Request, FETCH_FAILED};
 
 /// What a scripted peer answers a request with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Served {
     /// A head, its status, and its body as it comes.
     Head { status: u16, body: Sent },
-    /// No head: the connection refused or broken before one, and why.
-    NoHead(String),
+    /// No head: the connection refused or broken before one.
+    NoHead,
     /// When the test releases it.
     Held,
 }
@@ -31,8 +31,8 @@ pub enum Served {
 pub enum Sent {
     /// Whole, at once.
     Now(Vec<u8>),
-    /// Broken off, and why.
-    Cut(String),
+    /// Broken off.
+    Cut,
     /// When the test releases it.
     Held,
 }
@@ -53,7 +53,7 @@ struct Held<T> {
 
 /// A peer that answers each request with the next answer scripted for its
 /// route. A request with no answer left gets no head, as Node's scripted
-/// `fetch` threw.
+/// `fetch` threw `fetch failed`.
 #[derive(Default)]
 pub struct ScriptedLoopback {
     answers: RefCell<HashMap<String, VecDeque<Served>>>,
@@ -177,10 +177,7 @@ impl Loopback for ScriptedLoopback {
         let answer = match next {
             Some(Served::Held) => Box::pin(hold(&self.heads, &route)) as Work<'_, Served>,
             Some(served) => Box::pin(async move { served }),
-            None => {
-                let failed = Served::NoHead(format!("no answer for {route}"));
-                Box::pin(async move { failed })
-            }
+            None => Box::pin(async { Served::NoHead }),
         };
         Box::pin(async move {
             match answer.await {
@@ -190,8 +187,7 @@ impl Loopback for ScriptedLoopback {
                     body: Some(body),
                     bodies,
                 }) as Box<dyn Reply>),
-                Served::NoHead(why) => Err(why),
-                Served::Held => Err(format!("{route} was released held")),
+                Served::NoHead | Served::Held => Err(FETCH_FAILED.to_owned()),
             }
         })
     }
@@ -217,10 +213,7 @@ impl Reply for ScriptedReply {
             let bytes = match (body, held) {
                 (_, Some(held)) => held.await?,
                 (Some(Sent::Now(bytes)), None) => bytes,
-                (Some(Sent::Cut(why)), None) => return Err(BodyFailed::Cut(why)),
-                (Some(Sent::Held) | None, None) => {
-                    return Err(BodyFailed::Cut("the body was read already".to_owned()))
-                }
+                (Some(Sent::Cut | Sent::Held) | None, None) => return Err(BodyFailed::Cut),
             };
             if bytes.len() > limit {
                 return Err(BodyFailed::TooLarge);
@@ -254,7 +247,7 @@ mod tests {
                     status: 200,
                     body: Sent::Now(b"{}".to_vec()),
                 },
-                Served::NoHead("refused".to_owned()),
+                Served::NoHead,
             ],
         );
         let mut driver = Driver::default();
@@ -270,8 +263,8 @@ mod tests {
         let (op, (status, body, second, third)) = settled.pop().unwrap();
         assert_eq!((op, settled.len()), (0, 0));
         assert_eq!((status, body), (200, Ok(b"{}".to_vec())));
-        assert_eq!(second.as_deref(), Some("refused"));
-        assert_eq!(third.as_deref(), Some("no answer for GET /other"));
+        assert_eq!(second.as_deref(), Some("fetch failed"));
+        assert_eq!(third.as_deref(), Some("fetch failed"), "no answer left");
         let asked = peer.take_asked();
         assert_eq!(asked[0].url, "http://127.0.0.1:41000/session?directory=a+b");
         assert_eq!(asked.len(), 3);

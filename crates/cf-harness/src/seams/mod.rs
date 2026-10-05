@@ -6,12 +6,13 @@
 //! built with the ones it uses, so nothing in a window reads the system's
 //! time or randomness on its own, and a test sees every wait.
 
+use std::cell::{Cell, RefCell};
 use std::future::{poll_fn, Future};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::pin::pin;
 use std::rc::Rc;
-use std::task::Poll;
+use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use cf_base::env::Env;
@@ -23,7 +24,7 @@ pub mod loopback;
 pub mod processes;
 
 pub use loopback::{Loopback, SystemLoopback};
-pub use processes::{Processes, SystemProcesses};
+pub use processes::{Probes, Processes, SystemProcesses};
 
 /// What the engine gives every adapter it builds: the environment its
 /// windows run with, the records it reads them through, and the seams.
@@ -36,6 +37,9 @@ pub struct Services {
     pub ports: Rc<dyn Ports>,
     pub loopback: Rc<dyn Loopback>,
     pub processes: Rc<dyn Processes>,
+    /// The probes asked so far, one map for every adapter, as Node's was
+    /// one per process.
+    pub probes: Rc<Probes>,
     pub bundle: Bundle,
 }
 
@@ -74,21 +78,65 @@ pub struct Bundle {
     pub pane_cf: String,
 }
 
-/// `work`, or none once `millis` passed on `time` first, the work then
-/// dropped: a wait JavaScript bounded with a timer (`AbortSignal.timeout`,
-/// a `setTimeout` that rejects). The timer is armed before the work begins,
-/// as JavaScript arms `AbortSignal.timeout` before its fetch starts; when
-/// both are done at once, the work's answer is taken.
-pub async fn within<T>(time: &dyn Time, millis: u64, work: impl Future<Output = T>) -> Option<T> {
-    let mut timer = time.sleep(Duration::from_millis(millis));
-    let mut work = pin!(work);
-    poll_fn(|context| {
-        if let Poll::Ready(answer) = work.as_mut().poll(context) {
-            return Poll::Ready(Some(answer));
+/// A timer armed on `time`, which bounds the waits put under it: what
+/// JavaScript armed once and bounded several waits with (a fetch's
+/// `AbortSignal.timeout` its head and its body, a lifetime's `setTimeout`
+/// every request of a launch).
+pub struct Armed<'a> {
+    timer: RefCell<Work<'a, ()>>,
+    fired: Cell<bool>,
+}
+
+/// A timer of `millis` armed on `time` now, as JavaScript arms one when it
+/// asks for it, before the work it bounds begins.
+pub fn arm(time: &dyn Time, millis: u64) -> Armed<'_> {
+    Armed {
+        timer: RefCell::new(time.sleep(Duration::from_millis(millis))),
+        fired: Cell::new(false),
+    }
+}
+
+impl Armed<'_> {
+    /// Whether its time has come (`signal.aborted`).
+    pub fn fired(&self) -> bool {
+        let _ = self.poll(&mut Context::from_waker(Waker::noop()));
+        self.fired.get()
+    }
+
+    /// `work`, or none once the timer fired first, the work then dropped:
+    /// nothing is begun under a timer that has fired, and when both are
+    /// done at once the work's answer is taken.
+    pub async fn bound<T>(&self, work: impl Future<Output = T>) -> Option<T> {
+        if self.fired() {
+            return None;
         }
-        timer.as_mut().poll(context).map(|()| None)
-    })
-    .await
+        let mut work = pin!(work);
+        poll_fn(|context| {
+            if let Poll::Ready(answer) = work.as_mut().poll(context) {
+                return Poll::Ready(Some(answer));
+            }
+            self.poll(context).map(|()| None)
+        })
+        .await
+    }
+
+    fn poll(&self, context: &mut Context<'_>) -> Poll<()> {
+        if self.fired.get() {
+            return Poll::Ready(());
+        }
+        let ready = self.timer.borrow_mut().as_mut().poll(context);
+        if ready.is_ready() {
+            self.fired.set(true);
+        }
+        ready
+    }
+}
+
+/// `work`, or none once `millis` passed on `time` first, the work then
+/// dropped: a wait JavaScript bounded with a timer of its own, armed and
+/// bound at once.
+pub async fn within<T>(time: &dyn Time, millis: u64, work: impl Future<Output = T>) -> Option<T> {
+    arm(time, millis).bound(work).await
 }
 
 /// A uuid drawn from `entropy`, 16 bytes with the version 4 bits set, as
@@ -185,6 +233,31 @@ mod tests {
         assert!(time.fire_next(10));
         assert_eq!(driver.run(), [(0, None)]);
         assert!(dropped.get(), "the work is let go");
+    }
+
+    #[test]
+    fn one_timer_bounds_a_head_and_then_its_body_and_says_when_it_fired() {
+        let time = Rc::new(ManualTime::new(0));
+        let mut driver = Driver::default();
+        let clock = Rc::clone(&time);
+        driver.begin(0, async move {
+            let attempt = arm(&*clock, 10);
+            let inner = Rc::clone(&clock);
+            let head = attempt.bound(async { 1 }).await;
+            let body = attempt
+                .bound(async move { inner.sleep(Duration::from_millis(50)).await })
+                .await;
+            let after = attempt.bound(async { 3 }).await;
+            (head, body, after, attempt.fired())
+        });
+        assert!(driver.run().is_empty());
+        assert_eq!(time.waits(0), [10, 50], "one timer for both, armed first");
+        assert!(time.fire_next(10));
+        assert_eq!(
+            driver.run(),
+            [(0, (Some(1), None, None, true))],
+            "nothing begun under a timer that fired"
+        );
     }
 
     #[test]

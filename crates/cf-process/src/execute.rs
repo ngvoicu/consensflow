@@ -12,6 +12,11 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::{terminate, Ending, Run};
 
+/// How long a program asked to end at its timeout has before it is forced:
+/// Node waits for it as long as it runs, and a probe every launch shares
+/// would wait with it (a difference kept).
+const FORCE_AFTER: Duration = Duration::from_secs(2);
+
 /// How long a program may run and how much it may write to each stream:
 /// `execFile`'s `timeout` (none when zero) and `maxBuffer`, in bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,9 +33,11 @@ pub struct Failed {
     /// it did not start, `stdout maxBuffer length exceeded` when it wrote
     /// too much.
     pub message: String,
-    /// The code it exited with, when it exited of itself with one.
+    /// The code it exited with, when it exited with one: none when a signal
+    /// ended it, and on Windows none when this side ended it, as libuv
+    /// says a signal there.
     pub code: Option<i32>,
-    /// Whether it was ended because its time ran out.
+    /// Whether it was asked to end because its time ran out.
     pub killed: bool,
     /// What it wrote to its standard output, as far as it was read.
     pub stdout: String,
@@ -40,7 +47,9 @@ pub struct Failed {
 /// inherited, until it ends: its standard output as text, or how it failed.
 /// Its input stays open and unwritten, as Node's does. It has ended when it
 /// has exited and its streams have closed, as Node's `close`: a program it
-/// started that keeps them open holds the answer back, time out or not.
+/// started that keeps them open holds the answer back, time out or not. At
+/// its timeout it is asked to end, and how it ends decides: one that ends
+/// with 0 has answered, as with Node.
 pub async fn execute(
     run: &Run,
     cwd: Option<&Path>,
@@ -69,6 +78,7 @@ pub async fn execute(
         killed: false,
         stdout: String::new(),
     })?;
+    crate::job::adopt(&child);
     let pid = child.id();
     let _input = child.stdin.take();
     let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
@@ -98,7 +108,15 @@ pub async fn execute(
             () = tokio::time::sleep(limits.timeout) => {
                 killed = true;
                 end(pid);
-                reading.await
+                tokio::select! {
+                    done = &mut reading => done,
+                    () = tokio::time::sleep(FORCE_AFTER) => {
+                        if let Some(pid) = pid {
+                            terminate(pid, Ending::Forced);
+                        }
+                        reading.await
+                    }
+                }
             }
         }
     };
@@ -121,11 +139,16 @@ pub async fn execute(
             });
         }
     }
-    if !killed && status.success() {
+    if status.success() {
         return Ok(stdout);
     }
-    // Ended by this side or by a signal, Node has no code for it.
-    let code = if killed { None } else { status.code() };
+    // Ended by a signal, Node has no code for it; on Windows this side's
+    // end is one too, where the system says 1.
+    let code = if cfg!(windows) && killed {
+        None
+    } else {
+        status.code()
+    };
     Err(Failed {
         message: format!("Command failed: {}\n{stderr}", command_line(run)),
         code,
@@ -294,6 +317,32 @@ mod tests {
             "{}",
             failed.message
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_out_of_time_that_ends_with_0_when_asked_has_answered() {
+        let run = shell("trap 'echo bye; exit 0' TERM; echo hi; while true; do sleep 0.05; done");
+        let limits = Limits {
+            timeout: Duration::from_millis(300),
+            max_buffer: 1024,
+        };
+        assert_eq!(run_now(&run, &system_env(), limits).unwrap(), "hi\nbye\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_will_not_end_when_asked_is_forced_a_moment_later() {
+        let run = shell("trap '' TERM; while true; do sleep 0.05; done");
+        let limits = Limits {
+            timeout: Duration::from_millis(200),
+            max_buffer: 1024,
+        };
+        let started = std::time::Instant::now();
+        let failed = run_now(&run, &system_env(), limits).unwrap_err();
+        assert!(failed.killed);
+        assert_eq!(failed.code, None);
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 
     #[test]

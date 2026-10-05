@@ -28,7 +28,7 @@ use serde_json::Value;
 
 use crate::contract::{HostError, PaneHost, Records, Work};
 use crate::records::{self, Cache, Options, Reading, IDLE_MS};
-use crate::seams::{Bundle, Entropy, Loopback, Ports, Processes, Services, Time};
+use crate::seams::{Bundle, Entropy, Loopback, Ports, Probes, Processes, Services, Time};
 
 mod children;
 mod peer;
@@ -535,6 +535,7 @@ impl Fakes {
             ports: Rc::clone(&self.ports) as Rc<dyn Ports>,
             loopback: Rc::clone(&self.loopback) as Rc<dyn Loopback>,
             processes: Rc::clone(&self.processes) as Rc<dyn Processes>,
+            probes: Rc::new(Probes::default()),
             bundle: bundle(root),
         }
     }

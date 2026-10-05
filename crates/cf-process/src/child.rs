@@ -1,36 +1,48 @@
 //! A program started to run beside this one, as Node's `spawn` starts it:
 //! its whole environment given, lines written to its input and read from
-//! its output, asked or forced to end, and waited for. One left running
-//! when it is let go is forced to end, with all it started, as Node's exit
-//! hook forces it.
+//! its output, asked or forced to end, and waited for until it has exited
+//! and its streams have closed (Node's `close`). One let go that was never
+//! asked to end is forced to end; one asked is left to end as it was asked.
 
+use std::cell::{Cell, RefCell};
+use std::future::{poll_fn, Future};
 use std::path::Path;
+use std::pin::Pin;
 use std::process::Stdio;
+use std::rc::{Rc, Weak};
+use std::task::{Context, Poll, Waker};
 
 use cf_base::env::Env;
 use cf_base::file::error_code;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{ChildStdin, ChildStdout};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{ChildStderr, ChildStdin, ChildStdout};
 
 use crate::{terminate, Ending, Run};
 
 /// What a child's streams are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Streams {
-    /// Its input and output are this side's, a line at a time; what it
-    /// writes to its error stream is let go.
+    /// Its input and output are this side's, a line at a time; its error
+    /// stream is let go (`['pipe', 'pipe', 'ignore']`).
     Lines,
-    /// None of them: it runs on its own.
-    Silent,
+    /// Its input and output are let go; its error stream is read and let
+    /// go, and it has closed only once that stream has
+    /// (`['ignore', 'ignore', 'pipe']`, drained).
+    Quiet,
 }
 
 /// A program running beside this one.
 pub struct Child {
-    process: tokio::process::Child,
     pid: Option<u32>,
-    input: Option<ChildStdin>,
-    output: Option<BufReader<ChildStdout>>,
-    exited: bool,
+    input: RefCell<Option<ChildStdin>>,
+    output: RefCell<Option<BufReader<ChildStdout>>>,
+    /// Waits until it has exited and its error stream has closed; none once
+    /// it has.
+    closing: RefCell<Option<Pin<Box<dyn Future<Output = ()>>>>>,
+    /// Whether it has exited and been waited for: its pid is no longer its.
+    exited: Rc<Cell<bool>>,
+    /// Whether it was asked or forced to end.
+    asked: Cell<bool>,
 }
 
 /// Starts `run` in `cwd` with the environment `env`, all of it and nothing
@@ -38,10 +50,16 @@ pub struct Child {
 /// (`spawn <file> ENOENT`).
 pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Result<Child, String> {
     let mut command = tokio::process::Command::from(run.command());
-    command.env_clear().envs(env.iter()).stderr(Stdio::null());
+    command.env_clear().envs(env.iter());
     match streams {
-        Streams::Lines => command.stdin(Stdio::piped()).stdout(Stdio::piped()),
-        Streams::Silent => command.stdin(Stdio::null()).stdout(Stdio::null()),
+        Streams::Lines => command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null()),
+        Streams::Quiet => command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped()),
     };
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
@@ -54,100 +72,182 @@ pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Resu
             error_code(&failed)
         )
     })?;
+    crate::job::adopt(&process);
+    let exited = Rc::new(Cell::new(false));
     Ok(Child {
         pid: process.id(),
-        input: process.stdin.take(),
-        output: process.stdout.take().map(BufReader::new),
-        process,
-        exited: false,
+        input: RefCell::new(process.stdin.take()),
+        output: RefCell::new(process.stdout.take().map(BufReader::new)),
+        closing: RefCell::new(Some(Box::pin(closing(
+            process.stderr.take(),
+            process,
+            Rc::clone(&exited),
+        )))),
+        exited,
+        asked: Cell::new(false),
     })
 }
 
+/// Until `process` has exited (then `exited` is set) and `errors` has
+/// closed, read and let go.
+async fn closing(
+    errors: Option<ChildStderr>,
+    mut process: tokio::process::Child,
+    exited: Rc<Cell<bool>>,
+) {
+    let drain = async {
+        if let Some(mut errors) = errors {
+            let mut sink = [0; 4096];
+            while matches!(errors.read(&mut sink).await, Ok(count) if count > 0) {}
+        }
+    };
+    let wait = async {
+        let _ = process.wait().await;
+        exited.set(true);
+    };
+    tokio::join!(drain, wait);
+}
+
 impl Child {
-    /// Writes `line` and a newline to its input.
-    pub async fn write_line(&mut self, line: &str) -> Result<(), String> {
-        let input = self
+    /// Writes `line` and a newline to its input, waiting while its pipe is
+    /// full.
+    pub async fn write_line(&self, line: &str) -> Result<(), String> {
+        let mut input = self
             .input
-            .as_mut()
-            .ok_or_else(|| "the child takes no input".to_owned())?;
-        input
-            .write_all(format!("{line}\n").as_bytes())
-            .await
-            .map_err(|failed| failed.to_string())?;
-        input.flush().await.map_err(|failed| failed.to_string())
+            .borrow_mut()
+            .take()
+            .ok_or_else(|| "the child takes no input now".to_owned())?;
+        let written = async {
+            input.write_all(format!("{line}\n").as_bytes()).await?;
+            input.flush().await
+        }
+        .await;
+        *self.input.borrow_mut() = Some(input);
+        written.map_err(|failed| failed.to_string())
     }
 
-    /// The next line of its output, its newline taken off: none once its
-    /// output ended, a failure past `limit` bytes without a newline. Each
-    /// line is read as UTF-8 whole, where Node decoded each chunk alone and
-    /// broke a character two chunks shared.
-    pub async fn read_line(&mut self, limit: usize) -> Result<Option<String>, String> {
-        let output = self
+    /// The next line of its output, its newline taken off; none once its
+    /// output ended, what followed the last newline being no line, as Node
+    /// never read it; a failure past `limit` bytes without a newline. A line
+    /// is read as UTF-8 whole, where Node decoded each chunk alone and broke
+    /// a character two chunks shared, and is bounded alone, where Node's
+    /// bound took in the rest of the chunk too: neither can be held to, as
+    /// both hang on where the system cut the chunks.
+    pub async fn read_line(&self, limit: usize) -> Result<Option<String>, String> {
+        let mut output = self
             .output
-            .as_mut()
-            .ok_or_else(|| "the child gives no output".to_owned())?;
-        let mut line = Vec::new();
-        loop {
-            let available = output
-                .fill_buf()
-                .await
-                .map_err(|failed| failed.to_string())?;
-            if available.is_empty() {
-                return Ok((!line.is_empty()).then(|| text(&line)));
-            }
-            let (taken, ended) = match available.iter().position(|&byte| byte == b'\n') {
-                Some(at) => (at + 1, true),
-                None => (available.len(), false),
-            };
-            line.extend_from_slice(&available[..taken]);
-            output.consume(taken);
-            if ended {
-                line.pop();
-            }
-            if line.len() > limit {
-                return Err(format!("a line of more than {limit} bytes"));
-            }
-            if ended {
-                return Ok(Some(text(&line)));
-            }
-        }
+            .borrow_mut()
+            .take()
+            .ok_or_else(|| "the child gives no output now".to_owned())?;
+        let line = next_line(&mut output, limit).await;
+        *self.output.borrow_mut() = Some(output);
+        line
     }
 
-    /// Whether it has exited.
-    pub fn exited(&mut self) -> bool {
-        if !self.exited {
-            self.exited = matches!(self.process.try_wait(), Ok(Some(_)) | Err(_));
-        }
-        self.exited
+    /// Whether it has exited, as Node's `exitCode` says once it has.
+    pub fn exited(&self) -> bool {
+        let _ = self.poll_closing(&mut Context::from_waker(Waker::noop()));
+        self.exited.get()
     }
 
-    /// Waits until it has exited.
-    pub async fn closed(&mut self) {
-        if !self.exited {
-            let _ = self.process.wait().await;
-            self.exited = true;
-        }
+    /// Waits until it has exited and its streams have closed.
+    pub async fn closed(&self) {
+        poll_fn(|context| self.poll_closing(context)).await;
     }
 
     /// Asks or forces it to end, not waiting: on Unix the signal `how`
     /// names, on Windows its whole tree at once whatever `how` asks
-    /// (`terminate`, `src/harnesses.js`).
-    pub fn terminate(&mut self, how: Ending) {
+    /// (`terminate`, `src/harnesses.js`). Nothing is sent to one that has
+    /// exited and been waited for: its pid may be another's now.
+    pub fn terminate(&self, how: Ending) {
+        self.asked.set(true);
         if let (Some(pid), false) = (self.pid, self.exited()) {
             terminate(pid, how);
         }
+    }
+
+    /// What ends it later, should this process be ending: the forcing of it
+    /// while it runs.
+    pub fn ender(&self) -> Ender {
+        Ender {
+            pid: self.pid,
+            exited: Rc::downgrade(&self.exited),
+        }
+    }
+
+    fn poll_closing(&self, context: &mut Context<'_>) -> Poll<()> {
+        let mut closing = self.closing.borrow_mut();
+        let Some(running) = closing.as_mut() else {
+            return Poll::Ready(());
+        };
+        if running.as_mut().poll(context).is_ready() {
+            *closing = None;
+            return Poll::Ready(());
+        }
+        Poll::Pending
     }
 }
 
 impl Drop for Child {
     fn drop(&mut self) {
-        self.terminate(Ending::Forced);
+        if !self.asked.get() {
+            self.terminate(Ending::Forced);
+        }
     }
 }
 
-/// A line's bytes as text, what is no UTF-8 written U+FFFD.
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
+/// A child's end, kept apart from the child: this process's exit path
+/// forces every child still running.
+#[derive(Debug, Clone)]
+pub struct Ender {
+    pid: Option<u32>,
+    exited: Weak<Cell<bool>>,
+}
+
+impl Ender {
+    /// Whether the child is still there to be ended.
+    pub fn running(&self) -> bool {
+        self.exited.upgrade().is_some_and(|exited| !exited.get())
+    }
+
+    /// Forces the child to end, if it is still there.
+    pub fn force(&self) {
+        if let (Some(pid), true) = (self.pid, self.running()) {
+            terminate(pid, Ending::Forced);
+        }
+    }
+}
+
+/// The next line of `output` within `limit`, none at its end.
+async fn next_line(
+    output: &mut BufReader<ChildStdout>,
+    limit: usize,
+) -> Result<Option<String>, String> {
+    let mut line = Vec::new();
+    loop {
+        let available = output
+            .fill_buf()
+            .await
+            .map_err(|failed| failed.to_string())?;
+        if available.is_empty() {
+            return Ok(None);
+        }
+        let (taken, ended) = match available.iter().position(|&byte| byte == b'\n') {
+            Some(at) => (at + 1, true),
+            None => (available.len(), false),
+        };
+        line.extend_from_slice(&available[..taken]);
+        output.consume(taken);
+        if ended {
+            line.pop();
+        }
+        if line.len() > limit {
+            return Err(format!("a line of more than {limit} bytes"));
+        }
+        if ended {
+            return Ok(Some(String::from_utf8_lossy(&line).into_owned()));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -186,7 +286,7 @@ mod tests {
         ]);
     }
 
-    fn block_on<T>(work: impl std::future::Future<Output = T>) -> T {
+    fn block_on<T>(work: impl Future<Output = T>) -> T {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -196,10 +296,10 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn lines_go_both_ways_and_the_output_ends_with_none() {
+    fn lines_go_both_ways_and_what_follows_the_last_newline_is_no_line() {
         block_on(async {
-            let mut child = spawn(
-                &shell("read line; echo \"got $line\"; printf 'caf\\303\\251\\nlast'"),
+            let child = spawn(
+                &shell("read line; echo \"got $line\"; printf 'caf\\303\\251\\nunended'"),
                 None,
                 &system_env(),
                 Streams::Lines,
@@ -211,7 +311,6 @@ mod tests {
                 Some("got hello")
             );
             assert_eq!(child.read_line(64).await.unwrap().as_deref(), Some("café"));
-            assert_eq!(child.read_line(64).await.unwrap().as_deref(), Some("last"));
             assert_eq!(child.read_line(64).await.unwrap(), None);
             child.closed().await;
             assert!(child.exited());
@@ -221,7 +320,7 @@ mod tests {
     #[test]
     fn a_line_past_its_limit_is_a_failure() {
         block_on(async {
-            let mut child = spawn(
+            let child = spawn(
                 &shell("echo 0123456789abcdef"),
                 None,
                 &system_env(),
@@ -236,20 +335,42 @@ mod tests {
     }
 
     #[test]
-    fn a_child_asked_to_end_ends_and_is_waited_for() {
+    fn a_child_asked_to_end_ends_and_is_waited_for_and_says_so() {
         block_on(async {
             let script = if cfg!(windows) {
                 "ping -n 30 127.0.0.1 >NUL"
             } else {
                 "exec sleep 30"
             };
-            let mut child = spawn(&shell(script), None, &system_env(), Streams::Silent).unwrap();
+            let child = spawn(&shell(script), None, &system_env(), Streams::Quiet).unwrap();
+            let ender = child.ender();
             assert!(!child.exited());
+            assert!(ender.running());
             child.terminate(Ending::Asked);
             tokio::time::timeout(Duration::from_secs(10), child.closed())
                 .await
                 .unwrap();
             assert!(child.exited());
+            assert!(!ender.running());
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_quiet_child_has_closed_only_once_what_it_started_lets_its_errors_go() {
+        block_on(async {
+            // The shell exits at once; the sleep it left holds its error stream.
+            let child = spawn(
+                &shell("sleep 1 & echo started 1>&2"),
+                None,
+                &system_env(),
+                Streams::Quiet,
+            )
+            .unwrap();
+            let closing = tokio::time::timeout(Duration::from_millis(300), child.closed()).await;
+            assert!(closing.is_err(), "not closed while the stream is held");
+            assert!(child.exited(), "the shell itself has exited");
+            child.closed().await;
         });
     }
 
@@ -260,7 +381,36 @@ mod tests {
             args: Vec::new(),
             verbatim: false,
         };
-        let failed = block_on(async { spawn(&run, None, &system_env(), Streams::Silent).err() });
+        let failed = block_on(async { spawn(&run, None, &system_env(), Streams::Quiet).err() });
         assert_eq!(failed.as_deref(), Some("spawn /nonexistent/cli ENOENT"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn one_let_go_unasked_is_forced_and_one_asked_is_left_to_end_as_asked() {
+        block_on(async {
+            let child =
+                spawn(&shell("exec sleep 30"), None, &system_env(), Streams::Quiet).unwrap();
+            let pid = child.pid.unwrap();
+            drop(child);
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            assert!(!crate::alive(pid), "forced when let go");
+
+            // Asked to end, it may take its time: it is not forced.
+            let child = spawn(
+                &shell("trap 'sleep 1; exit 0' TERM; while true; do sleep 0.05; done"),
+                None,
+                &system_env(),
+                Streams::Quiet,
+            )
+            .unwrap();
+            let pid = child.pid.unwrap();
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            child.terminate(Ending::Asked);
+            drop(child);
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            assert!(crate::alive(pid), "still ending as it was asked");
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+        });
     }
 }

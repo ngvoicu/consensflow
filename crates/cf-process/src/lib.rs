@@ -10,13 +10,15 @@
 mod alive;
 mod child;
 mod execute;
+mod job;
 mod runnable;
 mod search;
 mod terminate;
 
 pub use alive::alive;
-pub use child::{spawn, Child, Streams};
+pub use child::{spawn, Child, Ender, Streams};
 pub use execute::{execute, Failed, Limits};
+pub use job::with_required;
 pub use runnable::{pane_argv, runnable, Run};
 pub use search::{find_in, on_path};
 pub use terminate::{terminate, Ending};
