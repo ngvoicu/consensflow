@@ -11,6 +11,7 @@
  *   names the platform's own paths and programs (`claude.mjs`).
  */
 import { claudeScenarios } from './claude.mjs'
+import { opencodeScenarios } from './opencode.mjs'
 import { piScenarios } from './pi.mjs'
 import { play } from './runner.mjs'
 import { tables } from './tables.mjs'
@@ -29,6 +30,7 @@ export async function launchGoldens() {
     [`tests/goldens/launch/scenarios.${process.platform}.json`]: await played([
       ...claudeScenarios(),
       ...piScenarios(),
+      ...opencodeScenarios(),
     ]),
   }
 }

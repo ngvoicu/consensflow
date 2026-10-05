@@ -7,6 +7,9 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+# OpenCode's server is asked with a basic-auth header, and its tokens are
+# base64url.
+base64.workspace = true
 cf-base.workspace = true
 cf-process.workspace = true
 cf-proto.workspace = true

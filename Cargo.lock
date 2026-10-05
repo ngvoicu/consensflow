@@ -424,6 +424,7 @@ dependencies = [
 name = "cf-harness"
 version = "3.0.0-alpha.73"
 dependencies = [
+ "base64 0.22.1",
  "cf-base",
  "cf-harness",
  "cf-process",

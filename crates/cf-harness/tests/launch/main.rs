@@ -10,6 +10,7 @@
 
 mod claude;
 mod coverage;
+mod opencode;
 mod pi;
 mod scenarios;
 mod tables;

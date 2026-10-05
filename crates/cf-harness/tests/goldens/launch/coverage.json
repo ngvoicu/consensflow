@@ -2,15 +2,17 @@
   "about": "Every golden of tests/goldens/launch, counted, and who answers it: a Rust test that holds every row, or the landing it waits for. Kept by hand: a case removed from the oracle fails tests/launch/coverage.rs until this says so too.",
   "tables": {
     "windows": { "rows": 2520, "held": "shared::window_args" },
-    "childEnv": { "rows": 7, "deferred": "landing 5, OpenCode: its only caller" },
+    "childEnv": { "rows": 7, "held": "opencode::child_env" },
     "windowText": { "rows": 270, "held": "tests/launch/tables.rs" },
     "consoleText": { "rows": 2011, "held": "tests/launch/tables.rs" },
     "admission": { "rows": 120, "held": "shared::admission" },
     "recordState": { "rows": 16, "held": "shared::record_state" },
-    "fileUrl": { "rows": 295, "held": "tests/launch/tables.rs" }
+    "fileUrl": { "rows": 295, "held": "tests/launch/tables.rs" },
+    "openCodeUrls": { "rows": 40, "held": "opencode::channel::url" }
   },
   "scenarios": {
     "claude-code": { "darwin": 44, "win32": 44, "held": "tests/launch/scenarios.rs" },
+    "opencode": { "darwin": 158, "win32": 158, "held": "tests/launch/scenarios.rs" },
     "pi": { "darwin": 62, "win32": 62, "held": "tests/launch/scenarios.rs" }
   }
 }

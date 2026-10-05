@@ -16,12 +16,13 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use cf_base::env::Env;
-use cf_base::path;
+use cf_base::{js, path};
 use cf_harness::claude::ClaudeAdapter;
 use cf_harness::contract::{
     Adapter, Admission, Agent, HostError, Launch, LaunchId, Observed, Pane, Readiness, Window,
 };
 use cf_harness::forget_launch;
+use cf_harness::opencode::OpenCodeAdapter;
 use cf_harness::pi::PiAdapter;
 use cf_harness::seams::loopback::BodyFailed;
 use cf_harness::seams::{Services, Time};
@@ -29,8 +30,10 @@ use cf_harness::testing::{
     fake_executable, route, Answer, ChildScript, Driver, Ends, Fakes, OtherProcess, ScriptedHost,
     Sent, Served,
 };
+use regex::Regex;
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
+use url::form_urlencoded::byte_serialize;
 
 /// A process id no process has (`DEAD`, runner.mjs).
 const DEAD: u32 = 999_999;
@@ -51,9 +54,62 @@ fn platform() -> &'static str {
 struct Names {
     root: String,
     other: Option<u32>,
+    forms: RootForms,
+    bundle: Regex,
+}
+
+/// The ways the root reads in the text a step records besides as itself
+/// (`rootForms`, runner.mjs): as a file URL, as JSON writes it, and as a
+/// URL's query holds it.
+struct RootForms {
+    file_url: String,
+    plain: Vec<String>,
+}
+
+/// `encodeURIComponent(text)`.
+pub(crate) fn component(text: &str) -> String {
+    text.bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' => char::from(byte).to_string(),
+            b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')' => {
+                char::from(byte).to_string()
+            }
+            other => format!("%{other:02X}"),
+        })
+        .collect()
+}
+
+impl RootForms {
+    fn of(root: &str) -> Self {
+        let component = component(root);
+        let json = serde_json::to_string(root).unwrap();
+        Self {
+            file_url: path::to_file_url(root, cfg!(windows)).unwrap(),
+            plain: vec![
+                root.to_owned(),
+                json[1..json.len() - 1].to_owned(),
+                component.clone(),
+                component.replace('\'', "%27"),
+                byte_serialize(root.as_bytes()).collect(),
+            ],
+        }
+    }
 }
 
 impl Names {
+    /// The names of a run whose root is `root`, as the system names it.
+    fn new(root: String, other: Option<u32>) -> Self {
+        Self {
+            forms: RootForms::of(&root),
+            // OpenCode's bundle is named by a hash of the folder it is
+            // published in, which the root is among the parents of: the hash
+            // is not the same in two runs, and is written `$HASH`.
+            bundle: Regex::new(r"(extensions[\\/]opencode[\\/])[0-9a-f]{64}").unwrap(),
+            root,
+            other,
+        }
+    }
+
     /// The process ids a scenario names, by their names.
     fn pids(&self) -> Vec<(&'static str, u32)> {
         let mut pids = vec![("$PID", std::process::id()), ("$DEAD", DEAD)];
@@ -125,12 +181,14 @@ impl Names {
                 live.map_or_else(|| value.clone(), |(name, _)| json!(name))
             }
             Value::String(text) => {
-                let text = text.replace(&self.root, "$ROOT");
-                if text.starts_with("$ROOT") {
-                    json!(posix(text))
-                } else {
-                    json!(text)
+                let mut text = text.replace(&self.forms.file_url, "file://$ROOT");
+                for form in &self.forms.plain {
+                    text = text.replace(form, "$ROOT");
                 }
+                if text.starts_with("$ROOT") {
+                    text = posix(text);
+                }
+                json!(self.bundle.replace_all(&text, "${1}$$HASH"))
             }
             other => other.clone(),
         }
@@ -164,9 +222,10 @@ fn answer(names: &Names, given: &Value) -> Answer {
 }
 
 /// A peer's answer as a scenario writes it: `{held: true}`, `{noHead:
-/// true}`, or a head's status and its body (its text, `{held: true}`,
-/// `{cut: true}`).
-fn served(given: &Value) -> Served {
+/// true}`, or a head's status and its body (its text, `{json: value}` as
+/// JSON with the paths in it under the root made whole, `{repeat: text,
+/// times}` as that text that many times, `{held: true}`, `{cut: true}`).
+fn served(names: &Names, given: &Value) -> Served {
     if given.get("held") == Some(&json!(true)) {
         return Served::Held;
     }
@@ -176,6 +235,19 @@ fn served(given: &Value) -> Served {
     let status = u16::try_from(given["status"].as_u64().unwrap()).unwrap();
     let body = match &given["body"] {
         Value::String(text) => Sent::Now(text.as_bytes().to_vec()),
+        whole if whole.get("json").is_some() => {
+            Sent::Now(js::stringify(&names.real(&whole["json"])).into_bytes())
+        }
+        repeated if repeated.get("repeat").is_some() => {
+            let times = usize::try_from(repeated["times"].as_u64().unwrap()).unwrap();
+            Sent::Now(
+                repeated["repeat"]
+                    .as_str()
+                    .unwrap()
+                    .repeat(times)
+                    .into_bytes(),
+            )
+        }
         held if held.get("held") == Some(&json!(true)) => Sent::Held,
         cut if cut.get("cut") == Some(&json!(true)) => Sent::Cut,
         _ => Sent::Now(Vec::new()),
@@ -393,10 +465,16 @@ fn begin_prepare(played: &mut Played, id: usize, given: &Value) {
     });
 }
 
-/// Begins what a step asks the window.
-fn begin_asking(played: &mut Played, id: usize, step: &Value) {
+/// Scripts what a step's work is answered by: the peer's routes, the
+/// programs started, and the host's operations, a prepare's as well as the
+/// others'.
+fn script(played: &mut Played, step: &Value) {
     for (route, answers) in step["served"].as_object().into_iter().flatten() {
-        let answers = answers.as_array().unwrap().iter().map(served);
+        let answers = answers
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|given| served(&played.names, given));
         played.fakes.loopback.serve(route, answers);
     }
     for (name, scripts) in step["children"].as_object().into_iter().flatten() {
@@ -413,6 +491,10 @@ fn begin_asking(played: &mut Played, id: usize, step: &Value) {
             .collect();
         played.host.answer(op, answers);
     }
+}
+
+/// Begins what a step asks the window.
+fn begin_asking(played: &mut Played, id: usize, step: &Value) {
     let window = Rc::clone(played.window.as_ref().expect("a window prepared"));
     let host = Rc::clone(&played.host);
     let pane = step.get("pane").map_or_else(
@@ -489,14 +571,48 @@ fn in_order_begun<W>(
 
 #[test]
 fn a_key_beginning_with_a_dollar_is_written_with_another_as_node_s_runner_writes_it() {
-    let names = Names {
-        root: "/nowhere".to_owned(),
-        other: None,
-    };
+    let names = Names::new("/nowhere".to_owned(), None);
     assert_eq!(
         names.written(&json!({"$utf16": [97], "plain": {"$ROOT": "$ROOT"}})),
         json!({"$$utf16": [97], "plain": {"$$ROOT": "$ROOT"}})
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn the_root_is_written_as_a_url_and_json_hold_it_and_the_hash_of_a_bundle_is_no_name() {
+    let names = Names::new("/tmp/cf-launch-golden-X y's".to_owned(), None);
+    let written = |text: &str| names.written(&json!(text));
+    assert_eq!(
+        written("/tmp/cf-launch-golden-X y's/home"),
+        json!("$ROOT/home")
+    );
+    assert_eq!(
+        written("file:///tmp/cf-launch-golden-X%20y's/a"),
+        json!("file://$ROOT/a")
+    );
+    // A query holds it as `encodeURIComponent` does, with the parser's `%27`
+    // for the quote, and as a form does, with `+` for the space.
+    assert_eq!(
+        written("http://127.0.0.1:41000/x?directory=%2Ftmp%2Fcf-launch-golden-X%20y's%2Fwork"),
+        json!("http://127.0.0.1:41000/x?directory=$ROOT%2Fwork")
+    );
+    assert_eq!(
+        written("?directory=%2Ftmp%2Fcf-launch-golden-X%20y%27s"),
+        json!("?directory=$ROOT")
+    );
+    assert_eq!(
+        written("?directory=%2Ftmp%2Fcf-launch-golden-X+y%27s%2Fwork"),
+        json!("?directory=$ROOT%2Fwork")
+    );
+    let hash = "0123456789abcdef".repeat(4);
+    assert_eq!(
+        written(&format!("/x/extensions/opencode/{hash}/hosts")),
+        json!("/x/extensions/opencode/$HASH/hosts")
+    );
+    // Pi's bundle is named by the same kind of hash, which does not change.
+    let pi = format!("/x/extensions/pi/{hash}/hosts");
+    assert_eq!(written(&pi), json!(pi));
 }
 
 #[test]
@@ -629,13 +745,15 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
     let mut advance = None;
     if step.get("prepare").is_some() {
         let given = played.names.real(&step["prepare"]);
+        script(played, step);
         begin_prepare(played, index, &given);
     } else if let Some(op) = step["release"].as_str() {
         // A route has a space in it (`GET /session`), a host's operation none.
         let released = if op == "look" {
             played.fakes.records.release()
         } else if op.contains(' ') {
-            played.fakes.loopback.release(op, served(&step["answer"]))
+            let given = served(&played.names, &step["answer"]);
+            played.fakes.loopback.release(op, given)
         } else {
             let given = response(&played.names, &step["answer"]);
             played.host.release(op, given)
@@ -660,6 +778,7 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
         forget_launch(home, launch).unwrap();
         played.window = None;
     } else {
+        script(played, step);
         begin_asking(played, index, step);
     }
     let settled = run(played, advance);
@@ -726,9 +845,29 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
 fn adapter(harness: &str, services: &Services) -> Rc<dyn Adapter> {
     match harness {
         "claude-code" => Rc::new(ClaudeAdapter::new(services)),
+        "opencode" => Rc::new(OpenCodeAdapter::new(services)),
         "pi" => Rc::new(PiAdapter::new(services)),
         other => panic!("no adapter for {other}"),
     }
+}
+
+/// `path` as the system names it, a Windows name as libuv writes it: the
+/// root a scenario is played in (`fs.realpath`, runner.mjs), so that a
+/// folder's real name is under it.
+pub(crate) fn real_name(path: &Path) -> PathBuf {
+    let real = fs::canonicalize(path).unwrap();
+    let named = real.to_string_lossy();
+    if cfg!(windows) {
+        if let Some(rest) = named.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = named.strip_prefix(r"\\?\") {
+            if rest.as_bytes().get(1) == Some(&b':') {
+                return PathBuf::from(rest);
+            }
+        }
+    }
+    real
 }
 
 /// The mask the files of a scenario are made under (`UMASK`, `runner.mjs`),
@@ -762,22 +901,23 @@ fn play(scenario: &Value) -> Vec<Value> {
         .prefix("cf-launch-golden-")
         .tempdir()
         .unwrap();
-    fs::create_dir(dir.path().join("bin")).unwrap();
+    let root = real_name(dir.path());
+    fs::create_dir(root.join("bin")).unwrap();
     let other = scenario["steps"]
         .to_string()
         .contains("$OTHER")
         .then(OtherProcess::start);
-    let names = Names {
-        root: dir.path().to_string_lossy().into_owned(),
-        other: other.as_ref().map(OtherProcess::pid),
-    };
+    let names = Names::new(
+        root.to_string_lossy().into_owned(),
+        other.as_ref().map(OtherProcess::pid),
+    );
     let env = names.real(&scenario["env"]).as_object().unwrap().clone();
     let vars = env
         .iter()
         .map(|(name, value)| (name.clone(), value.as_str().unwrap().to_owned()));
     let env_vars = Env::from_vars(vars);
     let fakes = Fakes::new(&env_vars);
-    let services = fakes.services(&env_vars, dir.path());
+    let services = fakes.services(&env_vars, &root);
     let adapter = adapter(scenario["harness"].as_str().unwrap(), &services);
     let mut played = Played {
         _dir: dir,
