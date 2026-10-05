@@ -34,7 +34,7 @@ impl Channel {
         }
     }
 
-    fn accepts(self, version: &Version) -> bool {
+    pub(crate) fn accepts(self, version: &Version) -> bool {
         version.build.is_empty()
             && (version.pre.is_empty()
                 || (self == Self::Alpha && version.pre.as_str().split('.').next() == Some("alpha")))
@@ -85,6 +85,19 @@ pub fn update_channel<R: Runtime>(app: AppHandle<R>, channel: Channel) -> Value 
     }
 }
 
+/// Whether this platform downloads and installs an update itself. Where it
+/// does not (Windows, for now), a check finds the release the feed names and
+/// the page it is downloaded from.
+const INSTALLS_IN_APP: bool = cfg!(target_os = "macos");
+
+/// What a check found: the release, the signed update to download where the
+/// app installs it, and the page to download it from where it does not.
+struct Found {
+    pending: Option<Update>,
+    available: Option<ReleaseInfo>,
+    page: Option<String>,
+}
+
 #[tauri::command]
 pub async fn update_check<R: Runtime>(app: AppHandle<R>) -> Value {
     let manager = app.state::<UpdateManager>();
@@ -93,95 +106,135 @@ pub async fn update_check<R: Runtime>(app: AppHandle<R>) -> Value {
     }
     publish(&app);
     let snapshot = manager.snapshot();
-    let checked = async {
-        let fixture = test_update_url(
-            crate::selftest::enabled(),
-            std::env::var("CONSENSFLOW_SELFTEST_UPDATER_URL")
-                .ok()
-                .as_deref(),
-        )?;
-        let mut builder = app
-            .updater_builder()
-            .target(tauri_plugin_updater::target().ok_or("This platform has no update target")?)
-            .endpoints(vec![fixture
-                .clone()
-                .unwrap_or_else(|| snapshot.channel.endpoint())])
-            .map_err(|e| e.to_string())?
-            .timeout(std::time::Duration::from_secs(20))
-            .configure_client(|client| client.https_only(true));
-        if fixture.is_some() {
-            // Only the existing opt-in packaged self-test may replace the
-            // distribution boundary. TLS and archive signatures still verify.
-            let pem = std::fs::read(
-                std::env::var("CONSENSFLOW_SELFTEST_UPDATER_CERT").map_err(|e| e.to_string())?,
-            )
-            .map_err(|e| e.to_string())?;
-            let certificate = reqwest::Certificate::from_pem(&pem).map_err(|e| e.to_string())?;
-            let public = std::fs::read_to_string(
-                std::env::var("CONSENSFLOW_SELFTEST_UPDATER_KEY").map_err(|e| e.to_string())?,
-            )
-            .map_err(|e| e.to_string())?;
-            builder = builder
-                .pubkey(public.trim())
-                .no_proxy()
-                .configure_client(move |client| {
-                    client
-                        .https_only(true)
-                        .add_root_certificate(certificate.clone())
-                });
-        }
-        let updater = builder.build().map_err(|e| e.to_string())?;
-        let mut candidate = updater
-            .check()
-            .await
-            .map_err(|e| describe_check_error(snapshot.channel, e))?;
-        let available = candidate
-            .as_ref()
-            .map(|update| {
-                validate_release(
-                    &snapshot.current_version,
-                    snapshot.channel,
-                    &update.raw_json,
-                    &update.target,
-                )
-            })
-            .transpose()?;
-        if let (Some(endpoint), Some(update)) = (fixture, candidate.as_mut()) {
-            update.download_url = endpoint.join("archive").map_err(|e| e.to_string())?;
-        }
-        Ok::<_, String>((candidate, available))
-    }
-    .await;
+    let checked = if INSTALLS_IN_APP {
+        check_in_app(&app, &snapshot).await
+    } else {
+        check_by_page(&snapshot).await
+    };
     match checked {
-        Ok((pending, available)) => {
-            let mut state = manager.state.lock().unwrap();
-            state.snapshot.phase = if pending.is_some() {
-                "available"
-            } else {
-                "idle"
-            };
-            state.pending = pending;
-            state.snapshot.available = available;
-            state.snapshot.last_checked = time::OffsetDateTime::now_utc()
-                .format(&time::format_description::well_known::Rfc3339)
-                .ok();
-        }
+        Ok(found) => manager.found(found),
         Err(error) => manager.fail(format!("Could not check for updates: {error}")),
     }
     publish(&app)
 }
 
+/// The signed update the feed offers this platform, checked, for the app to
+/// download and install.
+async fn check_in_app<R: Runtime>(
+    app: &AppHandle<R>,
+    snapshot: &UpdateSnapshot,
+) -> Result<Found, String> {
+    let fixture = test_update_url(
+        crate::selftest::enabled(),
+        std::env::var("CONSENSFLOW_SELFTEST_UPDATER_URL")
+            .ok()
+            .as_deref(),
+    )?;
+    let mut builder = app
+        .updater_builder()
+        .target(tauri_plugin_updater::target().ok_or("This platform has no update target")?)
+        .endpoints(vec![fixture
+            .clone()
+            .unwrap_or_else(|| snapshot.channel.endpoint())])
+        .map_err(|e| e.to_string())?
+        .timeout(std::time::Duration::from_secs(20))
+        .configure_client(|client| client.https_only(true));
+    if fixture.is_some() {
+        // Only the existing opt-in packaged self-test may replace the
+        // distribution boundary. TLS and archive signatures still verify.
+        let pem = std::fs::read(
+            std::env::var("CONSENSFLOW_SELFTEST_UPDATER_CERT").map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        let certificate = reqwest::Certificate::from_pem(&pem).map_err(|e| e.to_string())?;
+        let public = std::fs::read_to_string(
+            std::env::var("CONSENSFLOW_SELFTEST_UPDATER_KEY").map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        builder = builder
+            .pubkey(public.trim())
+            .no_proxy()
+            .configure_client(move |client| {
+                client
+                    .https_only(true)
+                    .add_root_certificate(certificate.clone())
+            });
+    }
+    let updater = builder.build().map_err(|e| e.to_string())?;
+    let mut pending = updater
+        .check()
+        .await
+        .map_err(|e| describe_check_error(snapshot.channel, e))?;
+    let available = pending
+        .as_ref()
+        .map(|update| {
+            validate_release(
+                &snapshot.current_version,
+                snapshot.channel,
+                &update.raw_json,
+                &update.target,
+            )
+        })
+        .transpose()?;
+    if let (Some(endpoint), Some(update)) = (fixture, pending.as_mut()) {
+        update.download_url = endpoint.join("archive").map_err(|e| e.to_string())?;
+    }
+    Ok(Found {
+        pending,
+        available,
+        page: None,
+    })
+}
+
+/// The release the feed names, checked as any release is, and the page it
+/// is downloaded from: the feed holds no archive this platform installs.
+async fn check_by_page(snapshot: &UpdateSnapshot) -> Result<Found, String> {
+    let document =
+        crate::update_page::read_feed(snapshot.channel.endpoint(), snapshot.channel).await?;
+    let available =
+        crate::update_page::newer_release(&snapshot.current_version, snapshot.channel, &document)?;
+    let page = available
+        .as_ref()
+        .map(|release| crate::update_page::page_of(&release.version));
+    Ok(Found {
+        pending: None,
+        available,
+        page,
+    })
+}
+
+/// Opens the page of the release a check found, where the app does not
+/// install it itself.
+#[tauri::command]
+pub fn update_open_page<R: Runtime>(app: AppHandle<R>) -> Value {
+    let Some(page) = app.state::<UpdateManager>().snapshot().page else {
+        return command_error(
+            &app,
+            "Check for updates before opening a download page".into(),
+        );
+    };
+    match crate::update_page::open(&page) {
+        Ok(()) => publish(&app),
+        Err(error) => command_error(&app, format!("The download page could not open: {error}")),
+    }
+}
+
 fn describe_check_error(channel: Channel, error: tauri_plugin_updater::Error) -> String {
     if matches!(error, tauri_plugin_updater::Error::ReleaseNotFound) {
-        let label = if channel == Channel::Alpha {
-            "Alpha"
-        } else {
-            "Stable"
-        };
-        format!("The {label} update feed is unavailable. Please try again later.")
+        feed_unavailable(channel)
     } else {
         error.to_string()
     }
+}
+
+/// What a check says of a channel's feed that is not there.
+pub(crate) fn feed_unavailable(channel: Channel) -> String {
+    let label = if channel == Channel::Alpha {
+        "Alpha"
+    } else {
+        "Stable"
+    };
+    format!("The {label} update feed is unavailable. Please try again later.")
 }
 
 fn test_update_url(enabled: bool, address: Option<&str>) -> Result<Option<url::Url>, String> {
@@ -326,6 +379,9 @@ pub struct UpdateSnapshot {
     last_checked: Option<String>,
     error: Option<String>,
     blockers: Vec<Value>,
+    /// Where an available release is downloaded from by hand, on a platform
+    /// whose app does not install it itself; none where it does.
+    page: Option<String>,
 }
 
 struct UpdateState {
@@ -358,6 +414,7 @@ impl UpdateManager {
                     last_checked: None,
                     error: None,
                     blockers: Vec::new(),
+                    page: None,
                 },
                 pending: None,
                 bytes: None,
@@ -393,6 +450,7 @@ impl UpdateManager {
         state.snapshot.channel = channel;
         state.snapshot.phase = "idle";
         state.snapshot.available = None;
+        state.snapshot.page = None;
         state.snapshot.error = None;
         state.snapshot.last_checked = None;
         state.snapshot.downloaded_bytes = 0;
@@ -413,9 +471,26 @@ impl UpdateManager {
         state.snapshot.phase = "checking";
         state.snapshot.error = None;
         state.snapshot.available = None;
+        state.snapshot.page = None;
         state.pending = None;
         state.bytes = None;
         true
+    }
+
+    /// What a check found becomes the state: available, or nothing newer.
+    fn found(&self, found: Found) {
+        let mut state = self.state.lock().unwrap();
+        state.snapshot.phase = if found.available.is_some() {
+            "available"
+        } else {
+            "idle"
+        };
+        state.pending = found.pending;
+        state.snapshot.available = found.available;
+        state.snapshot.page = found.page;
+        state.snapshot.last_checked = time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .ok();
     }
 
     fn fail(&self, error: String) {
@@ -513,9 +588,9 @@ impl UpdateManager {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ReleaseInfo {
-    version: String,
-    notes: String,
-    date: Option<String>,
+    pub(crate) version: String,
+    pub(crate) notes: String,
+    pub(crate) date: Option<String>,
 }
 
 pub fn validate_release(

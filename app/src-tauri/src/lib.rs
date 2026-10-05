@@ -23,6 +23,7 @@ mod portable;
 pub mod runtime;
 #[cfg(target_os = "macos")]
 mod update_install;
+mod update_page;
 pub mod updates;
 
 use runtime::AppRuntime;
@@ -379,6 +380,7 @@ pub fn run() {
                     updates::update_check,
                     updates::update_download,
                     updates::update_install,
+                    updates::update_open_page,
                     selftest_report,
                 ]);
             handler(invoke)
