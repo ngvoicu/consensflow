@@ -137,8 +137,10 @@ fn not_a_folder(name: Option<&str>, levels_below: bool) -> &'static str {
 /// `writeFile(path, bytes, { mode })`: the file opened as the flag `w` opens
 /// it (`open`, with its path), made with `mode` (less the umask) when it is
 /// not there and keeping its own when it is, the bytes written to it, and
-/// the file closed, its close checked as Node checks it: a rename is never
-/// made over a file written short.
+/// the file closed, its close checked on Unix as Node checks it: a rename is
+/// never made over a file written short. Windows takes no mode here, where
+/// libuv made a file read-only for a mode without the owner's write bit:
+/// every caller asks for one its owner may write (`0o600`, `0o666`).
 pub fn write_file(path: &Path, bytes: &[u8], mode: u32) -> Result<(), FileError> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
