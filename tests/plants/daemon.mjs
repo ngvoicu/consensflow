@@ -26,13 +26,14 @@ import { PLANTS as CONSTANTS } from './daemon/constants.mjs'
 import { PLANTS as FRONT } from './daemon/front.mjs'
 import { PLANTS as PARTS } from './daemon/parts.mjs'
 import { PLANTS as RUN } from './daemon/run.mjs'
+import { PLANTS as SCREENS } from './daemon/screens.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 /** The longest one run of tests may take, in milliseconds: the slowest takes a minute. */
 const RUN_LIMIT = 5 * 60 * 1000
 
 /** Every plant, by area; what a plant is, is told in `daemon/kit.mjs`. */
-const PLANTS = [...RUN, ...FRONT, ...PARTS, ...CONSTANTS]
+const PLANTS = [...RUN, ...FRONT, ...PARTS, ...CONSTANTS, ...SCREENS]
 
 const args = process.argv.slice(2)
 const checkOnly = args.includes('--check')

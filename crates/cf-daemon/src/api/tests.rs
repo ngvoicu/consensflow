@@ -6,14 +6,12 @@
 use hyper::Method;
 use serde_json::{json, Value};
 
+use super::answer::Content;
 use super::*;
 use crate::testing::{request, said, scene, Scene};
 
 fn screens() -> Screens {
-    Screens {
-        token: "the-ui-token".to_owned(),
-        on_roster_change: Rc::new(|| Ok(())),
-    }
+    crate::screens::testing::inert()
 }
 
 async fn through(
@@ -47,8 +45,9 @@ async fn a_path_that_is_no_route_from_a_caller_with_no_token_is_401_not_404() {
         (Method::GET, "/api/whoami"),
         (Method::POST, "/api/answers"),
         (Method::DELETE, "/anything/at/all"),
-        (Method::GET, "/"),
-        (Method::GET, "/api/agents"),
+        // Not `/` or `/api/agents`: those are the screens', whose 401 is their own.
+        (Method::GET, "/api/agents/Upper"),
+        (Method::GET, "/api/agents/"),
     ] {
         let (status, body) = through(&scene, method.clone(), target, None, "").await;
         assert_eq!(
@@ -117,7 +116,7 @@ async fn a_window_with_its_token_is_told_a_route_is_unknown_in_nodes_words() {
 }
 
 #[tokio::test]
-async fn until_the_screens_land_their_paths_are_answered_as_any_other_unknown_path() {
+async fn the_screens_answer_their_own_paths_before_any_window_s_token_is_looked_at() {
     let scene = scene();
     for target in [
         "/",
@@ -126,12 +125,29 @@ async fn until_the_screens_land_their_paths_are_answered_as_any_other_unknown_pa
         "/api/agents/mybuilder",
         "/api/preferences",
     ] {
-        let (status, _) = through(&scene, Method::GET, target, Some("the-ui-token"), "").await;
-        assert_eq!(status, 401, "the UI token is no window's: {target}");
-        let (status, body) = through(&scene, Method::GET, target, Some(&scene.zeus), "").await;
-        assert_eq!(status, 404, "{target}");
-        assert_eq!(body["error"], "unknown-route");
+        // No token, and a window's: their own bare 401, neither the API's (which
+        // says why) nor its 404 for a route it has none for.
+        for token in [None, Some(scene.zeus.as_str())] {
+            let (status, body) = through(&scene, Method::GET, target, token, "").await;
+            assert_eq!(
+                (status, body),
+                (401, json!({ "error": "unauthorized" })),
+                "{target}"
+            );
+        }
     }
+    // The UI token opens a screen, which the API never sees.
+    let answered = handle(
+        &scene.context,
+        &screens(),
+        request(Method::GET, "/harnesses", Some("the-ui-token"), ""),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        (answered.status, answered.content),
+        (200, Content::Html(page)) if page.contains("<title>ConsensFlow Harnesses</title>")
+    ));
 }
 
 #[tokio::test]

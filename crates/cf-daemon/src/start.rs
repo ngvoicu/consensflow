@@ -30,6 +30,8 @@ use cf_catalog::{roster_path, Catalog, CatalogError};
 use cf_engine::runtime::begin;
 use cf_engine::seams::{Limits, Seams};
 use cf_engine::Dispatcher;
+use cf_harness::admin::feed::Feed;
+use cf_harness::admin::HarnessAdmin;
 use cf_harness::records::Thread;
 use cf_harness::seams::{
     Bundle, LoopbackPorts, Probes, Services, SystemEntropy, SystemLoopback, SystemProcesses,
@@ -52,6 +54,7 @@ use crate::machine;
 use crate::page::{self, Page};
 use crate::pass::{throttle, PassLoop};
 use crate::roster::Agents;
+use crate::screens::network::HttpsFeed;
 use crate::screens::Screens;
 use crate::seams::{
     DaemonSpawn, HarnessAdapters, LaunchFolders, RandomLaunchIds, RoleTexts, WindowEnv,
@@ -255,6 +258,11 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
         log: Rc::clone(&log),
         trace: Rc::clone(&trace),
     });
+    // The programs the daemon runs and the time it reads: the engine's windows
+    // are run with them, and so are the harness diagnostics of the screens, which
+    // ask each CLI its version and each feed its latest release.
+    let processes = Rc::new(SystemProcesses::new(env.clone()));
+    let time = Rc::new(SystemTime);
     let screens = Rc::new(Screens {
         token: token.clone(),
         on_roster_change: {
@@ -273,6 +281,14 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
                 Ok(())
             })
         },
+        env: env.clone(),
+        agents: Rc::clone(&agents),
+        admin: HarnessAdmin::new(
+            env.clone(),
+            Rc::clone(&time) as _,
+            Rc::new(Feed::new(Rc::clone(&time) as _, Rc::new(HttpsFeed::new()))),
+            Rc::clone(&processes) as _,
+        ),
     });
     let api = Rc::new(
         api::serve(Rc::clone(&context), screens, Rc::clone(&spawn))
@@ -281,8 +297,6 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
     );
 
     // What the engine runs windows with.
-    let processes = Rc::new(SystemProcesses::new(env.clone()));
-    let time = Rc::new(SystemTime);
     let zone = machine::zone();
     let records = Rc::new(
         Thread::new(env.clone(), zone.clone(), Rc::clone(&time) as _)
