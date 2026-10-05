@@ -14,8 +14,9 @@
  *   the adapter or its window, through a pane host that answers each
  *   request as the step scripts it (`answers`), at once or held
  *   (`{held: true}`), for the pane `p1-zeus` of generation 1 unless the
- *   step names its `pane`, and a peer on loopback that answers each `fetch`
- *   by its route as the step scripts it (`served`, `scriptedPeer`);
+ *   step names its `pane`, a peer on loopback that answers each `fetch`
+ *   by its route as the step scripts it (`served`, `scriptedPeer`), and the
+ *   programs `spawn` starts (`children`, `scriptedChildren`);
  * - `release` answers a held host request (`release: op, answer`), a held
  *   fetch (`release: 'GET /session', answer`) or a held look
  *   (`release: 'look'`); `releaseBody` ends a held body (`releaseBody:
@@ -79,6 +80,7 @@ import { PassThrough } from 'node:stream'
 import { promisify } from 'node:util'
 import { cachedAnswers } from '../../../hosts/lib/completion.js'
 import { claudeCodeAdapter } from '../../../src/adapters/claude-code.js'
+import { codexAdapter } from '../../../src/adapters/codex.js'
 import { devinAdapter } from '../../../src/adapters/devin.js'
 import { piAdapter } from '../../../src/adapters/pi.js'
 import { forgetLaunch } from '../../../src/core/launch-files.js'
@@ -109,7 +111,12 @@ const TIMEOUT_MAX = 2 ** 31 - 1
  */
 const MACHINE_WAITS = new Set(['FSREQCALLBACK', 'FSREQPROMISE', 'FILEHANDLECLOSEREQ', 'Immediate'])
 
-const ADAPTERS = { 'claude-code': claudeCodeAdapter, devin: devinAdapter, pi: piAdapter }
+const ADAPTERS = {
+  'claude-code': claudeCodeAdapter,
+  codex: codexAdapter,
+  devin: devinAdapter,
+  pi: piAdapter,
+}
 const WINDOWS = process.platform === 'win32'
 
 /** The mask files and folders are made under: the one nearly every machine has. */
@@ -930,22 +937,28 @@ function recordedExecFile(context) {
 /**
  * A stand-in CLI that answers by its arguments (`standIn: {name, answers}`),
  * the twin of Rust's `ScriptedProcesses`: `answers` maps the arguments, a
- * space between, to what it writes to its output, or to how it fails
- * (`{stdout, stderr, exit}`); `*` is any other. It runs as JavaScript that
- * needs no module type (a stand-in named as Windows names a program,
- * `devin.exe`, has none on POSIX), so on Windows its shim names it
+ * space between, to what it writes to its output; or to
+ * `{stdout, stderr, exit}`, which ends with 0 unless it names another code;
+ * or to `{overflows: true}`, more than any buffer holds. `*` is any other.
+ * Asked what it was not told to answer, it fails and says so (99). It runs
+ * as JavaScript that needs no module type (a stand-in named as Windows names
+ * a program, `devin.exe`, has none on POSIX), so on Windows its shim names it
  * (`runnable`). Each run is written down where it is asked for
  * (`recordedExecFile`).
  */
 function standIn(context, { name, answers }) {
-  const source = `const args = process.argv.slice(2)
+  const source = `const asked = process.argv.slice(2).join(' ')
 const answers = ${JSON.stringify(answers ?? {})}
-const answer = answers[args.join(' ')] ?? answers['*'] ?? ''
-if (typeof answer === 'string') process.stdout.write(answer)
+const answer = answers[asked] ?? answers['*']
+if (answer === undefined) {
+  process.stderr.write(\`a stand-in not told to answer: \${asked}\\n\`)
+  process.exitCode = 99
+} else if (typeof answer === 'string') process.stdout.write(answer)
+else if (answer.overflows === true) process.stdout.write('x'.repeat(1024 * 1024 + 1))
 else {
   process.stdout.write(answer.stdout ?? '')
   process.stderr.write(answer.stderr ?? '')
-  process.exitCode = answer.exit ?? 1
+  process.exitCode = answer.exit ?? 0
 }
 `
   fakeNodeExecutable(path.join(context.root, 'bin', name), source)
@@ -1053,6 +1066,7 @@ function beginOwn(context, index, step) {
     )
   let work
   if (step.prepare !== undefined) {
+    context.children.script(step.children)
     const launch = realValue(context, step.prepare)
     context.launchId = launch.launchId
     work = settle(context.adapter.prepare(launch), (plan) => {

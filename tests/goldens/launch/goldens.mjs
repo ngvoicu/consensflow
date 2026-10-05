@@ -8,10 +8,11 @@
  * - `tests/goldens/launch/tables.json`: the pure functions (`tables.mjs`).
  * - `tests/goldens/launch/scenarios.<platform>.json`: each adapter's
  *   scenarios played (`runner.mjs`), one set per platform, since a launch
- *   names the platform's own paths and programs (`claude.mjs`, `pi.mjs`,
- *   `devin.mjs`).
+ *   names the platform's own paths and programs (`claude.mjs`, `codex.mjs`,
+ *   `pi.mjs`, `devin.mjs`).
  */
 import { claudeScenarios } from './claude.mjs'
+import { codexScenarios } from './codex.mjs'
 import { devinScenarios } from './devin.mjs'
 import { piScenarios } from './pi.mjs'
 import { play } from './runner.mjs'
@@ -30,6 +31,7 @@ export async function launchGoldens() {
     'tests/goldens/launch/tables.json': `${JSON.stringify(tables(), null, 2)}\n`,
     [`tests/goldens/launch/scenarios.${process.platform}.json`]: await played([
       ...claudeScenarios(),
+      ...codexScenarios(),
       ...piScenarios(),
       ...devinScenarios(),
     ]),

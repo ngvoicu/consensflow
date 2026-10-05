@@ -456,17 +456,22 @@ fn begin_prepare(played: &mut Played, id: usize, given: &Value) {
     });
 }
 
+/// Scripts the programs a step has `spawn` start.
+fn script_children(played: &Played, step: &Value) {
+    for (name, scripts) in step["children"].as_object().into_iter().flatten() {
+        for script in scripts.as_array().unwrap() {
+            played.fakes.processes.child(name, child(script));
+        }
+    }
+}
+
 /// Begins what a step asks the window.
 fn begin_asking(played: &mut Played, id: usize, step: &Value) {
     for (route, answers) in step["served"].as_object().into_iter().flatten() {
         let answers = answers.as_array().unwrap().iter().map(served);
         played.fakes.loopback.serve(route, answers);
     }
-    for (name, scripts) in step["children"].as_object().into_iter().flatten() {
-        for script in scripts.as_array().unwrap() {
-            played.fakes.processes.child(name, child(script));
-        }
-    }
+    script_children(played, step);
     for (op, answers) in step["answers"].as_object().into_iter().flatten() {
         let answers: Vec<Answer> = answers
             .as_array()
@@ -572,6 +577,41 @@ fn the_window_kept_is_the_one_prepared_last_and_records_go_in_the_order_begun() 
     assert_eq!(records, [json!({"op": 0}), json!({"op": 1})]);
 }
 
+#[test]
+fn a_stand_in_prints_what_it_says_and_fails_in_the_words_execfile_fails_in() {
+    let file = "/root/bin/codex";
+    let answer = |said: Value| stand_in_answer(file, "mcp list --json", &said);
+    assert_eq!(answer(json!("[]\n")), Ok("[]\n".to_owned()));
+    assert_eq!(answer(json!({"stdout": "[]\n"})), Ok("[]\n".to_owned()));
+    assert_eq!(
+        answer(json!({"exit": 0, "stderr": "ignored"})),
+        Ok(String::new())
+    );
+    let program = if cfg!(windows) {
+        "$NODE /root/bin/codex.mjs"
+    } else {
+        "/root/bin/codex"
+    };
+    assert_eq!(
+        answer(json!({"stdout": "half", "stderr": "boom\n", "exit": 3})),
+        Err(Failed {
+            message: format!("Command failed: {program} mcp list --json\nboom\n"),
+            code: Some(3),
+            killed: false,
+            stdout: "half".to_owned(),
+        })
+    );
+    assert_eq!(
+        answer(json!({"overflows": true})),
+        Err(Failed {
+            message: "stdout maxBuffer length exceeded".to_owned(),
+            code: None,
+            killed: false,
+            stdout: String::new(),
+        })
+    );
+}
+
 /// The work still waiting, each with what it waits on: its timers (how long
 /// until each is due), its held requests, its held looks. Work waiting on
 /// nothing a step controls waits on what no step can release: a defect of
@@ -614,11 +654,43 @@ fn pending(played: &Played) -> Vec<Value> {
         .collect()
 }
 
+/// What the stand-in at `file` answers to `args` (`standIn`'s `answers`,
+/// `runner.mjs`): its output; a failure in `execFile`'s sentence for the
+/// program Node runs (the stand-in itself, or on Windows Node and the
+/// stand-in's script, `$NODE`, as Node's runner writes it), when it names an
+/// exit other than 0; or more output than any buffer holds.
+fn stand_in_answer(file: &str, args: &str, answer: &Value) -> Result<String, Failed> {
+    let text = |field: &str| answer[field].as_str().unwrap_or_default().to_owned();
+    if let Value::String(stdout) = answer {
+        return Ok(stdout.clone());
+    }
+    if answer["overflows"] == json!(true) {
+        return Err(Failed {
+            message: "stdout maxBuffer length exceeded".to_owned(),
+            code: None,
+            killed: false,
+            stdout: String::new(),
+        });
+    }
+    let Some(code) = answer["exit"].as_i64().filter(|&code| code != 0) else {
+        return Ok(text("stdout"));
+    };
+    let program = if cfg!(windows) {
+        format!("$NODE {file}.mjs")
+    } else {
+        file.to_owned()
+    };
+    Err(Failed {
+        message: format!("Command failed: {program} {args}\n{}", text("stderr")),
+        code: Some(i32::try_from(code).unwrap()),
+        killed: false,
+        stdout: text("stdout"),
+    })
+}
+
 /// A stand-in CLI that answers by its arguments (`standIn: {name,
 /// answers}`, `standIn` in `runner.mjs`): its file there to be found and
-/// probed, and what each answer says scripted, a failure in `execFile`'s
-/// sentence for the program Node runs: the stand-in itself, or on Windows
-/// Node and the stand-in's script (`$NODE`, as Node's runner writes it).
+/// probed, and each answer scripted, as often as it is asked.
 fn stand_in(played: &mut Played, given: &Value) {
     let file = path::join(&[&played.names.root, "bin", given["name"].as_str().unwrap()]);
     let found = fake_executable(Path::new(&file));
@@ -634,23 +706,7 @@ fn stand_in(played: &mut Played, given: &Value) {
     .unwrap();
     let name = called(&found);
     for (args, answer) in given["answers"].as_object().into_iter().flatten() {
-        let answered = match answer {
-            Value::String(stdout) => Ok(stdout.clone()),
-            failure => {
-                let program = if cfg!(windows) {
-                    format!("$NODE {file}.mjs")
-                } else {
-                    file.clone()
-                };
-                let text = |field: &str| failure[field].as_str().unwrap_or_default().to_owned();
-                Err(Failed {
-                    message: format!("Command failed: {program} {args}\n{}", text("stderr")),
-                    code: Some(i32::try_from(failure["exit"].as_i64().unwrap_or(1)).unwrap()),
-                    killed: false,
-                    stdout: text("stdout"),
-                })
-            }
-        };
+        let answered = stand_in_answer(&file, args, answer);
         if args == "*" {
             played.fakes.processes.every_answer(&name, answered);
         } else {
@@ -797,6 +853,7 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
     let before = tree(&root);
     let mut advance = None;
     if step.get("prepare").is_some() {
+        script_children(played, step);
         let given = played.names.real(&step["prepare"]);
         begin_prepare(played, index, &given);
     } else if let Some(op) = step["release"].as_str() {
