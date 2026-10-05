@@ -172,6 +172,11 @@ impl Gate {
         }
     }
 
+    /// Whether the gate was opened.
+    pub fn is_open(&self) -> bool {
+        self.0.open.get()
+    }
+
     /// A wait on the gate.
     pub fn wait(&self) -> GateWait {
         GateWait(Rc::clone(&self.0))

@@ -9,20 +9,20 @@ use crate::testing::{Executor, Gate};
 
 /// What a test's pieces of work did, in order.
 #[derive(Clone, Default)]
-struct Log(Rc<RefCell<Vec<&'static str>>>);
+pub(super) struct Log(Rc<RefCell<Vec<&'static str>>>);
 
 impl Log {
-    fn push(&self, what: &'static str) {
+    pub(super) fn push(&self, what: &'static str) {
         self.0.borrow_mut().push(what);
     }
 
-    fn taken(&self) -> Vec<&'static str> {
+    pub(super) fn taken(&self) -> Vec<&'static str> {
         std::mem::take(&mut *self.0.borrow_mut())
     }
 }
 
 /// A piece of work that says it started, waits on `gate`, and says it ended.
-async fn gated(log: Log, gate: Gate, start: &'static str, end: &'static str) {
+pub(super) async fn gated(log: Log, gate: Gate, start: &'static str, end: &'static str) {
     log.push(start);
     gate.wait().await;
     log.push(end);
@@ -49,20 +49,6 @@ fn a_work_does_what_comes_before_its_first_wait_where_it_is_begun() {
     executor.run();
     assert_eq!(log.taken(), ["end"]);
     assert!(begun.ended());
-}
-
-#[test]
-fn a_work_that_ends_where_it_is_begun_holds_nothing_after() {
-    let executor = Rc::new(Executor::default());
-    let hold = Rc::new(Hold::default());
-    let (spawn, held) = (Rc::clone(&executor), Rc::clone(&hold));
-    let answer = executor.finish(async move {
-        let begun = held.exclusive(&*spawn, async { 7 }).await;
-        assert!(!held.held(), "nothing holds it once its work ended");
-        begun.await
-    });
-    assert_eq!(answer, Some(7));
-    assert_eq!(executor.waiting(), 0);
 }
 
 #[test]

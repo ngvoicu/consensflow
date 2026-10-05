@@ -92,13 +92,25 @@ impl Replaced {
 /// Closes and deletes `old` while something of it waits, and opens another
 /// project, the old one's close and delete left to go on beside it.
 pub fn replace_project(context: &Context, old: &ProjectView) -> Replaced {
+    replace_project_with(context, old, &[])
+}
+
+/// A project replaced as [`replace_project`] does, the one opened in its
+/// place with these workers on its staff.
+pub fn replace_project_with(context: &Context, old: &ProjectView, workers: &[&str]) -> Replaced {
     let closing = context.begin_close_project(old.id);
     let deleting = context.begin_delete_project(old.id);
+    let staff: Vec<_> = workers
+        .iter()
+        .map(|agent| {
+            json!({ "agent": agent, "harness": "claude-code", "role": "worker", "tier": "standard" })
+        })
+        .collect();
     let opening = context.begin_open_project(json!({
         "directory": "/work/api",
         "name": "api",
         "chief": { "harness": "claude-code", "agent": "apollo" },
-        "staff": [],
+        "staff": staff,
     }));
     let fresh = context
         .finish(opening)

@@ -9,7 +9,11 @@
 //! what it reads, says what it did in its place ([`FakeAdapter::prepare`],
 //! [`FakeAdapter::after_prepare`], [`FakeAdapter::started`],
 //! [`FakeAdapter::deliver`], [`FakeAdapter::ready`],
-//! [`FakeAdapter::hold_observes`], [`FakeAdapter::interrupt`]).
+//! [`FakeAdapter::hold_observes`], [`FakeAdapter::interrupt`]); one that held
+//! calls until it let them go (`hold`) says which, and when
+//! ([`FakeAdapter::prepare_holds`], [`FakeAdapter::observe_holds`],
+//! [`FakeAdapter::start_holds`], [`FakeAdapter::ready_holds`],
+//! [`FakeAdapter::deliver_holds`]).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -23,6 +27,7 @@ use cf_harness::records::{Item, Quota, Role};
 use serde_json::{json, Value};
 
 use super::executor::Gate;
+use super::holds::{Holds, Wrapped};
 use super::recorder::Recorder;
 use super::window::FakeWindow;
 use crate::runtime::next_turn;
@@ -105,6 +110,20 @@ pub struct FakeAdapter {
     /// The keys that interrupt a turn in its windows (`adapter.interrupt`):
     /// Escape once, as an adapter that says no more.
     pub interrupt: Cell<Interrupt>,
+    /// Launches the test holds (`hold(adapter, 'prepare', ...)`): one let go
+    /// fails with the reason, where the test gave one.
+    pub prepare_holds: Holds<String>,
+    /// Looks the test holds: one let go fails with the reason, where the test
+    /// gave one.
+    pub observe_holds: Holds<String>,
+    /// Starts the test holds: one let go names the conversation its window
+    /// opened, where the test gave one.
+    pub start_holds: Holds<String>,
+    /// Calls of `ready` the test holds: the test gives a `ready` of its own
+    /// too, as the JavaScript fake had none to wrap.
+    pub ready_holds: Holds,
+    /// Deliveries the test holds.
+    pub deliver_holds: Holds,
 }
 
 impl FakeAdapter {
@@ -134,6 +153,11 @@ impl FakeAdapter {
                 presses: 1,
                 close_after: None,
             }),
+            prepare_holds: Holds::default(),
+            observe_holds: Holds::default(),
+            start_holds: Holds::default(),
+            ready_holds: Holds::default(),
+            deliver_holds: Holds::default(),
         })
     }
 
@@ -169,6 +193,13 @@ impl FakeAdapter {
     /// The latest window of `handle`, as it is now.
     pub fn agent(&self, handle: &str) -> FakeAgent {
         self.with(handle, |agent| agent.clone())
+    }
+
+    /// Changes the window of `launch`, whichever participant it is for: the
+    /// test kept the agent it got (`agent(handle)` of JavaScript was the
+    /// object itself) while another project's window took the handle.
+    pub fn with_launch<T>(&self, launch: &str, change: impl FnOnce(&mut FakeAgent) -> T) -> T {
+        self.of_launch(launch, change)
     }
 
     /// The agent answers: its turn ends with `text`.
@@ -280,31 +311,18 @@ impl Asked {
             fake,
         }
     }
-}
 
-impl Adapter for Asked {
-    fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
+    /// The launch as the fake prepares it, its call written down at `at`:
+    /// what the fake's function does it does when it is made, as far as its
+    /// first wait.
+    fn made<'a>(
+        &'a self,
+        launch: &'a Launch<'a>,
+        asked: Value,
+        at: usize,
+    ) -> Work<'a, Result<Prepared, String>> {
         let fake = &self.fake;
         let seam = format!("adapter:{}", self.harness);
-        let asked = json!({
-            "launchId": launch.id.as_str(),
-            "participant": { "handle": launch.handle },
-            "role": launch.role,
-            "project": { "id": launch.project },
-            "directory": launch.directory,
-            "resume": launch.resume,
-            "message": launch.message,
-            "agent": launch.agent.map(|agent| json!({
-                "model": agent.model,
-                "effort": agent.effort,
-                "thinking": agent.thinking,
-                "designer": agent.designer,
-            })),
-            "instructions": launch.instructions,
-        });
-        let at = fake
-            .recorder
-            .call(&seam, Some("prepare"), json!([asked.clone()]));
         // A test's own `prepare` fails before the real one runs: nothing is
         // prepared and no window made, as where it threw in JavaScript.
         let own = fake.prepare.borrow().clone();
@@ -380,6 +398,54 @@ impl Adapter for Asked {
                 native_session: Some(native),
                 window,
             })
+        })
+    }
+}
+
+impl Adapter for Asked {
+    fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
+        let seam = format!("adapter:{}", self.harness);
+        let asked = json!({
+            "launchId": launch.id.as_str(),
+            "participant": { "handle": launch.handle },
+            "role": launch.role,
+            "project": { "id": launch.project },
+            "directory": launch.directory,
+            "resume": launch.resume,
+            "message": launch.message,
+            "agent": launch.agent.map(|agent| json!({
+                "model": agent.model,
+                "effort": agent.effort,
+                "thinking": agent.thinking,
+                "designer": agent.designer,
+            })),
+            "instructions": launch.instructions,
+        });
+        let args = json!([asked.clone()]);
+        let at = self
+            .fake
+            .recorder
+            .call(&seam, Some("prepare"), args.clone());
+        let wrapped = self.fake.prepare_holds.wrap(&args);
+        let Wrapped::Held { .. } = wrapped else {
+            let made = self.made(launch, asked, at);
+            return Box::pin(async move {
+                let prepared = made.await;
+                wrapped.after().await;
+                prepared
+            });
+        };
+        // A call held is made once the test lets it go, or, where the test
+        // gave a reason, fails in its place a turn after, as the wrapper's
+        // throw did.
+        Box::pin(async move {
+            if let Some(reason) = wrapped.before().await {
+                next_turn().await;
+                return Err(reason);
+            }
+            let prepared = self.made(launch, asked, at).await;
+            wrapped.after().await;
+            prepared
         })
     }
 
