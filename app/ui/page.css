@@ -683,23 +683,28 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
 .drawer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 
 /* The live windows. */
-/* The chief's window takes a whole column; the members' go two to a
-   column, one above the other, and one left alone takes its column whole. */
+/* One row of cards, each as tall as the dock and half as wide (half the
+   width less half the 8px gap, so two fill it), at least 420px and at most
+   the whole dock. A card never shares the width with the others: one that
+   opens goes after the last, and none already open changes size; the dock
+   scrolls sideways. Its scrollbar is always there, where scrollbars take
+   room: one that came when the row first overflowed would shorten every card. */
 .stage {
   display: grid;
   grid-auto-flow: column;
-  grid-template-rows: repeat(2, minmax(0, 1fr));
-  grid-auto-columns: minmax(min(100%, 420px), 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-auto-columns: max(min(100%, 420px), calc(50% - 4px));
   gap: 8px;
   padding: 8px;
   min-height: 0;
-  overflow-x: auto;
+  overflow-x: scroll;
   overflow-y: hidden;
   scroll-snap-type: x proximity;
 }
 .stage .terminal-card { scroll-snap-align: start; }
-.stage .terminal-card[data-tall="true"], .stage .stage-empty { grid-row: span 2; }
-.stage-empty { color: var(--muted); margin: 40px auto; }
+.stage-empty { color: var(--muted); margin: 40px auto; text-align: center; }
+/* With no card, the dock's one line is centred across it, not in a column. */
+.stage:has(> .stage-empty) { display: block; }
 .terminal-card {
   min-width: 0;
   min-height: 0;
