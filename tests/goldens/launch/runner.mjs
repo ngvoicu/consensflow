@@ -379,33 +379,39 @@ function realText(context, text) {
 }
 
 /**
- * The ways the root reads in the text a step records besides as itself: as a
- * file URL, as JSON writes it (Windows' backslashes escaped), and as a URL's
- * query holds it (`encodeURIComponent`; that with the parser's `%27` for a
- * quote; and a form's, with `+` for a space).
+ * The ways the root reads in the text a step records, each written as a name
+ * of its own, so that one spelled the wrong way is seen: itself (`$ROOT`), a
+ * file URL (`file://$ROOT`), as JSON writes it (`$JSON_ROOT`, Windows'
+ * backslashes escaped), and as a URL's query holds it (`$URI_ROOT` for
+ * `encodeURIComponent`, `$URI27_ROOT` with the parser's `%27` for a quote,
+ * `$FORM_ROOT` with a form's `+` for a space). A form spelled as one before
+ * it is that one: on POSIX, JSON writes the root as itself.
  */
 function rootForms(root) {
   const component = encodeURIComponent(root)
+  const forms = [
+    [root, '$ROOT'],
+    [JSON.stringify(root).slice(1, -1), '$JSON_ROOT'],
+    [component, '$URI_ROOT'],
+    [component.replaceAll("'", '%27'), '$URI27_ROOT'],
+    [new URLSearchParams({ d: root }).toString().slice(2), '$FORM_ROOT'],
+  ]
   return {
     fileUrl: pathToFileURL(root).href,
-    plain: [
-      root,
-      JSON.stringify(root).slice(1, -1),
-      component,
-      component.replaceAll("'", '%27'),
-      new URLSearchParams({ d: root }).toString().slice(2),
-    ],
+    plain: forms.filter(([form], at) => forms.findIndex(([other]) => other === form) === at),
   }
 }
 
 /**
  * OpenCode's bundle is named by the hash of its files and of its generated
  * `tui.json`, which names the folder it is published in, the root among its
- * parents: the hash is not the same in two runs, and is written `$HASH`.
- * (Its being what Node makes of those files is held where the bundle is,
+ * parents: the hash is not the same in two runs. Each one is written by the
+ * order it first appears in among the scenario's (`$HASH1`, `$HASH2`, …), so
+ * that a reference to another bundle than the one published is seen. (Its
+ * being what Node makes of those files is held where the bundle is,
  * `shared::private_bundle`.)
  */
-const BUNDLE_HASH = /(extensions[\\/]opencode[\\/])[0-9a-f]{64}/g
+const BUNDLE_HASH = /(extensions[\\/]opencode[\\/])([0-9a-f]{64})/g
 
 /** What a step recorded, with the root and the live processes written as the scenario writes them. */
 function written(context, value) {
@@ -427,7 +433,7 @@ function written(context, value) {
   }
   if (typeof value !== 'string') return value
   let text = value.replaceAll(context.rootForms.fileUrl, 'file://$ROOT')
-  for (const form of context.rootForms.plain) text = text.replaceAll(form, '$ROOT')
+  for (const [form, name] of context.rootForms.plain) text = text.replaceAll(form, name)
   // Node itself, which runs a stand-in on Windows, is `$NODE`.
   text = text.replaceAll(process.execPath, '$NODE')
   // The bundle's `bin` as a window names its `cf`, and as a path of it is spelled.
@@ -435,7 +441,10 @@ function written(context, value) {
     text = text.replaceAll(bin, '$ROOT/bundle/bin')
   }
   if (text.startsWith('$ROOT')) text = posix(text)
-  text = text.replace(BUNDLE_HASH, '$1$$HASH')
+  text = text.replace(BUNDLE_HASH, (_, folder, hash) => {
+    if (!context.hashes.has(hash)) context.hashes.set(hash, `$HASH${context.hashes.size + 1}`)
+    return `${folder}${context.hashes.get(hash)}`
+  })
   // Half a surrogate pair is no text every JSON reader holds, and Rust's
   // strings never do: such a string is written as its UTF-16 code units.
   if (!text.isWellFormed()) {
@@ -877,7 +886,8 @@ function scriptedChildren(context) {
       }
     },
     spawn(file, args, options) {
-      const [name, ...rest] = named(file, args)
+      const program = named(file, args)
+      const { name } = program
       const failed = Object.assign(new Error(`spawn ${file} ENOENT`), { code: 'ENOENT' })
       const script = left.get(name)?.shift() ?? { missing: true, failed }
       const child = new ScriptedChild(context, script, options.stdio)
@@ -888,10 +898,7 @@ function scriptedChildren(context) {
           : stdio === '["ignore","ignore","pipe"]'
             ? 'quiet'
             : stdio
-      context.spawned.push({
-        ...invocation(context, name, rest, options.cwd, options.env),
-        streams,
-      })
+      context.spawned.push({ ...invocation(context, program, options.cwd, options.env), streams })
       started.push(child)
       return child
     },
@@ -914,11 +921,12 @@ function scriptedChildren(context) {
 
 /**
  * How a program was started, as both runners write it down where an adapter
- * asks for it: its name, its arguments, its folder (none for the one this
- * runs in), and the variables its environment adds to or changes in the
- * scenario's (a variable taken away is `null`), each by name.
+ * asks for it: its name and its path (`programOf`), its arguments, its folder
+ * (none for the one this runs in), and the variables its environment adds to
+ * or changes in the scenario's (a variable taken away is `null`), each by
+ * name.
  */
-function invocation(context, name, args, cwd, env) {
+function invocation(context, { name, path: file, args }, cwd, env) {
   const given = env ?? context.env
   const changed = []
   for (const key of new Set([...Object.keys(context.env), ...Object.keys(given)])) {
@@ -930,6 +938,7 @@ function invocation(context, name, args, cwd, env) {
   changed.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
   return {
     program: name,
+    path: file,
     args: [...args],
     cwd: cwd === undefined || cwd === null || cwd === process.cwd() ? null : String(cwd),
     env: changed,
@@ -937,14 +946,15 @@ function invocation(context, name, args, cwd, env) {
 }
 
 /**
- * A program's name and its arguments as a test names them: its file's name,
- * the extension a Windows stand-in has taken off; on Windows a stand-in runs
- * as its shim's node and script (`runnable`), so the script names it.
+ * A program as a test names it: its path and its name, the extension a
+ * Windows stand-in has taken off, and its arguments; on Windows a stand-in
+ * runs as its shim's node and script (`runnable`), so the script names it.
  */
 function programOf(file, args) {
   const shim = WINDOWS && /\.mjs$/i.test(args[0] ?? '')
   const [program, rest] = shim ? [args[0], args.slice(1)] : [file, args]
-  return [path.basename(program).replace(/\.(mjs|cmd|bat|exe)$/i, ''), ...rest]
+  const stem = program.replace(/\.(mjs|cmd|bat|exe)$/i, '')
+  return { path: stem, name: path.basename(stem), args: rest }
 }
 
 /**
@@ -956,9 +966,8 @@ function programOf(file, args) {
  */
 function recordedExecFile(context) {
   const record = (file, args, options) => {
-    const [name, ...rest] = programOf(file, args)
     context.ran.push({
-      ...invocation(context, name, rest, options.cwd, options.env),
+      ...invocation(context, programOf(file, args), options.cwd, options.env),
       limits: { timeout: options.timeout ?? 0, maxBuffer: options.maxBuffer ?? 1024 * 1024 },
     })
   }
@@ -1293,6 +1302,7 @@ export async function play(scenario, adapters = ADAPTERS) {
   const context = {
     root,
     rootForms: rootForms(root),
+    hashes: new Map(),
     other: null,
     launch: null,
     launchId: null,

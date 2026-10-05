@@ -201,13 +201,15 @@ describe('the launch recorder writes', () => {
     assert.deepEqual(records[0].settled, [{ answer: true, op: 0 }])
   })
 
-  it('the root as a file URL, as JSON and as a URL’s query hold it, and an OpenCode bundle’s hash', async () => {
+  it('names the root by how a record spells it, and each OpenCode bundle’s hash by the order it came in', async () => {
     const { records } = await played([{ observe: true }], (env) => ({
       observe: async () => {
         const root = path.dirname(env.HOME)
-        const hash = 'ab12'.repeat(16)
+        const [hash, other] = ['ab12'.repeat(16), 'cd34'.repeat(16)]
         return [
           `${pathToFileURL(root).href}/extensions/opencode/${hash}/tui.json`,
+          `${root}${path.sep}extensions${path.sep}opencode${path.sep}${other}`,
+          `${root}${path.sep}extensions${path.sep}opencode${path.sep}${hash}`,
           `?directory=${encodeURIComponent(root)}%2Fwork`,
           `?directory=${encodeURIComponent(`${root}'s`).replaceAll("'", '%27')}`,
           `?directory=${new URLSearchParams({ d: `${root} x` }).toString().slice(2)}`,
@@ -216,12 +218,16 @@ describe('the launch recorder writes', () => {
         ]
       },
     }))
-    const [url, component, quoted, form, json, pi] = records[0].settled[0].answer
-    assert.equal(url, 'file://$ROOT/extensions/opencode/$HASH/tui.json')
-    assert.equal(component, '?directory=$ROOT%2Fwork')
-    assert.equal(quoted, '?directory=$ROOT%27s')
-    assert.equal(form, '?directory=$ROOT+x')
-    assert.equal(json, '{"at":"$ROOT"}')
+    const [url, second, first, component, quoted, form, json, pi] = records[0].settled[0].answer
+    assert.equal(url, 'file://$ROOT/extensions/opencode/$HASH1/tui.json')
+    assert.equal(second, '$ROOT/extensions/opencode/$HASH2', 'another bundle is another name')
+    assert.equal(first, '$ROOT/extensions/opencode/$HASH1', 'the same bundle is the same name')
+    // A root with no quote nor space is spelled in a query as its component is.
+    assert.equal(component, '?directory=$URI_ROOT%2Fwork')
+    assert.equal(quoted, '?directory=$URI_ROOT%27s')
+    assert.equal(form, '?directory=$URI_ROOT+x')
+    // JSON writes a POSIX root as itself, and escapes Windows' backslashes.
+    assert.equal(json, process.platform === 'win32' ? '{"at":"$JSON_ROOT"}' : '{"at":"$ROOT"}')
     assert.match(
       pi,
       /^\$ROOT\/extensions\/pi\/[0-9a-f]{64}$/,
@@ -492,7 +498,14 @@ describe("the launch recorder's children", () => {
         }),
     }))
     assert.deepEqual(records[0].spawned, [
-      { program: 'codex', args: ['app-server'], cwd: null, env: [], streams: 'lines' },
+      {
+        program: 'codex',
+        path: WINDOWS ? 'C:\\bin\\codex' : '/bin/codex',
+        args: ['app-server'],
+        cwd: null,
+        env: [],
+        streams: 'lines',
+      },
     ])
     assert.deepEqual(records[0].written, ['{"method":"initialize"}'])
     const { events, signalCode } = records[0].settled[0].answer
@@ -546,7 +559,16 @@ describe("the launch recorder's children", () => {
     assert.equal(exitCode, -2)
     assert.deepEqual(
       records[0].spawned,
-      [{ program: 'missing', args: [], cwd: null, env: [], streams: 'quiet' }],
+      [
+        {
+          program: 'missing',
+          path: WINDOWS ? 'C:\\bin\\missing' : '/bin/missing',
+          args: [],
+          cwd: null,
+          env: [],
+          streams: 'quiet',
+        },
+      ],
       'one asked for is written down, started or not, as Rust writes it down',
     )
   })
@@ -592,7 +614,14 @@ describe("the launch recorder's children", () => {
       },
     }))
     assert.deepEqual(records[0].spawned, [
-      { program: 'opencode', args: ['serve'], cwd: null, env: [], streams: 'quiet' },
+      {
+        program: 'opencode',
+        path: WINDOWS ? 'C:\\bin\\opencode' : '/bin/opencode',
+        args: ['serve'],
+        cwd: null,
+        env: [],
+        streams: 'quiet',
+      },
     ])
     assert.deepEqual(
       records[0].fetches.map((fetch) => fetch.route),
@@ -675,6 +704,7 @@ describe("the launch recorder's stand-ins", () => {
     assert.deepEqual(records[0].ran, [
       {
         program: 'codex',
+        path: '$ROOT/bin/codex',
         args: ['--version'],
         cwd: null,
         env: [['CODEX_HOME', '$ROOT/home/.codex']],
@@ -682,6 +712,7 @@ describe("the launch recorder's stand-ins", () => {
       },
       {
         program: 'codex',
+        path: '$ROOT/bin/codex',
         args: ['mcp', 'list', '--json'],
         cwd: '$ROOT/home',
         env: [],
@@ -690,6 +721,7 @@ describe("the launch recorder's stand-ins", () => {
       // The system's own variables are written down too, changed or taken away.
       {
         program: 'codex',
+        path: '$ROOT/bin/codex',
         args: ['--version'],
         cwd: null,
         env: [['PATH', `$ROOT/bin${path.delimiter}more`]],
@@ -697,6 +729,7 @@ describe("the launch recorder's stand-ins", () => {
       },
       {
         program: 'codex',
+        path: '$ROOT/bin/codex',
         args: ['--version'],
         cwd: null,
         env: [['PATH', null]],
@@ -804,7 +837,14 @@ describe("the launch recorder's stand-ins and bundle", () => {
       },
     }))
     assert.deepEqual(records[0].spawned, [
-      { program: 'codex', args: ['app-server'], cwd: null, env: [], streams: 'lines' },
+      {
+        program: 'codex',
+        path: WINDOWS ? 'C:\\bin\\codex' : '/bin/codex',
+        args: ['app-server'],
+        cwd: null,
+        env: [],
+        streams: 'lines',
+      },
     ])
     assert.deepEqual(records[0].written, ['hello'])
   })
