@@ -135,17 +135,39 @@ impl Window for FakeWindow {
         let (launch, given) = (self.launch.clone(), text.to_owned());
         let taking: Taking = Box::new(move || fake.take(&launch, &given));
         let own = self.fake.deliver.borrow().clone();
+        // A test that holds the deliveries of a launch put an async function
+        // of its own in the fake's place, in every window: it returns the
+        // fake's promise, so each answer takes two turns more to settle.
+        let hold = self.fake.hold_deliveries.borrow().clone();
+        let overridden = hold.is_some();
+        let held = hold
+            .filter(|(launch, _)| *launch == self.launch)
+            .map(|(_, gate)| gate);
         // What a delivery does is done when it is called, as the JavaScript
-        // fake's was; a test's own `deliver` does what it does in its place.
-        let outcome: Work<'a, Result<Admission, String>> = match own {
-            Some(own) => own(taking),
-            None => {
-                let admission = taking();
-                Box::pin(async move { Ok(admission) })
+        // fake's was; a test's own `deliver` does what it does in its place;
+        // and one the test holds is done once the gate opens.
+        let start = move || -> Work<'static, Result<Admission, String>> {
+            match own {
+                Some(own) => own(taking),
+                None => {
+                    let admission = taking();
+                    Box::pin(async move { Ok(admission) })
+                }
             }
+        };
+        let outcome: Work<'a, Result<Admission, String>> = match held {
+            Some(gate) => Box::pin(async move {
+                gate.wait().await;
+                start().await
+            }),
+            None => start(),
         };
         Box::pin(async move {
             let outcome = outcome.await;
+            if overridden {
+                next_turn().await;
+                next_turn().await;
+            }
             next_turn().await;
             let written = match &outcome {
                 Ok(Admission::Admitted { queued: true }) => {
