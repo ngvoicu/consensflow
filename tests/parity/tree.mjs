@@ -1,6 +1,6 @@
 /**
  * What `npm run parity:launch` reads of a root before and after a plan
- * (`launch.mjs` writes it for Node's, `crates/cf-harness/tests/parity_launch.rs`
+ * (`launch.mjs` writes it for Node's, `crates/cf-harness/tests/parity_launch/`
  * makes it for Rust's): every file, folder and link under it, by its path
  * there, and what a plan changed. A harness's own state is never listed,
  * only counted, for its text is not ConsensFlow's to hold equal.
