@@ -17,7 +17,8 @@ const TAR =
 
 /**
  * A release folder as `tauri build` leaves it on Windows, build leftovers
- * included: the test helper is there only when someone built it.
+ * included: the test helper is there only when someone built it. The
+ * terminals' console host and its license are the bundle's resources there.
  */
 function release(dir, { missing = [] } = {}) {
   const files = {
@@ -26,6 +27,9 @@ function release(dir, { missing = [] } = {}) {
     'node.exe': 'node',
     'cli/bin/cf.exe': 'cf',
     'cli/src/core/daemon.js': 'cli',
+    'conpty.dll': 'conpty',
+    'OpenConsole.exe': 'openconsole',
+    'OpenConsole-LICENSE.txt': 'MIT',
     'app.pdb': 'debug',
     'deps/app.d': 'dep',
     'nsis/installer.nsi': 'nsis',
@@ -68,14 +72,23 @@ describe('the portable Windows exe', () => {
         .split(/\r?\n/) // Windows' tar ends its lines with CRLF
         .filter((line) => line !== '' && !line.endsWith('/'))
         .sort()
-      assert.deepEqual(listed, ['cli/bin/cf.exe', 'cli/src/core/daemon.js', 'node.exe'])
+      assert.deepEqual(listed, [
+        'OpenConsole-LICENSE.txt',
+        'OpenConsole.exe',
+        'cli/bin/cf.exe',
+        'cli/src/core/daemon.js',
+        'conpty.dll',
+        'node.exe',
+      ])
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
   it('refuses a release folder missing a piece, and names the build that makes it', () => {
-    for (const piece of ['node.exe', 'cli/bin/cf.exe']) refusesWithout(piece)
+    for (const piece of ['node.exe', 'cli/bin/cf.exe', 'conpty.dll', 'OpenConsole.exe']) {
+      refusesWithout(piece)
+    }
   })
 })
 

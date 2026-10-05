@@ -91,6 +91,8 @@ try {
         'npm --prefix app run bundle:ui',
         'npm --prefix app run prepare-sidecar',
         'npm run build:bridge',
+        // The console host the app ships, beside the pane host, as the app has it.
+        'node app/scripts/conpty.mjs --into app/src-tauri/target/release',
       ]
     : []
   const script = `

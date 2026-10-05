@@ -1460,8 +1460,19 @@ mod tests {
         let OpenedPane { key, reader } = open_shell(&table, "printf hello");
 
         assert_eq!(read_to_end(reader), b"hello");
+        // The output can end a moment before the exit is seen: a slow runner
+        // read EOF while the shell was still being reaped (release run
+        // 37319546451). The listing that first sees it ended says so at once.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let listed = loop {
+            let listed = table.list().expect("list panes");
+            if listed.iter().all(|pane| !pane.alive) || Instant::now() > deadline {
+                break listed;
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
         assert_eq!(
-            table.list().expect("list panes"),
+            listed,
             vec![super::PaneInfo {
                 id: key.id,
                 generation: key.generation,

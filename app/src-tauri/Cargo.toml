@@ -32,7 +32,7 @@ reqwest = { version = "0.13.4", default-features = false }
 libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_System_Console"] }
+windows-sys = { workspace = true, features = ["Win32_System_Console", "Win32_System_LibraryLoader"] }
 
 [dev-dependencies]
 cf-panes = { workspace = true, features = ["test-support"] }
