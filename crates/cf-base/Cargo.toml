@@ -7,8 +7,11 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+icu_normalizer.workspace = true
+icu_properties.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+url.workspace = true
 
 # The errno names Node prints (`EACCES`): the numbers differ between the
 # systems, the constants do not.

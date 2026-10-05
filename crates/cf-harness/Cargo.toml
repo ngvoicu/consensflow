@@ -7,20 +7,70 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+# The tokens of Codex's broker and of OpenCode's server and plugin, as
+# `randomBytes(24).toString('base64url')` makes them, and OpenCode's
+# basic-auth header.
+base64.workspace = true
 cf-base.workspace = true
+cf-process.workspace = true
 cf-proto.workspace = true
+# A probe's run, shared by every caller that asked while it ran.
+futures-util.workspace = true
+getrandom.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["client"] }
+hyper-util.workspace = true
 jiff.workspace = true
 regex.workspace = true
 rusqlite.workspace = true
 # `rc`: a reading's quota is shared, as Node shared the object.
 serde = { workspace = true, features = ["rc"] }
 serde_json.workspace = true
+# A bundle's folder is named by the hash of its files, as Node names it
+# (`parity:records` digests each text the same way).
+sha2.workspace = true
+# The engine's timer, which a window's waits sleep on, and its sockets.
+tokio = { workspace = true, features = ["net", "time"] }
+url.workspace = true
+uuid.workspace = true
+
+[features]
+# The fakes of `testing`, for tests of other crates and of this one's
+# `tests/`, which turn it on through the dev-dependency below, and the
+# binaries `pi-send`, `codex-send` and `opencode-channel`, which run a
+# channel's cases on a runtime of their own.
+test-support = ["tokio/rt"]
+
+# Pi's channel on the system's clock, for `tests/pi-message.test.mjs` and
+# `tests/delivery-contract.test.mjs`.
+[[bin]]
+name = "pi-send"
+path = "src/bin/pi_send.rs"
+required-features = ["test-support"]
+
+# Codex's channel on the system's clock and loopback, for
+# `tests/codex-channel.test.mjs` and `tests/delivery-contract.test.mjs`.
+[[bin]]
+name = "codex-send"
+path = "src/bin/codex_send.rs"
+required-features = ["test-support"]
+
+# OpenCode's channel on the system's clock, loopback and processes, for
+# `tests/opencode-launch.test.mjs` and `tests/delivery-contract.test.mjs`.
+[[bin]]
+name = "opencode-channel"
+path = "src/bin/opencode_channel.rs"
+required-features = ["test-support"]
 
 [dev-dependencies]
+cf-harness = { path = ".", features = ["test-support"] }
 flate2.workspace = true
-# `parity:records` digests each text as Node's half does.
-sha2.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "rt"] }
+
+# The mask the goldens' scenarios make their files under, which std cannot set.
+[target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true, features = ["fs"] }
 
 [lints]
 workspace = true

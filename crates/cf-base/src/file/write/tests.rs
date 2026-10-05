@@ -181,10 +181,59 @@ fn what_is_not_there_is_no_failure_to_remove_and_a_file_is_removed() {
     assert!(folder.is_dir());
 }
 
+#[test]
+fn a_file_written_in_place_replaces_what_the_file_held() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    write_file(&path, b"a longer first text", 0o600).unwrap();
+    write_file(&path, b"short", 0o600).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), b"short");
+    assert_eq!(left_in(dir.path()), ["settings.json"], "nothing beside it");
+    let folder = dir.path().join("missing");
+    let said = write_file(&folder.join("x"), b"", 0o600).unwrap_err();
+    assert_eq!(
+        said.to_string(),
+        format!(
+            "ENOENT: no such file or directory, open '{}'",
+            folder.join("x").display()
+        )
+    );
+}
+
 #[cfg(unix)]
 mod unix {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    /// The permissions of what is at `path`.
+    fn mode_of(path: &Path) -> u32 {
+        fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn every_level_a_folder_makes_has_its_mode_and_one_there_keeps_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let there = dir.path().join("there");
+        fs::create_dir(&there).unwrap();
+        fs::set_permissions(&there, fs::Permissions::from_mode(0o755)).unwrap();
+        let folder = there.join("a").join("b");
+        make_folder(&folder, 0o700, Mkdir::Sync).unwrap();
+        assert_eq!(mode_of(&there), 0o755);
+        assert_eq!(mode_of(&there.join("a")), 0o700);
+        assert_eq!(mode_of(&folder), 0o700);
+        make_folder(&folder, 0o700, Mkdir::Sync).unwrap();
+    }
+
+    #[test]
+    fn a_new_file_has_its_mode_and_one_there_keeps_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        write_file(&path, b"{}", 0o600).unwrap();
+        assert_eq!(mode_of(&path), 0o600);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        write_file(&path, b"{}", 0o600).unwrap();
+        assert_eq!(mode_of(&path), 0o644);
+    }
 
     /// A folder whose permissions are `mode` until the guard goes, which
     /// opens it again so that the temporary folder can be removed.
@@ -229,6 +278,52 @@ mod unix {
         );
         assert_eq!(failure.code(), "EACCES");
         assert_eq!(left_in(&folder), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_promised_mkdir_names_the_level_that_failed_and_a_synchronous_one_the_whole_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let above = dir.path().join("ro");
+        fs::create_dir(&above).unwrap();
+        let _locked = Locked::new(&above, 0o555);
+        if !refuses_a_new_file(&above) {
+            return;
+        }
+        let folder = above.join("new").join("leaf");
+        let said = |call| make_folder(&folder, 0o700, call).unwrap_err().to_string();
+        // Probed on Node v26.8.1: `mkdirSync` and `fs.promises.mkdir`, both recursive.
+        assert_eq!(
+            said(Mkdir::Promise),
+            format!(
+                "EACCES: permission denied, mkdir '{}'",
+                above.join("new").display()
+            )
+        );
+        assert_eq!(
+            said(Mkdir::Sync),
+            format!("EACCES: permission denied, mkdir '{}'", folder.display())
+        );
+    }
+
+    #[test]
+    fn a_link_to_nothing_above_the_folder_is_no_directory_to_a_promised_mkdir() {
+        let dir = tempfile::tempdir().unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(dir.path().join("nowhere"), &link).unwrap();
+        let folder = link.join("leaf");
+        let said = |call| make_folder(&folder, 0o700, call).unwrap_err().to_string();
+        // Probed on Node v26.8.1, `fs.promises.mkdir` and `mkdirSync`, recursive.
+        assert_eq!(
+            said(Mkdir::Promise),
+            format!("ENOTDIR: not a directory, mkdir '{}'", link.display())
+        );
+        assert_eq!(
+            said(Mkdir::Sync),
+            format!(
+                "ENOENT: no such file or directory, mkdir '{}'",
+                folder.display()
+            )
+        );
     }
 
     #[test]
@@ -320,6 +415,20 @@ fn a_folder_name_windows_refuses_ends_the_walk_where_node_ends_it() {
         format!(
             "ENOENT: no such file or directory, mkdir '{}'",
             folder.display()
+        )
+    );
+}
+
+#[test]
+fn a_folder_in_the_way_of_a_file_written_is_eisdir_on_open() {
+    let dir = tempfile::tempdir().unwrap();
+    // Probed on Node v26.8.1 (`fs.promises.writeFile` over a folder), and
+    // recorded on Windows by the launch's goldens.
+    assert_eq!(
+        write_file(dir.path(), b"x", 0o666).unwrap_err().to_string(),
+        format!(
+            "EISDIR: illegal operation on a directory, open '{}'",
+            dir.path().display()
         )
     );
 }

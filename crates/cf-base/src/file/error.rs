@@ -58,7 +58,7 @@ impl FileError {
     /// A call of libuv's that failed with `source`, as `uvException` says it:
     /// `syscall` is what Node calls the call and `path` what it was given,
     /// none for the one that is given no path (`write`).
-    pub(super) fn call(source: io::Error, syscall: &'static str, path: Option<&Path>) -> Self {
+    pub fn call(source: io::Error, syscall: &'static str, path: Option<&Path>) -> Self {
         let code = error_code(&source);
         Self::named(code, source, syscall, path, None)
     }

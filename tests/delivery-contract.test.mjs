@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
-import { describe, it } from 'node:test'
+import { before, describe, it } from 'node:test'
 import { admission } from '../src/adapters/shared.js'
 import { Bridge } from '../src/bridge.js'
 import { send as sendCodex } from '../src/channels/codex.js'
@@ -12,6 +12,7 @@ import { send as sendDevin } from '../src/channels/devin.js'
 import { send as sendOpenCode } from '../src/channels/opencode.js'
 import { send as sendPi } from '../src/channels/pi.js'
 import { writePaste } from '../src/channels/pty.js'
+import { cargoMissing, rustCodex, rustOpenCode, rustPi } from './rust-channels.mjs'
 
 /**
  * One contract for every channel's answer to a send (the owner's rule,
@@ -27,7 +28,9 @@ import { writePaste } from '../src/channels/pty.js'
  * Every channel runs every row through its real send function, against
  * stand-ins for the pane host and the harness side, and the adapters read
  * each answer the same way (`admission()`): a refusal read into an answer
- * that does not say one is a message delivered twice.
+ * that does not say one is a message delivered twice. Codex's, OpenCode's
+ * and Pi's channels run every row twice, with the JavaScript send and with
+ * the Rust one (`tests/rust-channels.mjs`).
  */
 const ROWS = {
   refused: { says: 'refused before its handover point', admitted: false },
@@ -143,42 +146,46 @@ function posted(send, server) {
   }
 }
 
-async function sendThroughCodex(t, { claim, ...server }) {
-  return sendCodex(
-    {
-      session: '01a0817b-e6b0-7f32-8e11-370dc000cbc0',
-      pane: 'p1-diana',
-      generation: 3,
-      deadlineMs: 3_000,
-      bridge: paneHost(t, { claim }),
-      launch: {
-        kind: 'codex-queue',
-        launchId: 'launch-codex',
-        sessionBridge: await harnessServer(t, server),
-      },
-    },
-    'the cache key is per conversation',
-  )
-}
-
-async function sendThroughOpenCode(t, { claim, ...server }) {
-  return sendOpenCode(
-    {
-      session: 'ses_contract1',
-      pane: 'p1-hera',
-      generation: 3,
-      bridge: paneHost(t, { claim }),
-      launch: {
-        channel: {
-          kind: 'opencode-server',
-          launchId: 'launch-opencode',
+/** The rows of Codex's channel, run through `send`: JavaScript's or Rust's. */
+const throughCodex =
+  (send) =>
+  async (t, { claim, ...server }) =>
+    send(
+      {
+        session: '01a0817b-e6b0-7f32-8e11-370dc000cbc0',
+        pane: 'p1-diana',
+        generation: 3,
+        deadlineMs: 3_000,
+        bridge: paneHost(t, { claim }),
+        launch: {
+          kind: 'codex-queue',
+          launchId: 'launch-codex',
           sessionBridge: await harnessServer(t, server),
         },
       },
-    },
-    'the cache key is per conversation',
-  )
-}
+      'the cache key is per conversation',
+    )
+
+/** The rows of OpenCode's channel, run through `send`: JavaScript's or Rust's. */
+const throughOpenCode =
+  (send) =>
+  async (t, { claim, ...server }) =>
+    send(
+      {
+        session: 'ses_contract1',
+        pane: 'p1-hera',
+        generation: 3,
+        bridge: paneHost(t, { claim }),
+        launch: {
+          channel: {
+            kind: 'opencode-server',
+            launchId: 'launch-opencode',
+            sessionBridge: await harnessServer(t, server),
+          },
+        },
+      },
+      'the cache key is per conversation',
+    )
 
 const DEVIN_SESSION = 'b7c2a0f4-5d1e-4a8b-9c3f-1e2d3c4b5a69'
 
@@ -238,35 +245,36 @@ async function piWindow(t, answer) {
   return { root, inbox, ack }
 }
 
-async function sendThroughPi(
-  t,
-  { answer = async () => {}, claim, ackTimeoutMs = 5_000, inbox } = {},
-) {
-  const window = await piWindow(t, answer)
-  return sendPi(
-    {
-      session: 'cf-1-zeus-0000abcd',
-      pane: 'p1-zeus',
-      generation: 3,
-      bridge: paneHost(t, { claim }),
-      launch: {
-        channel: {
-          kind: 'pi-extension',
-          launchId: 'launch-pi',
-          inbox: inbox === undefined ? window.inbox : await inbox(window),
-          ack: window.ack,
-          ackTimeoutMs,
+/** The rows of Pi's channel, run through `send`: JavaScript's or Rust's. */
+const throughPi =
+  (send) =>
+  async (t, { answer = async () => {}, claim, ackTimeoutMs = 5_000, inbox } = {}) => {
+    const window = await piWindow(t, answer)
+    return send(
+      {
+        session: 'cf-1-zeus-0000abcd',
+        pane: 'p1-zeus',
+        generation: 3,
+        bridge: paneHost(t, { claim }),
+        launch: {
+          channel: {
+            kind: 'pi-extension',
+            launchId: 'launch-pi',
+            inbox: inbox === undefined ? window.inbox : await inbox(window),
+            ack: window.ack,
+            ackTimeoutMs,
+          },
         },
       },
-    },
-    'the cache key is per conversation',
-  )
-}
+      'the cache key is per conversation',
+    )
+  }
 
 const acknowledge = (fields) => async (path, id) =>
   writeFile(path, JSON.stringify({ id, ...fields }))
 
-const CHANNELS = {
+/** The channels that are pasted into their windows, which only JavaScript has. */
+const PASTED_CHANNELS = {
   'Claude Code, pasted into its window': pasted((t, host) =>
     writePaste(
       paneHost(t, host),
@@ -280,42 +288,50 @@ const CHANNELS = {
     'Devin has no wire log to say which conversation it shows': (t) =>
       sendThroughDevin(t, {}, { logged: false }),
   }),
-  'Codex, through its broker': posted(sendThroughCodex, 'the broker'),
-  'OpenCode, through its plugin': posted(sendThroughOpenCode, 'the plugin'),
-  'Pi, through its extension inbox': {
-    refused: {
-      'the pane host refuses its claim': (t) =>
-        sendThroughPi(t, { claim: { ok: false, error: 'pane p1-zeus is gone' } }),
-      'its inbox cannot be written': (t) =>
-        sendThroughPi(t, {
-          inbox: async (window) => {
-            const file = join(window.root, 'not-a-folder')
-            await writeFile(file, '')
-            return file
-          },
-        }),
-      'the extension refuses it before sending': (t) =>
-        sendThroughPi(t, {
-          answer: acknowledge({ admitted: false, bytesWritten: 0, reason: 'chief busy' }),
-        }),
-    },
-    uncertain: {
-      // The case a loaded CI runner hit (2026-10-02): something threw while
-      // the channel waited for the acknowledgement, after the record was in.
-      'an error after the inbox rename': (t) =>
-        sendThroughPi(t, { answer: (path) => mkdir(path, { recursive: true }) }),
-      'no acknowledgement before the record expires': (t) =>
-        sendThroughPi(t, { ackTimeoutMs: 100 }),
-    },
-    accepted: {
-      'the extension shows it in Pi': (t) =>
-        sendThroughPi(t, { answer: acknowledge({ admitted: true, mode: 'tui' }) }),
-    },
-  },
 }
 
-describe("one contract for every channel's send", () => {
-  for (const [channel, rows] of Object.entries(CHANNELS)) {
+/** The channels with a Rust twin, each row run through its `send` in `senders`. */
+function postedChannels(senders) {
+  const sendThroughPi = throughPi(senders.pi)
+  return {
+    'Codex, through its broker': posted(throughCodex(senders.codex), 'the broker'),
+    'OpenCode, through its plugin': posted(throughOpenCode(senders.opencode), 'the plugin'),
+    'Pi, through its extension inbox': {
+      refused: {
+        'the pane host refuses its claim': (t) =>
+          sendThroughPi(t, { claim: { ok: false, error: 'pane p1-zeus is gone' } }),
+        'its inbox cannot be written': (t) =>
+          sendThroughPi(t, {
+            inbox: async (window) => {
+              const file = join(window.root, 'not-a-folder')
+              await writeFile(file, '')
+              return file
+            },
+          }),
+        'the extension refuses it before sending': (t) =>
+          sendThroughPi(t, {
+            answer: acknowledge({ admitted: false, bytesWritten: 0, reason: 'chief busy' }),
+          }),
+      },
+      uncertain: {
+        // The case a loaded CI runner hit (2026-10-02): something threw while
+        // the channel waited for the acknowledgement, after the record was in.
+        'an error after the inbox rename': (t) =>
+          sendThroughPi(t, { answer: (path) => mkdir(path, { recursive: true }) }),
+        'no acknowledgement before the record expires': (t) =>
+          sendThroughPi(t, { ackTimeoutMs: 100 }),
+      },
+      accepted: {
+        'the extension shows it in Pi': (t) =>
+          sendThroughPi(t, { answer: acknowledge({ admitted: true, mode: 'tui' }) }),
+      },
+    },
+  }
+}
+
+/** One `describe` per channel, holding every row of the contract. */
+function hold(channels) {
+  for (const [channel, rows] of Object.entries(channels)) {
     describe(channel, () => {
       it('expresses every row', () => {
         assert.deepEqual(Object.keys(rows), Object.keys(ROWS))
@@ -332,4 +348,25 @@ describe("one contract for every channel's send", () => {
       }
     })
   }
+}
+
+describe("one contract for every channel's send", () => {
+  hold({
+    ...PASTED_CHANNELS,
+    ...postedChannels({ codex: sendCodex, opencode: sendOpenCode, pi: sendPi }),
+  })
+
+  describe("Rust's channels", { skip: cargoMissing }, () => {
+    let rust
+    before(() => {
+      rust = { codex: rustCodex(), opencode: rustOpenCode(), pi: rustPi() }
+    })
+    hold(
+      postedChannels({
+        codex: (target, text) => rust.codex.send(target, text),
+        opencode: (target, text) => rust.opencode.send(target, text),
+        pi: (target, text) => rust.pi.send(target, text),
+      }),
+    )
+  })
 })

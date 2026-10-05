@@ -1,16 +1,26 @@
 //! The one place a ConsensFlow program starts another process: how a
-//! program starts here (Windows scripts and npm's shims included), where a
-//! command is on PATH, running one in this process's place, and ending one.
+//! program starts here (Windows scripts and npm's shims included) and how a
+//! window's program does, where a command is on PATH, running one in this
+//! process's place, to its end (`execFile`) or beside this one a line at a
+//! time (`spawn`), ending one, and whether one is alive.
 
 #![deny(unsafe_code)]
 #![deny(clippy::undocumented_unsafe_blocks)]
 
+mod alive;
+mod child;
+mod execute;
+mod job;
 mod runnable;
 mod search;
 mod terminate;
 
-pub use runnable::{runnable, Run};
-pub use search::on_path;
+pub use alive::alive;
+pub use child::{spawn, Child, Ender, Streams};
+pub use execute::{execute, Failed, Limits};
+pub use job::with_required;
+pub use runnable::{pane_argv, runnable, Run};
+pub use search::{find_in, on_path};
 pub use terminate::{terminate, Ending};
 
 use std::ffi::{OsStr, OsString};

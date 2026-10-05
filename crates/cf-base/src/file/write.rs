@@ -1,6 +1,7 @@
-//! A file written whole or not at all, step by step as `saveDocument`
-//! (`src/roster.js`) writes it, each step's failure said as the call of
-//! Node's that failed.
+//! Files and folders made as Node makes them, each failure said as the call
+//! of Node's that failed: a folder with every level above it, a file written
+//! in place, and a file written whole or not at all, step by step as
+//! `saveDocument` (`src/roster.js`) writes it.
 
 use std::ffi::OsString;
 use std::fs::{self, File};
@@ -26,38 +27,62 @@ pub fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), FileError> {
         .parent()
         .filter(|folder| !folder.as_os_str().is_empty())
     {
-        make_folder(folder)?;
+        make_folder(folder, 0o777, Mkdir::Sync)?;
     }
     let mut temporary = OsString::from(path.as_os_str());
     temporary.push(format!(".{}.tmp", std::process::id()));
     let temporary = PathBuf::from(temporary);
-    write_new(&temporary, bytes)
+    write_file(&temporary, bytes, 0o666)
         .and_then(|()| rename(&temporary, path))
         .map_err(|failure| remove(&temporary).err().unwrap_or(failure))
 }
 
-/// `mkdirSync(folder, { recursive: true })`, as Node's `MKDirpSync` walks it:
-/// a folder that is not there is made after the one above it, and the path
-/// in a failure is the whole one asked for, not the level that failed. A
-/// level the system refuses for permission, space or because it is not a
-/// directory ends the walk; one that is there already is a folder, or is
-/// not, which is `EEXIST` for the path itself and `ENOTDIR` for a file in
-/// the way of a level above. Reconstructed from Node's behaviour, not read
-/// from its C++ (not at hand): the walk's Unix answers are probed, its
-/// Windows ones are not.
-fn make_folder(folder: &Path) -> Result<(), FileError> {
+/// Which of Node's recursive `mkdir` calls a folder is made as. Both walk
+/// the same levels and fail with the same codes (`MKDirpSync` and
+/// `MKDirpAsync`, `src/node_file.cc` of Node v26.8.1); a failure names the
+/// folder asked for after `mkdirSync`, and the level that failed after
+/// `fs.promises.mkdir`, whose error is the last request's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mkdir {
+    Sync,
+    Promise,
+}
+
+/// `mkdir(folder, { recursive: true, mode })`, as Node walks it: a folder
+/// that is not there is made after the one above it, with `mode` (less the
+/// umask; Windows has none). A level the system refuses for permission,
+/// space or because it is not a directory ends the walk; one that is there
+/// already is a folder, or is not, which is `EEXIST` for the path itself and
+/// `ENOTDIR` for a file in the way of a level above. `call` says which path
+/// a failure names.
+pub fn make_folder(folder: &Path, mode: u32, call: Mkdir) -> Result<(), FileError> {
+    #[cfg(unix)]
+    let builder = {
+        let mut builder = fs::DirBuilder::new();
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, mode);
+        builder
+    };
+    #[cfg(not(unix))]
+    let builder = {
+        let _ = mode;
+        fs::DirBuilder::new()
+    };
     let mut pending = vec![folder.to_path_buf()];
     while let Some(next) = pending.pop() {
-        let Err(error) = fs::create_dir(&next) else {
+        let Err(error) = builder.create(&next) else {
             continue;
         };
         let name = mkdir_error_name(&error);
+        let named = match call {
+            Mkdir::Sync => folder,
+            Mkdir::Promise => next.as_path(),
+        };
         let above = next
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty());
         match (name, above) {
             (Some("EACCES" | "ENOSPC" | "ENOTDIR" | "EPERM"), _) => {
-                return Err(FileError::call(error, "mkdir", Some(folder)));
+                return Err(FileError::call(error, "mkdir", Some(named)));
             }
             (Some("ENOENT"), Some(above)) => {
                 let above = above.to_path_buf();
@@ -65,12 +90,24 @@ fn make_folder(folder: &Path) -> Result<(), FileError> {
                 pending.push(above);
             }
             _ => match fs::metadata(&next) {
-                Ok(there) if !there.is_dir() => {
-                    let code = not_a_folder(name, !pending.is_empty());
-                    return Err(FileError::named(code, error, "mkdir", Some(folder), None));
+                Ok(there) if there.is_dir() => {}
+                // The promised walk takes a level there already, with levels
+                // still to make below it, for no folder whatever its look
+                // says, a link to nothing among them (`MKDirpAsync`).
+                _ if call == Mkdir::Promise && name == Some("EEXIST") && !pending.is_empty() => {
+                    return Err(FileError::named(
+                        "ENOTDIR",
+                        error,
+                        "mkdir",
+                        Some(named),
+                        None,
+                    ));
                 }
-                Ok(_) => {}
-                Err(error) => return Err(FileError::call(error, "mkdir", Some(folder))),
+                Ok(_) => {
+                    let code = not_a_folder(name, !pending.is_empty());
+                    return Err(FileError::named(code, error, "mkdir", Some(named), None));
+                }
+                Err(error) => return Err(FileError::call(error, "mkdir", Some(named))),
             },
         }
     }
@@ -109,15 +146,36 @@ fn not_a_folder(name: Option<&str>, levels_below: bool) -> &'static str {
     }
 }
 
-/// `writeFileSync(temporary, text)`: the file made as the flag `w` makes it
-/// (`open`, with the temporary's path), the bytes written to it, and the
-/// file closed, its close checked as Node checks it: the rename is never
-/// made over a file written short.
-fn write_new(temporary: &Path, bytes: &[u8]) -> Result<(), FileError> {
-    let mut file =
-        File::create(temporary).map_err(|error| FileError::call(error, "open", Some(temporary)))?;
+/// `writeFile(path, bytes, { mode })`: the file opened as the flag `w` opens
+/// it (`open`, with its path), made with `mode` (less the umask) when it is
+/// not there and keeping its own when it is, the bytes written to it, and
+/// the file closed, its close checked on Unix as Node checks it: a rename is
+/// never made over a file written short. Windows takes no mode here, where
+/// libuv made a file read-only for a mode without the owner's write bit:
+/// every caller asks for one its owner may write (`0o600`, `0o666`).
+pub fn write_file(path: &Path, bytes: &[u8], mode: u32) -> Result<(), FileError> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, mode);
+    #[cfg(not(unix))]
+    let _ = mode;
+    let mut file = options
+        .open(path)
+        .map_err(|error| open_failed(error, path))?;
     write_all(&mut file, bytes)?;
     close(file)
+}
+
+/// `open`'s failure for a file made anew, in Node's words. On Windows a
+/// folder in its way is `EISDIR`, as libuv reads the answer its own open of
+/// it gets (`fs__open`) and as Unix says it, where the system answers this
+/// open with access denied.
+fn open_failed(error: io::Error, path: &Path) -> FileError {
+    if cfg!(windows) && fs::metadata(path).is_ok_and(|found| found.is_dir()) {
+        return FileError::named("EISDIR", error, "open", Some(path), None);
+    }
+    FileError::call(error, "open", Some(path))
 }
 
 /// The close Node checks, where a write the system deferred (to a network

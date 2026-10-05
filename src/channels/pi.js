@@ -33,9 +33,13 @@ async function ackFor(path, id, expiresAt) {
     } catch (cause) {
       if (cause?.code !== 'ENOENT' && !(cause instanceof SyntaxError)) throw cause
     }
+    // The last millisecond is slept out, not read through: a loop that does
+    // not wait reads the file again and again until the clock moves.
     const remaining = expiresAt + ACK_GRACE_MS - Date.now()
-    if (remaining > 0) {
-      await new Promise((resolve) => setTimeout(resolve, Math.min(ACK_POLL_MS, remaining)))
+    if (remaining >= 0) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(1, Math.min(ACK_POLL_MS, remaining))),
+      )
     }
   }
   return null
