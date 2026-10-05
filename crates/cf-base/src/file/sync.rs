@@ -39,9 +39,14 @@ pub fn make_temporary_folder(
 ) -> Result<PathBuf, FileError> {
     let template = PathBuf::from(format!("{prefix}XXXXXX"));
     let failed = |failed| FileError::call(failed, "mkdtemp", Some(&template));
-    let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    let builder = {
+        let mut builder = fs::DirBuilder::new();
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder
+    };
+    #[cfg(not(unix))]
+    let builder = fs::DirBuilder::new();
     let mut tries = 1;
     loop {
         let name: String = random()
