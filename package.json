@@ -44,6 +44,7 @@
     "load": "CONSENSFLOW_LOAD=1 node --test tests/load/*.test.mjs",
     "candidate": "node app/scripts/candidate.mjs",
     "bench:core": "node tests/live/core-bench.mjs",
+    "bench:records-memory": "node tests/bench/records-memory.mjs",
     "live:paste": "node tests/live/paste-submit.mjs",
     "live:interrupt": "node tests/live/interrupt-idle.mjs",
     "live:asks": "node tests/live/claude-asks.mjs",

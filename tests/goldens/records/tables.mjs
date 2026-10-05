@@ -5,6 +5,7 @@
  *   pins); Codex's rate limits; OpenCode's retries; the status tests;
  * - `localeCompare`, by which the Claude and OpenCode readers break ties
  *   between item ids: ICU's collation, which the port emulates for ASCII;
+ * - `JSON.parse` of lines, kept as a schema says (lines.mjs);
  * - the reasons that are ConsensFlow's own sentences, by how each begins.
  *
  * A call that throws is written `{"throws": true}`.
@@ -18,6 +19,7 @@ import {
   refusedForQuota,
 } from '../../../hosts/lib/quota.js'
 import { fixtureJson, fixtureLines } from './fixtures.mjs'
+import { linesTable } from './lines.mjs'
 import { OUR_REASONS } from './runner.mjs'
 
 /** The zone a reset that names none is read in; the generator sets `TZ` to it. */
@@ -310,5 +312,10 @@ export function refuseTailoredCollation() {
 
 /** The tables, as one golden. */
 export function tables() {
-  return { quota: quotaTable(), collation: collationTable(), reasons: { ours: OUR_REASONS } }
+  return {
+    quota: quotaTable(),
+    collation: collationTable(),
+    lines: linesTable(),
+    reasons: { ours: OUR_REASONS },
+  }
 }

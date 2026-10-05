@@ -105,6 +105,22 @@ pub(crate) fn read_on(
     visit: &mut dyn FnMut(Value, usize) -> Result<(), Stop>,
     only: Option<&[u8]>,
 ) -> Result<Looked, Stop> {
+    read_on_with(file, seen, from_slice_lossy, visit, only)
+}
+
+/// How a line is read into a record: a parser of the JSON of one line.
+pub(crate) type Parse = fn(&[u8]) -> serde_json::Result<Value>;
+
+/// [`read_on`], each line read by `parse`. It reads as `from_slice_lossy`
+/// does, or fails where that fails: a line it cannot read is a failure of the
+/// look, malformed or too much for a value, said as `read_on` says it.
+pub(crate) fn read_on_with(
+    file: &Path,
+    seen: Option<&Seen>,
+    parse: Parse,
+    visit: &mut dyn FnMut(Value, usize) -> Result<(), Stop>,
+    only: Option<&[u8]>,
+) -> Result<Looked, Stop> {
     let mut handle = File::open(file)?;
     let metadata = handle.metadata()?;
     let file_identity = identity(&handle)?;
@@ -142,7 +158,7 @@ pub(crate) fn read_on(
                 break;
             }
             let mut start = 0;
-            while let Some(newline) = chunk[start..read].iter().position(|byte| *byte == b'\n') {
+            while let Some(newline) = memchr::memchr(b'\n', &chunk[start..read]) {
                 let end = start + newline;
                 line.extend_from_slice(&chunk[start..end]);
                 if visited {
@@ -153,7 +169,7 @@ pub(crate) fn read_on(
                     visited = false;
                     tail.clear();
                 } else if holds_only(&line) {
-                    records = consume_line(&line, records, visit)?;
+                    records = consume_line(&line, records, parse, visit)?;
                 }
                 line.clear();
                 offset = at + end as u64 + 1;
@@ -169,7 +185,7 @@ pub(crate) fn read_on(
         }
     } else if !is_blank(&line) && holds_only(&line) {
         let text = String::from_utf8_lossy(&line);
-        match from_slice_lossy(text.as_bytes()) {
+        match parse(text.as_bytes()) {
             Ok(record) => {
                 visit(record, records)?;
                 records += 1;
@@ -201,12 +217,13 @@ pub(crate) fn read_on(
 fn consume_line(
     raw: &[u8],
     index: usize,
+    parse: Parse,
     visit: &mut dyn FnMut(Value, usize) -> Result<(), Stop>,
 ) -> Result<usize, Stop> {
     if is_blank(raw) {
         return Ok(index);
     }
-    let record = from_slice_lossy(raw).map_err(|_| unread(raw, index))?;
+    let record = parse(raw).map_err(|_| unread(raw, index))?;
     visit(record, index)?;
     Ok(index + 1)
 }
@@ -258,5 +275,7 @@ fn holds(handle: &mut File, at: u64, bytes: &[u8]) -> io::Result<bool> {
     Ok(bytes_at(handle, at, at + bytes.len() as u64)? == bytes)
 }
 
+#[cfg(test)]
+mod parsers;
 #[cfg(test)]
 mod tests;

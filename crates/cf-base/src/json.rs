@@ -5,10 +5,17 @@
 //! as Node prints them in text. Written back out as JSON (cf's `--json`), the
 //! half emoji is U+FFFD too, where Node wrote the lone escape again: valid
 //! JSON for invalid, on purpose.
+//!
+//! A line of a big file can be read for part of what it holds
+//! ([`from_slice_lossy_keeping`]): the rest is read to its end, and never built.
+
+mod keeping;
 
 use std::borrow::Cow;
 
 use serde_json::{Map, Number, Value};
+
+pub use keeping::{from_slice_lossy_keeping, Keep};
 
 /// The most levels of arrays and objects serde_json reads, the root's own
 /// included: JSON nested deeper is no value here.
@@ -166,11 +173,9 @@ fn without_lone_surrogates(json: &str) -> Cow<'_, str> {
     let mut fixed: Option<String> = None;
     let mut copied = 0;
     let mut at = 0;
-    while at < bytes.len() {
-        if bytes[at] != b'\\' {
-            at += 1;
-            continue;
-        }
+    // Most of a line is no escape: `memchr` goes from one backslash to the next.
+    while let Some(found) = bytes.get(at..).and_then(|rest| memchr::memchr(b'\\', rest)) {
+        at += found;
         let Some(unit) = escaped_unit(bytes, at) else {
             // `\"`, `\\`, `\n` and the like: what they escape starts no escape.
             at += 2;
@@ -370,5 +375,76 @@ mod tests {
         }
         let broken = format!("{}1{}", "[".repeat(300), "]".repeat(299));
         assert!(!is_json_lossy(broken.as_bytes()));
+    }
+
+    /// `without_lone_surrogates` as it was first written, a byte at a time.
+    fn by_the_byte(json: &str) -> Cow<'_, str> {
+        let bytes = json.as_bytes();
+        let mut fixed: Option<String> = None;
+        let (mut copied, mut at) = (0, 0);
+        while at < bytes.len() {
+            if bytes[at] != b'\\' {
+                at += 1;
+                continue;
+            }
+            let Some(unit) = escaped_unit(bytes, at) else {
+                at += 2;
+                continue;
+            };
+            let leading = (0xD800..=0xDBFF).contains(&unit);
+            let paired = leading
+                && escaped_unit(bytes, at + 6)
+                    .is_some_and(|next| (0xDC00..=0xDFFF).contains(&next));
+            if paired {
+                at += 12;
+            } else if leading || (0xDC00..=0xDFFF).contains(&unit) {
+                let out = fixed.get_or_insert_with(|| String::with_capacity(json.len()));
+                out.push_str(&json[copied..at]);
+                out.push_str("\\ufffd");
+                at += 6;
+                copied = at;
+            } else {
+                at += 6;
+            }
+        }
+        match fixed {
+            None => Cow::Borrowed(json),
+            Some(mut out) => {
+                out.push_str(&json[copied..]);
+                Cow::Owned(out)
+            }
+        }
+    }
+
+    #[test]
+    fn the_escapes_are_found_as_a_scan_of_every_byte_finds_them() {
+        // Texts made of what escapes are made of, and of what they can be mistaken for.
+        const PIECES: [&str; 20] = [
+            "\\", "\\\\", "\\u", "\\ud83d", "\\ude00", "\\uD800", "\\udFFF", "\\u0041", "\\u00e",
+            "\\n", "\\\"", "u", "d8", "00", "\"", "é", "日", "😀", "x", " ",
+        ];
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut next = move || {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            usize::try_from(state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33).unwrap_or(0)
+        };
+        let mut changed = 0;
+        for _ in 0..20_000 {
+            let text: String = (0..next() % 14)
+                .map(|_| PIECES[next() % PIECES.len()])
+                .collect();
+            let (fast, slow) = (without_lone_surrogates(&text), by_the_byte(&text));
+            assert_eq!(fast, slow, "{text:?}");
+            assert_eq!(matches!(fast, Cow::Owned(_)), matches!(slow, Cow::Owned(_)));
+            changed += usize::from(matches!(fast, Cow::Owned(_)));
+        }
+        // Plenty had a lone surrogate to fix, and plenty had none.
+        assert!((2000..18_000).contains(&changed), "{changed}");
+        // A backslash is the last byte, or the one before it.
+        for text in ["\\", "a\\", "\\u", "\\ud800", "\\ud800\\", "é\\"] {
+            assert_eq!(without_lone_surrogates(text), by_the_byte(text), "{text:?}");
+        }
     }
 }
