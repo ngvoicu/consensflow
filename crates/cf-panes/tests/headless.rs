@@ -1579,6 +1579,37 @@ fn pane_replaces_a_noninteractive_launchers_dumb_term() {
 }
 
 #[test]
+fn pane_names_its_terminal_whatever_terminal_launched_the_app() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn_with_env(&[
+        ("TERM_PROGRAM", "iTerm.app"),
+        ("TERM_PROGRAM_VERSION", "3.5"),
+    ]);
+    let mut events = Vec::new();
+    let mut said = |body: Value, end: &[u8]| {
+        let opened = helper.request("pane.open", body, &mut events);
+        assert_eq!(opened["ok"], true);
+        let id = opened["id"].as_str().unwrap().to_owned();
+        let generation = opened["generation"].as_u64().unwrap();
+        output_until(&helper, &mut events, &id, generation, end)
+    };
+    let command = "printf '%s|%s:end' \"${TERM_PROGRAM-unset}\" \"${TERM_PROGRAM_VERSION-unset}\"";
+    assert_eq!(
+        said(open_body(command, 1024), b":end"),
+        format!("ConsensFlow|{}:end", env!("CARGO_PKG_VERSION")).as_bytes(),
+        "a pane is ConsensFlow's terminal, not the launcher's"
+    );
+    // What a frame says of it wins, and what it takes away stays away.
+    let mut named = open_body(command, 1024);
+    named["env"] = json!({"TERM_PROGRAM": "vscode"});
+    assert_eq!(said(named, b":end"), b"vscode|3.5:end");
+    let mut dropped = open_body(command, 1024);
+    dropped["dropEnv"] = json!(["TERM_PROGRAM", "TERM_PROGRAM_VERSION"]);
+    assert_eq!(said(dropped, b":end"), b"unset|unset:end");
+    helper.close_input_and_wait();
+}
+
+#[test]
 fn pane_does_not_inherit_a_launchers_disabled_colors() {
     let _pty_guard = serial_headless_test();
     let mut helper = Headless::spawn_with_env(&[

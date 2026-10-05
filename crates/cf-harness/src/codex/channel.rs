@@ -15,7 +15,10 @@ use url::Url;
 use crate::seams::loopback::{Loopback, Method, Request};
 use crate::seams::{arm, Time};
 
-pub use send::{send, Answer, Target};
+pub use send::{send, Target};
+// For the binary that plays the channel's cases (`test-support`).
+#[cfg(feature = "test-support")]
+pub use send::Answer;
 
 /// How long the broker has to say what the window shows, over the request and
 /// its body.

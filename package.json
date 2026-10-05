@@ -1,6 +1,6 @@
 {
   "name": "consensflow",
-  "version": "3.0.0-alpha.73",
+  "version": "3.0.0-alpha.76",
   "description": "Native terminal workspace where a Chief of Staff runs your project with a staff of coding agents.",
   "license": "MIT",
   "type": "module",
@@ -39,6 +39,7 @@
     "goldens:unwritable": "node tests/goldens/unwritable/record.mjs",
     "parity:ledger": "npm run goldens:ledger && cargo test -p cf-ledger --test replay",
     "parity:records": "node tests/parity/records.mjs",
+    "parity:launch": "node tests/parity/launch.mjs",
     "build:bridge": "cargo build --release -p cf-panes --bin consensflow-bridge",
     "build:cf": "node app/scripts/build-cf.mjs",
     "smoke": "CONSENSFLOW_SMOKE=1 node --test tests/smoke.test.mjs",
@@ -49,6 +50,7 @@
     "live:interrupt": "node tests/live/interrupt-idle.mjs",
     "live:asks": "node tests/live/claude-asks.mjs",
     "live:codex-resume": "node tests/live/codex-resume.mjs",
+    "live:terminal": "node tests/live/devin-terminal.mjs",
     "windows": "node tests/live/windows.mjs",
     "check:all": "npm run check && cargo fmt --all --check && cargo test --offline --workspace && cargo clippy --offline --workspace --all-targets -- -D warnings && npm --prefix app run test:ui && npm run build:bridge -- --offline && npm run build:cf -- --offline && npm run test:integration && npm run smoke"
   },

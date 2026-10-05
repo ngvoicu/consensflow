@@ -86,9 +86,10 @@ async function claudeExtras(workspace) {
 
 /**
  * Opens `name`'s window (claude or devin) in its own folder under
- * `~/.consensflow-candidate/live/<folder>`, as pane `id`.
+ * `~/.consensflow-candidate/live/<folder>`, as pane `id`, `env` added to
+ * what its harness starts with and `dropEnv` taken from it.
  */
-export async function openWindow(app, name, { folder, id }) {
+export async function openWindow(app, name, { folder, id, env = {}, dropEnv = [] }) {
   const workspace = liveFolder(folder)
   const { kind, model } = HARNESSES[name]
   // Claude and Pi open on an id they are given; the others name their own.
@@ -106,8 +107,8 @@ export async function openWindow(app, name, { folder, id }) {
       [executable, ...(name === 'claude' ? await claudeExtras(workspace) : []), ...start.args],
       ENV,
     ),
-    env: start.env,
-    dropEnv: start.dropEnv,
+    env: { ...start.env, ...env },
+    dropEnv: [...start.dropEnv, ...dropEnv],
     size: { rows: 40, cols: 120 },
   })
   if (opened?.ok !== true) throw new Error(`${name} did not open: ${JSON.stringify(opened)}`)

@@ -169,14 +169,29 @@ pub(crate) fn validate_drop_env(names: &[String]) -> Result<(), PaneError> {
     Ok(())
 }
 
+/// The name a pane's programs know their terminal by (`TERM_PROGRAM`).
+const TERM_PROGRAM: &str = "ConsensFlow";
+
 /// A launcher may have no terminal or advertise `dumb`; the pane is xterm.
 /// A tool runner's inherited plain-output flags do not describe this terminal.
-/// Explicit pane overrides and removals still win; no native theme is changed.
-fn advertise_color_capability(
+/// The pane is ConsensFlow's terminal, whatever terminal launched the app: a
+/// program that knows no terminal by name takes it for the bare console
+/// (Devin on Windows warned "Windows Console Host (conhost) has limited
+/// support", 2026-10-05). Explicit pane overrides and removals still win; no
+/// native theme is changed.
+fn advertise_terminal(
     command: &mut CommandBuilder,
     env: &HashMap<String, String>,
     drop_env: &[String],
 ) {
+    let set_by_frame =
+        |name: &str| env.contains_key(name) || drop_env.iter().any(|dropped| dropped == name);
+    if !set_by_frame("TERM_PROGRAM") {
+        command.env("TERM_PROGRAM", TERM_PROGRAM);
+        if !set_by_frame("TERM_PROGRAM_VERSION") {
+            command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+        }
+    }
     for name in ["NO_COLOR", "FORCE_COLOR", "CLICOLOR_FORCE"] {
         if !env.contains_key(name) {
             command.env_remove(name);
@@ -471,7 +486,7 @@ impl PaneTable {
         for name in drop_env {
             command.env_remove(name);
         }
-        advertise_color_capability(&mut command, env, drop_env);
+        advertise_terminal(&mut command, env, drop_env);
         #[cfg(target_os = "macos")]
         let mut process_tree = crate::process_tree::ProcessTree::new();
         #[cfg(target_os = "macos")]

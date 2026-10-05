@@ -148,12 +148,14 @@ const board = new BoardView(boardRoot, $('#stack-dialog'), {
   // the human just chose, while that one's board is on its way.
   onOpenTask: (number) => act(() => openTask(state.board.project.id, number)),
   onShowTerminal: (participant, opened) => showSession(participant, opened),
-  onHideTerminal: (participant) => terminals.hide(participant.projectId, participant.handle),
+  onHideTerminal: (participant) => hideSession(participant),
   onTryAgain: (participant) => tryAgain(participant),
   onEndSession: (participant) =>
     act(async () => {
       await daemon('session.end', { project: participant.projectId, handle: participant.handle })
-      note(`@${participant.handle} is gone; its tasks stay on @${participant.member}'s lane.`)
+      note(
+        `@${participant.handle} is off the board, its conversation kept: a follow-up brings it back. Its tasks stay on @${participant.member}'s lane.`,
+      )
     }),
   onResume: (project) =>
     act(async () => {
@@ -224,12 +226,13 @@ let outputObserver = null
 /**
  * A session's terminal is in the dock only once the human asks to see it:
  * showing it unfolds the dock and brings it to the front, and a closed one
- * opens first, on its own conversation. Hiding it takes its card out while
- * its window works on; a window the human opened stays until its session or
- * its project ends.
+ * opens first, on its own conversation. A window opened so stays until the
+ * human hides it, or its session or its project ends; one they hid that has
+ * not closed yet is theirs again. A window open for its task, which they
+ * only look at, closes with the task.
  */
-function showSession(participant, { closed }) {
-  if (!closed) {
+function showSession(participant, { closed, hidden }) {
+  if (!closed && !hidden) {
     showTerminal(participant)
     return
   }
@@ -237,6 +240,18 @@ function showSession(participant, { closed }) {
     await daemon('session.open', { project: participant.projectId, handle: participant.handle })
     showTerminal(participant)
   })
+}
+
+/**
+ * The human hides a session's terminal, from its lane or its card: the card
+ * leaves the dock at once, and the daemon, told the window is no longer the
+ * human's, closes it once it holds no task and its agent is not at work.
+ */
+function hideSession(participant) {
+  terminals.hide(participant.projectId, participant.handle)
+  void act(() =>
+    daemon('session.hide', { project: participant.projectId, handle: participant.handle }),
+  )
 }
 
 /** A session's terminal the human asked to see: in the dock, unfolded, in front. */
@@ -257,6 +272,8 @@ const terminals = new TerminalsView(stage, {
   // The chief is switched from its card in the dock, and tried again there when out of quota.
   onSwitchChief: (chief) => act(() => switchChief.open(chief)),
   onTryAgain: (chief) => tryAgain(chief),
+  // A session's terminal is hidden from its card as from its lane.
+  onHideTerminal: (participant) => hideSession(participant),
 })
 
 // A fold changes the room the board and the windows have: both draw again.
@@ -291,7 +308,7 @@ function terminalOf(task) {
   if (lane === undefined) return null
   const { participant } = lane
   if (participant.member === null && participant.role !== 'chief') return null
-  return { participant, closed: lane.pane === null }
+  return { participant, closed: lane.pane === null, hidden: lane.hidden === true }
 }
 
 function closeTask() {

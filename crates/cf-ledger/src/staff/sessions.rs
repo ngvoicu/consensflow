@@ -1,10 +1,12 @@
 //! A member's sessions, each a named window from its first task until the
-//! human ends it, and whether one has work on its hands.
+//! human deletes it, and after that for a follow-up, and whether one has
+//! work on its hands.
 
 use cf_proto::ledger::ProjectView;
 use rusqlite::{params, OptionalExtension};
 use serde_json::json;
 
+use crate::conversations::current_conversation;
 use crate::model::{sql_list, LedgerError, HELD_TASK_STATES};
 use crate::projects::known_project;
 use crate::store::Store;
@@ -72,27 +74,78 @@ pub(crate) fn start_session(
     store.participant_row(id)
 }
 
-/// The session that did T-`after`, still there and with nothing on its hands.
+/// Whether a session can take a follow-up: it is on the board, or it left and
+/// may come back, its member being on the staff and its conversation, if it
+/// had one, still there to resume. A member that left took the conversations
+/// of the sessions it had on the board with it: none of those comes back with
+/// its memory gone.
+pub(crate) fn can_continue(store: &Store, session: &ParticipantRow) -> Result<bool, LedgerError> {
+    if session.left_at.is_none() {
+        return Ok(true);
+    }
+    let member_here = match session.member_id {
+        Some(member) => store.participant_row(member)?.left_at.is_none(),
+        None => false,
+    };
+    let had_one = store
+        .db
+        .query_row(
+            "SELECT 1 FROM conversation WHERE participant_id = ?",
+            [session.id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    let lost = had_one && current_conversation(store, session.id)?.is_none();
+    Ok(member_here && !lost)
+}
+
+/// A session that left the board comes back for its follow-up, its lane with
+/// it: the row as it is now.
+pub(crate) fn bring_back(
+    store: &mut Store,
+    session: ParticipantRow,
+) -> Result<ParticipantRow, LedgerError> {
+    if session.left_at.is_none() {
+        return Ok(session);
+    }
+    store.db.execute(
+        "UPDATE participant SET left_at = NULL WHERE id = ?",
+        [session.id],
+    )?;
+    store.log(
+        session.project_id,
+        "session.returned",
+        json!({ "handle": session.handle, "member": session.member_handle }),
+    )?;
+    store.participant_row(session.id)
+}
+
+/// The session that did T-`after`, with nothing on its hands: on the board,
+/// or brought back to it if the human had deleted it.
 pub(crate) fn continuable_session(
-    store: &Store,
+    store: &mut Store,
     project_id: i64,
     after: i64,
 ) -> Result<ParticipantRow, LedgerError> {
     let previous = store.task_row(project_id, after)?;
-    let session = previous
+    let found = previous
         .assignee_id
         .map(|id| store.participant_row(id))
         .transpose()?
-        .filter(|session| session.member_id.is_some() && session.left_at.is_none())
-        .ok_or_else(|| {
-            LedgerError::refused_with(
+        .filter(|session| session.member_id.is_some());
+    let session = match found {
+        Some(session) if can_continue(store, &session)? => session,
+        _ => {
+            return Err(LedgerError::refused_with(
                 "session-ended",
                 format!(
                     "the session that did T-{after} has ended: open the task for its tier instead"
                 ),
                 409,
-            )
-        })?;
+            ))
+        }
+    };
     if holds_work(store, session.id)? {
         return Err(LedgerError::refused_with(
             "session-busy",
@@ -103,7 +156,7 @@ pub(crate) fn continuable_session(
             409,
         ));
     }
-    Ok(session)
+    bring_back(store, session)
 }
 
 /// Whether a member has a task on its hands: one task per member session
@@ -133,21 +186,26 @@ fn has_task_in(store: &Store, participant_id: i64, states: &[&str]) -> Result<bo
         .is_some())
 }
 
-/// A session ends: it leaves the project and its conversation closes.
+/// A session leaves the board and its lane folds into its member's. Its
+/// conversation closes with it, unless it is kept for a return
+/// (`keep_conversation`).
 pub(super) fn close_session(
     store: &mut Store,
     session: &ParticipantRow,
     reason: &str,
+    keep_conversation: bool,
 ) -> Result<(), LedgerError> {
     let at = store.at();
     store.db.execute(
         "UPDATE participant SET left_at = ? WHERE id = ?",
         params![at, session.id],
     )?;
-    store.db.execute(
-        "UPDATE conversation SET ended_at = ? WHERE participant_id = ? AND ended_at IS NULL",
-        params![at, session.id],
-    )?;
+    if !keep_conversation {
+        store.db.execute(
+            "UPDATE conversation SET ended_at = ? WHERE participant_id = ? AND ended_at IS NULL",
+            params![at, session.id],
+        )?;
+    }
     store.log(
         session.project_id,
         "session.ended",
@@ -155,10 +213,11 @@ pub(super) fn close_session(
     )
 }
 
-/// A session is the human's to end: its lane folds into its member's, its
-/// conversation closes, and nothing of it can be resumed. One still holding
-/// work (queued, working or waiting) is refused; paused work goes back on
-/// the board when resumed.
+/// A session is the human's to delete: it leaves the board, its lane folding
+/// into its member's, and its conversation is kept, so a follow-up (`--after`,
+/// a reopen) brings it back while its member is on the staff. One still
+/// holding work (queued, working or waiting) is refused; paused work goes
+/// back on the board when resumed.
 pub(crate) fn end_session(
     store: &mut Store,
     project_id: i64,
@@ -182,7 +241,7 @@ pub(crate) fn end_session(
                 409,
             ));
         }
-        close_session(store, &session, &format!("ended by @{by}"))?;
+        close_session(store, &session, &format!("ended by @{by}"), true)?;
         known_project(store, project_id)
     })
 }

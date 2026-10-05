@@ -35,9 +35,11 @@ chief's acceptance and your approval, not a fence around the run.
   so the chief writes every task for someone who has never seen the project.
   When a follow-up truly needs what a window already knows, the chief continues
   that window with `cf task add --after T-3 "…"`. A session keeps its
-  conversation until you delete it: from its lane you open its terminal
-  (again on that conversation, if it was closed), close it, or delete the
-  session for good. There is no limit on sessions and none of them expires.
+  conversation: from its lane you open its terminal (again on that
+  conversation, if it was closed), hide it (its window closes once it holds
+  no task and its agent is not at work), or delete the session, which takes
+  it off the board and keeps its conversation, so a follow-up brings it back.
+  There is no limit on sessions and none of them expires.
 - **You talk to the chief in its terminal.** Your work reaches the project
   through the chief: you type to it, and it plans, puts tasks on the board and
   decides on every result. The board has no Accept for you; you read, send
@@ -108,8 +110,9 @@ projects.
   runs on, Switch chief, and its terminal while its window lives. A session's
   terminal stays out of the dock until you choose Show terminal on its row
   (one whose window has closed opens again on its own conversation); Hide
-  terminal (or Hide on its card) puts it away while its window works on, and
-  it keeps all it wrote.
+  terminal (or Hide on its card) puts it away, and its window closes once it
+  holds no task and its agent is not at work; what it wrote stays on its
+  task's card.
 - **New project.** A folder, the saved agent the chief runs on (its harness,
   model and effort come with it), the staff (the last project's ticked
   already) and whether human approval is required.

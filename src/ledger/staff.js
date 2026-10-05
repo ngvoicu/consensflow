@@ -16,9 +16,9 @@ import { PARTICIPANT_SELECT, participantView } from './views.js'
 /**
  * The staff: members who join, change roles, follow the roster's tiers, run
  * out of quota and leave, and the sessions their tasks run in, each a named
- * window from its first task until the human ends it. It answers who may
- * take a task: the members of a pool and tier, with what the daemon ranks
- * them by.
+ * window from its first task until the human deletes it, and after that for
+ * a follow-up. It answers who may take a task: the members of a pool and
+ * tier, with what the daemon ranks them by.
  */
 
 const HOLDS_WORK = `SELECT 1 FROM task WHERE assignee_id = ? AND state IN (${HELD_TASK_STATES.map((state) => `'${state}'`).join(', ')})`
@@ -301,13 +301,18 @@ export function startSession(store, projectId, member, role) {
   return store.participantRow(id)
 }
 
-/** A session ends: it leaves the project and its conversation closes. */
-function closeSession(store, session, reason) {
+/**
+ * A session leaves the board and its lane folds into its member's. Its
+ * conversation closes with it, unless it is kept for a return (`keepConversation`).
+ */
+function closeSession(store, session, reason, { keepConversation = false } = {}) {
   const at = store.at()
   store.db.prepare('UPDATE participant SET left_at = ? WHERE id = ?').run(at, session.id)
-  store.db
-    .prepare('UPDATE conversation SET ended_at = ? WHERE participant_id = ? AND ended_at IS NULL')
-    .run(at, session.id)
+  if (!keepConversation) {
+    store.db
+      .prepare('UPDATE conversation SET ended_at = ? WHERE participant_id = ? AND ended_at IS NULL')
+      .run(at, session.id)
+  }
   store.log(session.project_id, 'session.ended', {
     handle: session.handle,
     member: session.member_handle,
@@ -316,10 +321,11 @@ function closeSession(store, session, reason) {
 }
 
 /**
- * A session is the human's to end: its lane folds into its member's, its
- * conversation closes, and nothing of it can be resumed. One still holding
- * work (queued, working or waiting) is refused; paused work goes
- * back on the board when resumed.
+ * A session is the human's to delete: it leaves the board, its lane folding
+ * into its member's, and its conversation is kept, so a follow-up (`--after`,
+ * a reopen) brings it back while its member is on the staff. One still
+ * holding work (queued, working or waiting) is refused; paused work goes back
+ * on the board when resumed.
  */
 export function endSession(store, projectId, handle, { by }) {
   return store.write(() => {
@@ -335,16 +341,46 @@ export function endSession(store, projectId, handle, { by }) {
         409,
       )
     }
-    closeSession(store, session, `ended by @${by}`)
+    closeSession(store, session, `ended by @${by}`, { keepConversation: true })
     return project(store, projectId)
   })
 }
 
-/** The session that did T-`after`, still there and with nothing on its hands. */
+/**
+ * Whether a session can take a follow-up: it is on the board, or it left and
+ * may come back, its member being on the staff and its conversation, if it
+ * had one, still there to resume. A member that left took the conversations
+ * of the sessions it had on the board with it: none of those comes back with
+ * its memory gone.
+ */
+export function canContinue(store, session) {
+  if (session.left_at === null) return true
+  const lost =
+    currentConversation(store, session.id) === null &&
+    store.db.prepare('SELECT 1 FROM conversation WHERE participant_id = ?').get(session.id) !==
+      undefined
+  return store.participantRow(session.member_id).left_at === null && !lost
+}
+
+/** A session that left the board comes back for its follow-up, its lane with it: the row as it is now. */
+export function bringBack(store, session) {
+  if (session.left_at === null) return session
+  store.db.prepare('UPDATE participant SET left_at = NULL WHERE id = ?').run(session.id)
+  store.log(session.project_id, 'session.returned', {
+    handle: session.handle,
+    member: session.member_handle,
+  })
+  return store.participantRow(session.id)
+}
+
+/**
+ * The session that did T-`after`, with nothing on its hands: on the board,
+ * or brought back to it if the human had deleted it.
+ */
 export function continuableSession(store, projectId, after) {
   const previous = store.taskRow(projectId, after)
   const session = previous.assignee_id === null ? null : store.participantRow(previous.assignee_id)
-  if (session === null || session.member_id === null || session.left_at !== null) {
+  if (session === null || session.member_id === null || !canContinue(store, session)) {
     throw new LedgerError(
       'session-ended',
       `the session that did T-${after} has ended: open the task for its tier instead`,
@@ -358,7 +394,7 @@ export function continuableSession(store, projectId, after) {
       409,
     )
   }
-  return session
+  return bringBack(store, session)
 }
 
 /** A member of the staff, never one of its sessions. */

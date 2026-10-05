@@ -15,6 +15,8 @@ import {
 } from './model.js'
 import { dropQueued, queue, send, withdrawGated } from './queue.js'
 import {
+  bringBack,
+  canContinue,
   continuableSession,
   membersOfTier,
   nearestTier,
@@ -469,7 +471,9 @@ export function toldSincePaused(store, participantId, taskId) {
 /**
  * A paused task goes on with the words that resume it: into the same
  * window when its session is still there (a brief never delivered goes in
- * first), or back on the board for its tier when the session has ended.
+ * first), or back on the board for its tier when the session has left the
+ * board: a task is only brought back to a deleted session by a follow-up
+ * (`--after`, a reopen).
  */
 export function resumeTask(store, projectId, number, { by, body }) {
   requireText(body, 'body', MAX_BODY)
@@ -531,7 +535,10 @@ export function resumeTask(store, projectId, number, { by, body }) {
   })
 }
 
-/** A follow-up on a finished or failed task: it goes back to its assignee's queue. */
+/**
+ * A follow-up on a finished or failed task: it goes back to its assignee's
+ * queue, and a session the human deleted is brought back to the board for it.
+ */
 export function reopenTask(store, projectId, number, { by, body }) {
   requireText(body, 'body', MAX_BODY)
   return store.write(() => {
@@ -539,14 +546,15 @@ export function reopenTask(store, projectId, number, { by, body }) {
     const task = store.taskRow(projectId, number)
     requireTaskState(task, ['done', 'failed'], 'reopen')
     requireResultReceived(store, task, by)
-    const assignee = store.participantRow(task.assignee_id)
-    if (assignee.member_id !== null && assignee.left_at !== null) {
+    const found = store.participantRow(task.assignee_id)
+    if (found.member_id !== null && !canContinue(store, found)) {
       throw new LedgerError(
         'session-ended',
-        `@${assignee.handle} has ended: open the task for its tier instead`,
+        `@${found.handle} has ended: open the task for its tier instead`,
         409,
       )
     }
+    const assignee = found.member_id === null ? found : bringBack(store, found)
     requireActive(assignee)
     withdrawGated(store, task.id, `sent back by @${by}`)
     const messageId = queue(store, projectId, {

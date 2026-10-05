@@ -241,6 +241,8 @@ console.log('devin ${version}')
     assert.match(windows, /never \/c\/… paths/)
     // A Windows machine is Windows whatever its environment says.
     assert.equal(devinRoleText(role, { HOME: '/h' }), process.platform === 'win32' ? windows : role)
+    // None stays none, for the window to be refused as on any machine.
+    assert.equal(devinRoleText('', { OS: 'Windows_NT' }), '')
   })
 
   it('reads a wire log that was replaced from its start, with nothing of the old one carried', async () => {

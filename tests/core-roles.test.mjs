@@ -165,13 +165,32 @@ describe('role instructions for each window the daemon opens', () => {
     assert.match(roleInstructions('chief', []), /Nobody is on the staff yet/)
     const text = roleInstructions('chief', [zeus])
     assert.match(text, /cf task add --after T-3/, 'the one way to continue a window')
-    assert.match(text, /only when its context matters/, 'and when')
+    assert.match(text, /the next step of that window's own work/, 'and when')
+    assert.match(
+      text,
+      /reviews, parallel work and work for another role stay fresh/,
+      'and when not',
+    )
     assert.match(roleInstructions('chief', [zeus]), /## What you do/)
     assert.match(roleInstructions('chief', [zeus]), /## What you never do/)
     assert.match(
       roleInstructions('chief', [zeus]),
       /## What you never do\n\n- Change the project yourself: edit a file, commit, push, build or deploy/,
     )
+  })
+
+  it('tells the chief a worker starts fresh unless its window is continued, and that only a busy window refuses', () => {
+    const text = roleInstructions('chief', [zeus])
+    assert.match(
+      text,
+      /of its own earlier tasks, unless\s+you continue its window with `--after`\./,
+    )
+    assert.match(
+      text,
+      /A window still busy refuses\s+and tells you to open the task for its tier instead\./,
+    )
+    assert.doesNotMatch(text, /session the human has deleted/, 'a deleted session comes back')
+    assert.doesNotMatch(text, /keeps its\s+conversation until the human deletes it/)
   })
 
   it("names this window's cf by its full path, for a shell that finds another cf first", () => {

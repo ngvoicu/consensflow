@@ -267,12 +267,41 @@ fn says_so_when_the_staff_is_empty() {
         text.contains("cf task add --after T-3"),
         "the one way to continue a window"
     );
-    assert!(text.contains("only when its context matters"), "and when");
+    assert!(
+        text.contains("the next step of that window's own work"),
+        "and when"
+    );
+    assert!(
+        text.contains("reviews, parallel work and work for another role stay fresh"),
+        "and when not"
+    );
     assert!(instructions("chief", &[zeus()]).contains("## What you do"));
     assert!(instructions("chief", &[zeus()]).contains("## What you never do"));
     assert!(found(
         r"## What you never do\n\n- Change the project yourself: edit a file, commit, push, build or deploy",
         &instructions("chief", &[zeus()])
+    ));
+}
+
+#[test]
+fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_only_a_busy_window_refuses(
+) {
+    let text = instructions("chief", &[zeus()]);
+    assert!(found(
+        r"of its own earlier tasks, unless\s+you continue its window with `--after`\.",
+        &text
+    ));
+    assert!(found(
+        r"A window still busy refuses\s+and tells you to open the task for its tier instead\.",
+        &text
+    ));
+    assert!(
+        !text.contains("session the human has deleted"),
+        "a deleted session comes back"
+    );
+    assert!(!found(
+        r"keeps its\s+conversation until the human deletes it",
+        &text
     ));
 }
 

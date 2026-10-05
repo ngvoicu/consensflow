@@ -84,6 +84,12 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
       project: await dispatcher.openWindow(project, handle),
     })),
 
+    // The human hides a session's terminal: its window closes once nothing holds it open.
+    'session.hide': change(async ({ project, handle }) => ({
+      project: await dispatcher.hideWindow(project, handle),
+    })),
+
+    // Delete session: it leaves the board with its window, and keeps its conversation.
     'session.end': change(async ({ project, handle }) => ({
       project: await dispatcher.endSession(project, handle),
     })),
@@ -108,6 +114,8 @@ export function pageOperations({ ledger, dispatcher, env, kick }) {
               agentGone(lane.participant.agent, env),
             activity: dispatcher.activity(lane.participant.id),
             pane: dispatcher.pane(lane.participant.id),
+            // A window the human hid that has not closed yet: Show makes it theirs again.
+            hidden: dispatcher.hidden(lane.participant.id),
             // A Switch chief that waits for the chief's turn to end.
             switching: dispatcher.pendingSwitch(lane.participant.id),
             // A message that waits until the human sends what they typed there.

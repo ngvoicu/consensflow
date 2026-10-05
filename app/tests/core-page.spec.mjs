@@ -1,5 +1,5 @@
 import { mkdirSync } from 'node:fs'
-import { expect, test } from '@playwright/test'
+import { chromium, expect, test } from '@playwright/test'
 
 import { addAgent } from '../../src/roster.js'
 import { tempEnv } from '../../tests/helpers.mjs'
@@ -537,7 +537,7 @@ test("gives a session's lane the human's hand on its window: show (opening a clo
     .poll(() => calls(page, 'session.end'))
     .toEqual([{ project: 1, handle: 'zeus-brisk-birch' }])
   await expect(page.locator('#status')).toHaveText(
-    "@zeus-brisk-birch is gone; its tasks stay on @zeus's lane.",
+    "@zeus-brisk-birch is off the board, its conversation kept: a follow-up brings it back. Its tasks stay on @zeus's lane.",
   )
   await expect(page.getByRole('button', { name: "Delete @zeus's session" })).toHaveCount(0)
 })
@@ -2118,14 +2118,20 @@ test('the dock stays where the human scrolled it across redraws', async ({ page 
   await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
   const stage = page.getByRole('region', { name: 'Terminals' })
   await expect(stage.locator('.terminal-card')).toHaveCount(3)
+  // The terminal shown is at the right end, in view; the human scrolls back
+  // to the chief, away from it.
+  const focused = stage.locator('.terminal-card[data-focused="true"]')
+  await expect(focused).toHaveAttribute('data-handle', 'zeus-amber-pine')
+  await expect(focused).toBeInViewport()
   await stage.evaluate((node) => {
-    node.scrollLeft = node.scrollWidth
+    node.scrollLeft = 0
   })
+  await expect(focused).not.toBeInViewport()
   const scrolled = await stage.evaluate((node) => node.scrollLeft)
-  expect(scrolled).toBeGreaterThan(0)
   await page.evaluate(() => window.__listeners.get('state-changed')())
   await page.waitForTimeout(100)
   expect(await stage.evaluate((node) => node.scrollLeft)).toBe(scrolled)
+  await expect(focused).not.toBeInViewport()
 })
 
 test('a note from an agent reads in its own list, marked read when seen', async ({ page }) => {
@@ -2218,6 +2224,58 @@ test('every key the human types reaches the pane in order, flagged as nothing', 
     )
 })
 
+/**
+ * The chief's real terminal with `line` printed in it and its first word
+ * selected by a double click: what the page copies from then on, and the
+ * keys that reach the chief's window.
+ */
+async function selecting(page, line) {
+  await open(page, { ...model(), realTerminals: true })
+  await page.evaluate(() => {
+    window.__copied = []
+    document.addEventListener('copy', (event) =>
+      window.__copied.push(event.clipboardData.getData('text/plain')),
+    )
+  })
+  await page.evaluate(
+    (bytes) => window.__output.onmessage({ id: 'p1-chief', generation: 5, seq: 1, bytes }),
+    [...new TextEncoder().encode(line)],
+  )
+  const rows = page.locator('#stage .terminal-card[data-handle="chief"] .xterm-rows')
+  await expect(rows).toContainText(line)
+  const box = await rows.boundingBox()
+  await page.mouse.dblclick(box.x + 6, box.y + 6)
+  return {
+    copied: () => page.evaluate(() => window.__copied),
+    sent: () =>
+      page.evaluate(() =>
+        window.__calls
+          .filter(([command, args]) => command === 'pane_input_enqueue' && args.id === 'p1-chief')
+          .map(([, args]) => args.bytes),
+      ),
+  }
+}
+
+// On a Mac, Cmd+C copies and Ctrl+C stays the program's interrupt, selection
+// or not; Ctrl+Shift+C copies on every system.
+test('interrupts with Ctrl+C on a Mac even with text selected, and copies with Ctrl+Shift+C', async ({
+  page,
+}) => {
+  const { copied, sent } = await selecting(page, 'copy this line')
+  await page.keyboard.press('Control+Shift+C')
+  expect(await copied()).toEqual(['copy'])
+  expect(await sent()).toEqual([])
+  await page.mouse.dblclick(
+    ...(await page
+      .locator('#stage .terminal-card[data-handle="chief"] .xterm-rows')
+      .boundingBox()
+      .then((box) => [box.x + 6, box.y + 6])),
+  )
+  await page.keyboard.press('Control+C')
+  await expect.poll(sent).toEqual([[3]])
+  expect(await copied()).toEqual(['copy'])
+})
+
 test.describe('on Windows', () => {
   test.use({
     userAgent:
@@ -2253,6 +2311,21 @@ test.describe('on Windows', () => {
 
   test("the human's marks reach a Claude window as typed", async ({ page }) => {
     expect(await sent(page, 'claude-code', 'a — “b” → €5')).toBe('a — “b” → €5')
+  })
+
+  // Ctrl+C is the program's interrupt: with text selected in a terminal it
+  // copies the text instead, as Windows Terminal does, and the selection goes,
+  // so the next Ctrl+C interrupts.
+  test('copies the text selected in a terminal with Ctrl+C, and interrupts with the next', async ({
+    page,
+  }) => {
+    const { copied, sent } = await selecting(page, 'copy this line')
+    await page.keyboard.press('Control+C')
+    expect(await copied()).toEqual(['copy'])
+    expect(await sent(), 'nothing reached the program').toEqual([])
+    await page.keyboard.press('Control+C')
+    await expect.poll(sent).toEqual([[3]])
+    expect(await copied()).toEqual(['copy'])
   })
 })
 
@@ -3115,64 +3188,6 @@ test('resumes a suspended project from the list', async ({ page }) => {
   await expect.poll(() => calls(page, 'project.resume')).toEqual([{ project: 2 }])
 })
 
-test('lays the windows out: the chief a whole column, the members two to a column', async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 1600, height: 900 })
-  await open(page)
-  const stage = page.getByRole('region', { name: 'Terminals' })
-  const box = (handle) => stage.locator(`.terminal-card[data-handle="${handle}"]`).boundingBox()
-  // A session of zeus at work, its terminal shown.
-  const addSession = async (id, name) => {
-    await page.evaluate(
-      ({ id, name }) => {
-        const zeus = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
-        window.__model.boards[1].lanes.push({
-          participant: {
-            ...zeus.participant,
-            id,
-            handle: `zeus-${name}`,
-            memberId: zeus.participant.id,
-            member: 'zeus',
-            session: name,
-          },
-          tasks: [],
-          activity: { state: 'working' },
-          pane: { id: `p1-zeus-${name}`, generation: 1 },
-        })
-        window.__listeners.get('state-changed')()
-      },
-      { id, name },
-    )
-    // A member's sessions fold under its row, which the redraw gives an arrow.
-    await page.locator('tr[data-handle="zeus"] button.fold-sessions').waitFor()
-    await unfold(page)
-    await page.getByRole('button', { name: `Show @zeus · ${name}'s terminal` }).click()
-  }
-  // One member: a column of its own, as tall as the chief's.
-  await expect(stage.locator('.terminal-card')).toHaveCount(2)
-  let [chief, zeus] = [await box('chief'), await box('zeus')]
-  expect(zeus.x).toBeGreaterThan(chief.x)
-  expect(Math.abs(zeus.height - chief.height)).toBeLessThan(2)
-  // Two: one column, one above the other.
-  await addSession(40, 'amber-pine')
-  await expect(stage.locator('.terminal-card')).toHaveCount(3)
-  await expect.poll(async () => (await box('zeus')).height).toBeLessThan(chief.height / 2 + 1)
-  zeus = await box('zeus')
-  const second = await box('zeus-amber-pine')
-  expect(second.x).toBe(zeus.x)
-  expect(second.y).toBeGreaterThan(zeus.y)
-  // Three: the third starts a column of its own, whole. Shown, it is
-  // scrolled into view: the columns are compared where they are now.
-  await addSession(41, 'brisk-birch')
-  await expect(stage.locator('.terminal-card')).toHaveCount(4)
-  await expect
-    .poll(async () => (await box('zeus-brisk-birch')).x - (await box('zeus')).x)
-    .toBeGreaterThan(0)
-  chief = await box('chief')
-  expect(Math.abs((await box('zeus-brisk-birch')).height - chief.height)).toBeLessThan(2)
-})
-
 test("counts the human's unread notes on Inbox, and opens For you with it, from a folded board too", async ({
   page,
 }) => {
@@ -3857,12 +3872,40 @@ test("shows a session's terminal in front, the dock unfolded, and hides it again
   await expect(
     row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }),
   ).toBeVisible()
-  // None of it asks the daemon anything: the window works on, the same one throughout.
+  // Showing a window that is open asks the daemon nothing; each Hide, from the
+  // row and from the card, tells it, and it closes the window once it is free.
+  // This one holds a task, so the board still has the same window throughout.
   expect(await calls(page, 'session.open')).toEqual([])
+  await expect
+    .poll(() => calls(page, 'session.hide'))
+    .toEqual([
+      { project: 1, handle: 'zeus-amber-pine' },
+      { project: 1, handle: 'zeus-amber-pine' },
+    ])
   expect(await disposed(page)).toBe(0)
 })
 
-test("offers Hide alone on a session's card: its window works on, hidden from the dock", async ({
+test('makes a window the human hid theirs again when they show it before it closes', async ({
+  page,
+}) => {
+  const data = atWork()
+  // Hidden while its agent was still at work on a turn: the daemon has it open yet.
+  const hid = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus-amber-pine')
+  Object.assign(hid, { tasks: [], activity: { state: 'working' }, hidden: true })
+  await open(page, data)
+  await unfold(page)
+  const row = page.locator('tr[data-handle="zeus-amber-pine"]')
+  await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect
+    .poll(() => calls(page, 'session.open'))
+    .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  await expect(
+    page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]'),
+  ).toHaveAttribute('data-focused', 'true')
+})
+
+test("offers Hide alone on a session's card, which tells the daemon: the window it holds at work stays", async ({
   page,
 }) => {
   await open(page, atWork())
@@ -3875,7 +3918,10 @@ test("offers Hide alone on a session's card: its window works on, hidden from th
   await expect(card.getByRole('button', { name: /^Close/ })).toHaveCount(0)
   await card.getByRole('button', { name: "Hide @zeus · amber-pine's terminal" }).click()
   await expect.poll(() => docked(page)).toEqual(['chief'])
-  // Hidden, its window is the same one, at work: what it prints is still taken.
+  await expect
+    .poll(() => calls(page, 'session.hide'))
+    .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
+  // Hidden, its window is the same one, at work on its task: what it prints is still taken.
   await page.evaluate(() =>
     window.__output.onmessage({ id: 'p1-zeus-amber-pine', generation: 9, seq: 1, bytes: [104] }),
   )
@@ -4060,6 +4106,380 @@ test("keeps the chief's card first in the dock while its window is down and a se
   await expect(card.locator('.terminal-host')).toHaveCount(1)
   await expect(card.locator('.terminal-status')).toHaveText('Idle')
   expect(await docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+})
+
+/**
+ * harbour with the chief's window alone in the dock and three sessions of
+ * zeus at work, their terminals waiting to be shown. Their ids run the other
+ * way from the order the tests show them in: a card put in lane order would
+ * go before those shown first.
+ */
+function threeSessions() {
+  const data = atWork()
+  const zeus = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus').participant
+  for (const [id, name] of [
+    [19, 'brisk-birch'],
+    [18, 'calm-cedar'],
+  ]) {
+    data.boards[1].lanes.push({
+      participant: session(id, zeus, name),
+      tasks: [],
+      activity: { state: 'working' },
+      pane: { id: `p1-zeus-${name}`, generation: 9 },
+    })
+  }
+  return data
+}
+
+/** The room the dock gives its cards: the stage less its padding, and the gap between two cards. */
+const roomOf = (page) =>
+  page.locator('#stage').evaluate((stage) => {
+    const style = getComputedStyle(stage)
+    const [left, right, top, bottom, gap] = [
+      'paddingLeft',
+      'paddingRight',
+      'paddingTop',
+      'paddingBottom',
+      'columnGap',
+    ].map((name) => Number.parseFloat(style[name]))
+    return {
+      width: stage.clientWidth - left - right,
+      height: stage.clientHeight - top - bottom,
+      gap,
+    }
+  })
+
+/**
+ * The dock's cards, left to right: each one's handle, its left edge in the
+ * row's own coordinates (the row scrolls), its size, and whether it is
+ * wholly in view.
+ */
+const cardsOf = (page) =>
+  page.locator('#stage').evaluate((stage) => {
+    const row = stage.getBoundingClientRect()
+    return [...stage.querySelectorAll('.terminal-card')].map((card) => {
+      const box = card.getBoundingClientRect()
+      return {
+        handle: card.dataset.handle,
+        x: box.left - row.left + stage.scrollLeft,
+        width: box.width,
+        height: box.height,
+        inView: box.left >= row.left - 1 && box.right <= row.right + 1,
+      }
+    })
+  })
+
+const cardOf = (cards, handle) => cards.find((card) => card.handle === handle)
+const sizesOf = (cards) => cards.map(({ handle, width, height }) => [handle, width, height])
+
+/** A card is at `x` in the row, to the pixel: a scroll may land half a pixel off. */
+const expectPlace = (card, x) =>
+  expect(Math.abs(card.x - x), `${card.handle} is at ${card.x}, not ${x}`).toBeLessThan(1)
+
+/** The handle of the card whose terminal has the keyboard, if one does. */
+const typingIn = (page) =>
+  page.evaluate(() => document.activeElement?.closest('.terminal-card')?.dataset.handle ?? null)
+
+/** Starts a record of the cards the page puts into the dock and takes out of it. */
+const watchStage = (page) =>
+  page.evaluate(() => {
+    window.__touched = []
+    new MutationObserver((records) => {
+      for (const { addedNodes, removedNodes } of records) {
+        for (const node of addedNodes) window.__touched.push(`in ${node.dataset.handle}`)
+        for (const node of removedNodes) window.__touched.push(`out ${node.dataset.handle}`)
+      }
+    }).observe(document.querySelector('#stage'), { childList: true })
+  })
+
+/** The cards put into the dock and taken out of it since this was last asked. */
+const touched = (page) => page.evaluate(() => window.__touched.splice(0))
+
+test('opens a terminal shown to the right of the open ones, in view and with the keyboard, and moves or resizes none of them', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  // The board at its narrowest leaves the dock wide: half of it is more than
+  // the 420px a card is at least.
+  await page.addInitScript(() => localStorage.setItem('cf.layout.board-width', '280'))
+  await open(page, { ...threeSessions(), realTerminals: true })
+  await unfold(page)
+  await watchStage(page)
+  const room = await roomOf(page)
+  const half = (room.width - room.gap) / 2
+  expect(half).toBeGreaterThan(420)
+  const show = async (name) => {
+    await page.getByRole('button', { name: `Show @zeus · ${name}'s terminal` }).click()
+    await expect(page.locator(`#stage .terminal-card[data-handle="zeus-${name}"]`)).toHaveAttribute(
+      'data-focused',
+      'true',
+    )
+    await expect.poll(() => typingIn(page)).toBe(`zeus-${name}`)
+    return cardsOf(page)
+  }
+  // The chief alone: as tall as the dock and half as wide, the right half empty.
+  const [chief, ...others] = await cardsOf(page)
+  expect([chief.handle, others]).toEqual(['chief', []])
+  expect(chief.height).toBeCloseTo(room.height, 0)
+  expect(chief.width).toBeCloseTo(half, 0)
+  // A session shown opens to the chief's right, as big, in view and with the
+  // keyboard; the chief keeps its size and its place.
+  const two = await show('amber-pine')
+  expect(sizesOf(two)).toEqual([
+    ['chief', chief.width, chief.height],
+    ['zeus-amber-pine', chief.width, chief.height],
+  ])
+  expectPlace(two[0], chief.x)
+  expectPlace(two[1], chief.x + chief.width + room.gap)
+  expect(two[1].inView).toBe(true)
+  // A third, whose lane comes before the second's: still to the right of both,
+  // the row scrolled to it, and the others where they were.
+  const three = await show('brisk-birch')
+  expect(sizesOf(three)).toEqual([
+    ['chief', chief.width, chief.height],
+    ['zeus-amber-pine', chief.width, chief.height],
+    ['zeus-brisk-birch', chief.width, chief.height],
+  ])
+  expectPlace(three[0], chief.x)
+  expectPlace(three[1], two[1].x)
+  expectPlace(three[2], two[1].x + chief.width + room.gap)
+  expect(three.map((card) => card.inView)).toEqual([false, true, true])
+  // Each card that came in was put into the row, and none was taken out and put back.
+  expect(await touched(page)).toEqual(['in zeus-amber-pine', 'in zeus-brisk-birch'])
+})
+
+test('sends no resize to a terminal already open when another is shown', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.addInitScript(() => localStorage.setItem('cf.layout.board-width', '280'))
+  await open(page, { ...threeSessions(), realTerminals: true })
+  await unfold(page)
+  const sent = () =>
+    page.evaluate(() =>
+      window.__calls
+        .filter(([command]) => command === 'pane_resize')
+        .map(([, { id, cols, rows }]) => `${id} ${cols}x${rows}`),
+    )
+  // A terminal takes its size once, when its card is first laid out.
+  await expect.poll(sent).toHaveLength(1)
+  for (const [shown, name] of [
+    [2, 'amber-pine'],
+    [3, 'brisk-birch'],
+  ]) {
+    await page.getByRole('button', { name: `Show @zeus · ${name}'s terminal` }).click()
+    await expect.poll(async () => (await sent()).length).toBe(shown)
+    // A size waits 200 ms to hold before it is sent: none follows for the cards already open.
+    await page.waitForTimeout(600)
+  }
+  expect((await sent()).map((size) => size.split(' ')[0])).toEqual([
+    'p1-chief',
+    'p1-zeus-amber-pine',
+    'p1-zeus-brisk-birch',
+  ])
+})
+
+test('closes the gap of a terminal hidden from the middle of the dock: those to its right move left and none changes size', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await open(page, threeSessions())
+  await unfold(page)
+  const names = ['amber-pine', 'brisk-birch', 'calm-cedar']
+  for (const name of names) {
+    await page.getByRole('button', { name: `Show @zeus · ${name}'s terminal` }).click()
+  }
+  await expect.poll(() => docked(page)).toEqual(['chief', ...names.map((name) => `zeus-${name}`)])
+  const before = await cardsOf(page)
+  await watchStage(page)
+  // Hidden from the middle: the one to its right takes its place.
+  const row = page.locator('tr[data-handle="zeus-brisk-birch"]')
+  await row.getByRole('button', { name: "Hide @zeus · brisk-birch's terminal" }).click()
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine', 'zeus-calm-cedar'])
+  const after = await cardsOf(page)
+  expect(sizesOf(after)).toEqual(
+    sizesOf(before).filter(([handle]) => handle !== 'zeus-brisk-birch'),
+  )
+  expectPlace(cardOf(after, 'chief'), cardOf(before, 'chief').x)
+  expectPlace(cardOf(after, 'zeus-amber-pine'), cardOf(before, 'zeus-amber-pine').x)
+  expectPlace(cardOf(after, 'zeus-calm-cedar'), cardOf(before, 'zeus-brisk-birch').x)
+  // Only the card that left was taken out of the row.
+  expect(await touched(page)).toEqual(['out zeus-brisk-birch'])
+  // Shown again, it comes in at the right end, in view.
+  await row.getByRole('button', { name: "Show @zeus · brisk-birch's terminal" }).click()
+  await expect
+    .poll(() => docked(page))
+    .toEqual(['chief', 'zeus-amber-pine', 'zeus-calm-cedar', 'zeus-brisk-birch'])
+  const last = cardOf(await cardsOf(page), 'zeus-brisk-birch')
+  expectPlace(last, cardOf(before, 'zeus-calm-cedar').x)
+  expect(last.inView).toBe(true)
+  expect(await touched(page)).toEqual(['in zeus-brisk-birch'])
+})
+
+test('keeps the order the cards came into the dock in across a switch to another project and back', async ({
+  page,
+}) => {
+  await open(page, twoOpen(threeSessions()))
+  await unfold(page)
+  for (const name of ['amber-pine', 'brisk-birch']) {
+    await page.getByRole('button', { name: `Show @zeus · ${name}'s terminal` }).click()
+  }
+  const shown = ['chief', 'zeus-amber-pine', 'zeus-brisk-birch']
+  await expect.poll(() => docked(page)).toEqual(shown)
+  await chooseProject(page, 'foundry')
+  await expect.poll(() => docked(page)).toEqual(['chief'])
+  await chooseProject(page, 'harbour')
+  await expect.poll(() => docked(page)).toEqual(shown)
+})
+
+test('makes a card half the dock wide, at least 420px, and the whole dock when it is narrower', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await open(page, atWork())
+  await unfold(page)
+  const dock = page.getByRole('complementary', { name: 'Terminal dock' })
+  const divider = page.getByRole('separator', { name: 'Board width' })
+  const squeeze = async (key, presses) => {
+    await divider.focus()
+    for (let press = 0; press < presses; press += 1) await divider.press(key)
+  }
+  const measure = async () => ({
+    dock: (await dock.boundingBox()).width,
+    room: await roomOf(page),
+    widths: (await cardsOf(page)).map((card) => card.width),
+  })
+  // A dock under 840px, whatever its width: 420px cards, the chief's alone as well.
+  let now = await measure()
+  expect(now.dock).toBeLessThan(840)
+  expect(now.widths).toEqual([420])
+  await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  now = await measure()
+  expect(now.widths).toEqual([420, 420])
+  const first = now.dock
+  await squeeze('ArrowLeft', 7)
+  now = await measure()
+  expect(now.dock).toBeGreaterThan(first)
+  expect(now.dock).toBeLessThan(840)
+  expect(now.widths).toEqual([420, 420])
+  // A dock under 420px: the cards are as wide as it is.
+  await squeeze('ArrowRight', 40)
+  now = await measure()
+  expect(now.dock).toBeLessThan(420)
+  for (const width of now.widths) expect(width).toBeCloseTo(now.room.width, 0)
+  // A dock past 840px: half of it, less half the gap between two.
+  await squeeze('ArrowLeft', 40)
+  now = await measure()
+  expect(now.dock).toBeGreaterThan(840)
+  for (const width of now.widths) {
+    expect(width).toBeCloseTo((now.room.width - now.room.gap) / 2, 0)
+  }
+})
+
+test("makes a card the dock's whole width on a narrow window, the next one opening to its right", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 700, height: 900 })
+  await open(page, atWork())
+  await unfold(page)
+  const room = await roomOf(page)
+  const [chief] = await cardsOf(page)
+  expect(chief.width).toBeCloseTo(room.width, 0)
+  expect(chief.height).toBeCloseTo(room.height, 0)
+  await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  const [kept, shown] = await cardsOf(page)
+  expect(sizesOf([kept, shown])).toEqual([
+    ['chief', chief.width, chief.height],
+    ['zeus-amber-pine', chief.width, chief.height],
+  ])
+  expectPlace(kept, chief.x)
+  expectPlace(shown, chief.x + chief.width + room.gap)
+  expect(shown.inView).toBe(true)
+})
+
+test('keeps every card as tall as it was when the row first scrolls, where a scrollbar takes room', async () => {
+  // The headless browser hides its scrollbars: this one draws them, as Windows
+  // and a Mac with a mouse do.
+  const browser = await chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'] })
+  try {
+    const page = await browser.newPage({ viewport: { width: 1600, height: 900 } })
+    await page.addInitScript(() => localStorage.setItem('cf.layout.board-width', '280'))
+    await open(page, threeSessions())
+    await unfold(page)
+    const [chief] = await cardsOf(page)
+    for (const name of ['amber-pine', 'brisk-birch']) {
+      await page.getByRole('button', { name: `Show @zeus · ${name}'s terminal` }).click()
+      await expect.poll(() => docked(page)).toContain(`zeus-${name}`)
+    }
+    // Two cards fill the dock and the third makes it scroll: a scrollbar that
+    // came with the third would take room from every card, a resize of each terminal.
+    const taken = await page
+      .locator('#stage')
+      .evaluate((stage) => stage.offsetHeight - stage.clientHeight)
+    expect(taken).toBeGreaterThan(0)
+    expect((await cardsOf(page)).map((card) => card.height)).toEqual([
+      chief.height,
+      chief.height,
+      chief.height,
+    ])
+  } finally {
+    await browser.close()
+  }
+})
+
+test('brings a terminal already in the dock into view again when it is shown from its task, where it is', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  const data = threeSessions()
+  data.tasks['1:21'] = {
+    ...task(21, 'Write the lexer', 'working', 'chief', 'zeus-amber-pine', 3),
+    messages: [],
+  }
+  await open(page, data)
+  await unfold(page)
+  for (const name of ['amber-pine', 'brisk-birch']) {
+    await page.getByRole('button', { name: `Show @zeus · ${name}'s terminal` }).click()
+  }
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine', 'zeus-brisk-birch'])
+  const stage = page.getByRole('region', { name: 'Terminals' })
+  const amber = page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
+  // Twice: the card shown last is another the first time, and this one the second.
+  for (let time = 1; time <= 2; time += 1) {
+    await stage.evaluate((node) => {
+      node.scrollLeft = 0
+    })
+    expect(cardOf(await cardsOf(page), 'zeus-amber-pine').inView).toBe(false)
+    await page.locator('tr[data-handle="zeus-amber-pine"] button.card[data-task="21"]').click()
+    const drawer = page.getByRole('complementary', { name: 'Task T-21' })
+    await drawer.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+    await expect(drawer).toBeHidden()
+    await expect(amber).toHaveAttribute('data-focused', 'true')
+    expect(cardOf(await cardsOf(page), 'zeus-amber-pine').inView).toBe(true)
+    expect(await docked(page)).toEqual(['chief', 'zeus-amber-pine', 'zeus-brisk-birch'])
+  }
+})
+
+test('leaves the keyboard in the terminal that has it when a window comes up that the human did not ask for', async ({
+  page,
+}) => {
+  const data = withAdvisor()
+  const athena = data.boards[1].lanes.find((l) => l.participant.handle === 'athena')
+  Object.assign(athena, { activity: { state: 'closed' }, pane: null })
+  await open(page, data)
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus'])
+  const typing = page.locator('#stage .terminal-card[data-handle="chief"] .stub-input')
+  await typing.focus()
+  await expect(typing).toBeFocused()
+  await changed(page, () => {
+    const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'athena')
+    Object.assign(lane, {
+      activity: { state: 'working' },
+      pane: { id: 'p1-athena', generation: 4 },
+    })
+  })
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus', 'athena'])
+  await expect(typing).toBeFocused()
 })
 
 test('resizes a terminal once, when a drag that narrows it holds still', async ({ page }) => {

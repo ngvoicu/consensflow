@@ -51,9 +51,10 @@ const DISCOVER_FOR_MS: i64 = 60_000;
 /// landed there and its task's work was lost (2026-10-03).
 const WINDOWS_PATHS: &str = "This machine runs Windows and your shell is Git Bash: give file tools Windows paths (C:\\Users\\…) or paths relative to the project folder, never /c/… paths, which they write under C:\\c\\.";
 
-/// The role text a Devin window gets: on Windows, with how to name a file there.
+/// The role text a Devin window gets: on Windows, with how to name a file
+/// there. A window given none gets none, and is refused as any is.
 fn role_text(instructions: &str, env: &Env) -> String {
-    if env.on_windows() {
+    if env.on_windows() && !instructions.is_empty() {
         format!("{instructions}\n\n{WINDOWS_PATHS}\n")
     } else {
         instructions.to_owned()

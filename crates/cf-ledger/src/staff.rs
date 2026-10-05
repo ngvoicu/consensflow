@@ -21,7 +21,9 @@ use crate::views::{participant_view, ParticipantRow, TaskRow, PARTICIPANT_SELECT
 pub(crate) use pools::{candidates, has_members_of_tier, members, nearest_tier};
 pub(crate) use quota::{mark_back, mark_out};
 use sessions::close_session;
-pub(crate) use sessions::{continuable_session, end_session, holds_work, start_session};
+pub(crate) use sessions::{
+    bring_back, can_continue, continuable_session, end_session, holds_work, start_session,
+};
 
 /// A participant joining a project: its handle, its role or its roles (the
 /// first leading), the agent and harness it runs on, and its tier.
@@ -305,7 +307,7 @@ pub(crate) fn remove_member(
             )?;
         }
         for session in &sessions {
-            close_session(store, session, &reason)?;
+            close_session(store, session, &reason, false)?;
         }
         let at = store.at();
         store.db.execute(

@@ -22,7 +22,7 @@ reply does nothing.
     cf task add --advice --tier <tier> "…"   a question for an advisor: findings back, no file changed
     cf task add --review --tier <tier> "…"   a review for a reviewer: what to review and what to check; findings back, no file changed
     cf task add --design "…"      an image from the image designer: what to draw, what to use as reference, where to save it
-    cf task add --after T-3 "…"   a follow-up for the window that did T-3, only when its context matters
+    cf task add --after T-3 "…"   a follow-up for the window that did T-3: the next step of that window's own work (carry out the plan or findings it just wrote, part 2 after its part 1); reviews, parallel work and work for another role stay fresh
     … --needs T-3,T-4             the task waits on the board until T-3 and T-4 are accepted
     … --before T-9,T-10           T-9 and T-10, still on the board, wait for this task
     cf task add --self --needs T-3 "…"  your own later step: its brief comes back to you when T-3 is accepted
@@ -90,9 +90,9 @@ yours. The one exception: the human tells you to do a change yourself.
    `cf task list` reads it back.
 3. Write every task as if for someone who has never seen the project, because
    that is who gets it: a worker starts from nothing, with no memory of your
-   conversation, of the project's history or of its own earlier tasks. Give
-   the context, the constraints, the files it may change, what was decided
-   before, and what to return.
+   conversation, of the project's history or of its own earlier tasks, unless
+   you continue its window with `--after`. Give the context, the constraints,
+   the files it may change, what was decided before, and what to return.
 4. A result arrives headed `[ConsensFlow m-… · T-… · result from @worker]`.
    Decide it: `cf task accept T-3`, `cf task reopen T-3 "what to change"`
    (back to the same window), or `cf task cancel T-3`. Deciding is yours
@@ -143,11 +143,10 @@ tell you why.
 ## The one exception: continuing a window
 
 A worker's window closes when its task is done, but its session keeps its
-conversation until the human deletes it. When a follow-up needs what that
-window already knows, give it with `cf task add --after T-3 "…"`: the same
-window comes back on its own conversation, and only the follow-up goes in.
-A session the human has deleted, or a window still busy, refuses and tells
-you to open the task for its tier instead.
+conversation. When a follow-up needs what that window already knows, give it
+with `cf task add --after T-3 "…"`: the same window comes back on its own
+conversation, and only the follow-up goes in. A window still busy refuses
+and tells you to open the task for its tier instead.
 
 The board is your only channel to the others: never read another agent's
 session files or type into another window.

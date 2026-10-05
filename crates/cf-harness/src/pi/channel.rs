@@ -17,7 +17,10 @@ use cf_base::path;
 use crate::contract::{LaunchId, Pane, PaneHost};
 use crate::shared::launch_files::launch_folder;
 
-pub use send::{send, Answer, Target};
+pub use send::{send, Target};
+// For the binary that plays the channel's cases (`test-support`).
+#[cfg(feature = "test-support")]
+pub use send::Answer;
 
 /// How long the extension has to give its verdict on a message, from the
 /// moment the message was written: the message's whole life.

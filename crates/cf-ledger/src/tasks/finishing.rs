@@ -12,6 +12,7 @@ use crate::model::{
     MAX_BODY, MEMBER_ROLES,
 };
 use crate::queue::{drop_queued, queue, send, withdraw_gated, Queued, Sent};
+use crate::staff::{bring_back, can_continue};
 use crate::store::Store;
 use crate::views::{ParticipantRow, TaskRow};
 
@@ -150,7 +151,8 @@ fn release_waiting(
     Ok(())
 }
 
-/// A follow-up on a finished or failed task: it goes back to its assignee's queue.
+/// A follow-up on a finished or failed task: it goes back to its assignee's
+/// queue, and a session the human deleted is brought back to the board for it.
 pub(crate) fn reopen_task(
     store: &mut Store,
     project_id: i64,
@@ -164,17 +166,21 @@ pub(crate) fn reopen_task(
         let task = store.task_row(project_id, number)?;
         require_task_state(&task, &["done", "failed"], "reopen")?;
         require_result_received(store, &task, by)?;
-        let assignee = store.participant_of(task.assignee_id)?;
-        if assignee.member_id.is_some() && assignee.left_at.is_some() {
+        let found = store.participant_of(task.assignee_id)?;
+        if found.member_id.is_some() && !can_continue(store, &found)? {
             return Err(LedgerError::refused_with(
                 "session-ended",
                 format!(
                     "@{} has ended: open the task for its tier instead",
-                    assignee.handle
+                    found.handle
                 ),
                 409,
             ));
         }
+        let assignee = match found.member_id {
+            Some(_) => bring_back(store, found)?,
+            None => found,
+        };
         require_active(&assignee)?;
         withdraw_gated(store, task.id, &format!("sent back by @{by}"))?;
         let message_id = queue(

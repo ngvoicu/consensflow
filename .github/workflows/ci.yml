@@ -80,3 +80,6 @@ jobs:
         timeout-minutes: 15
       # Every crate linted, its tests included.
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # The harnesses' crate as the daemon builds it, without the test kit
+      # the workspace's tests turn on for it.
+      - run: cargo clippy -p cf-harness --lib -- -D warnings

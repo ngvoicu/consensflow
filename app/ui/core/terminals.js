@@ -26,20 +26,25 @@ function about(lane, board, agent, now, onTryAgain) {
 }
 
 /**
- * The live windows beside the board: a horizontal strip of terminals, the
- * chief's first, then the sessions' the human asked to see, scrolling
- * sideways. The chief's card is always in the dock: the board has a row for
- * the chief only while a task is on it, so its card says what the chief is
- * doing and runs on, and switches it. While the chief's window is down
+ * The live windows beside the board: one row of terminals, scrolling
+ * sideways, each as tall as the dock and half as wide. The chief's comes
+ * first, then the sessions' the human asked to see, in the order they came
+ * into the dock. A terminal that comes in opens at the right end, scrolled
+ * into view and with the keyboard; no terminal already open is resized or
+ * moved by it, and one that leaves closes its gap, the cards to its right
+ * moving left. The chief's card is always in the dock: the board has a row
+ * for the chief only while a task is on it, so its card says what the chief
+ * is doing and runs on, and switches it. While the chief's window is down
  * (starting, being switched, its agent gone) its card is there all the
  * same, with no terminal. A session's terminal (a worker's, an advisor's, a
  * reviewer's or an image designer's task) stays out of the dock until the
  * human shows it from its lane, and leaves when they hide it, from its lane
- * or its card; only its lane closes its window. Only live windows: one that
- * ends leaves with its card, and its lane says it is closed and opens it
- * again on its conversation. While a window lives, in the dock or not, its
- * emulator takes all its output and keeps its scrollback, its size and the
- * human's half-typed input, across project switches too.
+ * or its card, which also lets its window go once nothing holds it open.
+ * Only live windows: one that ends leaves with its card, and its lane says
+ * it is closed and opens it again on its conversation. While a window
+ * lives, in the dock or not, its emulator takes all its output and keeps its
+ * scrollback, its size and the human's half-typed input, across project
+ * switches too.
  */
 export class TerminalsView {
   #stage
@@ -51,10 +56,14 @@ export class TerminalsView {
   #onSwitchChief
   /** The human trying the chief again before its quota resets, from its card. */
   #onTryAgain
+  /** The human hiding a session's terminal, from its card: the page takes the card out and tells the daemon. */
+  #onHideTerminal
   /** The chief's card while its window is down, made the first time it is: its head alone. */
   #windowless = null
   /** The card last brought into view: a redraw scrolls only when it changes. */
   #shownKey = null
+  /** The number the next card to come into the dock takes: the dock keeps its cards in that order. */
+  #arrivals = 0
   /**
    * The sessions whose terminals the human asked to see, by `showingKey`.
    * One stays in the dock while its window lives; the session's next window
@@ -73,12 +82,14 @@ export class TerminalsView {
       onChange = () => {},
       onSwitchChief = () => {},
       onTryAgain = () => {},
+      onHideTerminal = () => {},
     },
   ) {
     this.#stage = stage
     this.#onChange = onChange
     this.#onSwitchChief = onSwitchChief
     this.#onTryAgain = onTryAgain
+    this.#onHideTerminal = onHideTerminal
     this.#registry = new EmulatorRegistry({
       ...(createEmulator ? { createEmulator } : {}),
       onData: (pane, data) => void this.#link.input(pane, this.#typed(pane, data)),
@@ -165,25 +176,35 @@ export class TerminalsView {
 
   /**
    * Keep a terminal for every lane of the project `board` is for that has a
-   * live one (a closed project has none), in lane order; dock those the
-   * human may see now, the chief's card first, and bring `focused` into view
-   * if it is one of them. The rest stay alive, off screen, with their
-   * scrollback: a session's not shown, and another project's. Switching
-   * projects loses nothing. `agents` are the saved agents, which say what
-   * the chief runs on.
+   * live one (a closed project has none); dock those the human may see now,
+   * the chief's card first and the others in the order they came into the
+   * dock, and bring `focused` into view if it is one of them. A card in the
+   * dock keeps its place and its size: one that comes in goes after the
+   * others (those that come together, in lane order) and one that leaves
+   * closes its gap. The rest stay alive, off screen, with their scrollback:
+   * a session's not shown, and another project's. Switching projects loses
+   * nothing. `agents` are the saved agents, which say what the chief runs
+   * on.
    */
   render(board, { focused, agents = [] }) {
     const project = board?.project.id ?? null
     const ordered = board?.project.state === 'open' ? laneOrder(board.lanes) : []
     const agentOf = (lane) => agents.find((agent) => agent.name === lane.participant.agent)
-    for (const [order, lane] of ordered.entries()) {
+    for (const lane of ordered) {
       // A window over for good never comes back, whatever a board says.
       if (lane.pane === null || this.#link.retired(paneKey(lane.pane))) continue
-      this.#card(lane.pane, { lane, order, board, agent: agentOf(lane) })
+      const entry = this.#card(lane.pane, { lane, board, agent: agentOf(lane) })
+      // The next number puts a card that comes in at the right end; one
+      // that leaves gives its number up, and takes a new one if it comes back.
+      if (!this.#docked(entry)) entry.arrival = null
+      else if (entry.arrival === null) entry.arrival = this.#arrivals++
     }
     const live = [...this.#cards.values()].filter((entry) => entry.project === project)
-    const cards = live.filter((entry) => this.#docked(entry)).sort((a, b) => a.order - b.order)
     const chief = ordered.find((lane) => lane.participant.role === 'chief')
+    const rank = (entry) => (entry.handle === chief?.participant.handle ? 0 : 1)
+    const cards = live
+      .filter((entry) => this.#docked(entry))
+      .sort((a, b) => rank(a) - rank(b) || a.arrival - b.arrival)
     // The chief's window down, its card stays: switching the chief may be the way on.
     const windowless =
       chief === undefined || live.some((entry) => entry.handle === chief.participant.handle)
@@ -194,21 +215,7 @@ export class TerminalsView {
       this.#stage.replaceChildren(element('p', 'stage-empty', 'No terminal is open yet.'))
       return
     }
-    // Re-inserting a card blurs whatever has the keyboard inside it: the
-    // stage is touched only when its cards or their order change.
-    if (
-      wanted.length !== this.#stage.children.length ||
-      wanted.some((card, at) => this.#stage.children[at] !== card)
-    ) {
-      this.#stage.replaceChildren(...wanted)
-    }
-    // The chief's window takes a whole column; the members' go two to a
-    // column, and the last one left alone takes its column whole.
-    const members = cards.filter((entry) => entry.handle !== chief?.participant.handle)
-    const alone = members.length % 2 === 1 ? members.at(-1) : null
-    for (const entry of cards) {
-      entry.card.dataset.tall = String(!members.includes(entry) || entry === alone)
-    }
+    this.#place(wanted)
     // With no terminal in the dock, there is none to bring into view.
     if (cards.length === 0) return
     const shown = cards.find((entry) => entry.handle === focused) ?? cards[0]
@@ -220,6 +227,23 @@ export class TerminalsView {
     this.#shownKey = shown.key
     shown.card.scrollIntoView({ inline: 'nearest', block: 'nearest' })
     requestAnimationFrame(() => this.#registry.get(shown.pane)?.terminal?.focus())
+  }
+
+  /**
+   * The stage's cards, `wanted` in order, touched only where they change: a
+   * card that left is taken out, one that came in is put in its place, and
+   * the cards already there stay as they are. A card taken out and put back
+   * blurs the terminal with the keyboard and reflows the row.
+   */
+  #place(wanted) {
+    for (const child of [...this.#stage.children]) {
+      if (!wanted.includes(child)) child.remove()
+    }
+    let next = this.#stage.firstElementChild
+    for (const card of wanted) {
+      if (card === next) next = next.nextElementSibling
+      else this.#stage.insertBefore(card, next)
+    }
   }
 
   /**
@@ -242,14 +266,24 @@ export class TerminalsView {
   /**
    * The human asks to see a session's terminal: its card comes into the
    * dock with everything its window wrote since it opened. One asked for
-   * before its window is up (a closed one shown) comes in when it is.
+   * before its window is up (a closed one shown) comes in when it is. One
+   * already in the dock keeps its place and comes into view again, though
+   * it was the last brought into view and the human has scrolled away.
    */
   show(project, handle) {
     this.#showing.add(showingKey(project, handle))
+    const entry = [...this.#cards.values()].find(
+      (other) => other.project === project && other.handle === handle,
+    )
+    if (entry?.key === this.#shownKey) this.#shownKey = null
     this.#onChange()
   }
 
-  /** The human hides a session's terminal: its card leaves the dock, and its window works on. */
+  /**
+   * A session's terminal is hidden: its card leaves the dock. Telling the
+   * daemon, which closes the window once it is free, is the page's
+   * (`onHideTerminal`), for a card's Hide as for a lane's.
+   */
   hide(project, handle) {
     this.#showing.delete(showingKey(project, handle))
     this.#onChange()
@@ -277,8 +311,9 @@ export class TerminalsView {
   /**
    * A pane's card and emulator. Output may arrive before any board has shown
    * the pane (or for a project not shown): its card waits, with no project,
-   * until a board places it: `placed` is its lane, its order among the
-   * board's lanes, the board, and the saved agent it runs on.
+   * until a board places it: `placed` is its lane, the board, and the saved
+   * agent it runs on. `arrival` is the number it took coming into the dock,
+   * null while it is not in it.
    */
   #card(pane, placed = null) {
     const key = paneKey(pane)
@@ -299,20 +334,20 @@ export class TerminalsView {
         participant: null,
         project: null,
         session: false,
-        order: Number.MAX_SAFE_INTEGER,
+        arrival: null,
       }
       this.#cards.set(key, entry)
       this.#registry.ensure(pane, host)
     }
     if (placed !== null) {
-      const { lane, order, board, agent } = placed
+      const { lane, board, agent } = placed
       this.#head(entry, lane, board, agent)
       entry.handle = lane.participant.handle
       entry.harness = lane.participant.harness
       entry.project = board.project.id
       entry.session = lane.participant.member !== null
-      entry.order = order
     }
+    return entry
   }
 
   /** The chief's card while its window is down: its head, and no terminal. */
@@ -320,7 +355,6 @@ export class TerminalsView {
     if (this.#windowless === null) {
       const card = element('section', 'terminal-card')
       const head = element('header', 'terminal-head')
-      card.dataset.tall = 'true'
       card.append(head)
       this.#windowless = { card, head, participant: null }
     }
@@ -331,9 +365,10 @@ export class TerminalsView {
   /**
    * A card's head: whose window it is, its lamp, and what is done with it
    * there. The chief's says what the chief is doing and runs on, and switches
-   * it. Only a session's terminal hides, as on its board row, and its window
-   * works on; closing the window is its row's alone. Only an open project's
-   * cards are drawn: nothing on a closed one acts.
+   * it. Only a session's terminal hides, as on its board row, and the daemon
+   * closes its window once nothing holds it open; deleting the session is its
+   * row's alone. Only an open project's cards are drawn: nothing on a closed
+   * one acts.
    */
   #head(entry, lane, board, agent) {
     const { participant } = lane
@@ -360,7 +395,7 @@ export class TerminalsView {
                   iconButton(
                     ICONS.hide,
                     'Hide terminal',
-                    () => this.hide(board.project.id, participant.handle),
+                    () => this.#onHideTerminal(entry.participant),
                     `Hide ${name}'s terminal`,
                   ),
                 ]),

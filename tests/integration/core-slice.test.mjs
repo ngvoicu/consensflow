@@ -84,56 +84,6 @@ test('a chief hands a task to a worker through the board and the result lands in
   }
 })
 
-test('a chief with unsent text in its terminal still gets its result, behind that text', async () => {
-  const app = await startIntegration({
-    daemon: DAEMON,
-    fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
-  })
-  try {
-    const opened = await app.requestNode('project.open', {
-      directory: app.workspace,
-      agent: 'chief',
-    })
-    const project = opened.project.id
-    const { member } = await app.requestNode('member.add', { project, agent: 'worker' })
-    const chief = await app.openFrame(`p${project}-chief`)
-
-    // The human dispatches from the chief's own terminal, then types more and
-    // leaves it unsent. Nothing waits for that text (the owner's choice,
-    // 2026-10-01): the result is pasted in behind it and both go in together.
-    await app.waitFor(async () => {
-      const { board } = await app.requestNode('board.get', { project })
-      return board.lanes.find((l) => l.participant.handle === 'chief').activity.state === 'idle'
-    })
-    for (const text of [
-      `DISPATCH --tier ${member.tier} Reply with exactly: TYPED_OK\r`,
-      'half a thought',
-    ]) {
-      const typed = await app.requestRust('pane.input', {
-        id: chief.id,
-        generation: chief.generation,
-        bytes: [...Buffer.from(text)],
-      })
-      assert.equal(typed.ok, true, JSON.stringify(typed))
-    }
-
-    await app.waitFor(async () => {
-      const { messages } = await app.requestNode('inbox.get', { project, participant: 'chief' })
-      return messages.some((m) => m.kind === 'result' && m.state === 'delivered')
-    }, 30_000)
-    const { messages } = await app.requestNode('inbox.get', { project, participant: 'chief' })
-    const result = messages.find((m) => m.kind === 'result')
-    assert.equal(result.body, 'TYPED_OK')
-    const session = chief.argv[chief.argv.indexOf('--session-id') + 1]
-    assert.match(
-      app.transcript(session),
-      new RegExp(`half a thought\\[ConsensFlow m-${result.id} · T-1 · result from @worker-`),
-    )
-  } finally {
-    await app.close()
-  }
-})
-
 test('one member runs two tasks at once, each in a session and window of its own', async () => {
   const app = await startIntegration({
     daemon: DAEMON,

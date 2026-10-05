@@ -234,16 +234,13 @@ fn refuses_a_window_without_its_role_text_and_writes_it_in_a_private_file() {
         instructions: String::new(),
         ..Request::default()
     };
+    // On Windows too: the note on naming files there is added to a role
+    // text, never made one (parity:launch on zeewin, 2026-10-05).
     let refused = prepare(&home.adapter(), &empty);
-    if cfg!(windows) {
-        // Windows' own sentence is text all the same, as it was in Node.
-        assert!(refused.is_ok());
-    } else {
-        assert_eq!(
-            refused.err().as_deref(),
-            Some("the worker window needs its role text")
-        );
-    }
+    assert_eq!(
+        refused.err().as_deref(),
+        Some("the worker window needs its role text")
+    );
     let home = Home::new();
     let plan = prepare(&home.adapter(), &Request::default()).unwrap();
     let (_, file) = plan
