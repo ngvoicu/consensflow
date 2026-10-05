@@ -20,7 +20,7 @@ use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
-use crate::runtime::begin;
+use crate::runtime::{begin, turn};
 use crate::seams::{EngineError, SavedAgent};
 
 /// The key that interrupts a harness's current turn, how often it is pressed
@@ -750,9 +750,14 @@ impl Dispatcher {
         let Some(window) = record.window.borrow().window.clone() else {
             return Err("the window is closed".to_owned());
         };
-        let observed = window.observe().await?;
-        record.window.borrow_mut().settled = observed.settled;
-        Ok(observed)
+        let looked = window.observe().await;
+        if let Ok(observed) = &looked {
+            record.window.borrow_mut().settled = observed.settled;
+        }
+        // JavaScript's `observe` was an async function: its caller had the
+        // look a turn after the adapter answered.
+        turn().await;
+        looked
     }
 
     /// Whether a window has drawn its screen: it printed, then held still for

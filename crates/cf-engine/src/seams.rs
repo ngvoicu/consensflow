@@ -158,7 +158,9 @@ impl Default for Limits {
     }
 }
 
-/// Everything the engine is made with.
+/// Everything the engine is made with: each seam shared, so a second
+/// engine can be made with the same ones (a restart's).
+#[derive(Clone)]
 pub struct Seams {
     /// Shared with whoever else reads and writes the board (the API, the
     /// page): borrowed for one call at a time, never across a wait.

@@ -5,7 +5,7 @@
 use cf_engine::testing::Context;
 use cf_engine::ActivityState;
 use cf_harness::records::Role;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::traces::held_to;
 
@@ -62,6 +62,47 @@ fn opens_a_project_with_its_chief_window_and_binds_the_chief_conversation() {
         context.close(),
         SUITES,
         "opens a project with its chief window and binds the chief conversation",
+    );
+}
+
+#[test]
+fn opens_a_project_whose_chief_runs_on_its_saved_agent_and_none_whose_chief_names_no_agent_or_one_not_among_the_agents(
+) {
+    let context = Context::new();
+    context.roster.gone.borrow_mut().insert("nobody".to_owned());
+    let request = |chief: Value| json!({ "directory": "/work/app", "name": "app", "chief": chief });
+    let refused = context.open_project(request(json!({ "harness": "claude-code" })));
+    assert_eq!(
+        refused.unwrap_err().to_string(),
+        "pick one of your saved agents for the chief: its harness, model and effort come with it"
+    );
+    let refused = context.open_project(request(
+        json!({ "harness": "claude-code", "agent": "nobody" }),
+    ));
+    assert!(refused
+        .unwrap_err()
+        .to_string()
+        .contains("nobody is not among your agents"));
+    assert!(
+        context.ledger.borrow().projects().unwrap().is_empty(),
+        "nothing was opened"
+    );
+    let project = context.with_staff(&["zeus"]);
+    let chief = project.participants.iter().find(|p| p.handle == "chief");
+    let chief = chief.expect("the chief");
+    assert_eq!(
+        (chief.harness.as_deref(), chief.agent.as_deref()),
+        (Some("claude-code"), Some("apollo"))
+    );
+    assert_eq!(
+        context.adapter.prepared()[0]["agent"]["model"],
+        "claude-opus-5",
+        "its agent's model"
+    );
+    held_to(
+        context.close(),
+        SUITES,
+        "opens a project whose chief runs on its saved agent, and none whose chief names no agent or one not among the agents",
     );
 }
 

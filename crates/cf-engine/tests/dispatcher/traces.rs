@@ -4,7 +4,8 @@
 //!
 //! Both sides are read through one projection, which keeps what is the
 //! engine's behaviour and drops what is how it got there:
-//! - kept: where each of the engine's operations begins (by name); each
+//! - kept: where each of the engine's operations begins (by name, an exit
+//!   with its pane); each
 //!   event the ledger logs, whole; each call of the pane host, with what it
 //!   was given and answered; each call of an adapter by its method and what
 //!   names it (the launch, the message, the text, the conversation resumed or
@@ -73,13 +74,14 @@ static TRACES: LazyLock<HashMap<(Vec<String>, String), Value>> = LazyLock::new(|
 });
 
 /// The tests whose effects may come in another order than Node's where two
-/// windows' interleave, and only there: JavaScript's microtask hops through
-/// nested async functions let a worker's launch overtake the chief's look.
-/// Each is one an exception is counted for.
+/// windows' interleave, and only there: a look of the chief's, whose window
+/// has nothing in its record yet, passes through more async functions in
+/// JavaScript than in Rust (`drawn`), and a worker's step runs ahead of it
+/// there. Each is one an exception is counted for.
 const INTERLEAVED: &[&str] = &[
-    "launches a worker with its task as the first message and records its answer as the result",
-    "keeps everything a member wrote in its turn, not only its last message",
-    "leaves a harness's commentary out of a result: Codex's progress notes are not its answer",
+    "delivers results to an idle chief one at a time and proves each arrived",
+    "leaves a task waiting on a question alone, and resumes it with the answer",
+    "carries an advisor’s and a reviewer’s question to the chief and the answer back to their own window",
 ];
 
 /// Holds a closed test to the Node trace of the test named `name` in `suites`.
@@ -91,7 +93,9 @@ pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
     let trace = TRACES.get(&key).unwrap_or_else(|| {
         panic!("no Node trace of {suites:?} › {name}: npm run goldens:dispatcher")
     });
-    let node = projected(trace["events"].as_array().expect("its events"));
+    let node = projected(&without_nested(
+        trace["events"].as_array().expect("its events"),
+    ));
     let rust = projected(&closed.events);
     if INTERLEAVED.contains(&name) {
         if let Some(difference) = lanes::first_difference(&node, &rust) {
@@ -122,6 +126,29 @@ pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
     );
 }
 
+/// Node's events without the operations its engine called of itself: the
+/// recording wrapper wrote `resumeProject` down where `resumeAfterRestart`
+/// called it, as it writes one a test calls, and the Rust engine calls it
+/// directly. This holds no difference back: it relies on no operation of a
+/// test's following `resumeAfterRestart` before another operation does, and
+/// a test that breaks that loses Node's operation and keeps Rust's, so it
+/// fails.
+fn without_nested(events: &[Value]) -> Vec<Value> {
+    let mut resuming = false;
+    events
+        .iter()
+        .filter(|event| match event["op"].as_str() {
+            Some("resumeProject") if resuming => false,
+            Some(op) => {
+                resuming = op == "resumeAfterRestart";
+                true
+            }
+            None => true,
+        })
+        .cloned()
+        .collect()
+}
+
 /// What a trace's events are the engine's behaviour, as both sides write it.
 fn projected(events: &[Value]) -> Vec<Value> {
     events.iter().filter_map(project).map(defined).collect()
@@ -129,6 +156,10 @@ fn projected(events: &[Value]) -> Vec<Value> {
 
 fn project(event: &Value) -> Option<Value> {
     if let Some(op) = event.get("op") {
+        // An exit names its pane: it is that window's ([`lanes`]).
+        if op == "paneExited" {
+            return Some(json!({ "op": op, "pane": event["args"][0]["id"] }));
+        }
         return Some(json!({ "op": op }));
     }
     let seam = event["seam"].as_str()?;
@@ -342,6 +373,33 @@ fn a_launch_is_held_with_what_it_was_given() {
         projected(std::slice::from_ref(&node)),
         projected(std::slice::from_ref(&other)),
         "the role text is held"
+    );
+}
+
+#[test]
+fn the_resume_a_restart_calls_of_itself_is_no_operation_of_a_tests() {
+    let op = |name: &str| json!({ "op": name, "args": [] });
+    let event = json!({ "seam": "event", "event": { "kind": "project.state" } });
+    let node = [
+        op("pass"),
+        op("resumeAfterRestart"),
+        event.clone(),
+        op("resumeProject"),
+        op("resumeProject"),
+        event.clone(),
+        op("pass"),
+        op("resumeProject"),
+    ];
+    assert_eq!(
+        without_nested(&node),
+        [
+            op("pass"),
+            op("resumeAfterRestart"),
+            event.clone(),
+            event,
+            op("pass"),
+            op("resumeProject"),
+        ]
     );
 }
 

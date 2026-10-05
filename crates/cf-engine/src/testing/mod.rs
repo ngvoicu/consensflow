@@ -1,7 +1,8 @@
 //! The kit the engine's tests run it with, as `core-dispatcher.test.mjs`
 //! made its fakes: an executor that runs the engine's work to stillness, a
-//! gate, a pane host and an adapter whose agents do what the test tells
-//! them, fakes of the other seams, a test's engine made with them all
+//! gate, the time (a clock the test moves, and timers that are the loop's),
+//! a pane host and an adapter whose agents do what the test tells them,
+//! fakes of the other seams, a test's engine made with them all
 //! ([`Context`]), and a recorder that writes down what the engine asks of
 //! its seams in the shape of the Node traces the tests are held to.
 
@@ -9,15 +10,23 @@ mod adapter;
 mod context;
 mod executor;
 mod host;
+mod ledger;
+mod operations;
 mod recorder;
+mod records;
 mod seams;
+mod time;
+mod window;
 
-pub use adapter::{FakeAdapter, FakeAdapters, FakeAgent, FakeRecords, Ready};
+pub use adapter::{AfterPrepare, Deliver, FakeAdapter, FakeAdapters, FakeAgent, Ready, Taking};
 pub use context::{Closed, Context, Made, START_MS};
-pub use executor::{next_turn, Executor, Gate, GateWait, NextTurn};
-pub use host::{window_of, FakeHost};
+pub use executor::{next_turn, Answer, Executor, Gate, GateWait, NextTurn};
+pub use host::{window_of, FakeHost, OnRequest};
+pub use operations::Restarted;
 pub use recorder::Recorder;
+pub use records::FakeRecords;
 pub use seams::{
     CountingLaunchIds, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv, FakeRoles,
     FakeRoster, FakeTrace, MODELS,
 };
+pub use time::TestTime;

@@ -19,8 +19,8 @@ use crate::host::{EngineHost, Killed, OpenPane, Opened};
 #[derive(Default)]
 pub struct FakeHost {
     recorder: Recorder,
-    /// Where exits go: the engine, once made.
-    engine: RefCell<Weak<Dispatcher>>,
+    /// Where exits go: each engine made, in order (`host.onExit`).
+    engines: RefCell<Vec<Weak<Dispatcher>>>,
     opened: RefCell<Vec<OpenPane>>,
     killed: RefCell<Vec<Pane>>,
     requests: RefCell<Vec<(String, Value)>>,
@@ -36,7 +36,13 @@ pub struct FakeHost {
     pub snapshot: RefCell<Map<String, Value>>,
     /// The window's process, when the test names one.
     pub pid: Cell<Option<u32>>,
+    /// What a test's own `request` does first, given the request it wraps.
+    pub on_request: RefCell<Option<OnRequest>>,
 }
+
+/// What a test's own `request` does before the host's, given the operation
+/// asked and its body.
+pub type OnRequest = Rc<dyn Fn(&str, &Value)>;
 
 impl FakeHost {
     pub fn new(recorder: Recorder) -> Rc<Self> {
@@ -46,9 +52,18 @@ impl FakeHost {
         })
     }
 
-    /// Exits go to `engine` (`host.onExit`).
+    /// Exits go to `engine` too (`host.onExit`).
     pub fn attach(&self, engine: &Rc<Dispatcher>) {
-        *self.engine.borrow_mut() = Rc::downgrade(engine);
+        self.engines.borrow_mut().push(Rc::downgrade(engine));
+    }
+
+    /// What `pane.snapshot` answers besides `ok` from now on
+    /// (`host.snapshot = { outputQuietMs: 300 }`).
+    pub fn set_snapshot(&self, answer: Value) {
+        let Value::Object(fields) = answer else {
+            panic!("a snapshot is an object");
+        };
+        *self.snapshot.borrow_mut() = fields;
     }
 
     /// The panes opened, in order.
@@ -64,6 +79,16 @@ impl FakeHost {
     /// The requests made, in order.
     pub fn requests(&self) -> Vec<(String, Value)> {
         self.requests.borrow().clone()
+    }
+
+    /// What was typed into panes, in order: the body of each `pane.input`.
+    pub fn inputs(&self) -> Vec<Value> {
+        self.requests
+            .borrow()
+            .iter()
+            .filter(|(op, _)| op == "pane.input")
+            .map(|(_, body)| body.clone())
+            .collect()
     }
 
     /// The last pane opened for `handle`'s window: its own, or one of its sessions'.
@@ -83,18 +108,23 @@ impl FakeHost {
         }
     }
 
-    /// Tells the engine `pane` ended and waits for what it does about it.
+    /// Tells each engine `pane` ended, one after the other, and waits for
+    /// what it does about it.
     pub async fn exited(&self, pane: Pane) {
-        let engine = self.engine.borrow().upgrade();
-        let Some(engine) = engine else {
-            return;
-        };
-        self.recorder.op(
-            "paneExited",
-            json!([{ "id": pane.id, "generation": pane.generation }]),
-        );
-        if let Some(rest) = engine.pane_exited(pane) {
-            rest.await;
+        let engines: Vec<Rc<Dispatcher>> = self
+            .engines
+            .borrow()
+            .iter()
+            .filter_map(Weak::upgrade)
+            .collect();
+        for engine in engines {
+            self.recorder.op(
+                "paneExited",
+                json!([{ "id": pane.id, "generation": pane.generation }]),
+            );
+            if let Some(rest) = engine.pane_exited(pane.clone()) {
+                rest.await;
+            }
         }
     }
 }
@@ -141,6 +171,10 @@ impl PaneHost for FakeHost {
         let at = self
             .recorder
             .call("host", Some("request"), json!([op, body.clone()]));
+        let wrapped = self.on_request.borrow().clone();
+        if let Some(wrapped) = wrapped {
+            wrapped(op, &body);
+        }
         self.requests.borrow_mut().push((op.to_owned(), body));
         let mut answer = Map::new();
         answer.insert("ok".to_owned(), json!(true));

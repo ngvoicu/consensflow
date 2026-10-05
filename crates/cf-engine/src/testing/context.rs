@@ -20,14 +20,16 @@ use cf_ledger::{
 };
 use serde_json::{json, Value};
 
-use super::adapter::{FakeAdapter, FakeAdapters, FakeRecords};
-use super::executor::Executor;
+use super::adapter::{FakeAdapter, FakeAdapters};
+use super::executor::{Answer, Executor};
 use super::host::FakeHost;
 use super::recorder::Recorder;
+use super::records::FakeRecords;
 use super::seams::{
     CountingLaunchIds, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv, FakeRoles,
     FakeRoster, FakeTrace,
 };
+use super::time::TestTime;
 use crate::chief_switch::SwitchTo;
 use crate::dispatcher::{Dispatcher, SwitchWhen};
 use crate::seams::{EngineError, Limits, Seams};
@@ -74,7 +76,10 @@ pub struct Context {
     pub executor: Rc<Executor>,
     pub recorder: Recorder,
     pub ledger: Rc<RefCell<Ledger>>,
+    /// The clock a test moves ([`Context::advance`]).
     pub time: Rc<ManualTime>,
+    /// The timers an engine's sleeps wait on, which the clock never sees.
+    pub timers: Rc<TestTime>,
     pub host: Rc<FakeHost>,
     pub adapter: Rc<FakeAdapter>,
     pub roster: Rc<FakeRoster>,
@@ -82,6 +87,10 @@ pub struct Context {
     pub log: Rc<FakeLog>,
     pub launch_files: Rc<FakeLaunchFiles>,
     pub dispatcher: Rc<Dispatcher>,
+    /// What the engine is made with, for the engines a restart makes.
+    pub(super) seams: Seams,
+    /// The engines a restart made ([`Context::make`]), dropped with the test.
+    pub(super) restarted: RefCell<Vec<Rc<Dispatcher>>>,
     file: PathBuf,
     // Last, so the ledger's file goes after the ledger.
     _dir: tempfile::TempDir,
@@ -100,6 +109,7 @@ impl Context {
         let file = dir.path().join("consensflow.db");
         let recorder = Recorder::default();
         let time = Rc::new(ManualTime::new(START_MS));
+        let timers = Rc::new(TestTime::new(Rc::clone(&time), recorder.clone()));
         let named = Cell::new(0);
         let told = recorder.clone();
         let ledger = open_ledger(
@@ -146,12 +156,12 @@ impl Context {
             recorder: recorder.clone(),
             forgotten: RefCell::new(Vec::new()),
         });
-        let dispatcher = Dispatcher::new(Seams {
+        let seams = Seams {
             ledger: Rc::clone(&ledger),
             host: Rc::clone(&host) as Rc<_>,
             adapters: Rc::new(FakeAdapters::new(Rc::clone(&adapter), &made.harnesses)),
             records: Rc::new(FakeRecords::new(Rc::clone(&adapter))),
-            time: Rc::clone(&time) as Rc<dyn Time>,
+            time: Rc::clone(&timers) as Rc<dyn Time>,
             launch_ids: Rc::new(CountingLaunchIds::default()),
             credentials: Rc::new(FakeCredentials {
                 recorder: recorder.clone(),
@@ -173,13 +183,15 @@ impl Context {
                 launch_ms: 120_000,
                 max_attempts: 3,
             },
-        });
+        };
+        let dispatcher = Dispatcher::new(seams.clone());
         host.attach(&dispatcher);
         Self {
             executor,
             recorder,
             ledger,
             time,
+            timers,
             host,
             adapter,
             roster,
@@ -187,6 +199,8 @@ impl Context {
             log,
             launch_files,
             dispatcher,
+            seams,
+            restarted: RefCell::new(Vec::new()),
             file,
             _dir: dir,
         }
@@ -194,9 +208,28 @@ impl Context {
 
     /// Runs `work` and all it begins to stillness: its answer.
     pub fn run<T: 'static>(&self, work: impl Future<Output = T> + 'static) -> T {
-        self.executor
-            .finish(work)
+        self.finish(self.executor.start(work))
+    }
+
+    /// Runs what was started, and all it begins, until `answer` is there. A
+    /// sleep the work waits on ends once nothing else can move, as a timer
+    /// does in JavaScript's loop, the earliest first.
+    pub fn finish<T>(&self, answer: Answer<T>) -> T {
+        loop {
+            self.executor.run();
+            if answer.ended() || !self.timers.fire_next() {
+                break;
+            }
+        }
+        answer
+            .take()
             .expect("the work waits on nothing the test releases")
+    }
+
+    /// Runs everything started to stillness, its sleeps not ended: what
+    /// waits on one keeps waiting, as before a timer is due.
+    pub fn settle(&self) {
+        self.executor.run();
     }
 
     /// One pass, everything it began run to stillness.
@@ -317,13 +350,15 @@ impl Context {
             executor,
             ledger,
             dispatcher,
+            restarted,
             host,
             adapter,
+            seams,
             file,
             _dir: dir,
             ..
         } = self;
-        drop((executor, dispatcher, host, adapter));
+        drop((executor, dispatcher, restarted, host, adapter, seams));
         let ledger = Rc::try_unwrap(ledger)
             .unwrap_or_else(|_| panic!("something of the test still holds the ledger"));
         drop(ledger.into_inner());

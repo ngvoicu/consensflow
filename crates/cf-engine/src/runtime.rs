@@ -119,6 +119,25 @@ impl<T> Answer<T> {
     }
 }
 
+/// One turn of the executor: the microtask hop JavaScript paid when it
+/// awaited an async function, beyond the function's own waits. Which of two
+/// windows' work reaches its next effect first is held by a trace, and a step
+/// with an async function more in front of its effect is behind one with
+/// fewer: kept where a trace shows the difference (a look, `observe`).
+pub(crate) async fn turn() {
+    let mut waited = false;
+    poll_fn(|cx| {
+        if waited {
+            Poll::Ready(())
+        } else {
+            waited = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    })
+    .await;
+}
+
 /// The answers of work begun, in the order begun, as `Promise.all` gives
 /// them: the first failure as soon as it comes, whatever earlier work still
 /// waits on, the rest going on as the work of its own each is.

@@ -5,7 +5,15 @@
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod closing;
+mod deliveries;
+mod interrupts;
 mod lanes;
+mod looks;
+mod matching;
+mod restart;
 mod switching;
+mod tasks;
 mod the_dispatcher;
 mod traces;
+mod windows;

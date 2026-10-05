@@ -10,11 +10,12 @@
 //!
 //! An effect's lane is its window, `p<project>-<handle>`: a pane host's
 //! call by the pane it names, an adapter's call by its launch, a token by
-//! whom it is for, a trace line by its participant, and of the ledger's
-//! events, a conversation's by its participant and a delivery's by its
-//! message's recipient. What is no window's (an operation, any other event
-//! of the ledger, a forgotten project, the log) is in every lane: it keeps
-//! its place among all the others.
+//! whom it is for, a trace line by its participant, an exit by its pane, and
+//! of the ledger's events, a conversation's by its participant, a delivery's
+//! by its message's recipient and a task's own change by the task's
+//! assignee, where no chief or human made it. What is no window's (an other
+//! operation, any other event of the ledger, a forgotten project, the log)
+//! is in every lane: it keeps its place among all the others.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -65,15 +66,19 @@ pub fn first_difference(node: &[Value], rust: &[Value]) -> Option<String> {
     None
 }
 
+/// What names a window, learnt as the trace comes.
+#[derive(Default)]
+struct Learnt {
+    launches: HashMap<String, String>,
+    tokens: HashMap<String, String>,
+    conversations: HashMap<i64, String>,
+    recipients: HashMap<i64, String>,
+    assignees: HashMap<i64, String>,
+}
+
 /// Each effect's window, none for what is no window's.
 fn lanes(events: &[Value]) -> Vec<Option<String>> {
-    let mut launches: HashMap<String, String> = HashMap::new();
-    let mut tokens: HashMap<String, String> = HashMap::new();
-    let mut conversations: HashMap<i64, String> = HashMap::new();
-    let mut recipients: HashMap<i64, String> = HashMap::new();
-    let pane = |project: &Value, handle: &Value| {
-        format!("p{project}-{}", handle.as_str().unwrap_or_default())
-    };
+    let mut known = Learnt::default();
     events
         .iter()
         .map(|event| {
@@ -91,25 +96,25 @@ fn lanes(events: &[Value]) -> Vec<Option<String>> {
                 if event["method"] == "prepare" {
                     let lane = pane(&event["project"], &event["handle"]);
                     if let Some(launch) = launch {
-                        launches.insert(launch.to_owned(), lane.clone());
+                        known.launches.insert(launch.to_owned(), lane.clone());
                     }
                     return Some(lane);
                 }
-                return launch.and_then(|launch| launches.get(launch).cloned());
+                return launch.and_then(|launch| known.launches.get(launch).cloned());
             }
             if let Some(token) = event.get("issue").and_then(Value::as_str) {
                 let lane = pane(&event["project"], &event["handle"]);
-                tokens.insert(token.to_owned(), lane.clone());
+                known.tokens.insert(token.to_owned(), lane.clone());
                 return Some(lane);
             }
             if let Some(token) = event.get("revoke").and_then(Value::as_str) {
-                return tokens.get(token).cloned();
+                return known.tokens.get(token).cloned();
             }
             if let Some(launch) = event.get("forget").and_then(Value::as_str) {
-                return launches.get(launch).cloned();
+                return known.launches.get(launch).cloned();
             }
             if let Some(logged) = event.get("event") {
-                return ledger_lane(logged, &mut conversations, &mut recipients);
+                return ledger_lane(logged, &mut known);
             }
             if let Some(line) = event.get("trace") {
                 if let (Some(project), Some(participant)) =
@@ -118,38 +123,63 @@ fn lanes(events: &[Value]) -> Vec<Option<String>> {
                     return Some(format!("p{project}-{participant}"));
                 }
             }
+            // An exit names its pane.
+            if event["op"] == "paneExited" {
+                return event["pane"].as_str().map(str::to_owned);
+            }
             None
         })
         .collect()
 }
 
-/// A ledger event's window: a conversation's participant's, a delivery's
-/// recipient's; none for any other. What names whom is learnt as it comes:
-/// a conversation by the event that started it, a message by the one that
-/// sent it.
-fn ledger_lane(
-    event: &Value,
-    conversations: &mut HashMap<i64, String>,
-    recipients: &mut HashMap<i64, String>,
-) -> Option<String> {
+/// A window's pane id, `p<project>-<handle>`.
+fn pane(project: &Value, handle: &Value) -> String {
+    format!("p{project}-{}", handle.as_str().unwrap_or_default())
+}
+
+/// A ledger event's lane; none for one no window caused, or that cannot be
+/// told. What names whom is learnt as it comes: a conversation by the event
+/// that started it, a message by the one that sent it, a task's assignee by
+/// the one that gave it.
+fn ledger_lane(event: &Value, known: &mut Learnt) -> Option<String> {
     let (project, kind, data) = (&event["project"], event["kind"].as_str()?, &event["data"]);
     let lane_of = |handle: &Value| handle.as_str().map(|handle| format!("p{project}-{handle}"));
     let conversation = data["conversation"].as_i64();
-    let message = data["message"].as_i64();
+    let (task, message) = (data["task"].as_i64(), data["message"].as_i64());
     if let ("message.sent" | "task.created", Some(message), Some(lane)) =
         (kind, message, lane_of(&data["to"]))
     {
-        recipients.insert(message, lane);
-        return None;
+        known.recipients.insert(message, lane);
+    }
+    match (kind, task) {
+        ("task.created", Some(task)) => {
+            if let Some(lane) = lane_of(&data["to"]) {
+                known.assignees.insert(task, lane);
+            }
+            return None;
+        }
+        ("task.assigned", Some(task)) => {
+            if let Some(lane) = lane_of(&data["assignee"]) {
+                known.assignees.insert(task, lane);
+            }
+            return None;
+        }
+        // A chief's or a human's word is a test's; any other change is made
+        // in the window of the task's assignee.
+        ("task.state", Some(task)) if !data["by"].is_string() => {
+            return known.assignees.get(&task).cloned();
+        }
+        _ => {}
     }
     if kind.starts_with("conversation.") {
         if let (Some(conversation), Some(lane)) = (conversation, lane_of(&data["participant"])) {
-            conversations.insert(conversation, lane);
+            known.conversations.insert(conversation, lane);
         }
-        return conversation.and_then(|conversation| conversations.get(&conversation).cloned());
+        return conversation
+            .and_then(|conversation| known.conversations.get(&conversation).cloned());
     }
     if kind.starts_with("delivery.") {
-        return message.and_then(|message| recipients.get(&message).cloned());
+        return message.and_then(|message| known.recipients.get(&message).cloned());
     }
     None
 }
@@ -251,5 +281,56 @@ mod tests {
         assert_eq!(first_difference(&node, &rust), None);
         // A task's event is no window's: it keeps its place.
         assert!(first_difference(&[sent.clone(), chief.clone()], &[chief, sent]).is_some());
+    }
+
+    #[test]
+    fn a_tasks_change_is_its_assignees_unless_the_chief_or_the_human_made_it() {
+        let event = |kind: &str, data: Value| json!({ "event": { "project": 1, "kind": kind, "data": data } });
+        let given = event(
+            "task.created",
+            json!({ "task": 1, "from": "chief", "to": "zeus", "message": 1 }),
+        );
+        let working = event(
+            "task.state",
+            json!({ "task": 1, "from": "queued", "to": "working" }),
+        );
+        let accepted = event(
+            "task.state",
+            json!({ "task": 1, "from": "done", "to": "accepted", "by": "chief" }),
+        );
+        let chief = host("p1-chief", "pane.snapshot");
+        // The assignee's change may come after the chief's look, or before.
+        assert_eq!(
+            first_difference(
+                &[given.clone(), working.clone(), chief.clone()],
+                &[given.clone(), chief.clone(), working.clone()]
+            ),
+            None
+        );
+        // The chief's word is a test's: it keeps its place.
+        assert!(first_difference(
+            &[given.clone(), accepted.clone(), chief.clone()],
+            &[given, chief, accepted]
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn an_exit_is_its_panes_and_any_other_operation_is_no_windows() {
+        let (zeus, chief) = (
+            host("p1-zeus", "pane.snapshot"),
+            host("p1-chief", "pane.snapshot"),
+        );
+        let exit = json!({ "op": "paneExited", "pane": "p1-zeus" });
+        let pass = json!({ "op": "pass" });
+        // zeus's exit comes after its look, whenever the chief looks.
+        let node = [zeus.clone(), exit.clone(), chief.clone()];
+        assert_eq!(
+            first_difference(&node, &[zeus.clone(), chief.clone(), exit.clone()]),
+            None
+        );
+        assert!(first_difference(&node, &[exit, zeus, chief.clone()]).is_some());
+        // A pass keeps its place among them all.
+        assert!(first_difference(&[pass.clone(), chief.clone()], &[chief, pass]).is_some());
     }
 }
