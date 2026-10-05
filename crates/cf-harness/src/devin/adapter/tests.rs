@@ -90,6 +90,8 @@ fn a_windows_machine_tells_devin_how_to_name_files_the_way_its_file_tools_write_
             role.to_owned()
         }
     );
+    // None stays none, for the window to be refused as on any machine.
+    assert_eq!(role_text("", &Env::from_vars([("OS", "Windows_NT")])), "");
 }
 
 #[test]

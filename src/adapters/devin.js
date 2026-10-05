@@ -40,9 +40,12 @@ const HOLD = 'Devin has not said yet which conversation its window shows'
 const WINDOWS_PATHS =
   'This machine runs Windows and your shell is Git Bash: give file tools Windows paths (C:\\Users\\…) or paths relative to the project folder, never /c/… paths, which they write under C:\\c\\.'
 
-/** The role text a Devin window gets: on Windows, with how to name a file there. */
+/**
+ * The role text a Devin window gets: on Windows, with how to name a file
+ * there. A window given none gets none, and is refused as any is.
+ */
 export const devinRoleText = (instructions, env) =>
-  onWindows(env) ? `${instructions}\n\n${WINDOWS_PATHS}\n` : instructions
+  onWindows(env) && instructions ? `${instructions}\n\n${WINDOWS_PATHS}\n` : instructions
 
 export function devinAdapter({
   env,
