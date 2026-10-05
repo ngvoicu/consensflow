@@ -40,23 +40,32 @@ const OPERATIONS = [
 /** A host's methods that only set it up, which no trace holds. */
 const SETUP = new Set(['onExit'])
 
-export class Dispatcher extends Engine {
+/** The engine made with every seam it is given recording. */
+class Recording extends Engine {
   constructor(options) {
     super(seams(options))
-    // The test holds this proxy; the engine holds itself, so its calls of its
-    // own operations go unmarked. What the test sets on it (a wrapper of an
-    // operation) is the test's, kept apart where the engine never reads it;
-    // a method is bound to the engine, whose private fields a proxy would not
-    // reach.
+  }
+}
+
+/**
+ * The engine as the test makes it: the test holds a proxy that marks its
+ * calls, and the engine holds itself, so its calls of its own operations go
+ * unmarked. What the test sets on the proxy (a wrapper of an operation) is
+ * the test's, kept apart where the engine never reads it; a method is bound
+ * to the engine, whose private fields a proxy would not reach.
+ */
+export const Dispatcher = new Proxy(Recording, {
+  construct(Engine, args) {
+    const engine = new Engine(...args)
     const set = new Map()
-    return new Proxy(this, {
+    return new Proxy(engine, {
       get(target, property) {
         if (set.has(property)) return set.get(property)
         const value = Reflect.get(target, property, target)
         if (OPERATIONS.includes(property)) {
-          return (...args) => {
-            record({ op: property, args: encode(args) })
-            return value.apply(target, args)
+          return (...given) => {
+            record({ op: property, args: encode(given) })
+            return value.apply(target, given)
           }
         }
         return typeof value === 'function' ? value.bind(target) : value
@@ -66,8 +75,8 @@ export class Dispatcher extends Engine {
         return true
       },
     })
-  }
-}
+  },
+})
 
 /** The options the engine is made with, each seam in them recording. */
 function seams(options) {
