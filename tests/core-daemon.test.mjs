@@ -8,11 +8,32 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Credentials, startApi } from '../src/core/api.js'
 import { passLoop } from '../src/core/daemon.js'
 import { openLedger } from '../src/ledger/index.js'
-import { fakeNodeExecutable } from './helpers.mjs'
+import { daemonCommand, fakeNodeExecutable } from './helpers.mjs'
 
 const DAEMON = fileURLToPath(new URL('./integration/core-daemon.mjs', import.meta.url))
 const BUNDLE_BIN = fileURLToPath(new URL('../bin', import.meta.url))
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * The same cases run against both daemons (`npm run test:daemons`): Node's, and
+ * the native one `CONSENSFLOW_TEST_DAEMON` names. What only Node's own modules
+ * can show (a pass loop, an API, a Node preload) is skipped for the native one
+ * with its reason; what the native daemon does not serve yet is skipped with
+ * the landing it waits for.
+ */
+const NATIVE = daemonCommand([DAEMON]).native
+const ONLY_NODE_CAN = NATIVE && "a test of Node's own modules, which the native daemon has none of"
+const WAITS_FOR_THE_PAGE_OPERATIONS =
+  'asks the page operations and the agents screens, which the native daemon serves from their landings on (step 3.6)'
+
+/** The daemon as a child, the one under test; Node flags only go to Node's. */
+function startDaemon(env, nodeFlags = []) {
+  const started = daemonCommand([...nodeFlags, DAEMON])
+  return spawn(started.command, started.args, {
+    env: { ...env, ...started.env },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+}
 
 /** How long `work` took, failing past `limit` ms rather than waiting on it for good. */
 async function timed(work, limit) {
@@ -31,14 +52,18 @@ async function timed(work, limit) {
 
 /** The app ends the daemon 2 s after asking it to stop, so a stop takes no more than about 1.5 s. */
 describe("the daemon's stop", () => {
-  it('waits only a moment for a pass held up by a slow window', async () => {
+  it('waits only a moment for a pass held up by a slow window', {
+    skip: ONLY_NODE_CAN,
+  }, async () => {
     const loop = passLoop(() => new Promise(() => {}))
     loop.kick()
     await sleep(20)
     assert.ok((await timed(() => loop.stop(), 3_000)) < 1_500)
   })
 
-  it('answers a door still waiting for an answer at once, so the API closes', async () => {
+  it('answers a door still waiting for an answer at once, so the API closes', {
+    skip: ONLY_NODE_CAN,
+  }, async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-daemon-stop-'))
     const ledger = openLedger(path.join(dir, 'consensflow.db'))
     const credentials = new Credentials()
@@ -84,7 +109,9 @@ function lineLog() {
 }
 
 describe("the daemon's passes", () => {
-  it('runs one pass at a time: kicks during a pass run one more after it', async (t) => {
+  it('runs one pass at a time: kicks during a pass run one more after it', {
+    skip: ONLY_NODE_CAN,
+  }, async (t) => {
     // Only the kicks run passes here: the once-a-second timer stands still.
     t.mock.timers.enable({ apis: ['setInterval'] })
     let passes = 0
@@ -110,7 +137,9 @@ describe("the daemon's passes", () => {
     assert.deepEqual([passes, most], [2, 1])
   })
 
-  it('writes down a pass longer than five seconds, and every ten minutes that it is alive and how its passes went', async (t) => {
+  it('writes down a pass longer than five seconds, and every ten minutes that it is alive and how its passes went', {
+    skip: ONLY_NODE_CAN,
+  }, async (t) => {
     t.mock.timers.enable({ apis: ['setInterval', 'Date'] })
     const log = lineLog()
     const durations = [5_000, 6_000, 0]
@@ -137,7 +166,7 @@ describe("the daemon's passes", () => {
 
 /** The daemon writes down what is worth knowing afterwards: its start, its stop and why, a pass that failed. */
 describe('the daemon and its log', () => {
-  it('writes a failed pass down and goes on with the next', async () => {
+  it('writes a failed pass down and goes on with the next', { skip: ONLY_NODE_CAN }, async () => {
     const log = lineLog()
     let passes = 0
     const loop = passLoop(async () => {
@@ -165,14 +194,11 @@ describe('the daemon and its log', () => {
     }, async () => {
       const home = await mkdtemp(path.join(os.tmpdir(), 'cf-daemon-'))
       try {
-        const child = spawn(process.execPath, [DAEMON], {
-          env: {
-            ...process.env,
-            HOME: home,
-            CONSENSFLOW_HOME: home,
-            CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
-          },
-          stdio: ['pipe', 'pipe', 'pipe'],
+        const child = startDaemon({
+          ...process.env,
+          HOME: home,
+          CONSENSFLOW_HOME: home,
+          CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
         })
         let errors = ''
         child.stderr.on('data', (chunk) => {
@@ -183,10 +209,11 @@ describe('the daemon and its log', () => {
         const code = await new Promise((resolve) => child.once('exit', resolve))
         assert.equal(code, 0, errors)
         const log = await readFile(path.join(home, 'daemon.log'), 'utf8')
+        // The runtime the start line names is the daemon's own: Node's version, or the native one's.
         assert.match(
           log,
           new RegExp(
-            `^\\S+ info start pid ${child.pid} node v\\S+ home \\S+\\n\\S+ info stop: ${reason}; rss \\d+ MB\\n\\S+ info exit 0\\n$`,
+            `^\\S+ info start pid ${child.pid} (?:node v|rust )\\S+ home \\S+\\n\\S+ info stop: ${reason}; rss \\d+ MB\\n\\S+ info exit 0\\n$`,
           ),
         )
       } finally {
@@ -202,14 +229,11 @@ describe('the daemon and its log', () => {
     try {
       await mkdir(launch, { recursive: true })
       await writeFile(path.join(launch, 'settings.json'), '{}\n')
-      const child = spawn(process.execPath, [DAEMON], {
-        env: {
-          ...process.env,
-          HOME: home,
-          CONSENSFLOW_HOME: home,
-          CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
-        },
-        stdio: ['pipe', 'pipe', 'pipe'],
+      const child = startDaemon({
+        ...process.env,
+        HOME: home,
+        CONSENSFLOW_HOME: home,
+        CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
       })
       let errors = ''
       child.stderr.on('data', (chunk) => {
@@ -240,14 +264,11 @@ describe('the daemon and its log', () => {
     const broken = '{"schemaVersion": 1, "agents": [{"id": "mine", "kind": "codex"},]}\n'
     try {
       await writeFile(file, broken)
-      const child = spawn(process.execPath, [DAEMON], {
-        env: {
-          ...process.env,
-          HOME: home,
-          CONSENSFLOW_HOME: home,
-          CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
-        },
-        stdio: ['pipe', 'pipe', 'pipe'],
+      const child = startDaemon({
+        ...process.env,
+        HOME: home,
+        CONSENSFLOW_HOME: home,
+        CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
       })
       let errors = ''
       child.stderr.on('data', (chunk) => {
@@ -261,9 +282,11 @@ describe('the daemon and its log', () => {
       assert.ok(started, `it did not start: ${errors}`)
       child.stdin.end()
       assert.equal(await exited, 0, errors)
+      // Node's log has the error's stack under the line, which begins `Error: `;
+      // the native daemon's has the roster's words alone.
       assert.match(
         await readFile(path.join(home, 'daemon.log'), 'utf8'),
-        /\n\S+ error the agents file could not be used\n {4}Error: Your agents file .* is not valid JSON/,
+        /\n\S+ error the agents file could not be used\n {4}(?:Error: )?Your agents file .* is not valid JSON/,
       )
       assert.equal(await readFile(file, 'utf8'), broken, 'the file is left as the human wrote it')
     } finally {
@@ -315,11 +338,7 @@ async function daemonOverItsBridge(t, { agents = [], preload = null } = {}) {
     XDG_CONFIG_HOME: path.join(root, 'home', '.config'),
     PATH: bin,
   }
-  child = spawn(
-    process.execPath,
-    [...(preload === null ? [] : ['--import', pathToFileURL(preload).href]), DAEMON],
-    { env, stdio: ['pipe', 'pipe', 'pipe'] },
-  )
+  child = startDaemon(env, preload === null ? [] : ['--import', pathToFileURL(preload).href])
   exited = new Promise((resolve) => child.once('exit', resolve))
   let errors = ''
   child.stderr.on('data', (chunk) => {
@@ -396,7 +415,9 @@ const MYBUILDER = {
 }
 
 describe('the daemon over its bridge', () => {
-  it("opens a window with the agents' API, its project and participant, its runtime, and the bundled cf first on PATH", async (t) => {
+  it("opens a window with the agents' API, its project and participant, its runtime, and the bundled cf first on PATH", {
+    skip: NATIVE && WAITS_FOR_THE_PAGE_OPERATIONS,
+  }, async (t) => {
     const d = await daemonOverItsBridge(t, { agents: [MYBUILDER] })
     const opened = await d.request('project.open', {
       directory: d.workspace,
@@ -439,7 +460,9 @@ describe('the daemon over its bridge', () => {
     assert.ok(role.includes(`Here \`cf\` is ${cf}.`), role.slice(-600))
   })
 
-  it("tells the page when the board changes, and when a change to the agents moves a member's tier", async (t) => {
+  it("tells the page when the board changes, and when a change to the agents moves a member's tier", {
+    skip: NATIVE && WAITS_FOR_THE_PAGE_OPERATIONS,
+  }, async (t) => {
     const d = await daemonOverItsBridge(t, { agents: [MYBUILDER] })
     const told = (reason) =>
       d.frames.filter(
@@ -482,12 +505,15 @@ describe('the daemon over its bridge', () => {
     await timed(() => d.exited, 10_000)
     assert.equal(await d.exited, 0, d.errors())
     const log = await readFile(path.join(d.home, 'daemon.log'), 'utf8')
-    assert.match(log, /\n\S+ error the bridge failed\n {4}Error: /)
+    // Node's log has the error's stack under the line, which begins `Error: `;
+    // the native daemon's has the bridge's own words for what broke.
+    assert.match(log, /\n\S+ error the bridge failed\n {4}(?:Error: |bridge I\/O error: )/)
     assert.match(log, /\n\S+ info stop: the bridge failed; rss \d+ MB\n\S+ info exit 0\n$/)
   })
 
   it('writes down an error nobody caught, thrown or rejected, and goes on', {
-    skip: process.platform === 'win32' && 'the test throws from a SIGUSR2 handler',
+    skip:
+      (process.platform === 'win32' && 'the test throws from a SIGUSR2 handler') || ONLY_NODE_CAN,
   }, async (t) => {
     const preload = path.join(
       await mkdtemp(path.join(os.tmpdir(), 'cf-daemon-fault-')),

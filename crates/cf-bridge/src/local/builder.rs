@@ -11,7 +11,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 
 use super::reader::read_loop;
-use super::state::{ErrorHandler, Inner, Settings};
+use super::state::{ErrorHandler, Inner, ReadHandler, Settings};
 use super::writer::write_loop;
 use super::Bridge;
 use crate::BridgeError;
@@ -31,6 +31,7 @@ pub struct BridgeBuilder {
     default_deadline: Duration,
     on_error: Option<Rc<ErrorHandler>>,
     on_fatal: Option<Rc<ErrorHandler>>,
+    after_read: Option<Rc<ReadHandler>>,
 }
 
 impl BridgeBuilder {
@@ -42,6 +43,7 @@ impl BridgeBuilder {
             default_deadline: DEFAULT_DEADLINE,
             on_error: None,
             on_fatal: None,
+            after_read: None,
         }
     }
 
@@ -69,6 +71,20 @@ impl BridgeBuilder {
     /// is the normal end.
     pub fn on_fatal<F: Fn(BridgeError) + 'static>(mut self, handler: F) -> Self {
         self.on_fatal = Some(Rc::new(handler));
+        self
+    }
+
+    /// Called after the reader has handled the frames of one read of the
+    /// input, in place and before it reads again: where the daemon runs the
+    /// work those frames woke to its end, as Node's microtasks ran after each
+    /// `data` callback of its event loop, before the next. The frames of one
+    /// read are all handled before it is called, as Node's were, and a
+    /// request's handler has had its first poll by then. A read that held no
+    /// whole frame calls it too. The end of the input and a failed read do
+    /// not, having handled nothing; a read whose frames closed the bridge
+    /// calls it once, for the frames up to the close.
+    pub fn after_read<F: Fn() + 'static>(mut self, handler: F) -> Self {
+        self.after_read = Some(Rc::new(handler));
         self
     }
 
@@ -104,6 +120,7 @@ impl BridgeBuilder {
                 default_deadline: self.default_deadline,
                 on_error: self.on_error,
                 on_fatal: self.on_fatal,
+                after_read: self.after_read,
             },
             queue,
         ));

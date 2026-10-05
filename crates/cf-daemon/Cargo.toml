@@ -1,0 +1,47 @@
+[package]
+name = "cf-daemon"
+description = "ConsensFlow's daemon: the one process that owns its state, around the engine. Its run and stop, its HTTP front, the page's operations over the bridge, its log and trace."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bytes.workspace = true
+cf-base.workspace = true
+# The daemon's end of the bridge, which no other crate turns on.
+cf-bridge = { workspace = true, features = ["local"] }
+cf-catalog.workspace = true
+cf-engine.workspace = true
+cf-harness.workspace = true
+cf-ledger.workspace = true
+cf-process.workspace = true
+cf-proto.workspace = true
+# A panic is caught where a future runs (`catch_unwind`), and a body is a stream.
+futures-util.workspace = true
+# The window tokens and the UI token.
+getrandom.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+# The machine's time zone, which a quota's reset named by a time of day is read in.
+jiff.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# A window's token is kept as its digest.
+sha2.workspace = true
+# The UI token is compared in constant time.
+subtle.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt", "signal", "sync", "time"] }
+# A request's target is read as the WHATWG URL standard reads it, as Node's `new URL`.
+url.workspace = true
+
+[dev-dependencies]
+cf-engine = { workspace = true, features = ["test-support"] }
+cf-harness = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt", "signal", "sync", "test-util", "time"] }
+
+[lints]
+workspace = true

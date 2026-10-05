@@ -10,16 +10,19 @@ use std::time::Duration;
 
 use cf_proto::bridge::{Frame, Role};
 use serde_json::{json, Value};
-use tokio::sync::{mpsc, oneshot, Notify};
+use tokio::sync::{mpsc, oneshot, watch, Notify};
 use tokio::time::Instant;
 
 use super::registry::Registry;
+use super::Ended;
 use crate::BridgeError;
 
 /// What a request ends in: the peer's body, or why none will come.
 pub(super) type Answer = Result<Value, BridgeError>;
 
 pub(super) type ErrorHandler = dyn Fn(BridgeError);
+
+pub(super) type ReadHandler = dyn Fn();
 
 /// A request sent and not answered yet, and when it stops waiting.
 struct Pending {
@@ -35,6 +38,7 @@ pub(super) struct Settings {
     pub(super) default_deadline: Duration,
     pub(super) on_error: Option<Rc<ErrorHandler>>,
     pub(super) on_fatal: Option<Rc<ErrorHandler>>,
+    pub(super) after_read: Option<Rc<ReadHandler>>,
 }
 
 pub(super) struct Inner {
@@ -43,6 +47,7 @@ pub(super) struct Inner {
     pub(super) default_deadline: Duration,
     on_error: Option<Rc<ErrorHandler>>,
     on_fatal: Option<Rc<ErrorHandler>>,
+    after_read: Option<Rc<ReadHandler>>,
     next_id: Cell<u64>,
     closed: Cell<bool>,
     /// Why the bridge closed, which a request made after that is refused with.
@@ -53,6 +58,9 @@ pub(super) struct Inner {
     queue: RefCell<Option<mpsc::UnboundedSender<Vec<u8>>>>,
     /// Told when the bridge closes, to stop the reader where it waits.
     pub(super) stop: Notify,
+    /// Why the bridge ended, once it has: what [`super::Bridge::ended`]
+    /// waits for, kept for whoever asks after it ended.
+    ended: watch::Sender<Option<Ended>>,
 }
 
 impl Inner {
@@ -63,6 +71,7 @@ impl Inner {
             default_deadline: settings.default_deadline,
             on_error: settings.on_error,
             on_fatal: settings.on_fatal,
+            after_read: settings.after_read,
             next_id: Cell::new(0),
             closed: Cell::new(false),
             terminal: RefCell::new(None),
@@ -70,11 +79,17 @@ impl Inner {
             registry: Registry::default(),
             queue: RefCell::new(Some(queue)),
             stop: Notify::new(),
+            ended: watch::Sender::new(None),
         }
     }
 
     pub(super) fn is_closed(&self) -> bool {
         self.closed.get()
+    }
+
+    /// Waits to hear why the bridge ended: at once when it has.
+    pub(super) fn watch_ended(&self) -> watch::Receiver<Option<Ended>> {
+        self.ended.subscribe()
     }
 
     /// Why the bridge closed: what a request made now is refused with.
@@ -165,12 +180,17 @@ impl Inner {
         }
     }
 
+    /// Tells `after_read` that the frames of one read are handled.
+    pub(super) fn read_handled(&self) {
+        if let Some(handler) = self.after_read.clone() {
+            handler();
+        }
+    }
+
     /// The input ended, the normal end of a bridge: what waits is refused
     /// with `Eof`, and nothing is reported. The output stays as it is.
     pub(super) fn eof(&self) {
-        if !self.closed.replace(true) {
-            self.finish(BridgeError::Eof);
-        }
+        self.end(Ended::Input);
     }
 
     /// The transport broke: what waits is refused with `error`, `on_error`
@@ -181,6 +201,7 @@ impl Inner {
             return;
         }
         self.finish(error.clone());
+        self.ended.send_replace(Some(Ended::Failed(error.clone())));
         self.report(error.clone());
         self.end_output();
         if let Some(handler) = self.on_fatal.clone() {
@@ -191,8 +212,17 @@ impl Inner {
     /// Closes the bridge as an end of input does, and ends the output once
     /// what was queued is written.
     pub(super) fn close(&self) {
-        self.eof();
+        self.end(Ended::Closed);
         self.end_output();
+    }
+
+    /// The first way a bridge ends that is no failure is the one it says:
+    /// what waits is refused with `Eof`, and whoever waits to hear why is told.
+    fn end(&self, ended: Ended) {
+        if !self.closed.replace(true) {
+            self.finish(BridgeError::Eof);
+            self.ended.send_replace(Some(ended));
+        }
     }
 
     fn finish(&self, error: BridgeError) {

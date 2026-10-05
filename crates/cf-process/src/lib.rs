@@ -2,7 +2,8 @@
 //! program starts here (Windows scripts and npm's shims included) and how a
 //! window's program does, where a command is on PATH, running one in this
 //! process's place, to its end (`execFile`) or beside this one a line at a
-//! time (`spawn`), ending one, and whether one is alive.
+//! time (`spawn`), ending one, whether one is alive, and how much memory
+//! this one holds.
 
 #![deny(unsafe_code)]
 #![deny(clippy::undocumented_unsafe_blocks)]
@@ -12,6 +13,7 @@ mod capture;
 mod child;
 mod execute;
 mod job;
+mod memory;
 mod runnable;
 mod search;
 mod terminate;
@@ -21,9 +23,10 @@ pub use capture::{capture, CaptureFailed, Captured};
 pub use child::{spawn, Child, Ender, Streams};
 pub use execute::{execute, Failed, Limits};
 pub use job::with_required;
+pub use memory::{megabytes, rss};
 pub use runnable::{pane_argv, runnable, Run};
 pub use search::{find_in, on_path};
-pub use terminate::{terminate, Ending};
+pub use terminate::{terminate, terminate_without_waiting, Ending};
 
 use std::ffi::{OsStr, OsString};
 use std::io;

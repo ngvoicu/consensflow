@@ -17,7 +17,7 @@ use cf_base::file::error_code;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdin, ChildStdout};
 
-use crate::{terminate, Ending, Run};
+use crate::{terminate, terminate_without_waiting, Ending, Run};
 
 /// What a child's streams are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,10 +221,12 @@ impl Ender {
         self.exited.upgrade().is_some_and(|exited| !exited.get())
     }
 
-    /// Forces the child to end, if it is still there.
+    /// Forces the child to end, if it is still there, and waits for nothing
+    /// (on Windows `taskkill` is started and let go): this is the end of a
+    /// process on its way out.
     pub fn force(&self) {
         if let (Some(pid), true) = (self.pid, self.running()) {
-            terminate(pid, Ending::Forced);
+            terminate_without_waiting(pid, Ending::Forced);
         }
     }
 }
@@ -363,6 +365,28 @@ mod tests {
                 .unwrap();
             assert!(child.exited());
             assert!(!ender.running());
+        });
+    }
+
+    #[test]
+    fn an_ender_forces_a_running_child_to_end_and_a_gone_one_is_left_alone() {
+        block_on(async {
+            let script = if cfg!(windows) {
+                "ping -n 30 127.0.0.1 >NUL"
+            } else {
+                "exec sleep 30"
+            };
+            let child = spawn(&shell(script), None, &system_env(), Streams::Quiet).unwrap();
+            let ender = child.ender();
+            assert!(ender.running());
+            ender.force();
+            tokio::time::timeout(Duration::from_secs(10), child.closed())
+                .await
+                .unwrap();
+            assert!(child.exited());
+            assert!(!ender.running());
+            // Nothing is left to end, and nothing is sent to a pid that may be another's.
+            ender.force();
         });
     }
 

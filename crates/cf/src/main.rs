@@ -14,6 +14,11 @@ fn main() -> ExitCode {
     if let Some(code) = cf::codex_session(&env, &args) {
         return exit_code(code);
     }
+    // The daemon does the same, behind the switch: it reads and writes the
+    // standard streams from threads of its own.
+    if let Some(code) = cf::native_ui(&env, &args) {
+        return exit_code(code);
+    }
     let stdout = io::stdout();
     let mut out = stdout.lock();
     let ran = cf::run(

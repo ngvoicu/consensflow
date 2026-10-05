@@ -3,6 +3,8 @@
 //! milliseconds as `mtimeMs` has it, what a failure is called (`error.code`,
 //! `ENOENT`) and how Node words it, and a file written whole or not at all.
 //!
+//! - `append`: a file only appended to, moved aside once it is past its
+//!   limit, as the daemon's log and trace are;
 //! - `errno`: libuv's names and words for a failure;
 //! - `error`: a failed file operation, said as Node's error says it;
 //! - `write`: a folder made with every level above it, a file written in
@@ -18,12 +20,14 @@ use std::io;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
+mod append;
 mod errno;
 mod error;
 mod promises;
 mod sync;
 mod write;
 
+pub use append::{append_rotating, aside};
 pub use errno::{errno_name, error_code, is_missing, uv_words};
 pub use error::FileError;
 pub use promises::{read_file, rename, rm_force};

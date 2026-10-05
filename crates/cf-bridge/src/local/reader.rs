@@ -1,6 +1,8 @@
 //! The input: read, split into lines, and dispatched one frame at a time, in
 //! the order the peer wrote them. Dispatching is synchronous and never waits
-//! for a handler, so a frame is dealt with before the next is read.
+//! for a handler, so a frame is dealt with before the next is read. The
+//! frames of one read are handled together, and `after_read` is told when
+//! they all are.
 
 use std::rc::Rc;
 
@@ -57,19 +59,30 @@ pub(super) async fn read_loop<R: AsyncRead + Unpin>(inner: Rc<Inner>, mut input:
             }
             Ok(count) => lines.push(&chunk[..count]),
         }
-        while let Some(line) = lines.next_line() {
-            match line {
-                Line::Complete(bytes) => bridge.dispatch_bytes(&bytes),
-                Line::Overflow => bridge.report_over_the_limit(),
-            }
-            if bridge.inner.is_closed() {
-                return;
-            }
+        let closed = bridge.dispatch_lines(&mut lines);
+        bridge.inner.read_handled();
+        if closed {
+            return;
         }
     }
 }
 
 impl Bridge {
+    /// Dispatches each whole line `lines` holds, in order: whether the bridge
+    /// closed meanwhile, which leaves the lines after it unread.
+    fn dispatch_lines(&self, lines: &mut Lines) -> bool {
+        while let Some(line) = lines.next_line() {
+            match line {
+                Line::Complete(bytes) => self.dispatch_bytes(&bytes),
+                Line::Overflow => self.report_over_the_limit(),
+            }
+            if self.inner.is_closed() {
+                return true;
+            }
+        }
+        false
+    }
+
     fn report_over_the_limit(&self) {
         self.inner
             .report(BridgeError::MalformedFrame(OVER_THE_LIMIT.to_owned()));

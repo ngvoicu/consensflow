@@ -26,6 +26,30 @@ export function tempEnv() {
   }
 }
 
+/**
+ * How a test starts a daemon: Node's by default, `node <nodeArgs>`; with
+ * `CONSENSFLOW_TEST_DAEMON` set to a JSON array, a command and its arguments,
+ * the native one (`cf ui --json --no-open` of the build under test), with the
+ * switch it runs behind (`CONSENSFLOW_DAEMON=native`) in its environment. Either
+ * is told the runtime to name to the windows it opens (`CONSENSFLOW_NODE`): the
+ * Node daemon names its own whatever this says, the native one names what it is
+ * given. `env` is what to add to the environment the test gives the daemon.
+ */
+export function daemonCommand(nodeArgs) {
+  const named = process.env.CONSENSFLOW_TEST_DAEMON
+  const env = { CONSENSFLOW_NODE: process.execPath }
+  if (named === undefined || named === '') {
+    return { command: process.execPath, args: nodeArgs, env, native: false }
+  }
+  const [command, ...args] = JSON.parse(named)
+  if (typeof command !== 'string' || args.some((arg) => typeof arg !== 'string')) {
+    throw new Error(
+      'CONSENSFLOW_TEST_DAEMON is a JSON array of strings: a command and its arguments',
+    )
+  }
+  return { command, args, env: { ...env, CONSENSFLOW_DAEMON: 'native' }, native: true }
+}
+
 /** Native config resolution is a subprocess boundary, covered in role-skills.test. */
 export const testRoleConfiguration = (kind, options) =>
   roleConfiguration(kind, {

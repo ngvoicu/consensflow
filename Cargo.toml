@@ -24,6 +24,7 @@ cf-engine = { path = "crates/cf-engine" }
 cf-harness = { path = "crates/cf-harness" }
 cf-process = { path = "crates/cf-process" }
 cf-codex-session = { path = "crates/cf-codex-session" }
+cf-daemon = { path = "crates/cf-daemon" }
 cf-ledger = { path = "crates/cf-ledger" }
 base64 = "0.22"
 bytes = "1"

@@ -3,10 +3,12 @@
  * two pages the screens serve, with `$TOKEN` where the UI token goes and
  * `$VERSION` where the version does; the names of the page operations in the
  * order the page offers them; the handle line the daemon prints for the app,
- * and the lines it writes to its log when it starts and stops. The traces
- * name the pages by file (`response.page`), so a player compares what it
- * serves with these, filled in. The tests hold the checked-in files to what
- * this makes: `npm run goldens:daemon` after a change.
+ * and the lines it writes to its log when it starts and stops; and the
+ * formats of the lines of its log and its trace, each case once, with their
+ * rotation (`formats.mjs`: `files.json`). The traces name the pages by file
+ * (`response.page`), so a player compares what it serves with these, filled
+ * in. The tests hold the checked-in files to what this makes: `npm run
+ * goldens:daemon` after a change.
  */
 import { spawn } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -15,6 +17,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { agentsUi } from '../../../src/core/agents-server.js'
 import { pageOperations } from '../../../src/core/page.js'
+import { formats } from './formats.mjs'
 
 const VERSION = JSON.parse(
   readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'),
@@ -148,5 +151,6 @@ export async function dataFiles() {
     'pages/harnesses.html': pages.harnesses,
     'operations.json': `${JSON.stringify(operations(), null, 2)}\n`,
     'daemon.json': `${JSON.stringify(await daemon(), null, 2)}\n`,
+    'files.json': formats(),
   }
 }

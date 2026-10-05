@@ -21,7 +21,7 @@ use serde_json::json;
 use tokio::sync::oneshot;
 use tokio::task::LocalSet;
 
-use crate::local::{Bridge, BridgeBuilder};
+use crate::local::{Bridge, BridgeBuilder, Ended};
 use crate::{Bridge as HostBridge, BridgeBuilder as HostBuilder, BridgeError};
 
 #[cfg(unix)]
@@ -379,5 +379,46 @@ fn a_frame_over_the_daemons_limit_is_answered_too_large_across_the_pipe() {
             "the bridge carries on"
         );
         host.close_input();
+    });
+}
+
+#[test]
+fn the_hosts_end_of_input_is_told_to_the_daemon_as_its_input_ended_over_real_pipes() {
+    run_real(async {
+        let (host, daemon) = over_pipes(host_builder(), daemon_builder());
+        let heard = tokio::task::spawn_local(daemon.ended());
+        // Nothing has ended while the host still holds its end.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!heard.is_finished());
+        host.close_input();
+        assert_eq!(within_real(heard).await.expect("the task"), Ended::Input);
+        assert!(daemon.closed());
+        // Told to whoever asks after it, too: the daemon stops on it once.
+        assert_eq!(within_real(daemon.ended()).await, Ended::Input);
+    });
+}
+
+#[test]
+fn an_output_nobody_reads_any_more_is_told_as_a_failure_while_the_input_stays_open() {
+    run_real(async {
+        let (daemon_input, host_output) = pipe().expect("the host's output pipe");
+        let (host_input, daemon_output) = pipe().expect("the daemon's output pipe");
+        let (daemon, connection) =
+            daemon_builder().connect(stream(daemon_input), stream(daemon_output));
+        tokio::task::spawn_local(connection);
+        // The app's end of the daemon's stdout is gone; its stdin stays open.
+        drop(host_input);
+        assert!(daemon.event("late", json!({})), "queued, and written later");
+        let ended = within_real(daemon.ended()).await;
+        let Ended::Failed(BridgeError::Io(words)) = ended else {
+            panic!("not a failed transport: {ended:?}");
+        };
+        assert!(!words.is_empty());
+        assert!(daemon.closed());
+        assert!(
+            !daemon.event("later", json!({})),
+            "nothing more is queued once it failed"
+        );
+        drop(host_output);
     });
 }

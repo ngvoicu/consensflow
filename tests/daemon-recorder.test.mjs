@@ -588,12 +588,13 @@ describe('the runner', () => {
         'core-trace-001.json.gz',
         'core-trace-002.json.gz',
         'daemon.json',
+        'files.json',
         'operations.json',
         'pages',
       ])
       const same = run('--check')
       assert.equal(same.status, 0, same.stdout)
-      assert.match(same.stdout, /6 files recorded, 0 differ/)
+      assert.match(same.stdout, /7 files recorded, 0 differ/)
       writeFileSync(join(out, 'operations.json'), '{}')
       const differs = run('--check')
       assert.equal(differs.status, 1)
