@@ -1,15 +1,15 @@
 //! A record replayed (`replay`, `hosts/lib/completion/claude-code.js`): what
-//! it says of the turn, by its type.
+//! it says of the turn, by its type. A record is replayed as the projection
+//! made of it (`project`): what is read of it, and no more.
 
-use std::borrow::Cow;
 use std::sync::Arc;
 
 use cf_base::{js, time};
 use serde_json::Value;
 
 use super::patterns::CLEAR;
-use super::text::{claude_text, claude_tool_text, is_interrupt};
-use super::{field, kind, Candidate, Terminal, Transcript};
+use super::project::{Assistant, Block, Hook, Projected, ToolResult, User};
+use super::{Candidate, Terminal, Transcript};
 use crate::shared::quota::exhausted_quota;
 use crate::shared::record::reading::{native_id, Role};
 
@@ -18,84 +18,46 @@ impl Transcript {
     /// tree when it has one.
     pub(super) fn replay(
         &mut self,
-        record: &Value,
+        record: &Projected,
         place: Option<usize>,
         seq: usize,
     ) -> Result<(), String> {
-        let number = Value::from(seq);
-        // `record.timestamp ?? seq`.
-        let at = match record.get("timestamp") {
-            None | Some(Value::Null) => &number,
-            Some(at) => at,
-        };
-        match kind(record) {
-            Some("attachment") => self.hook_context(record, at, seq),
-            Some("queue-operation") => self.queue_operation(record),
-            Some("assistant") => self.assistant(record, at, seq),
-            Some("user") => self.user(record, place, at, seq),
-            Some("system") => {
-                self.system(record);
-                Ok(())
+        match record {
+            Projected::Other => {}
+            Projected::Hook(hook) => self.hook_context(hook, seq)?,
+            Projected::Enqueue(content) => self.queues.enqueue(content.clone()?),
+            Projected::Dequeue => self.queues.dequeue(),
+            Projected::PopAll(content) => self.queues.pop_all(content.clone()?),
+            Projected::Remove(content) => {
+                self.queues.remove(content.as_ref().map_err(Clone::clone)?);
             }
-            _ => Ok(()),
-        }
-    }
-
-    /// An attachment: what a `UserPromptSubmit` hook added to the prompt, a
-    /// context of the conversation that is its own, not the assistant's.
-    fn hook_context(&mut self, record: &Value, at: &Value, seq: usize) -> Result<(), String> {
-        let attachment = record.get("attachment");
-        let of = |name: &str| field(attachment, name);
-        let says = |name: &str, wanted: &str| of(name).and_then(Value::as_str) == Some(wanted);
-        if !(self.is_of_main_conversation(record)
-            && says("type", "hook_additional_context")
-            && says("hookEvent", "UserPromptSubmit"))
-        {
-            return Ok(());
-        }
-        let Some(Value::Array(parts)) = of("content") else {
-            return Ok(());
-        };
-        let text = parts
-            .iter()
-            .filter_map(Value::as_str)
-            .collect::<Vec<_>>()
-            .join("\n");
-        if !text.is_empty() {
-            let id = id_of(record.get("uuid"), "claude hook context", seq)?;
-            self.items.push(id, Role::Custom, &text, at, seq);
+            Projected::Assistant(assistant) => self.assistant(assistant, seq)?,
+            Projected::User(user) => self.user(user, place, seq)?,
+            Projected::Clear(parent) => self.clear(parent),
+            Projected::Boundary(uuid) => self.boundary(uuid.as_ref()),
         }
         Ok(())
     }
 
-    /// Whether the record is of this session's main conversation, not of
-    /// another session or of a sidechain.
-    fn is_of_main_conversation(&self, record: &Value) -> bool {
-        record.get("sessionId").and_then(Value::as_str) == Some(&*self.session)
-            && record.get("isSidechain") == Some(&Value::Bool(false))
-    }
-
-    /// An operation on Claude Code's queue of messages.
-    fn queue_operation(&mut self, record: &Value) -> Result<(), String> {
-        match record.get("operation").and_then(Value::as_str) {
-            Some("enqueue") => self.queues.enqueue(queued_content(record)?),
-            Some("dequeue") => self.queues.dequeue(),
-            Some("popAll") => self.queues.pop_all(queued_content(record)?),
-            Some("remove") => self.queues.remove(&queued_content(record)?),
-            _ => {}
-        }
+    /// An attachment that holds what a `UserPromptSubmit` hook added to the
+    /// prompt: an item of its own, not the assistant's.
+    fn hook_context(&mut self, hook: &Hook, seq: usize) -> Result<(), String> {
+        let number = Value::from(seq);
+        // `record.timestamp ?? seq`.
+        let at = hook.at.as_ref().unwrap_or(&number);
+        let id = id_of(hook.uuid.as_ref(), "claude hook context", seq)?;
+        self.items.push(id, Role::Custom, &hook.text, at, seq);
         Ok(())
     }
 
     /// An assistant's record: a fragment of a message, the tool calls it
     /// makes and the results it holds; its refusal when the API refused; and
     /// its answer, if it ended the turn.
-    fn assistant(&mut self, record: &Value, at: &Value, seq: usize) -> Result<(), String> {
-        // `record.message ?? {}`: none and null hold no field.
-        let message = record.get("message").filter(|message| !message.is_null());
-        let in_message = |name: &str| field(message, name);
+    fn assistant(&mut self, record: &Assistant, seq: usize) -> Result<(), String> {
+        let number = Value::from(seq);
+        let at = record.at.as_ref().unwrap_or(&number);
         self.queues.answered();
-        let named = in_message("id").and_then(Value::as_str);
+        let named = record.message_id.as_deref();
         if self
             .active_assistant
             .as_deref()
@@ -111,53 +73,45 @@ impl Transcript {
         }
         self.turn_open = true;
         self.terminal = None;
-        let refused = record.get("isApiErrorMessage") == Some(&Value::Bool(true));
-        if !refused {
+        if !record.refused {
             self.failed = false;
         }
         // The latest assistant record has the last word on quota.
         self.quota = None;
-        let message_id = id_of(in_message("id"), "claude message", seq)?;
+        let message_id = id_of(record.message_id.as_ref(), "claude message", seq)?;
         self.active_assistant = Some(Arc::clone(&message_id));
         let item = self.items.assistant(Arc::clone(&message_id), at, seq);
-        let text = claude_text(in_message("content"));
         // The record's uuid is asked for even of a record that says nothing.
-        let uuid = id_of(record.get("uuid"), "claude record", seq)?;
-        self.items.fragment(item, Arc::clone(&uuid), &text);
+        let uuid = id_of(record.uuid.as_ref(), "claude record", seq)?;
+        self.items.fragment(item, Arc::clone(&uuid), &record.text);
 
-        for block in blocks(in_message("content")) {
-            if matches!(kind(block), Some("tool_use" | "server_tool_use")) {
-                let call = self.keys.of(block.get("id"));
-                if call.truthy() {
-                    self.open_tools.insert(call);
+        for block in &record.blocks {
+            match block {
+                Block::Use(id) => {
+                    let call = self.keys.of(id.as_ref());
+                    if call.truthy() {
+                        self.open_tools.insert(call);
+                    }
                 }
-            }
-            if matches!(kind(block), Some("advisor_tool_result" | "tool_result")) {
-                self.tool_result(block, at, seq)?;
+                Block::Result(result) => self.tool_result(result, at, seq)?,
             }
         }
 
-        if refused {
+        if record.refused {
             self.hooks.clear();
             self.candidate = None;
             self.turn_open = false;
             self.failed = true;
-            let status = record.get("apiErrorStatus").and_then(Value::as_f64);
-            if status == Some(429.0)
-                || record.get("error").and_then(Value::as_str) == Some("rate_limit")
-            {
-                let at_ms = date_parse(record.get("timestamp"))?;
-                let quota = exhausted_quota(&text, at_ms, &self.local)?;
+            if record.rate_limited {
+                let at_ms = date_parse(record.at.as_ref())?;
+                let quota = exhausted_quota(&record.text, at_ms, &self.local)?;
                 self.quota = Some(Arc::new(quota));
             }
             self.terminal = Some(Terminal::Native);
             return Ok(());
         }
 
-        if matches!(
-            in_message("stop_reason").and_then(Value::as_str),
-            Some("end_turn" | "stop_sequence")
-        ) {
+        if record.ended {
             self.hooks.insert(Arc::clone(&message_id));
             self.candidate = Some(Candidate {
                 item_id: message_id,
@@ -169,54 +123,49 @@ impl Transcript {
 
     /// A tool's result in a block: the call it answers is closed, and the
     /// result is an item. A block that names no call is passed over.
-    fn tool_result(&mut self, block: &Value, at: &Value, seq: usize) -> Result<(), String> {
-        let call = self.keys.of(block.get("tool_use_id"));
+    fn tool_result(&mut self, result: &ToolResult, at: &Value, seq: usize) -> Result<(), String> {
+        let call = self.keys.of(result.call.as_ref());
         if !call.truthy() {
             return Ok(());
         }
         self.open_tools.remove(&call);
-        let text = claude_tool_text(block.get("content"))?;
-        let id = id_of(block.get("tool_use_id"), "claude tool result", seq)?;
-        self.items.tool(id, &text, at, seq);
+        let text = result.text.as_ref().map_err(Clone::clone)?;
+        let id = native_id(
+            result.call.as_ref(),
+            "claude tool result",
+            &Value::from(seq),
+        )?;
+        self.items.tool(id, text, at, seq);
         Ok(())
     }
 
     /// A user's record: the results of tools it holds, the interrupt that
     /// ends a turn, or a real prompt, which begins one, unless it is the
     /// late ancestor of an answer that already ended its turn.
-    fn user(
-        &mut self,
-        record: &Value,
-        place: Option<usize>,
-        at: &Value,
-        seq: usize,
-    ) -> Result<(), String> {
-        let content = field(record.get("message"), "content");
-        for block in blocks(content) {
-            if kind(block) == Some("tool_result") {
-                self.tool_result(block, at, seq)?;
-            }
+    fn user(&mut self, record: &User, place: Option<usize>, seq: usize) -> Result<(), String> {
+        let number = Value::from(seq);
+        let at = record.at.as_ref().unwrap_or(&number);
+        for result in &record.results {
+            self.tool_result(result, at, seq)?;
         }
-        let text = claude_text(content);
-        if is_interrupt(record) {
-            let id = id_of(record.get("uuid"), "claude user", seq)?;
-            self.items.push(id, Role::User, &text, at, seq);
+        if record.interrupt {
+            let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
+            self.items.push(id, Role::User, &record.text, at, seq);
             self.turn_open = false;
             self.hooks.clear();
             self.terminal = Some(Terminal::Native);
             self.candidate = None;
             return Ok(());
         }
-        if js::trim(&text).is_empty() {
+        if js::trim(&record.text).is_empty() {
             return Ok(());
         }
-        let id = id_of(record.get("uuid"), "claude user", seq)?;
-        self.items.push(id, Role::User, &text, at, seq);
+        let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
+        self.items.push(id, Role::User, &record.text, at, seq);
         if self.late_ancestor(place) {
             return Ok(());
         }
-        let queued = record.get("promptSource").and_then(Value::as_str) == Some("queued");
-        self.queues.consumed(&text, queued);
+        self.queues.consumed(&record.text, record.queued);
         self.open_tools.clear();
         self.hooks.clear();
         self.active_assistant = None;
@@ -242,107 +191,48 @@ impl Transcript {
             .is_late(user, uuid.as_deref(), &candidate.uuid)
     }
 
-    /// A system record: a `/clear`, or the boundary record that says a turn
-    /// that answered is over.
-    fn system(&mut self, record: &Value) {
-        let subtype = record.get("subtype").and_then(Value::as_str);
-        if subtype == Some("local_command") && self.is_clear(record) {
+    /// The output of a `/clear` that is the user's turn last pushed, with
+    /// nothing open: a native end of the turn. `parent` is the uuid of the
+    /// record the output is a child of.
+    fn clear(&mut self, parent: &str) {
+        let Some(command) = self.items.last() else {
+            return;
+        };
+        let of_the_command = command.role == Role::User
+            && parent == &*command.id
+            && CLEAR.is_match(&command.text)
+            && self.open_tools.is_empty()
+            && self.hooks.is_empty();
+        if of_the_command {
             self.turn_open = false;
             self.candidate = None;
             self.terminal = Some(Terminal::Native);
-            return;
         }
-        // 2.1.263/265/266's root query finalizer emits a `turn_duration` only
-        // after query completion, after stop hooks, and when not aborted. The
-        // transcript omits optional background counts; candidate/tool/queue/
-        // hook guards establish readiness. The exact installed call sites and
-        // native fixture are documented beside
-        // tests/engine/fixtures/completion/claude-code/v263-tool-loop.jsonl.
-        let duration = subtype == Some("turn_duration") && is_root_duration(record);
-        if !(duration || subtype == Some("stop_hook_summary")) {
-            return;
-        }
+    }
+
+    /// The boundary record that says a turn that answered is over, by its
+    /// uuid when that is text.
+    fn boundary(&mut self, uuid: Option<&Arc<str>>) {
         let Some(candidate) = &self.candidate else {
             return;
         };
-        if !duration && record.get("preventedContinuation") != Some(&Value::Bool(false)) {
-            return;
-        }
         let item_id = Arc::clone(&candidate.item_id);
         self.hooks.remove(&item_id);
         self.items.complete(&item_id);
         self.turn_open = false;
-        let uuid = record
-            .get("uuid")
-            .and_then(Value::as_str)
-            .filter(|uuid| !uuid.is_empty())
-            .map(Arc::from);
-        self.terminal = Some(Terminal::Derived { item_id, uuid });
-    }
-
-    /// Whether a `local_command` record is the output of a `/clear` that is
-    /// the user's turn last pushed, with nothing open: a native end of the
-    /// turn.
-    fn is_clear(&self, record: &Value) -> bool {
-        let Some(command) = self.items.last() else {
-            return false;
-        };
-        self.is_of_main_conversation(record)
-            && record.get("isMeta") == Some(&Value::Bool(false))
-            && record.get("level").and_then(Value::as_str) == Some("info")
-            && record.get("content").and_then(Value::as_str)
-                == Some("<local-command-stdout></local-command-stdout>")
-            && command.role == Role::User
-            && record.get("parentUuid").and_then(Value::as_str) == Some(&*command.id)
-            && CLEAR.is_match(&command.text)
-            && self.open_tools.is_empty()
-            && self.hooks.is_empty()
-    }
-}
-
-/// Whether a `turn_duration` is the root conversation's: in the main
-/// conversation, with a duration and a message count that are numbers, and
-/// no background agent or workflow pending.
-fn is_root_duration(record: &Value) -> bool {
-    // `Number.isFinite`, `>= 0`: a number alone, a JSON one always finite here.
-    let duration = record.get("durationMs").and_then(Value::as_f64);
-    let count = record.get("messageCount").and_then(Value::as_f64);
-    // `Number.isSafeInteger`, `>= 0`.
-    let counted = count.is_some_and(|count| {
-        count >= 0.0 && count.fract() == 0.0 && count <= 9_007_199_254_740_991.0
-    });
-    let nothing_pending = ["pendingBackgroundAgentCount", "pendingWorkflowCount"]
-        .into_iter()
-        .all(|name| match record.get(name) {
-            None => true,
-            Some(Value::Number(pending)) => pending.as_f64() == Some(0.0),
-            Some(_) => false,
+        self.terminal = Some(Terminal::Derived {
+            item_id,
+            uuid: uuid.cloned(),
         });
-    record.get("isSidechain") == Some(&Value::Bool(false))
-        && duration.is_some_and(|duration| duration >= 0.0)
-        && counted
-        && nothing_pending
-}
-
-/// The blocks of a message's content: none for content that is no list.
-fn blocks(content: Option<&Value>) -> &[Value] {
-    match content {
-        Some(Value::Array(blocks)) => blocks,
-        _ => &[],
     }
 }
 
-/// `nativeId` of a record's field.
-fn id_of(value: Option<&Value>, what: &str, seq: usize) -> Result<Arc<str>, String> {
-    native_id(value, what, &Value::from(seq))
-}
-
-/// `String(record.content ?? '')`, or the failure V8 threw: the content a
-/// queue operation names.
-fn queued_content(record: &Value) -> Result<String, String> {
-    match record.get("content") {
-        None | Some(Value::Null) => Ok(String::new()),
-        content => js::string(content).map(Cow::into_owned),
+/// `nativeId` of an id the projection held as text: the failure of a record
+/// that gave none.
+fn id_of(id: Option<&Arc<str>>, what: &str, seq: usize) -> Result<Arc<str>, String> {
+    match id {
+        Some(id) => Ok(Arc::clone(id)),
+        None => native_id(None, what, &Value::from(seq)),
     }
 }
 

@@ -9,15 +9,24 @@
 //! (`boundaries`), the tool calls and how the items are ordered (`items`),
 //! the messages queued (`queues`), the API's refusals (`refusals`), the
 //! output of a `/clear` (`clear`), an interrupt (`interrupts`), and the
-//! records read late (`ancestry`).
+//! records read late (`ancestry`). What a record waits as, and the line it is
+//! built from, are held to what replay reads of a record: what nothing reads
+//! changes nothing (`projection`), and each field replay reads changes the
+//! reading (`fields`). A long transcript, made like a big one (`synthetic`),
+//! is read (`scale`) and measured (`memory`).
 
 mod ancestry;
 mod boundaries;
 mod clear;
+mod fields;
 mod interrupts;
 mod items;
+mod memory;
+mod projection;
 mod queues;
 mod refusals;
+mod scale;
+mod synthetic;
 mod texts;
 
 use std::fs;

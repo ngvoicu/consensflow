@@ -10,6 +10,7 @@
 // The goldens' own reading: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod lines;
 mod play;
 mod scenario;
 mod tables;
