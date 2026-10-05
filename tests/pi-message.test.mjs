@@ -198,7 +198,9 @@ for (const [implementation, choose, skip] of [
       try {
         const text = 'worker followup while drafting'
         const pending = send(s.targetFor(), text)
-        const sendDeadline = Date.now() + 2_000
+        // An upper bound only: a send through Rust starts a process first,
+        // which a loaded machine took more than two seconds to.
+        const sendDeadline = Date.now() + 5000
         while (s.pi.sent.length === 0 && Date.now() < sendDeadline) {
           await new Promise((resolve) => setTimeout(resolve, 5))
         }
