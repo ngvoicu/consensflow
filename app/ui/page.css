@@ -1,4 +1,7 @@
 :root {
+  /* The projects' panel, open: the windows' share of the width is taken of
+     the room beside it, folded or not, so folding it moves no window. */
+  --projects-width: 224px;
   --ink: #08181d;
   --deep: #0c2026;
   --panel: #112a31;
@@ -38,7 +41,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .shell {
   height: 100dvh;
   display: grid;
-  grid-template-columns: 224px minmax(0, 1fr);
+  grid-template-columns: var(--projects-width) minmax(0, 1fr);
   grid-template-rows: 52px auto minmax(0, 1fr);
   grid-template-areas: "bar bar" "down down" "side main";
 }
@@ -185,13 +188,20 @@ button:disabled { opacity: .45; cursor: default; }
 .projects-empty, .staff-empty { color: var(--muted); padding: 6px 9px; }
 
 /* The board on the left, the windows on the right, the divider between
-   them: drag it to share the width, or fold the board away to the left. */
+   them: drag it to share the width, or fold the board away to the left.
+   The windows' share (a third, unless the divider moved) is of the room
+   beside the projects' open panel, folded or not: folding the projects
+   gives the board the room and resizes no terminal; a wider window widens
+   both, as before. */
 .main {
   grid-area: main;
   position: relative;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(280px, var(--board-width, 2fr)) 18px minmax(300px, 1fr);
+  grid-template-columns: minmax(280px, 1fr) 18px minmax(
+      300px,
+      calc((100vw - var(--projects-width) - 18px) * var(--dock-share, 0.33333))
+    );
   grid-template-rows: minmax(0, 1fr);
 }
 /* Each in its own column, so a folded neighbour leaves the others where they are. */

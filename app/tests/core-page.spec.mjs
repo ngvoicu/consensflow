@@ -3284,6 +3284,37 @@ test('folds the projects sidebar and the terminal dock away, and remembers it in
   await expect(page.getByRole('region', { name: 'Terminals' })).toBeVisible()
 })
 
+test('resizes no terminal when the projects fold away and come back: the board takes the room', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await open(page, { ...model(), realTerminals: true })
+  const resizes = () =>
+    page.evaluate(
+      () =>
+        window.__calls.filter(
+          ([command, args]) => command === 'pane_resize' && args.id === 'p1-chief',
+        ).length,
+    )
+  // The first size goes at once; it is the only one.
+  await expect.poll(resizes).toBe(1)
+  const widths = () =>
+    page.evaluate(() => [
+      document.querySelector('#board').getBoundingClientRect().width,
+      document.querySelector('.dock').getBoundingClientRect().width,
+    ])
+  const [board, dock] = await widths()
+  await page.getByRole('button', { name: 'Hide projects' }).click()
+  await expect.poll(async () => (await widths())[0]).toBeGreaterThan(board + 100)
+  expect((await widths())[1]).toBe(dock)
+  await page.getByRole('button', { name: 'Show projects' }).click()
+  await expect.poll(async () => (await widths())[0]).toBe(board)
+  expect((await widths())[1]).toBe(dock)
+  // Past the time a size settles in: still the first size alone.
+  await page.waitForTimeout(600)
+  expect(await resizes()).toBe(1)
+})
+
 test('folds the panels for this page when the browser keeps no storage', async ({ page }) => {
   // A browser that refuses storage (its data blocked, say) throws at every touch.
   await page.addInitScript(() => {
