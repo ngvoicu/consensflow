@@ -38,6 +38,7 @@
     "goldens:records": "node tests/goldens/records/record.mjs",
     "goldens:errno": "node tests/goldens/errno/record.mjs",
     "goldens:unwritable": "node tests/goldens/unwritable/record.mjs",
+    "goldens:daemon": "node tests/goldens/daemon/record.mjs",
     "parity:ledger": "npm run goldens:ledger && cargo test -p cf-ledger --test replay",
     "parity:records": "node tests/parity/records.mjs",
     "parity:launch": "node tests/parity/launch.mjs",
