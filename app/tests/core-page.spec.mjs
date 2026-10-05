@@ -537,7 +537,7 @@ test("gives a session's lane the human's hand on its window: show (opening a clo
     .poll(() => calls(page, 'session.end'))
     .toEqual([{ project: 1, handle: 'zeus-brisk-birch' }])
   await expect(page.locator('#status')).toHaveText(
-    "@zeus-brisk-birch is gone; its tasks stay on @zeus's lane.",
+    "@zeus-brisk-birch is off the board, its conversation kept: a follow-up brings it back. Its tasks stay on @zeus's lane.",
   )
   await expect(page.getByRole('button', { name: "Delete @zeus's session" })).toHaveCount(0)
 })
@@ -3805,12 +3805,40 @@ test("shows a session's terminal in front, the dock unfolded, and hides it again
   await expect(
     row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }),
   ).toBeVisible()
-  // None of it asks the daemon anything: the window works on, the same one throughout.
+  // Showing a window that is open asks the daemon nothing; each Hide, from the
+  // row and from the card, tells it, and it closes the window once it is free.
+  // This one holds a task, so the board still has the same window throughout.
   expect(await calls(page, 'session.open')).toEqual([])
+  await expect
+    .poll(() => calls(page, 'session.hide'))
+    .toEqual([
+      { project: 1, handle: 'zeus-amber-pine' },
+      { project: 1, handle: 'zeus-amber-pine' },
+    ])
   expect(await disposed(page)).toBe(0)
 })
 
-test("offers Hide alone on a session's card: its window works on, hidden from the dock", async ({
+test('makes a window the human hid theirs again when they show it before it closes', async ({
+  page,
+}) => {
+  const data = atWork()
+  // Hidden while its agent was still at work on a turn: the daemon has it open yet.
+  const hid = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus-amber-pine')
+  Object.assign(hid, { tasks: [], activity: { state: 'working' }, hidden: true })
+  await open(page, data)
+  await unfold(page)
+  const row = page.locator('tr[data-handle="zeus-amber-pine"]')
+  await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect
+    .poll(() => calls(page, 'session.open'))
+    .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  await expect(
+    page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]'),
+  ).toHaveAttribute('data-focused', 'true')
+})
+
+test("offers Hide alone on a session's card, which tells the daemon: the window it holds at work stays", async ({
   page,
 }) => {
   await open(page, atWork())
@@ -3823,7 +3851,10 @@ test("offers Hide alone on a session's card: its window works on, hidden from th
   await expect(card.getByRole('button', { name: /^Close/ })).toHaveCount(0)
   await card.getByRole('button', { name: "Hide @zeus · amber-pine's terminal" }).click()
   await expect.poll(() => docked(page)).toEqual(['chief'])
-  // Hidden, its window is the same one, at work: what it prints is still taken.
+  await expect
+    .poll(() => calls(page, 'session.hide'))
+    .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
+  // Hidden, its window is the same one, at work on its task: what it prints is still taken.
   await page.evaluate(() =>
     window.__output.onmessage({ id: 'p1-zeus-amber-pine', generation: 9, seq: 1, bytes: [104] }),
   )

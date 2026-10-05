@@ -49,6 +49,12 @@ export { RESUME_WORDS } from './tasks.js'
  *   questions too, and it is refused as a recipient (`member-left`) until it
  *   rejoins. The coordinators whose windows already run are told when the
  *   staff changes; a window that has not started reads the staff at launch.
+ * - A session the human deletes leaves the board and keeps its conversation:
+ *   a follow-up for it (`--after`, a reopen) brings it back, while its member
+ *   is on the staff, and is refused only while it still holds work
+ *   (`session-busy`). A session that went with its member (still on the board
+ *   when the member left) does not come back, even if the member does: its
+ *   conversation ended with it.
  * - An image designer is an image agent (a Codex agent with the designer
  *   flag), and an image agent is nothing else: a member joins, and gains a
  *   role, only in roles its agent fits (`invalid-role`). A role it held from

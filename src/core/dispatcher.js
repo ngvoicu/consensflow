@@ -33,9 +33,13 @@ import { Windows } from './windows.js'
  * - One task per member session: a worker, advisor, reviewer or designer
  *   window opens with its task and closes once it holds no task (assigned,
  *   working or waiting); the session and its conversation stay until the
- *   human deletes it. A fresh window whose first message is not the brief (an
- *   answer, a follow-up) gets the brief in front of it. The chief keeps its
- *   window and conversation.
+ *   human deletes it, and a deleted session's conversation stays too: a
+ *   follow-up (`--after`, a reopen) brings the session back on it. A fresh
+ *   window whose first message is not the brief (an answer, a follow-up)
+ *   gets the brief in front of it. The chief keeps its window and conversation.
+ * - A window the human opened (Show) stays open until they hide it (Hide):
+ *   it then closes as any that holds no task, though not while its agent is
+ *   still at work on a turn, which the human may have begun in it.
  * - A task cancelled under its window stops it: an agent still at work on
  *   it is interrupted, as a paused task's is, and the window closes as any
  *   that holds no task, unless the human opened it.
@@ -43,15 +47,15 @@ import { Windows } from './windows.js'
  *   pauses the task, and the requester is told how to resume it. A chief
  *   window that closes by itself closes its project, as the human's Close
  *   does: every window of it goes. A participant that leaves (a member off
- *   the staff with its sessions, a session the human ends, every one of a
+ *   the staff with its sessions, a session the human deletes, every one of a
  *   deleted project) is forgotten at once, quota marks and all, so a member
- *   that comes back, under its own id again, starts clean; its window closes
- *   once its step in progress ends, and that exit fails nothing: a member's
- *   open tasks were cancelled when it left. Work on it that was waiting
- *   meanwhile (a step, a launch, a delivery, an Open, a Switch chief, a
- *   removal) does nothing more by its ids. The ledger never gives an id
- *   twice: those ids name rows gone with their project, which the work
- *   would fail on, or a member that may be back on the staff.
+ *   or a session that comes back, under its own id again, starts clean; its
+ *   window closes once its step in progress ends, and that exit fails
+ *   nothing: a member's open tasks were cancelled when it left. Work on it
+ *   that was waiting meanwhile (a step, a launch, a delivery, an Open, a
+ *   Switch chief, a removal) does nothing more by its ids. The ledger never
+ *   gives an id twice: those ids name rows gone with their project, which the
+ *   work would fail on, or a member or session that may be back.
  * - A task for a tier of member starts open: each pass gives it to a free
  *   member of that pool and tier that is not out of quota, on the harness
  *   whose members of the tier have taken the fewest tasks, then the one with
@@ -247,6 +251,11 @@ export class Dispatcher {
     )
   }
 
+  /** Whether the human hid this window and it has not closed yet: Show makes it theirs again. */
+  hidden(participantId) {
+    return this.#runtime.get(participantId)?.window.hidden ?? false
+  }
+
   /** The Switch chief waiting for this chief's turn to end, `{harness, agent}`, or null. */
   pendingSwitch(participantId) {
     const pending = this.#runtime.get(participantId)?.pendingSwitch ?? null
@@ -351,10 +360,10 @@ export class Dispatcher {
   }
 
   /**
-   * Participants that left (a session ended, a member removed, a project
+   * Participants that left (a session deleted, a member removed, a project
    * deleted) are forgotten at once, quota marks and all: nothing of them
-   * stays for a member that comes back under its own id. A window one still
-   * has closes once its step in progress is over.
+   * stays for a member or session that comes back under its own id. A window
+   * one still has closes once its step in progress is over.
    */
   async #forget(participantIds) {
     const leaving = []
@@ -382,13 +391,29 @@ export class Dispatcher {
   /**
    * The human opens a session's window with nothing to deliver: it comes back
    * on its own conversation, with its history, and stays open, whatever work
-   * comes and goes meanwhile, until its session or its project ends.
+   * comes and goes meanwhile, until the human hides it or its session or its
+   * project ends. One open already, and hidden since, is the human's again.
    */
   async openWindow(projectId, handle) {
     const { project, participant } = this.#sessionOf(projectId, handle)
     requireOpen(project)
-    this.#runtimeOf(participant.id).window.pinned = true
+    Object.assign(this.#runtimeOf(participant.id).window, { pinned: true, hidden: false })
     this.#openSoon(participant.id)
+    this.#changed()
+    return this.#ledger.project(projectId)
+  }
+
+  /**
+   * The human hides a session's terminal: its window is no longer theirs, so
+   * the next pass closes it as it closes any session's, once it holds no task
+   * and nothing is on its way in, and not while its agent is still at work on
+   * a turn, which the human may have begun. A window the human never opened
+   * (one that holds a task, say) is as it was: it closes with its task.
+   */
+  async hideWindow(projectId, handle) {
+    const { participant } = this.#sessionOf(projectId, handle)
+    const { window } = this.#runtimeOf(participant.id)
+    if (window.pinned) Object.assign(window, { pinned: false, hidden: true })
     this.#changed()
     return this.#ledger.project(projectId)
   }
@@ -449,7 +474,11 @@ export class Dispatcher {
     )
   }
 
-  /** The human ends a session for good: the ledger folds it, and it is forgotten with its window. */
+  /**
+   * The human deletes a session: the ledger takes it off the board and keeps
+   * its conversation, and it is forgotten with its window. A follow-up brings
+   * it back, on a new record and a new window.
+   */
   async endSession(projectId, handle) {
     const { participant } = this.#sessionOf(projectId, handle)
     const project = this.#ledger.endSession(projectId, handle, { by: 'human' })
@@ -942,6 +971,8 @@ export class Dispatcher {
           retiring: false,
           ownExit: false,
           pinned: false,
+          hidden: false,
+          settled: false,
           relaunch: null,
           drawn: false,
           named: false,
@@ -962,9 +993,9 @@ export class Dispatcher {
    * Whether a record was forgotten (`#forget`) since work took it: its
    * participant left, or its project was deleted. That work does nothing
    * more by the id. The ledger never gives an id twice, but a deleted
-   * project's rows are gone, and a member that left keeps its id when it
-   * comes back: work that went on would fail on the one, into the log, or
-   * act on the other.
+   * project's rows are gone, and a member or session that left keeps its id
+   * when it comes back: work that went on would fail on the one, into the
+   * log, or act on the other.
    */
   #forgotten(runtime) {
     return this.#runtime.get(runtime.id) !== runtime

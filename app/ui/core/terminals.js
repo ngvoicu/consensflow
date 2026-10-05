@@ -39,11 +39,12 @@ function about(lane, board, agent, now, onTryAgain) {
  * same, with no terminal. A session's terminal (a worker's, an advisor's, a
  * reviewer's or an image designer's task) stays out of the dock until the
  * human shows it from its lane, and leaves when they hide it, from its lane
- * or its card; only its lane closes its window. Only live windows: one that
- * ends leaves with its card, and its lane says it is closed and opens it
- * again on its conversation. While a window lives, in the dock or not, its
- * emulator takes all its output and keeps its scrollback, its size and the
- * human's half-typed input, across project switches too.
+ * or its card, which also lets its window go once nothing holds it open.
+ * Only live windows: one that ends leaves with its card, and its lane says
+ * it is closed and opens it again on its conversation. While a window
+ * lives, in the dock or not, its emulator takes all its output and keeps its
+ * scrollback, its size and the human's half-typed input, across project
+ * switches too.
  */
 export class TerminalsView {
   #stage
@@ -55,6 +56,8 @@ export class TerminalsView {
   #onSwitchChief
   /** The human trying the chief again before its quota resets, from its card. */
   #onTryAgain
+  /** The human hiding a session's terminal, from its card: the page takes the card out and tells the daemon. */
+  #onHideTerminal
   /** The chief's card while its window is down, made the first time it is: its head alone. */
   #windowless = null
   /** The card last brought into view: a redraw scrolls only when it changes. */
@@ -79,12 +82,14 @@ export class TerminalsView {
       onChange = () => {},
       onSwitchChief = () => {},
       onTryAgain = () => {},
+      onHideTerminal = () => {},
     },
   ) {
     this.#stage = stage
     this.#onChange = onChange
     this.#onSwitchChief = onSwitchChief
     this.#onTryAgain = onTryAgain
+    this.#onHideTerminal = onHideTerminal
     this.#registry = new EmulatorRegistry({
       ...(createEmulator ? { createEmulator } : {}),
       onData: (pane, data) => void this.#link.input(pane, this.#typed(pane, data)),
@@ -274,7 +279,11 @@ export class TerminalsView {
     this.#onChange()
   }
 
-  /** The human hides a session's terminal: its card leaves the dock, and its window works on. */
+  /**
+   * A session's terminal is hidden: its card leaves the dock. Telling the
+   * daemon, which closes the window once it is free, is the page's
+   * (`onHideTerminal`), for a card's Hide as for a lane's.
+   */
   hide(project, handle) {
     this.#showing.delete(showingKey(project, handle))
     this.#onChange()
@@ -356,9 +365,10 @@ export class TerminalsView {
   /**
    * A card's head: whose window it is, its lamp, and what is done with it
    * there. The chief's says what the chief is doing and runs on, and switches
-   * it. Only a session's terminal hides, as on its board row, and its window
-   * works on; closing the window is its row's alone. Only an open project's
-   * cards are drawn: nothing on a closed one acts.
+   * it. Only a session's terminal hides, as on its board row, and the daemon
+   * closes its window once nothing holds it open; deleting the session is its
+   * row's alone. Only an open project's cards are drawn: nothing on a closed
+   * one acts.
    */
   #head(entry, lane, board, agent) {
     const { participant } = lane
@@ -385,7 +395,7 @@ export class TerminalsView {
                   iconButton(
                     ICONS.hide,
                     'Hide terminal',
-                    () => this.hide(board.project.id, participant.handle),
+                    () => this.#onHideTerminal(entry.participant),
                     `Hide ${name}'s terminal`,
                   ),
                 ]),

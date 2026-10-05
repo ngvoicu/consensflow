@@ -69,6 +69,10 @@ async function withPage(fn) {
       dispatcher.windows.push(['open', handle])
       return ledger.project(project)
     },
+    async hideWindow(project, handle) {
+      dispatcher.windows.push(['hide', handle])
+      return ledger.project(project)
+    },
     async endSession(project, handle) {
       dispatcher.windows.push(['end', handle])
       return ledger.endSession(project, handle, { by: 'human' })
@@ -92,6 +96,7 @@ async function withPage(fn) {
     pane: () => null,
     pendingSwitch: () => null,
     holding: () => false,
+    hidden: () => false,
     // The harnesses a test says the daemon has no adapter for.
     adapterless: new Set(),
     requireAdapter(harness) {
@@ -638,7 +643,7 @@ describe('the page protocol of the daemon', () => {
     })
   })
 
-  it("opens and ends a session's window at the human's hand", async () => {
+  it("opens, hides and ends a session's window at the human's hand", async () => {
     await withPage(async ({ ledger, operations, dispatcher }) => {
       const { project } = await operations['project.open']({
         directory: '/work/app',
@@ -655,6 +660,15 @@ describe('the page protocol of the daemon', () => {
       const { message } = ledger.assignTask(project.id, 1, artemis.id)
       const session = message.recipient
       await operations['session.open']({ project: project.id, handle: session })
+      const { project: hidden } = await operations['session.hide']({
+        project: project.id,
+        handle: session,
+      })
+      assert.equal(
+        hidden.participants.some((p) => p.handle === session),
+        true,
+        'hiding a terminal leaves the session on the board',
+      )
       await assert.rejects(
         operations['session.end']({ project: project.id, handle: session }),
         /still holds work/,
@@ -670,6 +684,7 @@ describe('the page protocol of the daemon', () => {
       )
       assert.deepEqual(dispatcher.windows, [
         ['open', session],
+        ['hide', session],
         ['end', session],
         ['end', session],
       ])

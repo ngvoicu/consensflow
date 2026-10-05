@@ -596,19 +596,187 @@ describe("sessions: a member's named windows", () => {
       ledger.endSession(project.id, 'zeus-amber-pine', { by: 'human' })
       assert.equal(sessionOf(ledger, project.id, 'zeus-amber-pine'), undefined)
       assert.throws(
-        () => ledger.createTask(project.id, { from: 'chief', after: 1, body: 'More' }),
-        (error) =>
-          error.code === 'session-ended' && /open the task for its tier/.test(error.message),
-      )
-      assert.throws(
         () => ledger.createTask(project.id, { from: 'zeus-amber-pine', after: 1, body: 'x' }),
         { code: 'member-left' },
-        'an ended session is nobody',
+        'a session off the board is nobody',
       )
     })
   })
 
-  it("folds an ended session's tasks into its member's lane, and keeps its cards", async () => {
+  /** T-1 done by a session of zeus whose window had a conversation, as the dispatcher opens one. */
+  function withConversation(ledger) {
+    const { project, id } = opened(ledger)
+    deliver(ledger, ledger.assignTask(project.id, 1, id('zeus')).message)
+    const session = sessionOf(ledger, project.id, 'zeus-amber-pine').id
+    const { id: conversation } = ledger.startConversation(session, { harness: 'claude-code' })
+    ledger.bindConversation(conversation, 'native-zeus-1')
+    ledger.recordResult(project.id, 1, { body: 'Parser done' })
+    return { project, id, session }
+  }
+
+  it("takes a deleted session off the board and keeps its conversation, its cards on its member's lane", async () => {
+    await withLedger((ledger) => {
+      const { project, session } = withConversation(ledger)
+      ledger.acceptTask(project.id, 1, { by: 'chief' })
+      ledger.endSession(project.id, 'zeus-amber-pine', { by: 'human' })
+      assert.equal(sessionOf(ledger, project.id, 'zeus-amber-pine'), undefined, 'its lane is gone')
+      const kept = ledger.currentConversation(session)
+      assert.deepEqual(
+        [kept.nativeSession, kept.endedAt],
+        ['native-zeus-1', null],
+        'the conversation is not ended: the harness can resume it',
+      )
+      const lane = ledger.board(project.id).lanes.find((l) => l.participant.handle === 'zeus')
+      assert.deepEqual(
+        lane.tasks.map((t) => [t.number, t.session]),
+        [[1, 'zeus-amber-pine']],
+        "its work folds into the member's lane",
+      )
+    })
+  })
+
+  it('brings a deleted session back on the board with --after, on the conversation it kept', async () => {
+    await withLedger((ledger) => {
+      const { project, session } = withConversation(ledger)
+      ledger.acceptTask(project.id, 1, { by: 'chief' })
+      ledger.endSession(project.id, 'zeus-amber-pine', { by: 'human' })
+      const { task, message } = ledger.createTask(project.id, {
+        from: 'chief',
+        after: 1,
+        body: 'Now the lexer, in the same style',
+      })
+      assert.deepEqual(
+        [task.number, task.assignee, task.state, message.recipient],
+        [2, 'zeus-amber-pine', 'queued', 'zeus-amber-pine'],
+      )
+      const back = sessionOf(ledger, project.id, 'zeus-amber-pine')
+      assert.deepEqual([back.id, back.leftAt, back.member], [session, null, 'zeus'])
+      assert.equal(
+        ledger.nextDelivery(session).id,
+        message.id,
+        'its window opens with the follow-up',
+      )
+      assert.equal(ledger.currentConversation(session).nativeSession, 'native-zeus-1')
+      const lanes = ledger.board(project.id).lanes
+      assert.deepEqual(
+        lanes.map((l) => [l.participant.handle, l.tasks.map((t) => t.number)]),
+        [
+          ['human', []],
+          ['chief', []],
+          ['zeus', []],
+          ['diana', []],
+          ['zeus-amber-pine', [1, 2]],
+        ],
+        'its cards are on its own lane again',
+      )
+      assert.deepEqual(
+        ledger
+          .events(project.id)
+          .filter((e) => e.kind.startsWith('session.'))
+          .map((e) => e.kind),
+        ['session.started', 'session.ended', 'session.returned'],
+      )
+    })
+  })
+
+  it('brings a deleted session back on a reopen of its task', async () => {
+    await withLedger((ledger) => {
+      const { project, session } = withConversation(ledger)
+      ledger.endSession(project.id, 'zeus-amber-pine', { by: 'human' })
+      const { task, message } = ledger.reopenTask(project.id, 1, {
+        by: 'chief',
+        body: 'Handle comments too',
+      })
+      assert.deepEqual([task.assignee, task.state], ['zeus-amber-pine', 'queued'])
+      assert.equal(sessionOf(ledger, project.id, 'zeus-amber-pine').leftAt, null)
+      assert.equal(ledger.nextDelivery(session).id, message.id)
+      assert.equal(ledger.currentConversation(session).nativeSession, 'native-zeus-1')
+    })
+  })
+
+  it('refuses a follow-up for a deleted session that still has paused work, and leaves it off the board', async () => {
+    await withLedger((ledger) => {
+      const { project } = withConversation(ledger)
+      // Paused work does not keep a session from being deleted, but it is work on its hands.
+      ledger.reopenTask(project.id, 1, { by: 'chief', body: 'And the tests' })
+      ledger.pauseTask(project.id, 1, { by: 'chief' })
+      ledger.endSession(project.id, 'zeus-amber-pine', { by: 'human' })
+      assert.throws(
+        () => ledger.createTask(project.id, { from: 'chief', after: 1, body: 'More' }),
+        { code: 'session-busy' },
+      )
+      assert.equal(
+        sessionOf(ledger, project.id, 'zeus-amber-pine'),
+        undefined,
+        'it is still off the board',
+      )
+      assert.equal(ledger.task(project.id, 2), null, 'and no task was made')
+    })
+  })
+
+  it('brings back a deleted session whose window never opened as the session it was, with no conversation yet', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = opened(ledger)
+      deliver(ledger, ledger.assignTask(project.id, 1, id('zeus')).message)
+      ledger.recordResult(project.id, 1, { body: 'Parser done' })
+      const session = sessionOf(ledger, project.id, 'zeus-amber-pine').id
+      ledger.endSession(project.id, 'zeus-amber-pine', { by: 'human' })
+      const { task } = ledger.createTask(project.id, { from: 'chief', after: 1, body: 'More' })
+      assert.deepEqual([task.assignee, task.state], ['zeus-amber-pine', 'queued'])
+      assert.equal(sessionOf(ledger, project.id, 'zeus-amber-pine').id, session)
+      assert.equal(ledger.currentConversation(session), null, 'its window opens a conversation')
+    })
+  })
+
+  it('does not bring back a session while its member is off the staff, nor, once it rejoins, one that went with it', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = withConversation(ledger)
+      // A second session of zeus, deleted while its member is still on the staff.
+      ledger.createTask(project.id, {
+        from: 'chief',
+        pool: 'worker',
+        tier: 'standard',
+        body: 'Docs',
+      })
+      const { task, message } = ledger.assignTask(project.id, 2, id('zeus'))
+      deliver(ledger, message)
+      const deleted = sessionOf(ledger, project.id, task.assignee).id
+      const { id: conversation } = ledger.startConversation(deleted, { harness: 'claude-code' })
+      ledger.bindConversation(conversation, 'native-zeus-2')
+      ledger.recordResult(project.id, 2, { body: 'Docs done' })
+      ledger.endSession(project.id, task.assignee, { by: 'human' })
+      ledger.removeMember(project.id, 'zeus')
+      for (const number of [1, 2]) {
+        assert.throws(
+          () => ledger.createTask(project.id, { from: 'chief', after: number, body: 'More' }),
+          { code: 'session-ended' },
+          `T-${number}: its member left the staff`,
+        )
+        assert.throws(
+          () => ledger.reopenTask(project.id, number, { by: 'chief', body: 'Again' }),
+          { code: 'session-ended' },
+          `T-${number}: its member left the staff`,
+        )
+      }
+      // The member rejoins; the session that went with it does not, its conversation having ended.
+      ledger.addMember(project.id, {
+        agent: 'zeus',
+        harness: 'claude-code',
+        role: 'worker',
+        tier: 'standard',
+      })
+      assert.throws(
+        () => ledger.createTask(project.id, { from: 'chief', after: 1, body: 'More' }),
+        { code: 'session-ended' },
+        'it does not come back with its member',
+      )
+      // The one the human deleted before kept its conversation, and its member is back.
+      const again = ledger.createTask(project.id, { from: 'chief', after: 2, body: 'More' })
+      assert.equal(again.task.assignee, task.assignee)
+    })
+  })
+
+  it("folds a deleted session's tasks into its member's lane, and keeps its cards", async () => {
     await withLedger((ledger) => {
       const { project, id } = opened(ledger)
       deliver(ledger, ledger.assignTask(project.id, 1, id('zeus')).message)
@@ -672,7 +840,7 @@ describe("sessions: a member's named windows", () => {
     })
   })
 
-  it('ends a session only when the human says so, and not while it holds work', async () => {
+  it('deletes a session only when the human says so, and not while it holds work', async () => {
     await withLedger((ledger) => {
       const { project, id } = opened(ledger)
       deliver(ledger, ledger.assignTask(project.id, 1, id('zeus')).message)
@@ -689,9 +857,6 @@ describe("sessions: a member's named windows", () => {
         handle: 'zeus-amber-pine',
         member: 'zeus',
         reason: 'ended by @human',
-      })
-      assert.throws(() => ledger.reopenTask(project.id, 1, { by: 'chief', body: 'Again' }), {
-        code: 'session-ended',
       })
       assert.equal(ledger.task(project.id, 1).state, 'done', 'the task itself is untouched')
       const lane = ledger.board(project.id).lanes.find((l) => l.participant.handle === 'zeus')

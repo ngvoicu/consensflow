@@ -24,7 +24,8 @@ const RELAUNCH_MAX_MS = 5 * 60_000
  *
  * It keeps the window's part of a participant's record (`runtime.window`):
  * its adapter, pane and launch, the token and files it was given, what it
- * is doing, whether the human opened it, and how it closes.
+ * is doing and whether its last look said its turn settled, whether the human
+ * opened it or has hidden it since, and how it closes.
  */
 /**
  * A harness's interrupt as keys into its window: Escape as many times in a
@@ -122,6 +123,8 @@ export class Windows {
       launchId: null,
       token: null,
       retiring: false,
+      hidden: false,
+      settled: false,
       activity: { state: 'closed' },
     })
   }
@@ -355,14 +358,19 @@ export class Windows {
     this.#changed()
   }
 
-  /** One look at a window: what its harness's record shows now. */
-  observe(participant, runtime) {
-    return runtime.window.adapter.observe({
+  /**
+   * One look at a window: what its harness's record shows now. The window
+   * keeps whether the look said its agent's turn settled (`closeIfFree`).
+   */
+  async observe(participant, runtime) {
+    const observed = await runtime.window.adapter.observe({
       launch: runtime.window.launch,
       pane: runtime.window.pane,
       conversation: this.#ledger.currentConversation(participant.id),
       host: this.#host,
     })
+    runtime.window.settled = observed.settled === true
+    return observed
   }
 
   /**
@@ -451,11 +459,11 @@ export class Windows {
   }
 
   /**
-   * A session's window closes with its task; its conversation stays until the
-   * session ends (the ledger ends both together), so a follow-up given with
-   * `--after` comes back on the same conversation. Says whether the window
-   * goes: one already closing had its kill, and one whose kill the pane host
-   * refused stays open, not closing, for the next close to try again.
+   * A session's window closes with its task; its conversation stays, even
+   * once the session is deleted, so a follow-up given with `--after` comes
+   * back on the same conversation. Says whether the window goes: one already
+   * closing had its kill, and one whose kill the pane host refused stays open,
+   * not closing, for the next close to try again.
    */
   async retire(runtime) {
     if (runtime.window.retiring) return true
@@ -478,14 +486,18 @@ export class Windows {
 
   /**
    * A member's window closes once it holds no task, unless the human opened
-   * it or a message is still on its way in. Says whether it closed; one gone
-   * already during the step (a launch that timed out) has nothing to close.
+   * it or a message is still on its way in. One the human opened and has
+   * hidden since waits for its agent's turn to end first (its last look did
+   * not say it settled): a turn begun in it is the human's. Says whether it
+   * closed; one gone already during the step (a launch that timed out) has
+   * nothing to close.
    */
   async closeIfFree(runtime) {
     if (
       runtime.window.pane === null ||
       runtime.delivery.delivering !== null ||
       runtime.window.pinned ||
+      (runtime.window.hidden && !runtime.window.settled) ||
       this.#ledger.holdsWork(runtime.id)
     ) {
       return false

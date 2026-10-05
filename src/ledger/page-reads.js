@@ -105,8 +105,9 @@ export function board(store, projectId) {
   // Each task with the first line of its latest result: what its card shows.
   // Its brief stays out: the drawer reads it with the task, and a long-lived
   // board of briefs would outgrow the frame the page reads it in.
-  // A task of a session that has ended sits on its member's lane; one the
-  // human deleted is on no lane.
+  // A task of a session off the board (the human deleted it, or it went with
+  // its member) sits on its member's lane, and goes back to the session's own
+  // if a follow-up brings it back; a task the human deleted is on no lane.
   const rows = store.db
     .prepare(`${TASK_SELECT} WHERE t.project_id = ? AND t.deleted_at IS NULL ORDER BY t.number`)
     .all(projectId)

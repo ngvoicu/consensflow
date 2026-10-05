@@ -2534,6 +2534,9 @@ describe('a member with several roles', () => {
 
 describe('one task per member session', () => {
   const zeusWindows = (context) => context.host.opened.filter((b) => windowOf(b.id, 'zeus'))
+  /** Whether the window opened as `pane` was closed. */
+  const closed = (context, pane) =>
+    context.host.killed.some((gone) => gone.id === pane.id && gone.generation === pane.generation)
 
   /** T-1 to zeus, the only standard worker here, delivered and answered. */
   async function finished(context) {
@@ -2573,13 +2576,14 @@ describe('one task per member session', () => {
 
       context.ledger.acceptTask(project.id, 1, { by: 'chief' })
       await context.dispatcher.pass()
-      assert.notEqual(
-        context.ledger.currentConversation(session),
-        null,
-        'accepted: the session keeps its conversation for the human',
-      )
+      const kept = context.ledger.currentConversation(session)
+      assert.notEqual(kept, null, 'accepted: the session keeps its conversation for the human')
       await context.dispatcher.endSession(project.id, 'zeus-amber-pine')
-      assert.equal(context.ledger.currentConversation(session), null)
+      assert.equal(
+        context.ledger.currentConversation(session).id,
+        kept.id,
+        'deleted, it keeps its conversation for a follow-up',
+      )
       assert.equal(
         context.ledger.project(project.id).participants.some((p) => p.id === session),
         false,
@@ -2782,6 +2786,232 @@ describe('one task per member session', () => {
       assert.ok(!context.host.killed.some(isKept))
       await context.dispatcher.endSession(project.id, 'zeus-amber-pine')
       assert.ok(context.host.killed.some(isKept))
+    })
+  })
+
+  it('closes a window the human opened once they hide it, and Show opens it again on the same conversation', async () => {
+    await setup(async (context) => {
+      const { project, id } = await finished(context)
+      const session = id('zeus-amber-pine')
+      const native = context.ledger.currentConversation(session).nativeSession
+      await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
+      const shown = context.host.last('zeus-amber-pine')
+      for (let look = 0; look < 2; look += 1) await context.dispatcher.pass()
+      assert.equal(closed(context, shown), false, 'shown, it stays open with nothing to do')
+
+      await context.dispatcher.hideWindow(project.id, 'zeus-amber-pine')
+      await context.dispatcher.pass()
+      assert.equal(closed(context, shown), true, 'hidden, it closes as any window that is free')
+      assert.equal(context.dispatcher.pane(session), null)
+      assert.equal(context.dispatcher.hidden(session), false, 'closed, it is no longer hidden')
+      assert.equal(context.ledger.currentConversation(session).nativeSession, native)
+
+      await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
+      const again = context.adapter.prepared.at(-1)
+      assert.deepEqual(
+        [again.participant.handle, again.resume, again.message],
+        ['zeus-amber-pine', native, null],
+        'Show opens it on the same conversation, with nothing to deliver',
+      )
+    })
+  })
+
+  it('keeps a window the human hid while its agent is at work, and closes it once the turn ends', async () => {
+    await setup(async (context) => {
+      const { project, id } = await finished(context)
+      await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
+      const shown = context.host.last('zeus-amber-pine')
+      // The human asks the agent something in the window, and hides it while it works.
+      const zeus = context.adapter.agent('zeus')
+      zeus.items.push(item('user', 'What did you change so far?'))
+      zeus.settled = false
+      await context.dispatcher.pass()
+      await context.dispatcher.hideWindow(project.id, 'zeus-amber-pine')
+      for (let look = 0; look < 3; look += 1) await context.dispatcher.pass()
+      assert.equal(context.dispatcher.activity(id('zeus-amber-pine')).state, 'working')
+      assert.equal(closed(context, shown), false, 'not while its agent is at work on the turn')
+      // A turn waiting on the human for a permission is a turn that has not ended either.
+      zeus.waiting = { reason: 'permission to run a command' }
+      await context.dispatcher.pass()
+      assert.equal(context.dispatcher.activity(id('zeus-amber-pine')).state, 'waiting')
+      assert.equal(closed(context, shown), false, 'nor while it waits on a prompt in the turn')
+      zeus.waiting = null
+      context.adapter.answer('zeus', 'Only the parser.')
+      await context.dispatcher.pass()
+      assert.equal(closed(context, shown), true, 'the turn ended: now it closes')
+    })
+  })
+
+  it('makes a window the human hid theirs again when they show it while it still works', async () => {
+    await setup(async (context) => {
+      const { project } = await finished(context)
+      await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
+      const shown = context.host.last('zeus-amber-pine')
+      const zeus = context.adapter.agent('zeus')
+      zeus.items.push(item('user', 'What did you change so far?'))
+      zeus.settled = false
+      await context.dispatcher.pass()
+      await context.dispatcher.hideWindow(project.id, 'zeus-amber-pine')
+      const session = context.ledger
+        .project(project.id)
+        .participants.find((p) => p.handle === 'zeus-amber-pine').id
+      assert.equal(context.dispatcher.hidden(session), true, 'the board says it is hidden')
+      const launches = context.adapter.prepared.length
+      await context.dispatcher.openWindow(project.id, 'zeus-amber-pine')
+      assert.equal(context.adapter.prepared.length, launches, 'its window is open: no new one')
+      assert.equal(context.dispatcher.hidden(session), false)
+      context.adapter.answer('zeus', 'Only the parser.')
+      for (let look = 0; look < 3; look += 1) await context.dispatcher.pass()
+      assert.equal(closed(context, shown), false, 'shown again, it stays open after its turn')
+    })
+  })
+
+  it('keeps a window the human hid while it holds a task, and closes it once the task ends', async () => {
+    await setup(async (context) => {
+      const { project, open, task } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const session = task(1).assignee
+      await context.dispatcher.openWindow(project.id, session)
+      await context.dispatcher.hideWindow(project.id, session)
+      const pane = context.host.last('zeus')
+      for (let look = 0; look < 3; look += 1) await context.dispatcher.pass()
+      assert.equal(task(1).state, 'working')
+      assert.equal(closed(context, pane), false, 'it holds its task')
+      context.adapter.answer('zeus', 'Parser done')
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'done')
+      assert.equal(closed(context, pane), true, 'its task ended and its turn with it')
+    })
+  })
+
+  it('closes a window the human never opened as its task ends, though its agent is at work, and one they hid only after its turn', async () => {
+    await setup(async (context) => {
+      const { project, open, task } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      open({ body: 'Write the docs' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const [opened, never] = [task(1).assignee, task(2).assignee]
+      assert.deepEqual([task(1).state, task(2).state], ['working', 'working'])
+      await context.dispatcher.openWindow(project.id, opened)
+      // Hide tells the daemon about any terminal; it frees only what the human opened.
+      for (const handle of [opened, never]) await context.dispatcher.hideWindow(project.id, handle)
+      // Both tasks end while their agents are still at work on their turns.
+      for (const number of [1, 2]) context.ledger.recordResult(project.id, number, { body: 'Done' })
+      await context.dispatcher.pass()
+      assert.equal(closed(context, context.host.last(never)), true, 'nobody opened it')
+      assert.equal(
+        closed(context, context.host.last(opened)),
+        false,
+        'the human did: its turn first',
+      )
+      context.adapter.answer(opened, 'Done.')
+      await context.dispatcher.pass()
+      assert.equal(closed(context, context.host.last(opened)), true)
+    })
+  })
+
+  it('brings a deleted session back when a follow-up comes with --after: its window opens on its own conversation, and a busy session still refuses', async () => {
+    await setup(async (context) => {
+      const { project, id, task } = await finished(context)
+      const session = id('zeus-amber-pine')
+      const native = context.ledger.currentConversation(session).nativeSession
+      context.ledger.acceptTask(project.id, 1, { by: 'chief' })
+      await context.dispatcher.endSession(project.id, 'zeus-amber-pine')
+      assert.equal(
+        context.ledger.project(project.id).participants.some((p) => p.id === session),
+        false,
+        'off the board',
+      )
+      context.ledger.createTask(project.id, {
+        from: 'chief',
+        after: 1,
+        body: 'Now the lexer, in the same style',
+      })
+      await context.dispatcher.pass()
+      const launch = context.adapter.prepared.at(-1)
+      assert.deepEqual(
+        [launch.participant.handle, launch.participant.id, launch.resume],
+        ['zeus-amber-pine', session, native],
+        'the session that did T-1, on its own conversation',
+      )
+      assert.match(
+        launch.message,
+        /^\[ConsensFlow m-\d+ · T-2 · task from @chief\]\nNow the lexer, in the same style$/,
+        'no brief in front: the window remembers',
+      )
+      await context.dispatcher.pass()
+      assert.equal(task(2).state, 'working')
+      assert.equal(
+        context.ledger.project(project.id).participants.some((p) => p.id === session),
+        true,
+        'back on the board',
+      )
+      assert.throws(
+        () => context.ledger.createTask(project.id, { from: 'chief', after: 1, body: 'More' }),
+        { code: 'session-busy' },
+      )
+      context.adapter.answer('zeus-amber-pine', 'Lexer done')
+      await context.dispatcher.pass()
+      assert.equal(task(2).state, 'done')
+      assert.equal(
+        closed(context, context.host.last('zeus-amber-pine')),
+        true,
+        'its window closes with its task as any',
+      )
+    })
+  })
+
+  it('brings a deleted session back when its task is reopened: its window opens on its own conversation', async () => {
+    await setup(async (context) => {
+      const { project, id, task } = await finished(context)
+      const session = id('zeus-amber-pine')
+      const native = context.ledger.currentConversation(session).nativeSession
+      await context.dispatcher.endSession(project.id, 'zeus-amber-pine')
+      context.ledger.reopenTask(project.id, 1, { by: 'chief', body: 'Handle empty input too' })
+      await context.dispatcher.pass()
+      const launch = context.adapter.prepared.at(-1)
+      assert.deepEqual(
+        [launch.participant.handle, launch.resume],
+        ['zeus-amber-pine', native],
+        'the same window comes back on its own conversation',
+      )
+      assert.match(
+        launch.message,
+        /^\[ConsensFlow m-\d+ · T-1 · task from @chief\]\nHandle empty input too$/,
+      )
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'working')
+    })
+  })
+
+  it("fails a deleted session's follow-up as any launch fails when its harness has lost the conversation, and the task goes to its tier instead", async () => {
+    await setup(async (context) => {
+      const { project, open, task, notes } = await finished(context)
+      await context.dispatcher.endSession(project.id, 'zeus-amber-pine')
+      const prepare = context.adapter.prepare
+      context.adapter.prepare = async (request) => {
+        if (request.resume !== null) throw new Error('no conversation found with that id')
+        return prepare(request)
+      }
+      context.ledger.createTask(project.id, { from: 'chief', after: 1, body: 'Now the lexer' })
+      await context.dispatcher.pass()
+      assert.equal(task(2).state, 'failed')
+      assert.match(
+        notes('chief').at(-1),
+        /^T-2 failed: the launch failed: no conversation found with that id\. Reopen it with/,
+        'the chief hears why',
+      )
+      open({ body: 'Now the lexer' })
+      await context.dispatcher.pass()
+      const fresh = context.adapter.prepared.at(-1)
+      assert.deepEqual(
+        [fresh.participant.handle, fresh.resume],
+        ['zeus-brisk-birch', null],
+        'given to its tier, a fresh session takes it',
+      )
     })
   })
 
