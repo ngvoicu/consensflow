@@ -28,6 +28,8 @@ pub use seed::{seed_session, Seed, LIFETIME_MS};
 pub use send::{send, Target};
 pub(super) use state::{session_state, Shown};
 
+// For the binary that plays the channel's cases (`test-support`).
+#[cfg(feature = "test-support")]
 pub use crate::shared::admission::Sent;
 
 /// A launch's channel: its window's server, and the plugin's.
