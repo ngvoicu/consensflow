@@ -264,7 +264,8 @@ fn carries_an_advisors_and_a_reviewers_question_to_the_chief_and_the_answer_back
             "chief": { "harness": "claude-code", "agent": "apollo" },
             "staff": [member("athena", "advisor"), member("calliope", "reviewer")],
         }))
-        .unwrap();
+        .unwrap()
+        .expect("the project");
     let task = |number: i64| context.task(project.id, number);
     for (pool, agent, body) in [
         ("advisor", "athena", "Which law applies to the page?"),

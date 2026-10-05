@@ -28,7 +28,8 @@ fn opens_with_the_text_of_the_role_its_task_needs_in_a_session_per_task() {
                 },
             ],
         }))
-        .unwrap();
+        .unwrap()
+        .expect("the project");
     let task = |number: i64| context.task(project.id, number);
     let assignee = |number: i64| task(number).task.assignee.unwrap_or_default();
     // What each of a member's sessions was opened with: the role and its text.

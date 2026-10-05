@@ -41,7 +41,10 @@ impl Context {
     }
 
     /// A project opened (`openProject`), begun where it is called.
-    pub fn begin_open_project(&self, request: Value) -> Answer<Result<ProjectView, EngineError>> {
+    pub fn begin_open_project(
+        &self,
+        request: Value,
+    ) -> Answer<Result<Option<ProjectView>, EngineError>> {
         self.recorder.op("openProject", json!([request.clone()]));
         let dispatcher = Rc::clone(&self.dispatcher);
         self.executor.start_now(async move {
@@ -63,21 +66,24 @@ impl Context {
     }
 
     /// The human's Resume (`resumeProject`).
-    pub fn resume_project(&self, project: i64) -> Result<ProjectView, EngineError> {
+    pub fn resume_project(&self, project: i64) -> Result<Option<ProjectView>, EngineError> {
         self.recorder.op("resumeProject", json!([project]));
         let dispatcher = Rc::clone(&self.dispatcher);
         self.run(async move { dispatcher.resume_project(project).await })
     }
 
     /// The human's Close (`closeProject`).
-    pub fn close_project(&self, project: i64) -> Result<ProjectView, EngineError> {
+    pub fn close_project(&self, project: i64) -> Result<Option<ProjectView>, EngineError> {
         self.recorder.op("closeProject", json!([project]));
         let dispatcher = Rc::clone(&self.dispatcher);
         self.run(async move { dispatcher.close_project(project).await })
     }
 
     /// The human's Close, begun where it is called.
-    pub fn begin_close_project(&self, project: i64) -> Answer<Result<ProjectView, EngineError>> {
+    pub fn begin_close_project(
+        &self,
+        project: i64,
+    ) -> Answer<Result<Option<ProjectView>, EngineError>> {
         self.recorder.op("closeProject", json!([project]));
         let dispatcher = Rc::clone(&self.dispatcher);
         self.executor
@@ -110,14 +116,22 @@ impl Context {
     }
 
     /// The human opens a session's window (`openWindow`).
-    pub fn open_window(&self, project: i64, handle: &str) -> Result<ProjectView, EngineError> {
+    pub fn open_window(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Result<Option<ProjectView>, EngineError> {
         self.recorder.op("openWindow", json!([project, handle]));
         let (dispatcher, handle) = (Rc::clone(&self.dispatcher), handle.to_owned());
         self.run(async move { dispatcher.open_window(project, &handle).await })
     }
 
     /// The human hides a session's terminal (`hideWindow`).
-    pub fn hide_window(&self, project: i64, handle: &str) -> Result<ProjectView, EngineError> {
+    pub fn hide_window(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Result<Option<ProjectView>, EngineError> {
         self.recorder.op("hideWindow", json!([project, handle]));
         let (dispatcher, handle) = (Rc::clone(&self.dispatcher), handle.to_owned());
         self.run(async move { dispatcher.hide_window(project, &handle).await })
@@ -154,7 +168,7 @@ impl Context {
         to: SwitchTo,
         when: SwitchWhen,
         note: bool,
-    ) -> Result<ProjectView, EngineError> {
+    ) -> Result<Option<ProjectView>, EngineError> {
         self.recorder
             .op("switchChief", switch_asked(project, &to, when, note));
         let dispatcher = Rc::clone(&self.dispatcher);
@@ -168,7 +182,7 @@ impl Context {
         to: SwitchTo,
         when: SwitchWhen,
         note: bool,
-    ) -> Answer<Result<ProjectView, EngineError>> {
+    ) -> Answer<Result<Option<ProjectView>, EngineError>> {
         self.recorder
             .op("switchChief", switch_asked(project, &to, when, note));
         let dispatcher = Rc::clone(&self.dispatcher);
@@ -222,7 +236,7 @@ impl Restarted<'_> {
         to: SwitchTo,
         when: SwitchWhen,
         note: bool,
-    ) -> Result<ProjectView, EngineError> {
+    ) -> Result<Option<ProjectView>, EngineError> {
         self.context
             .recorder
             .op("switchChief", switch_asked(project, &to, when, note));

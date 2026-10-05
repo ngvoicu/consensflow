@@ -66,22 +66,21 @@ pub struct Replaced {
     /// The project opened in its place.
     pub fresh: ProjectView,
     old: i64,
-    closing: Answer<Result<ProjectView, EngineError>>,
+    closing: Answer<Result<Option<ProjectView>, EngineError>>,
     deleting: Answer<Result<DeletedProject, EngineError>>,
 }
 
 impl Replaced {
     /// The old project's close and delete ended, and failed nothing
-    /// (`await gone`). A close answers the project as it is when it ends:
-    /// Node answered `null` for one deleted meanwhile, where the engine's
-    /// operations answer a project or say there is none. That is a limit,
-    /// held here as measured: the close says there is no such project.
+    /// (`await gone`): the close answers the project as it is when it ends,
+    /// none once it was deleted meanwhile, as Node answered `null`.
     pub fn gone(&self) {
         let closed = self.closing.take().expect("the close ended");
         assert_eq!(
-            closed.unwrap_err().to_string(),
-            format!("no project {}", self.old),
-            "the close of the deleted project"
+            closed.expect("the close").map(|project| project.id),
+            None,
+            "the close of project {}, deleted meanwhile",
+            self.old
         );
         self.deleting
             .take()
@@ -101,7 +100,10 @@ pub fn replace_project(context: &Context, old: &ProjectView) -> Replaced {
         "chief": { "harness": "claude-code", "agent": "apollo" },
         "staff": [],
     }));
-    let fresh = context.finish(opening).expect("a project in its place");
+    let fresh = context
+        .finish(opening)
+        .expect("a project in its place")
+        .expect("the project");
     assert_ne!(fresh.id, old.id, "the ledger never gives its id again");
     Replaced {
         fresh,

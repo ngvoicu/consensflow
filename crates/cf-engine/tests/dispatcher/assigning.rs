@@ -107,7 +107,8 @@ fn shares_the_work_of_one_tier_across_harnesses_the_harness_with_the_fewest_task
                 member("ares", "opencode"),
             ],
         }))
-        .unwrap();
+        .unwrap()
+        .expect("the project");
     let open = |body: &str| {
         context.create_task(
             project.id,

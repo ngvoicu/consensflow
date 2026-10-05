@@ -189,7 +189,7 @@ impl Dispatcher {
     pub async fn open_project(
         self: &Rc<Self>,
         request: NewProject,
-    ) -> Result<ProjectView, EngineError> {
+    ) -> Result<Option<ProjectView>, EngineError> {
         self.require_chief(&request.chief.harness, request.chief.agent.as_deref())?;
         for member in &request.staff {
             self.require_adapter(&member.harness)?;
@@ -203,7 +203,10 @@ impl Dispatcher {
 
     /// The human's Resume, and the restore after a restart: the chief comes
     /// back on its conversation.
-    pub async fn resume_project(self: &Rc<Self>, project: i64) -> Result<ProjectView, EngineError> {
+    pub async fn resume_project(
+        self: &Rc<Self>,
+        project: i64,
+    ) -> Result<Option<ProjectView>, EngineError> {
         let resumed = self
             .seams
             .ledger
@@ -219,7 +222,10 @@ impl Dispatcher {
     }
 
     /// The human's Close: the project is suspended and every window of it goes.
-    pub async fn close_project(self: &Rc<Self>, project: i64) -> Result<ProjectView, EngineError> {
+    pub async fn close_project(
+        self: &Rc<Self>,
+        project: i64,
+    ) -> Result<Option<ProjectView>, EngineError> {
         let suspended = self
             .seams
             .ledger
@@ -315,7 +321,7 @@ impl Dispatcher {
         self: &Rc<Self>,
         project: i64,
         handle: &str,
-    ) -> Result<ProjectView, EngineError> {
+    ) -> Result<Option<ProjectView>, EngineError> {
         let (found, participant) = self.session_of(project, handle)?;
         require_open(&found)?;
         {
@@ -335,7 +341,7 @@ impl Dispatcher {
         self: &Rc<Self>,
         project: i64,
         handle: &str,
-    ) -> Result<ProjectView, EngineError> {
+    ) -> Result<Option<ProjectView>, EngineError> {
         let (_, participant) = self.session_of(project, handle)?;
         {
             let record = self.record_of(participant.id);
@@ -482,9 +488,11 @@ impl Dispatcher {
             .ok_or_else(|| EngineError::said("no-project", format!("no project {project}")))
     }
 
-    /// The project as the ledger has it now, which an operation answers with.
-    fn project_now(&self, project: i64) -> Result<ProjectView, EngineError> {
-        self.known_project(project)
+    /// The project as the ledger has it now, which an operation answers
+    /// with: none once it was deleted meanwhile, where Node's
+    /// `this.#ledger.project(projectId)` answered null.
+    fn project_now(&self, project: i64) -> Result<Option<ProjectView>, EngineError> {
+        Ok(self.seams.ledger.borrow().project(project)?)
     }
 
     /// A closed project goes for good; the ledger refuses an open one. Its
@@ -976,7 +984,7 @@ impl Dispatcher {
         to: SwitchTo,
         when: SwitchWhen,
         note: bool,
-    ) -> Result<ProjectView, EngineError> {
+    ) -> Result<Option<ProjectView>, EngineError> {
         self.require_chief(&to.harness, Some(&to.agent))?;
         let found = self.known_project(project)?;
         let chief = found

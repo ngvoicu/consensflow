@@ -167,7 +167,7 @@ fn closes_a_project() {
     };
     let chief_native = native("chief");
     let closed = context.close_project(project.id).unwrap();
-    assert_eq!(closed.state, "suspended");
+    assert_eq!(closed.expect("the project").state, "suspended");
     assert_eq!(context.host.killed(), [chief, zeus]);
     context.exit("chief");
     context.exit("zeus");

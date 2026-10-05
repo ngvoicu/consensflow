@@ -254,7 +254,7 @@ impl Context {
 
     /// A project opened (`dispatcher.openProject`), `request` as the API
     /// gives it, run to stillness.
-    pub fn open_project(&self, request: Value) -> Result<ProjectView, EngineError> {
+    pub fn open_project(&self, request: Value) -> Result<Option<ProjectView>, EngineError> {
         self.recorder.op("openProject", json!([request.clone()]));
         let request = NewProject::from_json(&request)?;
         let dispatcher = Rc::clone(&self.dispatcher);
@@ -270,6 +270,7 @@ impl Context {
             .collect();
         self.open_project(app(staff))
             .expect("a project with its staff")
+            .expect("the project, not deleted")
     }
 
     /// A tiered staff (`withTiers`): standard workers (`workers`), a light
@@ -286,6 +287,7 @@ impl Context {
         ]);
         self.open_project(app(staff))
             .expect("a project with its tiers")
+            .expect("the project, not deleted")
     }
 
     /// The project as the ledger has it now.
