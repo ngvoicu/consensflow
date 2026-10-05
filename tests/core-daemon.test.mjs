@@ -18,13 +18,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
  * The same cases run against both daemons (`npm run test:daemons`): Node's, and
  * the native one `CONSENSFLOW_TEST_DAEMON` names. What only Node's own modules
  * can show (a pass loop, an API, a Node preload) is skipped for the native one
- * with its reason; what the native daemon does not serve yet is skipped with
- * the landing it waits for.
+ * with its reason.
  */
 const NATIVE = daemonCommand([DAEMON]).native
 const ONLY_NODE_CAN = NATIVE && "a test of Node's own modules, which the native daemon has none of"
-const WAITS_FOR_THE_PAGE_OPERATIONS =
-  'asks the page operations and the agents screens, which the native daemon serves from their landings on (step 3.6)'
 
 /** The daemon as a child, the one under test; Node flags only go to Node's. */
 function startDaemon(env, nodeFlags = []) {
@@ -415,9 +412,7 @@ const MYBUILDER = {
 }
 
 describe('the daemon over its bridge', () => {
-  it("opens a window with the agents' API, its project and participant, its runtime, and the bundled cf first on PATH", {
-    skip: NATIVE && WAITS_FOR_THE_PAGE_OPERATIONS,
-  }, async (t) => {
+  it("opens a window with the agents' API, its project and participant, its runtime, and the bundled cf first on PATH", {}, async (t) => {
     const d = await daemonOverItsBridge(t, { agents: [MYBUILDER] })
     const opened = await d.request('project.open', {
       directory: d.workspace,
@@ -460,9 +455,7 @@ describe('the daemon over its bridge', () => {
     assert.ok(role.includes(`Here \`cf\` is ${cf}.`), role.slice(-600))
   })
 
-  it("tells the page when the board changes, and when a change to the agents moves a member's tier", {
-    skip: NATIVE && WAITS_FOR_THE_PAGE_OPERATIONS,
-  }, async (t) => {
+  it("tells the page when the board changes, and when a change to the agents moves a member's tier", {}, async (t) => {
     const d = await daemonOverItsBridge(t, { agents: [MYBUILDER] })
     const told = (reason) =>
       d.frames.filter(
