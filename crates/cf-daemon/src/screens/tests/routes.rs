@@ -95,8 +95,8 @@ fn an_agent_that_cannot_be_offered_is_said_hidden_and_not_installed_in_that_orde
         unsupported: true,
         ..view("kimi", Some("kimi"))
     };
-    let offered = offerable(
-        vec![
+    let offered = crate::roster::offerable(
+        &[
             view("here", Some("claude")),
             view("away", Some("codex")),
             kept_out,

@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use super::scripted::Scripted;
 use super::*;
-use crate::page::agents::offerable;
+use crate::roster::offerable;
 
 /// A home whose agents file holds `rows`, and the environment that names it.
 fn home_with(rows: &str) -> (tempfile::TempDir, Env) {

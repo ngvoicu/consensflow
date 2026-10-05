@@ -9,9 +9,10 @@ use cf_ledger::model::parse_roles;
 use cf_ledger::NewMember;
 use serde_json::{json, Value};
 
-use super::agents::{chief_on, last_staff_now, membership, offerable, saved};
+use super::agents::{chief_on, last_staff_now, membership, saved};
 use super::body::{merged, one, Body, Fields, Said};
 use super::Page;
+use crate::roster::offerable;
 
 /// `agents.list`: the pickers offer only agents on a harness installed here,
 /// and say which are not.

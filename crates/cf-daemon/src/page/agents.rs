@@ -1,11 +1,12 @@
 //! The saved agents as the page reads them (`membership`, `chiefOn`,
-//! `lastStaffNow` and `agentGone` of `src/core/page.js`, and `offerable` of
-//! `src/harnesses.js`): each read goes to the file as it is now, so an agent the
-//! human added a moment ago is there and one they removed is gone.
+//! `lastStaffNow` and `agentGone` of `src/core/page.js`): each read goes to the
+//! file as it is now, so an agent the human added a moment ago is there and one
+//! they removed is gone. How the pickers offer them is the roster's
+//! ([`crate::roster::offerable`]).
 
 use cf_base::env::Env;
 use cf_base::js;
-use cf_catalog::{roster_path, AgentView, Catalog, Harness, Roster};
+use cf_catalog::{roster_path, AgentView, Catalog, Roster};
 use cf_engine::{require_chief_agent, SwitchTo};
 use cf_ledger::model::fits_role;
 use cf_ledger::{Ledger, StaffMember};
@@ -144,30 +145,4 @@ pub(super) fn last_staff_now(ledger: &Ledger, roster: &Roster<'_>) -> Result<Vec
 /// what to fix.
 pub(super) fn agent_gone(roster: &Roster<'_>, agent: &str) -> bool {
     matches!(roster.agent_row(agent), Ok(None))
-}
-
-/// Agents as the pickers offer them: one whose harness is not installed here is
-/// hidden, so only the Harnesses page shows that harness, where it is
-/// installed. One saved for a harness this build does not run (Kimi, dropped)
-/// is hidden too: no window could open for it.
-pub(super) fn offerable(agents: &[AgentView], missing: &[Harness]) -> Result<Vec<Value>, Said> {
-    agents
-        .iter()
-        .map(|agent| {
-            let mut shown = serde_json::to_value(agent)?;
-            let absent = agent
-                .harness
-                .as_deref()
-                .is_some_and(|harness| missing.iter().any(|missing| missing.as_str() == harness));
-            if agent.unsupported || absent {
-                if let Value::Object(fields) = &mut shown {
-                    // `{...agent, hidden: true, notInstalled: true}`: a key the
-                    // agent has keeps its place, a new one comes last.
-                    fields.insert("hidden".to_owned(), Value::Bool(true));
-                    fields.insert("notInstalled".to_owned(), Value::Bool(true));
-                }
-            }
-            Ok(shown)
-        })
-        .collect()
 }

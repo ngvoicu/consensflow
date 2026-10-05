@@ -12,12 +12,13 @@ use cf_base::refusal::Refusal;
 use cf_base::time::SystemClock;
 use cf_catalog::efforts;
 use cf_harness::detect::missing_harnesses;
-use cf_proto::agents::{AgentView, Harness};
+use cf_proto::agents::Harness;
 use serde_json::{json, Value};
 
 use super::body::fields;
 use super::Screens;
 use crate::api::answer::Answer;
+use crate::roster::offerable;
 
 /// What a refusal says, which is all a screen answers with: its code and status
 /// are the API's.
@@ -31,7 +32,8 @@ impl Screens {
     pub(super) fn list_agents(&self) -> Result<Answer, String> {
         let missing = missing_harnesses(&self.env);
         let roster = self.agents.roster();
-        let agents = offerable(roster.list().map_err(words)?, &missing)?;
+        let agents = offerable(&roster.list().map_err(words)?, &missing)
+            .map_err(|failed| failed.to_string())?;
         let installed: Vec<&str> = Harness::ALL
             .into_iter()
             .filter(|harness| !missing.contains(harness))
@@ -91,30 +93,4 @@ impl Screens {
         (self.on_roster_change)()?;
         Ok(Answer::ok(json!({ "preferences": chosen })))
     }
-}
-
-/// The agents as the pickers offer them (`offerable`, `src/harnesses.js`): one
-/// whose harness is not installed here is hidden, so only the Harnesses screen
-/// shows that harness, where it is installed; so is one saved for a harness this
-/// build does not run (Kimi, dropped), for no window could open on it. Each of
-/// them is its view with `hidden` and `notInstalled` said, in that order, as
-/// `{...agent, hidden: true, notInstalled: true}` says them: a `hidden` the
-/// view already has stays in its place.
-pub fn offerable(agents: Vec<AgentView>, missing: &[Harness]) -> Result<Vec<Value>, String> {
-    agents
-        .into_iter()
-        .map(|agent| {
-            let unavailable = agent.unsupported
-                || agent
-                    .harness
-                    .as_deref()
-                    .is_some_and(|word| missing.iter().any(|harness| harness.as_str() == word));
-            let mut view = serde_json::to_value(&agent).map_err(|failed| failed.to_string())?;
-            if let (true, Some(fields)) = (unavailable, view.as_object_mut()) {
-                fields.insert("hidden".to_owned(), Value::Bool(true));
-                fields.insert("notInstalled".to_owned(), Value::Bool(true));
-            }
-            Ok(view)
-        })
-        .collect()
 }

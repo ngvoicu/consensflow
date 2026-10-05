@@ -45,8 +45,6 @@ use crate::api::credentials::token_matches;
 use crate::api::request::Request;
 use crate::roster::Agents;
 
-pub use agents::offerable;
-
 /// The screens' own paths, in the order Node lists them (`:69-78`). A path that
 /// is none of these is the agents' API's.
 #[derive(Debug, Clone, PartialEq, Eq)]
