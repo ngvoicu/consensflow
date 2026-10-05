@@ -22,6 +22,12 @@ import { sessionName } from '../../../src/ledger/names.js'
 export * from '../../../src/ledger/index.js'
 
 const OUT = process.env.CF_LEDGER_TRACES
+/**
+ * The record behind each ledger this module hands out, by the ledger a test
+ * holds: the recorders that put more around a ledger's calls (`../daemon`)
+ * read it from here, and write what they make themselves.
+ */
+export const recordings = new WeakMap()
 const opened = new Map()
 /** The records of ledgers not closed yet: one a test leaves open is written as such when the process ends. */
 const open = new Set()
@@ -42,7 +48,7 @@ function opener() {
 }
 
 /** A value as JSON writes it, what JSON cannot hold tagged. */
-function encode(value, callbacks) {
+export function encode(value, callbacks) {
   if (value === undefined) return { $undefined: true }
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
   if (typeof value === 'number') return Number.isFinite(value) ? value : { $number: String(value) }
@@ -61,7 +67,7 @@ function encode(value, callbacks) {
   )
 }
 
-const failure = (cause) => ({
+export const failure = (cause) => ({
   $error: {
     name: cause?.name ?? null,
     code: cause?.code ?? null,
@@ -173,7 +179,7 @@ export function openLedger(file, options = {}) {
   }
   open.add(record)
   held.add(file)
-  return new Proxy(ledger, {
+  const recording = new Proxy(ledger, {
     get(target, property, receiver) {
       const value = Reflect.get(target, property, receiver)
       if (typeof value !== 'function' || typeof property !== 'string') return value
@@ -217,6 +223,8 @@ export function openLedger(file, options = {}) {
       }
     },
   })
+  recordings.set(recording, record)
+  return recording
 }
 
 /** A call's function arguments (a tier for each member, say): what each was asked and answered. */
