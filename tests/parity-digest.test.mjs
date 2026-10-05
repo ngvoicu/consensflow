@@ -62,7 +62,8 @@ test('a lone surrogate is made whole, as the Rust readers hold it, and said', ()
   for (const fields of [{ id: 'u\udfff' }, { at: '\ud83d' }, { at: { '\ud800': 1 } }]) {
     const made = digest(reading(fields), OURS)
     assert.equal(made.wellFormed, false, JSON.stringify(fields))
-    assert.ok(JSON.stringify(made).isWellFormed(), JSON.stringify(fields))
+    // Nothing in the digest is a lone half any more: walked again, it is whole.
+    assert.equal(wellFormed(made)[1], true, JSON.stringify(fields))
   }
   assert.deepEqual(wellFormed({ '\ud800': ['\udc00x'] }), [{ '\ufffd': ['\ufffdx'] }, false])
   // A whole pair is no lone half.
