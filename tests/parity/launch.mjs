@@ -30,7 +30,7 @@
  *
  * Node writes what it found, one case a line, raw: its root, its values, no
  * `$ROOT` and no names for what was drawn. Then it runs the Rust half
- * (`crates/cf-harness/tests/parity_launch.rs`, told the file in
+ * (`crates/cf-harness/tests/parity_launch/`, told the file in
  * CF_PARITY_LAUNCH), which plans the same cases in the other root, writes
  * both sides' findings the same way, with one normalizer, and holds them
  * equal: each plan's argv, environment (in its order), variables dropped and
