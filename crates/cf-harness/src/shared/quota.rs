@@ -63,8 +63,19 @@ pub enum Level {
     Exhausted,
 }
 
+impl Quota {
+    /// How spent the quota is (JavaScript's `quota.state`): a refusal is
+    /// exhausted, a count says its own level.
+    pub fn level(&self) -> Level {
+        match self {
+            Quota::Exhausted { .. } => Level::Exhausted,
+            Quota::Usage { level, .. } => *level,
+        }
+    }
+}
+
 impl Level {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Level::Ok => "ok",
             Level::Low => "low",
