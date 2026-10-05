@@ -19,7 +19,10 @@ fn candidate_names(command: &str, env: &Env) -> Vec<String> {
     }
     // `??`: an empty PATHEXT names no extension, and so no program.
     env.os("PATHEXT")
-        .map_or_else(|| ".COM;.EXE;.BAT;.CMD".into(), |value| value.to_string_lossy())
+        .map_or_else(
+            || ".COM;.EXE;.BAT;.CMD".into(),
+            |value| value.to_string_lossy(),
+        )
         .split(';')
         .map(str::to_lowercase)
         .filter(|extension| STARTABLE.contains(&extension.as_str()))

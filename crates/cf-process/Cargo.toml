@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 cf-base.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "process", "time"] }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
@@ -19,6 +20,7 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_
 
 [dev-dependencies]
 tempfile.workspace = true
+tokio = { workspace = true, features = ["rt"] }
 
 [lints]
 workspace = true

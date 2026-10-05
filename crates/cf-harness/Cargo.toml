@@ -11,14 +11,18 @@ cf-base.workspace = true
 cf-process.workspace = true
 cf-proto.workspace = true
 getrandom.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["client"] }
+hyper-util.workspace = true
 jiff.workspace = true
 regex.workspace = true
 rusqlite.workspace = true
 # `rc`: a reading's quota is shared, as Node shared the object.
 serde = { workspace = true, features = ["rc"] }
 serde_json.workspace = true
-# The engine's timer, which a window's waits sleep on.
-tokio = { workspace = true, features = ["time"] }
+# The engine's timer, which a window's waits sleep on, and its sockets.
+tokio = { workspace = true, features = ["net", "time"] }
+url.workspace = true
 uuid.workspace = true
 
 [features]
@@ -32,6 +36,7 @@ flate2.workspace = true
 # `parity:records` digests each text as Node's half does.
 sha2.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "rt"] }
 
 [lints]
 workspace = true

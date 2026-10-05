@@ -1,19 +1,27 @@
 //! What an adapter is given besides its launch: the time and its waits,
-//! randomness, a free port, and the bundle ConsensFlow ships with. The
+//! randomness, a free port, a peer on loopback to ask over HTTP, and the
+//! bundle ConsensFlow ships with. The
 //! engine gives the system's (the types here); a test gives fakes it drives
 //! by hand (`testing`, behind the `test-support` feature). Each adapter is
 //! built with the ones it uses, so nothing in a window reads the system's
 //! time or randomness on its own, and a test sees every wait.
 
+use std::future::{poll_fn, Future};
 use std::net::TcpListener;
 use std::path::PathBuf;
+use std::pin::pin;
 use std::rc::Rc;
+use std::task::Poll;
 use std::time::Duration;
 
 use cf_base::env::Env;
 use cf_base::time::{Clock, SystemClock};
 
 use crate::contract::{Records, Work};
+
+pub mod loopback;
+
+pub use loopback::{Loopback, SystemLoopback};
 
 /// What the engine gives every adapter it builds: the environment its
 /// windows run with, the records it reads them through, and the seams.
@@ -24,6 +32,7 @@ pub struct Services {
     pub time: Rc<dyn Time>,
     pub entropy: Rc<dyn Entropy>,
     pub ports: Rc<dyn Ports>,
+    pub loopback: Rc<dyn Loopback>,
     pub bundle: Bundle,
 }
 
@@ -60,6 +69,23 @@ pub struct Bundle {
     /// forward slashes on Windows, which Git Bash keeps where it drops
     /// backslashes, and PowerShell reads alike.
     pub pane_cf: String,
+}
+
+/// `work`, or none once `millis` passed on `time` first, the work then
+/// dropped: a wait JavaScript bounded with a timer (`AbortSignal.timeout`,
+/// a `setTimeout` that rejects). The timer is armed before the work begins,
+/// as JavaScript arms `AbortSignal.timeout` before its fetch starts; when
+/// both are done at once, the work's answer is taken.
+pub async fn within<T>(time: &dyn Time, millis: u64, work: impl Future<Output = T>) -> Option<T> {
+    let mut timer = time.sleep(Duration::from_millis(millis));
+    let mut work = pin!(work);
+    poll_fn(|context| {
+        if let Poll::Ready(answer) = work.as_mut().poll(context) {
+            return Poll::Ready(Some(answer));
+        }
+        timer.as_mut().poll(context).map(|()| None)
+    })
+    .await
 }
 
 /// A uuid drawn from `entropy`, 16 bytes with the version 4 bits set, as
@@ -116,6 +142,63 @@ impl Ports for LoopbackPorts {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{Driver, ManualTime};
+    use std::cell::Cell;
+
+    /// Marks when it is dropped.
+    struct Dropped(Rc<Cell<bool>>);
+
+    impl Drop for Dropped {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+
+    #[test]
+    fn work_done_in_time_is_answered_and_its_timer_forgotten() {
+        let time = Rc::new(ManualTime::new(0));
+        let mut driver = Driver::default();
+        let clock = Rc::clone(&time);
+        driver.begin(0, async move { within(&*clock, 10, async { 7 }).await });
+        assert_eq!(driver.run(), [(0, Some(7))]);
+        assert!(time.waits(0).is_empty());
+    }
+
+    #[test]
+    fn work_out_of_time_is_dropped_and_none_answered() {
+        let time = Rc::new(ManualTime::new(0));
+        let dropped = Rc::new(Cell::new(false));
+        let mut driver = Driver::default();
+        let (clock, mark) = (Rc::clone(&time), Rc::clone(&dropped));
+        driver.begin(0, async move {
+            let held = async move {
+                let _guard = Dropped(mark);
+                std::future::pending::<()>().await;
+            };
+            within(&*clock, 10, held).await
+        });
+        assert!(driver.run().is_empty());
+        assert!(!dropped.get());
+        assert!(time.fire_next(10));
+        assert_eq!(driver.run(), [(0, None)]);
+        assert!(dropped.get(), "the work is let go");
+    }
+
+    #[test]
+    fn the_timer_is_armed_before_the_work_begins() {
+        let time = Rc::new(ManualTime::new(0));
+        let mut driver = Driver::default();
+        let clock = Rc::clone(&time);
+        driver.begin(0, async move {
+            let inner = Rc::clone(&clock);
+            within(&*clock, 10, async move {
+                inner.sleep(Duration::from_millis(5)).await
+            })
+            .await
+        });
+        assert!(driver.run().is_empty());
+        assert_eq!(time.waits(0), [10, 5]);
+    }
 
     /// A stream of the same byte.
     struct Same(u8);

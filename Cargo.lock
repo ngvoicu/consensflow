@@ -430,6 +430,9 @@ dependencies = [
  "cf-proto",
  "flate2",
  "getrandom 0.4.3",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "jiff",
  "regex",
  "rusqlite",
@@ -438,6 +441,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
+ "url",
  "uuid",
 ]
 
@@ -480,6 +484,7 @@ dependencies = [
  "libc",
  "nix",
  "tempfile",
+ "tokio",
  "windows-sys 0.61.2",
 ]
 
