@@ -1,0 +1,15 @@
+{
+  "about": "Every golden of tests/goldens/launch, counted, and who answers it: a Rust test that holds every row, or the landing it waits for. Kept by hand: a case removed from the oracle fails tests/launch/coverage.rs until this says so too.",
+  "tables": {
+    "windows": { "rows": 2520, "held": "shared::window_args" },
+    "childEnv": { "rows": 7, "deferred": "landing 5, OpenCode: its only caller" },
+    "windowText": { "rows": 270, "held": "tests/launch/tables.rs" },
+    "consoleText": { "rows": 2011, "held": "tests/launch/tables.rs" },
+    "admission": { "rows": 120, "held": "shared::admission" },
+    "recordState": { "rows": 16, "deferred": "landing 3, Pi: its first caller" },
+    "fileUrl": { "rows": 290, "held": "tests/launch/tables.rs" }
+  },
+  "scenarios": {
+    "claude-code": { "darwin": 40, "win32": 40, "held": "tests/launch/scenarios.rs" }
+  }
+}

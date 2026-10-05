@@ -23,7 +23,6 @@ fn every_answer_reads_as_the_outcome_node_read() {
     let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/goldens/launch/tables.json");
     let tables: Value = serde_json::from_str(&fs::read_to_string(file).unwrap()).unwrap();
     let rows = tables["admission"].as_array().unwrap();
-    assert_eq!(rows.len(), 120);
     let undefined = json!({ "undefined": true });
     for row in rows {
         let sent = if row["sent"] == undefined {

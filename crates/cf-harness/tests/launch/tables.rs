@@ -25,7 +25,6 @@ fn text(value: &Value) -> Option<&str> {
 #[test]
 fn every_text_a_window_is_given_is_the_text_node_gave() {
     let rows = TABLES["windowText"].as_array().unwrap();
-    assert_eq!(rows.len(), 270);
     for row in rows {
         let given = text(&row["text"]);
         assert_eq!(
@@ -41,7 +40,6 @@ fn every_code_point_the_console_changes_is_changed_as_node_changed_it() {
     let table = &TABLES["consoleText"];
     assert_eq!(table["unicode"], "17.0");
     let changed = table["changed"].as_array().unwrap();
-    assert_eq!(changed.len(), 1999);
     let mut differ = Vec::new();
     for row in changed {
         let code = u32::try_from(row[0].as_u64().unwrap()).unwrap();
@@ -96,7 +94,6 @@ fn a_code_point_the_console_leaves_as_it_is_is_left_so() {
 #[test]
 fn every_path_is_the_file_url_node_wrote_for_it() {
     let rows = TABLES["fileUrl"].as_array().unwrap();
-    assert_eq!(rows.len(), 267);
     for row in rows {
         let path = row["path"].as_str().unwrap();
         let windows = row["windows"].as_bool().unwrap();

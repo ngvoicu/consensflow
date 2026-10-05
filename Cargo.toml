@@ -69,6 +69,9 @@ tokio-tungstenite = { version = "0.30", default-features = false, features = ["h
 # Plain HTTP to the daemon on loopback, synchronous: a `cf` run starts no runtime.
 ureq = { version = "3", default-features = false }
 uuid = { version = "1", default-features = false, features = ["v4"] }
+# A file URL as Node writes one: the WHATWG URL standard, which Node's ada
+# parses by. Already in the build, through Tauri.
+url = "2"
 windows-sys = "0.61"
 # A file's index on Windows, the identity std keeps unstable, with no unsafe of ours.
 winapi-util = "0.1"

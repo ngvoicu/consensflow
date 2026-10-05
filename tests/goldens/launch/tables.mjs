@@ -238,6 +238,10 @@ function fileUrlTable() {
     '/a/../b/./c',
     '/a/b/',
     '/a//b',
+    '/a/./b/../c/',
+    '/a/%2e%2e/b',
+    '/a/\u00e4\u{1F600}',
+    '/a/{b}<c>`|^~',
   ]
   const windows = [
     ...ascii.map((character) => `C:\\x${character}y`),
@@ -249,6 +253,25 @@ function fileUrlTable() {
     'C:\\a\\..\\b',
     'C:\\a\\',
     'C:\\a//b',
+    '\\\\SERVER\\share\\a\\..\\b',
+    '\\\\localhost\\share\\x',
+    '\\\\LocalHost\\s\\x',
+    '\\\\m\u00fcnich\\share\\x',
+    '//server/share/x',
+    '\\\\?\\C:\\x',
+    '\\\\?\\UNC\\Server\\share\\x',
+    '\\\\127.0.0.1\\s\\x',
+    '\\\\[::1]\\s\\x',
+    '\\\\server',
+    '\\\\\\x',
+    '\\\\server:80\\s',
+    '\\\\a b\\s',
+    '\\\\server\\share\\',
+    'C:\\a\\..\\..\\..\\b',
+    'C:\\a\\.\\b\\',
+    'C:\\a\\\u00e4\u{1F600}\\%41#?',
+    'c:/Mixed\\slashes/',
+    'C:\\a{b}<c>`d',
   ]
   return [
     ...posix.map((path) => ({

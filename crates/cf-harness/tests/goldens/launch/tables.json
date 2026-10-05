@@ -50014,6 +50014,26 @@
       "url": "file:///a/b"
     },
     {
+      "path": "/a/./b/../c/",
+      "windows": false,
+      "url": "file:///a/c/"
+    },
+    {
+      "path": "/a/%2e%2e/b",
+      "windows": false,
+      "url": "file:///a/%252e%252e/b"
+    },
+    {
+      "path": "/a/ä😀",
+      "windows": false,
+      "url": "file:///a/%C3%A4%F0%9F%98%80"
+    },
+    {
+      "path": "/a/{b}<c>`|^~",
+      "windows": false,
+      "url": "file:///a/%7Bb%7D%3Cc%3E%60%7C%5E%7E"
+    },
+    {
       "path": "C:\\x\u0000y",
       "windows": true,
       "url": "file:///C:/x%00y"
@@ -50682,6 +50702,109 @@
       "path": "C:\\a//b",
       "windows": true,
       "url": "file:///C:/a/b"
+    },
+    {
+      "path": "\\\\SERVER\\share\\a\\..\\b",
+      "windows": true,
+      "url": "file://server/share/b"
+    },
+    {
+      "path": "\\\\localhost\\share\\x",
+      "windows": true,
+      "url": "file:///share/x"
+    },
+    {
+      "path": "\\\\LocalHost\\s\\x",
+      "windows": true,
+      "url": "file:///s/x"
+    },
+    {
+      "path": "\\\\münich\\share\\x",
+      "windows": true,
+      "url": "file://xn--mnich-kva/share/x"
+    },
+    {
+      "path": "//server/share/x",
+      "windows": true,
+      "url": "file://server/share/x"
+    },
+    {
+      "path": "\\\\?\\C:\\x",
+      "windows": true,
+      "url": "file:///C:/x"
+    },
+    {
+      "path": "\\\\?\\UNC\\Server\\share\\x",
+      "windows": true,
+      "url": "file://server/share/x"
+    },
+    {
+      "path": "\\\\127.0.0.1\\s\\x",
+      "windows": true,
+      "url": "file://127.0.0.1/s/x"
+    },
+    {
+      "path": "\\\\[::1]\\s\\x",
+      "windows": true,
+      "url": "file://[::1]/s/x"
+    },
+    {
+      "path": "\\\\server",
+      "windows": true,
+      "url": {
+        "throws": true
+      }
+    },
+    {
+      "path": "\\\\\\x",
+      "windows": true,
+      "url": {
+        "throws": true
+      }
+    },
+    {
+      "path": "\\\\server:80\\s",
+      "windows": true,
+      "url": {
+        "throws": true
+      }
+    },
+    {
+      "path": "\\\\a b\\s",
+      "windows": true,
+      "url": {
+        "throws": true
+      }
+    },
+    {
+      "path": "\\\\server\\share\\",
+      "windows": true,
+      "url": "file://server/share/"
+    },
+    {
+      "path": "C:\\a\\..\\..\\..\\b",
+      "windows": true,
+      "url": "file:///C:/b"
+    },
+    {
+      "path": "C:\\a\\.\\b\\",
+      "windows": true,
+      "url": "file:///C:/a/b/"
+    },
+    {
+      "path": "C:\\a\\ä😀\\%41#?",
+      "windows": true,
+      "url": "file:///C:/a/%C3%A4%F0%9F%98%80/%2541%23%3F"
+    },
+    {
+      "path": "c:/Mixed\\slashes/",
+      "windows": true,
+      "url": "file:///c:/Mixed/slashes/"
+    },
+    {
+      "path": "C:\\a{b}<c>`d",
+      "windows": true,
+      "url": "file:///C:/a%7Bb%7D%3Cc%3E%60d"
     }
   ]
 }
