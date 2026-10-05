@@ -29,8 +29,9 @@ serde_json.workspace = true
 # A bundle's folder is named by the hash of its files, as Node names it
 # (`parity:records` digests each text the same way).
 sha2.workspace = true
-# The engine's timer, which a window's waits sleep on, and its sockets.
-tokio = { workspace = true, features = ["net", "time"] }
+# The engine's timer, which a window's waits sleep on, and its sockets; and
+# the channels between the engine's thread and the records thread.
+tokio = { workspace = true, features = ["net", "sync", "time"] }
 url.workspace = true
 uuid.workspace = true
 
