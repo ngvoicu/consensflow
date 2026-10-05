@@ -46,9 +46,9 @@ pub struct Failed {
 /// Runs `run` in `cwd` with the environment `env`, all of it and nothing
 /// inherited, until it ends: its standard output as text, or how it failed.
 /// Its input stays open and unwritten, as Node's does. It has ended when it
-/// has exited and its streams have closed, as Node's `close`: a program it
-/// started that keeps them open holds the answer back, time out or not. At
-/// its timeout it is asked to end, and how it ends decides: one that ends
+/// has exited and its streams have closed, as Node's `close`. At its
+/// timeout, or once a stream says more than its limit, both streams are
+/// closed and it is asked to end, and how it ends decides: one that ends
 /// with 0 has answered, as with Node.
 pub async fn execute(
     run: &Run,
@@ -90,35 +90,40 @@ pub async fn execute(
         });
     };
 
-    let reading = async {
-        let (out, err) = tokio::join!(
-            read_within(stdout, limits.max_buffer, pid),
-            read_within(stderr, limits.max_buffer, pid),
-        );
-        let status = child.wait().await;
-        (out, err, status)
-    };
-    let mut killed = false;
-    let (out, err, status) = if limits.timeout.is_zero() {
-        reading.await
+    let (mut stdout, mut stderr) = (stdout, stderr);
+    let (mut out, mut err) = (Read::default(), Read::default());
+    let read = read_both(
+        &mut stdout,
+        &mut stderr,
+        &mut out,
+        &mut err,
+        limits.max_buffer,
+    );
+    let killed = if limits.timeout.is_zero() {
+        read.await;
+        false
     } else {
-        tokio::pin!(reading);
         tokio::select! {
-            done = &mut reading => done,
-            () = tokio::time::sleep(limits.timeout) => {
-                killed = true;
-                end(pid);
-                tokio::select! {
-                    done = &mut reading => done,
-                    () = tokio::time::sleep(FORCE_AFTER) => {
-                        if let Some(pid) = pid {
-                            terminate(pid, Ending::Forced);
-                        }
-                        reading.await
-                    }
+            () = read => false,
+            () = tokio::time::sleep(limits.timeout) => true,
+        }
+    };
+    let status = if killed || out.overflowed || err.overflowed {
+        // As Node's `kill`: both streams closed first, so nothing it left
+        // running holds the answer back, then the program asked to end.
+        drop((stdout, stderr));
+        end(pid);
+        tokio::select! {
+            status = child.wait() => status,
+            () = tokio::time::sleep(FORCE_AFTER) => {
+                if let Some(pid) = pid {
+                    terminate(pid, Ending::Forced);
                 }
+                child.wait().await
             }
         }
+    } else {
+        child.wait().await
     };
 
     let stdout = String::from_utf8_lossy(&out.bytes).into_owned();
@@ -158,35 +163,48 @@ pub async fn execute(
 }
 
 /// What a stream gave, up to the limit, and whether it gave more.
+#[derive(Default)]
 struct Read {
     bytes: Vec<u8>,
     overflowed: bool,
 }
 
-/// Reads `stream` to its end, keeping its first `limit` bytes; past them
-/// the program is asked to end, as Node's `maxBuffer` asks, and the rest
-/// is read and let go so it can.
-async fn read_within(mut stream: impl AsyncRead + Unpin, limit: usize, pid: Option<u32>) -> Read {
-    let mut read = Read {
-        bytes: Vec::new(),
-        overflowed: false,
-    };
-    let mut chunk = [0; 16 * 1024];
-    loop {
-        let count = match stream.read(&mut chunk).await {
-            Ok(0) | Err(_) => return read,
-            Ok(count) => count,
-        };
-        if read.overflowed {
-            continue;
+impl Read {
+    /// Keeps `bytes` within `limit`: whether they all fit.
+    fn keep(&mut self, bytes: &[u8], limit: usize) -> bool {
+        let room = limit.saturating_sub(self.bytes.len());
+        if bytes.len() > room {
+            self.bytes.extend_from_slice(&bytes[..room]);
+            self.overflowed = true;
+            return false;
         }
-        let room = limit - read.bytes.len();
-        if count > room {
-            read.bytes.extend_from_slice(&chunk[..room]);
-            read.overflowed = true;
-            end(pid);
-        } else {
-            read.bytes.extend_from_slice(&chunk[..count]);
+        self.bytes.extend_from_slice(bytes);
+        true
+    }
+}
+
+/// Reads both streams to their ends, keeping each one's first `limit`
+/// bytes, and stops at once when either says more, as Node's `maxBuffer`
+/// does.
+async fn read_both(
+    stdout: &mut (impl AsyncRead + Unpin),
+    stderr: &mut (impl AsyncRead + Unpin),
+    out: &mut Read,
+    err: &mut Read,
+    limit: usize,
+) {
+    let (mut out_open, mut err_open) = (true, true);
+    let (mut out_chunk, mut err_chunk) = ([0; 16 * 1024], [0; 16 * 1024]);
+    while out_open || err_open {
+        tokio::select! {
+            read = stdout.read(&mut out_chunk), if out_open => match read {
+                Ok(0) | Err(_) => out_open = false,
+                Ok(count) => if !out.keep(&out_chunk[..count], limit) { return },
+            },
+            read = stderr.read(&mut err_chunk), if err_open => match read {
+                Ok(0) | Err(_) => err_open = false,
+                Ok(count) => if !err.keep(&err_chunk[..count], limit) { return },
+            },
         }
     }
 }
@@ -321,13 +339,37 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_program_out_of_time_that_ends_with_0_when_asked_has_answered() {
+    fn a_program_out_of_time_that_writes_once_asked_dies_of_its_closed_stream() {
+        // Probed on Node v26.8.1: the streams are closed before the program is
+        // asked to end, so the trap's `echo` meets a closed pipe (SIGPIPE).
         let run = shell("trap 'echo bye; exit 0' TERM; echo hi; while true; do sleep 0.05; done");
         let limits = Limits {
             timeout: Duration::from_millis(300),
             max_buffer: 1024,
         };
-        assert_eq!(run_now(&run, &system_env(), limits).unwrap(), "hi\nbye\n");
+        let failed = run_now(&run, &system_env(), limits).unwrap_err();
+        assert!(failed.killed);
+        assert_eq!(failed.code, None);
+        assert_eq!(failed.stdout, "hi\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_left_another_holding_its_streams_answers_at_its_timeout() {
+        // Probed on Node v26.8.1: `/bin/sh -c 'sleep 1 & printf ready'`, 100 ms,
+        // answered in 104 ms, the shell's own exit with 0 its answer.
+        let limits = Limits {
+            timeout: Duration::from_millis(100),
+            max_buffer: 1024,
+        };
+        let started = std::time::Instant::now();
+        let answered = run_now(&shell("sleep 1 & printf ready"), &system_env(), limits);
+        assert_eq!(answered.unwrap(), "ready");
+        assert!(
+            started.elapsed() < Duration::from_millis(900),
+            "{:?}",
+            started.elapsed()
+        );
     }
 
     #[cfg(unix)]

@@ -289,6 +289,31 @@ describe("the launch recorder's peer on loopback", () => {
     ])
   })
 
+  it('clears the timeout of a request that got no head, and lets a cancelled body go', async () => {
+    const steps = [
+      {
+        observe: true,
+        served: {
+          'GET /none': [{ noHead: true }],
+          'GET /body': [{ status: 200, body: { held: true } }],
+        },
+      },
+      { advance: 100 },
+    ]
+    const { records } = await played(steps, () => ({
+      observe: async () => {
+        await ask('http://127.0.0.1:41000/none', { signal: AbortSignal.timeout(500) })
+        const reply = await fetch('http://127.0.0.1:41000/body', {
+          signal: AbortSignal.timeout(700),
+        })
+        await reply.body.cancel()
+        await after(100)
+      },
+    }))
+    // Neither 500 nor 700 waits: only the work's own 100 ms.
+    assert.deepEqual(records[0].pending, [{ op: 0, waits: [{ timer: 100 }] }])
+  })
+
   it('gives a reply of no content no body', async () => {
     const steps = [{ observe: true, served: { 'POST /prompt': [{ status: 204 }] } }]
     const { records } = await played(steps, () => ({
@@ -355,7 +380,9 @@ describe("the launch recorder's children", () => {
           child.lines = lines
         }),
     }))
-    assert.deepEqual(records[0].spawned, ['codex app-server'])
+    assert.deepEqual(records[0].spawned, [
+      { program: 'codex', args: ['app-server'], cwd: null, env: [], streams: 'lines' },
+    ])
     assert.deepEqual(records[0].written, ['{"method":"initialize"}'])
     const { events, signalCode } = records[0].settled[0].answer
     assert.deepEqual(events, [['spawn'], ['exit', null, 'SIGTERM'], ['close', null, 'SIGTERM']])
@@ -421,6 +448,63 @@ describe("the launch recorder's children", () => {
       ['exit', 1, null],
       ['close', 1, null],
     ])
+  })
+})
+
+describe("the launch recorder's stand-ins", () => {
+  it('answer by their arguments, fail as asked, and write down how each was run', async () => {
+    const steps = [
+      {
+        standIn: {
+          name: 'codex',
+          answers: {
+            '--version': 'codex-cli 0.159.2\n',
+            'mcp list --json': { stdout: 'partial', stderr: 'no config\n', exit: 3 },
+          },
+        },
+      },
+      { observe: true },
+    ]
+    const { records } = await played(steps, (env) => ({
+      observe: async () => {
+        const { execFile } = await import('node:child_process')
+        const { promisify } = await import('node:util')
+        const run = promisify(execFile)
+        const file = path.join(path.dirname(env.HOME), 'bin', 'codex')
+        const program = process.platform === 'win32' ? `${file}.cmd` : file
+        const { runnable } = await import('../src/harnesses.js')
+        const ask = (args, options) => {
+          const started = runnable(program, args, options.env)
+          return run(started.file, started.args, { ...started.options, ...options }).then(
+            ({ stdout }) => ({ stdout }),
+            (cause) => ({ code: cause.code, stdout: cause.stdout, stderr: cause.stderr }),
+          )
+        }
+        await fs.mkdir(env.HOME, { recursive: true })
+        return [
+          await ask(['--version'], { env: { ...env, CODEX_HOME: `${env.HOME}/.codex` } }),
+          await ask(['mcp', 'list', '--json'], { env, cwd: env.HOME }),
+        ]
+      },
+    }))
+    assert.deepEqual(records[0].settled[0].answer, [
+      { stdout: 'codex-cli 0.159.2\n' },
+      { code: 3, stdout: 'partial', stderr: 'no config\n' },
+    ])
+    assert.deepEqual(records[0].ran, [
+      {
+        program: 'codex',
+        args: ['--version'],
+        cwd: null,
+        env: [['CODEX_HOME', '$ROOT/home/.codex']],
+      },
+      { program: 'codex', args: ['mcp', 'list', '--json'], cwd: '$ROOT/home', env: [] },
+    ])
+    assert.equal(
+      records[0].tree.some((entry) => entry.path.endsWith('.ran')),
+      false,
+      'the log is no file of the scene',
+    )
   })
 })
 

@@ -15,7 +15,7 @@ use crate::seams::processes::{Child, Ending, Failed, Limits, Processes, Program,
 
 /// A program's name as a test names it: its executable's file name, the
 /// extension a Windows stand-in has taken off (`codex.cmd` is `codex`).
-fn name(program: &Program) -> String {
+pub fn name(program: &Program) -> String {
     let path = &program.executable;
     let script = path.extension().is_some_and(|extension| {
         ["cmd", "bat", "exe", "mjs"]
@@ -33,7 +33,7 @@ fn name(program: &Program) -> String {
 
 /// A program as a test names it: its name, then its arguments, a space
 /// between each (`codex --version`).
-fn named(program: &Program) -> String {
+pub fn named(program: &Program) -> String {
     std::iter::once(name(program))
         .chain(program.args.iter().cloned())
         .collect::<Vec<_>>()
@@ -69,8 +69,8 @@ pub struct ScriptedProcesses {
     runs: RefCell<HashMap<String, VecDeque<Result<String, Failed>>>>,
     every: RefCell<HashMap<String, Result<String, Failed>>>,
     children: RefCell<HashMap<String, VecDeque<ChildScript>>>,
-    ran: RefCell<Vec<String>>,
-    spawned: RefCell<Vec<String>>,
+    ran: RefCell<Vec<Program>>,
+    spawned: RefCell<Vec<(Program, Streams)>>,
     written: Rc<RefCell<Vec<String>>>,
 }
 
@@ -100,13 +100,15 @@ impl ScriptedProcesses {
             .push_back(script);
     }
 
-    /// Every program run to its end since the last time they were taken.
-    pub fn take_ran(&self) -> Vec<String> {
+    /// Every program run to its end since the last time they were taken,
+    /// as it was given.
+    pub fn take_ran(&self) -> Vec<Program> {
         std::mem::take(&mut self.ran.borrow_mut())
     }
 
-    /// Every child started since the last time they were taken.
-    pub fn take_spawned(&self) -> Vec<String> {
+    /// Every child started since the last time they were taken, as it was
+    /// given, with its streams.
+    pub fn take_spawned(&self) -> Vec<(Program, Streams)> {
         std::mem::take(&mut self.spawned.borrow_mut())
     }
 
@@ -136,14 +138,14 @@ fn missing(named: &str) -> String {
 
 impl Processes for ScriptedProcesses {
     fn run(&self, program: Program, _limits: Limits) -> Work<'_, Result<String, Failed>> {
-        let named = named(&program);
-        self.ran.borrow_mut().push(named.clone());
+        let (named, name) = (named(&program), name(&program));
+        self.ran.borrow_mut().push(program);
         let answer = self
             .runs
             .borrow_mut()
             .get_mut(&named)
             .and_then(VecDeque::pop_front)
-            .or_else(|| self.every.borrow().get(&name(&program)).cloned())
+            .or_else(|| self.every.borrow().get(&name).cloned())
             .unwrap_or_else(|| {
                 Err(Failed {
                     message: missing(&named),
@@ -155,7 +157,7 @@ impl Processes for ScriptedProcesses {
         Box::pin(async move { answer })
     }
 
-    fn spawn(&self, program: Program, _streams: Streams) -> Result<Box<dyn Child>, String> {
+    fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, String> {
         let named = named(&program);
         let script = self
             .children
@@ -163,7 +165,7 @@ impl Processes for ScriptedProcesses {
             .get_mut(&name(&program))
             .and_then(VecDeque::pop_front)
             .ok_or_else(|| missing(&named))?;
-        self.spawned.borrow_mut().push(named);
+        self.spawned.borrow_mut().push((program, streams));
         // One that ends by itself and says nothing has ended once started.
         let ended = script.ends == Ends::Itself && script.lines.is_empty();
         Ok(Box::new(ScriptedChild {

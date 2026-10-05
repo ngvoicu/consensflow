@@ -8,7 +8,7 @@ publish = false
 
 [dependencies]
 cf-base.workspace = true
-tokio = { workspace = true, features = ["io-util", "macros", "process", "time"] }
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "time"] }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

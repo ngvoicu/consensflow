@@ -73,13 +73,19 @@ pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Resu
         )
     })?;
     crate::job::adopt(&process);
+    // Read and let go while the child lives, whoever waits on it: one that
+    // fills its error stream would otherwise stop, as Node's never does.
+    let drained = process
+        .stderr
+        .take()
+        .map(|errors| tokio::spawn(drain(errors)));
     let exited = Rc::new(Cell::new(false));
     Ok(Child {
         pid: process.id(),
         input: RefCell::new(process.stdin.take()),
         output: RefCell::new(process.stdout.take().map(BufReader::new)),
         closing: RefCell::new(Some(Box::pin(closing(
-            process.stderr.take(),
+            drained,
             process,
             Rc::clone(&exited),
         )))),
@@ -88,17 +94,22 @@ pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Resu
     })
 }
 
-/// Until `process` has exited (then `exited` is set) and `errors` has
-/// closed, read and let go.
+/// Reads `errors` to its end, letting each byte go.
+async fn drain(mut errors: ChildStderr) {
+    let mut sink = [0; 4096];
+    while matches!(errors.read(&mut sink).await, Ok(count) if count > 0) {}
+}
+
+/// Until `process` has exited (then `exited` is set) and its error stream,
+/// drained apart, has closed.
 async fn closing(
-    errors: Option<ChildStderr>,
+    drained: Option<tokio::task::JoinHandle<()>>,
     mut process: tokio::process::Child,
     exited: Rc<Cell<bool>>,
 ) {
     let drain = async {
-        if let Some(mut errors) = errors {
-            let mut sink = [0; 4096];
-            while matches!(errors.read(&mut sink).await, Ok(count) if count > 0) {}
+        if let Some(drained) = drained {
+            let _ = drained.await;
         }
     };
     let wait = async {
@@ -370,6 +381,25 @@ mod tests {
             let closing = tokio::time::timeout(Duration::from_millis(300), child.closed()).await;
             assert!(closing.is_err(), "not closed while the stream is held");
             assert!(child.exited(), "the shell itself has exited");
+            child.closed().await;
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_quiet_child_s_errors_are_drained_while_nobody_waits_on_it() {
+        block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let done = dir.path().join("done");
+            // A megabyte to its error stream, far past what a pipe holds.
+            let script = format!(
+                "head -c 1000000 /dev/zero 1>&2; : > '{}'; exec sleep 30",
+                done.display()
+            );
+            let child = spawn(&shell(&script), None, &system_env(), Streams::Quiet).unwrap();
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            assert!(done.exists(), "it wrote its errors and went on");
+            child.terminate(Ending::Forced);
             child.closed().await;
         });
     }

@@ -268,7 +268,7 @@ fn ask(processes: &Rc<dyn Processes>, executable: &Path, args: &[&str], env: &En
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{Driver, ScriptedProcesses};
+    use crate::testing::{named, Driver, ScriptedProcesses};
 
     fn stand_in(dir: &Path, name: &str) -> PathBuf {
         let cli = dir.join(name);
@@ -298,7 +298,8 @@ mod tests {
             driver.run(),
             [(0, answer.clone()), (1, answer.clone()), (2, answer)]
         );
-        assert_eq!(scripted.take_ran(), ["codex --version"], "asked once");
+        let ran: Vec<String> = scripted.take_ran().iter().map(named).collect();
+        assert_eq!(ran, ["codex --version"], "asked once");
     }
 
     #[test]

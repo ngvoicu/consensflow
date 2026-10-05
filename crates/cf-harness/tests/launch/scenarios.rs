@@ -11,6 +11,7 @@
 //! step holds waits until a step releases it, and the work begun is run by
 //! hand until nothing moves.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -23,10 +24,11 @@ use cf_harness::contract::{
 use cf_harness::forget_launch;
 use cf_harness::launch;
 use cf_harness::seams::loopback::BodyFailed;
+use cf_harness::seams::processes::{Failed, Program, Streams};
 use cf_harness::seams::{Services, Time};
 use cf_harness::testing::{
-    fake_executable, route, Answer, ChildScript, Driver, Ends, Fakes, OtherProcess, ScriptedHost,
-    Sent, Served,
+    fake_executable, name, route, Answer, ChildScript, Driver, Ends, Fakes, OtherProcess,
+    ScriptedHost, Sent, Served,
 };
 use cf_proto::agents::Harness;
 use serde_json::{json, Map, Value};
@@ -161,6 +163,75 @@ fn answer(names: &Names, given: &Value) -> Answer {
         return Answer::Held;
     }
     Answer::Now(response(names, given))
+}
+
+/// The variables the system gives a child that its environment lacks, which
+/// no record of how a program was started names (`SYSTEM_VARS`,
+/// `runner.mjs`): libuv's on Windows, and the one macOS gives every process.
+const SYSTEM_VARS: [&str; 12] = [
+    "__CF_USER_TEXT_ENCODING",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "LOGONSERVER",
+    "PATH",
+    "SYSTEMDRIVE",
+    "SYSTEMROOT",
+    "TEMP",
+    "USERDOMAIN",
+    "USERNAME",
+    "USERPROFILE",
+    "WINDIR",
+];
+
+/// How a program was started, as Node's runner writes it down
+/// (`invocation`): its name, its arguments, its folder, and the variables
+/// its environment adds to or changes in the scenario's, a variable taken
+/// away `null`, each by name, the system's own left out. Windows' names are
+/// of no case, and written upper.
+fn invocation(scenario: &Map<String, Value>, program: &Program) -> Value {
+    let spelled = |name: &str| {
+        if cfg!(windows) {
+            name.to_ascii_uppercase()
+        } else {
+            name.to_owned()
+        }
+    };
+    let given: BTreeMap<String, String> = program
+        .env
+        .iter()
+        .map(|(name, value)| {
+            (
+                spelled(&name.to_string_lossy()),
+                value.to_string_lossy().into_owned(),
+            )
+        })
+        .collect();
+    let scenario: BTreeMap<String, &str> = scenario
+        .iter()
+        .map(|(name, value)| (spelled(name), value.as_str().unwrap()))
+        .collect();
+    let mut changed: BTreeMap<String, Value> = BTreeMap::new();
+    for (key, value) in &given {
+        if scenario.get(key) != Some(&value.as_str()) {
+            changed.insert(key.clone(), json!(value));
+        }
+    }
+    for key in scenario.keys() {
+        if !given.contains_key(key) {
+            changed.insert(key.clone(), Value::Null);
+        }
+    }
+    let env: Vec<Value> = changed
+        .into_iter()
+        .filter(|(key, _)| !SYSTEM_VARS.contains(&key.to_ascii_uppercase().as_str()))
+        .map(|(key, value)| json!([key, value]))
+        .collect();
+    json!({
+        "program": name(program),
+        "args": program.args,
+        "cwd": program.cwd.as_ref().map(|cwd| cwd.to_string_lossy().into_owned()),
+        "env": env,
+    })
 }
 
 /// A peer's answer as a scenario writes it: `{held: true}`, `{noHead:
@@ -551,11 +622,53 @@ fn pending(played: &Played) -> Vec<Value> {
         .collect()
 }
 
+/// A stand-in CLI that answers by its arguments (`standIn: {name,
+/// answers}`, `standIn` in `runner.mjs`): its file there to be found and
+/// probed, and what each answer says scripted, a failure in `execFile`'s
+/// sentence for the program Node runs: the stand-in itself, or on Windows
+/// Node and the stand-in's script (`$NODE`, as Node's runner writes it).
+fn stand_in(played: &mut Played, given: &Value) {
+    let name = given["name"].as_str().unwrap();
+    let file = path::join(&[&played.names.root, "bin", name]);
+    fake_executable(Path::new(&file));
+    for (args, answer) in given["answers"].as_object().into_iter().flatten() {
+        let answered = match answer {
+            Value::String(stdout) => Ok(stdout.clone()),
+            failure => {
+                let program = if cfg!(windows) {
+                    format!("$NODE {file}.mjs")
+                } else {
+                    file.clone()
+                };
+                let text = |field: &str| failure[field].as_str().unwrap_or_default().to_owned();
+                Err(Failed {
+                    message: format!("Command failed: {program} {args}\n{}", text("stderr")),
+                    code: Some(i32::try_from(failure["exit"].as_i64().unwrap_or(1)).unwrap()),
+                    killed: false,
+                    stdout: text("stdout"),
+                })
+            }
+        };
+        if args == "*" {
+            played.fakes.processes.every_answer(name, answered);
+        } else {
+            played
+                .fakes
+                .processes
+                .run_answer(&format!("{name} {args}"), answered);
+        }
+    }
+}
+
 /// Sets the root up as a step says: false for a step that is recorded.
 fn set_up(played: &mut Played, step: &Value) -> bool {
     let names = &played.names;
     if let Some(name) = step["executable"].as_str() {
         fake_executable(Path::new(&path::join(&[&names.root, "bin", name])));
+        return true;
+    }
+    if let Some(given) = step.get("standIn") {
+        stand_in(played, given);
         return true;
     }
     if step.get("write").is_some() {
@@ -695,7 +808,32 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
     if !fetches.is_empty() {
         fields.insert("fetches".to_owned(), json!(fetches));
     }
-    let spawned = played.fakes.processes.take_spawned();
+    // The stand-ins' runs, then the children started, as Node's runner
+    // writes them down.
+    let ran: Vec<Value> = played
+        .fakes
+        .processes
+        .take_ran()
+        .iter()
+        .map(|program| invocation(&played.env, program))
+        .collect();
+    if !ran.is_empty() {
+        fields.insert("ran".to_owned(), json!(ran));
+    }
+    let spawned: Vec<Value> = played
+        .fakes
+        .processes
+        .take_spawned()
+        .iter()
+        .map(|(program, streams)| {
+            let mut started = invocation(&played.env, program);
+            started["streams"] = json!(match streams {
+                Streams::Lines => "lines",
+                Streams::Quiet => "quiet",
+            });
+            started
+        })
+        .collect();
     if !spawned.is_empty() {
         fields.insert("spawned".to_owned(), json!(spawned));
     }

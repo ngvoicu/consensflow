@@ -63,7 +63,16 @@
  */
 import { AsyncLocalStorage, createHook } from 'node:async_hooks'
 import { EventEmitter } from 'node:events'
-import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  statSync,
+} from 'node:fs'
 import fs from 'node:fs/promises'
 import { createRequire, syncBuiltinESMExports } from 'node:module'
 import os from 'node:os'
@@ -73,7 +82,7 @@ import { cachedAnswers } from '../../../hosts/lib/completion.js'
 import { claudeCodeAdapter } from '../../../src/adapters/claude-code.js'
 import { piAdapter } from '../../../src/adapters/pi.js'
 import { forgetLaunch } from '../../../src/core/launch-files.js'
-import { fakeExecutable } from '../../helpers.mjs'
+import { fakeExecutable, fakeNodeExecutable } from '../../helpers.mjs'
 
 const require = createRequire(import.meta.url)
 const childProcess = require('node:child_process')
@@ -98,6 +107,27 @@ const TIMEOUT_MAX = 2 ** 31 - 1
  * none is used.
  */
 const MACHINE_WAITS = new Set(['FSREQCALLBACK', 'FSREQPROMISE', 'FILEHANDLECLOSEREQ', 'Immediate'])
+
+/**
+ * The variables the system gives a child that its environment lacks, which
+ * no record of how a program was started names, as Rust's scripted
+ * programs never see them: libuv's on Windows (`required_vars`), and the one
+ * macOS gives every process.
+ */
+const SYSTEM_VARS = new Set([
+  '__CF_USER_TEXT_ENCODING',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'LOGONSERVER',
+  'PATH',
+  'SYSTEMDRIVE',
+  'SYSTEMROOT',
+  'TEMP',
+  'USERDOMAIN',
+  'USERNAME',
+  'USERPROFILE',
+  'WINDIR',
+])
 
 const ADAPTERS = { 'claude-code': claudeCodeAdapter, pi: piAdapter }
 const WINDOWS = process.platform === 'win32'
@@ -372,7 +402,8 @@ function written(context, value) {
     return live === undefined ? value : live[0]
   }
   if (typeof value !== 'string') return value
-  let text = value.replaceAll(context.root, '$ROOT')
+  // Node itself, which runs a stand-in on Windows, is `$NODE`.
+  let text = value.replaceAll(context.root, '$ROOT').replaceAll(process.execPath, '$NODE')
   if (text.startsWith('$ROOT')) text = posix(text)
   // Half a surrogate pair is no text every JSON reader holds, and Rust's
   // strings never do: such a string is written as its UTF-16 code units.
@@ -534,6 +565,8 @@ function scriptedPeer(context) {
     }
     let controller
     let rest = null
+    // The body held, while it is: one its reader cancels leaves at once.
+    let held = null
     const stream = new ReadableStream({
       start: (made) => {
         controller = made
@@ -550,7 +583,10 @@ function scriptedPeer(context) {
         controller.close()
         over()
       },
-      cancel: over,
+      cancel: () => {
+        if (held !== null && bodies.includes(held)) drop(bodies, held)
+        over()
+      },
     })
     const body = answer.body
     if (typeof body === 'string') rest = new TextEncoder().encode(body)
@@ -571,6 +607,7 @@ function scriptedPeer(context) {
         },
       }
       bodies.push(entry)
+      held = entry
       signal?.addEventListener(
         'abort',
         () => {
@@ -604,9 +641,13 @@ function scriptedPeer(context) {
       )
       const signal = init.signal
       signal?.throwIfAborted()
-      const answer = left.get(route)?.shift()
-      if (answer === undefined || answer.noHead === true) throw failed()
+      // The request waits under its signal from here, whatever it comes to.
       const over = context.signals.hold(signal)
+      const answer = left.get(route)?.shift()
+      if (answer === undefined || answer.noHead === true) {
+        over()
+        throw failed()
+      }
       const work = context.als.getStore()
       if (answer.held !== true) return response(route, answer, signal, work, over)
       return new Promise((resolve, reject) => {
@@ -804,7 +845,17 @@ function scriptedChildren(context) {
       const failed = Object.assign(new Error(`spawn ${file} ENOENT`), { code: 'ENOENT' })
       const script = left.get(name)?.shift() ?? { missing: true, failed }
       const child = new ScriptedChild(context, script, options.stdio)
-      context.spawned.push([name, ...rest].join(' '))
+      const stdio = JSON.stringify(options.stdio ?? 'pipe')
+      const streams =
+        stdio === '["pipe","pipe","ignore"]'
+          ? 'lines'
+          : stdio === '["ignore","ignore","pipe"]'
+            ? 'quiet'
+            : stdio
+      context.spawned.push({
+        ...invocation(context, name, rest, options.cwd, options.env),
+        streams,
+      })
       started.push(child)
       return child
     },
@@ -825,6 +876,73 @@ function scriptedChildren(context) {
   }
 }
 
+/**
+ * How a program was started, as both runners write it down: its name, its
+ * arguments, its folder (none for the one this runs in), and the variables
+ * its environment adds to or changes in the scenario's (a variable taken
+ * away is `null`), each by name, libuv's own for Windows left out.
+ */
+function invocation(context, name, args, cwd, env) {
+  const given = env ?? context.env
+  const changed = []
+  for (const key of new Set([...Object.keys(context.env), ...Object.keys(given)])) {
+    if (SYSTEM_VARS.has(key.toUpperCase())) continue
+    const value = Object.hasOwn(given, key) ? given[key] : null
+    // Windows' names are of no case, and Rust's environment writes them upper.
+    if (value !== (context.env[key] ?? null))
+      changed.push([WINDOWS ? key.toUpperCase() : key, value])
+  }
+  changed.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+  return {
+    program: name,
+    args: [...args],
+    cwd: cwd === undefined || cwd === null || cwd === process.cwd() ? null : String(cwd),
+    env: changed,
+  }
+}
+
+/**
+ * A stand-in CLI that answers by its arguments and writes down how it was
+ * run (`standIn: {name, answers}`), the twin of Rust's `ScriptedProcesses`:
+ * `answers` maps the arguments, a space between, to what it writes to its
+ * output, or to how it fails (`{stdout, stderr, exit}`); `*` is any other.
+ * It runs as JavaScript, so on Windows its shim names it (`runnable`).
+ */
+function standIn(context, { name, answers }) {
+  const log = path.join(context.root, `${name}.ran`)
+  const source = `import { appendFileSync } from 'node:fs'
+const args = process.argv.slice(2)
+appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, cwd: process.cwd(), env: process.env }) + '\\n')
+const answers = ${JSON.stringify(answers ?? {})}
+const answer = answers[args.join(' ')] ?? answers['*'] ?? ''
+if (typeof answer === 'string') process.stdout.write(answer)
+else {
+  process.stdout.write(answer.stdout ?? '')
+  process.stderr.write(answer.stderr ?? '')
+  process.exitCode = answer.exit ?? 1
+}
+`
+  fakeNodeExecutable(path.join(context.root, 'bin', name), source)
+  context.standIns.push({ name, log })
+}
+
+/** The runs each stand-in wrote down since it was last asked, its log then gone. */
+function standInRuns(context) {
+  const runs = []
+  // A program's folder is its real path (`/private/var` for `/var` on macOS).
+  const real = realpathSync(context.root)
+  for (const { name, log } of context.standIns) {
+    if (!existsSync(log)) continue
+    for (const line of readFileSync(log, 'utf8').split('\n').filter(Boolean)) {
+      const { args, cwd, env } = JSON.parse(line)
+      const folder = cwd.startsWith(real) ? context.root + cwd.slice(real.length) : cwd
+      runs.push(invocation(context, name, args, folder, env))
+    }
+    rmSync(log)
+  }
+  return runs
+}
+
 /** A live process of the scenario's own besides this one: `$OTHER`. */
 function startOther() {
   return WINDOWS
@@ -836,6 +954,10 @@ function startOther() {
 async function setUp(context, step) {
   if (step.executable !== undefined) {
     fakeExecutable(path.join(context.root, 'bin', step.executable))
+    return true
+  }
+  if (step.standIn !== undefined) {
+    standIn(context, step.standIn)
     return true
   }
   if (step.write !== undefined) {
@@ -1038,6 +1160,7 @@ async function record(context, index, step) {
     begin(context, index, step)
   }
   await settleDown(context)
+  const ran = standInRuns(context)
   const settled = context.work
     .filter((entry) => entry.settled !== null)
     .map((entry) => ({ ...entry.settled, op: entry.op }))
@@ -1053,6 +1176,7 @@ async function record(context, index, step) {
     pending: pending(context),
     requests: context.requests,
     ...(context.fetches.length > 0 ? { fetches: context.fetches } : {}),
+    ...(ran.length > 0 ? { ran } : {}),
     ...(context.spawned.length > 0 ? { spawned: context.spawned } : {}),
     ...(context.written.length > 0 ? { written: context.written } : {}),
     ...(unused.length > 0 ? { unused } : {}),
@@ -1077,6 +1201,7 @@ export async function play(scenario, adapters = ADAPTERS) {
     fetches: [],
     spawned: [],
     written: [],
+    standIns: [],
     draws: [],
     ports: Array.from({ length: 100 }, (_, index) => 41_000 + index),
     // A scripted child's pid, none a live process has (`DEAD` and on).

@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::task::{Context, Poll};
 
 use super::polling;
@@ -139,29 +139,46 @@ pub fn route(request: &Request) -> String {
     format!("{method} {path}")
 }
 
-/// A held answer, once given.
-struct Slot<T>(Hold<T>);
+/// A held answer, once given. One let go unanswered (its request's timer
+/// fired first) leaves its queue, so a release answers what still waits.
+struct Slot<T> {
+    hold: Hold<T>,
+    queue: Weak<RefCell<VecDeque<Held<T>>>>,
+}
 
 impl<T> Future for Slot<T> {
     type Output = T;
 
     fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<T> {
-        match self.0.borrow_mut().take() {
+        match self.hold.borrow_mut().take() {
             Some(answer) => Poll::Ready(answer),
             None => Poll::Pending,
         }
     }
 }
 
+impl<T> Drop for Slot<T> {
+    fn drop(&mut self) {
+        if let Some(queue) = self.queue.upgrade() {
+            queue
+                .borrow_mut()
+                .retain(|held| !Rc::ptr_eq(&held.hold, &self.hold));
+        }
+    }
+}
+
 /// A held thing for the work polled now.
-fn hold<T>(held: &RefCell<VecDeque<Held<T>>>, route: &str) -> Slot<T> {
+fn hold<T>(held: &Rc<RefCell<VecDeque<Held<T>>>>, route: &str) -> Slot<T> {
     let slot = Rc::new(RefCell::new(None));
     held.borrow_mut().push_back(Held {
         route: route.to_owned(),
         work: polling(),
         hold: Rc::clone(&slot),
     });
-    Slot(slot)
+    Slot {
+        hold: slot,
+        queue: Rc::downgrade(held),
+    }
 }
 
 impl Loopback for ScriptedLoopback {
@@ -268,6 +285,33 @@ mod tests {
         let asked = peer.take_asked();
         assert_eq!(asked[0].url, "http://127.0.0.1:41000/session?directory=a+b");
         assert_eq!(asked.len(), 3);
+    }
+
+    #[test]
+    fn a_request_let_go_unanswered_leaves_and_a_release_answers_the_one_that_waits() {
+        let peer = Rc::new(ScriptedLoopback::default());
+        peer.serve("GET /global/health", [Served::Held, Served::Held]);
+        let first = peer.send(get("/global/health"));
+        drop(first);
+        assert!(peer.heads.borrow().is_empty(), "the abandoned one left");
+        let mut driver = Driver::default();
+        let asking = Rc::clone(&peer);
+        driver.begin(1, async move {
+            asking
+                .send(get("/global/health"))
+                .await
+                .map(|reply| reply.status())
+        });
+        assert!(driver.run().is_empty());
+        assert_eq!(peer.waits(1), ["GET /global/health"]);
+        assert!(peer.release(
+            "GET /global/health",
+            Served::Head {
+                status: 204,
+                body: Sent::Now(Vec::new())
+            }
+        ));
+        assert_eq!(driver.run(), [(1, Ok(204))]);
     }
 
     #[test]
