@@ -14,7 +14,12 @@ import { record } from './trace.mjs'
 
 export * from '../../../../src/core/dispatcher.js'
 
-/** The engine's operations a trace marks where they begin: the human's, a pass, an exit. */
+/**
+ * The engine's operations a trace marks where the test calls them: the
+ * human's, a pass. What the engine calls of its own (an exit it settles in
+ * place, a resume inside the restart, every exit the host sends) is its
+ * insides, which its effects say, and is not marked.
+ */
 const OPERATIONS = [
   'openProject',
   'resumeProject',
@@ -38,13 +43,29 @@ const SETUP = new Set(['onExit'])
 export class Dispatcher extends Engine {
   constructor(options) {
     super(seams(options))
-    for (const name of OPERATIONS) {
-      const operation = Engine.prototype[name]
-      this[name] = (...args) => {
-        record({ op: name, args: encode(args) })
-        return operation.apply(this, args)
-      }
-    }
+    // The test holds this proxy; the engine holds itself, so its calls of its
+    // own operations go unmarked. What the test sets on it (a wrapper of an
+    // operation) is the test's, kept apart where the engine never reads it;
+    // a method is bound to the engine, whose private fields a proxy would not
+    // reach.
+    const set = new Map()
+    return new Proxy(this, {
+      get(target, property) {
+        if (set.has(property)) return set.get(property)
+        const value = Reflect.get(target, property, target)
+        if (OPERATIONS.includes(property)) {
+          return (...args) => {
+            record({ op: property, args: encode(args) })
+            return value.apply(target, args)
+          }
+        }
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+      set(_target, property, value) {
+        set.set(property, value)
+        return true
+      },
+    })
   }
 }
 

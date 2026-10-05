@@ -4,7 +4,8 @@
 //!
 //! Both sides are read through one projection, which keeps what is the
 //! engine's behaviour and drops what is how it got there:
-//! - kept: where each of the engine's operations begins (by name); each
+//! - kept: where each operation the test calls begins (by name; the
+//!   engine's calls of its own operations are its insides, unmarked); each
 //!   event the ledger logs, whole; each call of the pane host, with what it
 //!   was given and answered; each call of an adapter by its method and what
 //!   names it (the launch, the message, the text, the conversation resumed or

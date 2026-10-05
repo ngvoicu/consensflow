@@ -89,10 +89,6 @@ impl FakeHost {
         let Some(engine) = engine else {
             return;
         };
-        self.recorder.op(
-            "paneExited",
-            json!([{ "id": pane.id, "generation": pane.generation }]),
-        );
         if let Some(rest) = engine.pane_exited(pane) {
             rest.await;
         }
