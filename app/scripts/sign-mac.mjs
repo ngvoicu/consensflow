@@ -42,8 +42,12 @@ const SECRETS = [
   'APPLE_API_KEY_ID',
   'APPLE_API_ISSUER',
 ]
-/** How long one notarization may take before the release gives up on it. */
-const NOTARY_WAIT = '20m'
+/**
+ * How long one notarization may take before the release gives up on it. The
+ * notary answers most in minutes, but a new team's first submission sat in
+ * Apple's queue past 20 (2026-10-05).
+ */
+const NOTARY_WAIT = '60m'
 const THIN = new Set([0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe])
 const UNIVERSAL = new Set([0xcafebabe, 0xcafebabf])
 
