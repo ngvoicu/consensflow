@@ -16,7 +16,7 @@ use super::agent_row::{effort_key, AgentRow};
 use super::document::{load_document, Document};
 use super::save::save_document;
 use crate::presets::Preset;
-use crate::{harness_for_kind, validate_work_tier, Catalog};
+use crate::{validate_work_tier, Catalog, Harness};
 
 impl Catalog {
     /// Edits the agent named `name` in the file at `path` by `patch`, and
@@ -43,7 +43,7 @@ impl Catalog {
         {
             let row = &mut document.agents_mut()[at];
             if patch.contains_key("effort")
-                && (row.kind().and_then(harness_for_kind).is_none()
+                && (row.kind().and_then(Harness::from_kind).is_none()
                     || row.get("designer") == Some(&Value::Bool(true)))
             {
                 return Err(refuse_effort_edit(name, row));

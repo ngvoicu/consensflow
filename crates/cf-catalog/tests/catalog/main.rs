@@ -8,9 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use cf_catalog::{
-    efforts, Catalog, CatalogEntry, FoundEntry, Harness, Preset, Settings, WorkTier, HARNESSES,
-};
+use cf_catalog::{efforts, Catalog, CatalogEntry, FoundEntry, Harness, Preset, Settings, WorkTier};
 
 mod catalog_presentation_follows_actual_model_and_effort;
 mod every_tool_ships_a_list_of_ready_made_agents;
@@ -70,12 +68,14 @@ fn is_agent_name(name: &str) -> bool {
 fn ships_nothing_for_kimi_code_which_consensflow_does_not_run() {
     // Kimi is no harness of the build: it has no group, no efforts, and no preset of its kind.
     let catalog = catalog();
-    assert!(HARNESSES.iter().all(|harness| harness.as_str() != "kimi"));
+    assert!(Harness::ALL
+        .iter()
+        .all(|harness| harness.as_str() != "kimi"));
     assert!(catalog
         .groups()
         .iter()
         .all(|group| group.harness.as_str() != "kimi"));
-    assert_eq!(cf_catalog::harness_for_kind("kimi"), None);
+    assert_eq!(Harness::from_kind("kimi"), None);
     assert!(catalog.presets().iter().all(|preset| preset.kind != "kimi"));
     assert_eq!(catalog.entry("ilmarinen"), None);
 }

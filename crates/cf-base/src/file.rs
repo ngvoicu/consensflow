@@ -7,8 +7,9 @@
 //! - `error`: a failed file operation, said as Node's error says it;
 //! - `write`: a file written whole, each step's failure said.
 
-use std::fs::{File, Metadata};
+use std::fs::{self, File, Metadata};
 use std::io;
+use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 mod errno;
@@ -49,6 +50,51 @@ pub fn identity(file: &File) -> io::Result<Identity> {
     })
 }
 
+/// What Node's `fs.stat` says of a path: which file it names, how long it
+/// is, and when it was last written. It reads the file's attributes, never
+/// its bytes, so a file the user may not read is stated all the same.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Stat {
+    pub identity: Identity,
+    pub size: u64,
+    pub mtime_ms: f64,
+}
+
+/// `fs.stat(path)`, following a link as it does.
+#[cfg(unix)]
+pub fn stat(path: &Path) -> io::Result<Stat> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = fs::metadata(path)?;
+    Ok(Stat {
+        identity: Identity {
+            volume: metadata.dev(),
+            index: metadata.ino(),
+        },
+        size: metadata.len(),
+        mtime_ms: mtime_ms(&metadata)?,
+    })
+}
+
+/// `fs.stat(path)`, following a link as it does: the path opened as
+/// libuv's stat opens it, for its attributes alone, a folder too.
+#[cfg(windows)]
+pub fn stat(path: &Path) -> io::Result<Stat> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_READ_ATTRIBUTES,
+    };
+    let file = fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    Ok(Stat {
+        identity: identity(&file)?,
+        size: metadata.len(),
+        mtime_ms: mtime_ms(&metadata)?,
+    })
+}
+
 /// When the file was last written, as Node's `mtimeMs` computes it:
 /// seconds times a thousand plus nanoseconds over a million, so the two
 /// read the same double.
@@ -85,6 +131,34 @@ mod tests {
         std::fs::write(&beside, "other\n").unwrap();
         std::fs::rename(&beside, &path).unwrap();
         assert_ne!(identity(&File::open(&path).unwrap()).unwrap(), first);
+    }
+
+    #[test]
+    fn a_stat_says_what_an_open_file_says_without_opening_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("record.jsonl");
+        std::fs::write(&path, "one\n").unwrap();
+        let file = File::open(&path).unwrap();
+        let stated = stat(&path).unwrap();
+        assert_eq!(stated.identity, identity(&file).unwrap());
+        assert_eq!(stated.size, 4);
+        assert_eq!(
+            stated.mtime_ms,
+            mtime_ms(&file.metadata().unwrap()).unwrap()
+        );
+        assert!(stat(&dir.path().join("none")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_the_user_may_not_read_is_stated_all_the_same() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("record.jsonl");
+        std::fs::write(&path, "one\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        assert_eq!(stat(&path).unwrap().size, 4);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
     }
 
     #[test]

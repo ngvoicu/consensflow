@@ -21,7 +21,7 @@ mod roster;
 
 use std::collections::BTreeMap;
 
-pub use catalog::{efforts, harness_for_kind, Group, HARNESSES};
+pub use catalog::{efforts, Group};
 pub use cf_proto::agents::{
     AgentView, CatalogEntry, FoundEntry, Harness, Preferences, Profile, WorkTier, WorkTierInfo,
 };

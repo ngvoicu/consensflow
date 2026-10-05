@@ -424,8 +424,12 @@ dependencies = [
  "cf-base",
  "cf-proto",
  "flate2",
+ "jiff",
+ "regex",
+ "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 
@@ -1921,6 +1925,7 @@ dependencies = [
  "defmt",
  "jiff-core",
  "jiff-static",
+ "jiff-tzdb",
  "jiff-tzdb-platform",
  "log",
  "portable-atomic",

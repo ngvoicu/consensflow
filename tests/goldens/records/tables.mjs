@@ -254,6 +254,14 @@ function collationTable() {
     'prt_0',
     'prt_Z',
     'prt_z',
+    // Pairs a locale's collation tailors where root's does not: Danish and
+    // Norwegian `aa` after `z`, Lithuanian `y` before `j`, Hungarian `cs`.
+    'aa',
+    'z',
+    'y',
+    'j',
+    'cs',
+    'cz',
     '',
     ' ',
     'a b',
@@ -269,6 +277,34 @@ function collationTable() {
     pairs: words.map((left) =>
       words.map((right) => ['<', '=', '>'][sign(left, right) + 1]).join(''),
     ),
+  }
+}
+
+/**
+ * Throws unless this process's `localeCompare` orders ASCII as ICU's root
+ * does, as `localeCompare(…, 'en')` does: the goldens, and the Rust readers,
+ * hold root's order. A locale may tailor letters alone or pairs of them
+ * (Norwegian, Czech and Hungarian tailor pairs only), and may ignore
+ * punctuation (Thai ignores `_`), so every one- and two-character string of
+ * printable ASCII is sorted as root sorts it, and each neighbour compared
+ * both ways: two collations that agree on every neighbour, ties too, are one
+ * order there.
+ */
+export function refuseTailoredCollation() {
+  const printable = Array.from({ length: 95 }, (_, code) => String.fromCharCode(code + 32))
+  const strings = [
+    ...printable,
+    ...printable.flatMap((left) => printable.map((right) => left + right)),
+  ].sort((left, right) => left.localeCompare(right, 'en'))
+  const tailored = strings.slice(1).some((right, at) => {
+    const left = strings[at]
+    return Math.sign(left.localeCompare(right)) !== Math.sign(left.localeCompare(right, 'en'))
+  })
+  if (tailored) {
+    const locale = new Intl.Collator().resolvedOptions().locale
+    throw new Error(
+      `this process collates as ${locale}, which orders ASCII as root does not: unset LC_ALL, LC_MESSAGES and LANG first`,
+    )
   }
 }
 

@@ -10,7 +10,7 @@ mod search;
 mod terminate;
 
 pub use runnable::{runnable, Run};
-pub use search::{on_path, on_windows};
+pub use search::on_path;
 pub use terminate::{terminate, Ending};
 
 use std::ffi::{OsStr, OsString};

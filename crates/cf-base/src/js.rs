@@ -2,15 +2,23 @@
 //! on them: a JSON value written into a template literal, tested for truth,
 //! joined, written by `JSON.stringify`; a number written as `String` writes
 //! it; text trimmed, read as a number, or ordered as `localeCompare` orders
-//! it. A port that reads a value the way the Node code did says what Node
-//! said.
+//! it; a JSON value read as `Number(value)` reads it. A port that reads a
+//! value the way the Node code did says what Node said.
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
-/// `value` as `${value}` wrote it; `None` is a field that was not there.
+use crate::json::array_index;
+
+mod to_number;
+
+pub use to_number::to_number;
+
+/// `value` as `${value}` wrote it; `None` is a field that was not there. For
+/// a value that may hold an object with a `toString` of its own, where
+/// JavaScript threw, see [`string`].
 pub fn text(value: Option<&Value>) -> Cow<'_, str> {
     match value {
         None => Cow::Borrowed("undefined"),
@@ -20,6 +28,26 @@ pub fn text(value: Option<&Value>) -> Cow<'_, str> {
         Some(Value::Object(_)) => Cow::Borrowed("[object Object]"),
         Some(Value::Number(number)) => Cow::Owned(number_text(number.as_f64().unwrap_or(f64::NAN))),
         Some(Value::Bool(flag)) => Cow::Borrowed(if *flag { "true" } else { "false" }),
+    }
+}
+
+/// `String(value)`, and `${value}`, or why JavaScript threw instead. An
+/// object with a `toString` of its own, which JSON can make only something
+/// that is no function, has no way to be text: V8 throws `Cannot convert
+/// object to primitive value`. So does a list that holds one at any depth,
+/// whose `join` makes each item text.
+pub fn string(value: Option<&Value>) -> Result<Cow<'_, str>, String> {
+    if value.is_some_and(holds_its_own_to_string) {
+        return Err("an object with a toString of its own cannot be made text".to_owned());
+    }
+    Ok(text(value))
+}
+
+fn holds_its_own_to_string(value: &Value) -> bool {
+    match value {
+        Value::Object(fields) => fields.contains_key("toString"),
+        Value::Array(items) => items.iter().any(holds_its_own_to_string),
+        _ => false,
     }
 }
 
@@ -70,9 +98,11 @@ pub fn number_text(number: f64) -> String {
     format!("{sign}{written}")
 }
 
-/// `value` as `JSON.stringify(value)` writes it: no white space, keys in
-/// their order, every number as JavaScript writes it (`2` for `2.0`, and an
-/// integer past 2^53 as the double it reads as).
+/// `value` as `JSON.stringify(value)` writes it: no white space, each
+/// object's keys in the order JavaScript enumerates them (those that are
+/// array indices first, ascending, then the others as they are held), every
+/// number as JavaScript writes it (`2` for `2.0`, and an integer past 2^53
+/// as the double it reads as).
 pub fn stringify(value: &Value) -> String {
     let mut written = String::new();
     write_json(value, "", 0, &mut written);
@@ -125,7 +155,7 @@ fn write_json(value: &Value, indent: &str, depth: usize, written: &mut String) {
         }
         Value::Object(fields) => {
             written.push('{');
-            for (at, (key, item)) in fields.iter().enumerate() {
+            for (at, (key, item)) in enumerated(fields).into_iter().enumerate() {
                 if at > 0 {
                     written.push(',');
                 }
@@ -143,6 +173,19 @@ fn write_json(value: &Value, indent: &str, depth: usize, written: &mut String) {
             written.push('}');
         }
     }
+}
+
+/// An object's fields in the order JavaScript enumerates them: the keys
+/// that are array indices first, ascending, then the others as held. An
+/// object Node parsed or built enumerates so, whatever order serde_json
+/// read its text in.
+fn enumerated(fields: &Map<String, Value>) -> Vec<(&String, &Value)> {
+    let mut entries: Vec<_> = fields.iter().collect();
+    if entries.iter().any(|(key, _)| array_index(key).is_some()) {
+        // A stable sort: the other keys keep their order behind the indices.
+        entries.sort_by_key(|(key, _)| array_index(key).map_or((1, 0), |index| (0, index)));
+    }
+    entries
 }
 
 /// ASCII in the order ICU's root collation sorts it at its first level,
@@ -174,6 +217,13 @@ fn collation_weights(character: char) -> Option<(u32, u32)> {
 /// digits before letters), then its third (a lowercase letter before its
 /// capital). Beyond ASCII it orders by code point, where ICU would weigh
 /// each script: no id ConsensFlow sorts holds such a character.
+///
+/// Node collated by the process's locale (`LC_ALL`, else `LC_MESSAGES`,
+/// else `LANG`), and some tailor ASCII: Danish and Norwegian put `aa` after
+/// `z`, Lithuanian `y` before `j`, and Danish a capital before its small
+/// letter. This is root's order on every machine: a difference kept on
+/// purpose, with Calliope, since what it sorts are ids, words of no
+/// language.
 pub fn locale_compare(left: &str, right: &str) -> Ordering {
     let weights = |text: &str| {
         text.chars()
@@ -253,26 +303,60 @@ pub fn number(text: &str) -> f64 {
         .map_or(f64::NAN, |value| sign * value)
 }
 
-/// `0x10`, `0o7`, `0b11`: unsigned numbers in another radix.
+/// `0x10`, `0o7`, `0b11`: unsigned numbers in another radix, as V8 reads
+/// them (`InternalStringToIntDouble`): exact to 53 bits, then rounded once to
+/// the nearest double, the even one of two as near, every digit after the
+/// 53 bits weighed.
 fn radix_number(text: &str) -> Option<f64> {
-    let radix = match text.get(..2)? {
-        "0x" | "0X" => 16,
-        "0o" | "0O" => 8,
-        "0b" | "0B" => 2,
+    let bits = match text.get(..2)? {
+        "0x" | "0X" => 4,
+        "0o" | "0O" => 3,
+        "0b" | "0B" => 1,
         _ => return None,
     };
+    let radix = 1 << bits;
     let digits = &text[2..];
     if digits.is_empty() || !digits.chars().all(|digit| digit.is_digit(radix)) {
         return Some(f64::NAN);
     }
-    Some(
-        digits
-            .chars()
-            .filter_map(|digit| digit.to_digit(radix))
-            .fold(0.0, |value, digit| {
-                value * f64::from(radix) + f64::from(digit)
-            }),
-    )
+    let mut digits = digits
+        .chars()
+        .filter_map(|digit| digit.to_digit(radix))
+        .map(u64::from)
+        .skip_while(|digit| *digit == 0);
+    let mut number: u64 = 0;
+    let mut exponent: i32 = 0;
+    while let Some(digit) = digits.next() {
+        number = number * u64::from(radix) + digit;
+        let over = number >> 53;
+        if over == 0 {
+            continue;
+        }
+        // Past 53 bits: the bits over them are dropped, and decide the rounding
+        // with every digit after them.
+        let dropped_bits = 64 - over.leading_zeros();
+        let dropped = number & ((1 << dropped_bits) - 1);
+        number >>= dropped_bits;
+        exponent = i32::try_from(dropped_bits).ok()?;
+        let mut zero_tail = true;
+        for digit in digits.by_ref() {
+            zero_tail &= digit == 0;
+            exponent += bits;
+        }
+        let half = 1 << (dropped_bits - 1);
+        if dropped > half || (dropped == half && (number & 1 == 1 || !zero_tail)) {
+            number += 1;
+        }
+        if number >> 53 != 0 {
+            number >>= 1;
+            exponent += 1;
+        }
+        break;
+    }
+    // Under 2^53, the number is a double as it is; a power of two scales it
+    // exactly, or past the largest double, to infinity.
+    #[allow(clippy::cast_precision_loss)]
+    Some(number as f64 * 2_f64.powi(exponent))
 }
 
 /// Digits with an optional fraction and exponent: `5`, `5.`, `.5`, `1e1`.
@@ -365,6 +449,38 @@ mod tests {
     }
 
     #[test]
+    fn a_value_is_text_as_string_makes_it_or_fails_where_v8_threw() {
+        let made = |value: Value| string(Some(&value)).map(Cow::into_owned);
+        // Node: String(JSON.parse(text)) for each.
+        assert_eq!(made(json!([1, [2, null], "x"])).unwrap(), "1,2,,x");
+        assert_eq!(made(json!({ "valueOf": 1 })).unwrap(), "[object Object]");
+        assert_eq!(string(None).unwrap(), "undefined");
+        for thrown in [
+            json!({ "toString": null }),
+            json!({ "toString": "x" }),
+            json!([1, [{ "toString": 0 }]]),
+        ] {
+            assert!(made(thrown.clone()).is_err(), "{thrown}");
+        }
+    }
+
+    #[test]
+    fn writes_keys_that_are_array_indices_first_whatever_order_they_were_read_in() {
+        let read = |text: &str| serde_json::from_str::<Value>(text).unwrap();
+        // Node: JSON.stringify(JSON.parse(text)).
+        assert_eq!(
+            stringify(&read(
+                r#"{"b":1,"10":2,"a":{"z":0,"2":1,"1":2},"01":3,"4294967295":4,"4294967294":5}"#
+            )),
+            r#"{"10":2,"4294967294":5,"b":1,"a":{"1":2,"2":1,"z":0},"01":3,"4294967295":4}"#
+        );
+        assert_eq!(
+            stringify_indented(&read(r#"{"b":1,"0":2}"#), 1),
+            "{\n \"0\": 2,\n \"b\": 1\n}"
+        );
+    }
+
+    #[test]
     fn orders_ascii_as_locale_compare_did() {
         fn sorted<'a>(words: &[&'a str]) -> Vec<&'a str> {
             let mut words = words.to_vec();
@@ -454,6 +570,44 @@ mod tests {
             "inf", "nan", "1_000", "5x", "0x", "+0x10", "1e", ".", "+-5", "\u{663}",
         ] {
             assert!(number(written).is_nan(), "{written:?} is no number");
+        }
+    }
+
+    #[test]
+    fn a_number_in_another_radix_is_rounded_once_as_v8_rounds_it() {
+        // Node 26's `String(Number(text))`.
+        let f = |count: usize| "f".repeat(count);
+        let cases = [
+            (format!("0b1{}101", "0".repeat(52)), "36028797018963976"),
+            ("0x1fffffffffffff".to_owned(), "9007199254740991"),
+            // Half way: to the even one.
+            ("0x20000000000001".to_owned(), "9007199254740992"),
+            ("0x20000000000003".to_owned(), "9007199254740996"),
+            // Half way but for a digit far after: up.
+            (
+                "0x200000000000010000000000000001".to_owned(),
+                "1.6615349947311452e+35",
+            ),
+            (
+                format!("0x20000000000001{}", "0".repeat(40)),
+                "1.3164036458569648e+64",
+            ),
+            (format!("0x{}", f(256)), "Infinity"),
+            (format!("0x{}7", f(255)), "Infinity"),
+            (format!("0x{}", f(300)), "Infinity"),
+            (format!("0o{}", "7".repeat(30)), "1.2379400392853803e+27"),
+            (format!("0o1{}1", "0".repeat(20)), "9223372036854776000"),
+            ("0X000".to_owned(), "0"),
+            ("0b0".to_owned(), "0"),
+            (
+                format!("0x{}1fffffffffffff8", "0".repeat(40)),
+                "144115188075855870",
+            ),
+            (format!("0B{}", "1".repeat(55)), "36028797018963970"),
+            ("0x12AbCdEf".to_owned(), "313249263"),
+        ];
+        for (written, read) in cases {
+            assert_eq!(number_text(number(&written)), read, "{written}");
         }
     }
 }

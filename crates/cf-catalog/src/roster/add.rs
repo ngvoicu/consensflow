@@ -14,7 +14,7 @@ use serde_json::{Map, Value};
 use super::agent_row::{effort_key, AgentRow};
 use super::document::load_document;
 use super::save::save_document;
-use crate::{validate_work_tier, Catalog, HARNESSES};
+use crate::{validate_work_tier, Catalog};
 
 impl Catalog {
     /// Adds the agent `input` defines to the file at `path`, and answers it
@@ -105,7 +105,7 @@ impl Catalog {
             _ => None,
         };
         let Some(harness) = harness else {
-            let expected: Vec<&str> = HARNESSES.into_iter().map(Harness::as_str).collect();
+            let expected: Vec<&str> = Harness::ALL.into_iter().map(Harness::as_str).collect();
             return Err(Refusal::new(
                 "agent-harness",
                 format!(
