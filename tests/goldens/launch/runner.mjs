@@ -16,7 +16,7 @@
  *   (`{held: true}`), for the pane `p1-zeus` of generation 1 unless the
  *   step names its `pane`, a peer on loopback that answers each `fetch`
  *   by its route as the step scripts it (`served`, `scriptedPeer`), and the
- *   programs `spawn` starts (`children`, `scriptedChildren`);
+ *   programs `spawn` starts (`children`, `scriptedChildren`), a prepare's too;
  * - `release` answers a held host request (`release: op, answer`), a held
  *   fetch (`release: 'GET /session', answer`) or a held look
  *   (`release: 'look'`); `releaseBody` ends a held body (`releaseBody:
@@ -55,10 +55,12 @@
  * Rust never does.
  *
  * A step's record is written so that it is the same on every run: every
- * path under the root is `$ROOT/…`, and so is the bundle's `bin` (the
- * checkout's own, where a window's `cf` is), as `$ROOT/bundle/bin`, where
- * Rust's fakes put theirs (`crates/cf-harness/src/testing`); the process
- * this runs as is `$PID`,
+ * path under the root is `$ROOT/…` (the root is as the system names it, so
+ * a folder's real name is under it too), in a file URL, a URL's query and
+ * JSON text as well; so is the bundle's `bin` (the checkout's own, where a
+ * window's `cf` is), as `$ROOT/bundle/bin`, where Rust's fakes put theirs
+ * (`crates/cf-harness/src/testing`); the hash that names OpenCode's bundle is
+ * `$HASH`, Node itself `$NODE`; the process this runs as is `$PID`,
  * one long dead `$DEAD`, a second live one a scenario names `$OTHER`; and
  * it lists the work that settled (its step, and what it answered or
  * threw), the work still waiting, the requests asked of the host and, when
@@ -77,11 +79,13 @@ import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { PassThrough } from 'node:stream'
+import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { cachedAnswers } from '../../../hosts/lib/completion.js'
 import { claudeCodeAdapter } from '../../../src/adapters/claude-code.js'
 import { codexAdapter } from '../../../src/adapters/codex.js'
 import { devinAdapter } from '../../../src/adapters/devin.js'
+import { openCodeAdapter } from '../../../src/adapters/opencode.js'
 import { piAdapter } from '../../../src/adapters/pi.js'
 import { forgetLaunch } from '../../../src/core/launch-files.js'
 import { BUNDLE_BIN } from '../../../src/core/pane-cf.js'
@@ -115,6 +119,7 @@ const ADAPTERS = {
   'claude-code': claudeCodeAdapter,
   codex: codexAdapter,
   devin: devinAdapter,
+  opencode: openCodeAdapter,
   pi: piAdapter,
 }
 const WINDOWS = process.platform === 'win32'
@@ -373,6 +378,35 @@ function realText(context, text) {
   return filled
 }
 
+/**
+ * The ways the root reads in the text a step records besides as itself: as a
+ * file URL, as JSON writes it (Windows' backslashes escaped), and as a URL's
+ * query holds it (`encodeURIComponent`; that with the parser's `%27` for a
+ * quote; and a form's, with `+` for a space).
+ */
+function rootForms(root) {
+  const component = encodeURIComponent(root)
+  return {
+    fileUrl: pathToFileURL(root).href,
+    plain: [
+      root,
+      JSON.stringify(root).slice(1, -1),
+      component,
+      component.replaceAll("'", '%27'),
+      new URLSearchParams({ d: root }).toString().slice(2),
+    ],
+  }
+}
+
+/**
+ * OpenCode's bundle is named by the hash of its files and of its generated
+ * `tui.json`, which names the folder it is published in, the root among its
+ * parents: the hash is not the same in two runs, and is written `$HASH`.
+ * (Its being what Node makes of those files is held where the bundle is,
+ * `shared::private_bundle`.)
+ */
+const BUNDLE_HASH = /(extensions[\\/]opencode[\\/])[0-9a-f]{64}/g
+
 /** What a step recorded, with the root and the live processes written as the scenario writes them. */
 function written(context, value) {
   if (Array.isArray(value)) return value.map((item) => written(context, item))
@@ -392,13 +426,16 @@ function written(context, value) {
     return live === undefined ? value : live[0]
   }
   if (typeof value !== 'string') return value
+  let text = value.replaceAll(context.rootForms.fileUrl, 'file://$ROOT')
+  for (const form of context.rootForms.plain) text = text.replaceAll(form, '$ROOT')
   // Node itself, which runs a stand-in on Windows, is `$NODE`.
-  let text = value.replaceAll(context.root, '$ROOT').replaceAll(process.execPath, '$NODE')
+  text = text.replaceAll(process.execPath, '$NODE')
   // The bundle's `bin` as a window names its `cf`, and as a path of it is spelled.
   for (const bin of new Set([BUNDLE_BIN, BUNDLE_BIN.replaceAll('\\', '/')])) {
     text = text.replaceAll(bin, '$ROOT/bundle/bin')
   }
   if (text.startsWith('$ROOT')) text = posix(text)
+  text = text.replace(BUNDLE_HASH, '$1$$HASH')
   // Half a surrogate pair is no text every JSON reader holds, and Rust's
   // strings never do: such a string is written as its UTF-16 code units.
   if (!text.isWellFormed()) {
@@ -537,8 +574,10 @@ const NULL_BODY = new Set([101, 204, 205, 304])
  * `ScriptedLoopback` (`crates/cf-harness/src/testing/peer.rs`): `fetch`
  * answered by its route (`GET /session`: the method and the URL's path)
  * with the next answer scripted for it (`served`): a head at once
- * (`{status, body}`, the body its text, `{held: true}` until a step ends it,
- * or `{cut: true}`), none (`{noHead: true}`), or held until a step releases
+ * (`{status, body}`, the body its text, `{json: value}` as JSON with the
+ * paths in it under the root (`$ROOT/…`) made whole, `{repeat: text, times}`
+ * as that text that many times, `{held: true}` until a step ends it, or
+ * `{cut: true}`), none (`{noHead: true}`), or held until a step releases
  * it (`{held: true}`). Each request is written down as its caller wrote it.
  * The failures are undici's (probed on Node v26.8.1): no head is `TypeError:
  * fetch failed`, a body broken off `TypeError: terminated`, and an abort of
@@ -584,7 +623,11 @@ function scriptedPeer(context) {
     })
     const body = answer.body
     if (typeof body === 'string') rest = new TextEncoder().encode(body)
-    else if (body?.cut === true) {
+    else if (body?.json !== undefined) {
+      rest = new TextEncoder().encode(JSON.stringify(realValue(context, body.json)))
+    } else if (body?.repeat !== undefined) {
+      rest = new TextEncoder().encode(body.repeat.repeat(body.times))
+    } else if (body?.cut === true) {
       controller.error(new TypeError('terminated'))
       over()
     } else {
@@ -789,15 +832,16 @@ class ScriptedChild extends EventEmitter {
     if (signal === null) this.exitCode = code
     else this.signalCode = signal
     const open = [this.stdout, this.stderr].filter((stream) => stream !== null)
+    // Listening before the streams end: asked to end from a timer's callback,
+    // a stream says it has ended in a tick that comes before a microtask.
+    const ended = Promise.all(open.map((stream) => new Promise((done) => stream.once('end', done))))
     for (const stream of open) {
       stream.end()
       if (stream.listenerCount('data') === 0) stream.resume()
     }
     queueMicrotask(() => {
       this.emit('exit', this.exitCode, this.signalCode)
-      Promise.all(open.map((stream) => new Promise((ended) => stream.once('end', ended)))).then(
-        () => this.emit('close', this.exitCode, this.signalCode),
-      )
+      ended.then(() => this.emit('close', this.exitCode, this.signalCode))
     })
   }
 
@@ -1064,9 +1108,14 @@ function beginOwn(context, index, step) {
       (value) => ({ answer: written(value) }),
       (cause) => ({ throws: cause.message }),
     )
+  // What the work asks of the host, the peer and the programs is answered as
+  // the step scripts it, a prepare's (a window's first conversation is made on
+  // a server of its own) as well as the others'.
+  context.host.script(step.answers)
+  context.peer.script(step.served)
+  context.children.script(step.children)
   let work
   if (step.prepare !== undefined) {
-    context.children.script(step.children)
     const launch = realValue(context, step.prepare)
     context.launchId = launch.launchId
     work = settle(context.adapter.prepare(launch), (plan) => {
@@ -1080,9 +1129,6 @@ function beginOwn(context, index, step) {
       }
     })
   } else {
-    context.host.script(step.answers)
-    context.peer.script(step.served)
-    context.children.script(step.children)
     const target = {
       launch: context.launch,
       pane: step.pane ?? { id: 'p1-zeus', generation: 1 },
@@ -1241,9 +1287,12 @@ async function record(context, index, step) {
  * names among `adapters`: each recorded step's record.
  */
 export async function play(scenario, adapters = ADAPTERS) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-launch-golden-'))
+  // The root as the system names it, which a harness that asks for a folder's
+  // real name (OpenCode's `realpath`) is then told as the scenario writes it.
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'cf-launch-golden-')))
   const context = {
     root,
+    rootForms: rootForms(root),
     other: null,
     launch: null,
     launchId: null,

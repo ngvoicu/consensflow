@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { send } from '../src/channels/pi.js'
 import { BUNDLE_CF } from '../src/core/pane-cf.js'
@@ -190,6 +190,68 @@ describe('the launch recorder writes', () => {
     assert.equal(entries['$ROOT/home/link']?.link, '$ROOT/home/a\\b')
     assert.equal(entries['$ROOT/home/a/b'], undefined)
   })
+
+  it('the root as the system names it, so that a folder’s real name is under it', async () => {
+    const { records } = await played([{ observe: true }], (env) => ({
+      observe: async () => {
+        const root = path.dirname(env.HOME)
+        return (await fs.realpath(root)) === root
+      },
+    }))
+    assert.deepEqual(records[0].settled, [{ answer: true, op: 0 }])
+  })
+
+  it('the root as a file URL, as JSON and as a URL’s query hold it, and an OpenCode bundle’s hash', async () => {
+    const { records } = await played([{ observe: true }], (env) => ({
+      observe: async () => {
+        const root = path.dirname(env.HOME)
+        const hash = 'ab12'.repeat(16)
+        return [
+          `${pathToFileURL(root).href}/extensions/opencode/${hash}/tui.json`,
+          `?directory=${encodeURIComponent(root)}%2Fwork`,
+          `?directory=${encodeURIComponent(`${root}'s`).replaceAll("'", '%27')}`,
+          `?directory=${new URLSearchParams({ d: `${root} x` }).toString().slice(2)}`,
+          JSON.stringify({ at: root }),
+          `${root}${path.sep}extensions${path.sep}pi${path.sep}${hash}`,
+        ]
+      },
+    }))
+    const [url, component, quoted, form, json, pi] = records[0].settled[0].answer
+    assert.equal(url, 'file://$ROOT/extensions/opencode/$HASH/tui.json')
+    assert.equal(component, '?directory=$ROOT%2Fwork')
+    assert.equal(quoted, '?directory=$ROOT%27s')
+    assert.equal(form, '?directory=$ROOT+x')
+    assert.equal(json, '{"at":"$ROOT"}')
+    assert.match(
+      pi,
+      /^\$ROOT\/extensions\/pi\/[0-9a-f]{64}$/,
+      'Pi’s bundle is named by a hash that stays',
+    )
+  })
+})
+
+describe("the launch recorder's scene", () => {
+  it('makes a stand-in that answers as the script a node shim names, one only found as a plain one', async () => {
+    const steps = [
+      { standIn: { name: 'opencode', answers: {} } },
+      { executable: 'plain' },
+      { observe: true },
+    ]
+    const { records } = await played(steps, (env) => ({
+      observe: async () => {
+        const bin = path.join(path.dirname(env.HOME), 'bin')
+        const first = await fs.readFile(path.join(bin, 'opencode'), 'utf8').catch(() => '')
+        return { names: (await fs.readdir(bin)).sort(), shebang: first.split('\n')[0] }
+      },
+    }))
+    const { names, shebang } = records[0].settled[0].answer
+    if (process.platform === 'win32') {
+      assert.deepEqual(names, ['opencode.cmd', 'opencode.mjs', 'plain.cmd'])
+    } else {
+      assert.deepEqual(names, ['opencode', 'plain'])
+      assert.equal(shebang, '#!$NODE', 'Node itself, as a record names it')
+    }
+  })
 })
 
 describe("the launch recorder's peer on loopback", () => {
@@ -327,6 +389,51 @@ describe("the launch recorder's peer on loopback", () => {
     assert.deepEqual(records[0].settled, [{ answer: { undefined: true }, op: 0 }])
   })
 
+  it('answers a body as JSON with the paths in it under the root made whole, or as a text repeated', async () => {
+    const steps = [
+      {
+        observe: true,
+        served: {
+          'GET /session': [
+            { status: 200, body: { json: { id: 'ses_a', directory: '$ROOT/work', n: [1] } } },
+          ],
+          'GET /big': [{ status: 200, body: { repeat: 'xy', times: 3 } }],
+        },
+      },
+    ]
+    const { records } = await played(steps, (env) => ({
+      observe: async () => {
+        const session = await (await fetch('http://127.0.0.1:41000/session')).json()
+        const big = await (await fetch('http://127.0.0.1:41000/big')).text()
+        return {
+          whole: session.directory === path.join(path.dirname(env.HOME), 'work'),
+          session,
+          big,
+        }
+      },
+    }))
+    const { whole, session, big } = records[0].settled[0].answer
+    assert.equal(whole, true)
+    assert.deepEqual([session.id, session.n], ['ses_a', [1]])
+    assert.equal(big, 'xyxyxy')
+  })
+
+  it('clears a timeout once a request that fails has nothing left waiting under it', async () => {
+    const steps = [{ observe: true }, { advance: 100 }]
+    const { records } = await played(steps, () => ({
+      observe: async () => {
+        const answer = await fetch('http://127.0.0.1:41000/nobody', {
+          signal: AbortSignal.timeout(500),
+        }).catch((cause) => cause.message)
+        await after(100)
+        return answer
+      },
+    }))
+    // The request's 500 ms went with it: only the sleep waits.
+    assert.deepEqual(records[0].pending, [{ op: 0, waits: [{ timer: 100 }] }])
+    assert.deepEqual(records[1].settled, [{ answer: 'fetch failed', op: 0 }])
+  })
+
   it('hands out free ports on loopback from 41000 up, as Rust does', async () => {
     const { records } = await played([{ observe: true }], () => ({
       observe: async () => {
@@ -437,6 +544,61 @@ describe("the launch recorder's children", () => {
     assert.match(events[0][1], /^spawn .* ENOENT$/)
     assert.deepEqual(events.slice(1), [['close', -2, null]])
     assert.equal(exitCode, -2)
+    assert.deepEqual(
+      records[0].spawned,
+      [{ program: 'missing', args: [], cwd: null, env: [], streams: 'quiet' }],
+      'one asked for is written down, started or not, as Rust writes it down',
+    )
+  })
+
+  it('closes a child that a timer’s callback forces to end', {
+    skip: WINDOWS && 'an end on Windows is always forced',
+  }, async () => {
+    const steps = [
+      { observe: true, children: { opencode: [{ ends: 'forced' }] } },
+      { advance: 2000 },
+    ]
+    const { records } = await played(steps, () => ({
+      observe: () =>
+        run('opencode', ['serve'], ['ignore', 'ignore', 'pipe'], async (child) => {
+          child.stderr.on('data', () => {})
+          child.kill('SIGTERM')
+          setTimeout(() => child.kill('SIGKILL'), 2000)
+        }),
+    }))
+    assert.deepEqual(records[0].pending, [{ op: 0, waits: [{ timer: 2000 }] }])
+    assert.deepEqual(records[1].settled[0].answer.events, [
+      ['spawn'],
+      ['exit', null, 'SIGKILL'],
+      ['close', null, 'SIGKILL'],
+    ])
+  })
+
+  it('answers what a prepare asks of the peer and of the programs it starts', async () => {
+    const steps = [
+      {
+        prepare: { launchId: 'launch-1' },
+        served: { 'GET /up': [{ status: 200, body: 'ok' }] },
+        children: { opencode: [{ ends: 'itself' }] },
+      },
+    ]
+    const { records } = await played(steps, () => ({
+      prepare: async () => {
+        const text = await (await fetch('http://127.0.0.1:41000/up')).text()
+        const { spawn } = await import('node:child_process')
+        const [file, args] = program('opencode', 'serve')
+        spawn(file, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+        return { argv: [text], env: {}, dropEnv: [], launch: {} }
+      },
+    }))
+    assert.deepEqual(records[0].spawned, [
+      { program: 'opencode', args: ['serve'], cwd: null, env: [], streams: 'quiet' },
+    ])
+    assert.deepEqual(
+      records[0].fetches.map((fetch) => fetch.route),
+      ['GET /up'],
+    )
+    assert.deepEqual(records[0].settled[0].answer.argv, ['ok'])
   })
 
   it('ends a scripted child that taskkill is asked to end, and nothing of the machine', async () => {

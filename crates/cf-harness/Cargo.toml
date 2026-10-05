@@ -7,7 +7,9 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-# A Codex broker's token, as the bridge's `randomBytes(24).toString('base64url')`.
+# The tokens of Codex's broker and of OpenCode's server and plugin, as
+# `randomBytes(24).toString('base64url')` makes them, and OpenCode's
+# basic-auth header.
 base64.workspace = true
 cf-base.workspace = true
 cf-process.workspace = true

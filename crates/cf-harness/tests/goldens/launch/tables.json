@@ -50831,5 +50831,287 @@
       "windows": true,
       "url": "file://server.example/s/x"
     }
+  ],
+  "openCodeUrls": [
+    {
+      "session": "ses_abc123",
+      "directory": "/work/app",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2Fapp",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2Fapp",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fapp"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/my app",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2Fmy+app",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2Fmy+app",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fmy%20app"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/it's",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2Fit%27s",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2Fit%27s",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fit%27s"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/'''",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F%27%27%27",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F%27%27%27",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F%27%27%27"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/(a)",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F%28a%29",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F%28a%29",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F(a)"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/a!b~c*d",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2Fa%21b%7Ec*d",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2Fa%21b%7Ec*d",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fa!b~c*d"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/café",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2Fcaf%C3%A9",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2Fcaf%C3%A9",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fcaf%C3%A9"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/日本",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F%E6%97%A5%E6%9C%AC",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F%E6%97%A5%E6%9C%AC",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F%E6%97%A5%E6%9C%AC"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/😀",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F%F0%9F%98%80",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F%F0%9F%98%80",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F%F0%9F%98%80"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/é",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2Fe%CC%81",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2Fe%CC%81",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fe%CC%81"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/a&b=c#d",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2Fa%26b%3Dc%23d",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2Fa%26b%3Dc%23d",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fa%26b%3Dc%23d"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/a%b",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2Fa%25b",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2Fa%25b",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fa%25b"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/%20",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F%2520",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F%2520",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F%2520"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/%zz",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F%25zz",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F%25zz",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F%25zz"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/a+b",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2Fa%2Bb",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2Fa%2Bb",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fa%2Bb"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/a b+c",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2Fa+b%2Bc",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2Fa+b%2Bc",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fa%20b%2Bc"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/a?b",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2Fa%3Fb",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2Fa%3Fb",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fa%3Fb"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/\"q\"",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F%22q%22",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F%22q%22",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F%22q%22"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/<x>",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F%3Cx%3E",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F%3Cx%3E",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F%3Cx%3E"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/{y}[z]|^`",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F%7By%7D%5Bz%5D%7C%5E%60",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F%7By%7D%5Bz%5D%7C%5E%60",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F%7By%7D%5Bz%5D%7C%5E%60"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/a\\b",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2Fa%5Cb",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2Fa%5Cb",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fa%5Cb"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/a\nb",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2Fa%0Ab",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2Fa%0Ab",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fa%0Ab"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/a\tb",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2Fa%09b",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2Fa%09b",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fa%09b"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/\u0000",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F%00",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F%00",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F%00"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F%7F",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F%7F",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F%7F"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/ ",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F%C2%A0",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F%C2%A0",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F%C2%A0"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/ ",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F%E2%80%A8",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F%E2%80%A8",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F%E2%80%A8"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/﻿",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F%EF%BB%BF",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F%EF%BB%BF",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F%EF%BB%BF"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/-_.",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F-_.",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F-_.",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F-_."
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/~",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2F%7E",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2F%7E",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2F~"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2F",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2F",
+      "creation": "http://127.0.0.1:41001/session?directory=%2F"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=",
+      "creation": "http://127.0.0.1:41001/session?directory="
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "C:\\Users\\me\\proj",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=C%3A%5CUsers%5Cme%5Cproj",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=C%3A%5CUsers%5Cme%5Cproj",
+      "creation": "http://127.0.0.1:41001/session?directory=C%3A%5CUsers%5Cme%5Cproj"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "C:\\",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=C%3A%5C",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=C%3A%5C",
+      "creation": "http://127.0.0.1:41001/session?directory=C%3A%5C"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "\\\\server\\share\\dir",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%5C%5Cserver%5Cshare%5Cdir",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%5C%5Cserver%5Cshare%5Cdir",
+      "creation": "http://127.0.0.1:41001/session?directory=%5C%5Cserver%5Cshare%5Cdir"
+    },
+    {
+      "session": "ses_abc123",
+      "directory": "/work/app",
+      "settings": "http://127.0.0.1:41001/session/ses_abc123?directory=%2Fwork%2Fapp",
+      "prompt": "http://127.0.0.1:41001/session/ses_abc123/prompt_async?directory=%2Fwork%2Fapp",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fapp"
+    },
+    {
+      "session": "ses_A",
+      "directory": "/work/app",
+      "settings": "http://127.0.0.1:41001/session/ses_A?directory=%2Fwork%2Fapp",
+      "prompt": "http://127.0.0.1:41001/session/ses_A/prompt_async?directory=%2Fwork%2Fapp",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fapp"
+    },
+    {
+      "session": "ses_0",
+      "directory": "/work/app",
+      "settings": "http://127.0.0.1:41001/session/ses_0?directory=%2Fwork%2Fapp",
+      "prompt": "http://127.0.0.1:41001/session/ses_0/prompt_async?directory=%2Fwork%2Fapp",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fapp"
+    },
+    {
+      "session": "ses_ABCxyz789",
+      "directory": "/work/app",
+      "settings": "http://127.0.0.1:41001/session/ses_ABCxyz789?directory=%2Fwork%2Fapp",
+      "prompt": "http://127.0.0.1:41001/session/ses_ABCxyz789/prompt_async?directory=%2Fwork%2Fapp",
+      "creation": "http://127.0.0.1:41001/session?directory=%2Fwork%2Fapp"
+    }
   ]
 }

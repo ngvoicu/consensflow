@@ -8,11 +8,14 @@
  *   changes, under the Unicode version Node's ICU holds;
  * - how a send's answer reads as a delivery outcome (`admission`), and what
  *   a record says in the dispatcher's terms (`recordState`);
- * - a path as a file URL (`pathToFileURL`), on either platform's rules.
+ * - a path as a file URL (`pathToFileURL`), on either platform's rules;
+ * - the URLs OpenCode's channel asks of its server from the folder a window
+ *   works in (`new URL`, `searchParams` and `encodeURIComponent`).
  *
  * A call that throws is written `{"throws": true}`; one that answers
  * undefined, `{"undefined": true}`.
  */
+import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { childEnv, interactiveResume, interactiveStart } from '../../../hosts/lib/windows.js'
 import { admission, recordState, windowText } from '../../../src/adapters/shared.js'
@@ -292,6 +295,100 @@ function fileUrlTable() {
   ]
 }
 
+/**
+ * What `seedSession` and `createSession` (`src/channels/opencode.js`) build
+ * their URLs of, which the table below writes as they are there: it refuses
+ * to be made once the source no longer holds them.
+ */
+const URL_EXPRESSIONS = [
+  `\`/session/\${encodeURIComponent(sessionId)}\``,
+  `\`/session/\${encodeURIComponent(sessionId)}/prompt_async\``,
+  "nativeUrl.searchParams.set('directory', directory)",
+  "url.searchParams.set('directory', directory)",
+  `\`session?directory=\${encodeURIComponent(canonical)}\``,
+  `endpoint.href.endsWith('/') ? endpoint.href : \`\${endpoint.href}/\``,
+]
+
+/** Folders a window may work in, made odd: what each builder escapes, and what it keeps. */
+const DIRECTORIES = [
+  '/work/app',
+  '/work/my app',
+  "/work/it's",
+  "/work/'''",
+  '/work/(a)',
+  '/work/a!b~c*d',
+  '/work/caf\u00e9',
+  '/work/\u65e5\u672c',
+  '/work/\u{1F600}',
+  '/work/e\u0301',
+  '/work/a&b=c#d',
+  '/work/a%b',
+  '/work/%20',
+  '/work/%zz',
+  '/work/a+b',
+  '/work/a b+c',
+  '/work/a?b',
+  '/work/"q"',
+  '/work/<x>',
+  '/work/{y}[z]|^`',
+  '/work/a\\b',
+  '/work/a\nb',
+  '/work/a\tb',
+  '/work/\u0000',
+  '/work/\u007f',
+  '/work/\u00a0',
+  '/work/\u2028',
+  '/work/\ufeff',
+  '/work/-_.',
+  '/work/~',
+  '/',
+  '',
+  `/${'x'.repeat(300)}`,
+  'C:\\Users\\me\\proj',
+  'C:\\',
+  '\\\\server\\share\\dir',
+]
+
+/** The sessions a URL names: an id OpenCode mints, which is all that is asked. */
+const OPENCODE_SESSIONS = ['ses_abc123', 'ses_A', 'ses_0', 'ses_ABCxyz789']
+
+/**
+ * The URLs OpenCode's channel asks of its server for a folder: the session's
+ * own record and the first message, built with `searchParams`, and the new
+ * session, built from `encodeURIComponent` and then parsed. On the origin
+ * `launchConfiguration` gives a server (`http://127.0.0.1:<port>`).
+ */
+function openCodeUrlsTable() {
+  const source = readFileSync(new URL('../../../src/channels/opencode.js', import.meta.url), 'utf8')
+  for (const expression of URL_EXPRESSIONS) {
+    if (!source.includes(expression)) {
+      throw new Error(
+        `src/channels/opencode.js no longer holds ${expression}: the table is made of it`,
+      )
+    }
+  }
+  const endpoint = new URL('http://127.0.0.1:41001')
+  const base = endpoint.href.endsWith('/') ? endpoint.href : `${endpoint.href}/`
+  const row = (sessionId, directory) => {
+    const nativeUrl = new URL(`/session/${encodeURIComponent(sessionId)}`, endpoint)
+    nativeUrl.searchParams.set('directory', directory)
+    const url = new URL(`/session/${encodeURIComponent(sessionId)}/prompt_async`, endpoint)
+    url.searchParams.set('directory', directory)
+    const creation = new URL(`session?directory=${encodeURIComponent(directory)}`, base)
+    return {
+      session: sessionId,
+      directory,
+      settings: nativeUrl.href,
+      prompt: url.href,
+      creation: creation.href,
+    }
+  }
+  return [
+    ...DIRECTORIES.map((directory) => row('ses_abc123', directory)),
+    ...OPENCODE_SESSIONS.map((sessionId) => row(sessionId, '/work/app')),
+  ]
+}
+
 /** The tables, as one golden. */
 export function tables() {
   return {
@@ -302,5 +399,6 @@ export function tables() {
     admission: admissionTable(),
     recordState: recordStateTable(),
     fileUrl: fileUrlTable(),
+    openCodeUrls: openCodeUrlsTable(),
   }
 }

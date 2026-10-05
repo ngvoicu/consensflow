@@ -14,6 +14,7 @@
 import { claudeScenarios } from './claude.mjs'
 import { codexScenarios } from './codex.mjs'
 import { devinScenarios } from './devin.mjs'
+import { opencodeScenarios } from './opencode.mjs'
 import { piScenarios } from './pi.mjs'
 import { play } from './runner.mjs'
 import { tables } from './tables.mjs'
@@ -34,6 +35,7 @@ export async function launchGoldens() {
       ...codexScenarios(),
       ...piScenarios(),
       ...devinScenarios(),
+      ...opencodeScenarios(),
     ]),
   }
 }

@@ -5,8 +5,6 @@
 
 use std::path::Path;
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
 use cf_base::js;
 use serde_json::json;
 
@@ -14,6 +12,7 @@ use super::channel::Channel;
 use crate::contract::LaunchId;
 use crate::seams::processes::{probe, Probed, Unanswered};
 use crate::seams::{Bundle, Services};
+use crate::shared::token;
 
 /// How a Codex window is opened on its launch's broker.
 pub(super) struct Launched {
@@ -136,9 +135,7 @@ pub(super) async fn configuration(
     }
     require_native_queue(services, executable).await?;
     let port = services.ports.free_loopback()?;
-    let mut drawn = [0; 24];
-    services.entropy.fill(&mut drawn)?;
-    let token = URL_SAFE_NO_PAD.encode(drawn);
+    let token = token::draw(&*services.entropy)?;
     let bridge = js::stringify(&json!({
         "launchId": launch.as_str(),
         "port": port,

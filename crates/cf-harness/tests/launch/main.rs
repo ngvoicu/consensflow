@@ -12,6 +12,7 @@ mod claude;
 mod codex;
 mod coverage;
 mod devin;
+mod opencode;
 mod pi;
 mod scenarios;
 mod tables;

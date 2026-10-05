@@ -1,6 +1,5 @@
 //! The switch: the adapter that launches a harness's windows, built with
-//! the engine's services. A harness whose launch is not yet in Rust has
-//! none, and its windows stay with Node's adapters until it is.
+//! the engine's services.
 
 use std::rc::Rc;
 
@@ -10,16 +9,17 @@ use crate::claude::ClaudeAdapter;
 use crate::codex::CodexAdapter;
 use crate::contract::Adapter;
 use crate::devin::DevinAdapter;
+use crate::opencode::OpenCodeAdapter;
 use crate::pi::PiAdapter;
 use crate::seams::Services;
 
-/// The adapter of `harness`'s windows, or none while its launch is Node's.
-pub fn adapter(harness: Harness, services: &Services) -> Option<Rc<dyn Adapter>> {
+/// The adapter of `harness`'s windows.
+pub fn adapter(harness: Harness, services: &Services) -> Rc<dyn Adapter> {
     match harness {
-        Harness::Claude => Some(Rc::new(ClaudeAdapter::new(services))),
-        Harness::Pi => Some(Rc::new(PiAdapter::new(services))),
-        Harness::Codex => Some(Rc::new(CodexAdapter::new(services))),
-        Harness::Devin => Some(Rc::new(DevinAdapter::new(services))),
-        Harness::Opencode => None,
+        Harness::Claude => Rc::new(ClaudeAdapter::new(services)),
+        Harness::Codex => Rc::new(CodexAdapter::new(services)),
+        Harness::Devin => Rc::new(DevinAdapter::new(services)),
+        Harness::Opencode => Rc::new(OpenCodeAdapter::new(services)),
+        Harness::Pi => Rc::new(PiAdapter::new(services)),
     }
 }
