@@ -9,7 +9,9 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use cf_harness::contract::{Admission, Observed, Pane, PaneHost, Readiness, Waiting, Window, Work};
+use cf_harness::contract::{
+    Admission, Held, Observed, Pane, PaneHost, Readiness, Waiting, Window, Work,
+};
 use cf_harness::records::{Item, Reading, Record, Settlement};
 use serde_json::{json, Value};
 
@@ -105,10 +107,16 @@ impl Window for FakeWindow {
         };
         let at = self.call("ready", json!([{ "launch": self.bag() }]));
         let answer = ready();
+        let hold = self.fake.hold_ready.borrow().clone();
         Box::pin(async move {
+            if let Some(gate) = hold {
+                gate.wait().await;
+            }
             next_turn().await;
             let written = match &answer {
                 Ok(Readiness::Ready) => json!(true),
+                // A window that said no more than "not yet": the JavaScript fake answered `false`.
+                Ok(Readiness::Held(Held::Unsaid)) => json!(false),
                 Ok(Readiness::Held(held)) => json!(held.sentence()),
                 Err(error) => json!({ "$error": { "message": error } }),
             };

@@ -9,7 +9,8 @@
 //! what it reads, says what it did in its place ([`FakeAdapter::prepare`],
 //! [`FakeAdapter::after_prepare`], [`FakeAdapter::started`],
 //! [`FakeAdapter::deliver`], [`FakeAdapter::ready`],
-//! [`FakeAdapter::hold_observes`], [`FakeAdapter::interrupt`]).
+//! [`FakeAdapter::hold_ready`], [`FakeAdapter::hold_observes`],
+//! [`FakeAdapter::interrupt`]).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -89,6 +90,9 @@ pub struct FakeAdapter {
     /// A `ready` of the test's own; without one a window is ready, and
     /// nothing is asked (the JavaScript fake had none).
     pub ready: RefCell<Option<Ready>>,
+    /// Every `ready` the adapter has waits for the gate before it answers
+    /// (`await readying` in the test's own).
+    pub hold_ready: RefCell<Option<Gate>>,
     /// A `started` of the test's own, that fails some windows.
     pub started: RefCell<Option<Started>>,
     /// A `prepare` of the test's own, that fails some launches.
@@ -125,6 +129,7 @@ impl FakeAdapter {
             prepared: RefCell::new(Vec::new()),
             items,
             ready: RefCell::new(None),
+            hold_ready: RefCell::new(None),
             started: RefCell::new(None),
             prepare: RefCell::new(None),
             after_prepare: RefCell::new(None),
