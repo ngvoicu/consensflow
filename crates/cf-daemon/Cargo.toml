@@ -26,6 +26,11 @@ hyper.workspace = true
 hyper-util.workspace = true
 # The machine's time zone, which a quota's reset named by a time of day is read in.
 jiff.workspace = true
+# The harness feed's client (`screens::network`): the HTTPS of Node's `fetch`,
+# on rustls and the platform's own trust, built on ring.
+reqwest.workspace = true
+rustls.workspace = true
+rustls-platform-verifier.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # A window's token is kept as its digest.
@@ -44,6 +49,8 @@ base64.workspace = true
 cf-engine = { workspace = true, features = ["test-support"] }
 cf-harness = { workspace = true, features = ["test-support"] }
 flate2.workspace = true
+# The screens' player masks the times in what it compares.
+regex.workspace = true
 rusqlite.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt", "signal", "sync", "test-util", "time"] }

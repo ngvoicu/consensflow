@@ -50,10 +50,7 @@ fn reading(scene: &Scene, file: &str) -> (Rc<Context>, Rc<Asked>, tempfile::Temp
 }
 
 async fn staff(scene: &Scene, context: &Rc<Context>) -> (u16, serde_json::Value) {
-    let screens = crate::screens::Screens {
-        token: "the-ui-token".to_owned(),
-        on_roster_change: Rc::new(|| Ok(())),
-    };
+    let screens = crate::screens::testing::inert();
     crate::testing::said(
         crate::api::handle(
             context,

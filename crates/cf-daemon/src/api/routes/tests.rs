@@ -212,7 +212,6 @@ async fn every_route_is_answered_by_a_handler_of_its_own() {
 /// What the route tests stand on: the API as a client reaches it, and the
 /// board's state to start from.
 pub(super) mod support {
-    use std::rc::Rc;
 
     use bytes::Bytes;
     use cf_ledger::NewTask;
@@ -222,7 +221,6 @@ pub(super) mod support {
     use super::{request, said, Method, Scene};
     use crate::api::body::Body;
     use crate::api::request::Request;
-    use crate::screens::Screens;
 
     /// `method target` from the window of `token`, with `body` as its text:
     /// through the API's own checks, as a client sends it. The answer's
@@ -262,10 +260,7 @@ pub(super) mod support {
     }
 
     pub(in crate::api::routes) async fn through(scene: &Scene, asked: Request) -> (u16, Value) {
-        let screens = Screens {
-            token: "the-ui-token".to_owned(),
-            on_roster_change: Rc::new(|| Ok(())),
-        };
+        let screens = crate::screens::testing::inert();
         said(crate::api::handle(&scene.context, &screens, asked).await)
     }
 

@@ -23,6 +23,7 @@ use super::*;
 use crate::testing::Said;
 
 mod restart;
+mod screens;
 
 const UI_TOKEN_DIGITS: usize = 48;
 
