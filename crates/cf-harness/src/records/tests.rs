@@ -105,6 +105,19 @@ fn a_reset_that_names_no_zone_is_read_in_the_zone_the_switch_is_given() {
 }
 
 #[test]
+fn a_zone_is_the_one_intl_takes_the_name_for() {
+    let offset_at_epoch =
+        |name: &str| zone(name).map(|zone| zone.to_offset(jiff::Timestamp::UNIX_EPOCH).seconds());
+    assert_eq!(offset_at_epoch("America/Los_Angeles"), Some(-8 * 3600));
+    assert_eq!(offset_at_epoch("+03:00"), Some(3 * 3600));
+    assert_eq!(offset_at_epoch("SystemV/EST5"), Some(-5 * 3600));
+    assert_eq!(offset_at_epoch("PST"), Some(-8 * 3600));
+    for refused in ["Factory", "Etc/Unknown", "Nowhere/Zone", ""] {
+        assert_eq!(offset_at_epoch(refused), None, "{refused:?}");
+    }
+}
+
+#[test]
 fn a_transcript_is_had_where_its_harness_keeps_it_and_never_in_a_store() {
     let home = tempfile::tempdir().unwrap();
     let env = at_home(home.path());

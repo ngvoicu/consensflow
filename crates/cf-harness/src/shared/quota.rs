@@ -25,6 +25,8 @@ mod reset;
 mod tests;
 mod zone;
 
+pub(crate) use zone::time_zone;
+
 use cf_base::js;
 use cf_base::time::{iso, time_clip};
 use jiff::tz::TimeZone;

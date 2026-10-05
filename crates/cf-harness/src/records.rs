@@ -49,6 +49,14 @@ pub fn reader(
     })
 }
 
+/// The zone `Intl` takes `name` for, as the machine's own is named
+/// (`Intl.DateTimeFormat().resolvedOptions().timeZone`), the `local` a reader
+/// reads a reset that names no zone in: ICU's names and offsets as well as
+/// the database's; none for a name `Intl` refuses.
+pub fn zone(name: &str) -> Option<TimeZone> {
+    crate::shared::quota::time_zone(name)
+}
+
 /// How a [`Cache`] opens its readers: with [`reader`].
 pub fn open(local: TimeZone) -> Open {
     Box::new(move |harness, session, env| reader(harness, session, env, &local))

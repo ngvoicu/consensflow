@@ -27,7 +27,6 @@ use cf_base::js;
 use cf_base::text::utf16_len;
 use cf_harness::records::{self, Options, Reading};
 use cf_proto::agents::Harness;
-use jiff::tz::{Offset, TimeZone, TimeZoneDatabase};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -82,7 +81,8 @@ fn every_conversation_node_read_here_reads_the_same() {
         let read: Read = serde_json::from_str(line).unwrap();
         let harness = Harness::from_kind(&read.kind).unwrap();
         let env = environment(&read.env);
-        let local = zone(&read.zone);
+        let local = records::zone(&read.zone)
+            .unwrap_or_else(|| panic!("{}: a zone Intl does not take", read.zone));
         let tally = tallies.entry(read.kind.clone()).or_default();
 
         let mut reader = records::reader(harness, &read.session, &env, &local).unwrap();
@@ -163,22 +163,6 @@ fn environment(vars: &Map<String, Value>) -> Env {
         vars.iter()
             .map(|(name, value)| (name.clone(), value.as_str().unwrap().to_owned())),
     )
-}
-
-/// The zone Node's `Intl` named as the process's: a name, or an offset
-/// (`+03:00`) where `TZ` gave one.
-fn zone(name: &str) -> TimeZone {
-    let Some(offset) = name.strip_prefix(['+', '-']) else {
-        return TimeZoneDatabase::bundled().get(name).unwrap();
-    };
-    let (hours, minutes) = offset.split_once(':').unwrap();
-    let seconds = (hours.parse::<i32>().unwrap() * 60 + minutes.parse::<i32>().unwrap()) * 60;
-    let seconds = if name.starts_with('-') {
-        -seconds
-    } else {
-        seconds
-    };
-    TimeZone::fixed(Offset::from_seconds(seconds).unwrap())
 }
 
 /// What Node's half wrote of a reading (`digest`): each item's id, role,

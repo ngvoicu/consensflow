@@ -11,10 +11,11 @@
  * each naming its place in the snapshot. Both halves read the copies, so
  * nothing a harness writes meanwhile comes between them.
  *
- * Node reads each conversation from the snapshot twice, with a reader kept
- * between the looks as the daemon keeps one, and once from the live stores.
- * A live reading that differs from the copy's is counted as written since,
- * where a file the copy came from changed; where none did, the copy missed
+ * Once every copy is made, Node reads each conversation from the snapshot
+ * twice, with a reader kept between the looks as the daemon keeps one, and
+ * once from the live stores. A live reading that differs from the copy's is
+ * counted as written since, where what the copy came from changed (a file,
+ * one made since, a reader's folder); where nothing did, the copy missed
  * something, and the run fails. It writes both looks' digests, one
  * conversation a line, into the snapshot: the items' ids, roles,
  * completeness and times, and each text's UTF-16 length and SHA-256, never
@@ -25,8 +26,9 @@
  *
  * The live stores are the ones this environment names (HOME, CLAUDE_CONFIG_DIR,
  * CODEX_HOME, PI_CODING_AGENT_*, XDG_DATA_HOME, APPDATA, LOCALAPPDATA,
- * OPENCODE_*, and Pi's evidence, CF_DELIVERY_*), read and never written; a
- * place named relative to the working folder is refused. Devin's wire logs
+ * OPENCODE_*, and Pi's evidence, CF_DELIVERY_*), read and never written to
+ * (though SQLite may make a store's `-wal` and `-shm` beside it, where it has
+ * none); a place named relative to the working folder is refused. Devin's wire logs
  * are ConsensFlow's own: only with `--with-wires` are they read, from its
  * home. The snapshot holds the texts: it is removed, unless the halves
  * differ, when it is kept for the difference to be read again.
@@ -128,9 +130,17 @@ const env = Object.fromEntries(
   ]),
 )
 
-/** Each copied file's stamp when it was copied, by the conversation (`kind`, `session`) or the harness it was copied for. */
+/**
+ * What the copies came from, by the conversation (`kind`, `session`) or the
+ * harness they were made for: each a stamp to take again, and the one taken
+ * when the copy was made.
+ */
 const sources = new Map()
-const stamp = (file) => {
+function source(key, stamp) {
+  sources.set(key, [...(sources.get(key) ?? []), [stamp, stamp()]])
+}
+/** A file's size and time of writing: none where it is not, so that one made since is seen. */
+const fileStamp = (file) => () => {
   try {
     const { size, mtimeNs } = fs.statSync(file, { bigint: true })
     return `${size} ${mtimeNs}`
@@ -138,12 +148,11 @@ const stamp = (file) => {
     return 'none'
   }
 }
-function source(key, file) {
-  sources.set(key, [...(sources.get(key) ?? []), [file, stamp(file)]])
-}
-/** Whether no file copied for any of `keys` changed since it was copied. */
+/** Whether nothing the copies for any of `keys` came from changed since. */
 const unchanged = (...keys) =>
-  keys.every((key) => (sources.get(key) ?? []).every(([file, was]) => stamp(file) === was))
+  keys.every((key) => (sources.get(key) ?? []).every(([stamp, was]) => stamp() === was))
+/** The places copied to: a place two copies name (Pi's sessions in Claude's folder) is copied once. */
+const copied = new Set()
 
 /** Throws unless `to` is in the snapshot: a copy never writes a live store. */
 function inSnapshot(to) {
@@ -167,7 +176,9 @@ function nudged(x, steps) {
  */
 function copy(key, file, to) {
   inSnapshot(to)
-  source(key, file)
+  source(key, fileStamp(file))
+  if (copied.has(to)) return
+  copied.add(to)
   fs.mkdirSync(path.dirname(to), { recursive: true })
   fs.copyFileSync(file, to)
   const want = fs.statSync(file).mtimeMs
@@ -215,8 +226,13 @@ function newest(root, depth) {
     .map(({ file }) => file)
 }
 
-/** Each file under `from` a locator's `test` takes, copied for `key` to its place under `to`. */
+/**
+ * Each file under `from` a locator's `test` takes, copied for `key` to its
+ * place under `to`; which files those are is a source too, so that one
+ * made since is seen.
+ */
 function copyMatching(key, from, to, test) {
+  source(key, () => files(from, test).sort().join('\n'))
   for (const file of files(from, test)) copy(key, file, path.join(to, path.relative(from, file)))
 }
 
@@ -245,8 +261,8 @@ function copyStore(key, file, to) {
   try {
     const mode = db.prepare('pragma journal_mode').get().journal_mode
     if (mode !== 'wal') return `${file} is in ${mode} mode, not WAL`
-    source(key, file)
-    source(key, `${file}-wal`)
+    source(key, fileStamp(file))
+    source(key, fileStamp(`${file}-wal`))
     fs.mkdirSync(path.dirname(to), { recursive: true })
     db.prepare('vacuum into ?').run(to)
     return null
@@ -317,6 +333,7 @@ const HARNESSES = {
         for (const name of [`${launch}.json`, `${launch}.working.json`]) {
           const file = path.join(live.CF_DELIVERY_SETTLED, name)
           if (fs.existsSync(file)) copy('pi', file, path.join(env.CF_DELIVERY_SETTLED, name))
+          else source('pi', fileStamp(file))
         }
       }
       return null
@@ -354,14 +371,18 @@ const HARNESSES = {
           'integrations',
           'devin',
         )
-      const launches = fs.existsSync(wires(live))
-        ? fs
-            .readdirSync(wires(live), { withFileTypes: true })
-            .filter((entry) => entry.isDirectory())
-        : []
-      for (const { name } of launches) {
+      const launches = () =>
+        fs.existsSync(wires(live))
+          ? fs
+              .readdirSync(wires(live), { withFileTypes: true })
+              .filter((entry) => entry.isDirectory())
+              .map((entry) => entry.name)
+          : []
+      source('devin', () => launches().sort().join('\n'))
+      for (const name of launches()) {
         const file = path.join(wires(live), name, 'wire.jsonl')
         if (fs.existsSync(file)) copy('devin', file, path.join(wires(env), name, 'wire.jsonl'))
+        else source('devin', fileStamp(file))
       }
       return null
     },
@@ -412,13 +433,15 @@ Date.now = () => now
 const lines = []
 let kept = false
 try {
+  // Every copy first: a later copy never changes what a reading read.
+  const picked = []
   for (const [kind, harness] of Object.entries(HARNESSES)) {
     const sessions = [...new Set(harness.sessions())].slice(0, limit)
     const refused = harness.copy(sessions)
-    if (refused !== null) {
-      console.log(`${kind}: left out: ${refused}`)
-      continue
-    }
+    if (refused === null) picked.push([kind, sessions])
+    else console.log(`${kind}: left out: ${refused}`)
+  }
+  for (const [kind, sessions] of picked) {
     let written = 0
     for (const session of sessions) {
       const read = cachedAnswers()

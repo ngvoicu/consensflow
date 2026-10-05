@@ -72,7 +72,7 @@ const SYSTEM_V: [(&str, &str); 13] = [
 const REFUSED: [&str; 2] = ["Factory", "Etc/Unknown"];
 
 /// The zone `name` names, as `Intl` takes it; none where `Intl` throws.
-pub(super) fn time_zone(name: &str) -> Option<TimeZone> {
+pub(crate) fn time_zone(name: &str) -> Option<TimeZone> {
     if let Some(offset) = offset(name) {
         return Some(TimeZone::fixed(offset));
     }
