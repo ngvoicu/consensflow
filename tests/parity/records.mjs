@@ -4,19 +4,19 @@
  * the same readings.
  *
  * Node's half is here. It copies the newest conversations of each harness
- * into a snapshot: each file its harness's locator would take for one, with
- * its time of writing, at its place, and each SQLite store whole (`VACUUM
- * INTO`, read-only, from a store in WAL mode alone, whose writers it never
- * holds up). The snapshot's environment is this one re-rooted: the same
- * variables, each naming a place in the snapshot. Both halves read the
- * copies, so nothing a harness writes meanwhile comes between them.
+ * into a snapshot: each file a harness's reader would open for one, with its
+ * time of writing, at its place, and each SQLite store whole (`VACUUM INTO`,
+ * read-only, from a store in WAL mode alone, whose writers it never holds
+ * up). The snapshot's environment is this one re-rooted: the same variables,
+ * each naming its place in the snapshot. Both halves read the copies, so
+ * nothing a harness writes meanwhile comes between them.
  *
  * Node reads each conversation from the snapshot twice, with a reader kept
- * between the looks as the daemon keeps one, and once from the live
- * stores: a live reading that differs from the copy's is counted (a
- * conversation written since it was copied), and a copy that lost a record
- * fails the run. It writes both looks' digests, one conversation a line, to
- * `<tmpdir>/consensflow-parity-records.jsonl`: the items' ids, roles,
+ * between the looks as the daemon keeps one, and once from the live stores.
+ * A live reading that differs from the copy's is counted as written since,
+ * where a file the copy came from changed; where none did, the copy missed
+ * something, and the run fails. It writes both looks' digests, one
+ * conversation a line, into the snapshot: the items' ids, roles,
  * completeness and times, and each text's UTF-16 length and SHA-256, never
  * the text, with how long the live read took. Then it runs the Rust half
  * (`crates/cf-harness/tests/parity.rs`, told the file in CF_PARITY_RECORDS),
@@ -25,10 +25,11 @@
  *
  * The live stores are the ones this environment names (HOME, CLAUDE_CONFIG_DIR,
  * CODEX_HOME, PI_CODING_AGENT_*, XDG_DATA_HOME, APPDATA, LOCALAPPDATA,
- * OPENCODE_*), read and never written. Devin's wire logs are ConsensFlow's
- * own: only with `--with-wires` are they read, from its home. The snapshot
- * holds the texts: it is removed, unless the halves differ, when it is kept
- * for the difference to be read again, and its place printed.
+ * OPENCODE_*, and Pi's evidence, CF_DELIVERY_*), read and never written; a
+ * place named relative to the working folder is refused. Devin's wire logs
+ * are ConsensFlow's own: only with `--with-wires` are they read, from its
+ * home. The snapshot holds the texts: it is removed, unless the halves
+ * differ, when it is kept for the difference to be read again.
  *
  *   npm run parity:records [-- --limit 25 --with-wires]
  */
@@ -49,32 +50,39 @@ import { devinFolders, opencodeStores, piSessionDir } from '../../src/harnesses.
 import { refuseTailoredCollation } from '../goldens/records/tables.mjs'
 
 const REPO = path.join(import.meta.dirname, '..', '..')
-const OUTPUT = path.join(os.tmpdir(), 'consensflow-parity-records.jsonl')
 
-/** The variables that say where a harness keeps its record. */
-const NAMES = [
-  'HOME',
-  'USERPROFILE',
-  'OS',
-  'CLAUDE_CONFIG_DIR',
-  'CODEX_HOME',
-  'PI_CODING_AGENT_DIR',
-  'PI_CODING_AGENT_SESSION_DIR',
-  'XDG_DATA_HOME',
-  'APPDATA',
-  'LOCALAPPDATA',
-  'OPENCODE_DB',
-  'OPENCODE_DATA',
-  'CONSENSFLOW_HOME',
-]
+/**
+ * The variables that name where a harness keeps its record, and what an
+ * empty value is to the code that reads each: a path (`??`), or none (`||`,
+ * `if`). A value that is not a place (`OS`, the launch's id) is kept.
+ */
+const PLACES = {
+  HOME: 'path',
+  USERPROFILE: 'path',
+  CLAUDE_CONFIG_DIR: 'path',
+  CODEX_HOME: 'path',
+  PI_CODING_AGENT_DIR: 'none',
+  PI_CODING_AGENT_SESSION_DIR: 'none',
+  XDG_DATA_HOME: 'path',
+  APPDATA: 'path',
+  LOCALAPPDATA: 'none',
+  OPENCODE_DB: 'none',
+  OPENCODE_DATA: 'none',
+  CONSENSFLOW_HOME: 'path',
+  CF_DELIVERY_SETTLED: 'path',
+}
+const VALUES = ['OS', 'CF_DELIVERY_LAUNCH_ID']
+/** Pi's own variables, which it reads a `~` in as the home (`piPath`). */
+const TILDE = new Set(['PI_CODING_AGENT_DIR', 'PI_CODING_AGENT_SESSION_DIR'])
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/
 /** How deep a harness's locator looks for a file (`findFile`). */
 const DEPTH = 6
-/** How a reading begins that found no record: a copy that reads so, where the live store holds one, is broken. */
-const LOST = ['unreadable: no ', 'unreadable: missing Devin session']
 
-// The readers order ids as ICU's root collation does, as the goldens hold.
+// The readers order ids as ICU's root collation does, as the goldens hold,
+// and read a reset that names no zone in the one `Intl` names.
 refuseTailoredCollation()
+const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+if (zone === undefined) throw new Error('this process names no zone: set TZ to one Intl knows')
 const { values } = parseArgs({
   options: {
     limit: { type: 'string', default: '25' },
@@ -82,25 +90,97 @@ const { values } = parseArgs({
   },
 })
 const limit = Number(values.limit)
-const snapshot = fs.mkdtempSync(path.join(os.tmpdir(), 'consensflow-parity-'))
 
 const present = Object.fromEntries(
-  NAMES.filter((name) => process.env[name] !== undefined).map((name) => [name, process.env[name]]),
+  [...Object.keys(PLACES), ...VALUES]
+    .filter((name) => process.env[name] !== undefined)
+    .map((name) => [name, process.env[name]]),
 )
+/**
+ * Whether the snapshot re-roots `name`'s `value`: a place, as the code that
+ * reads it reads it. An empty one that is none to that code, and a `~` Pi
+ * reads as the home, are kept; a place named by the working folder cannot be.
+ */
+function reRoots(name, value) {
+  if (!(name in PLACES)) return false
+  if (value === '' && PLACES[name] === 'none') return false
+  const tilde = value === '~' || value.startsWith('~/') || value.startsWith(`~${path.sep}`)
+  if (TILDE.has(name) && tilde) return false
+  if (!path.isAbsolute(value)) {
+    throw new Error(
+      `${name}=${JSON.stringify(value)} names a place by the working folder: name one whole`,
+    )
+  }
+  return true
+}
+for (const [name, value] of Object.entries(present)) reRoots(name, value)
+
+const snapshot = fs.mkdtempSync(path.join(os.tmpdir(), 'consensflow-parity-'))
+const DIGESTS = path.join(snapshot, 'digests.jsonl')
 // ConsensFlow's own home, read for Devin's wire logs: an empty one unless asked.
 const live = values['with-wires']
   ? present
   : { ...present, CONSENSFLOW_HOME: path.join(snapshot, 'no-wires') }
-// The snapshot's environment: each place this one names, re-rooted. A path
-// under `~` follows the re-rooted home; an empty one is none, as it was.
 const env = Object.fromEntries(
   Object.entries(live).map(([name, value]) => [
     name,
-    name === 'OS' || value === '' || value.startsWith('~') ? value : path.join(snapshot, name),
+    reRoots(name, value) ? path.join(snapshot, name) : value,
   ]),
 )
 
-/** The files under `root`, `depth` folders down at most, whose names `test` takes. */
+/** Each copied file's stamp when it was copied, by the conversation (`kind`, `session`) or the harness it was copied for. */
+const sources = new Map()
+const stamp = (file) => {
+  try {
+    const { size, mtimeNs } = fs.statSync(file, { bigint: true })
+    return `${size} ${mtimeNs}`
+  } catch {
+    return 'none'
+  }
+}
+function source(key, file) {
+  sources.set(key, [...(sources.get(key) ?? []), [file, stamp(file)]])
+}
+/** Whether no file copied for any of `keys` changed since it was copied. */
+const unchanged = (...keys) =>
+  keys.every((key) => (sources.get(key) ?? []).every(([file, was]) => stamp(file) === was))
+
+/** Throws unless `to` is in the snapshot: a copy never writes a live store. */
+function inSnapshot(to) {
+  if (!path.resolve(to).startsWith(snapshot + path.sep)) {
+    throw new Error(`${to} is outside the snapshot`)
+  }
+}
+
+/** `x` moved `steps` doubles up or down. */
+function nudged(x, steps) {
+  const double = new Float64Array([x])
+  new BigInt64Array(double.buffer)[0] += BigInt(steps)
+  return double[0]
+}
+
+/**
+ * `file` copied to `to` for `key`, with its time of writing as both halves
+ * read it, `mtimeMs` to the last bit: Pi's reader reads it, and a copy
+ * stamped now is never quiet. Windows' copy keeps it; elsewhere the time is
+ * set, in seconds, the double nearest it and its neighbours tried in turn.
+ */
+function copy(key, file, to) {
+  inSnapshot(to)
+  source(key, file)
+  fs.mkdirSync(path.dirname(to), { recursive: true })
+  fs.copyFileSync(file, to)
+  const want = fs.statSync(file).mtimeMs
+  const { atimeNs, mtimeNs } = fs.statSync(file, { bigint: true })
+  const seconds = Number(mtimeNs) / 1e9
+  for (const steps of [0, 1, -1, 2, -2, 3, -3, 4, -4]) {
+    if (fs.statSync(to).mtimeMs === want) return
+    fs.utimesSync(to, Number(atimeNs) / 1e9, nudged(seconds, steps))
+  }
+  if (fs.statSync(to).mtimeMs !== want) throw new Error(`${to} cannot be given ${file}'s time`)
+}
+
+/** The files under `root`, `depth` folders down at most, whose names `test` takes, as `findFile` walks. */
 function files(root, test, depth = DEPTH) {
   const found = []
   const walk = (folder, left) => {
@@ -135,6 +215,11 @@ function newest(root, depth) {
     .map(({ file }) => file)
 }
 
+/** Each file under `from` a locator's `test` takes, copied for `key` to its place under `to`. */
+function copyMatching(key, from, to, test) {
+  for (const file of files(from, test)) copy(key, file, path.join(to, path.relative(from, file)))
+}
+
 /** A store's rows, read-only: `sql`'s answer, or none for a store that cannot be read. */
 function rows(file, sql) {
   let db
@@ -148,30 +233,20 @@ function rows(file, sql) {
   }
 }
 
-/** `file` copied to `to` with its times, to the microsecond: Pi's reader reads them. */
-function copy(file, to) {
-  fs.mkdirSync(path.dirname(to), { recursive: true })
-  fs.copyFileSync(file, to)
-  const { atimeNs, mtimeNs } = fs.statSync(file, { bigint: true })
-  fs.utimesSync(to, Number(atimeNs) / 1e9, Number(mtimeNs) / 1e9)
-}
-
-/** Each file under `from` a locator's `test` takes, copied to its place under `to`. */
-function copyMatching(from, to, test) {
-  for (const file of files(from, test)) copy(file, path.join(to, path.relative(from, file)))
-}
-
 /**
- * The store `file`, whole as one read of it saw it, written to `to`; nothing
- * where none is. Why it cannot be copied, where it cannot: a store not in WAL
- * mode, whose writers a read would hold up.
+ * The store `file`, whole as one read of it saw it, written to `to` for
+ * `key`; nothing where none is. Why it cannot be copied, where it cannot: a
+ * store not in WAL mode, whose writers a read would hold up.
  */
-function copyStore(file, to) {
+function copyStore(key, file, to) {
   if (!fs.existsSync(file)) return null
+  inSnapshot(to)
   const db = new DatabaseSync(file, { readOnly: true })
   try {
     const mode = db.prepare('pragma journal_mode').get().journal_mode
     if (mode !== 'wal') return `${file} is in ${mode} mode, not WAL`
+    source(key, file)
+    source(key, `${file}-wal`)
     fs.mkdirSync(path.dirname(to), { recursive: true })
     db.prepare('vacuum into ?').run(to)
     return null
@@ -183,15 +258,8 @@ function copyStore(file, to) {
 /** Claude's and Codex's folders, as their locators find them (`claudeTranscript`, `codexTranscript`). */
 const claudeRoot = (env) => env.CLAUDE_CONFIG_DIR ?? path.join(home(env), '.claude')
 const codexRoot = (env) => env.CODEX_HOME ?? path.join(home(env), '.codex')
-
 /** The transcript a JSONL harness's locator takes for a session, by its kind. */
 const TRANSCRIPTS = { 'claude-code': claudeTranscript, codex: codexTranscript, pi: piTranscript }
-
-/** The size of the transcript the snapshot holds of `session`; none for a store. */
-async function transcriptSize(kind, session) {
-  const file = await TRANSCRIPTS[kind]?.(session, env)
-  return file ? fs.statSync(file).size : null
-}
 
 /**
  * Each harness: its conversations in the live stores, newest first, and
@@ -206,6 +274,7 @@ const HARNESSES = {
     copy: (sessions) => {
       for (const session of sessions) {
         copyMatching(
+          `claude-code\n${session}`,
           path.join(claudeRoot(live), 'projects'),
           path.join(claudeRoot(env), 'projects'),
           (name) => name === `${session}.jsonl`,
@@ -222,6 +291,7 @@ const HARNESSES = {
     copy: (sessions) => {
       for (const session of sessions) {
         copyMatching(
+          `codex\n${session}`,
           path.join(codexRoot(live), 'sessions'),
           path.join(codexRoot(env), 'sessions'),
           (name) => name.includes(session),
@@ -237,7 +307,17 @@ const HARNESSES = {
         .filter(Boolean),
     copy: (sessions) => {
       for (const session of sessions) {
-        copyMatching(piSessionDir(live), piSessionDir(env), (name) => name.includes(session))
+        copyMatching(`pi\n${session}`, piSessionDir(live), piSessionDir(env), (name) =>
+          name.includes(session),
+        )
+      }
+      // The extension's evidence of the launch the environment names (`piSettlementEvidence`).
+      const launch = live.CF_DELIVERY_LAUNCH_ID
+      if (live.CF_DELIVERY_SETTLED !== undefined && launch !== undefined) {
+        for (const name of [`${launch}.json`, `${launch}.working.json`]) {
+          const file = path.join(live.CF_DELIVERY_SETTLED, name)
+          if (fs.existsSync(file)) copy('pi', file, path.join(env.CF_DELIVERY_SETTLED, name))
+        }
       }
       return null
     },
@@ -251,7 +331,7 @@ const HARNESSES = {
     copy: () => {
       const places = opencodeStores(env)
       for (const [index, file] of opencodeStores(live).entries()) {
-        const refused = copyStore(file, places[index])
+        const refused = copyStore('opencode', file, places[index])
         if (refused !== null) return refused
       }
       return null
@@ -265,15 +345,24 @@ const HARNESSES = {
       ).map((row) => row.id),
     copy: () => {
       const store = (env) => path.join(devinFolders(env).data, 'cli', 'sessions.db')
-      const refused = copyStore(store(live), store(env))
+      const refused = copyStore('devin', store(live), store(env))
       if (refused !== null) return refused
+      // Each launch's wire log, as Devin's reader opens it (`readWires`).
       const wires = (env) =>
         path.join(
           env.CONSENSFLOW_HOME ?? path.join(home(env), '.consensflow'),
           'integrations',
           'devin',
         )
-      copyMatching(wires(live), wires(env), (name) => name === 'wire.jsonl')
+      const launches = fs.existsSync(wires(live))
+        ? fs
+            .readdirSync(wires(live), { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+        : []
+      for (const { name } of launches) {
+        const file = path.join(wires(live), name, 'wire.jsonl')
+        if (fs.existsSync(file)) copy('devin', file, path.join(wires(env), name, 'wire.jsonl'))
+      }
       return null
     },
   },
@@ -311,11 +400,15 @@ function digest(reading) {
   }
 }
 
-// One instant for every reading, the Rust half's too: Pi's quiet reads the
-// clock. And the zone a reset that names none is read in.
+/** The size of the transcript the snapshot holds of `session`; none for a store. */
+async function transcriptSize(kind, session) {
+  const file = await TRANSCRIPTS[kind]?.(session, env)
+  return file ? fs.statSync(file).size : null
+}
+
+// One instant for every reading, the Rust half's too: Pi's quiet reads the clock.
 const now = Date.now()
 Date.now = () => now
-const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
 const lines = []
 let kept = false
 try {
@@ -326,7 +419,7 @@ try {
       console.log(`${kind}: left out: ${refused}`)
       continue
     }
-    let drifted = 0
+    let written = 0
     for (const session of sessions) {
       const read = cachedAnswers()
       const first = digest(await read(kind, session, env))
@@ -335,28 +428,28 @@ try {
       const there = digest(await answers(kind, session, live))
       const ms = performance.now() - started
       if (JSON.stringify(there) !== JSON.stringify(first)) {
-        if (!there.unknown && first.unknown && LOST.some((lost) => first.reason.startsWith(lost))) {
-          throw new Error(`${kind} ${session}: the copy lost its record (${first.reason})`)
+        if (unchanged(kind, `${kind}\n${session}`)) {
+          throw new Error(
+            `${kind} ${session}: the copy reads otherwise, though nothing was written`,
+          )
         }
-        drifted += 1
+        written += 1
       }
       const size = await transcriptSize(kind, session)
       lines.push(
         JSON.stringify({ kind, session, now, zone, env, live, ms, size, reading: first, again }),
       )
     }
-    console.log(
-      `${kind}: ${sessions.length} conversations, ${drifted} read otherwise live (written since)`,
-    )
+    console.log(`${kind}: ${sessions.length} conversations, ${written} written since copied`)
   }
-  fs.writeFileSync(OUTPUT, `${lines.join('\n')}\n`)
-  console.log(`${lines.length} digests in ${OUTPUT}`)
+  fs.writeFileSync(DIGESTS, `${lines.join('\n')}\n`)
+  console.log(`${lines.length} digests in ${DIGESTS}`)
 
   // Optimised, as the daemon is built: the Rust half times its reads.
   const rust = spawnSync(
     'cargo',
     ['test', '--release', '-p', 'cf-harness', '--test', 'parity', '--', '--ignored', '--nocapture'],
-    { cwd: REPO, stdio: 'inherit', env: { ...process.env, CF_PARITY_RECORDS: OUTPUT } },
+    { cwd: REPO, stdio: 'inherit', env: { ...process.env, CF_PARITY_RECORDS: DIGESTS } },
   )
   process.exitCode = rust.status ?? 1
   kept = process.exitCode !== 0

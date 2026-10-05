@@ -417,11 +417,14 @@ fn a_refusal_s_time_is_the_date_javascript_parses_of_the_string_it_makes_of_it()
         once(&[hello(), refusal(Some(json!(24)))]),
         said("24", no_time)
     );
-    // A fraction after the minutes, no time to V8 either.
-    assert_eq!(
-        once(&[hello(), refusal(Some(json!("2026-09-19T12:00.1Z")))]),
-        said(r#""2026-09-19T12:00.1Z""#, no_time)
-    );
+    // A fraction after the minutes, and one past 24:00, no time to V8 either.
+    for stamped in ["2026-09-19T12:00.1Z", "2026-09-19T24:00:00.0001Z"] {
+        assert_eq!(
+            once(&[hello(), refusal(Some(json!(stamped)))]),
+            said(&format!("\"{stamped}\""), no_time),
+            "{stamped}"
+        );
+    }
     // Node: TypeError.
     assert_eq!(
         once(&[hello(), refusal(Some(json!({ "toString": "x" })))]),

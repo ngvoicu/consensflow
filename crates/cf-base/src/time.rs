@@ -66,11 +66,12 @@ pub fn time_clip(ms: f64) -> Option<i64> {
 /// `:ss`, `.sss` and `Z` or `±HH:mm`; `±YYYYYY` years): milliseconds since the
 /// epoch, or none where it gives NaN. A date alone is UTC.
 ///
-/// V8 also reads what the format does not hold, through a legacy parser: a
-/// time with no offset as local time, a space or a `t` for the `T`, a `z`
-/// for the `Z`, an offset with no colon, a day past the month's last as one
-/// in the next. ConsensFlow writes none of these (every time it stores is
-/// `toISOString`'s), so they are read as none here.
+/// V8 reads more, and none of it is read here, as ConsensFlow writes none of
+/// it (every time it stores is `toISOString`'s): a time of day with no
+/// offset, which the format reads as local time; and, through a legacy
+/// parser, what the format does not hold: a space or a `t` for the `T`, a
+/// `z` for the `Z`, an offset with no colon, a day past the month's last as
+/// one in the next.
 pub fn parse(text: &str) -> Option<i64> {
     let mut rest = text;
     let year = take_year(&mut rest)?;
@@ -90,25 +91,26 @@ pub fn parse(text: &str) -> Option<i64> {
         let minutes = take_part(&mut rest, ':', 2)?;
         let seconds = take_part(&mut rest, ':', 2);
         // A fraction is of a second: one after the minutes is no time.
-        let millis = match rest.strip_prefix('.').filter(|_| seconds.is_some()) {
+        let (millis, fraction_zero) = match rest.strip_prefix('.').filter(|_| seconds.is_some()) {
             Some(fraction) => {
                 let digits = fraction.bytes().take_while(u8::is_ascii_digit).count();
                 if digits == 0 {
                     return None;
                 }
+                let all = &fraction[..digits];
                 rest = &fraction[digits..];
                 // JavaScript keeps the first three digits; more are read and dropped.
-                let first: String = fraction[..digits]
-                    .chars()
-                    .chain("00".chars())
-                    .take(3)
-                    .collect();
-                first.parse::<i64>().ok()?
+                let first: String = all.chars().chain("00".chars()).take(3).collect();
+                (
+                    first.parse::<i64>().ok()?,
+                    all.bytes().all(|digit| digit == b'0'),
+                )
             }
-            None => 0,
+            None => (0, true),
         };
         let seconds = seconds.unwrap_or(0);
-        let ends_day = hours == 24 && minutes == 0 && seconds == 0 && millis == 0;
+        // The day's end is 24:00 to the last digit: a nanosecond past it is none.
+        let ends_day = hours == 24 && minutes == 0 && seconds == 0 && fraction_zero;
         if (hours > 23 && !ends_day) || minutes > 59 || seconds > 59 {
             return None;
         }
@@ -527,6 +529,8 @@ mod tests {
             ("2026", Some(1_767_225_600_000)),
             ("2000-02-29T00:00:00.000Z", Some(951_782_400_000)),
             ("2026-10-02T24:00:00.000Z", Some(1_790_985_600_000)),
+            ("2026-10-02T24:00:00.0000000Z", Some(1_790_985_600_000)),
+            ("2026-10-02T24:00Z", Some(1_790_985_600_000)),
             ("+010000-01-01T00:00:00.000Z", Some(253_402_300_800_000)),
         ];
         for (text, ms) in cases {
@@ -537,11 +541,15 @@ mod tests {
             "",
             "2026-13-01",
             "2026-10-02T25:00Z",
-            // Node 26 gives NaN for a fraction after the minutes.
+            // Node 26 gives NaN for a fraction after the minutes, and for one
+            // that is not zero after 24:00, though its milliseconds are.
             "2026-09-19T12:00.1Z",
+            "2026-09-19T24:00:00.0001Z",
+            "2026-09-19T24:00:00.000000001Z",
             "2026-10-02T08:00.000Z",
             "2026-10-02T08:00.5+03:00",
-            // V8's legacy parser reads these; the format does not hold them.
+            // V8 reads these: the first as local time, which the format
+            // says; the others through its legacy parser.
             "2026-10-02T08:00:00.000",
             "2026-10-02 08:00:00Z",
             "2026-02-31",
