@@ -47,9 +47,10 @@ pub struct Failed {
 /// inherited, until it ends: its standard output as text, or how it failed.
 /// Its input stays open and unwritten, as Node's does. It has ended when it
 /// has exited and its streams have closed, as Node's `close`. At its
-/// timeout, or once a stream says more than its limit, both streams are
-/// closed and it is asked to end, and how it ends decides: one that ends
-/// with 0 has answered, as with Node.
+/// timeout, whether it is still writing or has closed its streams and goes
+/// on, or once a stream says more than its limit, both streams are closed
+/// and it is asked to end, and how it ends decides: one that ends with 0
+/// has answered, as with Node.
 pub async fn execute(
     run: &Run,
     cwd: Option<&Path>,
@@ -92,38 +93,49 @@ pub async fn execute(
 
     let (mut stdout, mut stderr) = (stdout, stderr);
     let (mut out, mut err) = (Read::default(), Read::default());
-    let read = read_both(
-        &mut stdout,
-        &mut stderr,
-        &mut out,
-        &mut err,
-        limits.max_buffer,
-    );
-    let killed = if limits.timeout.is_zero() {
-        read.await;
-        false
-    } else {
-        tokio::select! {
-            () = read => false,
-            () = tokio::time::sleep(limits.timeout) => true,
+    // Its streams read to their ends, then its exit, all within its time:
+    // none when it said too much.
+    let finished = async {
+        read_both(
+            &mut stdout,
+            &mut stderr,
+            &mut out,
+            &mut err,
+            limits.max_buffer,
+        )
+        .await;
+        if out.overflowed || err.overflowed {
+            None
+        } else {
+            Some(child.wait().await)
         }
     };
-    let status = if killed || out.overflowed || err.overflowed {
-        // As Node's `kill`: both streams closed first, so nothing it left
-        // running holds the answer back, then the program asked to end.
-        drop((stdout, stderr));
-        end(pid);
-        tokio::select! {
-            status = child.wait() => status,
-            () = tokio::time::sleep(FORCE_AFTER) => {
-                if let Some(pid) = pid {
-                    terminate(pid, Ending::Forced);
+    let mut killed = false;
+    let finished = if limits.timeout.is_zero() {
+        finished.await
+    } else if let Ok(finished) = tokio::time::timeout(limits.timeout, finished).await {
+        finished
+    } else {
+        killed = true;
+        None
+    };
+    let status = match finished {
+        Some(status) => status,
+        None => {
+            // As Node's `kill`: both streams closed first, so nothing it left
+            // running holds the answer back, then the program asked to end.
+            drop((stdout, stderr));
+            end(pid);
+            tokio::select! {
+                status = child.wait() => status,
+                () = tokio::time::sleep(FORCE_AFTER) => {
+                    if let Some(pid) = pid {
+                        terminate(pid, Ending::Forced);
+                    }
+                    child.wait().await
                 }
-                child.wait().await
             }
         }
-    } else {
-        child.wait().await
     };
 
     let stdout = String::from_utf8_lossy(&out.bytes).into_owned();
@@ -365,6 +377,28 @@ mod tests {
         let started = std::time::Instant::now();
         let answered = run_now(&shell("sleep 1 & printf ready"), &system_env(), limits);
         assert_eq!(answered.unwrap(), "ready");
+        assert!(
+            started.elapsed() < Duration::from_millis(900),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_closed_its_streams_and_goes_on_is_ended_at_its_timeout() {
+        // Probed on Node v26.8.1: this, with 100 ms, ended by SIGTERM after
+        // 104 ms, what it wrote kept.
+        let limits = Limits {
+            timeout: Duration::from_millis(100),
+            max_buffer: 1024,
+        };
+        let started = std::time::Instant::now();
+        let run = shell("printf ready; exec 1>&- 2>&-; exec /bin/sleep 5");
+        let failed = run_now(&run, &system_env(), limits).unwrap_err();
+        assert!(failed.killed);
+        assert_eq!(failed.code, None);
+        assert_eq!(failed.stdout, "ready");
         assert!(
             started.elapsed() < Duration::from_millis(900),
             "{:?}",

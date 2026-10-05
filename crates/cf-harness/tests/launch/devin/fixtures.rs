@@ -94,7 +94,12 @@ impl Home {
     /// The programs run since the last time this asked, each as a test names
     /// it (`devin --version`).
     pub(super) fn asked(&self) -> Vec<String> {
-        self.fakes.processes.take_ran().iter().map(named).collect()
+        self.fakes
+            .processes
+            .take_ran()
+            .iter()
+            .map(|(program, _)| named(program))
+            .collect()
     }
 
     pub(super) fn env(&self) -> Env {

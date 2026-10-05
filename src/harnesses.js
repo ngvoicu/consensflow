@@ -278,7 +278,6 @@ export function paneArgv(argv, env = process.env) {
   return [target.program, target.script, ...args]
 }
 
-const execute = promisify(execFile)
 const probes = new Map()
 
 /**
@@ -295,7 +294,9 @@ export function probeExecutable(executable, args, env, { timeoutMs = 30_000 } = 
   let probe = probes.get(key)
   if (probe === undefined) {
     const run = runnable(executable, args, env)
-    probe = execute(run.file, run.args, {
+    // `execFile` as it is now, not as it was when this module loaded: the
+    // launch recorder writes down each run where it is asked for.
+    probe = promisify(execFile)(run.file, run.args, {
       ...run.options,
       env,
       timeout: timeoutMs,

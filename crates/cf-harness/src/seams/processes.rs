@@ -298,7 +298,11 @@ mod tests {
             driver.run(),
             [(0, answer.clone()), (1, answer.clone()), (2, answer)]
         );
-        let ran: Vec<String> = scripted.take_ran().iter().map(named).collect();
+        let ran: Vec<String> = scripted
+            .take_ran()
+            .iter()
+            .map(|(program, _)| named(program))
+            .collect();
         assert_eq!(ran, ["codex --version"], "asked once");
     }
 

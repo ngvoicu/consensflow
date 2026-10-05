@@ -73,9 +73,10 @@ pub struct ChildScript {
 #[derive(Default)]
 pub struct ScriptedProcesses {
     runs: RefCell<HashMap<String, VecDeque<Result<String, Failed>>>>,
+    always: RefCell<HashMap<String, Result<String, Failed>>>,
     every: RefCell<HashMap<String, Result<String, Failed>>>,
     children: RefCell<HashMap<String, VecDeque<ChildScript>>>,
-    ran: RefCell<Vec<Program>>,
+    ran: RefCell<Vec<(Program, Limits)>>,
     spawned: RefCell<Vec<(Program, Streams)>>,
     written: Rc<RefCell<Vec<String>>>,
 }
@@ -90,9 +91,16 @@ impl ScriptedProcesses {
             .push_back(answer);
     }
 
+    /// Scripts what `named` answers every time it is run, as a stand-in
+    /// answers by its arguments (`standIn`): once the answers scripted for
+    /// one run each are used up.
+    pub fn always_answer(&self, named: &str, answer: Result<String, Failed>) {
+        self.always.borrow_mut().insert(named.to_owned(), answer);
+    }
+
     /// Scripts what every run of the executable `name` answers whatever it
-    /// is asked, as a stand-in that says one thing (`fakeExecutable`'s
-    /// `output`): when no answer to the exact arguments is left.
+    /// is asked, as a stand-in that says one thing (`standIn`'s `*`): when
+    /// no answer to the exact arguments is scripted.
     pub fn every_answer(&self, name: &str, answer: Result<String, Failed>) {
         self.every.borrow_mut().insert(name.to_owned(), answer);
     }
@@ -107,13 +115,13 @@ impl ScriptedProcesses {
     }
 
     /// Every program run to its end since the last time they were taken,
-    /// as it was given.
-    pub fn take_ran(&self) -> Vec<Program> {
+    /// as it was given, with its limits.
+    pub fn take_ran(&self) -> Vec<(Program, Limits)> {
         std::mem::take(&mut self.ran.borrow_mut())
     }
 
-    /// Every child started since the last time they were taken, as it was
-    /// given, with its streams.
+    /// Every child asked for since the last time they were taken, started
+    /// or not, as it was given, with its streams.
     pub fn take_spawned(&self) -> Vec<(Program, Streams)> {
         std::mem::take(&mut self.spawned.borrow_mut())
     }
@@ -143,14 +151,15 @@ fn missing(named: &str) -> String {
 }
 
 impl Processes for ScriptedProcesses {
-    fn run(&self, program: Program, _limits: Limits) -> Work<'_, Result<String, Failed>> {
+    fn run(&self, program: Program, limits: Limits) -> Work<'_, Result<String, Failed>> {
         let (named, name) = (named(&program), name(&program));
-        self.ran.borrow_mut().push(program);
+        self.ran.borrow_mut().push((program, limits));
         let answer = self
             .runs
             .borrow_mut()
             .get_mut(&named)
             .and_then(VecDeque::pop_front)
+            .or_else(|| self.always.borrow().get(&named).cloned())
             .or_else(|| self.every.borrow().get(&name).cloned())
             .unwrap_or_else(|| {
                 Err(Failed {
@@ -164,14 +173,16 @@ impl Processes for ScriptedProcesses {
     }
 
     fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, String> {
-        let named = named(&program);
+        let (named, name) = (named(&program), name(&program));
+        // Written down whether it starts or not, as Node's recorder writes
+        // down every `spawn`.
+        self.spawned.borrow_mut().push((program, streams));
         let script = self
             .children
             .borrow_mut()
-            .get_mut(&name(&program))
+            .get_mut(&name)
             .and_then(VecDeque::pop_front)
             .ok_or_else(|| missing(&named))?;
-        self.spawned.borrow_mut().push((program, streams));
         // One that ends by itself and says nothing has ended once started.
         let ended = script.ends == Ends::Itself && script.lines.is_empty();
         Ok(Box::new(ScriptedChild {
@@ -242,5 +253,79 @@ impl Child for ScriptedChild {
         if ends {
             self.ended.set(true);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    use cf_base::env::Env;
+
+    use super::*;
+    use crate::testing::finished;
+
+    fn program(executable: &str, args: &[&str]) -> Program {
+        Program {
+            executable: PathBuf::from(executable),
+            args: args.iter().map(|&arg| arg.to_owned()).collect(),
+            cwd: None,
+            env: Env::default(),
+        }
+    }
+
+    const LIMITS: Limits = Limits {
+        timeout: Duration::from_secs(1),
+        max_buffer: 1024,
+    };
+
+    #[test]
+    fn a_stand_in_answers_by_its_arguments_every_time_after_its_answers_for_one_run() {
+        let scripted = ScriptedProcesses::default();
+        scripted.run_answer("codex --version", Ok("once".to_owned()));
+        scripted.always_answer("codex --version", Ok("always".to_owned()));
+        scripted.every_answer("codex", Ok("anything".to_owned()));
+        let ask = |args: &[&str]| finished(scripted.run(program("/bin/codex.cmd", args), LIMITS));
+        assert_eq!(ask(&["--version"]).as_deref(), Ok("once"));
+        assert_eq!(ask(&["--version"]).as_deref(), Ok("always"));
+        assert_eq!(ask(&["--version"]).as_deref(), Ok("always"));
+        assert_eq!(ask(&["mcp", "list"]).as_deref(), Ok("anything"));
+        let ran: Vec<(String, Limits)> = scripted
+            .take_ran()
+            .iter()
+            .map(|(program, limits)| (named(program), *limits))
+            .collect();
+        assert_eq!(ran.len(), 4);
+        assert_eq!(ran[3], ("codex mcp list".to_owned(), LIMITS));
+    }
+
+    #[test]
+    fn a_child_asked_for_is_written_down_whether_it_starts_or_not() {
+        let scripted = ScriptedProcesses::default();
+        scripted.child(
+            "opencode",
+            ChildScript {
+                lines: Vec::new(),
+                ends: Ends::Asked,
+            },
+        );
+        assert!(scripted
+            .spawn(program("/bin/opencode", &["serve"]), Streams::Quiet)
+            .is_ok());
+        assert_eq!(
+            scripted
+                .spawn(program("/bin/opencode", &["serve"]), Streams::Quiet)
+                .err()
+                .as_deref(),
+            Some("spawn opencode serve ENOENT"),
+            "no child is left scripted"
+        );
+        let spawned: Vec<String> = scripted
+            .take_spawned()
+            .iter()
+            .map(|(program, _)| named(program))
+            .collect();
+        assert_eq!(spawned, ["opencode serve", "opencode serve"]);
     }
 }

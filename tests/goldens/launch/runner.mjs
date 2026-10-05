@@ -69,22 +69,14 @@
  */
 import { AsyncLocalStorage, createHook } from 'node:async_hooks'
 import { EventEmitter } from 'node:events'
-import {
-  existsSync,
-  lstatSync,
-  readdirSync,
-  readFileSync,
-  readlinkSync,
-  realpathSync,
-  rmSync,
-  statSync,
-} from 'node:fs'
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import { createRequire, syncBuiltinESMExports } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { PassThrough } from 'node:stream'
+import { promisify } from 'node:util'
 import { cachedAnswers } from '../../../hosts/lib/completion.js'
 import { claudeCodeAdapter } from '../../../src/adapters/claude-code.js'
 import { devinAdapter } from '../../../src/adapters/devin.js'
@@ -117,27 +109,6 @@ const TIMEOUT_MAX = 2 ** 31 - 1
  */
 const MACHINE_WAITS = new Set(['FSREQCALLBACK', 'FSREQPROMISE', 'FILEHANDLECLOSEREQ', 'Immediate'])
 
-/**
- * The variables the system gives a child that its environment lacks, which
- * no record of how a program was started names, as Rust's scripted
- * programs never see them: libuv's on Windows (`required_vars`), and the one
- * macOS gives every process.
- */
-const SYSTEM_VARS = new Set([
-  '__CF_USER_TEXT_ENCODING',
-  'HOMEDRIVE',
-  'HOMEPATH',
-  'LOGONSERVER',
-  'PATH',
-  'SYSTEMDRIVE',
-  'SYSTEMROOT',
-  'TEMP',
-  'USERDOMAIN',
-  'USERNAME',
-  'USERPROFILE',
-  'WINDIR',
-])
-
 const ADAPTERS = { 'claude-code': claudeCodeAdapter, devin: devinAdapter, pi: piAdapter }
 const WINDOWS = process.platform === 'win32'
 
@@ -150,6 +121,7 @@ const real = {
   setImmediate: globalThis.setImmediate,
   spawn: childProcess.spawn,
   spawnSync: childProcess.spawnSync,
+  execFile: childProcess.execFile,
 }
 
 /** A path under the root with Windows' separators as POSIX's; on POSIX a backslash is a name's own. */
@@ -328,6 +300,7 @@ function install(context) {
     context.children.spawn(file, args, options)
   childProcess.spawnSync = (file, args = [], options = {}) =>
     context.children.spawnSync(file, args, options)
+  childProcess.execFile = recordedExecFile(context)
   timersPromises.setTimeout = (ms, value) =>
     new Promise((resolve) => clock.setTimeout(() => resolve(value), ms))
   let drawn = 0
@@ -357,6 +330,7 @@ function install(context) {
     net.createServer = saved.createServer
     childProcess.spawn = real.spawn
     childProcess.spawnSync = real.spawnSync
+    childProcess.execFile = real.execFile
     timersPromises.setTimeout = saved.promisedTimeout
     crypto.randomUUID = saved.randomUUID
     crypto.randomBytes = saved.randomBytes
@@ -840,12 +814,10 @@ function scriptedChildren(context) {
   const left = new Map()
   const started = []
   const named = (file, args) => {
-    const shim = WINDOWS && /\.mjs$/i.test(args[0] ?? '')
-    if (WINDOWS && !shim) {
+    if (WINDOWS && !/\.mjs$/i.test(args[0] ?? '')) {
       throw new Error(`a spawned stand-in runs as a JavaScript one on Windows: ${file}`)
     }
-    const [program, rest] = shim ? [args[0], args.slice(1)] : [file, args]
-    return [path.basename(program).replace(/\.(mjs|cmd|bat|exe)$/i, ''), ...rest]
+    return programOf(file, args)
   }
   return {
     script(children) {
@@ -890,16 +862,15 @@ function scriptedChildren(context) {
 }
 
 /**
- * How a program was started, as both runners write it down: its name, its
- * arguments, its folder (none for the one this runs in), and the variables
- * its environment adds to or changes in the scenario's (a variable taken
- * away is `null`), each by name, libuv's own for Windows left out.
+ * How a program was started, as both runners write it down where an adapter
+ * asks for it: its name, its arguments, its folder (none for the one this
+ * runs in), and the variables its environment adds to or changes in the
+ * scenario's (a variable taken away is `null`), each by name.
  */
 function invocation(context, name, args, cwd, env) {
   const given = env ?? context.env
   const changed = []
   for (const key of new Set([...Object.keys(context.env), ...Object.keys(given)])) {
-    if (SYSTEM_VARS.has(key.toUpperCase())) continue
     const value = Object.hasOwn(given, key) ? given[key] : null
     // Windows' names are of no case, and Rust's environment writes them upper.
     if (value !== (context.env[key] ?? null))
@@ -915,19 +886,59 @@ function invocation(context, name, args, cwd, env) {
 }
 
 /**
- * A stand-in CLI that answers by its arguments and writes down how it was
- * run (`standIn: {name, answers}`), the twin of Rust's `ScriptedProcesses`:
- * `answers` maps the arguments, a space between, to what it writes to its
- * output, or to how it fails (`{stdout, stderr, exit}`); `*` is any other.
- * It runs as JavaScript, so on Windows its shim names it (`runnable`).
+ * A program's name and its arguments as a test names them: its file's name,
+ * the extension a Windows stand-in has taken off; on Windows a stand-in runs
+ * as its shim's node and script (`runnable`), so the script names it.
+ */
+function programOf(file, args) {
+  const shim = WINDOWS && /\.mjs$/i.test(args[0] ?? '')
+  const [program, rest] = shim ? [args[0], args.slice(1)] : [file, args]
+  return [path.basename(program).replace(/\.(mjs|cmd|bat|exe)$/i, ''), ...rest]
+}
+
+/**
+ * `execFile` as an adapter runs a program to its end, the twin of Rust's
+ * `ScriptedProcesses::run`: the program runs, each run written down first
+ * as the adapter asked for it (`ran`), with its limits (`timeout`, none at
+ * 0, and `maxBuffer`, as `execFile` defaults them). Promised, it answers as
+ * the real one does.
+ */
+function recordedExecFile(context) {
+  const record = (file, args, options) => {
+    const [name, ...rest] = programOf(file, args)
+    context.ran.push({
+      ...invocation(context, name, rest, options.cwd, options.env),
+      limits: { timeout: options.timeout ?? 0, maxBuffer: options.maxBuffer ?? 1024 * 1024 },
+    })
+  }
+  const promised = promisify(real.execFile)
+  const execFile = (file, ...rest) => {
+    const args = Array.isArray(rest[0]) ? rest[0] : []
+    const options = rest.find(
+      (given) => given !== null && typeof given === 'object' && !Array.isArray(given),
+    )
+    record(file, args, options ?? {})
+    return real.execFile(file, ...rest)
+  }
+  execFile[promisify.custom] = (file, args = [], options = {}) => {
+    record(file, args, options)
+    return promised(file, args, options)
+  }
+  return execFile
+}
+
+/**
+ * A stand-in CLI that answers by its arguments (`standIn: {name, answers}`),
+ * the twin of Rust's `ScriptedProcesses`: `answers` maps the arguments, a
+ * space between, to what it writes to its output, or to how it fails
+ * (`{stdout, stderr, exit}`); `*` is any other. It runs as JavaScript that
+ * needs no module type (a stand-in named as Windows names a program,
+ * `devin.exe`, has none on POSIX), so on Windows its shim names it
+ * (`runnable`). Each run is written down where it is asked for
+ * (`recordedExecFile`).
  */
 function standIn(context, { name, answers }) {
-  const log = path.join(context.root, `${name}.ran`)
-  // No `import`: a stand-in named as Windows names a program (`devin.exe`)
-  // runs on POSIX as a script of no module type, where only CommonJS loads.
-  const source = `const { appendFileSync } = process.getBuiltinModule('node:fs')
-const args = process.argv.slice(2)
-appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, cwd: process.cwd(), env: process.env }) + '\\n')
+  const source = `const args = process.argv.slice(2)
 const answers = ${JSON.stringify(answers ?? {})}
 const answer = answers[args.join(' ')] ?? answers['*'] ?? ''
 if (typeof answer === 'string') process.stdout.write(answer)
@@ -938,24 +949,6 @@ else {
 }
 `
   fakeNodeExecutable(path.join(context.root, 'bin', name), source)
-  context.standIns.push({ name, log })
-}
-
-/** The runs each stand-in wrote down since it was last asked, its log then gone. */
-function standInRuns(context) {
-  const runs = []
-  // A program's folder is its real path (`/private/var` for `/var` on macOS).
-  const real = realpathSync(context.root)
-  for (const { name, log } of context.standIns) {
-    if (!existsSync(log)) continue
-    for (const line of readFileSync(log, 'utf8').split('\n').filter(Boolean)) {
-      const { args, cwd, env } = JSON.parse(line)
-      const folder = cwd.startsWith(real) ? context.root + cwd.slice(real.length) : cwd
-      runs.push(invocation(context, name.replace(/\.(mjs|cmd|bat|exe)$/i, ''), args, folder, env))
-    }
-    rmSync(log)
-  }
-  return runs
 }
 
 /** A live process of the scenario's own besides this one: `$OTHER`. */
@@ -1176,6 +1169,7 @@ async function record(context, index, step) {
   context.requests = []
   context.fetches = []
   context.spawned = []
+  context.ran = []
   context.written = []
   context.draws = []
   if (step.release !== undefined) {
@@ -1204,7 +1198,6 @@ async function record(context, index, step) {
     begin(context, index, step)
   }
   await settleDown(context)
-  const ran = standInRuns(context)
   const settled = context.work
     .filter((entry) => entry.settled !== null)
     .map((entry) => ({ ...entry.settled, op: entry.op }))
@@ -1220,7 +1213,7 @@ async function record(context, index, step) {
     pending: pending(context),
     requests: context.requests,
     ...(context.fetches.length > 0 ? { fetches: context.fetches } : {}),
-    ...(ran.length > 0 ? { ran } : {}),
+    ...(context.ran.length > 0 ? { ran: context.ran } : {}),
     ...(context.spawned.length > 0 ? { spawned: context.spawned } : {}),
     ...(context.written.length > 0 ? { written: context.written } : {}),
     ...(unused.length > 0 ? { unused } : {}),
@@ -1244,8 +1237,8 @@ export async function play(scenario, adapters = ADAPTERS) {
     requests: [],
     fetches: [],
     spawned: [],
+    ran: [],
     written: [],
-    standIns: [],
     draws: [],
     ports: Array.from({ length: 100 }, (_, index) => 41_000 + index),
     // A scripted child's pid, none a live process has (`DEAD` and on).

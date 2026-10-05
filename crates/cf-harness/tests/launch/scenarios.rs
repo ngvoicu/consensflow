@@ -174,29 +174,11 @@ fn answer(names: &Names, given: &Value) -> Answer {
     Answer::Now(response(names, given))
 }
 
-/// The variables the system gives a child that its environment lacks, which
-/// no record of how a program was started names (`SYSTEM_VARS`,
-/// `runner.mjs`): libuv's on Windows, and the one macOS gives every process.
-const SYSTEM_VARS: [&str; 12] = [
-    "__CF_USER_TEXT_ENCODING",
-    "HOMEDRIVE",
-    "HOMEPATH",
-    "LOGONSERVER",
-    "PATH",
-    "SYSTEMDRIVE",
-    "SYSTEMROOT",
-    "TEMP",
-    "USERDOMAIN",
-    "USERNAME",
-    "USERPROFILE",
-    "WINDIR",
-];
-
-/// How a program was started, as Node's runner writes it down
-/// (`invocation`): its name, its arguments, its folder, and the variables
-/// its environment adds to or changes in the scenario's, a variable taken
-/// away `null`, each by name, the system's own left out. Windows' names are
-/// of no case, and written upper.
+/// How a program was started, as Node's runner writes it down where an
+/// adapter asks for it (`invocation`): its name, its arguments, its folder,
+/// and the variables its environment adds to or changes in the scenario's, a
+/// variable taken away `null`, each by name. Windows' names are of no case,
+/// and written upper.
 fn invocation(scenario: &Map<String, Value>, program: &Program) -> Value {
     let spelled = |name: &str| {
         if cfg!(windows) {
@@ -232,7 +214,6 @@ fn invocation(scenario: &Map<String, Value>, program: &Program) -> Value {
     }
     let env: Vec<Value> = changed
         .into_iter()
-        .filter(|(key, _)| !SYSTEM_VARS.contains(&key.to_ascii_uppercase().as_str()))
         .map(|(key, value)| json!([key, value]))
         .collect();
     json!({
@@ -676,7 +657,7 @@ fn stand_in(played: &mut Played, given: &Value) {
             played
                 .fakes
                 .processes
-                .run_answer(&format!("{name} {args}"), answered);
+                .always_answer(&format!("{name} {args}"), answered);
         }
     }
 }
@@ -890,7 +871,14 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
         .processes
         .take_ran()
         .iter()
-        .map(|program| invocation(&played.env, program))
+        .map(|(program, limits)| {
+            let mut ran = invocation(&played.env, program);
+            ran["limits"] = json!({
+                "timeout": limits.timeout.as_millis(),
+                "maxBuffer": limits.max_buffer,
+            });
+            ran
+        })
         .collect();
     if !ran.is_empty() {
         fields.insert("ran".to_owned(), json!(ran));

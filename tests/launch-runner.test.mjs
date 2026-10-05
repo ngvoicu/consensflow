@@ -7,8 +7,8 @@ import { send } from '../src/channels/pi.js'
 import { play } from './goldens/launch/runner.mjs'
 
 /** Plays `steps` against a stand-in adapter whose window does what `window` says. */
-function played(steps, window) {
-  const scenario = { name: 'stand-in', harness: 'stand-in', env: { HOME: '$ROOT/home' }, steps }
+function played(steps, window, env = { HOME: '$ROOT/home' }) {
+  const scenario = { name: 'stand-in', harness: 'stand-in', env, steps }
   return play(scenario, { 'stand-in': ({ env }) => window(env) })
 }
 
@@ -452,7 +452,7 @@ describe("the launch recorder's children", () => {
 })
 
 describe("the launch recorder's stand-ins", () => {
-  it('answer by their arguments, fail as asked, and write down how each was run', async () => {
+  it('answer by their arguments and fail as asked, each run written down as it was asked for', async () => {
     const steps = [
       {
         standIn: {
@@ -465,46 +465,78 @@ describe("the launch recorder's stand-ins", () => {
       },
       { observe: true },
     ]
-    const { records } = await played(steps, (env) => ({
-      observe: async () => {
-        const { execFile } = await import('node:child_process')
-        const { promisify } = await import('node:util')
-        const run = promisify(execFile)
-        const file = path.join(path.dirname(env.HOME), 'bin', 'codex')
-        const program = process.platform === 'win32' ? `${file}.cmd` : file
-        const { runnable } = await import('../src/harnesses.js')
-        const ask = (args, options) => {
-          const started = runnable(program, args, options.env)
-          return run(started.file, started.args, { ...started.options, ...options }).then(
-            ({ stdout }) => ({ stdout }),
-            (cause) => ({ code: cause.code, stdout: cause.stdout, stderr: cause.stderr }),
-          )
-        }
-        await fs.mkdir(env.HOME, { recursive: true })
-        return [
-          await ask(['--version'], { env: { ...env, CODEX_HOME: `${env.HOME}/.codex` } }),
-          await ask(['mcp', 'list', '--json'], { env, cwd: env.HOME }),
-        ]
-      },
-    }))
+    const { records } = await played(
+      steps,
+      (env) => ({
+        observe: async () => {
+          const { execFile } = await import('node:child_process')
+          const { promisify } = await import('node:util')
+          const run = promisify(execFile)
+          const file = path.join(path.dirname(env.HOME), 'bin', 'codex')
+          const program = process.platform === 'win32' ? `${file}.cmd` : file
+          const { runnable } = await import('../src/harnesses.js')
+          const ask = (args, options) => {
+            const started = runnable(program, args, options.env)
+            return run(started.file, started.args, { ...started.options, ...options }).then(
+              ({ stdout }) => ({ stdout }),
+              (cause) => ({ code: cause.code, stdout: cause.stdout, stderr: cause.stderr }),
+            )
+          }
+          await fs.mkdir(env.HOME, { recursive: true })
+          const { PATH: _path, ...pathless } = env
+          return [
+            await ask(['--version'], { env: { ...env, CODEX_HOME: `${env.HOME}/.codex` } }),
+            await ask(['mcp', 'list', '--json'], {
+              env,
+              cwd: env.HOME,
+              timeout: 15_000,
+              maxBuffer: 1024,
+            }),
+            await ask(['--version'], { env: { ...env, PATH: `${env.PATH}${path.delimiter}more` } }),
+            await ask(['--version'], { env: pathless }),
+          ]
+        },
+      }),
+      { HOME: '$ROOT/home', PATH: '$ROOT/bin' },
+    )
     assert.deepEqual(records[0].settled[0].answer, [
       { stdout: 'codex-cli 0.159.2\n' },
       { code: 3, stdout: 'partial', stderr: 'no config\n' },
+      { stdout: 'codex-cli 0.159.2\n' },
+      { stdout: 'codex-cli 0.159.2\n' },
     ])
+    const unlimited = { timeout: 0, maxBuffer: 1024 * 1024 }
     assert.deepEqual(records[0].ran, [
       {
         program: 'codex',
         args: ['--version'],
         cwd: null,
         env: [['CODEX_HOME', '$ROOT/home/.codex']],
+        limits: unlimited,
       },
-      { program: 'codex', args: ['mcp', 'list', '--json'], cwd: '$ROOT/home', env: [] },
+      {
+        program: 'codex',
+        args: ['mcp', 'list', '--json'],
+        cwd: '$ROOT/home',
+        env: [],
+        limits: { timeout: 15_000, maxBuffer: 1024 },
+      },
+      // The system's own variables are written down too, changed or taken away.
+      {
+        program: 'codex',
+        args: ['--version'],
+        cwd: null,
+        env: [['PATH', `$ROOT/bin${path.delimiter}more`]],
+        limits: unlimited,
+      },
+      {
+        program: 'codex',
+        args: ['--version'],
+        cwd: null,
+        env: [['PATH', null]],
+        limits: unlimited,
+      },
     ])
-    assert.equal(
-      records[0].tree.some((entry) => entry.path.endsWith('.ran')),
-      false,
-      'the log is no file of the scene',
-    )
   })
 })
 
