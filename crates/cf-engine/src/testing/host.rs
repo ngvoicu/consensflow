@@ -33,6 +33,12 @@ pub struct FakeHost {
     pub refuse_kills: Cell<bool>,
     /// An open waits for this gate.
     pub hold: RefCell<Option<Gate>>,
+    /// The window of this handle exits as the next open is answered: the
+    /// host sends the exit first, in the same read as its answer.
+    pub exit_after_open: RefCell<Option<String>>,
+    /// A kill of the window of this generation waits for the gate, and is
+    /// made once it opens.
+    pub hold_kill: RefCell<Option<(u64, Gate)>>,
     /// A kill's exit is held until the test sends it.
     pub hold_exits: Cell<bool>,
     /// What `pane.snapshot` answers besides `ok` ([`FakeHost::set_snapshot`]).
@@ -215,6 +221,10 @@ impl EngineHost for FakeHost {
             // The JavaScript fake waited on its hold, and its answer reached
             // the caller a turn after it returned.
             next_turn().await;
+            let leaves = self.exit_after_open.borrow_mut().take();
+            if let Some(handle) = leaves {
+                self.exit(&handle).await;
+            }
             Ok(Opened::Open { pid })
         })
     }
@@ -223,8 +233,21 @@ impl EngineHost for FakeHost {
         let at = self
             .recorder
             .call("host", Some("kill"), json!([pane_json(pane)]));
-        self.killed.borrow_mut().push(pane.clone());
+        let held = self
+            .hold_kill
+            .borrow()
+            .clone()
+            .filter(|(generation, _)| *generation == pane.generation)
+            .map(|(_, gate)| gate);
+        // What a kill does it does when called, unless the test holds it.
+        if held.is_none() {
+            self.killed.borrow_mut().push(pane.clone());
+        }
         Box::pin(async move {
+            if let Some(gate) = held {
+                gate.wait().await;
+                self.killed.borrow_mut().push(pane.clone());
+            }
             if self.refuse_kills.get() {
                 next_turn().await;
                 let error = "refused by the test".to_owned();

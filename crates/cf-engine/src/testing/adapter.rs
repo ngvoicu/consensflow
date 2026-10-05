@@ -1,14 +1,15 @@
 //! A harness adapter whose agents do exactly what the test tells them: the
 //! twin of `fakeAdapter` in `core-dispatcher.test.mjs`. One adapter answers
-//! for any harness the test names it under; each window is an agent, found
-//! by its launch, and by the handle it is for. What a call does and reads, it
-//! does when called, as the JavaScript fake's async functions did; each is
-//! answered a turn later, as their promises were, and written down in the
-//! Node traces' shape, under the harness it was asked as. A test that
-//! replaced one of the fake's functions, or set what it reads, says what it
-//! did in its place ([`FakeAdapter::prepare`], [`FakeAdapter::after_prepare`],
-//! [`FakeAdapter::fail_started`], [`FakeAdapter::deliver`],
-//! [`FakeAdapter::ready`], [`FakeAdapter::interrupt`]).
+//! for any harness the test names it under ([`super::FakeAdapters`]); each
+//! window is an agent, found by its launch, and by the handle it is for.
+//! What a call does and reads, it does when called, as the JavaScript fake's
+//! async functions did; each is answered a turn later, as their promises
+//! were, and written down in the Node traces' shape, under the harness it
+//! was asked as. A test that replaced one of the fake's functions, or set
+//! what it reads, says what it did in its place ([`FakeAdapter::prepare`],
+//! [`FakeAdapter::after_prepare`], [`FakeAdapter::started`],
+//! [`FakeAdapter::deliver`], [`FakeAdapter::ready`],
+//! [`FakeAdapter::hold_observes`], [`FakeAdapter::interrupt`]).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -21,10 +22,10 @@ use cf_harness::contract::{
 use cf_harness::records::{Item, Quota, Role};
 use serde_json::{json, Value};
 
+use super::executor::Gate;
 use super::recorder::Recorder;
 use super::window::FakeWindow;
 use crate::runtime::next_turn;
-use crate::seams::Adapters;
 
 /// An agent's window, as the test tells it to be.
 #[derive(Debug, Clone)]
@@ -55,6 +56,10 @@ pub struct FakeAgent {
 /// What a test makes `ready` answer, where it gives the adapter one.
 pub type Ready = Rc<dyn Fn() -> Result<Readiness, String>>;
 
+/// What a test makes `started` answer, where it gives the adapter one: why
+/// the window could not take its first message, if it could not.
+pub type Started = Rc<dyn Fn() -> Result<(), String>>;
+
 /// What a test makes `prepare` do, where it gives the adapter one: told the
 /// launch as asked, it may fail it, before any window is made.
 pub type Prepare = Rc<dyn Fn(&Value) -> Result<(), String>>;
@@ -79,20 +84,24 @@ pub struct FakeAdapter {
     /// fake's `prepared`: its launch id, participant's handle, role,
     /// project, folder, resume, message, agent and instructions.
     prepared: RefCell<Vec<Value>>,
-    items: Cell<u64>,
+    /// The test's items are numbered across its adapters.
+    items: Rc<Cell<u64>>,
     /// A `ready` of the test's own; without one a window is ready, and
     /// nothing is asked (the JavaScript fake had none).
     pub ready: RefCell<Option<Ready>>,
+    /// A `started` of the test's own, that fails some windows.
+    pub started: RefCell<Option<Started>>,
     /// A `prepare` of the test's own, that fails some launches.
     pub prepare: RefCell<Option<Prepare>>,
     /// A `prepare` that does something with the window once the fake's own
     /// has prepared it (`await original(request)`), its answer a turn later
     /// still, as the replacement's promise settled after the original's.
     pub after_prepare: RefCell<Option<AfterPrepare>>,
-    /// A `started` that fails with this reason.
-    pub fail_started: RefCell<Option<String>>,
     /// A `deliver` of the test's own, in place of the fake's.
     pub deliver: RefCell<Option<Deliver>>,
+    /// Every `observe` of the window of this launch waits for the gate, and
+    /// is made once it opens.
+    pub hold_observes: RefCell<Option<(String, Gate)>>,
     /// The keys that interrupt a turn in its windows (`adapter.interrupt`):
     /// Escape once, as an adapter that says no more.
     pub interrupt: Cell<Interrupt>,
@@ -100,16 +109,27 @@ pub struct FakeAdapter {
 
 impl FakeAdapter {
     pub fn new(recorder: Recorder) -> Rc<Self> {
+        Self::numbering(recorder, Rc::new(Cell::new(0)))
+    }
+
+    /// Another adapter of the same test, with agents of its own: Codex's
+    /// own fake (`fakeAdapter('codex')`), its items numbered with this one's.
+    pub fn another(&self) -> Rc<Self> {
+        Self::numbering(self.recorder.clone(), Rc::clone(&self.items))
+    }
+
+    fn numbering(recorder: Recorder, items: Rc<Cell<u64>>) -> Rc<Self> {
         Rc::new(Self {
             recorder,
             agents: RefCell::new(Vec::new()),
             prepared: RefCell::new(Vec::new()),
-            items: Cell::new(0),
+            items,
             ready: RefCell::new(None),
+            started: RefCell::new(None),
             prepare: RefCell::new(None),
             after_prepare: RefCell::new(None),
-            fail_started: RefCell::new(None),
             deliver: RefCell::new(None),
+            hold_observes: RefCell::new(None),
             interrupt: Cell::new(Interrupt {
                 presses: 1,
                 close_after: None,
@@ -248,9 +268,18 @@ impl FakeAdapter {
 }
 
 /// The adapter as the engine asks it for one harness.
-struct Asked {
+pub(super) struct Asked {
     harness: String,
     fake: Rc<FakeAdapter>,
+}
+
+impl Asked {
+    pub(super) fn new(harness: &str, fake: Rc<FakeAdapter>) -> Self {
+        Self {
+            harness: harness.to_owned(),
+            fake,
+        }
+    }
 }
 
 impl Adapter for Asked {
@@ -356,38 +385,5 @@ impl Adapter for Asked {
 
     fn interrupt(&self) -> Interrupt {
         self.fake.interrupt.get()
-    }
-}
-
-/// The adapters the test's engine is made with: the fake under every
-/// harness the test names, as `{ 'claude-code': adapter, opencode: adapter }`.
-pub struct FakeAdapters {
-    harnesses: Vec<String>,
-    fake: Rc<FakeAdapter>,
-}
-
-impl FakeAdapters {
-    pub fn new(fake: Rc<FakeAdapter>, harnesses: &[&str]) -> Self {
-        Self {
-            harnesses: harnesses
-                .iter()
-                .map(|harness| (*harness).to_owned())
-                .collect(),
-            fake,
-        }
-    }
-}
-
-impl Adapters for FakeAdapters {
-    fn adapter(&self, harness: &str) -> Option<Rc<dyn Adapter>> {
-        self.harnesses
-            .iter()
-            .any(|named| named == harness)
-            .then(|| {
-                Rc::new(Asked {
-                    harness: harness.to_owned(),
-                    fake: Rc::clone(&self.fake),
-                }) as Rc<dyn Adapter>
-            })
     }
 }

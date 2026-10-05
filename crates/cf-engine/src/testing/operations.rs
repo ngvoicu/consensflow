@@ -1,19 +1,34 @@
 //! The engine's operations as a test calls them (the human's, the pane host's
 //! exits, and a restart's engine): each written down where it begins, by its
 //! Node name, as the Node recorder marks the dispatcher's operations a test
-//! calls, and the work it began run to stillness. Two calls a test made
-//! without awaiting the first are begun where they were called and run after
+//! calls, and the work it began run to stillness. Calls a test made without
+//! awaiting the first are begun where they were called and run after
 //! ([`Context::begin_pass`]).
 
 use std::rc::{Rc, Weak};
 
-use cf_ledger::{DeletedProject, ParticipantView, ProjectView, RemovedMember, TaskReleased};
-use serde_json::json;
+use cf_ledger::{
+    DeletedProject, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
+};
+use serde_json::{json, Value};
 
 use super::context::Context;
 use super::executor::Answer;
-use crate::dispatcher::{Dispatcher, Resumed};
+use crate::chief_switch::SwitchTo;
+use crate::dispatcher::{Dispatcher, Resumed, SwitchWhen};
 use crate::seams::EngineError;
+
+/// What a Switch chief is asked, as `switchChief` is given it.
+fn switch_asked(project: i64, to: &SwitchTo, when: SwitchWhen, note: bool) -> Value {
+    let mut asked = json!({ "harness": to.harness, "agent": to.agent });
+    if when == SwitchWhen::Turn {
+        asked["when"] = json!("turn");
+    }
+    if note {
+        asked["note"] = json!(true);
+    }
+    json!([project, asked])
+}
 
 impl Context {
     /// A pass begun where it is called, its first wait not passed:
@@ -23,6 +38,16 @@ impl Context {
         let dispatcher = Rc::clone(&self.dispatcher);
         self.executor
             .start_now(async move { dispatcher.pass().await })
+    }
+
+    /// A project opened (`openProject`), begun where it is called.
+    pub fn begin_open_project(&self, request: Value) -> Answer<Result<ProjectView, EngineError>> {
+        self.recorder.op("openProject", json!([request.clone()]));
+        let dispatcher = Rc::clone(&self.dispatcher);
+        self.executor.start_now(async move {
+            let request = NewProject::from_json(&request)?;
+            dispatcher.open_project(request).await
+        })
     }
 
     /// A member taken off the staff, begun where it is called.
@@ -51,11 +76,30 @@ impl Context {
         self.run(async move { dispatcher.close_project(project).await })
     }
 
+    /// The human's Close, begun where it is called.
+    pub fn begin_close_project(&self, project: i64) -> Answer<Result<ProjectView, EngineError>> {
+        self.recorder.op("closeProject", json!([project]));
+        let dispatcher = Rc::clone(&self.dispatcher);
+        self.executor
+            .start_now(async move { dispatcher.close_project(project).await })
+    }
+
     /// The human deletes a closed project (`deleteProject`).
     pub fn delete_project(&self, project: i64) -> Result<DeletedProject, EngineError> {
         self.recorder.op("deleteProject", json!([project]));
         let dispatcher = Rc::clone(&self.dispatcher);
         self.run(async move { dispatcher.delete_project(project).await })
+    }
+
+    /// The human deletes a closed project, begun where it is called.
+    pub fn begin_delete_project(
+        &self,
+        project: i64,
+    ) -> Answer<Result<DeletedProject, EngineError>> {
+        self.recorder.op("deleteProject", json!([project]));
+        let dispatcher = Rc::clone(&self.dispatcher);
+        self.executor
+            .start_now(async move { dispatcher.delete_project(project).await })
     }
 
     /// The human takes a member off the staff (`removeMember`).
@@ -103,6 +147,35 @@ impl Context {
         self.dispatcher.back_from_quota(project, handle)
     }
 
+    /// The human's Switch chief (`switchChief`).
+    pub fn switch_chief(
+        &self,
+        project: i64,
+        to: SwitchTo,
+        when: SwitchWhen,
+        note: bool,
+    ) -> Result<ProjectView, EngineError> {
+        self.recorder
+            .op("switchChief", switch_asked(project, &to, when, note));
+        let dispatcher = Rc::clone(&self.dispatcher);
+        self.run(async move { dispatcher.switch_chief(project, to, when, note).await })
+    }
+
+    /// The human's Switch chief, begun where it is called.
+    pub fn begin_switch_chief(
+        &self,
+        project: i64,
+        to: SwitchTo,
+        when: SwitchWhen,
+        note: bool,
+    ) -> Answer<Result<ProjectView, EngineError>> {
+        self.recorder
+            .op("switchChief", switch_asked(project, &to, when, note));
+        let dispatcher = Rc::clone(&self.dispatcher);
+        self.executor
+            .start_now(async move { dispatcher.switch_chief(project, to, when, note).await })
+    }
+
     /// The last window of `handle` exits, as the pane host says it (`host.exit`).
     pub fn exit(&self, handle: &str) {
         let (host, handle) = (Rc::clone(&self.host), handle.to_owned());
@@ -140,6 +213,22 @@ impl Restarted<'_> {
         self.context.recorder.op("pass", json!([]));
         let engine = self.engine();
         self.context.run(async move { engine.pass().await })
+    }
+
+    /// The human's Switch chief, everything it began run to stillness.
+    pub fn switch_chief(
+        &self,
+        project: i64,
+        to: SwitchTo,
+        when: SwitchWhen,
+        note: bool,
+    ) -> Result<ProjectView, EngineError> {
+        self.context
+            .recorder
+            .op("switchChief", switch_asked(project, &to, when, note));
+        let engine = self.engine();
+        self.context
+            .run(async move { engine.switch_chief(project, to, when, note).await })
     }
 
     /// What was on its way is settled, and the projects open before come back.

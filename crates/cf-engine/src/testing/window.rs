@@ -56,6 +56,12 @@ impl FakeWindow {
         }
         bag
     }
+
+    /// What a look at the agent's window finds, its launch on `session`.
+    fn look(&self, session: &str) -> Observed {
+        self.fake
+            .of_launch(&self.launch, |agent| looked(agent, session))
+    }
 }
 
 impl Window for FakeWindow {
@@ -69,19 +75,20 @@ impl Window for FakeWindow {
 
     fn started(&self) -> Work<'_, Result<Option<String>, String>> {
         let at = self.call("started", json!([{ "launch": self.bag() }]));
-        let failure = self.fake.fail_started.borrow().clone();
+        let started = self.fake.started.borrow().clone();
+        let answer = started.map_or(Ok(()), |started| started());
         Box::pin(async move {
             next_turn().await;
-            match failure {
-                Some(reason) => {
+            match answer {
+                Ok(()) => {
+                    self.fake.recorder.answered(at, json!({}));
+                    Ok(None)
+                }
+                Err(reason) => {
                     self.fake
                         .recorder
                         .answered(at, json!({ "$error": { "message": reason } }));
                     Err(reason)
-                }
-                None => {
-                    self.fake.recorder.answered(at, json!({}));
-                    Ok(None)
                 }
             }
         })
@@ -167,10 +174,20 @@ impl Window for FakeWindow {
                 "conversation": { "nativeSession": session },
             }]),
         );
-        let observed = self
+        // Made when called, or once the test lets a held look go.
+        let held = self
             .fake
-            .of_launch(&self.launch, |agent| looked(agent, &session));
+            .hold_observes
+            .borrow()
+            .clone()
+            .filter(|(launch, _)| *launch == self.launch)
+            .map(|(_, gate)| gate);
+        let early = held.is_none().then(|| self.look(&session));
         Box::pin(async move {
+            if let Some(gate) = held {
+                gate.wait().await;
+            }
+            let observed = early.unwrap_or_else(|| self.look(&session));
             next_turn().await;
             self.fake.recorder.answered(at, observed_json(&observed));
             Ok(observed)

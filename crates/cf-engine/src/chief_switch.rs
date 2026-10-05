@@ -4,21 +4,22 @@
 //! flight, closes the old window as the engine's own, switches the chief in
 //! the ledger and launches the new one with the handoff. It also picks a
 //! chief's first message, and owns the record's pending switch.
-//!
-//! Landing C freezes what the dispatcher asks of it; a worker ports it.
 
 use std::rc::Rc;
 
 use cf_base::refusal::Refusal;
 use cf_harness::contract::Observed;
-use cf_ledger::{ConversationView, MessageView, NewNote, ParticipantView, ProjectView};
+use cf_harness::records::Role;
+use cf_ledger::{
+    ChiefSwitch, ConversationView, MessageView, NewNote, ParticipantView, ProjectView,
+};
+use serde_json::Value;
 
 use crate::deliveries::Delivering;
 use crate::dispatcher::Dispatcher;
 use crate::handoff::{handoff_text, history_pages, is_handoff, last_words, Handoff};
 use crate::record::Record;
 use crate::seams::EngineError;
-use crate::windows::not_ported;
 use cf_proto::ledger::SwitchedFrom;
 
 /// The chief a switch is to: a saved agent on its harness.
@@ -152,38 +153,211 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// A switch the human asked for after the chief's turn; with `note`,
-    /// the chief is asked first where things stand.
+    /// A switch the human asked for after the chief's turn, with a note that
+    /// first asks the chief where things stand when they want one: it waits
+    /// in the record ([`Dispatcher::await_switch`]).
     pub(crate) fn after_turn(
         &self,
-        _project: i64,
-        _record: &Record,
-        _to: SwitchTo,
-        _note: bool,
+        project: i64,
+        record: &Record,
+        to: SwitchTo,
+        note: bool,
     ) -> Result<(), EngineError> {
-        Err(not_ported("a switch after the chief's turn"))
+        // A switch asked again replaces the one waiting, with a note not yet sent.
+        let replaced = record
+            .pending_switch
+            .borrow()
+            .as_ref()
+            .and_then(|pending| pending.note);
+        if let Some(replaced) = replaced {
+            let waiting = self.seams.ledger.borrow().message(replaced)?;
+            if waiting.is_some_and(|waiting| waiting.state == "queued") {
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .cancel_message(replaced, "the human asked for the switch again")?;
+            }
+        }
+        let asked = if note {
+            let body = format!(
+                "The human is moving this project's chief to {} ({}) once you answer. Write down where things stand, for the chief after you: what you and the human decided, what you promised, what you were about to do, and what is unresolved. Do not start anything new.",
+                to.harness, to.agent
+            );
+            let sent = self.seams.ledger.borrow_mut().note(
+                project,
+                &NewNote {
+                    from: None,
+                    to: "chief".to_owned(),
+                    task: None,
+                    body,
+                },
+            )?;
+            Some(sent.id)
+        } else {
+            None
+        };
+        *record.pending_switch.borrow_mut() = Some(PendingSwitch { to, note: asked });
+        self.changed();
+        Ok(())
     }
 
-    /// A switch waiting for the chief's turn goes once the turn ends.
+    /// A switch the human asked for after the chief's turn: once the turn is
+    /// over (and the note asking where things stand came and was answered,
+    /// when they asked for one), the chief goes. Until then nothing else is
+    /// delivered to it, so its turn can end.
     pub(crate) async fn await_switch(
         self: &Rc<Self>,
-        _project: &ProjectView,
-        _chief: &ParticipantView,
-        _record: &Rc<Record>,
-        _observed: &Observed,
-        _idle: bool,
+        project: &ProjectView,
+        chief: &ParticipantView,
+        record: &Rc<Record>,
+        observed: &Observed,
+        idle: bool,
     ) -> Result<(), EngineError> {
-        Err(not_ported("a switch waiting for the chief's turn"))
+        if !idle {
+            return Ok(());
+        }
+        let Some(pending) = record.pending_switch.borrow().clone() else {
+            return Ok(());
+        };
+        let asked = match pending.note {
+            Some(note) => self.seams.ledger.borrow().message(note)?,
+            None => None,
+        };
+        if let Some(asked) = asked {
+            if asked.state == "queued" {
+                let (this, held) = (Rc::clone(self), Rc::clone(record));
+                self.act(record, async move { this.deliver(&held, asked).await })
+                    .await;
+                return Ok(());
+            }
+            if asked.state == "delivered" {
+                let shown = asked.receipt.get("item").and_then(Value::as_str);
+                let items = observed.items();
+                let at = items
+                    .iter()
+                    .position(|item| shown.is_some_and(|shown| &*item.id == shown));
+                let answered = at.is_some_and(|at| {
+                    items[at + 1..]
+                        .iter()
+                        .any(|item| item.role == Role::Assistant && item.complete)
+                });
+                if !answered {
+                    return Ok(());
+                }
+            }
+        }
+        self.perform_switch(project, chief, record, pending.to)
+            .await
     }
 
-    /// The switch: the old window closed, the chief switched, the new one launched.
+    /// The switch itself, holding the chief's turn: one last look at the old
+    /// window (its words become history; a delivery whose header shows there
+    /// arrived), what it was still receiving goes back to the queue with its
+    /// attempt, the window closes without suspending the project, the ledger
+    /// moves the chief, and the new window opens with the handoff. A project
+    /// deleted on the way (its chief forgotten) stops it there: its rows are
+    /// gone, so there is no delivery to confirm and no chief to move, and its
+    /// old window closes with the record.
     pub(crate) async fn perform_switch(
         self: &Rc<Self>,
-        _project: &ProjectView,
-        _chief: &ParticipantView,
-        _record: &Rc<Record>,
-        _to: SwitchTo,
+        project: &ProjectView,
+        chief: &ParticipantView,
+        record: &Rc<Record>,
+        to: SwitchTo,
     ) -> Result<(), EngineError> {
-        Err(not_ported("Switch chief"))
+        let asked = record
+            .pending_switch
+            .borrow_mut()
+            .take()
+            .and_then(|pending| pending.note);
+        let mut cut = false;
+        let pane = record.window.borrow().pane.clone();
+        if let Some(pane) = pane {
+            let observed = self.observe(chief, record).await.ok();
+            if self.forgotten(record) {
+                return Ok(());
+            }
+            if let Some(observed) = &observed {
+                self.copy(chief, record, observed)?;
+                if record.delivery.borrow().delivering.is_some() {
+                    self.confirm_arrival(record, observed)?;
+                }
+                cut = !observed.settled;
+            }
+            let delivering = record.delivery.borrow_mut().delivering.take();
+            if let Some(delivering) = delivering {
+                self.give_back(delivering, "the chief was switched before it arrived")?;
+            }
+            if !self.close_own(record, &pane).await? {
+                // The old window would not close: the switch waits, as one
+                // asked for after a turn does, and the chief's next step
+                // tries it again.
+                *record.pending_switch.borrow_mut() = Some(PendingSwitch { to, note: asked });
+                self.changed();
+                return Ok(());
+            }
+        }
+        if self.forgotten(record) {
+            return Ok(());
+        }
+        // A handoff still on its way is an earlier switch's: this one writes
+        // its own. The note asking the old chief where things stand was for
+        // it alone, however the switch came (now, or the chief out of quota).
+        let pending = self.seams.ledger.borrow().pending(chief.id)?;
+        for message in pending {
+            if is_handoff(&message) {
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .cancel_message(message.id, "the chief was switched again")?;
+            } else if Some(message.id) == asked {
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .cancel_message(message.id, "the chief was switched before it came")?;
+            }
+        }
+        self.seams.ledger.borrow_mut().switch_chief(
+            project.id,
+            &ChiefSwitch {
+                harness: to.harness,
+                agent: to.agent,
+                cut,
+            },
+        )?;
+        {
+            let mut quota = record.quota.borrow_mut();
+            quota.reported = None;
+            quota.low_until = None;
+        }
+        *record.copied.borrow_mut() = None;
+        {
+            let mut window = record.window.borrow_mut();
+            window.interrupted = None;
+            window.relaunch = None;
+        }
+        record.delivery.borrow_mut().held = None;
+        self.changed();
+        let current = self.known_project(project.id)?;
+        if current.state != "open" {
+            return Ok(());
+        }
+        let Some(moved) = current
+            .participants
+            .iter()
+            .find(|participant| participant.role == "chief")
+            .cloned()
+        else {
+            return Ok(());
+        };
+        let (this, held) = (Rc::clone(self), Rc::clone(record));
+        self.act(record, async move {
+            this.launch(&held, &current, &moved, None).await
+        })
+        .await;
+        Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

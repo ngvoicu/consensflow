@@ -7,26 +7,24 @@
 //! its seams in the shape of the Node traces the tests are held to.
 
 mod adapter;
+mod adapters;
 mod context;
 mod executor;
 mod host;
 mod ledger;
 mod operations;
 mod recorder;
-mod records;
 mod seams;
 mod time;
 mod window;
 
-pub use adapter::{
-    AfterPrepare, Deliver, FakeAdapter, FakeAdapters, FakeAgent, Prepare, Ready, Taking,
-};
+pub use adapter::{AfterPrepare, Deliver, FakeAdapter, FakeAgent, Prepare, Ready, Started, Taking};
+pub use adapters::{FakeAdapters, FakeRecords};
 pub use context::{Closed, Context, Made, START_MS};
 pub use executor::{Answer, Executor, Gate, GateWait};
 pub use host::{window_of, FakeHost, OnRequest};
 pub use operations::Restarted;
 pub use recorder::Recorder;
-pub use records::FakeRecords;
 pub use seams::{
     CountingLaunchIds, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv, FakeRoles,
     FakeRoster, FakeTrace, MODELS,

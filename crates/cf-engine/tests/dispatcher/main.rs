@@ -7,6 +7,8 @@
 
 mod agent_gone;
 mod assigning;
+mod chief_not_up;
+mod chiefs;
 mod closing;
 mod deleted_sessions;
 mod deliveries;
@@ -23,6 +25,9 @@ mod session_windows;
 mod sessions;
 mod several_roles;
 mod switching;
+mod switching_deleted;
+mod switching_handoffs;
+mod switching_refused;
 mod tasks;
 mod the_dispatcher;
 mod traces;

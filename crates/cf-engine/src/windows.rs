@@ -172,11 +172,6 @@ pub(crate) struct WindowsState {
     generation: Cell<i64>,
 }
 
-/// What a part of the engine not ported yet answers.
-pub(crate) fn not_ported(what: &str) -> EngineError {
-    EngineError::said("not-ported", format!("{what} is not ported yet"))
-}
-
 /// A pane as the pane host's requests name it.
 fn pane_body(pane: &Pane) -> Value {
     json!({ "id": pane.id, "generation": pane.generation })

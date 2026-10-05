@@ -25,12 +25,21 @@ impl Context {
 
     /// A note from `from` to `to` (`ledger.note`).
     pub fn note(&self, project: i64, from: &str, to: &str, body: &str) -> MessageView {
+        self.write_note(project, Some(from), to, body)
+    }
+
+    /// A note from ConsensFlow itself to `to` (`ledger.note` with no sender).
+    pub fn note_from_consensflow(&self, project: i64, to: &str, body: &str) -> MessageView {
+        self.write_note(project, None, to, body)
+    }
+
+    fn write_note(&self, project: i64, from: Option<&str>, to: &str, body: &str) -> MessageView {
         self.ledger
             .borrow_mut()
             .note(
                 project,
                 &NewNote {
-                    from: Some(from.to_owned()),
+                    from: from.map(str::to_owned),
                     to: to.to_owned(),
                     body: body.to_owned(),
                     task: None,

@@ -256,7 +256,8 @@ fn fails_a_launch_whose_first_message_never_arrives() {
 fn fails_the_first_message_at_once_when_the_harness_cannot_take_it_after_the_window_opens() {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]);
-    *context.adapter.fail_started.borrow_mut() = Some("the server never answered".to_owned());
+    *context.adapter.started.borrow_mut() =
+        Some(Rc::new(|| Err("the server never answered".to_owned())));
     context.give(project.id, "zeus", "Parser");
     context.pass().unwrap();
     let task = context.task(project.id, 1);

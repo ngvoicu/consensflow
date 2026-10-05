@@ -20,19 +20,18 @@ use cf_ledger::{
 };
 use serde_json::{json, Value};
 
-use super::adapter::{FakeAdapter, FakeAdapters};
+use super::adapter::FakeAdapter;
+use super::adapters::{FakeAdapters, FakeRecords};
 use super::executor::{Answer, Executor};
 use super::host::FakeHost;
 use super::recorder::Recorder;
-use super::records::FakeRecords;
 use super::seams::{
     CountingLaunchIds, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv, FakeRoles,
     FakeRoster, FakeTrace,
 };
 use super::time::TestTime;
-use crate::chief_switch::SwitchTo;
-use crate::dispatcher::{Dispatcher, SwitchWhen};
-use crate::seams::{EngineError, Limits, Seams};
+use crate::dispatcher::Dispatcher;
+use crate::seams::{Adapters, EngineError, Limits, Seams};
 
 /// 2026-09-19T12:00:00.000Z, where every test's clock starts.
 pub const START_MS: i64 = 1_789_819_200_000;
@@ -60,6 +59,9 @@ impl Clock for TestClock {
 pub struct Made {
     /// The harnesses the fake adapter answers for.
     pub harnesses: Vec<&'static str>,
+    /// Codex has a fake of its own ([`Context::codex`]), so a test sees which
+    /// harness a window opened on (`withCodex`).
+    pub codex: bool,
 }
 
 impl Default for Made {
@@ -67,6 +69,7 @@ impl Default for Made {
         Self {
             // The fake answers for any harness; OpenCode is here for a mixed staff.
             harnesses: vec!["claude-code", "opencode"],
+            codex: false,
         }
     }
 }
@@ -82,6 +85,8 @@ pub struct Context {
     pub timers: Rc<TestTime>,
     pub host: Rc<FakeHost>,
     pub adapter: Rc<FakeAdapter>,
+    /// The fake of Codex's own, which answers for it when the test made it so.
+    pub codex: Rc<FakeAdapter>,
     pub roster: Rc<FakeRoster>,
     pub trace: Rc<FakeTrace>,
     pub log: Rc<FakeLog>,
@@ -136,6 +141,12 @@ impl Context {
         let executor = Rc::new(Executor::default());
         let host = FakeHost::new(recorder.clone());
         let adapter = FakeAdapter::new(recorder.clone());
+        let codex = adapter.another();
+        let mut table = FakeAdapters::new(&adapter, &made.harnesses);
+        if made.codex {
+            table = table.with("codex", &codex);
+        }
+        let adapters = Rc::new(table);
         let roster = Rc::new(FakeRoster {
             recorder: recorder.clone(),
             gone: RefCell::new(HashSet::new()),
@@ -160,8 +171,8 @@ impl Context {
         let seams = Seams {
             ledger: Rc::clone(&ledger),
             host: Rc::clone(&host) as Rc<_>,
-            adapters: Rc::new(FakeAdapters::new(Rc::clone(&adapter), &made.harnesses)),
-            records: Rc::new(FakeRecords::new(Rc::clone(&adapter))),
+            adapters: Rc::clone(&adapters) as Rc<dyn Adapters>,
+            records: Rc::new(FakeRecords::new(adapters)),
             time: Rc::clone(&timers) as Rc<dyn Time>,
             launch_ids: Rc::new(CountingLaunchIds::default()),
             credentials: Rc::new(FakeCredentials {
@@ -195,6 +206,7 @@ impl Context {
             timers,
             host,
             adapter,
+            codex,
             roster,
             trace,
             log,
@@ -276,13 +288,18 @@ impl Context {
             .expect("a project with its tiers")
     }
 
-    /// The id of `handle` in `project`, as the ledger has it now.
-    pub fn id(&self, project: i64, handle: &str) -> i64 {
+    /// The project as the ledger has it now.
+    pub fn project(&self, project: i64) -> ProjectView {
         self.ledger
             .borrow()
             .project(project)
             .expect("the ledger read")
-            .expect("the project")
+            .unwrap_or_else(|| panic!("no project {project}"))
+    }
+
+    /// The id of `handle` in `project`, as the ledger has it now.
+    pub fn id(&self, project: i64, handle: &str) -> i64 {
+        self.project(project)
             .participants
             .into_iter()
             .find(|participant| participant.handle == handle)
@@ -323,22 +340,6 @@ impl Context {
     /// Moves the clock on by `ms`.
     pub fn advance(&self, ms: i64) {
         self.time.settle_at(self.time.wall_ms() + ms);
-    }
-
-    /// Switch chief (`dispatcher.switchChief`), run to stillness.
-    pub fn switch_chief(
-        &self,
-        project: i64,
-        to: SwitchTo,
-        when: SwitchWhen,
-        note: bool,
-    ) -> Result<ProjectView, EngineError> {
-        self.recorder.op(
-            "switchChief",
-            json!([project, { "harness": to.harness, "agent": to.agent }]),
-        );
-        let dispatcher = Rc::clone(&self.dispatcher);
-        self.run(async move { dispatcher.switch_chief(project, to, when, note).await })
     }
 
     /// The test is over: nothing may have failed unseen, and the engine and
