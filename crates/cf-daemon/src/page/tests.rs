@@ -1,10 +1,10 @@
 //! The page's operations on the bridge, asked as the app asks them: every
-//! one is registered and answers, `ping` says the bridge is up, an operation
-//! that has not landed names itself, and the rules of how an operation
-//! answers hold whatever serves it: `ok` first, a kick after a success and
-//! never after a failure, and a panic at any poll an `{ok: false}` with the
-//! bridge going on. An operation is the engine's work: begun where its frame is
-//! read, and run on the executor.
+//! one is registered and answers, `ping` says the bridge is up, and the rules
+//! of how an operation answers hold whatever serves it: `ok` first, a kick
+//! after a success and never after a failure, and a panic at any poll an
+//! `{ok: false}` with the bridge going on. An operation is the engine's work:
+//! begun where its frame is read, and run on the executor. What each
+//! operation answers is held to Node's recordings (`tests/page.rs`).
 
 use std::cell::{Cell, RefCell};
 use std::time::Duration;
@@ -23,20 +23,27 @@ struct Rig {
     kicks: Rc<Cell<u32>>,
     page: Rc<Page>,
     spawn: Rc<DaemonSpawn>,
-    _kit: Context,
+    /// The engine and the ledger the page is given.
+    kit: Context,
 }
 
 /// Called inside the local set the test runs in: the executor's driver is
 /// spawned on it.
 fn rig() -> Rig {
+    rig_over(Env::default(), None)
+}
+
+/// A rig whose page is given `env`, and `engine` for the engine where a test
+/// stands its own in the dispatcher's place.
+fn rig_over(env: Env, engine: Option<Rc<dyn Engine>>) -> Rig {
     let Worked { home, spawn } = worked();
     let kit = Context::new();
     let kicks = Rc::new(Cell::new(0));
     let counted = Rc::clone(&kicks);
     let page = Rc::new(Page {
         ledger: Rc::clone(&kit.ledger),
-        engine: Rc::new(Rc::clone(&kit.dispatcher)),
-        env: Env::default(),
+        engine: engine.unwrap_or_else(|| Rc::new(Rc::clone(&kit.dispatcher))),
+        env,
         kick: Rc::new(move || counted.set(counted.get() + 1)),
     });
     Rig {
@@ -44,7 +51,7 @@ fn rig() -> Rig {
         kicks,
         page,
         spawn,
-        _kit: kit,
+        kit,
     }
 }
 
@@ -79,21 +86,27 @@ async fn ping_says_the_bridge_is_up() {
 }
 
 #[tokio::test]
-async fn every_operation_is_registered_and_one_that_has_not_landed_names_itself() {
+async fn every_operation_is_registered_and_asked_for_nothing_it_says_what_it_lacks() {
     LocalSet::new()
         .run_until(async {
             let rig = rig();
             let (daemon, app) = bridge_pair_over(&rig.spawn);
             register(&daemon, &rig.page, &rig.spawn);
             for operation in PageOperation::ALL {
-                let answer = ask(&app, operation.as_str(), json!({})).await;
-                assert_eq!(answer["ok"], false, "{}", operation.as_str());
-                assert_eq!(
-                    answer["error"],
-                    format!(
-                        "the page operation {} is not served by this daemon yet",
-                        operation.as_str()
-                    )
+                let name = operation.as_str();
+                let answer = ask(&app, name, json!({})).await;
+                if name == "projects.list" {
+                    assert_eq!(answer, json!({ "ok": true, "projects": [] }));
+                    continue;
+                }
+                // The rig has no home, so even the operations that need no body
+                // are refused, and each says why: an operation nobody registered
+                // would say `unknown-op`.
+                assert_eq!(answer["ok"], false, "{name}");
+                let error = answer["error"].as_str().unwrap_or_default();
+                assert!(
+                    !error.is_empty() && error != "unknown-op",
+                    "{name}: {answer}"
                 );
             }
             assert_eq!(rig.kicks.get(), 0, "nothing succeeded, nothing is woken");
@@ -352,3 +365,7 @@ async fn an_operation_is_begun_where_its_frame_is_read_and_its_turns_end_before_
         })
         .await;
 }
+
+mod reading;
+mod scripted;
+mod turns;

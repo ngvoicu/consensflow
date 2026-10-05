@@ -40,6 +40,10 @@ url.workspace = true
 [dev-dependencies]
 cf-engine = { workspace = true, features = ["test-support"] }
 cf-harness = { workspace = true, features = ["test-support"] }
+# The goldens are gzipped traces, and the database a trace left is read back
+# to be compared (`tests/page`).
+flate2.workspace = true
+rusqlite.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt", "signal", "sync", "test-util", "time"] }
 

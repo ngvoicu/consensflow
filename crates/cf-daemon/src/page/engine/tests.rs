@@ -4,7 +4,6 @@
 use std::rc::Rc;
 
 use cf_engine::testing::Context;
-use cf_engine::ActivityState;
 use cf_ledger::{NewChief, NewMember, NewProject};
 
 use super::*;
@@ -36,11 +35,72 @@ fn engine(kit: &Context) -> Rc<dyn Engine> {
 fn the_projections_of_a_participant_nobody_knows_are_the_closed_window_of_nothing() {
     let kit = Context::new();
     let engine = engine(&kit);
-    assert_eq!(engine.activity(999).state, ActivityState::Closed);
+    assert_eq!(engine.activity(999), json!({ "state": "closed" }));
     assert!(!engine.hidden(999));
     assert_eq!(engine.pending_switch(999), None);
     assert_eq!(engine.pane(999), None);
     assert!(!engine.holding(999).unwrap());
+}
+
+#[test]
+fn an_activity_is_written_as_the_dispatcher_writes_its_object() {
+    let said = |activity: &Activity| activity_value(activity).to_string();
+    for state in [
+        ActivityState::Starting,
+        ActivityState::Working,
+        ActivityState::Idle,
+        ActivityState::Closed,
+    ] {
+        assert_eq!(
+            said(&Activity::of(state)),
+            format!(r#"{{"state":"{}"}}"#, state.as_str()),
+            "no reason to give"
+        );
+    }
+    assert_eq!(
+        said(&Activity::because(
+            ActivityState::Out,
+            "out of quota until 2099-01-01T00:00:00.000Z"
+        )),
+        r#"{"state":"out","reason":"out of quota until 2099-01-01T00:00:00.000Z"}"#
+    );
+    assert_eq!(
+        said(&Activity::because(
+            ActivityState::Unknown,
+            "the look failed"
+        )),
+        r#"{"state":"unknown","reason":"the look failed"}"#
+    );
+    // `observed.waiting.reason ?? null`: a window that waits names its reason
+    // or says `null`, and no other window says `null`.
+    assert_eq!(
+        said(&Activity::of(ActivityState::Waiting)),
+        r#"{"state":"waiting","reason":null}"#
+    );
+    assert_eq!(
+        said(&Activity::because(ActivityState::Waiting, "a question")),
+        r#"{"state":"waiting","reason":"a question"}"#
+    );
+}
+
+#[test]
+fn a_pane_and_a_waiting_switch_are_written_as_the_dispatcher_writes_them() {
+    let pane = Pane {
+        id: "p1-chief".to_owned(),
+        generation: 1_791_194_400_123,
+    };
+    assert_eq!(
+        pane_value(&pane).to_string(),
+        r#"{"id":"p1-chief","generation":1791194400123}"#
+    );
+    let to = SwitchTo {
+        harness: "codex".to_owned(),
+        agent: "diana".to_owned(),
+    };
+    assert_eq!(
+        switch_value(&to).to_string(),
+        r#"{"harness":"codex","agent":"diana"}"#
+    );
 }
 
 #[test]
@@ -79,11 +139,13 @@ fn a_project_opens_its_chief_window_and_closes_it_through_the_trait() {
         .iter()
         .find(|participant| participant.role == "chief")
         .unwrap();
-    assert!(
-        engine.pane(chief.id).is_some(),
-        "the chief's window is open"
-    );
-    assert_ne!(engine.activity(chief.id).state, ActivityState::Closed);
+    let pane = engine.pane(chief.id).expect("the chief's window is open");
+    let keys: Vec<&str> = pane
+        .as_object()
+        .map(|pane| pane.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+    assert_eq!(keys, ["id", "generation"], "{pane}");
+    assert_ne!(engine.activity(chief.id), json!({ "state": "closed" }));
 
     let closed = {
         let engine = Rc::clone(&engine);
