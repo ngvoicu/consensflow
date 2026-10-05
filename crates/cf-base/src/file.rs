@@ -19,7 +19,7 @@ mod write;
 
 pub use errno::{errno_name, error_code, is_missing, uv_words};
 pub use error::FileError;
-pub use write::{make_folder, write_file, write_whole};
+pub use write::{make_folder, write_file, write_whole, Mkdir};
 
 /// Which file an open file is, whatever its path: its device and inode on
 /// Unix, its volume and file index on Windows (Node's `stat` calls the

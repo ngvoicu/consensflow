@@ -217,11 +217,11 @@ mod unix {
         fs::create_dir(&there).unwrap();
         fs::set_permissions(&there, fs::Permissions::from_mode(0o755)).unwrap();
         let folder = there.join("a").join("b");
-        make_folder(&folder, 0o700).unwrap();
+        make_folder(&folder, 0o700, Mkdir::Sync).unwrap();
         assert_eq!(mode_of(&there), 0o755);
         assert_eq!(mode_of(&there.join("a")), 0o700);
         assert_eq!(mode_of(&folder), 0o700);
-        make_folder(&folder, 0o700).unwrap();
+        make_folder(&folder, 0o700, Mkdir::Sync).unwrap();
     }
 
     #[test]
@@ -278,6 +278,31 @@ mod unix {
         );
         assert_eq!(failure.code(), "EACCES");
         assert_eq!(left_in(&folder), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_promised_mkdir_names_the_level_that_failed_and_a_synchronous_one_the_whole_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let above = dir.path().join("ro");
+        fs::create_dir(&above).unwrap();
+        let _locked = Locked::new(&above, 0o555);
+        if !refuses_a_new_file(&above) {
+            return;
+        }
+        let folder = above.join("new").join("leaf");
+        let said = |call| make_folder(&folder, 0o700, call).unwrap_err().to_string();
+        // Probed on Node v26.8.1: `mkdirSync` and `fs.promises.mkdir`, both recursive.
+        assert_eq!(
+            said(Mkdir::Promise),
+            format!(
+                "EACCES: permission denied, mkdir '{}'",
+                above.join("new").display()
+            )
+        );
+        assert_eq!(
+            said(Mkdir::Sync),
+            format!("EACCES: permission denied, mkdir '{}'", folder.display())
+        );
     }
 
     #[test]

@@ -4,13 +4,13 @@
 //!
 //! - The session id is ConsensFlow's: drawn for a fresh window, resumed for
 //!   a known one.
-//! - A message is pasted into a live window as if the human typed it,
-//!   whatever its input box holds: text the human left unsent goes in with
-//!   it (the owner's choice, 2026-10-01). Claude's own peer inbox would
-//!   bypass the input box, but Claude wraps each such message as a
-//!   teammate's request from another Claude session, a hundred tokens of
-//!   caution per delivery that misnames the human's own answers, so it is
-//!   not used (2026-09-22).
+//! - A message is pasted into a live window as if the human typed it, once
+//!   its input box holds nothing the human typed and has not sent (the
+//!   owner's choice, 2026-10-03: never pasted into their text). Claude's own
+//!   peer inbox would bypass the input box, but Claude wraps each such
+//!   message as a teammate's request from another Claude session, a hundred
+//!   tokens of caution per delivery that misnames the human's own answers,
+//!   so it is not used (2026-09-22).
 //! - Claude's own `sessions/<pid>.json` says busy, idle or waiting (and
 //!   why); the transcript holds the conversation and says whether the turn
 //!   settled.
@@ -37,8 +37,8 @@ use uuid::Uuid;
 use super::install;
 use super::status::{self, State, Status};
 use crate::contract::{
-    Adapter, Admission, Held, HostError, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
-    Records, Waiting, Window, Work,
+    Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
+    Waiting, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
@@ -57,8 +57,10 @@ const MEMBER_ISOLATION: [&str; 2] = ["--strict-mcp-config", "--no-chrome"];
 pub struct ClaudeAdapter {
     env: Env,
     records: Rc<dyn Records>,
-    /// Where Claude keeps its own status of each of its processes.
-    statuses: Option<String>,
+    /// Where Claude keeps its own status of each of its processes, made
+    /// whole once, as Node resolved it when it made the adapter; or why
+    /// there is none.
+    statuses: Result<String, String>,
 }
 
 impl ClaudeAdapter {
@@ -80,6 +82,10 @@ impl Adapter for ClaudeAdapter {
             let executable = executable(Harness::Claude, &self.env)?;
             let settings = install::settings(&self.env, launch.id, launch.role != "chief")?;
             let role = install::role(&self.env, launch)?;
+            // Kept from Node on purpose: an environment that names no home
+            // fails here, where Node read the process's own and opened a
+            // window it would never see the status of.
+            let statuses = self.statuses.clone()?;
             // Claude keeps a conversation only once something was said in
             // it: a window that closed before that (opened by hand, then
             // lost to a restart) has nothing to resume, and `--resume` would
@@ -100,7 +106,7 @@ impl Adapter for ClaudeAdapter {
                 window_args::start
             };
             // None only for a conversation of an empty id, which no ledger holds.
-            let window = open(Harness::Claude, agent, Some(&session), message.as_deref())
+            let invocation = open(Harness::Claude, agent, Some(&session), message.as_deref())
                 .ok_or_else(|| "a Claude window opens on a session id".to_owned())?;
             let mut argv = vec![executable];
             argv.extend(settings);
@@ -108,11 +114,11 @@ impl Adapter for ClaudeAdapter {
             if launch.role != "chief" {
                 argv.extend(MEMBER_ISOLATION.map(str::to_owned));
             }
-            argv.extend(window.args);
+            argv.extend(invocation.args);
             Ok(Prepared {
                 argv,
                 env: Vec::new(),
-                drop_env: window
+                drop_env: invocation
                     .drop_env
                     .iter()
                     .map(|&name| name.to_owned())
@@ -120,7 +126,7 @@ impl Adapter for ClaudeAdapter {
                 native_session: Some(session.clone()),
                 window: Rc::new(ClaudeWindow {
                     records: Rc::clone(&self.records),
-                    statuses: self.statuses.clone(),
+                    statuses,
                     session: RefCell::new(session),
                     pid: Cell::new(None),
                     claude_pid: Cell::new(None),
@@ -133,7 +139,7 @@ impl Adapter for ClaudeAdapter {
 /// A Claude window, and what the engine told it of itself.
 struct ClaudeWindow {
     records: Rc<dyn Records>,
-    statuses: Option<String>,
+    statuses: String,
     /// The conversation the window shows: its launch's, or the one it was
     /// followed to.
     session: RefCell<String>,
@@ -148,11 +154,7 @@ impl ClaudeWindow {
     /// when the host named it and Claude keeps one, else the status of the
     /// process that first named the window's conversation.
     fn status(&self) -> Option<Status> {
-        let statuses = self
-            .statuses
-            .as_deref()
-            .map(status::statuses)
-            .unwrap_or_default();
+        let statuses = status::statuses(&self.statuses);
         let of = |pid: u32| {
             statuses
                 .iter()
@@ -199,12 +201,14 @@ impl Window for ClaudeWindow {
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
-    ) -> Work<'a, Result<Readiness, HostError>> {
+    ) -> Work<'a, Result<Readiness, String>> {
         Box::pin(async move {
             if self.status().is_some_and(|live| self.elsewhere(&live)) {
                 return Ok(Readiness::Held(Held::ShowsAnother));
             }
-            let snapshot = pane::snapshot(host, pane).await?;
+            let snapshot = pane::snapshot(host, pane)
+                .await
+                .map_err(|failed| failed.message)?;
             if snapshot.get("ok") != Some(&Value::Bool(true)) {
                 // The host's own word for why, as a template writes it.
                 let said = snapshot
@@ -231,21 +235,24 @@ impl Window for ClaudeWindow {
         host: &'a dyn PaneHost,
         pane: &'a Pane,
         text: &'a str,
-    ) -> Work<'a, Admission> {
+    ) -> Work<'a, Result<Admission, String>> {
         Box::pin(async move {
             let sent = pane::write_paste(host, pane, &window_text(text)).await;
-            admission(&sent, "the window refused the paste", false)
+            Ok(admission(&sent, "the window refused the paste", false))
         })
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {
         Box::pin(async move {
+            // Node read both at once, and Claude's few small status files
+            // are read before a transcript is: the status first, then the
+            // conversation, which is then never older than Claude's word.
+            let live = self.status();
             let session = self.session.borrow().clone();
             let reading = self
                 .records
                 .look(Harness::Claude, &session, &Options::default())
                 .await;
-            let live = self.status();
             let (empty, settled, failed, quota) = match &*reading {
                 Reading::Known(record) => (
                     record.items.is_empty(),

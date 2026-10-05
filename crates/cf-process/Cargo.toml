@@ -11,6 +11,8 @@ cf-base.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+# `access`, which asks the system whether this user may run a file.
+nix = { workspace = true, features = ["fs"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Threading"] }

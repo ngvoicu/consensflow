@@ -2,7 +2,9 @@
 //! against the Rust adapters step by step as `tests/goldens/launch/runner.mjs`
 //! played them against Node's, each step's answer held to Node's. The
 //! runner's comment says how a step's answer is written so that it is the
-//! same on every run: `$ROOT`, the values a step drew, `$PID`.
+//! same on every run (`$ROOT`, the values a step drew, the named processes),
+//! and what a step's `kept` says: a difference Rust keeps on purpose, where
+//! Rust's answer is held to it and must still differ from Node's.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -20,7 +22,7 @@ use cf_harness::contract::{
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
-use crate::fakes::{done, fake_executable, Local};
+use crate::fakes::{done, fake_executable, Local, Other};
 
 /// A process id no process has (`DEAD`, runner.mjs).
 const DEAD: u32 = 999_999;
@@ -36,16 +38,24 @@ fn platform() -> &'static str {
     }
 }
 
-/// How a scenario writes what is particular to its run: its root, and the
-/// values its steps drew, by the names it gives them.
+/// How a scenario writes what is particular to its run: its root, the
+/// values its steps drew by the names it gives them, and its processes.
 struct Names {
     root: String,
     named: Vec<(String, String)>,
+    other: Option<u32>,
 }
 
 impl Names {
-    /// `$ROOT/a/b` as a path under the root, `$PID` and `$DEAD` as process
-    /// ids, the named values as drawn (`real`).
+    /// The process ids a scenario names, by their names.
+    fn pids(&self) -> Vec<(&'static str, u32)> {
+        let mut pids = vec![("$PID", std::process::id()), ("$DEAD", DEAD)];
+        pids.extend(self.other.map(|other| ("$OTHER", other)));
+        pids
+    }
+
+    /// `$ROOT/a/b` as a path under the root, a named process as its id,
+    /// the named values as drawn (`real`).
     fn real(&self, value: &Value) -> Value {
         match value {
             Value::Array(items) => items.iter().map(|item| self.real(item)).collect(),
@@ -55,9 +65,10 @@ impl Names {
                     .map(|(key, item)| (key.clone(), self.real(item)))
                     .collect(),
             ),
-            Value::String(text) if text == "$PID" => json!(std::process::id()),
-            Value::String(text) if text == "$DEAD" => json!(DEAD),
             Value::String(text) => {
+                if let Some((_, pid)) = self.pids().into_iter().find(|(name, _)| name == text) {
+                    return json!(pid);
+                }
                 let mut text = text.clone();
                 for (name, drawn) in &self.named {
                     text = text.replace(name.as_str(), drawn);
@@ -75,8 +86,21 @@ impl Names {
         }
     }
 
-    /// What a step answered, with the root, the named values and this
-    /// process written as the scenario writes them (`written`).
+    /// A file's text with the named processes and values in it
+    /// (`realText`).
+    fn real_text(&self, text: &str) -> String {
+        let mut filled = text.to_owned();
+        for (name, pid) in self.pids() {
+            filled = filled.replace(name, &pid.to_string());
+        }
+        for (name, drawn) in &self.named {
+            filled = filled.replace(name.as_str(), drawn);
+        }
+        filled
+    }
+
+    /// What a step answered, with the root, the named values and the live
+    /// processes written as the scenario writes them (`written`).
     fn written(&self, value: &Value) -> Value {
         match value {
             Value::Array(items) => items.iter().map(|item| self.written(item)).collect(),
@@ -86,8 +110,11 @@ impl Names {
                     .map(|(key, item)| (key.clone(), self.written(item)))
                     .collect(),
             ),
-            Value::Number(number) if number.as_u64() == Some(u64::from(std::process::id())) => {
-                json!("$PID")
+            Value::Number(number) => {
+                let live = self.pids().into_iter().find(|&(name, pid)| {
+                    name != "$DEAD" && number.as_u64() == Some(u64::from(pid))
+                });
+                live.map_or_else(|| value.clone(), |(name, _)| json!(name))
             }
             Value::String(text) => {
                 let mut text = text.clone();
@@ -106,9 +133,11 @@ impl Names {
 }
 
 /// A scenario being played: its root and names, the environment and the
-/// adapter it plays against, and the window it prepared.
+/// adapter it plays against, the window it prepared, and its second live
+/// process when it names one.
 struct Played {
     _dir: TempDir,
+    _other: Option<Other>,
     names: Names,
     env: Map<String, Value>,
     adapter: Box<dyn Adapter>,
@@ -128,6 +157,22 @@ struct Scripted<'p> {
     names: &'p Names,
     answers: RefCell<HashMap<String, VecDeque<Value>>>,
     requests: RefCell<Vec<Value>>,
+}
+
+impl Scripted<'_> {
+    /// The answers left unasked, by operation, but the `optional` ones.
+    fn unused(&self, optional: &Value) -> Vec<String> {
+        let optional = optional.as_array().cloned().unwrap_or_default();
+        let mut unused: Vec<String> = self
+            .answers
+            .borrow()
+            .iter()
+            .filter(|(op, left)| !left.is_empty() && !optional.contains(&json!(op)))
+            .map(|(op, _)| op.clone())
+            .collect();
+        unused.sort();
+        unused
+    }
 }
 
 impl PaneHost for Scripted<'_> {
@@ -191,25 +236,31 @@ fn tree(root: &Path) -> Vec<(String, Value)> {
     found
 }
 
-/// What a step changed of the tree: each path made or changed, in
+/// What a step did to the tree: each path made, changed or removed, in
 /// JavaScript's order of their texts.
-fn changes(before: &[(String, Value)], after: Vec<(String, Value)>) -> Value {
-    let mut made: Vec<(String, Value)> = after
+fn changes(before: &[(String, Value)], after: &[(String, Value)]) -> Value {
+    let find = |entries: &[(String, Value)], relative: &str| {
+        entries
+            .iter()
+            .find(|(held, _)| held == relative)
+            .map(|(_, entry)| entry.clone())
+    };
+    let mut paths: Vec<&String> = before.iter().chain(after).map(|(path, _)| path).collect();
+    paths.sort_by(|left, right| left.encode_utf16().cmp(right.encode_utf16()));
+    paths.dedup();
+    paths
         .into_iter()
-        .filter(|(relative, entry)| {
-            before
-                .iter()
-                .find(|(held, _)| held == relative)
-                .is_none_or(|(_, was)| was != entry)
-        })
-        .collect();
-    made.sort_by(|(left, _), (right, _)| left.encode_utf16().cmp(right.encode_utf16()));
-    made.into_iter()
-        .map(|(relative, entry)| {
+        .filter_map(|relative| {
             let mut fields = Map::new();
             fields.insert("path".to_owned(), json!(format!("$ROOT/{relative}")));
-            fields.extend(entry.as_object().unwrap().clone());
-            Value::Object(fields)
+            match (find(before, relative), find(after, relative)) {
+                (_, None) => {
+                    fields.insert("removed".to_owned(), json!(true));
+                }
+                (Some(was), Some(entry)) if was == entry => return None,
+                (_, Some(entry)) => fields.extend(entry.as_object().unwrap().clone()),
+            }
+            Some(Value::Object(fields))
         })
         .collect()
 }
@@ -219,8 +270,7 @@ fn text(value: &Value) -> Option<&str> {
     value.as_str()
 }
 
-/// The launch a prepare step names, its participant's fields as the engine
-/// gives them.
+/// A prepare step, played: the launch it names, as the engine gives it.
 fn prepare(played: &mut Played, step: &Value) -> Value {
     let given = played.names.real(&step["prepare"]);
     let id = LaunchId::new(text(&given["launchId"]).unwrap()).expect("a launch id");
@@ -228,6 +278,7 @@ fn prepare(played: &mut Played, step: &Value) -> Value {
         model: agent.get("model").and_then(Value::as_str),
         effort: agent.get("effort").and_then(Value::as_str),
         thinking: agent.get("thinking").and_then(Value::as_str),
+        designer: agent.get("designer") == Some(&Value::Bool(true)),
     });
     let launch = Launch {
         id: &id,
@@ -240,33 +291,24 @@ fn prepare(played: &mut Played, step: &Value) -> Value {
         agent,
         instructions: text(&given["instructions"]).unwrap(),
     };
-    let root = Path::new(&played.names.root).to_path_buf();
-    let before = tree(&root);
-    let mut answer = match done(played.adapter.prepare(&launch)) {
+    match done(played.adapter.prepare(&launch)) {
         Ok(prepared) => {
-            let env: Map<String, Value> = prepared
-                .env
-                .iter()
-                .map(|(name, value)| (name.clone(), json!(value)))
-                .collect();
-            let answer = json!({
-                "argv": prepared.argv,
-                "env": env,
-                "dropEnv": prepared.drop_env,
-                "nativeSession": prepared.native_session,
-            });
             for (name, field) in step["draws"].as_object().into_iter().flatten() {
                 assert_eq!(field, "nativeSession", "a value a prepare draws");
                 let drawn = prepared.native_session.clone().expect("a session drawn");
                 played.names.named.push((name.clone(), drawn));
             }
+            let answer = json!({
+                "argv": prepared.argv,
+                "env": prepared.env,
+                "dropEnv": prepared.drop_env,
+                "nativeSession": prepared.native_session,
+            });
             played.window = Some(prepared.window);
             answer
         }
         Err(refused) => json!({ "refused": refused }),
-    };
-    answer["tree"] = changes(&before, tree(&root));
-    played.names.written(&answer)
+    }
 }
 
 /// What a look found, as Node's adapter answered it.
@@ -309,7 +351,8 @@ fn admission(admission: &Admission) -> Value {
 }
 
 /// A step that asks the window something, through a host scripted with the
-/// step's answers.
+/// step's answers. Answers left unasked are said, where Node's runner
+/// refused the scenario.
 fn ask(played: &Played, step: &Value) -> Value {
     let answers = step["answers"]
         .as_object()
@@ -332,7 +375,7 @@ fn ask(played: &Played, step: &Value) -> Value {
         generation: 1,
     };
     let window = played.window();
-    let answer = if step.get("observe").is_some() {
+    let mut answer = if step.get("observe").is_some() {
         match done(window.observe()) {
             Ok(found) => json!({ "answer": observed(&found) }),
             Err(thrown) => json!({ "throws": thrown }),
@@ -340,34 +383,57 @@ fn ask(played: &Played, step: &Value) -> Value {
     } else if step.get("ready").is_some() {
         match done(window.ready(&host, &pane)) {
             Ok(ready) => json!({ "answer": readiness(&ready) }),
-            Err(thrown) => json!({ "throws": thrown.message }),
+            Err(thrown) => json!({ "throws": thrown }),
         }
     } else if let Some(text) = step["deliver"].as_str() {
-        json!({ "answer": admission(&done(window.deliver(&host, &pane, text))) })
+        match done(window.deliver(&host, &pane, text)) {
+            Ok(outcome) => json!({ "answer": admission(&outcome) }),
+            Err(thrown) => json!({ "throws": thrown }),
+        }
     } else {
         panic!("a step of no kind: {step}");
     };
-    let mut answer = played.names.written(&answer);
+    let unused = host.unused(&step["optional"]);
+    if !unused.is_empty() {
+        answer["unused"] = json!(unused);
+    }
     answer["requests"] = json!(host.requests.into_inner());
     answer
 }
 
-/// One step, played: what it answered, written as the scenario writes it.
-fn step(played: &mut Played, step: &Value) -> Option<Value> {
+/// Sets the root up as a step says: false for a step that asks the adapter.
+fn set_up(played: &Played, step: &Value) -> bool {
+    let names = &played.names;
     if let Some(name) = step["executable"].as_str() {
-        fake_executable(Path::new(&path::join(&[&played.names.root, "bin", name])));
-        return None;
+        fake_executable(Path::new(&path::join(&[&names.root, "bin", name])));
+        return true;
     }
     if step.get("write").is_some() {
-        let file = played.names.real(&step["write"]);
+        let file = names.real(&step["write"]);
         let file = Path::new(file.as_str().unwrap());
         fs::create_dir_all(file.parent().unwrap()).unwrap();
-        fs::write(file, played.names.real(&step["text"]).as_str().unwrap()).unwrap();
-        return None;
+        fs::write(file, names.real(&step["text"]).as_str().unwrap()).unwrap();
+        return true;
     }
-    if step.get("status").is_some() {
-        // Claude's own status of a live process (`sessions/<pid>.json`).
-        let given = played.names.real(&step["status"]);
+    if step.get("remove").is_some() {
+        let file = names.real(&step["remove"]);
+        let _ = fs::remove_file(file.as_str().unwrap());
+        return true;
+    }
+    if step.get("status").is_some() || step.get("statusText").is_some() {
+        // Claude's own status of a live process (`sessions/<pid>.json`), or
+        // a file of its by another name, or its text where JSON cannot hold it.
+        let folder = path::join(&[
+            played.env["CLAUDE_CONFIG_DIR"].as_str().unwrap(),
+            "sessions",
+        ]);
+        fs::create_dir_all(&folder).unwrap();
+        if let Some(text) = step["statusText"].as_str() {
+            let file = path::join(&[&folder, step["file"].as_str().unwrap()]);
+            fs::write(file, names.real_text(text)).unwrap();
+            return true;
+        }
+        let given = names.real(&step["status"]);
         let pid = given["pid"].clone();
         let mut row = Map::new();
         row.insert("pid".to_owned(), pid.clone());
@@ -379,32 +445,27 @@ fn step(played: &mut Played, step: &Value) -> Option<Value> {
                 .filter(|(key, _)| *key != "pid")
                 .map(|(key, value)| (key.clone(), value.clone())),
         );
-        let folder = path::join(&[
-            played.env["CLAUDE_CONFIG_DIR"].as_str().unwrap(),
-            "sessions",
-        ]);
-        fs::create_dir_all(&folder).unwrap();
-        let file = path::join(&[&folder, &format!("{pid}.json")]);
+        let named = step["file"]
+            .as_str()
+            .map_or_else(|| format!("{pid}.json"), str::to_owned);
+        let file = path::join(&[&folder, &named]);
         fs::write(file, serde_json::to_string(&Value::Object(row)).unwrap()).unwrap();
-        return None;
-    }
-    if step.get("prepare").is_some() {
-        return Some(prepare(played, step));
+        return true;
     }
     if step.get("opened").is_some() {
         // What the engine tells a window once its pane opened.
-        let pid = played.names.real(&step["opened"])["pid"].as_u64();
+        let pid = names.real(&step["opened"])["pid"].as_u64();
         played
             .window()
             .opened(pid.map(|pid| u32::try_from(pid).unwrap()));
-        return None;
+        return true;
     }
     if step.get("follow").is_some() {
-        let session = played.names.real(&step["follow"]);
+        let session = names.real(&step["follow"]);
         played.window().follow(session.as_str().unwrap());
-        return None;
+        return true;
     }
-    Some(ask(played, step))
+    false
 }
 
 /// The adapter a scenario plays against.
@@ -423,9 +484,14 @@ fn play(scenario: &Value) -> Vec<Value> {
         .tempdir()
         .unwrap();
     fs::create_dir(dir.path().join("bin")).unwrap();
+    let other = scenario["steps"]
+        .to_string()
+        .contains("$OTHER")
+        .then(Other::start);
     let names = Names {
         root: dir.path().to_string_lossy().into_owned(),
         named: Vec::new(),
+        other: other.as_ref().map(Other::pid),
     };
     let env = names.real(&scenario["env"]).as_object().unwrap().clone();
     let vars = env
@@ -434,21 +500,62 @@ fn play(scenario: &Value) -> Vec<Value> {
     let adapter = adapter(scenario["harness"].as_str().unwrap(), Env::from_vars(vars));
     let mut played = Played {
         _dir: dir,
+        _other: other,
         names,
         env,
         adapter,
         window: None,
     };
+    let root = Path::new(&played.names.root).to_path_buf();
     let mut answers = Vec::new();
     for (index, each) in scenario["steps"].as_array().unwrap().iter().enumerate() {
-        if let Some(answer) = step(&mut played, each) {
-            let mut fields = Map::new();
-            fields.insert("step".to_owned(), json!(index));
-            fields.extend(answer.as_object().unwrap().clone());
-            answers.push(Value::Object(fields));
+        if set_up(&played, each) {
+            continue;
         }
+        let before = tree(&root);
+        let answer = if each.get("prepare").is_some() {
+            prepare(&mut played, each)
+        } else {
+            ask(&played, each)
+        };
+        let mut fields = Map::new();
+        fields.insert("step".to_owned(), json!(index));
+        fields.extend(answer.as_object().unwrap().clone());
+        fields.insert("tree".to_owned(), changes(&before, &tree(&root)));
+        answers.push(played.names.written(&Value::Object(fields)));
     }
     answers
+}
+
+/// Whether Rust's `answer` to a step is what it should be: Node's, but
+/// where the step keeps a difference, which must still be one.
+fn differs(step: &Value, answer: &Value, node: &Value) -> Option<String> {
+    let Some(kept) = step.get("kept") else {
+        return (answer != node).then(|| format!("\n  rust {answer}\n  node {node}"));
+    };
+    let held = kept["answer"].as_object().unwrap();
+    let fields = answer.as_object().unwrap();
+    let wrong: Vec<String> = fields
+        .iter()
+        .filter(|(key, value)| match held.get(*key) {
+            Some(kept) => kept != *value,
+            None => node.get(key.as_str()) != Some(*value),
+        })
+        .map(|(key, value)| format!("{key}: {value}"))
+        .chain(
+            held.keys()
+                .filter(|key| !fields.contains_key(*key))
+                .map(|key| format!("{key}: not answered")),
+        )
+        .collect();
+    if !wrong.is_empty() {
+        return Some(format!(
+            " (kept: {}):\n  rust {}",
+            kept["why"],
+            wrong.join(", ")
+        ));
+    }
+    (answer == node).then(|| format!(" keeps a difference that is none: {}", kept["why"]))
 }
 
 #[test]
@@ -478,11 +585,9 @@ fn every_scenario_plays_as_node_played_it() {
             ));
         }
         for (answer, node) in answers.iter().zip(expected) {
-            if answer != node {
-                differ.push(format!(
-                    "{name}, step {}:\n  rust {answer}\n  node {node}",
-                    node["step"]
-                ));
+            let step = &scenario["steps"][node["step"].as_u64().unwrap() as usize];
+            if let Some(how) = differs(step, answer, node) {
+                differ.push(format!("{name}, step {}{how}", node["step"]));
             }
         }
     }

@@ -13,6 +13,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use cf_proto::agents::Harness;
 use serde_json::Value;
@@ -22,12 +23,33 @@ use crate::records::{Item, Options, Quota, Reading};
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
-/// A harness's side of the engine: how its windows are launched.
+/// A harness's side of the engine: how its windows are launched, and how
+/// one is interrupted. A conversation's record with no window open is the
+/// engine's own look through [`Records`], the same for every harness.
 pub trait Adapter {
     /// Prepares a window on `launch`: writes the files it runs with and
     /// says how it opens, or why it cannot (the launch then fails with that
     /// sentence).
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>>;
+
+    /// The keys that interrupt a turn in this harness's window
+    /// (`adapter.interrupt`): Escape once, unless the harness says more.
+    fn interrupt(&self) -> Interrupt {
+        Interrupt {
+            presses: 1,
+            close_after: None,
+        }
+    }
+}
+
+/// A harness's interrupt as keys into its window (`pressInterrupt`,
+/// `src/core/windows.js`): Escape `presses` times in a row, and where those
+/// presses open a dialog at a turn that has just ended, once more
+/// `close_after` later, which closes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Interrupt {
+    pub presses: u8,
+    pub close_after: Option<Duration>,
 }
 
 /// A window to launch (`adapter.prepare`'s argument).
@@ -58,6 +80,9 @@ pub struct Agent<'a> {
     pub model: Option<&'a str>,
     pub effort: Option<&'a str>,
     pub thinking: Option<&'a str>,
+    /// An image agent: Codex on its own default model, whose image tool
+    /// draws, naming no model or effort of its own.
+    pub designer: bool,
 }
 
 /// A launch's id: a uuid in lowercase (`core/launch-files.js`), the name of
@@ -103,19 +128,22 @@ pub trait Window {
     /// The conversation the window started on, where its harness says it
     /// itself; none where ConsensFlow named it.
     fn started(&self) -> Work<'_, Result<Option<String>, String>>;
-    /// Whether a delivery may go in now.
+    /// Whether a delivery may go in now, or why that could not be told.
     fn ready<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
-    ) -> Work<'a, Result<Readiness, HostError>>;
-    /// Hands `text` to the window's harness.
+    ) -> Work<'a, Result<Readiness, String>>;
+    /// Hands `text` to the window's harness: what became of it, or why it
+    /// failed before the hand-over, which the engine says the delivery
+    /// failed for. A failure after the hand-over is uncertain, never an
+    /// error.
     fn deliver<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
         text: &'a str,
-    ) -> Work<'a, Admission>;
+    ) -> Work<'a, Result<Admission, String>>;
     /// What the window's harness says of it now.
     fn observe(&self) -> Work<'_, Result<Observed, String>>;
 }

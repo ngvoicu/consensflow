@@ -1,6 +1,7 @@
 //! What the launch's tests stand the engine's side and the machine in with:
 //! a step's work done at once, the records served on the test's own thread,
-//! a pane host that answers as a test says, and a stand-in CLI.
+//! a pane host that answers as a test says, a stand-in CLI, and a second
+//! live process.
 
 use std::cell::RefCell;
 use std::fs;
@@ -104,4 +105,33 @@ pub fn fake_executable(file: &Path) -> PathBuf {
     #[cfg(unix)]
     fs::set_permissions(file, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     file.to_path_buf()
+}
+
+/// A live process of the test's own, other than the test, ended with it.
+pub struct Other(std::process::Child);
+
+impl Other {
+    #[allow(clippy::disallowed_methods)] // The test starts what it ends.
+    pub fn start() -> Self {
+        let child = if cfg!(windows) {
+            std::process::Command::new("ping")
+                .args(["-n", "600", "127.0.0.1"])
+                .stdout(std::process::Stdio::null())
+                .spawn()
+        } else {
+            std::process::Command::new("sleep").arg("600").spawn()
+        };
+        Self(child.unwrap())
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.0.id()
+    }
+}
+
+impl Drop for Other {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
 }

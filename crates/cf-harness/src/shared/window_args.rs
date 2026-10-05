@@ -13,9 +13,10 @@ use cf_proto::agents::Harness;
 
 use crate::contract::Agent;
 
-/// A harness's own window, as the pane opens it.
+/// A harness's own window, as the pane opens it: its program and
+/// arguments.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Window {
+pub(crate) struct Invocation {
     pub(crate) command: &'static str,
     pub(crate) args: Vec<String>,
     /// Devin's first message, which it takes in another way than as an
@@ -33,7 +34,7 @@ pub(crate) fn start(
     agent: Agent,
     session: Option<&str>,
     seed: Option<&str>,
-) -> Option<Window> {
+) -> Option<Invocation> {
     window(harness, agent, given(session), given(seed), false)
 }
 
@@ -44,7 +45,7 @@ pub(crate) fn resume(
     agent: Agent,
     session: Option<&str>,
     seed: Option<&str>,
-) -> Option<Window> {
+) -> Option<Invocation> {
     let session = given(session)?;
     window(harness, agent, Some(session), given(seed), true)
 }
@@ -60,7 +61,7 @@ fn window(
     session: Option<&str>,
     seed: Option<&str>,
     resumed: bool,
-) -> Option<Window> {
+) -> Option<Invocation> {
     let seeded = |mut args: Vec<String>| {
         args.extend(seed.map(str::to_owned));
         args
@@ -77,7 +78,7 @@ fn window(
             let mut args = words(&[if resumed { "--resume" } else { "--session-id" }, session]);
             args.extend(model_and_effort(harness, agent));
             args.extend(words(&["--permission-mode", "bypassPermissions"]));
-            Window {
+            Invocation {
                 command: "claude",
                 args: seeded(args),
                 prompt: None,
@@ -90,7 +91,7 @@ fn window(
             let mut args = words(&["--session-id", session]);
             args.extend(model_and_effort(harness, agent));
             args.push("--approve".to_owned());
-            Window {
+            Invocation {
                 command: "pi",
                 args: seeded(args),
                 prompt: None,
@@ -106,7 +107,7 @@ fn window(
             };
             args.extend(model_and_effort(harness, agent));
             args.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
-            Window {
+            Invocation {
                 command: "codex",
                 args: seeded(args),
                 prompt: None,
@@ -125,7 +126,7 @@ fn window(
                 "--respect-workspace-trust",
                 "false",
             ]));
-            Window {
+            Invocation {
                 command: "devin",
                 args,
                 prompt: seed.map(str::to_owned),
@@ -141,7 +142,7 @@ fn window(
                 args.extend(model_and_effort(harness, agent));
             }
             args.push("--auto".to_owned());
-            Window {
+            Invocation {
                 command: "opencode",
                 args,
                 prompt: None,

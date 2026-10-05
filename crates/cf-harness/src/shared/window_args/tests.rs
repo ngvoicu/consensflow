@@ -19,7 +19,7 @@ fn text(value: &Value) -> Option<&str> {
 }
 
 /// A window as Node wrote it: its `env` always empty, `prompt` only where given.
-fn written(window: &Window) -> Value {
+fn written(window: &Invocation) -> Value {
     let mut fields = Map::new();
     fields.insert("command".to_owned(), json!(window.command));
     fields.insert("args".to_owned(), json!(window.args));
@@ -43,6 +43,7 @@ fn every_window_opens_and_resumes_as_node_built_it() {
             model: text(&agent["model"]),
             effort: text(&agent["effort"]),
             thinking: text(&agent["thinking"]),
+            designer: false,
         };
         let (session, seed) = (text(&row["sessionId"]), text(&row["seed"]));
         let window = harness.and_then(|harness| match row["call"].as_str().unwrap() {

@@ -474,6 +474,7 @@ version = "3.0.0-alpha.73"
 dependencies = [
  "cf-base",
  "libc",
+ "nix",
  "tempfile",
  "windows-sys 0.61.2",
 ]

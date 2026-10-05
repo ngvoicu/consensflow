@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use cf_base::env::Env;
-use cf_base::file::{make_folder, write_file, FileError};
+use cf_base::file::{make_folder, write_file, FileError, Mkdir};
 use cf_base::{js, path};
 use cf_proto::agents::Harness;
 use serde_json::json;
@@ -32,7 +32,7 @@ pub(super) fn settings(
 ) -> Result<Vec<String>, String> {
     let root = launch_folder("claude", env, launch)?;
     let said = |error: FileError| error.to_string();
-    make_folder(Path::new(&root), 0o700).map_err(said)?;
+    make_folder(Path::new(&root), 0o700, Mkdir::Promise).map_err(said)?;
     let turn_end = json!({ "hooks": [{ "type": "command", "command": "exit 0" }] });
     // Claude's question tool prompts even in full-permission mode. A
     // member's is answered from the board through this hook (`cf` is first

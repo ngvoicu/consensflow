@@ -17,6 +17,8 @@ const ENV = {
   CLAUDE_CONFIG_DIR: '$ROOT/claude',
   PATH: '$ROOT/bin',
 }
+/** An environment that names no home, nor Claude's folder. */
+const HOMELESS = { CONSENSFLOW_HOME: '$ROOT/consensflow', PATH: '$ROOT/bin' }
 
 const worker = {
   id: 3,
@@ -96,13 +98,33 @@ const snapshot = (fields) => ({
   'pane.snapshot': [{ ok: true, pasteInFlight: false, unsent: false, ...fields }],
 })
 
+/** A look Rust answers unsettled with nothing in it, where Node answered otherwise, and why. */
+const notSettled = (why) => ({
+  why,
+  answer: {
+    answer: { items: [], settled: false, waiting: null, failed: false, quota: null },
+  },
+})
+
 export function claudeScenarios() {
-  const prepared = (name, fields, before = [], draws = { $SESSION: 'nativeSession' }) => ({
+  const prepared = (
+    name,
+    fields,
+    before = [],
+    draws = { $SESSION: 'nativeSession' },
+    { env = ENV, after = [], kept } = {},
+  ) => ({
     name: `claude: ${name}`,
     harness: 'claude-code',
-    env: ENV,
-    steps: [...before, { prepare: launch(fields), draws }],
+    env,
+    steps: [...before, { prepare: launch(fields), draws, ...(kept ? { kept } : {}) }, ...after],
   })
+  const resumedLive = [
+    { opened: { pid: '$PID' } },
+    { status: { pid: '$PID', sessionId: SESSION, status: 'idle' } },
+    { observe: {} },
+    { ready: {}, answers: snapshot({}) },
+  ]
   const installed = { executable: 'claude' }
   const plans = [
     prepared('a fresh worker opens on its own session id, in full permission, the task last', {}, [
@@ -131,10 +153,11 @@ export function claudeScenarios() {
       installed,
     ]),
     prepared(
-      'a conversation Claude kept is resumed on its session',
+      'a conversation Claude kept is resumed on its session, and its window looks there',
       { resume: SESSION, message: null },
       [installed, transcript(SESSION, [user(SESSION, 1, 'Write the parser')])],
       {},
+      { after: resumedLive },
     ),
     prepared(
       'a resumed conversation is given its follow-up',
@@ -143,10 +166,11 @@ export function claudeScenarios() {
       {},
     ),
     prepared(
-      'a conversation Claude never kept starts afresh under the same id',
-      { resume: OTHER, message: 'Review T-1' },
+      'a conversation Claude never kept starts afresh under the same id, its window there',
+      { resume: SESSION, message: 'Review T-1' },
       [installed],
       {},
+      { after: resumedLive },
     ),
     prepared('a window with no first message', { message: null }, [installed]),
     prepared('Claude not installed is refused, and nothing is written', {}),
@@ -154,6 +178,46 @@ export function claudeScenarios() {
       'a window with no role text is refused, after its settings were written',
       { instructions: '' },
       [installed],
+    ),
+    prepared("a ConsensFlow folder that is a file refuses the launch in Node's words", {}, [
+      installed,
+      { write: '$ROOT/consensflow', text: 'x' },
+    ]),
+    prepared('a role folder in the way refuses the launch, after its settings were written', {}, [
+      installed,
+      { write: `$ROOT/consensflow/integrations/claude/${LAUNCH}/role`, text: 'x' },
+    ]),
+    prepared(
+      'a resumed conversation with no home to look in is refused, after its files were written',
+      { resume: SESSION, message: null },
+      [installed],
+      {},
+      { env: HOMELESS },
+    ),
+    prepared(
+      'a fresh window with no home is refused, after its files were written',
+      {},
+      [installed],
+      { $SESSION: 'nativeSession' },
+      {
+        env: HOMELESS,
+        kept: {
+          why: 'no home is "missing home in env": Node read the process\'s own, and opened a window whose status it read from another home',
+          answer: { refused: 'missing home in env' },
+        },
+      },
+    ),
+    prepared(
+      'a conversation of an empty id is refused',
+      { resume: '', message: null },
+      [installed],
+      {},
+      {
+        kept: {
+          why: "a sentence of Rust's own where V8 threw its TypeError: no ledger holds an empty id",
+          answer: { refused: 'a Claude window opens on a session id' },
+        },
+      },
     ),
   ]
   const live = (fields) => ({
@@ -214,6 +278,94 @@ export function claudeScenarios() {
       { write: '$ROOT/claude/sessions/notes.json', text: '{}' },
       { observe: {} },
     ]),
+    opened("the pane's own child is taken before another Claude naming the conversation", [
+      { status: { pid: '$OTHER', sessionId: '$SESSION', status: 'busy' } },
+      live({ status: 'idle' }),
+      { observe: {} },
+    ]),
+    opened("a Claude keeps its place among the files, with its last file's status", [
+      { opened: { pid: '$DEAD' } },
+      { status: { pid: '$PID', sessionId: OTHER, status: 'idle' }, file: '1.json' },
+      { status: { pid: '$OTHER', sessionId: '$SESSION', status: 'busy' }, file: '2.json' },
+      { status: { pid: '$PID', sessionId: '$SESSION', status: 'idle' }, file: '3.json' },
+      { observe: {} },
+    ]),
+    opened('the Claude a window found is kept when its file goes, never traded for another', [
+      { opened: { pid: '$DEAD' } },
+      { status: { pid: '$OTHER', sessionId: '$SESSION', status: 'idle' }, file: '2.json' },
+      { observe: {} },
+      { remove: '$ROOT/claude/sessions/2.json' },
+      live({ status: 'idle' }),
+      { observe: {} },
+    ]),
+    opened('a Claude that names the conversation later is found then', [
+      { opened: { pid: '$DEAD' } },
+      { observe: {} },
+      live({ status: 'idle' }),
+      { observe: {} },
+    ]),
+    opened('an idle Claude whose transcript cannot be read is settled and empty', [
+      { write: '$ROOT/claude/projects/-work-app/$SESSION.jsonl', text: '{not json}\n' },
+      live({ status: 'idle' }),
+      { observe: {} },
+    ]),
+    opened('an idle Claude with a turn its transcript has not finished is not settled', [
+      transcript('$SESSION', [user('$SESSION', 1, 'Write the parser')]),
+      live({ status: 'idle' }),
+      { observe: {} },
+    ]),
+    opened("a switch keeps the old conversation's items, its failure and its quota", [
+      transcript('$SESSION', [
+        user('$SESSION', 1, 'Write the parser'),
+        answer('$SESSION', 2, "You've hit your limit · resets in 2 hours", {
+          isApiErrorMessage: true,
+          apiErrorStatus: 429,
+        }),
+      ]),
+      live({ status: 'waiting', waitingFor: 'a dialog', sessionId: OTHER }),
+      { observe: {} },
+    ]),
+    opened('a status file of process 0 says nothing', [
+      { status: { pid: 0, sessionId: '$SESSION', status: 'idle' }, file: '7.json' },
+      {
+        observe: {},
+        kept: notSettled(
+          'Node asked the system of process 0, its own group or itself, and found it alive',
+        ),
+      },
+    ]),
+    opened("only Claude's own four words are a state", [
+      { status: { pid: '$PID', sessionId: OTHER, status: 'constructor' } },
+      {
+        observe: {},
+        kept: notSettled('Node looked the word up in an object, and found what every object has'),
+      },
+      { status: { pid: '$PID', sessionId: '$SESSION', status: ['idle'] } },
+      { observe: {}, kept: notSettled('Node took a list for its text') },
+      { status: { pid: '$PID', sessionId: '$SESSION', status: { toString: 1 } } },
+      {
+        observe: {},
+        kept: notSettled('Node failed the look on an object with a toString of its own'),
+      },
+    ]),
+    opened('a status file JSON writes past what a double or a depth holds says nothing', [
+      {
+        statusText: '{"pid":$PID,"sessionId":"$SESSION","status":"idle","big":1e400}',
+        file: '1.json',
+      },
+      {
+        observe: {},
+        kept: notSettled('Node read 1e400 as Infinity; JSON here holds no such number'),
+      },
+      {
+        statusText: `{"pid":$PID,"sessionId":"$SESSION","status":"idle","deep":${'['.repeat(200)}${']'.repeat(200)}}`,
+        file: '1.json',
+      },
+      {
+        observe: {},
+        kept: notSettled('Node read JSON at any depth; it is read here 127 levels deep'),
+      },
+    ]),
     opened('a refused request is exhausted quota, with the reset its text names', [
       transcript('$SESSION', [
         user('$SESSION', 1, 'Write the parser'),
@@ -233,6 +385,26 @@ export function claudeScenarios() {
     ]),
   ]
   const ready = [
+    opened("a paste on its way is said before what the human has not sent, by JavaScript's truth", [
+      { ready: {}, answers: snapshot({ pasteInFlight: true, unsent: true }) },
+      { ready: {}, answers: snapshot({ pasteInFlight: [] }) },
+      { ready: {}, answers: snapshot({ pasteInFlight: 0, unsent: {} }) },
+      { ready: {}, answers: snapshot({ pasteInFlight: '', unsent: 'x' }) },
+      { ready: {}, answers: { 'pane.snapshot': [{ ok: 1 }] } },
+      { ready: {}, answers: { 'pane.snapshot': [{ ok: 'true', error: '' }] } },
+      { ready: {}, answers: { 'pane.snapshot': [{ ok: false, error: 0 }] } },
+      { ready: {}, answers: { 'pane.snapshot': [{ ok: false, error: null }] } },
+      { ready: {}, answers: { 'pane.snapshot': [{ ok: false, error: false }] } },
+      { ready: {}, answers: { 'pane.snapshot': [null] } },
+      {
+        ready: {},
+        answers: { 'pane.snapshot': [{ ok: false, error: { toString: 1 } }] },
+        kept: {
+          why: "the host's word is written as a template writes a value; Node's template threw on an object with a toString of its own",
+          answer: { answer: 'the window cannot be read: [object Object]' },
+        },
+      },
+    ]),
     opened('a window with no status is ready when its snapshot says so', [
       { ready: {}, answers: snapshot({}) },
       { ready: {}, answers: snapshot({ pasteInFlight: true }) },
@@ -241,9 +413,9 @@ export function claudeScenarios() {
       { ready: {}, answers: { 'pane.snapshot': [{ ok: false }] } },
       { ready: {}, answers: { 'pane.snapshot': [{ throws: 'bridge ended' }] } },
     ]),
-    opened('a window that shows another conversation is not ready', [
+    opened('a window that shows another conversation is not ready, its snapshot never asked', [
       live({ status: 'idle', sessionId: OTHER }),
-      { ready: {}, answers: snapshot({}) },
+      { ready: {} },
     ]),
   ]
   const deliveries = [
@@ -268,6 +440,26 @@ export function claudeScenarios() {
       {
         deliver: 'Unanswered',
         answers: { 'pane.write_paste': [{ ok: false }] },
+      },
+      {
+        deliver: 'Taken, whatever else it says',
+        answers: { 'pane.write_paste': [{ ok: true, admitted: false, error: 'odd' }] },
+      },
+      {
+        deliver: 'Not taken, though it says so',
+        answers: { 'pane.write_paste': [{ ok: false, admitted: true, error: 'odd' }] },
+      },
+      {
+        deliver: 'Refused in no words',
+        answers: { 'pane.write_paste': [{ ok: false, admitted: false, cause: '', error: 'x' }] },
+      },
+      {
+        deliver: 'Refused in a number',
+        answers: { 'pane.write_paste': [{ ok: false, admitted: false, cause: 0 }] },
+        kept: {
+          why: "the host's cause is its words, and a reason is text; Node passed any other value on as the reason itself",
+          answer: { answer: { admitted: false, reason: '0' } },
+        },
       },
     ]),
   ]

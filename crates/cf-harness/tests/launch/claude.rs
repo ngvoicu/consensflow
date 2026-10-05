@@ -23,7 +23,7 @@ use cf_harness::records::Role;
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
-use crate::fakes::{done, fake_executable, Answering, Local};
+use crate::fakes::{done, fake_executable, Answering, Local, Other};
 
 /// The launch's id: a uuid, as the engine mints one (Node's tests took any
 /// filename-safe word).
@@ -133,6 +133,7 @@ impl Default for Request {
                 model: Some("claude-sonnet-5"),
                 effort: Some("high"),
                 thinking: None,
+                designer: false,
             }),
         }
     }
@@ -234,35 +235,6 @@ fn words(words: &[&str]) -> Vec<String> {
 /// This test's own process: a live one.
 fn me() -> u32 {
     std::process::id()
-}
-
-/// A live process of the test's own, other than the test, ended with it.
-struct Other(std::process::Child);
-
-impl Other {
-    #[allow(clippy::disallowed_methods)] // The test starts what it ends.
-    fn start() -> Self {
-        let child = if cfg!(windows) {
-            std::process::Command::new("ping")
-                .args(["-n", "60", "127.0.0.1"])
-                .stdout(std::process::Stdio::null())
-                .spawn()
-        } else {
-            std::process::Command::new("sleep").arg("60").spawn()
-        };
-        Self(child.unwrap())
-    }
-
-    fn pid(&self) -> u32 {
-        self.0.id()
-    }
-}
-
-impl Drop for Other {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
 }
 
 #[test]
@@ -631,7 +603,7 @@ fn gives_the_window_text_it_can_take_and_leaves_a_paste_the_bridge_lost_uncertai
         id: "s1-zeus".to_owned(),
         generation: 7,
     };
-    let deliver = || done(plan.window.deliver(&host, &pane, text));
+    let deliver = || done(plan.window.deliver(&host, &pane, text)).unwrap();
     assert_eq!(deliver(), Admission::Admitted { queued: false });
     let pasted = host.asked.borrow().last().unwrap().1["body"].clone();
     assert_eq!(pasted, taken);
@@ -688,7 +660,7 @@ fn pastes_a_message_into_the_window_waiting_for_a_paste_on_its_way_and_for_what_
     assert_eq!(done(window.ready(&host, &pane)), Ok(Readiness::Ready));
     assert_eq!(
         done(window.deliver(&host, &pane, "hello")),
-        Admission::Admitted { queued: false }
+        Ok(Admission::Admitted { queued: false })
     );
     assert_eq!(
         host.asked.borrow().last().unwrap(),

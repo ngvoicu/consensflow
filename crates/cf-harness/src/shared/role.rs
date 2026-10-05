@@ -10,7 +10,7 @@
 use std::path::Path;
 
 use cf_base::env::Env;
-use cf_base::file::{make_folder, write_file};
+use cf_base::file::{make_folder, write_file, Mkdir};
 use cf_base::path;
 use cf_proto::agents::Harness;
 
@@ -46,7 +46,7 @@ pub(crate) fn write_role(
     let skill = path::join(&[&skills, &format!("consensflow-{role}")]);
     let file = path::join(&[&skill, "SKILL.md"]);
     let said = |error: cf_base::file::FileError| error.to_string();
-    make_folder(Path::new(&skill), 0o700).map_err(said)?;
+    make_folder(Path::new(&skill), 0o700, Mkdir::Promise).map_err(said)?;
     write_file(Path::new(&file), content.as_bytes(), 0o600).map_err(said)?;
     Ok(RoleFile { root, file })
 }

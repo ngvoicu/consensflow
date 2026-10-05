@@ -34,14 +34,17 @@ pub(super) enum State {
 
 /// The folder Claude keeps its statuses in: `sessions` in its config folder,
 /// which is `CLAUDE_CONFIG_DIR` (an empty one too), else `.claude` in the
-/// home. None for an environment that names no home, where Node read the
-/// process's own.
-pub(super) fn folder(env: &Env) -> Option<String> {
+/// home, made whole against the working folder now (`path.resolve`, its
+/// `..` taken off by the join after it). An environment that names no home
+/// has none, where Node read the process's own.
+pub(super) fn folder(env: &Env) -> Result<String, String> {
     let root = match env.os("CLAUDE_CONFIG_DIR") {
         Some(root) => root.to_string_lossy().into_owned(),
-        None => path::join(&[&home(env).ok()?, ".claude"]),
+        None => path::join(&[&home(env)?, ".claude"]),
     };
-    Some(path::join(&[&root, "sessions"]))
+    let named = if root.is_empty() { "." } else { &root };
+    let whole = std::path::absolute(named).map_err(|failed| failed.to_string())?;
+    Ok(path::join(&[&whole.to_string_lossy(), "sessions"]))
 }
 
 /// The status of each Claude running, by its process id, in the order
@@ -76,13 +79,14 @@ fn is_status_file(name: &str) -> bool {
 /// of a process alive, and the status one of Claude's own four words.
 ///
 /// Kept from Node on purpose, for files Claude never writes: a process id
-/// of 0 or below names a process group, never Claude's process, and says
-/// nothing here, where Node found the caller's own group alive; and a
-/// status that is not one of the four words names no state, where Node,
-/// which looked the word up in an object, took a name every object has
-/// (`constructor`) for a state neither idle nor waiting, read a list as its
-/// text (`["idle"]`), and failed the look on an object with a `toString`
-/// of its own.
+/// below 0 says nothing here, where Node asked the system of a process
+/// group (0 is `alive`'s to refuse); a status that is not one of the four
+/// words names no state, where Node, which looked the word up in an
+/// object, took a name every object has (`constructor`) for a state
+/// neither idle nor waiting, read a list as its text (`["idle"]`), and
+/// failed the look on an object with a `toString` of its own; and JSON
+/// that holds a number past a double's range or nests past 127 levels says
+/// nothing, where Node read it.
 fn read(bytes: &[u8]) -> Option<(u32, Status)> {
     let row = from_slice_lossy(bytes).ok()?;
     let session = row.get("sessionId")?.as_str()?.to_owned();
@@ -103,12 +107,12 @@ fn read(bytes: &[u8]) -> Option<(u32, Status)> {
     Some((pid, Status { session, state }))
 }
 
-/// The process a status names: a safe integer (`Number.isSafeInteger`)
-/// that `process.kill` takes, which is an int32, and above 0.
+/// The process a status names: a whole number a process id may be, which
+/// `alive` asks the system of as `process.kill` did (Node took any safe
+/// integer, `Number.isSafeInteger`).
 fn process(pid: &Value) -> Option<u32> {
     let pid = pid.as_f64()?;
-    let whole = pid.fract() == 0.0 && pid.abs() <= 9_007_199_254_740_991.0;
-    (whole && pid >= 1.0 && pid <= f64::from(i32::MAX)).then_some(pid as u32)
+    (pid.fract() == 0.0 && (0.0..=f64::from(u32::MAX)).contains(&pid)).then_some(pid as u32)
 }
 
 #[cfg(test)]

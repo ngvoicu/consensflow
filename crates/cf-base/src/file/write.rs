@@ -27,7 +27,7 @@ pub fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), FileError> {
         .parent()
         .filter(|folder| !folder.as_os_str().is_empty())
     {
-        make_folder(folder, 0o777)?;
+        make_folder(folder, 0o777, Mkdir::Sync)?;
     }
     let mut temporary = OsString::from(path.as_os_str());
     temporary.push(format!(".{}.tmp", std::process::id()));
@@ -37,34 +37,52 @@ pub fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), FileError> {
         .map_err(|failure| remove(&temporary).err().unwrap_or(failure))
 }
 
-/// `mkdir(folder, { recursive: true, mode })`, as Node's `MKDirpSync` walks
-/// it: a folder that is not there is made after the one above it, with
-/// `mode` (less the umask; Windows has none), and the path in a failure is
-/// the whole one asked for, not the level that failed. A
-/// level the system refuses for permission, space or because it is not a
-/// directory ends the walk; one that is there already is a folder, or is
-/// not, which is `EEXIST` for the path itself and `ENOTDIR` for a file in
-/// the way of a level above. Reconstructed from Node's behaviour, not read
-/// from its C++ (not at hand): the walk's Unix answers are probed, its
-/// Windows ones are not.
-pub fn make_folder(folder: &Path, mode: u32) -> Result<(), FileError> {
-    let mut builder = fs::DirBuilder::new();
+/// Which of Node's recursive `mkdir` calls a folder is made as. Both walk
+/// the same levels and fail with the same codes (`MKDirpSync` and
+/// `MKDirpAsync`, `src/node_file.cc` of Node v26.8.1); a failure names the
+/// folder asked for after `mkdirSync`, and the level that failed after
+/// `fs.promises.mkdir`, whose error is the last request's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mkdir {
+    Sync,
+    Promise,
+}
+
+/// `mkdir(folder, { recursive: true, mode })`, as Node walks it: a folder
+/// that is not there is made after the one above it, with `mode` (less the
+/// umask; Windows has none). A level the system refuses for permission,
+/// space or because it is not a directory ends the walk; one that is there
+/// already is a folder, or is not, which is `EEXIST` for the path itself and
+/// `ENOTDIR` for a file in the way of a level above. `call` says which path
+/// a failure names.
+pub fn make_folder(folder: &Path, mode: u32, call: Mkdir) -> Result<(), FileError> {
     #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut builder, mode);
+    let builder = {
+        let mut builder = fs::DirBuilder::new();
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, mode);
+        builder
+    };
     #[cfg(not(unix))]
-    let _ = mode;
+    let builder = {
+        let _ = mode;
+        fs::DirBuilder::new()
+    };
     let mut pending = vec![folder.to_path_buf()];
     while let Some(next) = pending.pop() {
         let Err(error) = builder.create(&next) else {
             continue;
         };
         let name = mkdir_error_name(&error);
+        let named = match call {
+            Mkdir::Sync => folder,
+            Mkdir::Promise => next.as_path(),
+        };
         let above = next
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty());
         match (name, above) {
             (Some("EACCES" | "ENOSPC" | "ENOTDIR" | "EPERM"), _) => {
-                return Err(FileError::call(error, "mkdir", Some(folder)));
+                return Err(FileError::call(error, "mkdir", Some(named)));
             }
             (Some("ENOENT"), Some(above)) => {
                 let above = above.to_path_buf();
@@ -74,10 +92,10 @@ pub fn make_folder(folder: &Path, mode: u32) -> Result<(), FileError> {
             _ => match fs::metadata(&next) {
                 Ok(there) if !there.is_dir() => {
                     let code = not_a_folder(name, !pending.is_empty());
-                    return Err(FileError::named(code, error, "mkdir", Some(folder), None));
+                    return Err(FileError::named(code, error, "mkdir", Some(named), None));
                 }
                 Ok(_) => {}
-                Err(error) => return Err(FileError::call(error, "mkdir", Some(folder))),
+                Err(error) => return Err(FileError::call(error, "mkdir", Some(named))),
             },
         }
     }

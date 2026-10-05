@@ -41,7 +41,8 @@ pub fn on_path(command: &str, env: &Env) -> Option<PathBuf> {
 }
 
 /// The first of `folders` that holds `command` as a file this user can
-/// start, by the names `env`'s system gives it, as an absolute path.
+/// start, by the names `env`'s system gives it (`pathOnPath`,
+/// `src/harnesses.js`), as an absolute path.
 pub fn find_in(
     command: &str,
     folders: impl IntoIterator<Item = PathBuf>,
@@ -51,23 +52,32 @@ pub fn find_in(
     folders
         .into_iter()
         .flat_map(|folder| names.iter().map(move |name| folder.join(name)))
+        .filter_map(|candidate| resolved(&candidate))
         .find(|candidate| startable(candidate))
-        .and_then(|found| std::path::absolute(found).ok())
 }
 
-/// Whether `file` is a file this user can start: on Unix, one with an execute bit.
+/// A candidate as `path.resolve` made it before Node looked at it: whole
+/// against the working folder, its `.` and `..` taken off by its text, so a
+/// `..` goes back above a folder that is not there, or a link, by its name.
+fn resolved(candidate: &Path) -> Option<PathBuf> {
+    let whole = std::path::absolute(candidate).ok()?;
+    Some(PathBuf::from(cf_base::path::join(&[
+        &whole.to_string_lossy()
+    ])))
+}
+
+/// Whether `file` is a file this user can start: on Unix, one the system
+/// lets this user run (`access(X_OK)`), as Node asked; on Windows, any file.
 fn startable(file: &Path) -> bool {
-    let Ok(metadata) = fs::metadata(file) else {
-        return false;
-    };
+    let is_file = fs::metadata(file).is_ok_and(|metadata| metadata.is_file());
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+        use nix::unistd::{access, AccessFlags};
+        is_file && access(file, AccessFlags::X_OK).is_ok()
     }
     #[cfg(not(unix))]
     {
-        metadata.is_file()
+        is_file
     }
 }
 
@@ -102,5 +112,42 @@ mod tests {
         assert_eq!(on_path("node", &env), Some(runs.join("node")));
         assert_eq!(on_path("codex", &env), None);
         assert_eq!(on_path("node", &Env::default()), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn takes_a_dot_dot_off_by_its_text_before_looking_as_node_resolved_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("claude"), "").unwrap();
+        fs::set_permissions(bin.join("claude"), fs::Permissions::from_mode(0o755)).unwrap();
+        // `missing` is not there: the system would not go through it.
+        let path = dir.path().join("missing").join("..").join("bin");
+        let env = Env::from_vars([("PATH", path.as_os_str())]);
+        assert_eq!(on_path("claude", &env), Some(bin.join("claude")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_this_user_may_not_run_is_passed_over_for_the_next() {
+        use nix::unistd::{access, AccessFlags};
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (others, mine) = (dir.path().join("others"), dir.path().join("mine"));
+        fs::create_dir_all(&others).unwrap();
+        fs::create_dir_all(&mine).unwrap();
+        // Others may run it, its owner (this user) may not.
+        fs::write(others.join("pi"), "").unwrap();
+        fs::set_permissions(others.join("pi"), fs::Permissions::from_mode(0o641)).unwrap();
+        if access(&others.join("pi"), AccessFlags::X_OK).is_ok() {
+            return; // Root may run any file with an execute bit.
+        }
+        fs::write(mine.join("pi"), "").unwrap();
+        fs::set_permissions(mine.join("pi"), fs::Permissions::from_mode(0o700)).unwrap();
+        let path = format!("{}:{}", others.display(), mine.display());
+        let env = Env::from_vars([("PATH", path.as_str())]);
+        assert_eq!(on_path("pi", &env), Some(mine.join("pi")));
     }
 }
