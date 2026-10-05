@@ -1,4 +1,7 @@
 :root {
+  /* The projects' panel, open: the windows' share of the width is taken of
+     the room beside it, folded or not, so folding it moves no window. */
+  --projects-width: 224px;
   --ink: #08181d;
   --deep: #0c2026;
   --panel: #112a31;
@@ -38,7 +41,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .shell {
   height: 100dvh;
   display: grid;
-  grid-template-columns: 224px minmax(0, 1fr);
+  grid-template-columns: var(--projects-width) minmax(0, 1fr);
   grid-template-rows: 52px auto minmax(0, 1fr);
   grid-template-areas: "bar bar" "down down" "side main";
 }
@@ -185,13 +188,20 @@ button:disabled { opacity: .45; cursor: default; }
 .projects-empty, .staff-empty { color: var(--muted); padding: 6px 9px; }
 
 /* The board on the left, the windows on the right, the divider between
-   them: drag it to share the width, or fold the board away to the left. */
+   them: drag it to share the width, or fold either away. The windows' share
+   (half, unless the divider moved) is of the whole window less the divider,
+   so the projects' panel and the board have the other half: opening or
+   folding the projects gives the board the room and resizes no terminal; a
+   wider window widens both. */
 .main {
   grid-area: main;
   position: relative;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(280px, var(--board-width, 2fr)) 18px minmax(300px, 1fr);
+  grid-template-columns: minmax(280px, 1fr) 18px minmax(
+      300px,
+      calc((100vw - 18px) * var(--dock-share, 0.5))
+    );
   grid-template-rows: minmax(0, 1fr);
 }
 /* Each in its own column, so a folded neighbour leaves the others where they are. */
@@ -683,25 +693,39 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
 .drawer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 
 /* The live windows. */
-/* One row of cards, each as tall as the dock and half as wide (half the
-   width less half the 8px gap, so two fill it), at least 420px and at most
-   the whole dock. A card never shares the width with the others: one that
-   opens goes after the last, and none already open changes size; the dock
-   scrolls sideways. Its scrollbar is always there, where scrollbars take
-   room: one that came when the row first overflowed would shorten every card. */
+/* One row of cards, each as tall as the dock: the chief's first, the others
+   to its right. Beside the board, the chief's is the whole dock and each
+   other two-thirds of it, a third of the window while the dock is half of
+   it; with the board folded, the chief's is two-thirds of the row and each
+   other the last third (less the 8px gap), so the first sits whole beside
+   it. A card is at least 320px, or the whole dock where that is narrower. A
+   card never shares the width with the others: one that opens goes after
+   the last, and none already open changes size; the dock scrolls sideways.
+   Its scrollbar is always there, where scrollbars take room: one that came
+   when the row first overflowed would shorten every card. A card snaps to
+   the row's padding, not its edge: snapped to the edge, the row sat 8px
+   along and the next card showed a sliver at the right. */
 .stage {
-  display: grid;
-  grid-auto-flow: column;
-  grid-template-rows: minmax(0, 1fr);
-  grid-auto-columns: max(min(100%, 420px), calc(50% - 4px));
+  display: flex;
   gap: 8px;
   padding: 8px;
   min-height: 0;
   overflow-x: scroll;
   overflow-y: hidden;
   scroll-snap-type: x proximity;
+  scroll-padding-inline: 8px;
 }
 .stage .terminal-card { scroll-snap-align: start; }
+@media (min-width: 761px) {
+  .stage > .terminal-card { flex: 0 0 max(min(100%, 320px), calc((100% - 8px) * 2 / 3)); }
+  .stage > .terminal-card[data-role="chief"] { flex-basis: 100%; }
+  .main[data-board="hidden"] .stage > .terminal-card {
+    flex-basis: max(min(100%, 320px), calc((100% - 8px) / 3));
+  }
+  .main[data-board="hidden"] .stage > .terminal-card[data-role="chief"] {
+    flex-basis: max(min(100%, 320px), calc((100% - 8px) * 2 / 3));
+  }
+}
 .stage-empty { color: var(--muted); margin: 40px auto; text-align: center; }
 /* With no card, the dock's one line is centred across it, not in a column. */
 .stage:has(> .stage-empty) { display: block; }
@@ -841,7 +865,6 @@ dialog.screen .dialog-actions { padding: 12px 26px 14px; border-top: 1px solid v
   .divider { display: none; }
   .main > .board, .main > .dock { grid-column: 1; }
   .main[data-board="hidden"] .board { display: grid; }
-  .stage { display: flex; }
   .stage .terminal-card { flex: 0 0 min(100%, 720px); }
   .dock { border-left: 0; border-top: 1px solid var(--line-soft); }
   .shell {

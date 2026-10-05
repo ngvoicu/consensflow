@@ -1,12 +1,14 @@
 //! The portable Windows app is one file: the app's own exe, then the runtime
-//! it needs (Node and the CLI) as a payload, then a footer that finds it.
+//! it needs (Node, the CLI, and the terminals' console host) as a payload,
+//! then a footer that finds it.
 //! `app/scripts/portable.mjs` packs it; this module reads and unpacks it. The
 //! layout, written down here once:
 //!
 //! ```text
 //! ConsensFlow_<version>_x64-portable.exe
 //!   the built ConsensFlow.exe, byte for byte
-//!   the payload: a gzip-compressed tar of node.exe and cli/
+//!   the payload: a gzip-compressed tar of node.exe, cli/, conpty.dll and
+//!     OpenConsole.exe
 //!   the footer, 16 bytes: the payload's length in bytes, as an unsigned
 //!     64-bit little-endian integer, then the tag "CFPAYLD1"
 //! ```
@@ -224,6 +226,29 @@ fn remove_aside(root: &Path, path: &Path) {
     };
     let _ = fs::rename(path, aside.path().join("removed"));
     // `aside` goes when it drops, with whatever was moved into it.
+}
+
+/// Names the runtime folder to Windows' search for libraries: the terminals'
+/// console host is there (`conpty.dll`, which runs `OpenConsole.exe` beside
+/// it; `app/scripts/conpty.mjs`), and Windows looks beside the exe first,
+/// which for a portable exe is wherever it was saved. Called before the
+/// first terminal opens, which loads the console host once for the app.
+#[cfg(windows)]
+pub(crate) fn find_libraries_in(runtime: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::System::LibraryLoader::SetDllDirectoryW;
+
+    let wide: Vec<u16> = runtime
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    // SAFETY: `wide` is a NUL-terminated wide string that outlives the call,
+    // which copies it.
+    if unsafe { SetDllDirectoryW(wide.as_ptr()) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

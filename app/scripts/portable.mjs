@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
  * The portable Windows app: one exe to run from anywhere, without installing.
- * ConsensFlow.exe carries its own Node and CLI after its own bytes, and its
- * first start unpacks them into %LOCALAPPDATA%\dev.ngvoicu.consensflow\runtime.
+ * ConsensFlow.exe carries its own Node and CLI, and the terminals' console
+ * host, after its own bytes, and its first start unpacks them into
+ * %LOCALAPPDATA%\dev.ngvoicu.consensflow\runtime.
  * The file's layout, and how the app reads it, are written down once, in
  * app/src-tauri/src/portable.rs. Its data lives where the installed app's
  * does (%USERPROFILE%\.consensflow), and the app installs no update in place
@@ -35,7 +36,11 @@ const version =
   JSON.parse(readFileSync(join(APP, 'src-tauri', 'tauri.conf.json'), 'utf8')).version
 
 // cli\bin\cf.exe is a pane's `cf`: without it a window has none in PowerShell.
-for (const name of ['ConsensFlow.exe', 'node.exe', 'cli', join('cli', 'bin', 'cf.exe')]) {
+// conpty.dll and OpenConsole.exe are the terminals' console host
+// (scripts/conpty.mjs), which the app finds in the runtime folder, with
+// Microsoft's license for them.
+const RUNTIME = ['node.exe', 'cli', 'conpty.dll', 'OpenConsole.exe', 'OpenConsole-LICENSE.txt']
+for (const name of ['ConsensFlow.exe', ...RUNTIME, join('cli', 'bin', 'cf.exe')]) {
   if (!existsSync(join(values.release, name))) {
     console.error(
       `portable: ${name} is missing from ${values.release}; build first with npm --prefix app run build`,
@@ -54,7 +59,7 @@ const tar =
 const staging = mkdtempSync(join(tmpdir(), 'cf-portable-'))
 try {
   const runtime = join(staging, 'runtime.tar.gz')
-  execFileSync(tar, ['-c', '-z', '-f', runtime, '-C', values.release, 'node.exe', 'cli'], {
+  execFileSync(tar, ['-c', '-z', '-f', runtime, '-C', values.release, ...RUNTIME], {
     env: { ...process.env, COPYFILE_DISABLE: '1' },
   })
   const payload = readFileSync(runtime)

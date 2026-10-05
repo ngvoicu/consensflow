@@ -1,11 +1,22 @@
 /**
  * How the page is laid out, kept in this browser: the projects and the
  * windows fold away to a rail, the board folds away for the windows, and the
- * divider between the board and the windows sets the board's width. A
+ * divider between the board and the windows sets how they share the width.
+ * The windows' share is of the whole window less the divider, half to start
+ * with: the projects' panel and the board have the rest, so opening or
+ * folding the projects gives the board the room and resizes no terminal. A
  * per-viewer convenience: storage may be missing, so every touch is guarded.
  */
 
 const $ = (selector) => document.querySelector(selector)
+/** The divider's own width between the board and the windows. */
+const DIVIDER = 18
+/**
+ * Where this browser keeps the windows' share of the window. What older
+ * builds kept was a share of another room, and is left alone: the windows
+ * start at half.
+ */
+const SHARE = 'dock-share-of-window'
 const storageKey = (name) => `cf.layout.${name}`
 /** The board and the windows share one space: folding one brings the other back. */
 const OPPOSITE = { board: 'dock', dock: 'board' }
@@ -52,13 +63,22 @@ export class Layout {
           if (OPPOSITE[name]) this.#show(OPPOSITE[name])
         }
         this.#applyFolds()
+        this.#showDivider()
         onFold()
       })
     }
     this.#applyFolds()
-    const saved = Number(kept('board-width'))
-    if (saved > 0) this.#setBoardWidth(saved)
+    this.#keepDock()
     this.#takeDivider()
+    // A window resized widens or narrows both, and the divider says where it stands now.
+    window.addEventListener('resize', () => this.#showDivider())
+  }
+
+  /** The windows' share of the window, as this browser kept it; else the page's own, half. */
+  #keepDock() {
+    const share = Number(kept(SHARE))
+    if (share > 0 && share < 1) this.#main.style.setProperty('--dock-share', String(share))
+    this.#showDivider()
   }
 
   /** A panel the page needs to show comes back unfolded. */
@@ -81,15 +101,28 @@ export class Layout {
     }
   }
 
-  /** The board keeps 280px and leaves the windows 300px beside the divider. */
+  /**
+   * The board at `pixels` wide, the windows given the rest: the board keeps
+   * 280px and leaves the windows 300px beside the divider. What is kept is
+   * the windows' share of the whole window less the divider, which opening
+   * or folding the projects leaves as it is.
+   */
   #setBoardWidth(pixels, { save = false } = {}) {
     const room = this.#main.getBoundingClientRect().width
-    const width = Math.round(Math.min(Math.max(pixels, 280), Math.max(280, room - 318)))
-    this.#main.style.setProperty('--board-width', `${width}px`)
-    this.#divider.setAttribute('aria-valuenow', String(width))
+    const board = Math.round(Math.min(Math.max(pixels, 280), Math.max(280, room - 318)))
+    const share = Math.min(Math.max((room - DIVIDER - board) / (window.innerWidth - DIVIDER), 0), 1)
+    this.#main.style.setProperty('--dock-share', String(share))
+    this.#showDivider()
+    if (save) keep(SHARE, String(share))
+  }
+
+  /** The divider says where it stands: the board's width, between 280px and what leaves the windows 300px. */
+  #showDivider() {
+    const room = this.#main.getBoundingClientRect().width
+    const board = Math.round($('#board').getBoundingClientRect().width)
+    this.#divider.setAttribute('aria-valuenow', String(board))
     this.#divider.setAttribute('aria-valuemin', '280')
     this.#divider.setAttribute('aria-valuemax', String(Math.max(280, Math.round(room - 318))))
-    if (save) keep('board-width', String(width))
   }
 
   /** The divider, dragged or moved with the arrow keys, sets the board's width. */

@@ -49,7 +49,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "3.0.0-alpha.76"
+version = "3.0.0-alpha.77"
 dependencies = [
  "cf-bridge",
  "cf-panes",
@@ -333,7 +333,7 @@ checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
 
 [[package]]
 name = "cf"
-version = "3.0.0-alpha.76"
+version = "3.0.0-alpha.77"
 dependencies = [
  "cf-base",
  "cf-board",
@@ -349,11 +349,12 @@ dependencies = [
 
 [[package]]
 name = "cf-base"
-version = "3.0.0-alpha.76"
+version = "3.0.0-alpha.77"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
  "libc",
+ "memchr",
  "nix",
  "serde",
  "serde_json",
@@ -365,7 +366,7 @@ dependencies = [
 
 [[package]]
 name = "cf-board"
-version = "3.0.0-alpha.76"
+version = "3.0.0-alpha.77"
 dependencies = [
  "cf-base",
  "cf-proto",
@@ -377,15 +378,16 @@ dependencies = [
 
 [[package]]
 name = "cf-bridge"
-version = "3.0.0-alpha.76"
+version = "3.0.0-alpha.77"
 dependencies = [
  "cf-proto",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
 name = "cf-catalog"
-version = "3.0.0-alpha.76"
+version = "3.0.0-alpha.77"
 dependencies = [
  "cf-base",
  "cf-proto",
@@ -397,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "cf-codex-session"
-version = "3.0.0-alpha.76"
+version = "3.0.0-alpha.77"
 dependencies = [
  "bytes",
  "cf-base",
@@ -443,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "cf-harness"
-version = "3.0.0-alpha.76"
+version = "3.0.0-alpha.77"
 dependencies = [
  "base64 0.22.1",
  "cf-base",
@@ -457,6 +459,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "jiff",
+ "memchr",
  "nix",
  "regex",
  "rusqlite",
@@ -471,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "cf-ledger"
-version = "3.0.0-alpha.76"
+version = "3.0.0-alpha.77"
 dependencies = [
  "base64 0.22.1",
  "cf-base",
@@ -487,7 +490,7 @@ dependencies = [
 
 [[package]]
 name = "cf-panes"
-version = "3.0.0-alpha.76"
+version = "3.0.0-alpha.77"
 dependencies = [
  "cf-bridge",
  "cf-proto",
@@ -502,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "cf-process"
-version = "3.0.0-alpha.76"
+version = "3.0.0-alpha.77"
 dependencies = [
  "cf-base",
  "libc",
@@ -514,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "cf-proto"
-version = "3.0.0-alpha.76"
+version = "3.0.0-alpha.77"
 dependencies = [
  "serde",
  "serde_json",

@@ -27,9 +27,10 @@ function about(lane, board, agent, now, onTryAgain) {
 
 /**
  * The live windows beside the board: one row of terminals, scrolling
- * sideways, each as tall as the dock and half as wide. The chief's comes
- * first, then the sessions' the human asked to see, in the order they came
- * into the dock. A terminal that comes in opens at the right end, scrolled
+ * sideways, each as tall as the dock (how wide is the page's: the chief's
+ * the whole dock beside the board, two-thirds of it with the board folded).
+ * The chief's comes first, then the sessions' the human asked to see, in the
+ * order they came into the dock. A terminal that comes in opens at the right end, scrolled
  * into view and with the keyboard; no terminal already open is resized or
  * moved by it, and one that leaves closes its gap, the cards to its right
  * moving left. The chief's card is always in the dock: the board has a row

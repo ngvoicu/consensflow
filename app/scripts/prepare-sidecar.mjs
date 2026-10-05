@@ -19,6 +19,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildCf } from './build-cf.mjs'
+import { prepareConpty } from './conpty.mjs'
 
 const APP = dirname(dirname(fileURLToPath(import.meta.url)))
 const REPO = dirname(APP)
@@ -127,6 +128,13 @@ if (!WINDOWS) execFileSync('chmod', ['+x', sidecar])
 // A window's `cf`, native, in bin/ before bin/ is copied.
 buildCf()
 const version = copyCli()
+// Windows: Microsoft's own console host, which the Windows bundle puts beside
+// the app (tauri.windows.conf.json) and the portable exe in its runtime.
+if (WINDOWS) {
+  for (const file of prepareConpty(join(APP, 'src-tauri', 'resources', 'conpty'))) {
+    process.stdout.write(`conpty: ${file}\n`)
+  }
+}
 
 process.stdout.write(`sidecar: ${sidecar}\n`)
 process.stdout.write(`cli ${version} → ${RESOURCES}\n`)

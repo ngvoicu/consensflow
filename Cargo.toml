@@ -6,7 +6,7 @@ resolver = "2"
 members = ["app/src-tauri", "crates/*"]
 
 [workspace.package]
-version = "3.0.0-alpha.76"
+version = "3.0.0-alpha.77"
 edition = "2021"
 rust-version = "1.95"
 
@@ -49,6 +49,10 @@ icu_properties = "2.3"
 # machine may lack and a test would then depend on.
 jiff = { version = "0.2", features = ["tzdb-bundle-always"] }
 libc = "0.2"
+# Where a byte is in a long line, at the speed memory reads: the lines of a
+# transcript are searched for their ends, and a line for its escapes. Already
+# in the build, through serde_json and regex.
+memchr = "2"
 # A checked close, which std does not give (cf-base forbids unsafe code).
 nix = { version = "0.28", default-features = false }
 portable-pty = "0.9"

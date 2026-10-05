@@ -104,7 +104,11 @@ jobs:
           $env:CONSENSFLOW_NODE = Join-Path $runtime 'node.exe'
           $said = & (Join-Path $runtime 'cli\bin\cf.exe') --version
           if ($said -ne $version) { "the runtime's cf.exe said '$said', not $version"; exit 1 }
-          "the portable exe unpacked $runtime, its daemon came up on that Node, and its cf.exe runs the CLI"
+          # The terminals' console host, which the app names to Windows' library search.
+          foreach ($name in 'conpty.dll', 'OpenConsole.exe') {
+            if (-not (Test-Path (Join-Path $runtime $name))) { "the runtime has no $name"; exit 1 }
+          }
+          "the portable exe unpacked $runtime with its console host, its daemon came up on that Node, and its cf.exe runs the CLI"
           exit 0
 
       - uses: actions/upload-artifact@v7

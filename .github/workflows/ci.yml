@@ -83,3 +83,8 @@ jobs:
       # The harnesses' crate as the daemon builds it, without the test kit
       # the workspace's tests turn on for it.
       - run: cargo clippy -p cf-harness --lib -- -D warnings
+      # The daemon's end of the bridge, behind a feature nothing in the
+      # workspace turns on yet: tested and linted here until the daemon does.
+      - run: cargo test -p cf-bridge --features local
+        timeout-minutes: 15
+      - run: cargo clippy -p cf-bridge --features local --all-targets -- -D warnings

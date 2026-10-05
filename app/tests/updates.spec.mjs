@@ -122,6 +122,7 @@ async function installTauriShim(page, { snapshot = updateSnapshot(), state = cor
           window.__updateSnapshot.phase = 'installing'
           return copy(window.__updateSnapshot)
         }
+        if (command === 'update_open_page') return copy(window.__updateSnapshot)
         return { ok: true }
       }
 
@@ -305,6 +306,38 @@ test('renders notes as text, downloads with progress, and Later never installs',
   await dialog.getByRole('button', { name: 'Later' }).click()
   await expect(dialog).not.toBeVisible()
   await expect(commandCalls(page, 'update_install')).resolves.toHaveLength(0)
+})
+
+test("offers a release's download page where the app installs nothing itself, never Download or Install", async ({
+  page,
+}) => {
+  // Windows, for now: the check finds the release, and the page it is downloaded from.
+  const available = updateSnapshot({
+    phase: 'available',
+    available: { version: '3.0.0-alpha.36', notes: 'The terminals take half', date: '2026-09-09' },
+    page: 'https://github.com/ngvoicu/consensflow/releases/tag/v3.0.0-alpha.36',
+  })
+  await boot(page, { snapshot: available })
+  await page.evaluate((next) => window.__setCommandResult('update_check', next), available)
+  await page.evaluate(() => window.__runUpdateTimer(10_000))
+  await expect(page.locator('#update-banner')).toContainText('Update available: 3.0.0-alpha.36')
+  await page.evaluate(() => window.__emitTauriEvent('check-updates'))
+  const dialog = page.locator('#updates-dialog')
+  await expect(dialog).toContainText('Available version: 3.0.0-alpha.36')
+  await expect(dialog).toContainText('download its installer or portable exe from its page')
+  await expect(dialog.getByRole('button', { name: 'Download update' })).toBeHidden()
+  await expect(dialog.getByRole('button', { name: 'Install and restart' })).toBeHidden()
+  await expect(dialog.locator('#updates-progress')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Open download page' }).click()
+  await expect.poll(async () => (await commandCalls(page, 'update_open_page')).length).toBe(1)
+  await expect(commandCalls(page, 'update_download')).resolves.toHaveLength(0)
+  // Where the app installs it (the Mac), the page's button is not there.
+  await page.evaluate((next) => window.__emitTauriEvent('update-state-changed', next), {
+    ...available,
+    page: null,
+  })
+  await expect(dialog.getByRole('button', { name: 'Open download page' })).toBeHidden()
+  await expect(dialog.getByRole('button', { name: 'Download update' })).toBeVisible()
 })
 
 test('channel changes clear the candidate and disable while downloading or installing', async ({

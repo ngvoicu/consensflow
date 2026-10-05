@@ -17,14 +17,18 @@
 //! A look's records wait until all of them are in, and are then replayed in
 //! order, so that a decision may rest on a record that comes after the one it
 //! is about (`ancestry`). A record read later that such a decision looked up
-//! has the whole transcript read again.
+//! has the whole transcript read again. A record waits as what replay reads
+//! of it (`project`), since most of what a transcript holds is read by
+//! nobody.
 //!
 //! The transcript's ids key the reader's sets as they keyed Node's (see
 //! [`Key`]), so a record that says something odd is read as Node read it.
 
 mod ancestry;
 mod items;
+mod keep;
 mod patterns;
+mod project;
 mod queues;
 mod replay;
 #[cfg(test)]
@@ -35,6 +39,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use cf_base::env::Env;
+use cf_base::json::from_slice_lossy_keeping;
 use jiff::tz::TimeZone;
 use serde_json::Value;
 
@@ -47,6 +52,7 @@ use crate::shared::record::key::{Key, Keys};
 use crate::shared::record::reading::{null_record, Record, Settlement};
 use ancestry::Ancestry;
 use items::Items;
+use project::{project, Projected};
 use queues::Queues;
 
 /// The reader of the session `session`, in the Claude Code folders `env`
@@ -115,10 +121,10 @@ enum Terminal {
     },
 }
 
-/// A record visited and not yet replayed, with its place in the tree and
-/// among the records.
+/// A record visited and not yet replayed, as replay reads it, with its place
+/// in the tree and among the records.
 struct Pending {
-    record: Value,
+    record: Projected,
     place: Option<usize>,
     seq: usize,
 }
@@ -171,8 +177,15 @@ impl Transcript {
 }
 
 impl Parser for Transcript {
-    /// A record waits for the rest of its look. Its uuid, when a decision
-    /// already looked it up, has the transcript read again.
+    /// A line is built into the members that are read of it, and no more
+    /// (`keep`).
+    fn parse(line: &[u8]) -> serde_json::Result<Value> {
+        from_slice_lossy_keeping(line, &keep::RECORD)
+    }
+
+    /// A record waits for the rest of its look, as what replay reads of it.
+    /// Its uuid, when a decision already looked it up, has the transcript
+    /// read again.
     fn visit(&mut self, record: Value, index: usize) -> Result<(), Stop> {
         self.count += 1;
         if record.is_null() {
@@ -180,7 +193,7 @@ impl Parser for Transcript {
         }
         let place = self.ancestry.place(&record, &self.session)?;
         self.pending.push(Pending {
-            record,
+            record: project(&record, &self.session),
             place,
             seq: index,
         });

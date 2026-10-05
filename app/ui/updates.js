@@ -47,6 +47,9 @@ function normalizeSnapshot(value) {
     lastChecked: value.lastChecked === null ? null : text(value.lastChecked),
     error: value.error === null ? null : text(value.error),
     blockers: array(value.blockers).filter(record),
+    // Where the release is downloaded by hand, on a system whose app installs
+    // nothing itself (Windows, for now); null where the app installs it.
+    page: text(value.page) || null,
   }
 }
 
@@ -180,8 +183,9 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
   const download = updaterButton('primary-button', 'Download update', 'updates-download')
   const later = updaterButton('quiet-button', 'Later', 'updates-later')
   const install = updaterButton('primary-button', 'Install and restart', 'updates-install')
+  const openPage = updaterButton('primary-button', 'Open download page', 'updates-page')
   const actions = element('div', 'updates-actions')
-  actions.append(check, download, later, install)
+  actions.append(check, download, later, install, openPage)
 
   const form = element('form', 'updates-dialog-form')
   form.method = 'dialog'
@@ -287,9 +291,14 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     const isReady = current?.phase === 'ready'
     const bytes = current?.downloadedBytes ?? 0
     const total = current?.totalBytes
-    progress.hidden = !hasDownload && !busy() && !isReady
+    // Downloaded by hand from its page: nothing to download or install here.
+    const byPage = current?.page != null
+    progress.hidden = byPage || (!hasDownload && !busy() && !isReady)
     progress.textContent = progressText(current, bytes, total)
     check.disabled = current !== null && busy()
+    download.hidden = byPage
+    install.hidden = byPage
+    openPage.hidden = !byPage
     download.disabled = !hasDownload || busy() || isReady
     install.disabled =
       !hasDownload || current?.phase !== 'ready' || (current?.blockers?.length ?? 0) !== 0
@@ -303,6 +312,9 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     if (current.phase === 'ready') return 'Update downloaded and ready to install.'
     if (current.phase === 'installing') return 'Installing update and preparing restart…'
     if (current.phase === 'error') return 'The last update operation failed.'
+    if (current.available !== null && current.page !== null) {
+      return 'A newer release is available: download its installer or portable exe from its page.'
+    }
     if (current.available !== null) return 'A newer signed release is available.'
     return 'No update candidate is available.'
   }
@@ -382,6 +394,15 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     }
   }
 
+  async function openDownloadPage() {
+    if (snapshot?.page == null) return
+    const result = await call('update_open_page')
+    if (!applySnapshot(result)) {
+      setFeedback(commandFailure(result) ?? 'The download page could not open', 'error')
+      render()
+    }
+  }
+
   async function changeChannel() {
     if (snapshot === null || busy()) return
     const selected = channel.value
@@ -443,6 +464,7 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
   download.addEventListener('click', () => void downloadUpdate())
   channel.addEventListener('change', () => void changeChannel())
   install.addEventListener('click', () => void installUpdate())
+  openPage.addEventListener('click', () => void openDownloadPage())
   dialog.addEventListener('close', () => previousFocus?.focus?.())
 
   if (typeof listen === 'function') {

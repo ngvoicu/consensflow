@@ -42,6 +42,10 @@ pub(crate) fn daemon_command(app: &AppHandle) -> Result<Command, DaemonFailure> 
 fn bundled_cli(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
     #[cfg(windows)]
     if let Some(runtime) = portable_runtime(app)? {
+        // The terminals' console host is in the runtime; without it Windows' own serves.
+        if let Err(error) = crate::portable::find_libraries_in(&plain_path(runtime.clone())) {
+            eprintln!("consensflow: the runtime's console host is not found ({error}); Windows' own serves");
+        }
         return present(
             runtime.join("node.exe"),
             runtime.join("cli").join("bin").join("cf.mjs"),

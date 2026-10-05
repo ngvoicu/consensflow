@@ -13,14 +13,22 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use cf_base::file::{stat, Stat};
+use cf_base::json::from_slice_lossy;
 use serde_json::Value;
 
 use super::cache::{Look, Options};
-use super::jsonl::{read_on, Looked, Seen, Stop};
+use super::jsonl::{read_on_with, Looked, Seen, Stop};
 use super::reading::{Reading, Record};
 
 /// What reads a transcript's records into what they say.
 pub(crate) trait Parser {
+    /// A line of the transcript, read as a record: as `JSON.parse` reads it.
+    /// A parser that reads a part of a record may read a line for that part
+    /// alone, so long as it fails where this does.
+    fn parse(line: &[u8]) -> serde_json::Result<Value> {
+        from_slice_lossy(line)
+    }
+
     /// A record, at its place among the transcript's records. Fails with
     /// `Stop::Reread` to have the transcript read again from its start.
     fn visit(&mut self, record: Value, index: usize) -> Result<(), Stop>;
@@ -95,9 +103,10 @@ impl<P: Parser> Followed<P> {
         self.broken = None;
         loop {
             let state = self.state.get_or_insert_with(|| (self.parse)());
-            let looked = read_on(
+            let looked = read_on_with(
                 &file,
                 self.seen.as_ref(),
+                P::parse,
                 &mut |record, index| state.visit(record, index),
                 None,
             )

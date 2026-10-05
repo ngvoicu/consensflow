@@ -21,6 +21,8 @@ http-body-util.workspace = true
 hyper = { workspace = true, features = ["client"] }
 hyper-util.workspace = true
 jiff.workspace = true
+# Where a line of a transcript ends, found at the speed a disk reads.
+memchr.workspace = true
 regex.workspace = true
 rusqlite.workspace = true
 # `rc`: a reading's quota is shared, as Node shared the object.
@@ -69,9 +71,10 @@ flate2.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt"] }
 
-# The mask the goldens' scenarios make their files under, which std cannot set.
+# The mask the goldens' scenarios make their files under, which std cannot set,
+# and the most memory a process held, which the memory measurement reports.
 [target.'cfg(unix)'.dev-dependencies]
-nix = { workspace = true, features = ["fs"] }
+nix = { workspace = true, features = ["fs", "resource"] }
 
 [lints]
 workspace = true
