@@ -1,6 +1,6 @@
 //! What an adapter is given besides its launch: the time and its waits,
-//! randomness, a free port, a peer on loopback to ask over HTTP, and the
-//! bundle ConsensFlow ships with. The
+//! randomness, a free port, a peer on loopback to ask over HTTP, the
+//! programs it runs, and the bundle ConsensFlow ships with. The
 //! engine gives the system's (the types here); a test gives fakes it drives
 //! by hand (`testing`, behind the `test-support` feature). Each adapter is
 //! built with the ones it uses, so nothing in a window reads the system's
@@ -20,8 +20,10 @@ use cf_base::time::{Clock, SystemClock};
 use crate::contract::{Records, Work};
 
 pub mod loopback;
+pub mod processes;
 
 pub use loopback::{Loopback, SystemLoopback};
+pub use processes::{Processes, SystemProcesses};
 
 /// What the engine gives every adapter it builds: the environment its
 /// windows run with, the records it reads them through, and the seams.
@@ -33,6 +35,7 @@ pub struct Services {
     pub entropy: Rc<dyn Entropy>,
     pub ports: Rc<dyn Ports>,
     pub loopback: Rc<dyn Loopback>,
+    pub processes: Rc<dyn Processes>,
     pub bundle: Bundle,
 }
 

@@ -10,6 +10,8 @@ publish = false
 cf-base.workspace = true
 cf-process.workspace = true
 cf-proto.workspace = true
+# A probe's run, shared by every caller that asked while it ran.
+futures-util.workspace = true
 getrandom.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["client"] }

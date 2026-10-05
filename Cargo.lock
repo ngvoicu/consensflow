@@ -429,6 +429,7 @@ dependencies = [
  "cf-process",
  "cf-proto",
  "flate2",
+ "futures-util",
  "getrandom 0.4.3",
  "http-body-util",
  "hyper",

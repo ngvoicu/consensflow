@@ -1,7 +1,8 @@
 //! Fakes of what the engine gives an adapter, which a test drives by hand:
 //! a clock that moves only when told, randomness from a known stream, the
 //! records, a pane host and a peer on loopback (`peer`) whose answers can
-//! be held, and a driver that
+//! be held, programs whose answers are scripted (`children`), and a driver
+//! that
 //! runs begun work until it waits on one of them. Nothing here starts a
 //! runtime: a wait an adapter makes on anything but these never ends, and
 //! the driver says so.
@@ -27,10 +28,12 @@ use serde_json::Value;
 
 use crate::contract::{HostError, PaneHost, Records, Work};
 use crate::records::{self, Cache, Options, Reading, IDLE_MS};
-use crate::seams::{Bundle, Entropy, Loopback, Ports, Services, Time};
+use crate::seams::{Bundle, Entropy, Loopback, Ports, Processes, Services, Time};
 
+mod children;
 mod peer;
 
+pub use children::ScriptedProcesses;
 pub use peer::{ScriptedLoopback, Sent, Served};
 
 thread_local! {
@@ -499,6 +502,7 @@ pub struct Fakes {
     pub records: Rc<LocalRecords>,
     pub ports: Rc<FixedPorts>,
     pub loopback: Rc<ScriptedLoopback>,
+    pub processes: Rc<ScriptedProcesses>,
 }
 
 impl Fakes {
@@ -516,6 +520,7 @@ impl Fakes {
             records,
             ports: Rc::new(FixedPorts(RefCell::new((41_000..41_100).collect()))),
             loopback: Rc::new(ScriptedLoopback::default()),
+            processes: Rc::new(ScriptedProcesses::default()),
         }
     }
 
@@ -529,6 +534,7 @@ impl Fakes {
             entropy: Rc::clone(&self.entropy) as Rc<dyn Entropy>,
             ports: Rc::clone(&self.ports) as Rc<dyn Ports>,
             loopback: Rc::clone(&self.loopback) as Rc<dyn Loopback>,
+            processes: Rc::clone(&self.processes) as Rc<dyn Processes>,
             bundle: bundle(root),
         }
     }
