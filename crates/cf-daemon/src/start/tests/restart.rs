@@ -58,7 +58,7 @@ async fn what_was_open_comes_back_and_its_window_opens_with_the_environment_the_
             let daemon = start(environment(root.path()), options).await.unwrap();
 
             // The resume opens the chief's window through the host.
-            wait_for(|| !opened.borrow().is_empty()).await;
+            wait_for(root.path(), || !opened.borrow().is_empty()).await;
             let open = opened.borrow()[0].clone();
             assert_eq!(open["id"], format!("p{project}-chief"));
             let env = &open["env"];
@@ -82,10 +82,12 @@ async fn what_was_open_comes_back_and_its_window_opens_with_the_environment_the_
             let argv: Vec<&str> = open["argv"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
             let at = argv.iter().position(|arg| *arg == "--append-system-prompt-file").expect("a role file");
             let role = std::fs::read_to_string(argv[at + 1]).unwrap();
-            assert!(role.contains(&format!("Here `cf` is {}", bin.join("cf").display())), "{role}");
+            // As the daemon names it: `cf.exe`, spelled with `/`, on Windows.
+            let cf = machine::bundle_of(&bin.join("cf")).pane_cf;
+            assert!(role.contains(&format!("Here `cf` is {cf}")), "{role}");
 
             // The page is told the board changed, once for what came together.
-            wait_for(|| !events.borrow().is_empty()).await;
+            wait_for(root.path(), || !events.borrow().is_empty()).await;
             assert_eq!(events.borrow()[0], ("state.changed".to_owned(), json!({ "reason": "core" })));
             // The ledger's own events are in the trace as they happen: the
             // start suspended the project for a resume, and the resume opened it.
@@ -100,10 +102,21 @@ async fn what_was_open_comes_back_and_its_window_opens_with_the_environment_the_
         .await;
 }
 
-async fn wait_for(condition: impl Fn() -> bool) {
+/// Waits for `condition`, ten seconds at most; past them it fails with the
+/// daemon's log and trace on `root`, which say what stopped it.
+async fn wait_for(root: &Path, condition: impl Fn() -> bool) {
     let until = Instant::now() + Duration::from_secs(10);
     while !condition() {
-        assert!(Instant::now() < until, "timed out waiting");
+        if Instant::now() >= until {
+            let read = |name: &str| {
+                std::fs::read_to_string(root.join("consensflow").join(name)).unwrap_or_default()
+            };
+            panic!(
+                "timed out waiting; the daemon's log:\n{}\nits trace:\n{}",
+                read("daemon.log"),
+                read("events.jsonl")
+            );
+        }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
@@ -125,7 +138,7 @@ async fn an_exit_the_host_tells_reaches_the_engine_where_it_is_read() {
                 }
             });
             let daemon = start(environment(root.path()), options).await.unwrap();
-            wait_for(|| !opened.borrow().is_empty()).await;
+            wait_for(root.path(), || !opened.borrow().is_empty()).await;
             let chief = {
                 let found = daemon
                     .parts
@@ -142,7 +155,7 @@ async fn an_exit_the_host_tells_reaches_the_engine_where_it_is_read() {
                     .id
             };
             let pane = opened.borrow()[0].clone();
-            wait_for(|| daemon.parts.engine.pane(chief).is_some()).await;
+            wait_for(root.path(), || daemon.parts.engine.pane(chief).is_some()).await;
             // The host says the window ended: the engine knows before the next frame.
             app.event(
                 "pane.exit",
@@ -192,7 +205,7 @@ async fn the_page_is_told_the_board_moved_a_hundred_milliseconds_after_the_first
             daemon.parts.engine.close_project(project).await.unwrap();
             tokio::time::sleep(Duration::from_millis(30)).await;
             daemon.parts.engine.close_project(project).await.unwrap();
-            wait_for(|| !told.borrow().is_empty()).await;
+            wait_for(root.path(), || !told.borrow().is_empty()).await;
             // Nothing more comes of what came together.
             tokio::time::sleep(Duration::from_millis(300)).await;
             let after = {

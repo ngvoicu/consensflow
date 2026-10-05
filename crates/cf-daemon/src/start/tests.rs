@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use cf_bridge::local::{Bridge, BridgeBuilder};
 use cf_harness::contract::LaunchId;
-use cf_harness::testing::fake_executable;
+use cf_harness::testing::fake_window_executable;
 use cf_ledger::{open_ledger, Options as LedgerOptions};
 use cf_proto::bridge::Role;
 use serde_json::{json, Value};
@@ -37,34 +37,45 @@ struct Rig {
 }
 
 /// The environment the app gives a daemon on `root`: the home inside it, a
-/// `claude` to be found on PATH and only it.
+/// `claude` to be found on PATH and only it, and on Windows what finds and
+/// starts a `.cmd` there (`PATHEXT`, `SystemRoot`, `ComSpec`).
 fn environment(root: &Path) -> Env {
     let home = root.join("home");
     let bin = root.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
-    fake_executable(&bin.join("claude"));
-    Env::from_vars([
-        (
-            "CONSENSFLOW_HOME",
-            root.join("consensflow").to_string_lossy().into_owned(),
-        ),
-        ("HOME", home.to_string_lossy().into_owned()),
-        ("USERPROFILE", home.to_string_lossy().into_owned()),
-        (
-            "CLAUDE_CONFIG_DIR",
-            home.join(".claude").to_string_lossy().into_owned(),
-        ),
-        (
-            "CODEX_HOME",
-            home.join(".codex").to_string_lossy().into_owned(),
-        ),
-        (
-            "XDG_CONFIG_HOME",
-            home.join(".config").to_string_lossy().into_owned(),
-        ),
-        ("PATH", bin.to_string_lossy().into_owned()),
-        ("CONSENSFLOW_NODE", "/the/node/the/app/named".to_owned()),
-    ])
+    fake_window_executable(&bin.join("claude"));
+    let process = Env::from_process();
+    let windows = ["SystemRoot", "ComSpec", "PATHEXT"]
+        .into_iter()
+        .filter(|_| cfg!(windows))
+        .filter_map(|name| Some((name.to_owned(), process.text(name)?.to_owned())));
+    Env::from_vars(
+        [
+            (
+                "CONSENSFLOW_HOME",
+                root.join("consensflow").to_string_lossy().into_owned(),
+            ),
+            ("HOME", home.to_string_lossy().into_owned()),
+            ("USERPROFILE", home.to_string_lossy().into_owned()),
+            (
+                "CLAUDE_CONFIG_DIR",
+                home.join(".claude").to_string_lossy().into_owned(),
+            ),
+            (
+                "CODEX_HOME",
+                home.join(".codex").to_string_lossy().into_owned(),
+            ),
+            (
+                "XDG_CONFIG_HOME",
+                home.join(".config").to_string_lossy().into_owned(),
+            ),
+            ("PATH", bin.to_string_lossy().into_owned()),
+            ("CONSENSFLOW_NODE", "/the/node/the/app/named".to_owned()),
+        ]
+        .into_iter()
+        .map(|(name, value)| (name.to_owned(), value))
+        .chain(windows),
+    )
 }
 
 fn options(

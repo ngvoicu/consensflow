@@ -29,7 +29,7 @@ impl Root {
             dir: tempfile::tempdir().expect("a temporary folder"),
         };
         std::fs::create_dir_all(root.bin()).expect("a bin folder");
-        cf_harness::testing::fake_executable(&root.bin().join("claude"));
+        cf_harness::testing::fake_window_executable(&root.bin().join("claude"));
         root
     }
 

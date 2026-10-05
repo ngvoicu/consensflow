@@ -82,7 +82,11 @@ fn the_hook_notes_where_a_panic_was_and_writes_nothing() {
     let caught = contain_now(|| panic!("over there")).unwrap_err();
     panic::set_hook(before);
     let location = caught.location.clone().expect("the hook noted it");
-    assert!(location.contains("errors/tests.rs"), "{location}");
+    // Rust names the file with the platform's separator.
+    assert!(
+        location.replace('\\', "/").contains("errors/tests.rs"),
+        "{location}"
+    );
     assert_eq!(
         caught.cause(),
         format!("panic: over there\n    at {location}")

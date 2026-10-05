@@ -676,6 +676,31 @@ pub fn fake_executable(file: &Path) -> PathBuf {
     file.to_path_buf()
 }
 
+/// A stand-in a window can open on: on Windows the shape of an npm shim,
+/// naming node and a script beside it, the only `.cmd` `pane_argv` opens (a
+/// bare one is refused as no window could run it), as Node's rig writes its
+/// stand-in; elsewhere [`fake_executable`]'s script.
+pub fn fake_window_executable(file: &Path) -> PathBuf {
+    if !cfg!(windows) {
+        return fake_executable(file);
+    }
+    let script = file.with_extension("js");
+    fs::write(&script, "").expect("a stand-in's script written");
+    let name = script
+        .file_name()
+        .expect("a stand-in's script has a name")
+        .to_string_lossy()
+        .into_owned();
+    let mut shim = file.as_os_str().to_owned();
+    shim.push(".cmd");
+    fs::write(
+        &shim,
+        format!("@echo off\r\n\"%_prog%\" \"%dp0%\\{name}\" %*\r\n"),
+    )
+    .expect("a stand-in written");
+    PathBuf::from(shim)
+}
+
 /// A live process of the test's own besides the test, ended with it.
 pub struct OtherProcess(std::process::Child);
 

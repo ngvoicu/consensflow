@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { before, describe, it } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { check } from './goldens/daemon/check.mjs'
@@ -230,7 +230,8 @@ describe('the daemon recorder', () => {
     const [world, open, board, close, list] = traces['surfaces-004'].steps
     assert.equal(world.kind, 'world')
     assert.deepEqual(Object.keys(world.files), ['consensflow/agents.json'])
-    assert.deepEqual(world.env, { HOME: '«root»', CONSENSFLOW_HOME: '«root»/consensflow' })
+    // The rest of a path after its folder's name is the platform's spelling.
+    assert.deepEqual(world.env, { HOME: '«root»', CONSENSFLOW_HOME: `«root»${sep}consensflow` })
     assert.deepEqual(
       [open.name, open.body, open.kicks],
       ['project.open', { directory: '/work/app', agent: 'leto' }, 1],
