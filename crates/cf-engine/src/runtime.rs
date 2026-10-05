@@ -20,15 +20,23 @@
 //!   [`returning`] a turn too: a pass's steps cross-read the ledger (a note
 //!   one step writes is the chief's next delivery in the same pass), so a
 //!   step that took fewer turns than Node's would read it before it was there.
+//! - A piece of work that panics is what one that threw was: its participant
+//!   is let go of as it unwinds (`finally`, `#exclusive` and `#act`), and
+//!   whoever waits for its answer ends with an error, not for ever. The panic
+//!   itself goes on unwinding where the work runs, for whoever runs it to
+//!   write down.
 
+use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::future::{poll_fn, Future};
+use std::panic::{resume_unwind, AssertUnwindSafe};
 use std::pin::{pin, Pin};
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
+use futures_util::FutureExt;
 
 /// A piece of work on the engine's thread.
 pub type LocalWork = Pin<Box<dyn Future<Output = ()>>>;
@@ -52,6 +60,11 @@ impl Spawn for LocalSpawn {
 /// what it does before its first wait is done now; what is left, if
 /// anything, goes on as work of its own. Its answer comes through the
 /// [`Begun`] returned, which may be dropped: the work goes on all the same.
+///
+/// A panic in `work` before its first wait unwinds out of this call, to the
+/// caller, as a throw did; one after it unwinds the work of its own, which is
+/// told to whoever spawned it, and the [`Begun`] ends its waiter with a panic
+/// of its own.
 pub async fn begin<T: 'static>(
     spawn: &dyn Spawn,
     work: impl Future<Output = T> + 'static,
@@ -59,7 +72,16 @@ pub async fn begin<T: 'static>(
     let answer = Rc::new(Answer::default());
     let mut whole: LocalWork = Box::pin({
         let answer = Rc::clone(&answer);
-        async move { answer.set(work.await) }
+        async move {
+            match AssertUnwindSafe(work).catch_unwind().await {
+                Ok(value) => answer.set(value),
+                Err(panic) => {
+                    // Whoever waits for the answer must not wait for ever.
+                    answer.fail(&panic_words(panic.as_ref()));
+                    resume_unwind(panic);
+                }
+            }
+        }
     });
     // Polled with the caller's waker: whatever it waits on now is waited on
     // again, with the work's own waker, at the work's first poll there.
@@ -85,11 +107,16 @@ impl<T> Begun<T> {
 impl<T> Future for Begun<T> {
     type Output = T;
 
+    /// The work's answer; a panic of this waiter's own where the work panicked,
+    /// which says what the work's did.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
         let value = self.answer.value.borrow_mut().take();
         match value {
             Some(value) => Poll::Ready(value),
             None => {
+                if let Some(words) = self.answer.failed.borrow().as_deref() {
+                    panic!("the work waited for panicked: {words}");
+                }
                 *self.answer.waker.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
@@ -101,6 +128,8 @@ impl<T> Future for Begun<T> {
 struct Answer<T> {
     value: RefCell<Option<T>>,
     ended: Cell<bool>,
+    /// What the work's panic said, once it panicked.
+    failed: RefCell<Option<String>>,
     waker: RefCell<Option<Waker>>,
 }
 
@@ -109,6 +138,7 @@ impl<T> Default for Answer<T> {
         Self {
             value: RefCell::new(None),
             ended: Cell::new(false),
+            failed: RefCell::new(None),
             waker: RefCell::new(None),
         }
     }
@@ -118,11 +148,30 @@ impl<T> Answer<T> {
     fn set(&self, value: T) {
         *self.value.borrow_mut() = Some(value);
         self.ended.set(true);
+        self.wake();
+    }
+
+    /// The work panicked: its waiter is woken, to end with an error.
+    fn fail(&self, words: &str) {
+        *self.failed.borrow_mut() = Some(words.to_owned());
+        self.wake();
+    }
+
+    fn wake(&self) {
         let waker = self.waker.borrow_mut().take();
         if let Some(waker) = waker {
             waker.wake();
         }
     }
+}
+
+/// What a panic said: its words when it had them.
+fn panic_words(panic: &(dyn Any + Send)) -> String {
+    panic
+        .downcast_ref::<&str>()
+        .map(|words| (*words).to_owned())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "a panic with no words".to_owned())
 }
 
 /// The answers of work begun, in the order begun, as `Promise.all` gives
@@ -238,7 +287,7 @@ impl Hold {
     }
 
     /// Begins `work` in place, holding the participant from its first wait
-    /// until it ends.
+    /// until it ends, however it ends.
     async fn hold_for<T: 'static>(
         self: &Rc<Self>,
         spawn: &dyn Spawn,
@@ -246,10 +295,8 @@ impl Hold {
     ) -> Begun<T> {
         let hold = Rc::clone(self);
         let begun = begin(spawn, async move {
-            let answer = work.await;
-            hold.running.set(false);
-            hold.pass_on();
-            answer
+            let _release = Release::running(&hold);
+            work.await
         })
         .await;
         // Held from here, as JavaScript held it once the work's start was
@@ -264,19 +311,17 @@ impl Hold {
     /// start as JavaScript ran it, nothing held until it first waits; then
     /// held until it ends, and the participant passed on. Each wait of the
     /// work is the waiter's, so what was begun meanwhile goes first.
-    async fn run_held<T>(&self, work: impl Future<Output = T>) -> T {
+    async fn run_held<T>(self: &Rc<Self>, work: impl Future<Output = T>) -> T {
+        let _release = Release::running(self);
         let mut work = pin!(work);
-        let answer = poll_fn(|context| {
+        poll_fn(|context| {
             let polled = work.as_mut().poll(context);
             if polled.is_pending() {
                 self.running.set(true);
             }
             polled
         })
-        .await;
-        self.running.set(false);
-        self.pass_on();
-        answer
+        .await
     }
 
     /// Begins `work` apart from the pass, holding the participant until it
@@ -284,9 +329,8 @@ impl Hold {
     pub async fn act(self: &Rc<Self>, spawn: &dyn Spawn, work: impl Future<Output = ()> + 'static) {
         let hold = Rc::clone(self);
         let begun = begin(spawn, async move {
+            let _release = Release::acting(&hold);
             work.await;
-            hold.acting.set(false);
-            hold.pass_on();
         })
         .await;
         if !begun.ended() {
@@ -304,6 +348,45 @@ impl Hold {
             self.handed.set(true);
             turn.give();
         }
+    }
+}
+
+/// What lets go of a participant when the work that holds it ends: how it
+/// ends does not matter, as Node's `finally` let go of it whether the work
+/// answered or threw. A panic that unwinds through the work drops this too,
+/// so a participant is never held for good by work that is gone.
+struct Release {
+    hold: Rc<Hold>,
+    /// Whether it is a launch or a delivery going on apart that is let go of.
+    acting: bool,
+}
+
+impl Release {
+    /// For a step or a human's operation.
+    fn running(hold: &Rc<Hold>) -> Self {
+        Self {
+            hold: Rc::clone(hold),
+            acting: false,
+        }
+    }
+
+    /// For a launch or a delivery going on apart from the pass.
+    fn acting(hold: &Rc<Hold>) -> Self {
+        Self {
+            hold: Rc::clone(hold),
+            acting: true,
+        }
+    }
+}
+
+impl Drop for Release {
+    fn drop(&mut self) {
+        if self.acting {
+            self.hold.acting.set(false);
+        } else {
+            self.hold.running.set(false);
+        }
+        self.hold.pass_on();
     }
 }
 

@@ -338,7 +338,9 @@ dependencies = [
  "cf-base",
  "cf-board",
  "cf-codex-session",
+ "cf-daemon",
  "cf-harness",
+ "cf-ledger",
  "cf-process",
  "cf-proto",
  "form_urlencoded",
@@ -381,6 +383,7 @@ version = "3.0.0-alpha.76"
 dependencies = [
  "cf-proto",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -418,6 +421,35 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "uuid",
+]
+
+[[package]]
+name = "cf-daemon"
+version = "3.0.0-alpha.76"
+dependencies = [
+ "bytes",
+ "cf-base",
+ "cf-bridge",
+ "cf-catalog",
+ "cf-engine",
+ "cf-harness",
+ "cf-ledger",
+ "cf-process",
+ "cf-proto",
+ "futures-util",
+ "getrandom 0.4.3",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "jiff",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "url",
 ]
 
 [[package]]

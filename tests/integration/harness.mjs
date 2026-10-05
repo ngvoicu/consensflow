@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { daemonCommand } from '../helpers.mjs'
 
 const WINDOWS = process.platform === 'win32'
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -199,9 +200,11 @@ export async function startIntegration({
   )
   writeRoster(env)
 
-  const node = spawn(process.execPath, [daemon], {
+  // The daemon under test: Node's, or the native one CONSENSFLOW_TEST_DAEMON names.
+  const started = daemonCommand([daemon])
+  const node = spawn(started.command, started.args, {
     cwd: REPO,
-    env,
+    env: { ...env, ...started.env },
     stdio: ['pipe', 'pipe', 'pipe'],
   })
   const nodeErrors = []

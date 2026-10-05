@@ -146,4 +146,15 @@ impl Ledger {
     pub fn close(self) -> Result<(), LedgerError> {
         self.store.db.close().map_err(|(_, cause)| cause.into())
     }
+
+    /// Closes the file where the ledger is shared and cannot be given up
+    /// (the daemon's, borrowed per call by every task that reads or writes
+    /// the board): the lock goes with it, as with [`Ledger::close`]. What is
+    /// left holds an empty database in memory, so the ledger is a value
+    /// still, and every operation after this fails as SQLite fails for a
+    /// table that is not there: nothing may use it again.
+    pub fn close_in_place(&mut self) -> Result<(), LedgerError> {
+        let open = std::mem::replace(&mut self.store.db, Connection::open_in_memory()?);
+        open.close().map_err(|(_, cause)| cause.into())
+    }
 }

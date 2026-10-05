@@ -497,3 +497,218 @@ fn a_turn_lets_the_work_woken_before_it_go_first() {
     executor.run();
     assert_eq!(log.taken(), ["meanwhile", "after a turn"]);
 }
+
+/// What a panic that unwound out of `work` said.
+fn panicked(work: impl FnOnce()) -> String {
+    let panic = std::panic::catch_unwind(AssertUnwindSafe(work)).expect_err("it panics");
+    panic_words(panic.as_ref())
+}
+
+/// What the work the executor runs next says as it panics.
+fn runs_to_a_panic(executor: &Executor) -> String {
+    panicked(|| {
+        executor.run();
+    })
+}
+
+#[test]
+fn work_that_panics_after_a_wait_lets_go_of_its_participant_and_the_next_waiter_takes_its_turn() {
+    let executor = Rc::new(Executor::default());
+    let hold = Rc::new(Hold::default());
+    let (log, gate) = (Log::default(), Gate::default());
+    let (spawn, held, opened) = (Rc::clone(&executor), Rc::clone(&hold), gate.clone());
+    // A step holds the participant, and panics once its gate opens.
+    executor.finish(async move {
+        held.try_exclusive(&*spawn, async move {
+            opened.wait().await;
+            panic!("a step failed");
+        })
+        .await
+        .expect("free");
+    });
+    assert!(hold.held());
+    // A human's operation waits its turn for the participant.
+    let (spawn, held, operation) = (Rc::clone(&executor), Rc::clone(&hold), log.clone());
+    executor.spawn(Box::pin(async move {
+        held.exclusive(&*spawn, async move { operation.push("operation") })
+            .await
+            .await;
+    }));
+    executor.run();
+    assert!(log.taken().is_empty(), "it waits for the step");
+    gate.open();
+    assert_eq!(runs_to_a_panic(&executor), "a step failed");
+    // The panic let go of the participant, and what was woken went on.
+    executor.run();
+    assert_eq!(log.taken(), ["operation"]);
+    assert!(
+        !hold.held(),
+        "held by nothing: the work that held it is gone"
+    );
+}
+
+#[test]
+fn work_that_panics_before_its_first_wait_unwinds_to_its_caller_and_holds_nothing() {
+    let executor = Rc::new(Executor::default());
+    let hold = Rc::new(Hold::default());
+    let (spawn, held) = (Rc::clone(&executor), Rc::clone(&hold));
+    let said = panicked(|| {
+        executor.finish(async move {
+            held.try_exclusive(&*spawn, async { panic!("a first poll") })
+                .await;
+        });
+    });
+    assert_eq!(said, "a first poll");
+    assert!(!hold.held());
+    // Free for the next operation, which begins at once.
+    let (spawn, held) = (Rc::clone(&executor), Rc::clone(&hold));
+    let answer = executor.finish(async move { held.exclusive(&*spawn, async { 5 }).await.await });
+    assert_eq!(answer, Some(5));
+}
+
+#[test]
+fn a_waiter_s_work_that_panics_in_its_turn_lets_go_of_the_participant_too() {
+    let executor = Rc::new(Executor::default());
+    let hold = Rc::new(Hold::default());
+    let (log, gate) = (Log::default(), Gate::default());
+    let (spawn, held, step, opened) = (
+        Rc::clone(&executor),
+        Rc::clone(&hold),
+        log.clone(),
+        gate.clone(),
+    );
+    executor.finish(async move {
+        held.try_exclusive(&*spawn, gated(step, opened, "step", "stepped"))
+            .await
+            .expect("free");
+    });
+    // The first waiter's work panics when it is handed the participant; the second goes after.
+    let (spawn, held) = (Rc::clone(&executor), Rc::clone(&hold));
+    executor.spawn(Box::pin(async move {
+        held.exclusive(&*spawn, async { panic!("the first operation failed") })
+            .await
+            .await;
+    }));
+    let (spawn, held, second) = (Rc::clone(&executor), Rc::clone(&hold), log.clone());
+    executor.spawn(Box::pin(async move {
+        held.exclusive(&*spawn, async move { second.push("second") })
+            .await
+            .await;
+    }));
+    executor.run();
+    gate.open();
+    assert_eq!(runs_to_a_panic(&executor), "the first operation failed");
+    // The second took its turn; the first one's waiter, woken by the failure, ends with an error.
+    assert_eq!(
+        runs_to_a_panic(&executor),
+        "the work waited for panicked: the first operation failed"
+    );
+    assert_eq!(log.taken(), ["step", "stepped", "second"]);
+    assert!(!hold.held());
+}
+
+#[test]
+fn a_launch_going_on_apart_that_panics_lets_go_of_its_participant() {
+    let executor = Rc::new(Executor::default());
+    let hold = Rc::new(Hold::default());
+    let gate = Gate::default();
+    let (spawn, held, opened) = (Rc::clone(&executor), Rc::clone(&hold), gate.clone());
+    executor.finish(async move {
+        held.act(&*spawn, async move {
+            opened.wait().await;
+            panic!("a launch failed");
+        })
+        .await;
+    });
+    assert!(hold.held(), "held while it goes on");
+    gate.open();
+    assert_eq!(runs_to_a_panic(&executor), "a launch failed");
+    assert!(!hold.held());
+    assert!(!hold.acting.get());
+}
+
+#[test]
+fn whoever_waits_for_work_that_panicked_ends_with_an_error_and_does_not_wait_for_ever() {
+    let executor = Rc::new(Executor::default());
+    let (log, gate) = (Log::default(), Gate::default());
+    let (spawn, opened) = (Rc::clone(&executor), gate.clone());
+    let kept = Rc::new(RefCell::new(None));
+    let keep = Rc::clone(&kept);
+    executor.finish(async move {
+        let begun = begin(&*spawn, async move {
+            opened.wait().await;
+            panic!("the work failed");
+        })
+        .await;
+        *keep.borrow_mut() = Some(begun);
+    });
+    let waiting = log.clone();
+    executor.spawn(Box::pin(async move {
+        let begun: Begun<()> = kept.borrow_mut().take().expect("begun");
+        begun.await;
+        waiting.push("answered");
+    }));
+    executor.run();
+    gate.open();
+    // The work's own panic unwinds where the work runs...
+    assert_eq!(runs_to_a_panic(&executor), "the work failed");
+    // ...and the waiter, woken by it, ends with an error of its own.
+    let said = runs_to_a_panic(&executor);
+    assert_eq!(said, "the work waited for panicked: the work failed");
+    assert!(
+        log.taken().is_empty(),
+        "it never took the work's answer for one"
+    );
+}
+
+#[test]
+fn a_waiter_that_comes_after_the_work_panicked_is_told_at_once() {
+    let executor = Rc::new(Executor::default());
+    let gate = Gate::default();
+    let (spawn, opened) = (Rc::clone(&executor), gate.clone());
+    let kept = Rc::new(RefCell::new(None));
+    let keep = Rc::clone(&kept);
+    executor.finish(async move {
+        let begun = begin(&*spawn, async move {
+            opened.wait().await;
+            panic!("already gone");
+        })
+        .await;
+        *keep.borrow_mut() = Some(begun);
+    });
+    gate.open();
+    assert_eq!(runs_to_a_panic(&executor), "already gone");
+    let begun: Begun<()> = kept.borrow_mut().take().expect("begun");
+    let said = panicked(|| {
+        executor.finish(begun);
+    });
+    assert_eq!(said, "the work waited for panicked: already gone");
+}
+
+#[test]
+fn on_tokios_local_set_a_panic_apart_is_the_task_s_and_its_participant_goes_free() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("a runtime");
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&runtime, async {
+        let hold = Rc::new(Hold::default());
+        let gate = Gate::default();
+        let opened = gate.clone();
+        hold.try_exclusive(&LocalSpawn, async move {
+            opened.wait().await;
+            panic!("apart");
+        })
+        .await
+        .expect("free");
+        assert!(hold.held());
+        gate.open();
+        for _ in 0..5 {
+            tokio::task::yield_now().await;
+        }
+        assert!(!hold.held(), "the task panicked and the hold went with it");
+        // And the participant is there for the next operation.
+        let answer = hold.exclusive(&LocalSpawn, async { 9 }).await.await;
+        assert_eq!(answer, 9);
+    });
+}

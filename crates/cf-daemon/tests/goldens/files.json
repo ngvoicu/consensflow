@@ -1,0 +1,278 @@
+{
+  "clock": "2026-10-05T10:00:00.123Z",
+  "log": {
+    "cases": [
+      {
+        "name": "a start",
+        "level": "info",
+        "message": "start pid 4242 node v26.8.1 home /tmp/consensflow",
+        "cause": null,
+        "expected": "2026-10-05T10:00:00.123Z info start pid 4242 node v26.8.1 home /tmp/consensflow\n"
+      },
+      {
+        "name": "a stop",
+        "level": "info",
+        "message": "stop: stdin ended; rss 61 MB",
+        "cause": null,
+        "expected": "2026-10-05T10:00:00.123Z info stop: stdin ended; rss 61 MB\n"
+      },
+      {
+        "name": "a slow pass",
+        "level": "warn",
+        "message": "a pass took 6000 ms",
+        "cause": null,
+        "expected": "2026-10-05T10:00:00.123Z warn a pass took 6000 ms\n"
+      },
+      {
+        "name": "an error with its stack",
+        "level": "error",
+        "message": "a pass failed",
+        "cause": "Error: boom\n    at step (/src/core/dispatcher.js:10:5)\n    at pass (/src/core/dispatcher.js:99:7)",
+        "expected": "2026-10-05T10:00:00.123Z error a pass failed\n    Error: boom\n        at step (/src/core/dispatcher.js:10:5)\n        at pass (/src/core/dispatcher.js:99:7)\n"
+      },
+      {
+        "name": "an error that is text",
+        "level": "error",
+        "message": "the agents file could not be used",
+        "cause": "plain words",
+        "expected": "2026-10-05T10:00:00.123Z error the agents file could not be used\n    plain words\n"
+      },
+      {
+        "name": "a cause with a blank line and a trailing newline",
+        "level": "error",
+        "message": "a cause of several lines",
+        "cause": "first\n\nthird\n",
+        "expected": "2026-10-05T10:00:00.123Z error a cause of several lines\n    first\n    \n    third\n    \n"
+      },
+      {
+        "name": "an error with no stack says its message",
+        "level": "warn",
+        "message": "something odd",
+        "cause": "only a message",
+        "expected": "2026-10-05T10:00:00.123Z warn something odd\n    only a message\n"
+      },
+      {
+        "name": "a message of its own lines and characters",
+        "level": "info",
+        "message": "café ☕ 😀\nsecond line \"quoted\" \\ back",
+        "cause": null,
+        "expected": "2026-10-05T10:00:00.123Z info café ☕ 😀\nsecond line \"quoted\" \\ back\n"
+      }
+    ],
+    "rotation": {
+      "limit": 100,
+      "lines": 7,
+      "current": "2026-10-05T10:00:06.123Z info line 6\n",
+      "aside": "2026-10-05T10:00:03.123Z info line 3\n2026-10-05T10:00:04.123Z info line 4\n2026-10-05T10:00:05.123Z info line 5\n"
+    }
+  },
+  "trace": {
+    "cases": [
+      {
+        "name": "a ledger event, with the time it carries",
+        "entry": {
+          "at": "2026-10-05T09:59:00.000Z",
+          "project": 2,
+          "kind": "task.created",
+          "data": {
+            "number": 2,
+            "to": "zeus",
+            "title": "Café ☕"
+          }
+        },
+        "expected": "{\"at\":\"2026-10-05T09:59:00.000Z\",\"project\":2,\"kind\":\"task.created\",\"data\":{\"number\":2,\"to\":\"zeus\",\"title\":\"Café ☕\"}}\n"
+      },
+      {
+        "name": "a ledger event with nested data",
+        "entry": {
+          "at": "2026-10-05T09:59:00.000Z",
+          "project": 1,
+          "kind": "conversation.bound",
+          "data": {
+            "a": [
+              1,
+              null,
+              true
+            ],
+            "b": {
+              "c": "x"
+            },
+            "n": 1.5,
+            "big": 12345678
+          }
+        },
+        "expected": "{\"at\":\"2026-10-05T09:59:00.000Z\",\"project\":1,\"kind\":\"conversation.bound\",\"data\":{\"a\":[1,null,true],\"b\":{\"c\":\"x\"},\"n\":1.5,\"big\":12345678}}\n"
+      },
+      {
+        "name": "a ledger event with characters JSON writes as escapes",
+        "entry": {
+          "at": "2026-10-05T09:59:00.000Z",
+          "project": 3,
+          "kind": "message.sent",
+          "data": {
+            "body": "tab\there\nnew \"quote\" \\ \u0001    😀"
+          }
+        },
+        "expected": "{\"at\":\"2026-10-05T09:59:00.000Z\",\"project\":3,\"kind\":\"message.sent\",\"data\":{\"body\":\"tab\\there\\nnew \\\"quote\\\" \\\\ \\u0001    😀\"}}\n"
+      },
+      {
+        "name": "a window going idle",
+        "entry": {
+          "kind": "window.activity",
+          "project": 1,
+          "participant": "chief",
+          "state": "idle",
+          "reason": null
+        },
+        "expected": "{\"at\":\"2026-10-05T10:00:00.123Z\",\"kind\":\"window.activity\",\"project\":1,\"participant\":\"chief\",\"state\":\"idle\",\"reason\":null}\n"
+      },
+      {
+        "name": "a window working for a reason",
+        "entry": {
+          "kind": "window.activity",
+          "project": 4,
+          "participant": "zeus",
+          "state": "waiting",
+          "reason": "a question"
+        },
+        "expected": "{\"at\":\"2026-10-05T10:00:00.123Z\",\"kind\":\"window.activity\",\"project\":4,\"participant\":\"zeus\",\"state\":\"waiting\",\"reason\":\"a question\"}\n"
+      },
+      {
+        "name": "a kill that failed",
+        "entry": {
+          "kind": "window.kill_failed",
+          "project": null,
+          "participant": null,
+          "error": null
+        },
+        "expected": "{\"at\":\"2026-10-05T10:00:00.123Z\",\"kind\":\"window.kill_failed\",\"project\":null,\"participant\":null,\"error\":null}\n"
+      },
+      {
+        "name": "a delivery held",
+        "entry": {
+          "kind": "delivery.held",
+          "project": 2,
+          "participant": "zeus",
+          "message": 7,
+          "reason": "the window is not ready for a paste: a paste is on its way"
+        },
+        "expected": "{\"at\":\"2026-10-05T10:00:00.123Z\",\"kind\":\"delivery.held\",\"project\":2,\"participant\":\"zeus\",\"message\":7,\"reason\":\"the window is not ready for a paste: a paste is on its way\"}\n"
+      },
+      {
+        "name": "enter pressed again",
+        "entry": {
+          "kind": "delivery.enter_again",
+          "project": 2,
+          "participant": "zeus",
+          "message": 7
+        },
+        "expected": "{\"at\":\"2026-10-05T10:00:00.123Z\",\"kind\":\"delivery.enter_again\",\"project\":2,\"participant\":\"zeus\",\"message\":7}\n"
+      },
+      {
+        "name": "a project deleted",
+        "entry": {
+          "kind": "project.deleted",
+          "project": null,
+          "data": {
+            "id": 3,
+            "name": "Parser",
+            "directory": "/work/parser",
+            "createdAt": "2026-09-19T11:00:00.000Z",
+            "members": 1,
+            "sessions": 2,
+            "tasks": 4,
+            "messages": 9
+          }
+        },
+        "expected": "{\"at\":\"2026-10-05T10:00:00.123Z\",\"kind\":\"project.deleted\",\"project\":null,\"data\":{\"id\":3,\"name\":\"Parser\",\"directory\":\"/work/parser\",\"createdAt\":\"2026-09-19T11:00:00.000Z\",\"members\":1,\"sessions\":2,\"tasks\":4,\"messages\":9}}\n"
+      },
+      {
+        "name": "an error nobody caught",
+        "entry": {
+          "kind": "daemon.error",
+          "project": null,
+          "reason": "a pass failed: it said \"no\"\nsecond line"
+        },
+        "expected": "{\"at\":\"2026-10-05T10:00:00.123Z\",\"kind\":\"daemon.error\",\"project\":null,\"reason\":\"a pass failed: it said \\\"no\\\"\\nsecond line\"}\n"
+      }
+    ],
+    "rotation": {
+      "limit": 120,
+      "entries": [
+        {
+          "at": "2026-10-05T09:59:00.000Z",
+          "project": 1,
+          "kind": "project.created",
+          "data": {
+            "n": 0
+          }
+        },
+        {
+          "at": "2026-10-05T09:59:00.000Z",
+          "project": 2,
+          "kind": "project.created",
+          "data": {
+            "n": 1
+          }
+        },
+        {
+          "at": "2026-10-05T09:59:00.000Z",
+          "project": 3,
+          "kind": "project.created",
+          "data": {
+            "n": 2
+          }
+        },
+        {
+          "at": "2026-10-05T09:59:00.000Z",
+          "project": 4,
+          "kind": "project.created",
+          "data": {
+            "n": 3
+          }
+        },
+        {
+          "at": "2026-10-05T09:59:00.000Z",
+          "project": 5,
+          "kind": "project.created",
+          "data": {
+            "n": 4
+          }
+        },
+        {
+          "at": "2026-10-05T09:59:00.000Z",
+          "project": 6,
+          "kind": "project.created",
+          "data": {
+            "n": 5
+          }
+        },
+        {
+          "at": "2026-10-05T09:59:00.000Z",
+          "project": 7,
+          "kind": "project.created",
+          "data": {
+            "n": 6
+          }
+        },
+        {
+          "at": "2026-10-05T09:59:00.000Z",
+          "project": 8,
+          "kind": "project.created",
+          "data": {
+            "n": 7
+          }
+        }
+      ],
+      "current": "{\"at\":\"2026-10-05T09:59:00.000Z\",\"project\":7,\"kind\":\"project.created\",\"data\":{\"n\":6}}\n{\"at\":\"2026-10-05T09:59:00.000Z\",\"project\":8,\"kind\":\"project.created\",\"data\":{\"n\":7}}\n",
+      "aside": "{\"at\":\"2026-10-05T09:59:00.000Z\",\"project\":5,\"kind\":\"project.created\",\"data\":{\"n\":4}}\n{\"at\":\"2026-10-05T09:59:00.000Z\",\"project\":6,\"kind\":\"project.created\",\"data\":{\"n\":5}}\n"
+    },
+    "forget": {
+      "project": 2,
+      "before": "{\"at\":\"a\",\"project\":1,\"kind\":\"x\"}\n{\"at\":\"b\",\"project\":2,\"kind\":\"x\"}\nnot json\n\n[2]\n{\"at\":\"c\",\"project\":\"2\",\"kind\":\"x\"}\n{\"at\":\"d\",\"project\":2.0,\"kind\":\"y\"}\n{\"at\":\"e\",\"project\":null,\"kind\":\"z\"}\n{\"at\":\"f\",\"project\":3,\"kind\":\"x\"}\n",
+      "beforeAside": "{\"at\":\"g\",\"project\":2,\"kind\":\"x\"}\n{\"at\":\"h\",\"project\":4,\"kind\":\"x\"}\n",
+      "after": "{\"at\":\"a\",\"project\":1,\"kind\":\"x\"}\nnot json\n[2]\n{\"at\":\"c\",\"project\":\"2\",\"kind\":\"x\"}\n{\"at\":\"e\",\"project\":null,\"kind\":\"z\"}\n{\"at\":\"f\",\"project\":3,\"kind\":\"x\"}\n",
+      "afterAside": "{\"at\":\"h\",\"project\":4,\"kind\":\"x\"}\n"
+    }
+  }
+}

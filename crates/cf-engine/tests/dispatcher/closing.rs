@@ -284,7 +284,7 @@ fn deletes_a_closed_project_for_good_refuses_an_open_one_and_leaves_one_line_in_
         .iter()
         .filter_map(|line| match &line.what {
             Traced::ProjectDeleted(deleted) => Some(deleted.name.clone()),
-            Traced::Window { .. } => None,
+            Traced::Window { .. } | Traced::Event { .. } | Traced::DaemonError { .. } => None,
         })
         .collect();
     assert_eq!(deleted, ["app"]);

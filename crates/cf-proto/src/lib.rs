@@ -9,5 +9,6 @@ pub mod agents;
 pub mod bridge;
 pub mod codex;
 pub mod ledger;
+pub mod page;
 pub mod questions;
 pub mod trace;

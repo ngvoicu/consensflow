@@ -1,15 +1,21 @@
 //! A line of the daemon's trace, which the daemon writes as JSON, one line
-//! each (`src/core/trace.js`): what happened at a window, or a project
-//! deleted. The engine says each as it happens; the daemon writes it.
+//! each (`src/core/trace.js`): what happened at a window, a project deleted,
+//! an event the ledger logged, or an error nobody caught. The engine says
+//! what happens at a window and a deleted project as it happens; the ledger
+//! says each of its events; the daemon says what it did not catch. The daemon
+//! writes them all.
 
 use serde::ser::{Serialize, SerializeMap, Serializer};
+use serde_json::Value;
 
 use crate::ledger::DeletedProject;
 
 /// A line of the trace: when it happened, and what.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraceLine {
-    /// As JavaScript's `toISOString` writes the time.
+    /// As JavaScript's `toISOString` writes the time. A ledger event's line
+    /// carries the event's own time, which wins over the moment it was
+    /// traced (`{ at: now, ...entry }`).
     pub at: String,
     pub what: Traced,
 }
@@ -27,6 +33,16 @@ pub enum Traced {
     /// A project deleted: the line names no project, its data says which
     /// one went.
     ProjectDeleted(DeletedProject),
+    /// An event of a project's log, as the ledger logged it.
+    Event {
+        project: i64,
+        kind: String,
+        data: Value,
+    },
+    /// An error nobody caught (`daemon.error`): for Node an exception thrown
+    /// or a rejection nobody handled, here a panic, said as
+    /// `<what failed>: <its message>`. The line names no project.
+    DaemonError { reason: String },
 }
 
 /// What happened at a window.
@@ -58,12 +74,27 @@ impl WindowEvent {
 }
 
 /// In the order JavaScript wrote the keys: `at`, `kind`, `project`,
-/// `participant`, then what the event says.
+/// `participant`, then what the event says; a ledger event's are `at`,
+/// `project`, `kind`, `data`, as the ledger logs them.
 impl Serialize for TraceLine {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut line = serializer.serialize_map(None)?;
         line.serialize_entry("at", &self.at)?;
         match &self.what {
+            Traced::Event {
+                project,
+                kind,
+                data,
+            } => {
+                line.serialize_entry("project", project)?;
+                line.serialize_entry("kind", kind)?;
+                line.serialize_entry("data", data)?;
+            }
+            Traced::DaemonError { reason } => {
+                line.serialize_entry("kind", "daemon.error")?;
+                line.serialize_entry("project", &None::<i64>)?;
+                line.serialize_entry("reason", reason)?;
+            }
             Traced::ProjectDeleted(deleted) => {
                 line.serialize_entry("kind", "project.deleted")?;
                 line.serialize_entry("project", &None::<i64>)?;
@@ -146,6 +177,36 @@ mod tests {
                 WindowEvent::EnterAgain { message: 7 }
             )),
             r#"{"at":"2026-09-19T12:00:00.000Z","kind":"delivery.enter_again","project":2,"participant":"zeus","message":7}"#
+        );
+    }
+
+    #[test]
+    fn a_ledger_event_is_written_at_project_kind_data_with_its_own_time() {
+        let line = TraceLine {
+            at: "2026-09-19T12:00:00.123Z".to_owned(),
+            what: Traced::Event {
+                project: 4,
+                kind: "task.created".to_owned(),
+                data: serde_json::json!({ "number": 2, "to": "zeus", "title": "Caf\u{e9}" }),
+            },
+        };
+        assert_eq!(
+            written(&line),
+            r#"{"at":"2026-09-19T12:00:00.123Z","project":4,"kind":"task.created","data":{"number":2,"to":"zeus","title":"Café"}}"#
+        );
+    }
+
+    #[test]
+    fn an_error_nobody_caught_is_a_daemon_error_of_no_project() {
+        let line = TraceLine {
+            at: "2026-09-19T12:00:00.000Z".to_owned(),
+            what: Traced::DaemonError {
+                reason: "a pass failed: it said \"no\"".to_owned(),
+            },
+        };
+        assert_eq!(
+            written(&line),
+            r#"{"at":"2026-09-19T12:00:00.000Z","kind":"daemon.error","project":null,"reason":"a pass failed: it said \"no\""}"#
         );
     }
 
