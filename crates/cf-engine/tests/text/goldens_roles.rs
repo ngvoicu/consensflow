@@ -26,7 +26,7 @@ fn environment(card: &Value, folder: &Path) -> Env {
         fs::write(&file, bytes).unwrap();
         file.into_os_string()
     } else if let Some(missing) = card.get("missing").and_then(Value::as_str) {
-        missing.into()
+        folder.join(missing).into_os_string()
     } else if card.get("folder").is_some() {
         folder.as_os_str().to_owned()
     } else if card.get("empty").is_some() {
@@ -65,11 +65,12 @@ fn every_role_is_given_the_text_node_gave_it_or_refused_as_node_refused_it() {
                 tiers += 1;
             }
             (Err(error), expected) if expected["throws"].is_string() => {
-                assert_eq!(
-                    error.to_string(),
-                    expected["throws"].as_str().unwrap(),
-                    "{what}"
-                );
+                // Words that name the card name it $CARD, as the golden does.
+                let words = match env.text("CONSENSFLOW_EVAL_CHIEF_CARD") {
+                    Some(card) if !card.is_empty() => error.to_string().replace(card, "$CARD"),
+                    _ => error.to_string(),
+                };
+                assert_eq!(words, expected["throws"].as_str().unwrap(), "{what}");
                 said += 1;
             }
             (answer, expected) => panic!("{what}: Rust {answer:?}, Node {expected}"),

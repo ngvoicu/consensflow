@@ -8,8 +8,10 @@
  * an Error of the code's own, or a file's, is written with its message.
  *
  * An eval's card (`CONSENSFLOW_EVAL_CHIEF_CARD`) is a file the row describes:
- * its `text` or its `bytes`, a `missing` file named relative to the working
- * folder, a `folder`, or the variable set to nothing (`empty`).
+ * its `text` or its `bytes`, a `missing` file in a folder of its own, a
+ * `folder`, or the variable set to nothing (`empty`). Words that name the
+ * card name it `$CARD`: its path is the run's, and Windows' Node gives it
+ * whole where the Mac's gives it as asked.
  */
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -53,7 +55,9 @@ function instructions({ role, staff, cf, card }) {
       writeFileSync(file, card.text ?? Buffer.from(card.bytes))
       process.env.CONSENSFLOW_EVAL_CHIEF_CARD = file
     } else if (card?.missing !== undefined) {
-      process.env.CONSENSFLOW_EVAL_CHIEF_CARD = card.missing
+      // In a folder of its own: Windows' Node names a missing file by its
+      // full path, whatever it was given.
+      process.env.CONSENSFLOW_EVAL_CHIEF_CARD = join(folder, card.missing)
     } else if (card?.folder) {
       process.env.CONSENSFLOW_EVAL_CHIEF_CARD = folder
     } else if (card?.empty) {
@@ -63,7 +67,11 @@ function instructions({ role, staff, cf, card }) {
     }
     return { text: roleInstructions(role, staff, options) }
   } catch (cause) {
-    return thrown(cause)
+    const answer = thrown(cause)
+    const path = process.env.CONSENSFLOW_EVAL_CHIEF_CARD
+    if (path && typeof answer.throws === 'string')
+      answer.throws = answer.throws.replaceAll(path, '$CARD')
+    return answer
   } finally {
     if (saved === undefined) delete process.env.CONSENSFLOW_EVAL_CHIEF_CARD
     else process.env.CONSENSFLOW_EVAL_CHIEF_CARD = saved
@@ -120,7 +128,7 @@ function roleRows() {
     { bytes: [0x68, 0x69, 0xff, 0xfe, 0xc3, 0x28, 0xe2, 0x82, 0x0a] },
     { bytes: [0xef, 0xbb, 0xbf, 0x78] },
     { bytes: [0xed, 0xa0, 0x80, 0x0a, 0xf0, 0x9f, 0x99] },
-    { missing: 'engine-text-goldens-no-such-card.md' },
+    { missing: 'no-such-card.md' },
     { folder: true },
     { empty: true },
   ]

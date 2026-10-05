@@ -24127,10 +24127,10 @@
       ],
       "cf": "/opt/consensflow/bin/cf",
       "card": {
-        "missing": "engine-text-goldens-no-such-card.md"
+        "missing": "no-such-card.md"
       },
       "answer": {
-        "throws": "ENOENT: no such file or directory, open 'engine-text-goldens-no-such-card.md'"
+        "throws": "ENOENT: no such file or directory, open '$CARD'"
       }
     },
     {
@@ -24149,10 +24149,10 @@
         "undefined": true
       },
       "card": {
-        "missing": "engine-text-goldens-no-such-card.md"
+        "missing": "no-such-card.md"
       },
       "answer": {
-        "throws": "ENOENT: no such file or directory, open 'engine-text-goldens-no-such-card.md'"
+        "throws": "ENOENT: no such file or directory, open '$CARD'"
       }
     },
     {

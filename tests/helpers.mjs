@@ -85,3 +85,20 @@ export function fakeNodeExecutable(file, source) {
   writeFileSync(file, `#!${process.execPath}\n${body}`, { mode: 0o755 })
   return file
 }
+
+/**
+ * Where `actual` first differs from `expected`, a line of each around it: a
+ * golden file is megabytes, often one long line per scenario, which an
+ * assertion's own message cuts off before the difference.
+ */
+export function firstDifference(actual, expected) {
+  const lines = actual.split('\n')
+  const wanted = expected.split('\n')
+  const line = lines.findIndex((text, at) => text !== wanted[at])
+  const at = line === -1 ? lines.length : line
+  const [got, want] = [lines[at] ?? '', wanted[at] ?? '']
+  let column = 0
+  while (column < got.length && got[column] === want[column]) column += 1
+  const around = (text) => text.slice(Math.max(0, column - 300), column + 300)
+  return `line ${at + 1}, column ${column + 1}:\n  actual   …${around(got)}…\n  expected …${around(want)}…`
+}
