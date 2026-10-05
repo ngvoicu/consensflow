@@ -306,6 +306,27 @@ mod unix {
     }
 
     #[test]
+    fn a_link_to_nothing_above_the_folder_is_no_directory_to_a_promised_mkdir() {
+        let dir = tempfile::tempdir().unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(dir.path().join("nowhere"), &link).unwrap();
+        let folder = link.join("leaf");
+        let said = |call| make_folder(&folder, 0o700, call).unwrap_err().to_string();
+        // Probed on Node v26.8.1, `fs.promises.mkdir` and `mkdirSync`, recursive.
+        assert_eq!(
+            said(Mkdir::Promise),
+            format!("ENOTDIR: not a directory, mkdir '{}'", link.display())
+        );
+        assert_eq!(
+            said(Mkdir::Sync),
+            format!(
+                "ENOENT: no such file or directory, mkdir '{}'",
+                folder.display()
+            )
+        );
+    }
+
+    #[test]
     fn a_folder_that_may_not_be_made_in_says_the_mkdir_of_the_whole_path() {
         let dir = tempfile::tempdir().unwrap();
         let above = dir.path().join("ro");

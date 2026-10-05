@@ -163,8 +163,9 @@ fn response(names: &Names, given: &Value) -> Result<Value, HostError> {
     }
 }
 
-/// Every file and folder under `root`, by its path there, with its mode
-/// (none on Windows) and a file's text.
+/// Every file, folder and link under `root`, by its path there: a file's
+/// and a folder's mode (none on Windows), a file's text, a link's target,
+/// never followed.
 fn tree(root: &Path) -> Vec<(String, Value)> {
     fn walk(root: &Path, folder: &Path, found: &mut Vec<(String, Value)>) {
         for entry in fs::read_dir(folder).unwrap() {
@@ -174,6 +175,11 @@ fn tree(root: &Path) -> Vec<(String, Value)> {
                 .unwrap()
                 .to_string_lossy()
                 .replace('\\', "/");
+            if fs::symlink_metadata(&full).unwrap().is_symlink() {
+                let target = fs::read_link(&full).unwrap();
+                found.push((relative, json!({ "link": target.to_string_lossy() })));
+                continue;
+            }
             let metadata = fs::metadata(&full).unwrap();
             #[cfg(unix)]
             let mode =
@@ -378,6 +384,8 @@ fn run(played: &mut Played, advance: Option<i64>) -> Vec<Value> {
         }
         played.fakes.time.settle_at(until);
     }
+    // In the order the work was begun, as Node's runner writes it.
+    settled.sort_by_key(|(op, _)| *op);
     settled
         .into_iter()
         .map(|(op, (mut record, window))| {
@@ -386,6 +394,40 @@ fn run(played: &mut Played, advance: Option<i64>) -> Vec<Value> {
             }
             record["op"] = json!(op);
             record
+        })
+        .collect()
+}
+
+/// The work still waiting, each with what it waits on: its timers (how long
+/// until each is due), its held requests, its held looks. Work waiting on
+/// nothing a step controls waits on what no step can release: a defect of
+/// the adapter or the scenario, said at once.
+fn pending(played: &Played) -> Vec<Value> {
+    played
+        .driver
+        .pending()
+        .into_iter()
+        .map(|op| {
+            let mut waits: Vec<Value> = played
+                .fakes
+                .time
+                .waits(op)
+                .into_iter()
+                .map(|millis| json!({ "timer": millis }))
+                .collect();
+            waits.extend(
+                played
+                    .host
+                    .waits(op)
+                    .into_iter()
+                    .map(|request| json!({ "request": request })),
+            );
+            waits.extend((0..played.fakes.records.waits(op)).map(|_| json!({ "look": true })));
+            assert!(
+                !waits.is_empty(),
+                "work {op} waits on nothing a step controls"
+            );
+            json!({ "op": op, "waits": waits })
         })
         .collect()
 }
@@ -493,7 +535,7 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
     let mut fields = Map::new();
     fields.insert("step".to_owned(), json!(index));
     fields.insert("settled".to_owned(), json!(settled));
-    fields.insert("pending".to_owned(), json!(played.driver.pending()));
+    fields.insert("pending".to_owned(), json!(pending(played)));
     let asked: Vec<Value> = played
         .host
         .take_asked()

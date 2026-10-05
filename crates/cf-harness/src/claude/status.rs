@@ -35,8 +35,13 @@ pub(super) enum State {
 /// The folder Claude keeps its statuses in: `sessions` in its config folder,
 /// which is `CLAUDE_CONFIG_DIR` (an empty one too), else `.claude` in the
 /// home, made whole against the working folder now (`path.resolve`, its
-/// `..` taken off by the join after it). An environment that names no home
-/// has none, where Node read the process's own.
+/// `..` taken off by the join after it).
+///
+/// Kept from Node on purpose: the home is the environment's `HOME`, else
+/// its `USERPROFILE` (Windows' own), as every home of the harnesses here
+/// is, and an environment that names neither has none. Node's adapter read
+/// the process's own home (`os.homedir()`) when `HOME` was not set, which
+/// is that same `USERPROFILE` when the environment is the process's.
 pub(super) fn folder(env: &Env) -> Result<String, String> {
     let root = match env.os("CLAUDE_CONFIG_DIR") {
         Some(root) => root.to_string_lossy().into_owned(),

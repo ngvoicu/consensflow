@@ -105,10 +105,15 @@ fn encoded(path: &str, windows: bool) -> String {
 }
 
 /// Sets `name` as a file URL's host, as the standard's setter does
-/// (`set_hostname`): up to its first `/`, `\`, `?` or `#`; none for
-/// nothing or `localhost`; else the host it parses as, a name made ASCII.
-/// None for one that is no host.
+/// (`set_hostname`): its tabs and newlines taken out, as the parser takes
+/// them out of all it reads; up to its first `/`, `\`, `?` or `#`; none
+/// for nothing or `localhost`; else the host it parses as, a name made
+/// ASCII. None for one that is no host.
 fn set_host(url: &mut Url, name: &str) -> Option<()> {
+    let name: String = name
+        .chars()
+        .filter(|character| !matches!(character, '\t' | '\n' | '\r'))
+        .collect();
     let name = name.split(['/', '\\', '?', '#']).next().unwrap_or_default();
     if name.is_empty() {
         return url.set_host(None).ok();

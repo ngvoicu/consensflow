@@ -50805,6 +50805,31 @@
       "path": "C:\\a{b}<c>`d",
       "windows": true,
       "url": "file:///C:/a%7Bb%7D%3Cc%3E%60d"
+    },
+    {
+      "path": "\\\\ser\tver\\share\\x",
+      "windows": true,
+      "url": "file://server/share/x"
+    },
+    {
+      "path": "\\\\ser\nver\\s\\x",
+      "windows": true,
+      "url": "file://server/s/x"
+    },
+    {
+      "path": "\\\\ser\rver\\s\\x",
+      "windows": true,
+      "url": "file://server/s/x"
+    },
+    {
+      "path": "\\\\\tlocalhost\\s\\x",
+      "windows": true,
+      "url": "file:///s/x"
+    },
+    {
+      "path": "\\\\SER\tVER.Example\\s\\x",
+      "windows": true,
+      "url": "file://server.example/s/x"
     }
   ]
 }

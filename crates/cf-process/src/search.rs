@@ -17,8 +17,9 @@ fn candidate_names(command: &str, env: &Env) -> Vec<String> {
     if !env.on_windows() {
         return vec![command.to_string()];
     }
-    env.text("PATHEXT")
-        .unwrap_or(".COM;.EXE;.BAT;.CMD")
+    // `??`: an empty PATHEXT names no extension, and so no program.
+    env.os("PATHEXT")
+        .map_or_else(|| ".COM;.EXE;.BAT;.CMD".into(), |value| value.to_string_lossy())
         .split(';')
         .map(str::to_lowercase)
         .filter(|extension| STARTABLE.contains(&extension.as_str()))
@@ -94,6 +95,8 @@ mod tests {
             candidate_names("node", &default),
             ["node.com", "node.exe", "node.bat", "node.cmd"]
         );
+        let empty = Env::from_vars([("OS", "Windows_NT"), ("PATHEXT", "")]);
+        assert_eq!(candidate_names("node", &empty), Vec::<String>::new());
     }
 
     #[cfg(unix)]

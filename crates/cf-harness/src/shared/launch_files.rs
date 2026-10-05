@@ -14,6 +14,12 @@ use cf_base::path;
 use cf_proto::agents::Harness;
 
 use crate::contract::LaunchId;
+use crate::shared::record::find::entries;
+
+/// The harness folders a launch's files are in, in the order Node goes
+/// through them (`HARNESSES`, `src/core/launch-files.js`): a removal that
+/// fails stops there, leaving the folders after it.
+const FOLDERS: [&str; 4] = ["claude", "pi", "devin", "opencode"];
 
 /// The folder under `integrations` a harness keeps its launches' files in:
 /// Codex is given what it runs with and keeps none.
@@ -50,7 +56,7 @@ fn folder(home: &str, harness_folder: &str, launch: &str) -> String {
 /// A window closed: its files go (`forgetLaunch`), from every harness's
 /// folder in `home`, ConsensFlow's folder.
 pub fn forget_launch(home: &str, launch: &LaunchId) -> io::Result<()> {
-    for harness in Harness::ALL.into_iter().filter_map(harness_folder) {
+    for harness in FOLDERS {
         remove(Path::new(&folder(home, harness, launch.as_str())))?;
     }
     Ok(())
@@ -61,11 +67,12 @@ pub fn forget_launch(home: &str, launch: &LaunchId) -> io::Result<()> {
 /// went; a harness's folder that cannot be read holds none.
 pub fn sweep_launches(home: &str) -> io::Result<usize> {
     let mut swept = 0;
-    for harness in Harness::ALL.into_iter().filter_map(harness_folder) {
-        let Ok(names) = fs::read_dir(path::join(&[home, "integrations", harness])) else {
+    for harness in FOLDERS {
+        let parent = path::join(&[home, "integrations", harness]);
+        let Ok(names) = entries(Path::new(&parent)) else {
             continue;
         };
-        for entry in names.filter_map(Result::ok) {
+        for entry in names {
             if LaunchId::new(&entry.file_name().to_string_lossy()).is_some() {
                 remove(&entry.path())?;
                 swept += 1;

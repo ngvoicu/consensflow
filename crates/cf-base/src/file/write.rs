@@ -90,11 +90,23 @@ pub fn make_folder(folder: &Path, mode: u32, call: Mkdir) -> Result<(), FileErro
                 pending.push(above);
             }
             _ => match fs::metadata(&next) {
-                Ok(there) if !there.is_dir() => {
+                Ok(there) if there.is_dir() => {}
+                // The promised walk takes a level there already, with levels
+                // still to make below it, for no folder whatever its look
+                // says, a link to nothing among them (`MKDirpAsync`).
+                _ if call == Mkdir::Promise && name == Some("EEXIST") && !pending.is_empty() => {
+                    return Err(FileError::named(
+                        "ENOTDIR",
+                        error,
+                        "mkdir",
+                        Some(named),
+                        None,
+                    ));
+                }
+                Ok(_) => {
                     let code = not_a_folder(name, !pending.is_empty());
                     return Err(FileError::named(code, error, "mkdir", Some(named), None));
                 }
-                Ok(_) => {}
                 Err(error) => return Err(FileError::call(error, "mkdir", Some(named))),
             },
         }

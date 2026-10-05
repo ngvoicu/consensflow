@@ -245,9 +245,13 @@ impl Window for ClaudeWindow {
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {
         Box::pin(async move {
-            // Node read both at once, and Claude's few small status files
-            // are read before a transcript is: the status first, then the
-            // conversation, which is then never older than Claude's word.
+            // Claude's status first, then the conversation, which is then
+            // never older than Claude's word: the order Node's reads finish
+            // in when Claude's few small status files are read before a
+            // transcript is. Kept from Node on purpose until the status read
+            // leaves the event thread (3.5): Node started both at once, and
+            // a transcript its look had read before the status came back
+            // could be older than the status.
             let live = self.status();
             let session = self.session.borrow().clone();
             let reading = self

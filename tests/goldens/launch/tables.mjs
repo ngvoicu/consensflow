@@ -272,6 +272,11 @@ function fileUrlTable() {
     'C:\\a\\\u00e4\u{1F600}\\%41#?',
     'c:/Mixed\\slashes/',
     'C:\\a{b}<c>`d',
+    '\\\\ser\tver\\share\\x',
+    '\\\\ser\nver\\s\\x',
+    '\\\\ser\rver\\s\\x',
+    '\\\\\tlocalhost\\s\\x',
+    '\\\\SER\tVER.Example\\s\\x',
   ]
   return [
     ...posix.map((path) => ({

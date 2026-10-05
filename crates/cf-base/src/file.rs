@@ -6,7 +6,9 @@
 //! - `errno`: libuv's names and words for a failure;
 //! - `error`: a failed file operation, said as Node's error says it;
 //! - `write`: a folder made with every level above it, a file written in
-//!   place, and one written whole, each step's failure said.
+//!   place, and one written whole, each step's failure said;
+//! - `promises`: the `fs/promises` calls a channel makes, a file read
+//!   whole, renamed, and removed.
 
 use std::fs::{self, File, Metadata};
 use std::io;
@@ -15,10 +17,12 @@ use std::time::UNIX_EPOCH;
 
 mod errno;
 mod error;
+mod promises;
 mod write;
 
 pub use errno::{errno_name, error_code, is_missing, uv_words};
 pub use error::FileError;
+pub use promises::{read_file, rename, rm_force};
 pub use write::{make_folder, write_file, write_whole, Mkdir};
 
 /// Which file an open file is, whatever its path: its device and inode on

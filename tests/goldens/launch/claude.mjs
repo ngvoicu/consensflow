@@ -12,16 +12,21 @@ const SESSION = '0f8fad5b-d9cb-469f-a165-70867728950e'
 const OTHER = '6a2f41ac-8c1d-4c55-9b4e-2f1e8a3d9c70'
 
 /**
- * The session id a fresh Claude window draws: the first 16 bytes of the
- * scripted stream (`runner.mjs`), as a version 4 uuid.
+ * The `n`th session id a fresh Claude window draws: the `n`th 16 bytes of
+ * the scripted stream (`runner.mjs`), as a version 4 uuid.
  */
-const DRAWN = (() => {
-  const bytes = Buffer.from(Array.from({ length: 16 }, (_, index) => (index * 7 + 3) % 256))
+function drawn(n) {
+  const bytes = Buffer.from(
+    Array.from({ length: 16 }, (_, index) => ((16 * n + index) * 7 + 3) % 256),
+  )
   bytes[6] = (bytes[6] & 0x0f) | 0x40
   bytes[8] = (bytes[8] & 0x3f) | 0x80
   const hex = bytes.toString('hex')
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
-})()
+}
+const DRAWN = drawn(0)
+/** A second launch's id. */
+const SECOND = '1b2c3d4e-5f60-4172-8b9c-0d1e2f3a4b5c'
 
 const ENV = {
   HOME: '$ROOT/home',
@@ -384,6 +389,40 @@ export function claudeScenarios() {
       { observe: {} },
     ]),
   ]
+  const draws = [
+    {
+      name: 'claude: two fresh windows draw two sessions, the second opening on its own',
+      harness: 'claude-code',
+      env: ENV,
+      steps: [
+        { executable: 'claude' },
+        { prepare: launch() },
+        { prepare: launch({ launchId: SECOND }) },
+        { opened: { pid: '$PID' } },
+        { status: { pid: '$PID', sessionId: drawn(1), status: 'idle' } },
+        { observe: {} },
+      ],
+    },
+    opened('a status naming half a surrogate pair is read as Node read it but for that half', [
+      { statusText: '{"pid":$PID,"sessionId":"\\ud800","status":"idle"}', file: '1.json' },
+      {
+        observe: {},
+        kept: {
+          why: 'a Rust text holds no half of a pair: JSON read here writes U+FFFD for it',
+          answer: {
+            answer: {
+              items: [],
+              settled: false,
+              waiting: null,
+              failed: false,
+              quota: null,
+              switched: { nativeSession: '\ufffd' },
+            },
+          },
+        },
+      },
+    ]),
+  ]
   const waits = [
     opened("a look reads Claude's status before the conversation it waits for", [
       live({ status: 'idle' }),
@@ -478,5 +517,5 @@ export function claudeScenarios() {
       },
     ]),
   ]
-  return [...plans, ...looks, ...waits, ...ready, ...deliveries]
+  return [...plans, ...draws, ...looks, ...waits, ...ready, ...deliveries]
 }

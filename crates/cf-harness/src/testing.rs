@@ -28,6 +28,16 @@ use crate::contract::{HostError, PaneHost, Records, Work};
 use crate::records::{self, Cache, Options, Reading, IDLE_MS};
 use crate::seams::{Bundle, Entropy, Ports, Services, Time};
 
+thread_local! {
+    /// The work the driver polls now, which a wait made meanwhile belongs to.
+    static POLLING: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+/// The work a wait made now belongs to: the work the driver polls.
+fn polling() -> Option<usize> {
+    POLLING.with(Cell::get)
+}
+
 /// A wait that ends once its flag is set.
 struct Flagged(Rc<Cell<bool>>);
 
@@ -44,11 +54,18 @@ impl Future for Flagged {
 }
 
 /// A clock that moves only when the test moves it, from a time of day it
-/// starts at, and the sleeps armed on it. A sleep given up (dropped)
-/// is no longer armed.
+/// starts at, and the sleeps armed on it, in the order they were armed. A
+/// sleep given up (dropped) is no longer armed.
 pub struct ManualTime {
     now: Cell<i64>,
-    sleepers: RefCell<Vec<(i64, Weak<Cell<bool>>)>>,
+    sleepers: RefCell<Vec<Sleeper>>,
+}
+
+/// A sleep armed: when it is due, the work it belongs to, and its flag.
+struct Sleeper {
+    due: i64,
+    work: Option<usize>,
+    flag: Weak<Cell<bool>>,
 }
 
 impl ManualTime {
@@ -59,29 +76,37 @@ impl ManualTime {
         }
     }
 
-    /// Ends the sleeps due first, if one is due by `until`, moving the clock
-    /// to when they were: whether there were any. A test runs its work
-    /// between one firing and the next, as Node's loop runs between timers.
+    /// Ends the sleep due first, if one is due by `until`, the one armed
+    /// first of those due together, moving the clock to when it was due:
+    /// whether there was one. A test runs its work between one firing and
+    /// the next, as Node runs a timer's continuations before the next timer.
     pub fn fire_next(&self, until: i64) -> bool {
         let mut sleepers = self.sleepers.borrow_mut();
-        sleepers.retain(|(_, flag)| flag.strong_count() > 0);
-        let Some(due) = sleepers.iter().map(|(due, _)| *due).min() else {
+        sleepers.retain(|sleeper| sleeper.flag.strong_count() > 0);
+        let Some(due) = sleepers.iter().map(|sleeper| sleeper.due).min() else {
             return false;
         };
         if due > until {
             return false;
         }
         self.now.set(due.max(self.now.get()));
-        sleepers.retain(|(at, flag)| {
-            if *at > due {
-                return true;
-            }
-            if let Some(flag) = flag.upgrade() {
+        if let Some(first) = sleepers.iter().position(|sleeper| sleeper.due == due) {
+            if let Some(flag) = sleepers.remove(first).flag.upgrade() {
                 flag.set(true);
             }
-            false
-        });
+        }
         true
+    }
+
+    /// How long until each sleep `work` waits on is due, in the order armed.
+    pub fn waits(&self, work: usize) -> Vec<i64> {
+        let now = self.now.get();
+        self.sleepers
+            .borrow()
+            .iter()
+            .filter(|sleeper| sleeper.work == Some(work) && sleeper.flag.strong_count() > 0)
+            .map(|sleeper| sleeper.due - now)
+            .collect()
     }
 
     /// Moves the clock to `until` with nothing more to fire.
@@ -99,7 +124,11 @@ impl Time for ManualTime {
         let flag = Rc::new(Cell::new(false));
         let millis = i64::try_from(duration.as_millis()).unwrap_or(i64::MAX);
         let due = self.now.get().saturating_add(millis);
-        self.sleepers.borrow_mut().push((due, Rc::downgrade(&flag)));
+        self.sleepers.borrow_mut().push(Sleeper {
+            due,
+            work: polling(),
+            flag: Rc::downgrade(&flag),
+        });
         Box::pin(Flagged(flag))
     }
 }
@@ -151,7 +180,13 @@ pub struct LocalRecords {
     time: Rc<dyn Time>,
     cache: RefCell<Cache>,
     hold: Cell<bool>,
-    held: RefCell<VecDeque<Rc<Cell<bool>>>>,
+    held: RefCell<VecDeque<HeldLook>>,
+}
+
+/// A look held: the work it belongs to, and the flag that releases it.
+struct HeldLook {
+    work: Option<usize>,
+    flag: Rc<Cell<bool>>,
 }
 
 impl LocalRecords {
@@ -175,10 +210,19 @@ impl LocalRecords {
 
     /// Releases the look held longest: whether one was.
     pub fn release(&self) -> bool {
-        self.held.borrow_mut().pop_front().is_some_and(|flag| {
-            flag.set(true);
+        self.held.borrow_mut().pop_front().is_some_and(|look| {
+            look.flag.set(true);
             true
         })
+    }
+
+    /// How many held looks `work` waits on.
+    pub fn waits(&self, work: usize) -> usize {
+        self.held
+            .borrow()
+            .iter()
+            .filter(|look| look.work == Some(work))
+            .count()
     }
 }
 
@@ -191,7 +235,10 @@ impl Records for LocalRecords {
     ) -> Work<'a, Arc<Reading>> {
         let held = self.hold.get().then(|| {
             let flag = Rc::new(Cell::new(false));
-            self.held.borrow_mut().push_back(Rc::clone(&flag));
+            self.held.borrow_mut().push_back(HeldLook {
+                work: polling(),
+                flag: Rc::clone(&flag),
+            });
             Flagged(flag)
         });
         Box::pin(async move {
@@ -236,7 +283,15 @@ pub enum Answer {
 pub struct ScriptedHost {
     answers: RefCell<HashMap<String, VecDeque<Answer>>>,
     asked: RefCell<Vec<(String, Value)>>,
-    held: RefCell<VecDeque<(String, Hold)>>,
+    held: RefCell<VecDeque<HeldRequest>>,
+}
+
+/// A request held: its operation, the work it belongs to, and where its
+/// answer is put.
+struct HeldRequest {
+    op: String,
+    work: Option<usize>,
+    hold: Hold,
 }
 
 impl ScriptedHost {
@@ -270,13 +325,23 @@ impl ScriptedHost {
     /// Answers the request to `op` held longest: whether one was.
     pub fn release(&self, op: &str, answer: Reply) -> bool {
         let mut held = self.held.borrow_mut();
-        let Some(at) = held.iter().position(|(asked, _)| asked == op) else {
+        let Some(at) = held.iter().position(|request| request.op == op) else {
             return false;
         };
-        if let Some((_, slot)) = held.remove(at) {
-            *slot.borrow_mut() = Some(answer);
+        if let Some(request) = held.remove(at) {
+            *request.hold.borrow_mut() = Some(answer);
         }
         true
+    }
+
+    /// The operations of the held requests `work` waits on, in the order asked.
+    pub fn waits(&self, work: usize) -> Vec<String> {
+        self.held
+            .borrow()
+            .iter()
+            .filter(|request| request.work == Some(work))
+            .map(|request| request.op.clone())
+            .collect()
     }
 }
 
@@ -306,9 +371,11 @@ impl PaneHost for ScriptedHost {
             Some(Answer::Now(answer)) => Box::pin(async move { answer }),
             Some(Answer::Held) => {
                 let slot = Rc::new(RefCell::new(None));
-                self.held
-                    .borrow_mut()
-                    .push_back((op.to_owned(), Rc::clone(&slot)));
+                self.held.borrow_mut().push_back(HeldRequest {
+                    op: op.to_owned(),
+                    work: polling(),
+                    hold: Rc::clone(&slot),
+                });
                 Box::pin(Slot(slot))
             }
             None => {
@@ -387,7 +454,10 @@ impl<T> Driver<T> {
             let mut moved = false;
             let mut index = 0;
             while index < self.begun.len() {
-                if let Poll::Ready(value) = self.begun[index].1.as_mut().poll(&mut context) {
+                POLLING.with(|polling| polling.set(Some(self.begun[index].0)));
+                let polled = self.begun[index].1.as_mut().poll(&mut context);
+                POLLING.with(|polling| polling.set(None));
+                if let Poll::Ready(value) = polled {
                     let (id, _) = self.begun.remove(index);
                     settled.push((id, value));
                     moved = true;
@@ -409,7 +479,7 @@ impl<T> Driver<T> {
 
 /// When a scenario's clock starts: 2026-09-19T12:00:00Z, as the Node
 /// recorder's does.
-pub const EPOCH_MS: i64 = 1_758_283_200_000;
+pub const EPOCH_MS: i64 = 1_789_819_200_000;
 
 /// The fakes a test drives, and the services an adapter is built with of
 /// them.
@@ -520,12 +590,38 @@ mod tests {
         let given_up = time.sleep(Duration::from_millis(10));
         drop(given_up);
         assert!(driver.run().is_empty());
+        assert_eq!(time.waits(0), [20], "the 10 ms sleep given up is no wait");
         assert!(
             time.fire_next(1_050),
             "the 20 ms sleep, the 10 ms one forgotten"
         );
         assert_eq!(driver.run(), [(0, 1_020)]);
         assert!(!time.fire_next(1_050));
+    }
+
+    #[test]
+    fn sleeps_due_together_end_one_at_a_time_in_the_order_armed() {
+        let time = Rc::new(ManualTime::new(0));
+        let order = Rc::new(RefCell::new(Vec::new()));
+        let mut driver = Driver::default();
+        for (id, name) in [(0, "first"), (1, "second")] {
+            let (clock, order) = (Rc::clone(&time), Rc::clone(&order));
+            driver.begin(id, async move {
+                clock.sleep(Duration::from_millis(10)).await;
+                order.borrow_mut().push(name);
+            });
+        }
+        assert!(driver.run().is_empty());
+        assert!(time.fire_next(10));
+        assert_eq!(driver.run(), [(0, ())]);
+        assert_eq!(*order.borrow(), ["first"], "the second still armed");
+        assert!(time.fire_next(10));
+        assert_eq!(driver.run(), [(1, ())]);
+    }
+
+    #[test]
+    fn a_scenario_s_clock_starts_at_the_instant_node_s_does() {
+        assert_eq!(cf_base::time::parse("2026-09-19T12:00:00Z"), Some(EPOCH_MS));
     }
 
     #[test]

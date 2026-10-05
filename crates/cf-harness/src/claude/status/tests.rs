@@ -36,6 +36,12 @@ fn the_folder_is_claude_s_config_folder_s_else_the_home_s_made_whole_once() {
     );
     let env = Env::from_vars([("HOME", "/h")]);
     assert_eq!(folder(&env), Ok(whole(&path::join(&["/h", ".claude"]))));
+    let env = Env::from_vars([("USERPROFILE", "/profile")]);
+    assert_eq!(
+        folder(&env),
+        Ok(whole(&path::join(&["/profile", ".claude"]))),
+        "Windows' own home, where HOME is not set"
+    );
     assert_eq!(
         folder(&Env::from_vars::<&str, &str>([])),
         Err("missing home in env".to_owned())

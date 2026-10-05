@@ -7,9 +7,9 @@
     "consoleText": { "rows": 2011, "held": "tests/launch/tables.rs" },
     "admission": { "rows": 120, "held": "shared::admission" },
     "recordState": { "rows": 16, "deferred": "landing 3, Pi: its first caller" },
-    "fileUrl": { "rows": 290, "held": "tests/launch/tables.rs" }
+    "fileUrl": { "rows": 295, "held": "tests/launch/tables.rs" }
   },
   "scenarios": {
-    "claude-code": { "darwin": 42, "win32": 42, "held": "tests/launch/scenarios.rs" }
+    "claude-code": { "darwin": 44, "win32": 44, "held": "tests/launch/scenarios.rs" }
   }
 }
