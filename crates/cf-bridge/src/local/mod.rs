@@ -18,12 +18,19 @@
 //!   That is how an exit reaches the engine before the answer written after
 //!   it: the handler changes what the exit changes and starts the rest of its
 //!   work on a task of its own.
+//! - [`BridgeBuilder::after_read`] is told once the reader has handled all the
+//!   frames of one read, before it reads again: where the daemon runs, to
+//!   their end, the tasks those frames woke, as Node ran its microtasks after
+//!   each `data` callback.
 //! - A malformed line is reported to `on_error` and skipped; an oversized one
 //!   is checked whole before it is routed, so only a well-formed request is
 //!   answered and only a well-formed response settles anything.
 //! - A failure of the transport (the end of the input excepted) refuses every
 //!   request waiting, closes the bridge, ends the output once what was queued
 //!   is written, and is told to `on_error` and `on_fatal`.
+//! - [`Bridge::ended`] is the one place that says a bridge ended and why (its
+//!   input ended, it was closed, its transport failed): the end of the input
+//!   is told to no callback, and the daemon stops on it.
 //! - Nothing but frames is written to the output. The handle line the app
 //!   reads first is not a frame: the daemon writes it before it connects.
 //!
@@ -73,11 +80,27 @@ mod writer;
 #[cfg(test)]
 mod tests;
 
+use std::future::Future;
 use std::rc::Rc;
 
 pub use builder::{BridgeBuilder, Connection, DEFAULT_DEADLINE, DEFAULT_MAX_FRAME_BYTES};
 pub use registry::Subscription;
 use state::Inner;
+
+use crate::BridgeError;
+
+/// Why a bridge ended, the first way it did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ended {
+    /// The peer's end of the input ended: the normal end of a bridge, which
+    /// is not a failure and is told to no `on_fatal`.
+    Input,
+    /// This end closed it ([`Bridge::close`]).
+    Closed,
+    /// The transport failed, as told to `on_fatal`: a read or a write that
+    /// the system refused (a peer that has gone from the output).
+    Failed(BridgeError),
+}
 
 /// One end of the bridge. Cheap to clone: every clone is the same bridge. It
 /// belongs to its thread, as the state it serves does:
@@ -96,6 +119,24 @@ impl Bridge {
     /// transport failed.
     pub fn closed(&self) -> bool {
         self.inner.is_closed()
+    }
+
+    /// Waits for the bridge to end and says why it did first: its input
+    /// ended, it was closed, or its transport failed. The end is latched: it
+    /// is told at once to whoever asks after it came, and to as many as ask.
+    /// It owns no part of the bridge, so a bridge that is dropped with every
+    /// handle to it ends as closed.
+    ///
+    /// This is how the daemon hears its input end, which no callback of the
+    /// builder says: `on_fatal` is told of a failure only.
+    pub fn ended(&self) -> impl Future<Output = Ended> + 'static {
+        let mut heard = self.inner.watch_ended();
+        async move {
+            match heard.wait_for(Option::is_some).await {
+                Ok(ended) => ended.clone().unwrap_or(Ended::Closed),
+                Err(_) => Ended::Closed,
+            }
+        }
     }
 
     /// Refuses every request waiting with `Eof`, stops reading, and ends the

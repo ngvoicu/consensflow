@@ -187,6 +187,36 @@ fn refuses_a_second_open_while_the_first_holds_the_file_in_this_process_and_in_a
 }
 
 #[test]
+fn closes_in_place_where_it_is_shared_and_frees_the_file_with_its_data_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("consensflow.db");
+    // Shared as the daemon shares it: every task holds the one cell.
+    let shared = Rc::new(RefCell::new(open_ledger(&file, options()).unwrap()));
+    let other_holder = Rc::clone(&shared);
+    shared
+        .borrow_mut()
+        .create_project(&project("app", "claude-code"))
+        .unwrap();
+    assert_eq!(code(open_ledger(&file, options())), Some("ledger-locked"));
+
+    other_holder.borrow_mut().close_in_place().unwrap();
+
+    let reopened = open_ledger(&file, options()).unwrap();
+    assert_eq!(
+        reopened.projects().unwrap().len(),
+        1,
+        "what was written stays"
+    );
+    reopened.close().unwrap();
+    // What is left of the closed one answers with an error, not a panic.
+    assert!(shared.borrow().projects().is_err());
+    assert!(shared
+        .borrow_mut()
+        .create_project(&project("late", "claude-code"))
+        .is_err());
+}
+
+#[test]
 fn is_free_again_once_a_holder_is_killed() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("consensflow.db");

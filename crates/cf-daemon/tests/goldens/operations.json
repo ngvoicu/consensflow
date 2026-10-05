@@ -1,0 +1,33 @@
+{
+  "operations": [
+    "projects.list",
+    "project.open",
+    "project.resume",
+    "project.close",
+    "project.delete",
+    "agents.list",
+    "staff.last",
+    "chief.switch",
+    "member.add",
+    "member.roles",
+    "session.open",
+    "session.hide",
+    "session.end",
+    "member.remove",
+    "board.get",
+    "inbox.get",
+    "task.get",
+    "task.transcript",
+    "project.gate",
+    "task.cancel",
+    "task.pause",
+    "task.reassign",
+    "member.back",
+    "task.resume",
+    "tasks.delete",
+    "message.read",
+    "message.approve",
+    "message.decline"
+  ],
+  "ping": "{\"ok\":true}"
+}

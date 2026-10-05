@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { PassThrough } from 'node:stream'
 import { describe, it } from 'node:test'
 import { Bridge } from '../src/bridge.js'
-import { tempEnv } from './helpers.mjs'
+import { daemonCommand, tempEnv } from './helpers.mjs'
 
 /** Two bridges talking to each other over in-process pipes, like Node and Rust. */
 function pair(options = {}) {
@@ -851,8 +851,11 @@ describe('cf ui --json --no-open speaks the bridge after its handle line', () =>
     const { spawn } = await import('node:child_process')
     const { join } = await import('node:path')
     const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
-    const child = spawn(process.execPath, [cf, 'ui', '--json', '--no-open'], {
-      env: t.env,
+    // `cf ui` as the app runs it: through cf.mjs on Node, or the native `cf`
+    // that CONSENSFLOW_TEST_DAEMON names (`npm run test:daemons` runs both).
+    const started = daemonCommand([cf, 'ui', '--json', '--no-open'])
+    const child = spawn(started.command, started.args, {
+      env: { ...t.env, ...started.env },
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     try {

@@ -80,22 +80,29 @@ impl Stage {
         [Self::by_hand(), Self::local_set()]
     }
 
+    /// One stage of each kind, on an executor that ends the work that
+    /// panicked and nothing else, as the daemon's does.
+    pub(super) fn isolating() -> [Self; 2] {
+        [
+            Self::over(Executor::new(), false),
+            Self::over(Executor::new(), true),
+        ]
+    }
+
     /// Work drained by the test, as the kit does.
     pub(super) fn by_hand() -> Self {
-        Self {
-            executor: Rc::new(Executor::strict()),
-            local: None,
-        }
+        Self::over(Executor::strict(), false)
     }
 
     /// Work drained by the driver on a `LocalSet`, as the daemon does.
     pub(super) fn local_set() -> Self {
-        let executor = Rc::new(Executor::strict());
-        let local = Local::driving(&executor);
-        Self {
-            executor,
-            local: Some(local),
-        }
+        Self::over(Executor::strict(), true)
+    }
+
+    fn over(executor: Executor, on_local_set: bool) -> Self {
+        let executor = Rc::new(executor);
+        let local = on_local_set.then(|| Local::driving(&executor));
+        Self { executor, local }
     }
 
     /// The `LocalSet` of a stage that has one.

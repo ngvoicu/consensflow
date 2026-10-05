@@ -5,6 +5,8 @@
 //! answer. `cf hook <harness>` is what a harness's hooks run, in a window or
 //! not; it says only what its harness reads, and never fails.
 //! `cf codex-session <codex> <args…>` is what a Codex window runs in Codex's place.
+//! `cf ui` is the app's daemon: the Node one while the switch is off, the one
+//! of `cf-daemon` once `CONSENSFLOW_DAEMON=native` is set.
 
 #![forbid(unsafe_code)]
 
@@ -27,6 +29,25 @@ use cf_board::Board;
 pub fn codex_session(env: &Env, args: &[OsString]) -> Option<i32> {
     let (first, rest) = args.split_first()?;
     (first == "codex-session").then(|| cf_codex_session::run(env, rest))
+}
+
+/// Runs `cf ui [--json] [--no-open]` as the native daemon when `args` ask for
+/// it and the switch is on: its exit code. It is matched on the first argument
+/// as it came, tokenless (a window has its participant's token, and there `cf`
+/// is the board), and only with `CONSENSFLOW_DAEMON=native`: without the
+/// switch `ui` goes to the CLI's Node sources as it always did, until the
+/// default flips (step 4).
+///
+/// The daemon reads its input and writes its output from other threads, which
+/// would wait for the standard streams' locks for good if the caller held
+/// them, so the caller runs this before taking them, as it does
+/// [`codex_session`].
+pub fn native_ui(env: &Env, args: &[OsString]) -> Option<i32> {
+    let (first, rest) = args.split_first()?;
+    let asked = first == "ui"
+        && env.text("CONSENSFLOW_DAEMON") == Some("native")
+        && env.text("CONSENSFLOW_TOKEN").is_none();
+    asked.then(|| cf_daemon::ui(env, rest))
 }
 
 /// Runs the command in `args`: its exit code. Only a failure to write is an error.

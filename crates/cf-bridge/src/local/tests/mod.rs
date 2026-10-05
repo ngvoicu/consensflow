@@ -4,6 +4,7 @@
 //! paired with the pane host's own transport over operating system pipes.
 
 mod dispatch;
+mod ended;
 mod events;
 mod exits;
 mod failure;
@@ -11,5 +12,6 @@ mod input;
 mod lifecycle;
 mod limits;
 mod pipes;
+mod reads;
 mod requests;
 mod wire;

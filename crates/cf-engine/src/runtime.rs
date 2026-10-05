@@ -41,15 +41,23 @@
 //!   learns of it a few turns after that ([`Hold`]): `#exclusive` and `#act`
 //!   begin the work inside promises that settle, and clear `running` and
 //!   `acting`, only after the work's own promise did.
+//! - A piece of work that panics is what one that threw was: its participant
+//!   is let go of as it unwinds (`finally`, `#exclusive` and `#act`), at once,
+//!   and whoever waits for its answer ends with an error, not for ever. The
+//!   panic itself goes on unwinding where the work runs: the executor ends
+//!   that work and nothing else, and whatever spawned it writes it down.
 
+use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::future::{poll_fn, Future};
+use std::panic::{resume_unwind, AssertUnwindSafe};
 use std::pin::{pin, Pin};
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
+use futures_util::FutureExt;
 
 mod executor;
 
@@ -68,6 +76,11 @@ pub trait Spawn {
 /// what it does before its first wait is done now; what is left, if
 /// anything, goes on as work of its own. Its answer comes through the
 /// [`Begun`] returned, which may be dropped: the work goes on all the same.
+///
+/// A panic in `work` before its first wait unwinds out of this call, to the
+/// caller, as a throw did; one after it unwinds the work of its own, which is
+/// told to whoever spawned it, and the [`Begun`] ends its waiter with a panic
+/// of its own.
 pub async fn begin<T: 'static>(
     spawn: &dyn Spawn,
     work: impl Future<Output = T> + 'static,
@@ -75,7 +88,16 @@ pub async fn begin<T: 'static>(
     let answer = Rc::new(Answer::default());
     let mut whole: LocalWork = Box::pin({
         let answer = Rc::clone(&answer);
-        async move { answer.set(work.await) }
+        async move {
+            match AssertUnwindSafe(work).catch_unwind().await {
+                Ok(value) => answer.set(value),
+                Err(panic) => {
+                    // Whoever waits for the answer must not wait for ever.
+                    answer.fail(&panic_words(panic.as_ref()));
+                    resume_unwind(panic);
+                }
+            }
+        }
     });
     // Polled with the caller's waker: whatever it waits on now is waited on
     // again, with the work's own waker, at the work's first poll there.
@@ -101,11 +123,16 @@ impl<T> Begun<T> {
 impl<T> Future for Begun<T> {
     type Output = T;
 
+    /// The work's answer; a panic of this waiter's own where the work panicked,
+    /// which says what the work's did.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
         let value = self.answer.value.borrow_mut().take();
         match value {
             Some(value) => Poll::Ready(value),
             None => {
+                if let Some(words) = self.answer.failed.borrow().as_deref() {
+                    panic!("the work waited for panicked: {words}");
+                }
                 *self.answer.waker.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
@@ -117,6 +144,8 @@ impl<T> Future for Begun<T> {
 struct Answer<T> {
     value: RefCell<Option<T>>,
     ended: Cell<bool>,
+    /// What the work's panic said, once it panicked.
+    failed: RefCell<Option<String>>,
     waker: RefCell<Option<Waker>>,
 }
 
@@ -125,6 +154,7 @@ impl<T> Default for Answer<T> {
         Self {
             value: RefCell::new(None),
             ended: Cell::new(false),
+            failed: RefCell::new(None),
             waker: RefCell::new(None),
         }
     }
@@ -134,11 +164,30 @@ impl<T> Answer<T> {
     fn set(&self, value: T) {
         *self.value.borrow_mut() = Some(value);
         self.ended.set(true);
+        self.wake();
+    }
+
+    /// The work panicked: its waiter is woken, to end with an error.
+    fn fail(&self, words: &str) {
+        *self.failed.borrow_mut() = Some(words.to_owned());
+        self.wake();
+    }
+
+    fn wake(&self) {
         let waker = self.waker.borrow_mut().take();
         if let Some(waker) = waker {
             waker.wake();
         }
     }
+}
+
+/// What a panic said: its words when it had them.
+fn panic_words(panic: &(dyn Any + Send)) -> String {
+    panic
+        .downcast_ref::<&str>()
+        .map(|words| (*words).to_owned())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "a panic with no words".to_owned())
 }
 
 /// The answers of work begun, in the order begun, as `Promise.all` gives
@@ -279,7 +328,7 @@ impl Hold {
     }
 
     /// Begins `work` in place, holding the participant from its first wait
-    /// until it ends.
+    /// until it ends, however it ends.
     async fn hold_for<T: 'static>(
         self: &Rc<Self>,
         spawn: &dyn Spawn,
@@ -304,8 +353,10 @@ impl Hold {
     /// JavaScript ran it, with nothing held until it is done; then `held` is
     /// set, until the work has ended and the promises it was begun in have
     /// settled ([`LET_GO_AFTER_WAIT`], [`LET_GO_AFTER_START`]). Then the
-    /// participant is passed on.
+    /// participant is passed on, which a panic that unwinds through the work
+    /// does at once ([`Release`]).
     async fn lasting<T>(&self, held: &Cell<bool>, work: impl Future<Output = T>) -> T {
+        let _release = Release { hold: self, held };
         let mut work = pin!(work);
         let mut started = false;
         let mut at_once = false;
@@ -327,8 +378,6 @@ impl Hold {
         for _ in 0..turns {
             next_turn().await;
         }
-        held.set(false);
-        self.pass_on();
         answer
     }
 
@@ -342,6 +391,24 @@ impl Hold {
             self.handed.set(true);
             turn.give();
         }
+    }
+}
+
+/// What lets go of a participant when the work that holds it is done with:
+/// how it ends does not matter, as Node's `finally` let go of it whether the
+/// work answered or threw. A panic the executor isolates to the work drops
+/// this as it unwinds, so a participant is never held for good by work that
+/// is gone.
+struct Release<'a> {
+    hold: &'a Hold,
+    /// The one of the hold's flags the work set.
+    held: &'a Cell<bool>,
+}
+
+impl Drop for Release<'_> {
+    fn drop(&mut self) {
+        self.held.set(false);
+        self.hold.pass_on();
     }
 }
 
@@ -413,6 +480,8 @@ impl Drop for Waiting {
     }
 }
 
+#[cfg(test)]
+mod panics;
 #[cfg(test)]
 mod stage;
 #[cfg(test)]

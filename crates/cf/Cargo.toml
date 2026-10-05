@@ -10,6 +10,7 @@ publish = false
 cf-base.workspace = true
 cf-board.workspace = true
 cf-codex-session.workspace = true
+cf-daemon.workspace = true
 cf-harness.workspace = true
 cf-process.workspace = true
 cf-proto.workspace = true
@@ -18,6 +19,9 @@ serde_json.workspace = true
 
 [dev-dependencies]
 cf-board = { workspace = true, features = ["test-support"] }
+# The daemon as a process: a home of its own with a ledger and a fake `claude`.
+cf-harness = { workspace = true, features = ["test-support"] }
+cf-ledger.workspace = true
 serde.workspace = true
 tempfile.workspace = true
 

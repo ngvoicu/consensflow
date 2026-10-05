@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 src-tauri/target/
 test-results/
 playwright-report/

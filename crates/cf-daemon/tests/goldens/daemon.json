@@ -1,0 +1,8 @@
+{
+  "line": "{\"url\":\"http://127.0.0.1:$PORT/\",\"token\":\"$TOKEN\"}\n",
+  "log": [
+    "$TIME info start pid $PID node $NODE home $HOME",
+    "$TIME info stop: stdin ended; rss $MB MB",
+    "$TIME info exit 0"
+  ]
+}

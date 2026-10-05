@@ -49,7 +49,10 @@ use super::{LocalWork, Spawn};
 ///
 /// A panic in a piece of work ends that work and nothing else, as it ended a
 /// tokio task, the panic hook having told it; [`Executor::strict`] lets it
-/// out of the drain instead, which is what a test wants.
+/// out of the drain instead, which is what a test wants. What the work held
+/// is let go as the panic unwinds (a participant, [`super::Hold`]) and whoever
+/// waits for its answer ends with an error ([`super::Begun`]); writing the
+/// panic down is the spawner's, which catches it before the executor does.
 pub struct Executor {
     /// The work that has not ended, by its number; none of the one polled now.
     tasks: RefCell<HashMap<u64, Task>>,
