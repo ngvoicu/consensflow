@@ -167,22 +167,28 @@ async fn a_route_that_has_landed_runs_after_the_token_is_checked() {
 #[tokio::test]
 async fn a_body_is_read_only_where_a_route_reads_one() {
     let scene = scene();
-    // A route that has not landed reads nothing: a huge body is no 413 there.
     let huge = "x".repeat(3 * 1024 * 1024);
+    // A route that takes no body reads none: a huge one is no 413 there.
+    let (status, _) = through(&scene, Method::GET, "/api/whoami", Some(&scene.zeus), &huge).await;
+    assert_eq!(status, 200);
+    // One that refuses the window before it reads its body does not read it.
     let (status, body) =
-        through(&scene, Method::POST, "/api/notes", Some(&scene.zeus), &huge).await;
+        through(&scene, Method::POST, "/api/tasks", Some(&scene.zeus), &huge).await;
     assert_eq!(
         (status, body["error"].as_str()),
-        (404, Some("unknown-route"))
+        (403, Some("not-a-coordinator"))
     );
-    // One that reads it refuses it.
-    let (status, body) = through(
-        &scene,
-        Method::POST,
-        "/api/answers",
-        Some(&scene.chief),
-        &huge,
-    )
-    .await;
-    assert_eq!((status, body["error"].as_str()), (413, Some("too-large")));
+    // Those that read it refuse it.
+    for (target, token) in [
+        ("/api/notes", &scene.zeus),
+        ("/api/answers", &scene.chief),
+        ("/api/tasks", &scene.chief),
+    ] {
+        let (status, body) = through(&scene, Method::POST, target, Some(token), &huge).await;
+        assert_eq!(
+            (status, body["error"].as_str()),
+            (413, Some("too-large")),
+            "{target}"
+        );
+    }
 }
