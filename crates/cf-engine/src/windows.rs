@@ -394,6 +394,8 @@ impl Dispatcher {
                 drop_env: planned.drop_env.clone(),
             })
             .await;
+        // `.catch(...)` made a promise of its own to wait on.
+        next_turn().await;
         let exited = record
             .window
             .borrow_mut()
@@ -479,6 +481,8 @@ impl Dispatcher {
             return Ok(());
         }
         let started = planned.window.started().await;
+        // `.catch(...)` made a promise of its own to wait on.
+        next_turn().await;
         if let (Err(error), Some(delivering)) = (&started, delivering) {
             record.delivery.borrow_mut().delivering = None;
             // The chief's window goes without taking its project with it: the chief is tried again.

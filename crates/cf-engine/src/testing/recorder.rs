@@ -3,7 +3,9 @@
 //! reads both sides: `{op, args}` where one of the engine's operations
 //! begins, `{seam, method?, args, answer}` for each call of a seam (a call
 //! that waits gets its answer once it has one), and `{seam: "event", event}`
-//! for each event the ledger logs.
+//! for each event the ledger logs. The engine's sleeps are written down too,
+//! as `{seam: "time", method: "sleep", args: [ms]}`, which the Node traces
+//! have none of, and no projection keeps.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -58,5 +60,21 @@ impl Recorder {
     /// Everything written down so far.
     pub fn events(&self) -> Vec<Value> {
         self.0.borrow().clone()
+    }
+
+    /// Each call of `seam`'s `methods`, in order: the method and what it
+    /// was given.
+    pub fn calls(&self, seam: &str, methods: &[&str]) -> Vec<(String, Value)> {
+        self.0
+            .borrow()
+            .iter()
+            .filter(|event| event["seam"] == seam)
+            .filter_map(|event| {
+                let method = event["method"].as_str()?;
+                methods
+                    .contains(&method)
+                    .then(|| (method.to_owned(), event["args"].clone()))
+            })
+            .collect()
     }
 }

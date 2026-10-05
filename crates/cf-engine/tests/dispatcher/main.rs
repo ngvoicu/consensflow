@@ -7,17 +7,24 @@
 
 mod agent_gone;
 mod assigning;
+mod closing;
 mod deleted_sessions;
+mod deliveries;
 mod fixtures;
+mod interrupts;
 mod lanes;
+mod looks;
 mod no_adapter;
 mod out_of_quota;
 mod quota;
+mod restart;
 mod review;
 mod session_windows;
 mod sessions;
 mod several_roles;
 mod switching;
+mod tasks;
 mod the_dispatcher;
 mod traces;
 mod unreadable_agents;
+mod windows;

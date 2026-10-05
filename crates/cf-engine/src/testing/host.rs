@@ -35,11 +35,17 @@ pub struct FakeHost {
     pub hold: RefCell<Option<Gate>>,
     /// A kill's exit is held until the test sends it.
     pub hold_exits: Cell<bool>,
-    /// What `pane.snapshot` answers besides `ok`.
-    pub snapshot: RefCell<Map<String, Value>>,
+    /// What `pane.snapshot` answers besides `ok` ([`FakeHost::set_snapshot`]).
+    snapshot: RefCell<Map<String, Value>>,
     /// The window's process, when the test names one.
     pub pid: Cell<Option<u32>>,
+    /// What a test's own `request` does first, given the request it wraps.
+    pub on_request: RefCell<Option<OnRequest>>,
 }
+
+/// What a test's own `request` does before the host's, given the operation
+/// asked and its body.
+pub type OnRequest = Rc<dyn Fn(&str, &Value)>;
 
 impl FakeHost {
     pub fn new(recorder: Recorder) -> Rc<Self> {
@@ -54,6 +60,15 @@ impl FakeHost {
         self.engines.borrow_mut().push(Rc::downgrade(engine));
     }
 
+    /// What `pane.snapshot` answers besides `ok` from now on
+    /// (`host.snapshot = { outputQuietMs: 300 }`).
+    pub fn set_snapshot(&self, answer: Value) {
+        let Value::Object(fields) = answer else {
+            panic!("a snapshot is an object");
+        };
+        *self.snapshot.borrow_mut() = fields;
+    }
+
     /// The panes opened, in order.
     pub fn opened(&self) -> Vec<OpenPane> {
         self.opened.borrow().clone()
@@ -64,9 +79,14 @@ impl FakeHost {
         self.killed.borrow().clone()
     }
 
-    /// The requests made, in order.
-    pub fn requests(&self) -> Vec<(String, Value)> {
-        self.requests.borrow().clone()
+    /// What was typed into panes, in order: the body of each `pane.input`.
+    pub fn inputs(&self) -> Vec<Value> {
+        self.requests
+            .borrow()
+            .iter()
+            .filter(|(op, _)| op == "pane.input")
+            .map(|(_, body)| body.clone())
+            .collect()
     }
 
     /// The last pane opened for `handle`'s window: its own, or one of its sessions'.
@@ -147,6 +167,10 @@ impl PaneHost for FakeHost {
         let at = self
             .recorder
             .call("host", Some("request"), json!([op, body.clone()]));
+        let wrapped = self.on_request.borrow().clone();
+        if let Some(wrapped) = wrapped {
+            wrapped(op, &body);
+        }
         self.requests.borrow_mut().push((op.to_owned(), body));
         let mut answer = Map::new();
         answer.insert("ok".to_owned(), json!(true));

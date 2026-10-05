@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::*;
-use crate::testing::{next_turn, Executor, Gate};
+use crate::testing::{Executor, Gate};
 
 /// What a test's pieces of work did, in order.
 #[derive(Clone, Default)]
@@ -482,4 +482,18 @@ fn the_same_rules_hold_on_tokios_local_set() {
         log.taken()
     });
     assert_eq!(log, ["step", "caller", "stepped", "operation"]);
+}
+
+#[test]
+fn a_turn_lets_the_work_woken_before_it_go_first() {
+    let executor = Executor::default();
+    let log = Log::default();
+    let (waiting, going) = (log.clone(), log.clone());
+    executor.spawn(Box::pin(async move {
+        next_turn().await;
+        waiting.push("after a turn");
+    }));
+    executor.spawn(Box::pin(async move { going.push("meanwhile") }));
+    executor.run();
+    assert_eq!(log.taken(), ["meanwhile", "after a turn"]);
 }

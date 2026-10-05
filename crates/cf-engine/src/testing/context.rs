@@ -20,16 +20,18 @@ use cf_ledger::{
 };
 use serde_json::{json, Value};
 
-use super::adapter::{FakeAdapter, FakeAdapters, FakeRecords};
-use super::executor::Executor;
+use super::adapter::{FakeAdapter, FakeAdapters};
+use super::executor::{Answer, Executor};
 use super::host::FakeHost;
 use super::recorder::Recorder;
+use super::records::FakeRecords;
 use super::seams::{
     CountingLaunchIds, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv, FakeRoles,
     FakeRoster, FakeTrace,
 };
+use super::time::TestTime;
 use crate::chief_switch::SwitchTo;
-use crate::dispatcher::{Dispatcher, Resumed, SwitchWhen};
+use crate::dispatcher::{Dispatcher, SwitchWhen};
 use crate::seams::{EngineError, Limits, Seams};
 
 /// 2026-09-19T12:00:00.000Z, where every test's clock starts.
@@ -74,7 +76,10 @@ pub struct Context {
     pub executor: Rc<Executor>,
     pub recorder: Recorder,
     pub ledger: Rc<RefCell<Ledger>>,
+    /// The clock a test moves ([`Context::advance`]).
     pub time: Rc<ManualTime>,
+    /// The timers an engine's sleeps wait on, which the clock never sees.
+    pub timers: Rc<TestTime>,
     pub host: Rc<FakeHost>,
     pub adapter: Rc<FakeAdapter>,
     pub roster: Rc<FakeRoster>,
@@ -82,37 +87,13 @@ pub struct Context {
     pub log: Rc<FakeLog>,
     pub launch_files: Rc<FakeLaunchFiles>,
     pub dispatcher: Rc<Dispatcher>,
-    /// The engines made after the first (`make`), kept to the test's end.
-    later: RefCell<Vec<Rc<Dispatcher>>>,
-    /// What each engine is made with: the test's own fakes, shared.
-    seams: Box<dyn Fn() -> Seams>,
+    /// What the engine is made with, for the engines a restart makes.
+    pub(super) seams: Seams,
+    /// The engines a restart made ([`Context::make`]), dropped with the test.
+    pub(super) restarted: RefCell<Vec<Rc<Dispatcher>>>,
     file: PathBuf,
     // Last, so the ledger's file goes after the ledger.
     _dir: tempfile::TempDir,
-}
-
-/// An engine made after the first, on the same ledger, host and adapter,
-/// as the daemon starts again (`context.make()`).
-pub struct Engine<'a> {
-    context: &'a Context,
-    /// Its place among the engines the context keeps: the context closes them.
-    at: usize,
-}
-
-impl Engine<'_> {
-    fn dispatcher(&self) -> Rc<Dispatcher> {
-        Rc::clone(&self.context.later.borrow()[self.at])
-    }
-
-    /// One pass, everything it began run to stillness.
-    pub fn pass(&self) -> Result<(), EngineError> {
-        self.context.pass_of(&self.dispatcher())
-    }
-
-    /// Once, at start (`resumeAfterRestart`), run to stillness.
-    pub fn resume_after_restart(&self) -> Result<Vec<Resumed>, EngineError> {
-        self.context.resume_after_restart_of(&self.dispatcher())
-    }
 }
 
 impl Context {
@@ -128,6 +109,7 @@ impl Context {
         let file = dir.path().join("consensflow.db");
         let recorder = Recorder::default();
         let time = Rc::new(ManualTime::new(START_MS));
+        let timers = Rc::new(TestTime::new(Rc::clone(&time), recorder.clone()));
         let named = Cell::new(0);
         let told = recorder.clone();
         let ledger = open_ledger(
@@ -175,58 +157,42 @@ impl Context {
             recorder: recorder.clone(),
             forgotten: RefCell::new(Vec::new()),
         });
-        // The launch ids go on from one engine to the next, as `randomUUID` did.
-        let launch_ids = Rc::new(CountingLaunchIds::default());
-        let seams = {
-            let (ledger, host, adapter, time) = (
-                Rc::clone(&ledger),
-                Rc::clone(&host),
-                Rc::clone(&adapter),
-                Rc::clone(&time),
-            );
-            let (roster, trace, log, launch_files, executor, recorder) = (
-                Rc::clone(&roster),
-                Rc::clone(&trace),
-                Rc::clone(&log),
-                Rc::clone(&launch_files),
-                Rc::clone(&executor),
-                recorder.clone(),
-            );
-            move || Seams {
+        let seams = Seams {
+            ledger: Rc::clone(&ledger),
+            host: Rc::clone(&host) as Rc<_>,
+            adapters: Rc::new(FakeAdapters::new(Rc::clone(&adapter), &made.harnesses)),
+            records: Rc::new(FakeRecords::new(Rc::clone(&adapter))),
+            time: Rc::clone(&timers) as Rc<dyn Time>,
+            launch_ids: Rc::new(CountingLaunchIds::default()),
+            credentials: Rc::new(FakeCredentials {
+                recorder: recorder.clone(),
                 ledger: Rc::clone(&ledger),
-                host: Rc::clone(&host) as Rc<_>,
-                adapters: Rc::new(FakeAdapters::new(Rc::clone(&adapter), &made.harnesses)),
-                records: Rc::new(FakeRecords::new(Rc::clone(&adapter))),
-                time: Rc::clone(&time) as Rc<dyn Time>,
-                launch_ids: Rc::clone(&launch_ids) as Rc<_>,
-                credentials: Rc::new(FakeCredentials {
-                    recorder: recorder.clone(),
-                    ledger: Rc::clone(&ledger),
-                }),
-                pane_env: Rc::new(FakePaneEnv {
-                    recorder: recorder.clone(),
-                }),
-                roster: Rc::clone(&roster) as Rc<_>,
-                roles: Rc::new(FakeRoles {
-                    recorder: recorder.clone(),
-                }),
-                trace: Rc::clone(&trace) as Rc<_>,
-                log: Rc::clone(&log) as Rc<_>,
-                launch_files: Rc::clone(&launch_files) as Rc<_>,
-                spawn: Rc::clone(&executor) as Rc<_>,
-                limits: Limits {
-                    arrival_ms: 30_000,
-                    launch_ms: 120_000,
-                    max_attempts: 3,
-                },
-            }
+            }),
+            pane_env: Rc::new(FakePaneEnv {
+                recorder: recorder.clone(),
+            }),
+            roster: Rc::clone(&roster) as Rc<_>,
+            roles: Rc::new(FakeRoles {
+                recorder: recorder.clone(),
+            }),
+            trace: Rc::clone(&trace) as Rc<_>,
+            log: Rc::clone(&log) as Rc<_>,
+            launch_files: Rc::clone(&launch_files) as Rc<_>,
+            spawn: Rc::clone(&executor) as Rc<_>,
+            limits: Limits {
+                arrival_ms: 30_000,
+                launch_ms: 120_000,
+                max_attempts: 3,
+            },
         };
-        let dispatcher = engine(seams(), &host);
+        let dispatcher = Dispatcher::new(seams.clone());
+        host.attach(&dispatcher);
         Self {
             executor,
             recorder,
             ledger,
             time,
+            timers,
             host,
             adapter,
             roster,
@@ -234,57 +200,44 @@ impl Context {
             log,
             launch_files,
             dispatcher,
-            later: RefCell::new(Vec::new()),
-            seams: Box::new(seams),
+            seams,
+            restarted: RefCell::new(Vec::new()),
             file,
             _dir: dir,
         }
     }
 
-    /// An engine made again on the same ledger, host and adapter
-    /// (`context.make()`), as the daemon starts again; the host tells it the
-    /// exits too.
-    pub fn make(&self) -> Engine<'_> {
-        let dispatcher = engine((self.seams)(), &self.host);
-        let mut later = self.later.borrow_mut();
-        later.push(dispatcher);
-        Engine {
-            context: self,
-            at: later.len() - 1,
-        }
-    }
-
     /// Runs `work` and all it begins to stillness: its answer.
     pub fn run<T: 'static>(&self, work: impl Future<Output = T> + 'static) -> T {
-        self.executor
-            .finish(work)
+        self.finish(self.executor.start(work))
+    }
+
+    /// Runs what was started, and all it begins, until `answer` is there. A
+    /// sleep the work waits on ends once nothing else can move, as a timer
+    /// does in JavaScript's loop, the earliest first.
+    pub fn finish<T>(&self, answer: Answer<T>) -> T {
+        loop {
+            self.executor.run();
+            if answer.ended() || !self.timers.fire_next() {
+                break;
+            }
+        }
+        answer
+            .take()
             .expect("the work waits on nothing the test releases")
+    }
+
+    /// Runs everything started to stillness, its sleeps not ended: what
+    /// waits on one keeps waiting, as before a timer is due.
+    pub fn settle(&self) {
+        self.executor.run();
     }
 
     /// One pass, everything it began run to stillness.
     pub fn pass(&self) -> Result<(), EngineError> {
-        self.pass_of(&self.dispatcher)
-    }
-
-    fn pass_of(&self, dispatcher: &Rc<Dispatcher>) -> Result<(), EngineError> {
         self.recorder.op("pass", json!([]));
-        let dispatcher = Rc::clone(dispatcher);
+        let dispatcher = Rc::clone(&self.dispatcher);
         self.run(async move { dispatcher.pass().await })
-    }
-
-    /// The restart's settling and the projects that come back
-    /// (`resumeAfterRestart`), run to stillness.
-    pub fn resume_after_restart(&self) -> Result<Vec<Resumed>, EngineError> {
-        self.resume_after_restart_of(&self.dispatcher)
-    }
-
-    fn resume_after_restart_of(
-        &self,
-        dispatcher: &Rc<Dispatcher>,
-    ) -> Result<Vec<Resumed>, EngineError> {
-        self.recorder.op("resumeAfterRestart", json!([]));
-        let dispatcher = Rc::clone(dispatcher);
-        self.run(async move { dispatcher.resume_after_restart().await })
     }
 
     /// A project opened (`dispatcher.openProject`), `request` as the API
@@ -398,27 +351,20 @@ impl Context {
             executor,
             ledger,
             dispatcher,
-            later,
-            seams,
+            restarted,
             host,
             adapter,
+            seams,
             file,
             _dir: dir,
             ..
         } = self;
-        drop((executor, dispatcher, later, seams, host, adapter));
+        drop((executor, dispatcher, restarted, host, adapter, seams));
         let ledger = Rc::try_unwrap(ledger)
             .unwrap_or_else(|_| panic!("something of the test still holds the ledger"));
         drop(ledger.into_inner());
         Closed { events, file, dir }
     }
-}
-
-/// An engine made with `seams`, the host telling it the exits.
-fn engine(seams: Seams, host: &FakeHost) -> Rc<Dispatcher> {
-    let dispatcher = Dispatcher::new(seams);
-    host.attach(&dispatcher);
-    dispatcher
 }
 
 /// The project `withStaff` and `withTiers` open: `/work/app`, the chief on
