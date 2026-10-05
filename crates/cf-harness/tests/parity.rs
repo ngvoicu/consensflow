@@ -9,10 +9,10 @@
 //! A line of JSON this build cannot hold is a difference kept on purpose:
 //! counted, as the records' decision asks, and not failed.
 //!
-//! Each conversation's looks are timed too, for step 3.5 to decide where a
-//! look runs: a first look, beside Node's, a look that finds nothing new,
-//! and the locate of a JSONL harness's transcript in the live stores. The
-//! slowest first look is named with its transcript's size.
+//! The looks are timed on the live stores, as the daemon will read them, for
+//! step 3.5 to decide where a look runs: a first look, beside Node's, a look
+//! that finds nothing new, and the locate of a JSONL harness's transcript.
+//! The slowest first look is named with its transcript's size.
 
 // The run's own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -43,8 +43,10 @@ struct Read {
     env: Map<String, Value>,
     /// The environment that names the live stores.
     live: Map<String, Value>,
-    /// How long Node's first look took, in milliseconds.
+    /// How long Node's read of the live stores took, in milliseconds.
     ms: f64,
+    /// The size of the transcript a JSONL harness keeps; none for a store.
+    size: Option<u64>,
     /// Node's first look, and its look after it.
     reading: Value,
     again: Value,
@@ -83,22 +85,24 @@ fn every_conversation_node_read_here_reads_the_same() {
         let local = zone(&read.zone);
         let tally = tallies.entry(read.kind.clone()).or_default();
 
-        let started = Instant::now();
-        let Ok(mut reader) = records::reader(harness, &read.session, &env, &local) else {
-            panic!("{} {}: no reader", read.kind, read.session);
-        };
+        let mut reader = records::reader(harness, &read.session, &env, &local).unwrap();
         let reading = reader.look(&Options::default(), read.now);
+        let again = reader.look(&Options::default(), read.now);
+
+        let live = environment(&read.live);
+        let started = Instant::now();
+        let mut there = records::reader(harness, &read.session, &live, &local).unwrap();
+        there.look(&Options::default(), read.now);
         let first = started.elapsed();
         let started = Instant::now();
-        let again = reader.look(&Options::default(), read.now);
+        there.look(&Options::default(), read.now);
         tally.unchanged.push(started.elapsed());
         tally.first.push(first);
         tally.node.push(Duration::from_secs_f64(read.ms / 1000.0));
         if tally.slowest.is_none_or(|(slowest, _)| first > slowest) {
-            tally.slowest = Some((first, transcript_size(harness, &read.session, &env)));
+            tally.slowest = Some((first, read.size));
         }
         if matches!(harness, Harness::Claude | Harness::Codex | Harness::Pi) {
-            let live = environment(&read.live);
             let started = Instant::now();
             records::has_transcript(harness, &read.session, &live).unwrap();
             tally.locate.push(started.elapsed());
@@ -175,42 +179,6 @@ fn zone(name: &str) -> TimeZone {
         seconds
     };
     TimeZone::fixed(Offset::from_seconds(seconds).unwrap())
-}
-
-/// The size of the transcript a JSONL harness keeps of `session`, in the
-/// snapshot `env` names; none for a store.
-fn transcript_size(harness: Harness, session: &str, env: &Env) -> Option<u64> {
-    let (folder, under) = match harness {
-        Harness::Claude => ("CLAUDE_CONFIG_DIR", "projects"),
-        Harness::Codex => ("CODEX_HOME", "sessions"),
-        Harness::Pi => ("PI_CODING_AGENT_SESSION_DIR", ""),
-        Harness::Opencode | Harness::Devin => return None,
-    };
-    sizes(&env.path(folder)?.join(under))
-        .into_iter()
-        .find(|(name, _)| name.contains(session))
-        .map(|(_, size)| size)
-}
-
-/// Every file under `folder`, by name, with its size.
-fn sizes(folder: &Path) -> Vec<(String, u64)> {
-    let Ok(entries) = fs::read_dir(folder) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .flat_map(|entry| {
-            let metadata = entry.metadata().unwrap();
-            if metadata.is_dir() {
-                sizes(&entry.path())
-            } else {
-                vec![(
-                    entry.file_name().to_string_lossy().into_owned(),
-                    metadata.len(),
-                )]
-            }
-        })
-        .collect()
 }
 
 /// What Node's half wrote of a reading (`digest`): each item's id, role,
