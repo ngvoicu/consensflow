@@ -474,7 +474,7 @@ impl Dispatcher {
     }
 
     /// A project the ledger has; one it does not is refused.
-    fn known_project(&self, project: i64) -> Result<ProjectView, EngineError> {
+    pub(crate) fn known_project(&self, project: i64) -> Result<ProjectView, EngineError> {
         self.seams
             .ledger
             .borrow()
@@ -621,7 +621,9 @@ impl Dispatcher {
                 }
                 let record = self.record_of(participant.id);
                 let (this, at, who) = (Rc::clone(self), Rc::clone(&project), participant.clone());
-                let step = async move { this.step(&at, &who).await };
+                // Boxed where it is made: a step holds every wait below it, and
+                // moved by value through the hold it filled the stack.
+                let step = Box::pin(async move { this.step(&at, &who).await });
                 steps.extend(self.try_exclusive(&record, step).await);
             }
         }
@@ -1028,7 +1030,7 @@ impl Dispatcher {
     ) -> Result<(), EngineError> {
         self.handled(record);
         let reported = record.quota.borrow().reported.clone();
-        let reset = self.reset_of(reported.as_deref())?;
+        let reset = self.reset_of(reported.as_deref());
         let marked = self
             .seams
             .ledger
@@ -1060,7 +1062,10 @@ impl Dispatcher {
         record: &Rc<Record>,
         work: impl Future<Output = Result<T, EngineError>> + 'static,
     ) -> Begun<Result<T, EngineError>> {
-        record.hold.exclusive(&*self.seams.spawn, work).await
+        record
+            .hold
+            .exclusive(&*self.seams.spawn, Box::pin(work))
+            .await
     }
 
     /// Runs `work` holding `record`'s participant if nothing holds it now:
@@ -1070,7 +1075,10 @@ impl Dispatcher {
         record: &Rc<Record>,
         work: impl Future<Output = Result<T, EngineError>> + 'static,
     ) -> Option<Begun<Result<T, EngineError>>> {
-        record.hold.try_exclusive(&*self.seams.spawn, work).await
+        record
+            .hold
+            .try_exclusive(&*self.seams.spawn, Box::pin(work))
+            .await
     }
 
     /// Begins a launch or a delivery apart from the pass, holding its
@@ -1081,6 +1089,7 @@ impl Dispatcher {
         work: impl Future<Output = Result<(), EngineError>> + 'static,
     ) {
         let this = Rc::clone(self);
+        let work = Box::pin(work);
         let work = async move {
             if let Err(cause) = work.await {
                 this.write_down(&cause);
@@ -1206,3 +1215,6 @@ impl Dispatcher {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

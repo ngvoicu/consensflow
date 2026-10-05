@@ -374,11 +374,16 @@ impl Window for FakeWindow {
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {
+        // JavaScript handed the fake the participant's conversation, which
+        // this window follows: its session.
+        let session = self.session.borrow().clone();
         let at = self.call(
             "observe",
-            json!([{ "launch": { "launchId": self.launch } }]),
+            json!([{
+                "launch": { "launchId": self.launch },
+                "conversation": { "nativeSession": session },
+            }]),
         );
-        let session = self.session.borrow().clone();
         let observed = self
             .fake
             .of_launch(&self.launch, |agent| looked(agent, &session));

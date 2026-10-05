@@ -27,8 +27,11 @@
 //! A limit: a transcript's copy logs no event, so where its writes fall
 //! among the other effects is held only by the database each side left.
 //!
-//! The database each side left is held equal whole, table by table, each
-//! value as SQLite quotes it, the test's temporary folder written «dir».
+//! The effects are held in order, but for the tests named in [`INTERLEAVED`],
+//! which may differ by how independent windows interleave, and only so
+//! ([`lanes`]). The database each side left is held equal whole, table by
+//! table, each value as SQLite quotes it, the test's temporary folder
+//! written «dir».
 
 use std::collections::HashMap;
 use std::fs;
@@ -37,6 +40,8 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use cf_engine::testing::Closed;
+
+use crate::lanes;
 use flate2::read::GzDecoder;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Map, Value};
@@ -67,6 +72,16 @@ static TRACES: LazyLock<HashMap<(Vec<String>, String), Value>> = LazyLock::new(|
     traces
 });
 
+/// The tests whose effects may come in another order than Node's where two
+/// windows' interleave, and only there: JavaScript's microtask hops through
+/// nested async functions let a worker's launch overtake the chief's look.
+/// Each is one an exception is counted for.
+const INTERLEAVED: &[&str] = &[
+    "launches a worker with its task as the first message and records its answer as the result",
+    "keeps everything a member wrote in its turn, not only its last message",
+    "leaves a harness's commentary out of a result: Codex's progress notes are not its answer",
+];
+
 /// Holds a closed test to the Node trace of the test named `name` in `suites`.
 pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
     let key = (
@@ -78,7 +93,13 @@ pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
     });
     let node = projected(trace["events"].as_array().expect("its events"));
     let rust = projected(&closed.events);
-    if let Some(at) = (0..node.len().max(rust.len())).find(|&at| node.get(at) != rust.get(at)) {
+    if INTERLEAVED.contains(&name) {
+        if let Some(difference) = lanes::first_difference(&node, &rust) {
+            panic!("{name}: the engine's effects differ {difference}");
+        }
+    } else if let Some(at) =
+        (0..node.len().max(rust.len())).find(|&at| node.get(at) != rust.get(at))
+    {
         let around = |events: &[Value]| {
             events[at.saturating_sub(3)..(at + 3).min(events.len())]
                 .iter()

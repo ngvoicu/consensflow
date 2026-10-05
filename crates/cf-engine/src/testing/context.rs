@@ -15,8 +15,10 @@ use std::rc::Rc;
 use cf_base::time::Clock;
 use cf_harness::seams::Time;
 use cf_harness::testing::ManualTime;
-use cf_ledger::{open_ledger, Ledger, Options, ProjectView};
-use serde_json::json;
+use cf_ledger::{
+    open_ledger, Ledger, NewProject, NewTask, Options, ProjectView, TaskCreated, TaskThread,
+};
+use serde_json::{json, Value};
 
 use super::adapter::{FakeAdapter, FakeAdapters, FakeRecords};
 use super::executor::Executor;
@@ -204,6 +206,86 @@ impl Context {
         self.run(async move { dispatcher.pass().await })
     }
 
+    /// A project opened (`dispatcher.openProject`), `request` as the API
+    /// gives it, run to stillness.
+    pub fn open_project(&self, request: Value) -> Result<ProjectView, EngineError> {
+        self.recorder.op("openProject", json!([request.clone()]));
+        let request = NewProject::from_json(&request)?;
+        let dispatcher = Rc::clone(&self.dispatcher);
+        self.run(async move { dispatcher.open_project(request).await })
+    }
+
+    /// A project with its chief window up, `workers` (standard workers on
+    /// Claude Code) its staff from the start (`withStaff`).
+    pub fn with_staff(&self, workers: &[&str]) -> ProjectView {
+        let staff: Vec<Value> = workers
+            .iter()
+            .map(|agent| member(agent, "worker", "standard"))
+            .collect();
+        self.open_project(app(staff))
+            .expect("a project with its staff")
+    }
+
+    /// A tiered staff (`withTiers`): standard workers (`workers`), a light
+    /// worker, and two standard reviewers.
+    pub fn with_tiers(&self, workers: &[&str]) -> ProjectView {
+        let mut staff: Vec<Value> = workers
+            .iter()
+            .map(|agent| member(agent, "worker", "standard"))
+            .collect();
+        staff.extend([
+            member("hera", "worker", "light"),
+            member("calliope", "reviewer", "standard"),
+            member("astraeus", "reviewer", "standard"),
+        ]);
+        self.open_project(app(staff))
+            .expect("a project with its tiers")
+    }
+
+    /// The id of `handle` in `project`, as the ledger has it now.
+    pub fn id(&self, project: i64, handle: &str) -> i64 {
+        self.ledger
+            .borrow()
+            .project(project)
+            .expect("the ledger read")
+            .expect("the project")
+            .participants
+            .into_iter()
+            .find(|participant| participant.handle == handle)
+            .map(|participant| participant.id)
+            .unwrap_or_else(|| panic!("no @{handle} in project {project}"))
+    }
+
+    /// A task from the chief to `to` by name (`ledger.createTask`).
+    pub fn give(&self, project: i64, to: &str, body: &str) -> TaskCreated {
+        self.create_task(
+            project,
+            NewTask {
+                from: "chief".to_owned(),
+                to: Some(to.to_owned()),
+                body: body.to_owned(),
+                ..NewTask::default()
+            },
+        )
+    }
+
+    /// A task as the ledger is asked for it (`ledger.createTask`).
+    pub fn create_task(&self, project: i64, task: NewTask) -> TaskCreated {
+        self.ledger
+            .borrow_mut()
+            .create_task(project, &task)
+            .expect("a task")
+    }
+
+    /// Task `number` of `project`, with its thread.
+    pub fn task(&self, project: i64, number: i64) -> TaskThread {
+        self.ledger
+            .borrow()
+            .task(project, number)
+            .expect("the ledger read")
+            .expect("the task")
+    }
+
     /// Moves the clock on by `ms`.
     pub fn advance(&self, ms: i64) {
         self.time.settle_at(self.time.wall_ms() + ms);
@@ -247,6 +329,22 @@ impl Context {
         drop(ledger.into_inner());
         Closed { events, file, dir }
     }
+}
+
+/// The project `withStaff` and `withTiers` open: `/work/app`, the chief on
+/// apollo, `staff` from the start.
+fn app(staff: Vec<Value>) -> Value {
+    json!({
+        "directory": "/work/app",
+        "name": "app",
+        "chief": { "harness": "claude-code", "agent": "apollo" },
+        "staff": staff,
+    })
+}
+
+/// A member of a project's first staff, on Claude Code.
+fn member(agent: &str, role: &str, tier: &str) -> Value {
+    json!({ "agent": agent, "harness": "claude-code", "role": role, "tier": tier })
 }
 
 /// A test's engine, closed: what it asked of its seams, and its ledger's
