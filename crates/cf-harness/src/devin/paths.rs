@@ -13,19 +13,40 @@ pub(crate) fn store(env: &Env) -> Result<String, String> {
     Ok(path::join(&[&data(env)?, "cli", "sessions.db"]))
 }
 
+/// Devin's config folder, where its `config.json` is: on Windows its data
+/// folder, and elsewhere `devin` in `XDG_CONFIG_HOME` (`.config` in the
+/// home). A variable set empty is kept, as `??` kept it.
+pub(crate) fn config(env: &Env) -> Result<String, String> {
+    let base = if env.on_windows() {
+        roaming(env)?
+    } else if let Some(config) = env.os("XDG_CONFIG_HOME") {
+        config.to_string_lossy().into_owned()
+    } else {
+        path::join(&[&home(env)?, ".config"])
+    };
+    Ok(path::join(&[&base, "devin"]))
+}
+
 /// Devin's data folder: `devin` in `%APPDATA%` on Windows (`AppData/Roaming`
 /// in the home when it is not set), and elsewhere in `XDG_DATA_HOME`
 /// (`.local/share` in the home). A variable set empty is kept, as `??`
 /// kept it.
 fn data(env: &Env) -> Result<String, String> {
-    let base = if !env.on_windows() {
-        data_home(env)?
-    } else if let Some(roaming) = env.os("APPDATA") {
-        roaming.to_string_lossy().into_owned()
+    let base = if env.on_windows() {
+        roaming(env)?
     } else {
-        path::join(&[&home(env)?, "AppData", "Roaming"])
+        data_home(env)?
     };
     Ok(path::join(&[&base, "devin"]))
+}
+
+/// Where Windows keeps what an application keeps for its user: `%APPDATA%`,
+/// else `AppData/Roaming` in the home.
+fn roaming(env: &Env) -> Result<String, String> {
+    match env.os("APPDATA") {
+        Some(roaming) => Ok(roaming.to_string_lossy().into_owned()),
+        None => Ok(path::join(&[&home(env)?, "AppData", "Roaming"])),
+    }
 }
 
 #[cfg(test)]
@@ -34,6 +55,40 @@ mod tests {
 
     fn store_of(vars: &[(&str, &str)]) -> Result<String, String> {
         store(&Env::from_vars(vars.iter().copied()))
+    }
+
+    fn config_of(vars: &[(&str, &str)]) -> Result<String, String> {
+        config(&Env::from_vars(vars.iter().copied()))
+    }
+
+    #[test]
+    fn on_windows_the_config_is_under_appdata_else_the_homes_roaming_folder() {
+        let windows = ("OS", "Windows_NT");
+        assert_eq!(
+            config_of(&[windows, ("APPDATA", "/r"), ("XDG_CONFIG_HOME", "/x")]).unwrap(),
+            path::join(&["/r", "devin"])
+        );
+        assert_eq!(
+            config_of(&[windows, ("HOME", "/h")]).unwrap(),
+            path::join(&["/h", "AppData", "Roaming", "devin"])
+        );
+        assert_eq!(config_of(&[windows]).unwrap_err(), "missing home in env");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn elsewhere_the_config_is_under_xdg_config_home_else_the_homes_dot_config_folder() {
+        assert_eq!(
+            config_of(&[("APPDATA", "/r"), ("XDG_CONFIG_HOME", "/x")]).unwrap(),
+            "/x/devin"
+        );
+        assert_eq!(config_of(&[("HOME", "/h")]).unwrap(), "/h/.config/devin");
+        // `??` keeps an empty variable: a folder under the working one.
+        assert_eq!(
+            config_of(&[("HOME", "/h"), ("XDG_CONFIG_HOME", "")]).unwrap(),
+            "devin"
+        );
+        assert_eq!(config_of(&[]).unwrap_err(), "missing home in env");
     }
 
     #[test]

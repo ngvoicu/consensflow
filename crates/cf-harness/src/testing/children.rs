@@ -7,6 +7,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::future::poll_fn;
+use std::path::Path;
 use std::rc::Rc;
 use std::task::Poll;
 
@@ -16,7 +17,12 @@ use crate::seams::processes::{Child, Ending, Failed, Limits, Processes, Program,
 /// A program's name as a test names it: its executable's file name, the
 /// extension a Windows stand-in has taken off (`codex.cmd` is `codex`).
 pub fn name(program: &Program) -> String {
-    let path = &program.executable;
+    called(&program.executable)
+}
+
+/// What the program at `path` is called: its file's name, the extension a
+/// Windows stand-in has taken off.
+pub fn called(path: &Path) -> String {
     let script = path.extension().is_some_and(|extension| {
         ["cmd", "bat", "exe", "mjs"]
             .iter()

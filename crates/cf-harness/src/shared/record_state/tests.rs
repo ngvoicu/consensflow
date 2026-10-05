@@ -1,5 +1,5 @@
 //! The `recordState` table of `tests/goldens/launch/tables.json`, each row
-//! held to what Node answered. A row holds the record as JavaScript's look
+//! held to what Node answered, and the looks a window's own word makes. A row holds the record as JavaScript's look
 //! wrote it, which a `Reading` says for all but the records that are no
 //! object, that give `items` that is no list, or `failed` that is no flag:
 //! the inputs Rust has no reading for.
@@ -10,7 +10,7 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 use super::*;
-use crate::records::{Item, Quota, Record, Role};
+use crate::records::{Item, Quota, Record, Role, Settlement};
 
 /// The reading a row's record is, or none where no reading says it.
 fn reading_of(record: &Value) -> Option<Reading> {
@@ -123,4 +123,53 @@ fn a_look_names_the_record_it_read() {
     assert!(state
         .reading
         .is_some_and(|read| Arc::ptr_eq(&read, &reading)));
+}
+
+#[test]
+fn a_dialog_of_its_own_still_open_is_a_window_waiting_and_nothing_else_is() {
+    let mut record = Record::new();
+    assert_eq!(dialog_waiting(Some(&Reading::Known(record.clone()))), None);
+    record.asking = true;
+    assert_eq!(
+        dialog_waiting(Some(&Reading::Known(record))),
+        Some(Waiting {
+            reason: Some("its own question dialog is open".to_owned())
+        })
+    );
+    assert_eq!(
+        dialog_waiting(Some(&Reading::Unknown("unreadable".to_owned()))),
+        None
+    );
+    assert_eq!(dialog_waiting(None), None);
+}
+
+#[test]
+fn a_window_switched_away_settles_nothing_and_waits_for_nothing_and_one_unnamed_waits_for_its_name()
+{
+    let mut record = Record::new();
+    record.settlement = Settlement::Settled;
+    let observed = record_state(Arc::new(Reading::Known(record)));
+    let observed = Observed {
+        waiting: Some(Waiting { reason: None }),
+        ..observed
+    };
+    assert!(observed.settled);
+    let switched = switched_to(observed.clone(), "fresh-leaf".to_owned());
+    assert_eq!(
+        (
+            switched.settled,
+            switched.waiting.is_some(),
+            switched.switched.as_deref(),
+            switched.unnamed
+        ),
+        (false, false, Some("fresh-leaf"), false)
+    );
+    let held = unnamed(observed, "not said yet");
+    assert_eq!(
+        held.waiting,
+        Some(Waiting {
+            reason: Some("not said yet".to_owned())
+        })
+    );
+    assert!(held.unnamed && held.settled && held.switched.is_none());
 }

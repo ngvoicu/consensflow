@@ -8,6 +8,7 @@ use cf_proto::agents::Harness;
 
 use crate::claude::ClaudeAdapter;
 use crate::contract::Adapter;
+use crate::devin::DevinAdapter;
 use crate::pi::PiAdapter;
 use crate::seams::Services;
 
@@ -16,6 +17,7 @@ pub fn adapter(harness: Harness, services: &Services) -> Option<Rc<dyn Adapter>>
     match harness {
         Harness::Claude => Some(Rc::new(ClaudeAdapter::new(services))),
         Harness::Pi => Some(Rc::new(PiAdapter::new(services))),
-        Harness::Codex | Harness::Opencode | Harness::Devin => None,
+        Harness::Devin => Some(Rc::new(DevinAdapter::new(services))),
+        Harness::Codex | Harness::Opencode => None,
     }
 }

@@ -4,7 +4,10 @@
  * Rust player (`crates/cf-harness/tests/launch/scenarios.rs`).
  *
  * A scenario is data. Some steps set the scene and record nothing: stand-in
- * CLIs, files, a harness's own status files, what the engine tells a
+ * CLIs (`executable`, found and never run; `standIn`, answering by its
+ * arguments), files and folders (`write`, `append`, `mkdir`, `remove`),
+ * a SQLite store of a harness's own (`db`: `open`, `exec`, `run` with its
+ * `params`, `close`), a harness's own status files, what the engine tells a
  * window (`opened`, `follow`), and whether looks at a harness's record
  * wait to be released (`holdLooks`). The others are recorded:
  * - `prepare`, `observe`, `ready`, `deliver`, `started` begin that work on
@@ -51,7 +54,10 @@
  * Rust never does.
  *
  * A step's record is written so that it is the same on every run: every
- * path under the root is `$ROOT/…`; the process this runs as is `$PID`,
+ * path under the root is `$ROOT/…`, and so is the bundle's `bin` (the
+ * checkout's own, where a window's `cf` is), as `$ROOT/bundle/bin`, where
+ * Rust's fakes put theirs (`crates/cf-harness/src/testing`); the process
+ * this runs as is `$PID`,
  * one long dead `$DEAD`, a second live one a scenario names `$OTHER`; and
  * it lists the work that settled (its step, and what it answered or
  * threw), the work still waiting, the requests asked of the host and, when
@@ -77,11 +83,14 @@ import fs from 'node:fs/promises'
 import { createRequire, syncBuiltinESMExports } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { PassThrough } from 'node:stream'
 import { cachedAnswers } from '../../../hosts/lib/completion.js'
 import { claudeCodeAdapter } from '../../../src/adapters/claude-code.js'
+import { devinAdapter } from '../../../src/adapters/devin.js'
 import { piAdapter } from '../../../src/adapters/pi.js'
 import { forgetLaunch } from '../../../src/core/launch-files.js'
+import { BUNDLE_BIN } from '../../../src/core/pane-cf.js'
 import { fakeExecutable, fakeNodeExecutable } from '../../helpers.mjs'
 
 const require = createRequire(import.meta.url)
@@ -129,7 +138,7 @@ const SYSTEM_VARS = new Set([
   'WINDIR',
 ])
 
-const ADAPTERS = { 'claude-code': claudeCodeAdapter, pi: piAdapter }
+const ADAPTERS = { 'claude-code': claudeCodeAdapter, devin: devinAdapter, pi: piAdapter }
 const WINDOWS = process.platform === 'win32'
 
 /** The mask files and folders are made under: the one nearly every machine has. */
@@ -404,6 +413,10 @@ function written(context, value) {
   if (typeof value !== 'string') return value
   // Node itself, which runs a stand-in on Windows, is `$NODE`.
   let text = value.replaceAll(context.root, '$ROOT').replaceAll(process.execPath, '$NODE')
+  // The bundle's `bin` as a window names its `cf`, and as a path of it is spelled.
+  for (const bin of new Set([BUNDLE_BIN, BUNDLE_BIN.replaceAll('\\', '/')])) {
+    text = text.replaceAll(bin, '$ROOT/bundle/bin')
+  }
   if (text.startsWith('$ROOT')) text = posix(text)
   // Half a surrogate pair is no text every JSON reader holds, and Rust's
   // strings never do: such a string is written as its UTF-16 code units.
@@ -910,7 +923,9 @@ function invocation(context, name, args, cwd, env) {
  */
 function standIn(context, { name, answers }) {
   const log = path.join(context.root, `${name}.ran`)
-  const source = `import { appendFileSync } from 'node:fs'
+  // No `import`: a stand-in named as Windows names a program (`devin.exe`)
+  // runs on POSIX as a script of no module type, where only CommonJS loads.
+  const source = `const { appendFileSync } = process.getBuiltinModule('node:fs')
 const args = process.argv.slice(2)
 appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, cwd: process.cwd(), env: process.env }) + '\\n')
 const answers = ${JSON.stringify(answers ?? {})}
@@ -936,7 +951,7 @@ function standInRuns(context) {
     for (const line of readFileSync(log, 'utf8').split('\n').filter(Boolean)) {
       const { args, cwd, env } = JSON.parse(line)
       const folder = cwd.startsWith(real) ? context.root + cwd.slice(real.length) : cwd
-      runs.push(invocation(context, name, args, folder, env))
+      runs.push(invocation(context, name.replace(/\.(mjs|cmd|bat|exe)$/i, ''), args, folder, env))
     }
     rmSync(log)
   }
@@ -964,6 +979,35 @@ async function setUp(context, step) {
     const file = realValue(context, step.write)
     await fs.mkdir(path.dirname(file), { recursive: true })
     await fs.writeFile(file, realValue(context, step.text))
+    return true
+  }
+  if (step.append !== undefined) {
+    const file = realValue(context, step.append)
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.appendFile(file, realValue(context, step.text))
+    return true
+  }
+  if (step.mkdir !== undefined) {
+    await fs.mkdir(realValue(context, step.mkdir), { recursive: true })
+    return true
+  }
+  if (step.db !== undefined) {
+    // A harness's SQLite store, made as a step says: opened, written, closed.
+    if (step.open !== undefined) {
+      context.dbs.set(step.db, new DatabaseSync(realValue(context, step.open)))
+    } else if (step.exec !== undefined) {
+      context.dbs.get(step.db).exec(step.exec)
+    } else if (step.run !== undefined) {
+      context.dbs
+        .get(step.db)
+        .prepare(step.run)
+        .run(...(step.params ?? []))
+    } else if (step.close === true) {
+      context.dbs.get(step.db).close()
+      context.dbs.delete(step.db)
+    } else {
+      throw new Error(`a db step with nothing to do: ${JSON.stringify(step)}`)
+    }
     return true
   }
   if (step.remove !== undefined) {
@@ -1206,6 +1250,7 @@ export async function play(scenario, adapters = ADAPTERS) {
     ports: Array.from({ length: 100 }, (_, index) => 41_000 + index),
     // A scripted child's pid, none a live process has (`DEAD` and on).
     pids: Array.from({ length: 100 }, (_, index) => DEAD - 1 - index),
+    dbs: new Map(),
     als: new AsyncLocalStorage(),
   }
   context.clock = fakeClock(() => context.als.getStore())
@@ -1249,6 +1294,7 @@ export async function play(scenario, adapters = ADAPTERS) {
     restore()
     context.machine.stop()
     context.other?.kill()
+    for (const db of context.dbs.values()) db.close()
     await fs.rm(root, { recursive: true, force: true })
   }
 }

@@ -1,5 +1,6 @@
 //! What a harness's record says, in the dispatcher's terms (`recordState`,
-//! `src/adapters/shared.js`), and the two looks a window's own word makes of
+//! `src/adapters/shared.js`), whether its window waits on its own question
+//! dialog (`dialogWaiting`), and the two looks a window's own word makes of
 //! it: one that shows another conversation (`switchedTo`), and one that has
 //! not said which it shows (`unnamed`). A conversation with no messages and
 //! nothing in flight is idle: a window opened without a task has nothing to
@@ -35,6 +36,18 @@ pub(crate) fn record_state(reading: Arc<Reading>) -> Observed {
         quota,
         switched: None,
         unnamed: false,
+    }
+}
+
+/// A window whose own question dialog is open waits for an answer there (the
+/// chief's, from the human; a member's, from the board through its door):
+/// nothing is pasted into it, and the board says it waits.
+pub(crate) fn dialog_waiting(reading: Option<&Reading>) -> Option<Waiting> {
+    match reading {
+        Some(Reading::Known(record)) if record.asking => Some(Waiting {
+            reason: Some("its own question dialog is open".to_owned()),
+        }),
+        _ => None,
     }
 }
 

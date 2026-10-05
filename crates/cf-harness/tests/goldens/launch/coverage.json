@@ -11,6 +11,7 @@
   },
   "scenarios": {
     "claude-code": { "darwin": 44, "win32": 44, "held": "tests/launch/scenarios.rs" },
-    "pi": { "darwin": 62, "win32": 62, "held": "tests/launch/scenarios.rs" }
+    "pi": { "darwin": 62, "win32": 62, "held": "tests/launch/scenarios.rs" },
+    "devin": { "darwin": 136, "win32": 136, "held": "tests/launch/scenarios.rs" }
   }
 }

@@ -33,7 +33,7 @@ use crate::seams::{Bundle, Entropy, Loopback, Ports, Probes, Processes, Services
 mod children;
 mod peer;
 
-pub use children::{name, named, ChildScript, Ends, ScriptedProcesses};
+pub use children::{called, name, named, ChildScript, Ends, ScriptedProcesses};
 pub use peer::{route, ScriptedLoopback, Sent, Served};
 
 thread_local! {
@@ -537,6 +537,9 @@ impl Fakes {
             processes: Rc::clone(&self.processes) as Rc<dyn Processes>,
             probes: Rc::new(Probes::default()),
             bundle: bundle(root),
+            // Node's recorder runs in the machine's zone, so no scenario can
+            // name a time of day without one: any zone serves.
+            zone: TimeZone::UTC,
         }
     }
 }

@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use cf_base::env::Env;
 use cf_base::time::{Clock, SystemClock};
+use jiff::tz::TimeZone;
 
 use crate::contract::{Records, Work};
 
@@ -41,6 +42,9 @@ pub struct Services {
     /// one per process.
     pub probes: Rc<Probes>,
     pub bundle: Bundle,
+    /// The machine's time zone: a time of day said with none is read in it,
+    /// as Node read the process's own.
+    pub zone: TimeZone,
 }
 
 /// Where an adapter reads the time and waits.
