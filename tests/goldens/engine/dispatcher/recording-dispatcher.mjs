@@ -62,15 +62,22 @@ function seams(options) {
     host: object('host', options.host),
     adapters,
     credentials: object('credentials', options.credentials),
-    log:
-      options.log === null || options.log === undefined ? options.log : object('log', options.log),
+    // What the engine is not given it makes do without, as `dispatcher.js`
+    // does: each is written down all the same, so every trace holds them.
+    log: object('log', options.log ?? { error: () => {} }),
     launchFiles: object('launchFiles', options.launchFiles ?? { forget: () => {} }),
     ...Object.fromEntries(
-      ['paneEnv', 'roster', 'roles', 'trace']
-        .filter((name) => options[name] !== undefined)
-        .map((name) => [name, fn(name, options[name])]),
+      Object.entries(DEFAULTS).map(([name, made]) => [name, fn(name, options[name] ?? made)]),
     ),
   }
+}
+
+/** The seams that are functions, and what the engine does without each (`dispatcher.js`). */
+const DEFAULTS = {
+  paneEnv: () => ({}),
+  roster: () => null,
+  roles: () => undefined,
+  trace: () => {},
 }
 
 /** A seam that is a function, each call of it written down, and of what it has besides (the trace's `forget`). */
