@@ -117,8 +117,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::runtime::Spawn;
-    use crate::testing::Executor;
+    use crate::runtime::{Executor, Spawn};
 
     /// What a test's pieces of work heard, in order.
     type Log = Rc<RefCell<Vec<String>>>;
@@ -152,7 +151,7 @@ mod tests {
 
     #[test]
     fn a_call_held_goes_on_the_turn_after_the_gate_opens_and_one_let_go_already_waits_a_turn() {
-        let executor = Executor::default();
+        let executor = Executor::strict();
         let holds = Rc::new(Holds::<()>::default());
         let gate = holds.hold(|_| true);
         let log = Log::default();
@@ -161,11 +160,11 @@ mod tests {
             asking.wrap(&json!([])).before().await;
             heard.borrow_mut().push("went on".to_owned());
         }));
-        executor.run();
+        executor.drain();
         assert!(log.borrow().is_empty(), "it waits for the test");
         gate.open();
         ticking(&executor, &log, 3);
-        executor.run();
+        executor.drain();
         assert_eq!(*log.borrow(), ["went on", "0", "1", "2"]);
 
         // The gate is open already: the `await` still takes its turn.
@@ -176,13 +175,13 @@ mod tests {
             heard.borrow_mut().push("went on".to_owned());
         }));
         ticking(&executor, &log, 3);
-        executor.run();
+        executor.drain();
         assert_eq!(*log.borrow(), ["0", "went on", "1", "2"]);
     }
 
     #[test]
     fn the_wrapper_answers_two_turns_after_the_fakes_own_whichever_call_it_picked() {
-        let executor = Executor::default();
+        let executor = Executor::strict();
         let (bare, wrapped) = (Holds::<()>::default(), Holds::<()>::default());
         wrapped.hold(|args| args[0] == "held");
         let log = Log::default();
@@ -198,7 +197,7 @@ mod tests {
             }));
         }
         ticking(&executor, &log, 3);
-        executor.run();
+        executor.drain();
         assert_eq!(
             *log.borrow(),
             ["bare", "0", "1", "passed", "held", "2"],
@@ -208,7 +207,7 @@ mod tests {
 
     #[test]
     fn what_a_call_held_does_in_place_is_handed_back_once_it_is_let_go() {
-        let executor = Executor::default();
+        let executor = Executor::strict();
         let holds = Rc::new(Holds::<String>::default());
         let gate = holds.hold_instead(|_| true, "native-named".to_owned());
         let named = Rc::new(RefCell::new(None));
@@ -216,10 +215,10 @@ mod tests {
         executor.spawn(Box::pin(async move {
             *kept.borrow_mut() = Some(asking.wrap(&json!([])).before().await);
         }));
-        executor.run();
+        executor.drain();
         assert_eq!(*named.borrow(), None, "held");
         gate.open();
-        executor.run();
+        executor.drain();
         assert_eq!(*named.borrow(), Some(Some("native-named".to_owned())));
     }
 }

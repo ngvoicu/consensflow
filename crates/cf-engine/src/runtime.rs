@@ -1,6 +1,9 @@
 //! How the engine's work runs, as Node's ran on its one thread
 //! (`#exclusive`, `#act` and `begin`, `src/core/dispatcher.js`):
 //!
+//! - All of it runs on one [`Executor`], in the daemon and in the kit's
+//!   tests, which runs what is woken in the order it was, until nothing is,
+//!   as Node's microtask queue did after each callback of its event loop.
 //! - A piece of work is begun where JavaScript called it ([`begin`]): what it
 //!   does before its first wait is done in place, so a launch takes its
 //!   message, draws its id and counts its generation inside the pass that
@@ -15,11 +18,25 @@
 //! - Work begun together is awaited together ([`all`]), its first failure
 //!   answered as soon as it comes.
 //! - What an `async` function answers reaches its caller a turn after it was
-//!   made, in JavaScript, even when it waited on nothing. Where that order
-//!   decides what one participant's step sees of another's, the call is made
-//!   [`returning`] a turn too: a pass's steps cross-read the ledger (a note
-//!   one step writes is the chief's next delivery in the same pass), so a
-//!   step that took fewer turns than Node's would read it before it was there.
+//!   made, in JavaScript, even when it waited on nothing: an adapter's
+//!   methods are such functions, and Pi's `prepare`, `started` and `ready`
+//!   never wait. The engine takes that turn itself (`returning`) after a
+//!   call of an adapter's `prepare`, `deliver` and `observe`, and the two of
+//!   `await call().catch(...)` (`caught`) after `started`, a record read, and
+//!   the look at a chief a switch closes; and the one of a `.catch(...)` alone
+//!   after the pane host's `open` and `kill` and the requests of a window's
+//!   snapshot and of an Enter pressed again. The fakes in the kit take none of
+//!   these. A pass's steps cross-read the ledger (a note one step writes is
+//!   the chief's next delivery in the same pass), so a step that took fewer
+//!   turns than Node's would read it before it was there. Limits: `ready` is
+//!   optional in an adapter, as the fake of Node's tests mostly has none, and
+//!   the engine cannot tell, so its turn is the fake's, and a real adapter's
+//!   that never waits (Pi's) costs the engine none. The `.catch` of the Escape
+//!   a window is interrupted with is not taken: probed beside a reassignment
+//!   that waits behind the interrupted step, the engine's kill of the window
+//!   came about four turns before Node's, from `async` methods of its own
+//!   whose returns it does not wait (`retire`, the hold's release among
+//!   them), so that hop could not be told apart.
 //! - A participant is let go a few turns after its work ended, and a waiter
 //!   learns of it a few turns after that ([`Hold`]): `#exclusive` and `#act`
 //!   begin the work inside promises that settle, and clear `running` and
@@ -34,22 +51,17 @@ use std::task::{Context, Poll, Waker};
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
 
+mod executor;
+
+pub use executor::Executor;
+
 /// A piece of work on the engine's thread.
 pub type LocalWork = Pin<Box<dyn Future<Output = ()>>>;
 
-/// Where work that goes on apart from its caller runs to its end.
+/// Where work that goes on apart from its caller runs to its end: the
+/// [`Executor`].
 pub trait Spawn {
     fn spawn(&self, work: LocalWork);
-}
-
-/// Tokio's local tasks, on the daemon's `LocalSet`. A task that panics is
-/// told by the panic hook, as any panic is.
-pub struct LocalSpawn;
-
-impl Spawn for LocalSpawn {
-    fn spawn(&self, work: LocalWork) {
-        drop(tokio::task::spawn_local(work));
-    }
 }
 
 /// Begins `work` where JavaScript called it (`begin`): polled once here, so
@@ -155,10 +167,20 @@ pub(crate) async fn returning<T>(work: impl Future<Output = T>) -> T {
     answer
 }
 
+/// Runs `work`, then waits two turns: `await call().catch(...)`. The promise
+/// `catch` makes settles a turn after the call's, and the `await` of it goes
+/// on a turn after that, whether or not the call waited.
+pub(crate) async fn caught<T>(work: impl Future<Output = T>) -> T {
+    let answer = returning(work).await;
+    next_turn().await;
+    answer
+}
+
 /// A wait of one turn: the work goes behind every piece of work woken before
 /// it, as an `await` of a JavaScript promise already kept did, and before
 /// whatever the system has still to say (a frame to read), as a microtask
-/// did.
+/// did: it is woken again at once, on the [`Executor`], which runs every
+/// turn of a chain inside one drain.
 pub fn next_turn() -> NextTurn {
     NextTurn { waited: false }
 }
@@ -391,6 +413,8 @@ impl Drop for Waiting {
     }
 }
 
+#[cfg(test)]
+mod stage;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

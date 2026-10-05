@@ -5,8 +5,9 @@
  * each call it makes of them is written down in the order it made it, with
  * what it was given and what it answered, a promise's once it settles. The
  * human's operations and the passes a test drives are written down too, where
- * they begin, so a trace reads in steps. The clock is not: when the engine
- * reads it is no behaviour, what it does with the time is.
+ * they begin and with what they answered or failed with, so a trace reads in
+ * steps and holds what the engine told its callers. The clock is not: when
+ * the engine reads it is no behaviour, what it does with the time is.
  */
 import { Dispatcher as Engine } from '../../../../src/core/dispatcher.js'
 import { encode, failure, known } from './encode.mjs'
@@ -18,7 +19,8 @@ export * from '../../../../src/core/dispatcher.js'
  * The engine's operations a trace marks where the test calls them: the
  * human's, a pass. What the engine calls of its own (an exit it settles in
  * place, a resume inside the restart, every exit the host sends) is its
- * insides, which its effects say, and is not marked.
+ * insides, which its effects say, and is not marked. Each is written down
+ * with what it answered or threw, once it has.
  */
 const OPERATIONS = [
   'openProject',
@@ -63,10 +65,8 @@ export const Dispatcher = new Proxy(Recording, {
         if (set.has(property)) return set.get(property)
         const value = Reflect.get(target, property, target)
         if (OPERATIONS.includes(property)) {
-          return (...given) => {
-            record({ op: property, args: encode(given) })
-            return value.apply(target, given)
-          }
+          return (...given) =>
+            watched({ op: property, args: encode(given) }, () => value.apply(target, given))
         }
         return typeof value === 'function' ? value.bind(target) : value
       },
@@ -138,38 +138,43 @@ function object(seam, target) {
   return wrapped
 }
 
-/**
- * `fn`, each call of it written down as `seam`'s `method`, its answer once
- * there is one. A promise is watched from the side and handed on itself: a
- * promise of the recorder's own in its place would settle a turn later, and
- * the engine's work would interleave as it never does unrecorded.
- */
+/** `fn`, each call of it written down as `seam`'s `method`, its answer once there is one (`watched`). */
 function called(seam, method, fn, self = undefined) {
-  return (...args) => {
-    const event = { seam, ...(method === null ? {} : { method }), args: encode(args) }
-    record(event)
-    let answer
-    try {
-      answer = fn.apply(self, args)
-    } catch (cause) {
-      event.threw = failure(cause)
-      throw cause
-    }
-    if (answer instanceof Promise) {
-      event.pending = true
-      answer.then(
-        (value) => {
-          delete event.pending
-          event.answer = encode(value)
-        },
-        (cause) => {
-          delete event.pending
-          event.threw = failure(cause)
-        },
-      )
-      return answer
-    }
-    event.answer = encode(answer)
+  return (...args) =>
+    watched({ seam, ...(method === null ? {} : { method }), args: encode(args) }, () =>
+      fn.apply(self, args),
+    )
+}
+
+/**
+ * `event` written down where `call` is made, and its answer, or what it
+ * threw, once there is one. A promise is watched from the side and handed on
+ * itself: a promise of the recorder's own in its place would settle a turn
+ * later, and the engine's work would interleave as it never does unrecorded.
+ */
+function watched(event, call) {
+  record(event)
+  let answer
+  try {
+    answer = call()
+  } catch (cause) {
+    event.threw = failure(cause)
+    throw cause
+  }
+  if (answer instanceof Promise) {
+    event.pending = true
+    answer.then(
+      (value) => {
+        delete event.pending
+        event.answer = encode(value)
+      },
+      (cause) => {
+        delete event.pending
+        event.threw = failure(cause)
+      },
+    )
     return answer
   }
+  event.answer = encode(answer)
+  return answer
 }

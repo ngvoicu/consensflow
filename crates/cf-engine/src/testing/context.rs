@@ -2,7 +2,8 @@
 //! real ledger on a temporary file, at a clock that moves when the test
 //! says (from 2026-09-19 12:00 UTC) and naming sessions from a fixed list;
 //! the fake pane host and adapter; the other seams' fakes; and the engine
-//! made with them, its work run to stillness by the kit's executor. What
+//! made with them, its work run to stillness by the engine's own executor,
+//! which the kit drains. What
 //! the engine asks of its seams is written down ([`Recorder`]) for the Node
 //! trace of the same test to be held against.
 
@@ -22,8 +23,9 @@ use serde_json::{json, Value};
 
 use super::adapter::FakeAdapter;
 use super::adapters::{FakeAdapters, FakeRecords};
-use super::executor::{Answer, Executor};
+use super::executor::Answer;
 use super::host::FakeHost;
+use super::operations::{answer, nothing};
 use super::recorder::Recorder;
 use super::seams::{
     CountingLaunchIds, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv, FakeRoles,
@@ -31,6 +33,7 @@ use super::seams::{
 };
 use super::time::TestTime;
 use crate::dispatcher::Dispatcher;
+use crate::runtime::Executor;
 use crate::seams::{Adapters, EngineError, Limits, Seams};
 
 /// 2026-09-19T12:00:00.000Z, where every test's clock starts.
@@ -138,7 +141,7 @@ impl Context {
         )
         .expect("a ledger");
         let ledger = Rc::new(RefCell::new(ledger));
-        let executor = Rc::new(Executor::default());
+        let executor = Rc::new(Executor::strict());
         let host = FakeHost::new(recorder.clone());
         let adapter = FakeAdapter::new(recorder.clone());
         let codex = adapter.another();
@@ -229,7 +232,7 @@ impl Context {
     /// does in JavaScript's loop, the earliest first.
     pub fn finish<T>(&self, answer: Answer<T>) -> T {
         loop {
-            self.executor.run();
+            self.executor.drain();
             if answer.ended() || !self.timers.fire_next() {
                 break;
             }
@@ -242,23 +245,28 @@ impl Context {
     /// Runs everything started to stillness, its sleeps not ended: what
     /// waits on one keeps waiting, as before a timer is due.
     pub fn settle(&self) {
-        self.executor.run();
+        self.executor.drain();
     }
 
     /// One pass, everything it began run to stillness.
     pub fn pass(&self) -> Result<(), EngineError> {
-        self.recorder.op("pass", json!([]));
         let dispatcher = Rc::clone(&self.dispatcher);
-        self.run(async move { dispatcher.pass().await })
+        let pass = self.operation("pass", json!([]), nothing, async move {
+            dispatcher.pass().await
+        });
+        self.run(pass)
     }
 
     /// A project opened (`dispatcher.openProject`), `request` as the API
     /// gives it, run to stillness.
     pub fn open_project(&self, request: Value) -> Result<Option<ProjectView>, EngineError> {
-        self.recorder.op("openProject", json!([request.clone()]));
-        let request = NewProject::from_json(&request)?;
         let dispatcher = Rc::clone(&self.dispatcher);
-        self.run(async move { dispatcher.open_project(request).await })
+        let asked = request.clone();
+        let opening = self.operation("openProject", json!([request]), answer, async move {
+            let request = NewProject::from_json(&asked)?;
+            dispatcher.open_project(request).await
+        });
+        self.run(opening)
     }
 
     /// A project with its chief window up, `workers` (standard workers on
