@@ -6,6 +6,7 @@
 //!
 //! Landing C freezes what the dispatcher asks of it; landing D ports it.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use cf_harness::contract::{LaunchId, Observed, Pane, Window};
@@ -127,6 +128,12 @@ impl Default for WindowPart {
     }
 }
 
+/// What the windows keep across records: the last pane's generation.
+#[derive(Debug, Default)]
+pub(crate) struct WindowsState {
+    generation: Cell<i64>,
+}
+
 /// What a part of the engine not ported yet answers.
 pub(crate) fn not_ported(what: &str) -> EngineError {
     EngineError::said("not-ported", format!("{what} is not ported yet"))
@@ -148,19 +155,32 @@ impl Dispatcher {
     /// A window that exited: its token is revoked, its files in the home go
     /// with it, and its part of the record holds no window.
     pub(crate) fn closed(&self, record: &Record) {
-        let mut window = record.window.borrow_mut();
-        if let Some(token) = window.token.take() {
+        let (token, launch) = {
+            let mut window = record.window.borrow_mut();
+            let taken = (window.token.take(), window.launch_id.take());
+            window.window = None;
+            window.pane = None;
+            window.retiring = false;
+            window.hidden = false;
+            window.settled = false;
+            window.activity = Activity::of(ActivityState::Closed);
+            taken
+        };
+        if let Some(token) = token {
             self.seams.credentials.revoke(&token);
         }
-        if let Some(launch) = window.launch_id.take() {
+        if let Some(launch) = launch {
             self.seams.launch_files.forget(&launch);
         }
-        window.window = None;
-        window.pane = None;
-        window.retiring = false;
-        window.hidden = false;
-        window.settled = false;
-        window.activity = Activity::of(ActivityState::Closed);
+    }
+
+    /// The next pane's generation: past the last one, and no earlier than
+    /// now, so a window opened after a restart takes no old one's.
+    #[expect(dead_code, reason = "a window's launch draws it, in landing D")]
+    pub(crate) fn next_generation(&self) -> i64 {
+        let next = (self.windows.generation.get() + 1).max(self.now());
+        self.windows.generation.set(next);
+        next
     }
 
     /// What a window does now, told to the trace and the board when it changed.

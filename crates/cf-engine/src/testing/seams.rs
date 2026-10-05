@@ -11,7 +11,7 @@ use std::rc::Rc;
 use cf_base::refusal::Refusal;
 use cf_harness::contract::LaunchId;
 use cf_ledger::{Ledger, ParticipantView, ProjectView};
-use cf_proto::trace::TraceLine;
+use cf_proto::trace::{TraceLine, Traced};
 use serde_json::{json, Value};
 
 use super::recorder::Recorder;
@@ -152,6 +152,11 @@ impl Roster for FakeRoster {
 pub struct FakeTrace {
     pub(crate) recorder: Recorder,
     pub lines: RefCell<Vec<TraceLine>>,
+    /// It forgets a deleted project's lines, as the event file in the home
+    /// does; without, it has no `forget`, as the Node tests' own trace.
+    pub forgets: Cell<bool>,
+    /// The projects it forgot, in order.
+    pub forgotten: RefCell<Vec<i64>>,
 }
 
 impl Trace for FakeTrace {
@@ -162,7 +167,17 @@ impl Trace for FakeTrace {
         self.lines.borrow_mut().push(line);
     }
 
-    fn forget(&self, _project: i64) {}
+    fn forget(&self, project: i64) {
+        if !self.forgets.get() {
+            return;
+        }
+        self.recorder
+            .called("trace", Some("forget"), json!([project]), Value::Null);
+        self.forgotten.borrow_mut().push(project);
+        self.lines.borrow_mut().retain(
+            |line| !matches!(&line.what, Traced::Window { project: of, .. } if *of == Some(project)),
+        );
+    }
 }
 
 /// The log: what failed apart from any pass, which no test may leave.

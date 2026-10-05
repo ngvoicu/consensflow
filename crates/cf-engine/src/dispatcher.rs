@@ -34,8 +34,9 @@ use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 use crate::chief_switch::SwitchTo;
 use crate::record::Record;
 use crate::runtime::{all, begin, Begun, LocalWork};
+use crate::scheduler::SchedulerState;
 use crate::seams::{EngineError, Seams};
-use crate::windows::{Activity, ActivityState};
+use crate::windows::{Activity, ActivityState, WindowsState};
 
 /// When a Switch chief goes: now, or once the chief's turn ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +86,10 @@ pub struct Dispatcher {
     leaving: RefCell<Vec<Rc<Record>>>,
     listeners: RefCell<Vec<Rc<dyn Fn()>>>,
     transcript_listeners: RefCell<Vec<Rc<dyn Fn()>>>,
+    /// What the windows keep across records (`windows`).
+    pub(crate) windows: WindowsState,
+    /// What the scheduler keeps across records (`scheduler`).
+    pub(crate) scheduler: SchedulerState,
 }
 
 impl Dispatcher {
@@ -95,6 +100,8 @@ impl Dispatcher {
             leaving: RefCell::new(Vec::new()),
             listeners: RefCell::new(Vec::new()),
             transcript_listeners: RefCell::new(Vec::new()),
+            windows: WindowsState::default(),
+            scheduler: SchedulerState::default(),
         })
     }
 
@@ -1185,6 +1192,15 @@ impl Dispatcher {
 
     pub(crate) fn changed(&self) {
         let listeners: Vec<Rc<dyn Fn()>> = self.listeners.borrow().clone();
+        for listener in listeners {
+            listener();
+        }
+    }
+
+    /// A look copied something new of what a window wrote: each view of a
+    /// window's work hears it ([`Dispatcher::on_transcript`]).
+    pub(crate) fn wrote(&self) {
+        let listeners: Vec<Rc<dyn Fn()>> = self.transcript_listeners.borrow().clone();
         for listener in listeners {
             listener();
         }

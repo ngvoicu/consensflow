@@ -133,6 +133,8 @@ impl Context {
         let trace = Rc::new(FakeTrace {
             recorder: recorder.clone(),
             lines: RefCell::new(Vec::new()),
+            forgets: Cell::new(false),
+            forgotten: RefCell::new(Vec::new()),
         });
         let log = Rc::new(FakeLog {
             recorder: recorder.clone(),

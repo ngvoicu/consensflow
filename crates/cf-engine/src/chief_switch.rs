@@ -10,8 +10,9 @@
 use std::rc::Rc;
 
 use cf_harness::contract::Observed;
-use cf_ledger::{ParticipantView, ProjectView};
+use cf_ledger::{ConversationView, MessageView, ParticipantView, ProjectView};
 
+use crate::deliveries::Delivering;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::seams::EngineError;
@@ -33,6 +34,32 @@ pub(crate) struct PendingSwitch {
 }
 
 impl Dispatcher {
+    /// A chief's first message: a handoff still on its way goes first; a
+    /// chief that starts fresh with earlier conversations behind it gets a
+    /// handoff; else `message`, if there is one.
+    #[expect(dead_code, reason = "a window's launch asks for it, in landing D")]
+    pub(crate) fn chief_first(
+        &self,
+        _project: &ProjectView,
+        _chief: &ParticipantView,
+        _conversation: Option<&ConversationView>,
+        _message: Option<MessageView>,
+    ) -> Result<Option<MessageView>, EngineError> {
+        Err(not_ported("a chief's first message"))
+    }
+
+    /// A chief whose agent is gone does not open: the human hears why, and
+    /// what it was to receive waits for the chief they switch in.
+    #[expect(dead_code, reason = "a window's launch asks for it, in landing D")]
+    pub(crate) fn chief_without_agent(
+        &self,
+        _project: &ProjectView,
+        _chief: &ParticipantView,
+        _delivering: Option<Delivering>,
+    ) -> Result<(), EngineError> {
+        Err(not_ported("a chief whose agent is gone"))
+    }
+
     /// A switch the human asked for after the chief's turn; with `note`,
     /// the chief is asked first where things stand.
     pub(crate) fn after_turn(

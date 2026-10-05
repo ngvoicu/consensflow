@@ -8,14 +8,23 @@
 //!   event the ledger logs, whole; each call of the pane host, with what it
 //!   was given and answered; each call of an adapter by its method and what
 //!   names it (the launch, the message, the text, the conversation resumed or
-//!   read); each token issued and revoked; each launch's files forgotten;
-//!   each line of the trace and of the log;
+//!   read), and each launch with what it was given (the participant's
+//!   handle, its role, folder and role text, its agent's settings); each
+//!   token issued, with whom for, and revoked; each launch's files
+//!   forgotten; each line of the trace, each project it forgot, and each
+//!   line of the log, a failure by its words;
 //! - dropped: the ledger's own calls (its events and the final database say
 //!   what they changed, and reads are no behaviour), the roster, the role
 //!   texts and the pane environment (lookups), a revoke or a forget of
 //!   nothing (JavaScript made them for a window that had no token yet);
-//! - renamed: the conversations' item ids, numbered in the test file by
-//!   JavaScript and in the test by Rust, each by its first appearance.
+//! - read as absent: a field JavaScript held `undefined`, as `JSON.stringify`
+//!   leaves it out.
+//!
+//! Both kits number a test's conversation items from `i-1`, so the ids are
+//! held as they are.
+//!
+//! A limit: a transcript's copy logs no event, so where its writes fall
+//! among the other effects is held only by the database each side left.
 //!
 //! The database each side left is held equal whole, table by table, each
 //! value as SQLite quotes it, the test's temporary folder written «dir».
@@ -66,8 +75,8 @@ pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
     let trace = TRACES.get(&key).unwrap_or_else(|| {
         panic!("no Node trace of {suites:?} › {name}: npm run goldens:dispatcher")
     });
-    let node = renumbered(projected(trace["events"].as_array().expect("its events")));
-    let rust = renumbered(projected(&closed.events));
+    let node = projected(trace["events"].as_array().expect("its events"));
+    let rust = projected(&closed.events);
     if let Some(at) = (0..node.len().max(rust.len())).find(|&at| node.get(at) != rust.get(at)) {
         let around = |events: &[Value]| {
             events[at.saturating_sub(3)..(at + 3).min(events.len())]
@@ -93,7 +102,7 @@ pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
 
 /// What a trace's events are the engine's behaviour, as both sides write it.
 fn projected(events: &[Value]) -> Vec<Value> {
-    events.iter().filter_map(project).collect()
+    events.iter().filter_map(project).map(defined).collect()
 }
 
 fn project(event: &Value) -> Option<Value> {
@@ -107,77 +116,102 @@ fn project(event: &Value) -> Option<Value> {
         "event" => Some(json!({ "event": event["event"] })),
         "host" => Some(json!({ "host": method, "args": args, "answer": event["answer"] })),
         "credentials" => match method {
-            Some("issue") => Some(json!({ "issue": event["answer"] })),
+            Some("issue") => Some(json!({
+                "issue": event["answer"],
+                "participant": args[0]["participant"]["id"],
+                "handle": args[0]["participant"]["handle"],
+                "project": args[0]["project"]["id"],
+            })),
             _ => (!args[0].is_null()).then(|| json!({ "revoke": args[0] })),
         },
         "launchFiles" => (!args[0].is_null()).then(|| json!({ "forget": args[0] })),
-        "trace" => Some(json!({ "trace": args[0] })),
-        "log" => Some(json!({ "log": args })),
-        adapter if adapter.starts_with("adapter:") => {
-            let given = &args[0];
-            let launch = given.get("launchId").or_else(|| {
-                given
-                    .get("launch")
-                    .and_then(|launch| launch.get("launchId"))
-            });
-            let mut named = Map::new();
-            named.insert("adapter".to_owned(), json!(adapter));
-            named.insert("method".to_owned(), json!(method));
-            for (key, value) in [
-                ("launch", launch),
-                ("message", given.get("message")),
-                ("text", given.get("text")),
-                ("resume", given.get("resume")),
-                (
-                    "session",
-                    given
-                        .get("conversation")
-                        .and_then(|conversation| conversation.get("nativeSession")),
-                ),
-            ] {
-                if let Some(value) = value {
-                    named.insert(key.to_owned(), value.clone());
-                }
-            }
-            Some(Value::Object(named))
-        }
+        "trace" => Some(match method {
+            Some("forget") => json!({ "trace forgets": args[0] }),
+            _ => json!({ "trace": args[0] }),
+        }),
+        "log" => Some(json!({ "log": args[0], "cause": said(&args[1]) })),
+        adapter if adapter.starts_with("adapter:") => Some(adapter_call(adapter, method, &args[0])),
         _ => None,
     }
 }
 
-/// `events` with each conversation item's id (`i-<n>`) numbered by its first
-/// appearance.
-fn renumbered(events: Vec<Value>) -> Vec<Value> {
-    let mut names: HashMap<String, String> = HashMap::new();
-    events
-        .into_iter()
-        .map(|event| rename(event, &mut names))
-        .collect()
+/// An adapter's call by what names it; a launch with what it was given.
+fn adapter_call(adapter: &str, method: Option<&str>, given: &Value) -> Value {
+    let launch = given.get("launchId").or_else(|| {
+        given
+            .get("launch")
+            .and_then(|launch| launch.get("launchId"))
+    });
+    let mut named = Map::new();
+    named.insert("adapter".to_owned(), json!(adapter));
+    named.insert("method".to_owned(), json!(method));
+    for (key, value) in [
+        ("launch", launch),
+        ("message", given.get("message")),
+        ("text", given.get("text")),
+        ("resume", given.get("resume")),
+        (
+            "session",
+            given
+                .get("conversation")
+                .and_then(|conversation| conversation.get("nativeSession")),
+        ),
+    ] {
+        if let Some(value) = value {
+            named.insert(key.to_owned(), value.clone());
+        }
+    }
+    if method == Some("prepare") {
+        named.insert("handle".to_owned(), given["participant"]["handle"].clone());
+        for key in ["role", "directory", "instructions"] {
+            named.insert(key.to_owned(), given[key].clone());
+        }
+        named.insert("agent".to_owned(), settings(&given["agent"]));
+    }
+    Value::Object(named)
 }
 
-fn rename(value: Value, names: &mut HashMap<String, String>) -> Value {
+/// A saved agent as the adapters read it: its model, effort, thinking and
+/// whether it is an image agent; none for a chief from before every chief
+/// had one.
+fn settings(agent: &Value) -> Value {
+    if agent.is_null() {
+        return Value::Null;
+    }
+    let read = |key: &str| match &agent[key] {
+        Value::Object(tagged) if tagged.contains_key("$undefined") => Value::Null,
+        value => value.clone(),
+    };
+    json!({
+        "model": read("model"),
+        "effort": read("effort"),
+        "thinking": read("thinking"),
+        "designer": agent["designer"] == json!(true),
+    })
+}
+
+/// A failure by its words: JavaScript logged an `Error`, Rust its message.
+fn said(cause: &Value) -> Value {
+    cause
+        .get("$error")
+        .and_then(|error| error.get("message"))
+        .unwrap_or(cause)
+        .clone()
+}
+
+/// `value` with each field JavaScript held `undefined` left out.
+fn defined(value: Value) -> Value {
     match value {
-        Value::String(text) if is_item_id(&text) => {
-            let next = format!("i-{}", names.len() + 1);
-            Value::String(names.entry(text).or_insert(next).clone())
-        }
-        Value::Array(items) => {
-            Value::Array(items.into_iter().map(|item| rename(item, names)).collect())
-        }
+        Value::Array(items) => Value::Array(items.into_iter().map(defined).collect()),
         Value::Object(fields) => Value::Object(
             fields
                 .into_iter()
-                .map(|(key, item)| (key, rename(item, names)))
+                .filter(|(_, item)| *item != json!({ "$undefined": true }))
+                .map(|(key, item)| (key, defined(item)))
                 .collect(),
         ),
         other => other,
     }
-}
-
-fn is_item_id(text: &str) -> bool {
-    text.strip_prefix("i-").is_some_and(|digits| {
-        !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
-    })
 }
 
 /// The database `file` holds, as the Node recorder dumped its own: each
@@ -230,17 +264,54 @@ fn dump(file: &Path, folder: &Path) -> Value {
 }
 
 #[test]
-fn an_item_id_is_named_by_its_first_appearance_and_nothing_else_is() {
-    let events = vec![
-        json!({ "items": [{ "id": "i-7" }, { "id": "i-3" }], "text": "i-7 said" }),
-        json!({ "id": "i-3", "other": "i-", "launch": "i-x" }),
+fn a_field_javascript_held_undefined_is_absent_and_a_failure_is_its_words() {
+    let node = [
+        json!({ "seam": "host", "method": "open", "args": [{ "id": "p1-chief" }], "answer": { "ok": true, "pid": { "$undefined": true } } }),
+        json!({ "seam": "log", "method": "error", "args": ["a launch failed", { "$error": { "name": "Error", "code": null, "status": null, "message": "refused" } }] }),
     ];
+    let rust = [
+        json!({ "seam": "host", "method": "open", "args": [{ "id": "p1-chief" }], "answer": { "ok": true } }),
+        json!({ "seam": "log", "method": "error", "args": ["a launch failed", "refused"] }),
+    ];
+    assert_eq!(projected(&node), projected(&rust));
+    let kept = [
+        json!({ "seam": "host", "method": "open", "args": [{ "id": "p1-chief" }], "answer": { "ok": true, "pid": 4242 } }),
+    ];
+    assert_ne!(projected(&kept), projected(&rust), "a pid is kept");
+}
+
+#[test]
+fn a_launch_is_held_with_what_it_was_given() {
+    let node = json!({ "seam": "adapter:claude-code", "method": "prepare", "args": [{
+        "launchId": "l", "participant": { "id": 2, "handle": "chief", "createdAt": "then" },
+        "role": "chief", "project": { "id": 1, "name": "app" }, "directory": "/work/app",
+        "resume": null, "message": null,
+        "agent": { "id": "apollo", "model": "claude-opus-5", "profile": { "modelKey": "claude-opus-5" } },
+        "instructions": "instructions for chief",
+    }] });
+    let rust = json!({ "seam": "adapter:claude-code", "method": "prepare", "args": [{
+        "launchId": "l", "participant": { "handle": "chief" }, "role": "chief",
+        "project": { "id": 1 }, "directory": "/work/app", "resume": null, "message": null,
+        "agent": { "model": "claude-opus-5", "effort": null, "thinking": null, "designer": false },
+        "instructions": "instructions for chief",
+    }] });
     assert_eq!(
-        renumbered(events),
-        [
-            json!({ "items": [{ "id": "i-1" }, { "id": "i-2" }], "text": "i-7 said" }),
-            json!({ "id": "i-2", "other": "i-", "launch": "i-x" }),
-        ]
+        projected(std::slice::from_ref(&node)),
+        projected(std::slice::from_ref(&rust))
+    );
+    let mut other = rust.clone();
+    other["args"][0]["agent"]["model"] = json!("gpt-6-astra");
+    assert_ne!(
+        projected(std::slice::from_ref(&node)),
+        projected(std::slice::from_ref(&other)),
+        "the model is held"
+    );
+    let mut other = rust;
+    other["args"][0]["instructions"] = json!("instructions for worker");
+    assert_ne!(
+        projected(std::slice::from_ref(&node)),
+        projected(std::slice::from_ref(&other)),
+        "the role text is held"
     );
 }
 
@@ -254,6 +325,7 @@ fn a_lookup_and_a_ledger_call_are_no_behaviour_and_a_revoke_of_nothing_is_none()
         json!({ "seam": "credentials", "method": "revoke", "args": ["token-zeus"] }),
         json!({ "seam": "launchFiles", "method": "forget", "args": [null] }),
         json!({ "seam": "adapter:codex", "method": "observe", "args": [{ "launch": { "launchId": "l" }, "host": "$host" }] }),
+        json!({ "seam": "trace", "method": "forget", "args": [1], "answer": 1 }),
     ];
     assert_eq!(
         projected(&events),
@@ -261,6 +333,7 @@ fn a_lookup_and_a_ledger_call_are_no_behaviour_and_a_revoke_of_nothing_is_none()
             json!({ "op": "pass" }),
             json!({ "revoke": "token-zeus" }),
             json!({ "adapter": "adapter:codex", "method": "observe", "launch": "l" }),
+            json!({ "trace forgets": 1 }),
         ]
     );
 }

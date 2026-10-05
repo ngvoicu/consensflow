@@ -1,9 +1,10 @@
 //! A harness adapter whose agents do exactly what the test tells them: the
 //! twin of `fakeAdapter` in `core-dispatcher.test.mjs`. One adapter answers
 //! for any harness the test names it under; each window is an agent, found
-//! by its launch, and by the handle it is for. Every call is written down in
-//! the Node traces' shape, under the harness it was asked as, and answered a
-//! turn later, as the JavaScript fake's promises were.
+//! by its launch, and by the handle it is for. What a call does and reads, it
+//! does when called, as the JavaScript fake's async functions did; each is
+//! answered a turn later, as their promises were, and written down in the
+//! Node traces' shape, under the harness it was asked as.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -55,7 +56,9 @@ pub type Ready = Rc<dyn Fn() -> Result<Readiness, String>>;
 pub struct FakeAdapter {
     recorder: Recorder,
     agents: RefCell<Vec<FakeAgent>>,
-    /// Each launch prepared, as asked: its launch id, handle, role, resume and message.
+    /// Each launch prepared, as asked, in the shape of the JavaScript
+    /// fake's `prepared`: its launch id, participant's handle, role,
+    /// project, folder, resume, message, agent and instructions.
     prepared: RefCell<Vec<Value>>,
     items: Cell<u64>,
     /// A `ready` of the test's own; without one a window is ready, and
@@ -211,11 +214,18 @@ impl Adapter for Asked {
         let seam = format!("adapter:{}", self.harness);
         let asked = json!({
             "launchId": launch.id.as_str(),
-            "handle": launch.handle,
+            "participant": { "handle": launch.handle },
             "role": launch.role,
+            "project": { "id": launch.project },
             "directory": launch.directory,
             "resume": launch.resume,
             "message": launch.message,
+            "agent": launch.agent.map(|agent| json!({
+                "model": agent.model,
+                "effort": agent.effort,
+                "thinking": agent.thinking,
+                "designer": agent.designer,
+            })),
             "instructions": launch.instructions,
         });
         let at = fake
@@ -302,13 +312,13 @@ impl Window for FakeWindow {
         _pane: &'a Pane,
     ) -> Work<'a, Result<Readiness, String>> {
         let ready = self.fake.ready.borrow().clone();
+        let Some(ready) = ready else {
+            return Box::pin(async { Ok(Readiness::Ready) });
+        };
+        let at = self.call("ready", json!([{ "launch": { "launchId": self.launch } }]));
+        let answer = ready();
         Box::pin(async move {
-            let Some(ready) = ready else {
-                return Ok(Readiness::Ready);
-            };
-            let at = self.call("ready", json!([{ "launch": { "launchId": self.launch } }]));
             next_turn().await;
-            let answer = ready();
             let written = match &answer {
                 Ok(Readiness::Ready) => json!(true),
                 Ok(Readiness::Held(held)) => json!(held.sentence()),
@@ -333,24 +343,24 @@ impl Window for FakeWindow {
                 "text": text,
             }]),
         );
+        let admission = self.fake.of_launch(&self.launch, |agent| {
+            if !agent.admit {
+                return Admission::Refused {
+                    reason: "refused by the test".to_owned(),
+                };
+            }
+            if agent.arrive {
+                agent.items.push(self.fake.item(Role::User, text));
+                agent.settled = false;
+                // A message that arrives starts a turn: the one before it ended as it did.
+                agent.failed = false;
+            }
+            Admission::Admitted {
+                queued: agent.queued,
+            }
+        });
         Box::pin(async move {
             next_turn().await;
-            let admission = self.fake.of_launch(&self.launch, |agent| {
-                if !agent.admit {
-                    return Admission::Refused {
-                        reason: "refused by the test".to_owned(),
-                    };
-                }
-                if agent.arrive {
-                    agent.items.push(self.fake.item(Role::User, text));
-                    agent.settled = false;
-                    // A message that arrives starts a turn: the one before it ended as it did.
-                    agent.failed = false;
-                }
-                Admission::Admitted {
-                    queued: agent.queued,
-                }
-            });
             let written = match &admission {
                 Admission::Admitted { queued: true } => json!({ "admitted": true, "queued": true }),
                 Admission::Admitted { queued: false } => json!({ "admitted": true }),
@@ -368,12 +378,12 @@ impl Window for FakeWindow {
             "observe",
             json!([{ "launch": { "launchId": self.launch } }]),
         );
+        let session = self.session.borrow().clone();
+        let observed = self
+            .fake
+            .of_launch(&self.launch, |agent| looked(agent, &session));
         Box::pin(async move {
             next_turn().await;
-            let session = self.session.borrow().clone();
-            let observed = self
-                .fake
-                .of_launch(&self.launch, |agent| looked(agent, &session));
             self.fake.recorder.answered(at, observed_json(&observed));
             Ok(observed)
         })
@@ -504,9 +514,9 @@ impl Records for FakeRecords {
             Some("record"),
             json!([{ "conversation": { "nativeSession": session } }]),
         );
+        let reading = self.fake.record_of(session);
         Box::pin(async move {
             next_turn().await;
-            let reading = self.fake.record_of(session);
             let written = match &reading {
                 Reading::Unknown(_) => json!({ "unknown": true }),
                 Reading::Known(record) => json!({ "items": record.items }),

@@ -8,6 +8,8 @@
 //! Landing C freezes what the dispatcher asks of it, with the readings that
 //! are one line each; a worker ports the rest.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use cf_base::time;
@@ -28,6 +30,13 @@ pub(crate) struct QuotaPart {
     pub(crate) reported: Option<Arc<Quota>>,
     /// The refusal this window acted on: the same one is history after.
     pub(crate) handled: Option<Arc<Quota>>,
+}
+
+/// What the scheduler keeps across records: the open tasks whose requester
+/// heard that they wait for a free member, each with its project.
+#[derive(Debug, Default)]
+pub(crate) struct SchedulerState {
+    waiting_noted: RefCell<HashMap<i64, i64>>,
 }
 
 impl Dispatcher {
@@ -139,6 +148,12 @@ impl Dispatcher {
         Err(not_ported("a turn cut short"))
     }
 
-    /// A deleted project's open tasks wait for nobody now.
-    pub(crate) fn forget_project(&self, _project: i64) {}
+    /// A deleted project's open tasks wait for nobody now: what their
+    /// requesters heard is forgotten.
+    pub(crate) fn forget_project(&self, project: i64) {
+        self.scheduler
+            .waiting_noted
+            .borrow_mut()
+            .retain(|_, noted| *noted != project);
+    }
 }

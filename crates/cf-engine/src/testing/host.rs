@@ -1,7 +1,8 @@
 //! A pane host that opens nothing real and ends panes when told to: the
-//! twin of `fakeHost` in `core-dispatcher.test.mjs`. Each answer comes a
-//! turn later, as the JavaScript fake's promises did, and every call is
-//! written down in the Node traces' shape.
+//! twin of `fakeHost` in `core-dispatcher.test.mjs`. What a call does and
+//! reads, it does when called, as the JavaScript fake's async functions did
+//! up to their first wait; each answer comes a turn later, as their promises
+//! did; and every call is written down in the Node traces' shape.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -141,14 +142,14 @@ impl PaneHost for FakeHost {
             .recorder
             .call("host", Some("request"), json!([op, body.clone()]));
         self.requests.borrow_mut().push((op.to_owned(), body));
+        let mut answer = Map::new();
+        answer.insert("ok".to_owned(), json!(true));
+        if op == "pane.snapshot" {
+            answer.extend(self.snapshot.borrow().clone());
+        }
+        let answer = Value::Object(answer);
         Box::pin(async move {
             next_turn().await;
-            let mut answer = Map::new();
-            answer.insert("ok".to_owned(), json!(true));
-            if op == "pane.snapshot" {
-                answer.extend(self.snapshot.borrow().clone());
-            }
-            let answer = Value::Object(answer);
             self.recorder.answered(at, answer.clone());
             Ok(answer)
         })
