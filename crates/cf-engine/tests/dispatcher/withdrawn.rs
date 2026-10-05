@@ -5,7 +5,7 @@
 use std::rc::Rc;
 
 use cf_engine::delivery_text::{delivery_text, marker_of};
-use cf_engine::testing::{Context, Gate};
+use cf_engine::testing::Context;
 use cf_harness::contract::Readiness;
 use cf_harness::records::Role;
 use cf_ledger::MessageView;
@@ -93,9 +93,8 @@ fn is_not_confirmed_when_it_shows_after_all_and_its_window_goes_with_its_work() 
 fn is_handed_nothing_when_it_was_withdrawn_while_its_window_got_ready_and_fails_nothing() {
     let context = Context::new();
     let (tiers, answer) = asked(&context);
-    let readying = Gate::default();
     *context.adapter.ready.borrow_mut() = Some(Rc::new(|| Ok(Readiness::Ready)));
-    *context.adapter.hold_ready.borrow_mut() = Some(readying.clone());
+    let readying = context.adapter.ready_holds.hold(|_| true);
     context.pass().unwrap();
     context
         .ledger

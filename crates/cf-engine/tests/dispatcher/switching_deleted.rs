@@ -12,6 +12,7 @@ use cf_harness::records::Role;
 
 use crate::chiefs::{chief_of, replace_project, to, with_codex};
 use crate::traces::held_to;
+use crate::work_in_flight::looks_at;
 
 const SUITES: &[&str] = &["switching the chief to another agent"];
 
@@ -98,8 +99,7 @@ fn hands_nothing_to_an_old_chief_whose_switch_waited_for_its_turns_end_once_its_
     // The turn ends, and the next look at the old window waits on its harness.
     context.adapter.answer("chief", "Done with that");
     let launch = context.adapter.agent("chief").launch;
-    let held = Gate::default();
-    *context.adapter.hold_observes.borrow_mut() = Some((launch, held.clone()));
+    let held = context.adapter.observe_holds.hold(looks_at(launch));
     let looking = context.begin_pass();
     let replaced = replace_project(&context, &old);
     let welcome = context.note_from_consensflow(replaced.fresh.id, "chief", "Welcome");
@@ -146,8 +146,7 @@ fn copies_and_confirms_nothing_of_the_old_chiefs_last_look_once_its_project_is_d
         .adapter
         .with("chief", |agent| agent.items.push(said));
     let launch = context.adapter.agent("chief").launch;
-    let held = Gate::default();
-    *context.adapter.hold_observes.borrow_mut() = Some((launch, held.clone()));
+    let held = context.adapter.observe_holds.hold(looks_at(launch));
     let switched =
         context.begin_switch_chief(old.id, to("codex", "astraeus"), SwitchWhen::Now, false);
     context.settle();

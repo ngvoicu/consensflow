@@ -11,6 +11,7 @@ use serde_json::json;
 use crate::chiefs::{chief_of, to, with_codex};
 use crate::fixtures::assert_match;
 use crate::traces::held_to;
+use crate::work_in_flight::looks_at;
 
 const SUITES: &[&str] = &["a window that takes long"];
 
@@ -49,8 +50,7 @@ fn holds_up_only_itself_the_pass_moves_on_and_other_windows_are_delivered_to_and
         .unwrap()
         .to_owned();
     // Pi waits up to 30 s for a paste's acknowledgement; this one waits for the test.
-    let held = Gate::default();
-    *context.adapter.hold_deliveries.borrow_mut() = Some((slow_launch, held.clone()));
+    let held = context.adapter.deliver_holds.hold(looks_at(slow_launch));
     let one = context.note_from_consensflow(slow.id, "chief", "Slow");
     let two = context.note_from_consensflow(quick.id, "chief", "Quick");
     context.pass().unwrap();

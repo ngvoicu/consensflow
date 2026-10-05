@@ -224,9 +224,10 @@ fn opens_nothing_for_a_sessions_open_that_waited_while_its_project_was_deleted_n
     let session = first.id("zeus-amber-pine");
     // The human opens the session's window, and again while the first one
     // comes up; that one exits at once, before its open is answered.
-    let held = Gate::default();
-    *context.adapter.hold_prepares.borrow_mut() =
-        Some(("zeus-amber-pine".to_owned(), held.clone()));
+    let held = context
+        .adapter
+        .prepare_holds
+        .hold(|args| args[0]["participant"]["handle"] == "zeus-amber-pine");
     let launches = context.adapter.prepared().len();
     context
         .open_window(first.project.id, "zeus-amber-pine")

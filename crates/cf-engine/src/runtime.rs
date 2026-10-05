@@ -20,6 +20,10 @@
 //!   [`returning`] a turn too: a pass's steps cross-read the ledger (a note
 //!   one step writes is the chief's next delivery in the same pass), so a
 //!   step that took fewer turns than Node's would read it before it was there.
+//! - A participant is let go a few turns after its work ended, and a waiter
+//!   learns of it a few turns after that ([`Hold`]): `#exclusive` and `#act`
+//!   begin the work inside promises that settle, and clear `running` and
+//!   `acting`, only after the work's own promise did.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -178,6 +182,17 @@ impl Future for NextTurn {
     }
 }
 
+/// Turns a participant stays held after its work ended (`Hold::lasting`).
+/// `#exclusive` and `#act` (`src/core/dispatcher.js`) begin the work in
+/// `begin(work)`, an `async` function that adopts the work's promise, and
+/// clear `running` or `acting` in the `finally` of an `async` function that
+/// awaits `begin`'s: adopting a promise takes a turn to ask it and a turn
+/// after it settled, and the `finally` goes on a turn after that. A promise
+/// settled already when asked, as that of work that waited on nothing was,
+/// costs one turn more.
+const LET_GO_AFTER_WAIT: usize = 2;
+const LET_GO_AFTER_START: usize = 3;
+
 /// Who holds a participant now (`runtime.running` and `runtime.acting`), and
 /// who waits for it.
 #[derive(Default)]
@@ -231,8 +246,12 @@ impl Hold {
         let hold = Rc::clone(self);
         begin(spawn, async move {
             waiting.await;
+            // `await (runtime.running ?? runtime.acting).catch(() => {})` in
+            // `#exclusive`: the `catch` made a promise of its own, so the
+            // waiter goes on a turn after the one it was woken in.
+            next_turn().await;
             hold.handed.set(false);
-            hold.run_held(work).await
+            hold.lasting(&hold.running, work).await
         })
         .await
     }
@@ -245,53 +264,50 @@ impl Hold {
         work: impl Future<Output = T> + 'static,
     ) -> Begun<T> {
         let hold = Rc::clone(self);
-        let begun = begin(spawn, async move {
-            let answer = work.await;
-            hold.running.set(false);
-            hold.pass_on();
-            answer
-        })
-        .await;
-        // Held from here, as JavaScript held it once the work's start was
-        // done; one that ended there holds nothing.
-        if !begun.ended() {
-            self.running.set(true);
-        }
-        begun
-    }
-
-    /// Runs `work`, handed the participant, in the waiter's own work: its
-    /// start as JavaScript ran it, nothing held until it first waits; then
-    /// held until it ends, and the participant passed on. Each wait of the
-    /// work is the waiter's, so what was begun meanwhile goes first.
-    async fn run_held<T>(&self, work: impl Future<Output = T>) -> T {
-        let mut work = pin!(work);
-        let answer = poll_fn(|context| {
-            let polled = work.as_mut().poll(context);
-            if polled.is_pending() {
-                self.running.set(true);
-            }
-            polled
-        })
-        .await;
-        self.running.set(false);
-        self.pass_on();
-        answer
+        begin(
+            spawn,
+            async move { hold.lasting(&hold.running, work).await },
+        )
+        .await
     }
 
     /// Begins `work` apart from the pass, holding the participant until it
     /// ends (`#act`): a launch or a delivery a step started.
     pub async fn act(self: &Rc<Self>, spawn: &dyn Spawn, work: impl Future<Output = ()> + 'static) {
         let hold = Rc::clone(self);
-        let begun = begin(spawn, async move {
-            work.await;
-            hold.acting.set(false);
-            hold.pass_on();
+        drop(begin(spawn, async move { hold.lasting(&hold.acting, work).await }).await);
+    }
+
+    /// Runs `work` as `#exclusive` and `#act` ran it: its start in place, as
+    /// JavaScript ran it, with nothing held until it is done; then `held` is
+    /// set, until the work has ended and the promises it was begun in have
+    /// settled ([`LET_GO_AFTER_WAIT`], [`LET_GO_AFTER_START`]). Then the
+    /// participant is passed on.
+    async fn lasting<T>(&self, held: &Cell<bool>, work: impl Future<Output = T>) -> T {
+        let mut work = pin!(work);
+        let mut started = false;
+        let mut at_once = false;
+        let answer = poll_fn(|context| {
+            let polled = work.as_mut().poll(context);
+            if !started {
+                started = true;
+                at_once = polled.is_ready();
+                held.set(true);
+            }
+            polled
         })
         .await;
-        if !begun.ended() {
-            self.acting.set(true);
+        let turns = if at_once {
+            LET_GO_AFTER_START
+        } else {
+            LET_GO_AFTER_WAIT
+        };
+        for _ in 0..turns {
+            next_turn().await;
         }
+        held.set(false);
+        self.pass_on();
+        answer
     }
 
     /// Hands the participant to the first waiter, once nothing holds it.
@@ -377,3 +393,5 @@ impl Drop for Waiting {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod turns;

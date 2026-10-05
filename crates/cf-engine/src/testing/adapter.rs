@@ -9,9 +9,10 @@
 //! what it reads, says what it did in its place ([`FakeAdapter::prepare`],
 //! [`FakeAdapter::after_prepare`], [`FakeAdapter::started`],
 //! [`FakeAdapter::deliver`], [`FakeAdapter::ready`],
-//! [`FakeAdapter::hold_ready`], [`FakeAdapter::hold_observes`],
-//! [`FakeAdapter::hold_prepares`], [`FakeAdapter::hold_deliveries`],
-//! [`FakeAdapter::interrupt`]).
+//! [`FakeAdapter::interrupt`]); one that held calls until it let them go
+//! (`hold`) says which, and when ([`FakeAdapter::prepare_holds`],
+//! [`FakeAdapter::observe_holds`], [`FakeAdapter::start_holds`],
+//! [`FakeAdapter::ready_holds`], [`FakeAdapter::deliver_holds`]).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -24,7 +25,7 @@ use cf_harness::contract::{
 use cf_harness::records::{Item, Quota, Role};
 use serde_json::{json, Value};
 
-use super::executor::Gate;
+use super::holds::{Holds, Wrapped};
 use super::recorder::Recorder;
 use super::window::FakeWindow;
 use crate::runtime::next_turn;
@@ -91,9 +92,6 @@ pub struct FakeAdapter {
     /// A `ready` of the test's own; without one a window is ready, and
     /// nothing is asked (the JavaScript fake had none).
     pub ready: RefCell<Option<Ready>>,
-    /// Every `ready` the adapter has waits for the gate before it answers
-    /// (`await readying` in the test's own).
-    pub hold_ready: RefCell<Option<Gate>>,
     /// A `started` of the test's own, that fails some windows.
     pub started: RefCell<Option<Started>>,
     /// A `prepare` of the test's own, that fails some launches.
@@ -104,19 +102,23 @@ pub struct FakeAdapter {
     pub after_prepare: RefCell<Option<AfterPrepare>>,
     /// A `deliver` of the test's own, in place of the fake's.
     pub deliver: RefCell<Option<Deliver>>,
-    /// Every `observe` of the window of this launch waits for the gate, and
-    /// is made once it opens.
-    pub hold_observes: RefCell<Option<(String, Gate)>>,
-    /// Every `prepare` for the participant of this handle waits for the gate,
-    /// and is made once it opens: its launch is asked at once, and no window
-    /// is made before.
-    pub hold_prepares: RefCell<Option<(String, Gate)>>,
-    /// Every `deliver` into the window of this launch waits for the gate,
-    /// and is made once it opens.
-    pub hold_deliveries: RefCell<Option<(String, Gate)>>,
     /// The keys that interrupt a turn in its windows (`adapter.interrupt`):
     /// Escape once, as an adapter that says no more.
     pub interrupt: Cell<Interrupt>,
+    /// Launches the test holds (`hold(adapter, 'prepare', ...)`): one let go
+    /// fails with the reason, where the test gave one.
+    pub prepare_holds: Holds<String>,
+    /// Looks the test holds: one let go fails with the reason, where the test
+    /// gave one.
+    pub observe_holds: Holds<String>,
+    /// Starts the test holds: one let go names the conversation its window
+    /// opened, where the test gave one.
+    pub start_holds: Holds<String>,
+    /// Calls of `ready` the test holds: the test gives a `ready` of its own
+    /// too, as the JavaScript fake had none to wrap.
+    pub ready_holds: Holds,
+    /// Deliveries the test holds.
+    pub deliver_holds: Holds,
 }
 
 impl FakeAdapter {
@@ -137,18 +139,19 @@ impl FakeAdapter {
             prepared: RefCell::new(Vec::new()),
             items,
             ready: RefCell::new(None),
-            hold_ready: RefCell::new(None),
             started: RefCell::new(None),
             prepare: RefCell::new(None),
             after_prepare: RefCell::new(None),
             deliver: RefCell::new(None),
-            hold_observes: RefCell::new(None),
-            hold_prepares: RefCell::new(None),
-            hold_deliveries: RefCell::new(None),
             interrupt: Cell::new(Interrupt {
                 presses: 1,
                 close_after: None,
             }),
+            prepare_holds: Holds::default(),
+            observe_holds: Holds::default(),
+            start_holds: Holds::default(),
+            ready_holds: Holds::default(),
+            deliver_holds: Holds::default(),
         })
     }
 
@@ -184,6 +187,13 @@ impl FakeAdapter {
     /// The latest window of `handle`, as it is now.
     pub fn agent(&self, handle: &str) -> FakeAgent {
         self.with(handle, |agent| agent.clone())
+    }
+
+    /// Changes the window of `launch`, whichever participant it is for: the
+    /// test kept the agent it got (`agent(handle)` of JavaScript was the
+    /// object itself) while another project's window took the handle.
+    pub fn with_launch<T>(&self, launch: &str, change: impl FnOnce(&mut FakeAgent) -> T) -> T {
+        self.of_launch(launch, change)
     }
 
     /// The agent answers: its turn ends with `text`.
@@ -296,22 +306,21 @@ impl Asked {
         }
     }
 
-    /// What `prepare` does once it is made: the launch `asked`, written down
-    /// at `at`, is prepared, or failed by a test's own `prepare`.
-    /// `overridden` is whether a test put an async function of its own in
-    /// the fake's place.
-    fn prepared<'a>(
+    /// The launch as the fake prepares it, its call written down at `at`:
+    /// what the fake's function does it does when it is made, as far as its
+    /// first wait.
+    fn made<'a>(
         &'a self,
         launch: &'a Launch<'a>,
-        seam: String,
         asked: Value,
         at: usize,
-        overridden: bool,
     ) -> Work<'a, Result<Prepared, String>> {
         let fake = &self.fake;
+        let seam = format!("adapter:{}", self.harness);
         // A test's own `prepare` fails before the real one runs: nothing is
         // prepared and no window made, as where it threw in JavaScript.
         let own = fake.prepare.borrow().clone();
+        let overridden = own.is_some();
         if let Some(Err(reason)) = own.map(|own| own(&asked)) {
             return Box::pin(async move {
                 next_turn().await;
@@ -389,7 +398,6 @@ impl Asked {
 
 impl Adapter for Asked {
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
-        let fake = &self.fake;
         let seam = format!("adapter:{}", self.harness);
         let asked = json!({
             "launchId": launch.id.as_str(),
@@ -407,23 +415,32 @@ impl Adapter for Asked {
             })),
             "instructions": launch.instructions,
         });
-        let at = fake
+        let args = json!([asked.clone()]);
+        let at = self
+            .fake
             .recorder
-            .call(&seam, Some("prepare"), json!([asked.clone()]));
-        let hold = fake.hold_prepares.borrow().clone();
-        let overridden = hold.is_some() || fake.prepare.borrow().is_some();
-        let gate = hold
-            .filter(|(handle, _)| handle.as_str() == launch.handle)
-            .map(|(_, gate)| gate);
-        match gate {
-            // The launch is asked at once, and nothing is prepared until the
-            // test lets it go.
-            Some(gate) => Box::pin(async move {
-                gate.wait().await;
-                self.prepared(launch, seam, asked, at, overridden).await
-            }),
-            None => self.prepared(launch, seam, asked, at, overridden),
-        }
+            .call(&seam, Some("prepare"), args.clone());
+        let wrapped = self.fake.prepare_holds.wrap(&args);
+        let Wrapped::Held { .. } = wrapped else {
+            let made = self.made(launch, asked, at);
+            return Box::pin(async move {
+                let prepared = made.await;
+                wrapped.after().await;
+                prepared
+            });
+        };
+        // A call held is made once the test lets it go, or, where the test
+        // gave a reason, fails in its place a turn after, as the wrapper's
+        // throw did.
+        Box::pin(async move {
+            if let Some(reason) = wrapped.before().await {
+                next_turn().await;
+                return Err(reason);
+            }
+            let prepared = self.made(launch, asked, at).await;
+            wrapped.after().await;
+            prepared
+        })
     }
 
     fn interrupt(&self) -> Interrupt {

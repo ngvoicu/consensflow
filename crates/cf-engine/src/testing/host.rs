@@ -4,7 +4,9 @@
 //! up to their first wait; each answer comes a turn later, as their promises
 //! did, and a turn more for each wait inside them (`open` waits on its hold,
 //! `kill` on each engine told of the exit); and every call is written down in
-//! the Node traces' shape.
+//! the Node traces' shape. A test that held calls until it let them go
+//! (`hold`) says which, and when ([`FakeHost::open_holds`],
+//! [`FakeHost::request_holds`]).
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -13,6 +15,7 @@ use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use serde_json::{json, Map, Value};
 
 use super::executor::Gate;
+use super::holds::{Holds, Wrapped};
 use super::recorder::Recorder;
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
@@ -47,6 +50,12 @@ pub struct FakeHost {
     pub pid: Cell<Option<u32>>,
     /// What a test's own `request` does first, given the request it wraps.
     pub on_request: RefCell<Option<OnRequest>>,
+    /// Opens the test holds (`hold(host, 'open', ...)`): one let go is made,
+    /// and the window of the handle the test named, if it did, exits before
+    /// the open is answered.
+    pub open_holds: Holds<String>,
+    /// Requests the test holds.
+    pub request_holds: Holds,
 }
 
 /// What a test's own `request` does before the host's, given the operation
@@ -129,6 +138,63 @@ impl FakeHost {
             next_turn().await;
         }
     }
+
+    /// What a request does when it is made: the test's own function first,
+    /// then the host's own, which answers.
+    fn requested(&self, op: &str, body: Value) -> Value {
+        let own = self.on_request.borrow().clone();
+        if let Some(own) = own {
+            own(op, &body);
+        }
+        self.requests.borrow_mut().push((op.to_owned(), body));
+        let mut answer = Map::new();
+        answer.insert("ok".to_owned(), json!(true));
+        if op == "pane.snapshot" {
+            answer.extend(self.snapshot.borrow().clone());
+        }
+        Value::Object(answer)
+    }
+
+    /// The host's own open, its call written down at `at`; the window of the
+    /// handle `exits` names, if any, exits before the open is answered.
+    async fn opening(
+        &self,
+        at: usize,
+        open: OpenPane,
+        exits: Option<String>,
+    ) -> Result<Opened, HostError> {
+        if self.refuse.replace(false) {
+            next_turn().await;
+            let error = "refused by the test".to_owned();
+            self.recorder
+                .answered(at, json!({ "ok": false, "error": error }));
+            return Ok(Opened::Refused { error });
+        }
+        let hold = self.hold.borrow().clone();
+        match hold {
+            Some(gate) => gate.wait().await,
+            None => next_turn().await,
+        }
+        let pane = open.pane.clone();
+        self.opened.borrow_mut().push(open);
+        let pid = self.pid.get();
+        let mut answer = json!({ "ok": true, "id": pane.id, "generation": pane.generation });
+        if let Some(pid) = pid {
+            answer["pid"] = json!(pid);
+        }
+        self.recorder.answered(at, answer);
+        // The JavaScript fake waited on its hold, and its answer reached the
+        // caller a turn after it returned.
+        next_turn().await;
+        let leaves = match exits {
+            Some(handle) => Some(handle),
+            None => self.exit_after_open.borrow_mut().take(),
+        };
+        if let Some(handle) = leaves {
+            self.exit(&handle).await;
+        }
+        Ok(Opened::Open { pid })
+    }
 }
 
 /// Whether a pane id is a window of `handle`: its own, or one of its sessions'.
@@ -170,23 +236,18 @@ fn open_json(open: &OpenPane) -> Value {
 
 impl PaneHost for FakeHost {
     fn request<'a>(&'a self, op: &'a str, body: Value) -> Work<'a, Result<Value, HostError>> {
-        let at = self
-            .recorder
-            .call("host", Some("request"), json!([op, body.clone()]));
-        let wrapped = self.on_request.borrow().clone();
-        if let Some(wrapped) = wrapped {
-            wrapped(op, &body);
-        }
-        self.requests.borrow_mut().push((op.to_owned(), body));
-        let mut answer = Map::new();
-        answer.insert("ok".to_owned(), json!(true));
-        if op == "pane.snapshot" {
-            answer.extend(self.snapshot.borrow().clone());
-        }
-        let answer = Value::Object(answer);
+        let args = json!([op, body.clone()]);
+        let at = self.recorder.call("host", Some("request"), args.clone());
+        let wrapped = self.request_holds.wrap(&args);
+        // Made when called, or once the test lets a held request go.
+        let early =
+            (!matches!(wrapped, Wrapped::Held { .. })).then(|| self.requested(op, body.clone()));
         Box::pin(async move {
+            wrapped.before().await;
+            let answer = early.unwrap_or_else(|| self.requested(op, body));
             next_turn().await;
             self.recorder.answered(at, answer.clone());
+            wrapped.after().await;
             Ok(answer)
         })
     }
@@ -194,38 +255,14 @@ impl PaneHost for FakeHost {
 
 impl EngineHost for FakeHost {
     fn open(&self, open: OpenPane) -> Work<'_, Result<Opened, HostError>> {
-        let at = self
-            .recorder
-            .call("host", Some("open"), json!([open_json(&open)]));
+        let args = json!([open_json(&open)]);
+        let at = self.recorder.call("host", Some("open"), args.clone());
+        let wrapped = self.open_holds.wrap(&args);
         Box::pin(async move {
-            if self.refuse.replace(false) {
-                next_turn().await;
-                let error = "refused by the test".to_owned();
-                self.recorder
-                    .answered(at, json!({ "ok": false, "error": error }));
-                return Ok(Opened::Refused { error });
-            }
-            let hold = self.hold.borrow().clone();
-            match hold {
-                Some(gate) => gate.wait().await,
-                None => next_turn().await,
-            }
-            let pane = open.pane.clone();
-            self.opened.borrow_mut().push(open);
-            let pid = self.pid.get();
-            let mut answer = json!({ "ok": true, "id": pane.id, "generation": pane.generation });
-            if let Some(pid) = pid {
-                answer["pid"] = json!(pid);
-            }
-            self.recorder.answered(at, answer);
-            // The JavaScript fake waited on its hold, and its answer reached
-            // the caller a turn after it returned.
-            next_turn().await;
-            let leaves = self.exit_after_open.borrow_mut().take();
-            if let Some(handle) = leaves {
-                self.exit(&handle).await;
-            }
-            Ok(Opened::Open { pid })
+            let exits = wrapped.before().await;
+            let opened = self.opening(at, open, exits).await;
+            wrapped.after().await;
+            opened
         })
     }
 
