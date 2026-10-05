@@ -2224,6 +2224,58 @@ test('every key the human types reaches the pane in order, flagged as nothing', 
     )
 })
 
+/**
+ * The chief's real terminal with `line` printed in it and its first word
+ * selected by a double click: what the page copies from then on, and the
+ * keys that reach the chief's window.
+ */
+async function selecting(page, line) {
+  await open(page, { ...model(), realTerminals: true })
+  await page.evaluate(() => {
+    window.__copied = []
+    document.addEventListener('copy', (event) =>
+      window.__copied.push(event.clipboardData.getData('text/plain')),
+    )
+  })
+  await page.evaluate(
+    (bytes) => window.__output.onmessage({ id: 'p1-chief', generation: 5, seq: 1, bytes }),
+    [...new TextEncoder().encode(line)],
+  )
+  const rows = page.locator('#stage .terminal-card[data-handle="chief"] .xterm-rows')
+  await expect(rows).toContainText(line)
+  const box = await rows.boundingBox()
+  await page.mouse.dblclick(box.x + 6, box.y + 6)
+  return {
+    copied: () => page.evaluate(() => window.__copied),
+    sent: () =>
+      page.evaluate(() =>
+        window.__calls
+          .filter(([command, args]) => command === 'pane_input_enqueue' && args.id === 'p1-chief')
+          .map(([, args]) => args.bytes),
+      ),
+  }
+}
+
+// On a Mac, Cmd+C copies and Ctrl+C stays the program's interrupt, selection
+// or not; Ctrl+Shift+C copies on every system.
+test('interrupts with Ctrl+C on a Mac even with text selected, and copies with Ctrl+Shift+C', async ({
+  page,
+}) => {
+  const { copied, sent } = await selecting(page, 'copy this line')
+  await page.keyboard.press('Control+Shift+C')
+  expect(await copied()).toEqual(['copy'])
+  expect(await sent()).toEqual([])
+  await page.mouse.dblclick(
+    ...(await page
+      .locator('#stage .terminal-card[data-handle="chief"] .xterm-rows')
+      .boundingBox()
+      .then((box) => [box.x + 6, box.y + 6])),
+  )
+  await page.keyboard.press('Control+C')
+  await expect.poll(sent).toEqual([[3]])
+  expect(await copied()).toEqual(['copy'])
+})
+
 test.describe('on Windows', () => {
   test.use({
     userAgent:
@@ -2259,6 +2311,21 @@ test.describe('on Windows', () => {
 
   test("the human's marks reach a Claude window as typed", async ({ page }) => {
     expect(await sent(page, 'claude-code', 'a — “b” → €5')).toBe('a — “b” → €5')
+  })
+
+  // Ctrl+C is the program's interrupt: with text selected in a terminal it
+  // copies the text instead, as Windows Terminal does, and the selection goes,
+  // so the next Ctrl+C interrupts.
+  test('copies the text selected in a terminal with Ctrl+C, and interrupts with the next', async ({
+    page,
+  }) => {
+    const { copied, sent } = await selecting(page, 'copy this line')
+    await page.keyboard.press('Control+C')
+    expect(await copied()).toEqual(['copy'])
+    expect(await sent(), 'nothing reached the program').toEqual([])
+    await page.keyboard.press('Control+C')
+    await expect.poll(sent).toEqual([[3]])
+    expect(await copied()).toEqual(['copy'])
   })
 })
 

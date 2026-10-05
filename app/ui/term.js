@@ -8,6 +8,17 @@ import { FitAddon, Terminal } from './vendor/xterm.js'
  */
 const SETTLE_MS = 200
 
+/** A Mac, where Cmd+C copies and Ctrl+C is always the program's. */
+const MAC = /Macintosh|Mac OS X/.test(globalThis.navigator?.userAgent ?? '')
+
+/**
+ * The letter a key types for a shortcut: its own on a Latin layout, else the
+ * one its place on the keyboard has (Ctrl+C on a Cyrillic layout is still
+ * the C key).
+ */
+const shortcutLetter = (event) =>
+  /^[a-z]$/i.test(event.key) ? event.key.toLowerCase() : event.code === 'KeyC' ? 'c' : null
+
 /**
  * The page-side terminal contract. Pane ownership stays in Rust; this object
  * owns only one xterm parser, renderer and input subscription for one pane.
@@ -34,6 +45,7 @@ export class XtermEmulator {
     this.fitAddon = new FitAddon()
     this.terminal.loadAddon(this.fitAddon)
     this.terminal.open(host)
+    this.terminal.attachCustomKeyEventHandler((event) => this.#programKey(event))
     this.humanDataPending = 0
     this.humanListeners = new Set()
     // xterm's public onData event erases the internal `wasUserInput` bit. In
@@ -64,6 +76,26 @@ export class XtermEmulator {
     this.pending = null
     this.resizeObserver = new ResizeObserver(() => this.fit())
     this.resizeObserver.observe(host)
+  }
+
+  /**
+   * Whether xterm sends `event` to the program, and not when it copies.
+   * Where Ctrl+C is the program's interrupt (Windows, Linux), Ctrl+C copies
+   * the text selected instead, as Windows Terminal does, and the selection
+   * goes, so the next one interrupts; Ctrl+Shift+C copies on every system.
+   * The copy is the page's own, which xterm fills with the selection, as it
+   * does for Cmd+C on a Mac.
+   */
+  #programKey(event) {
+    if (event.type !== 'keydown' || !event.ctrlKey || event.altKey || event.metaKey) return true
+    if (shortcutLetter(event) !== 'c') return true
+    if (!event.shiftKey && (MAC || !this.terminal.hasSelection())) return true
+    event.preventDefault()
+    if (this.terminal.hasSelection()) {
+      document.execCommand('copy')
+      this.terminal.clearSelection()
+    }
+    return false
   }
 
   /** Resolve only after xterm's parser has committed these bytes. */
