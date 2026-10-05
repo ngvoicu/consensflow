@@ -47,3 +47,32 @@ fn every_answer_reads_as_the_outcome_node_read() {
         assert_eq!(written, row["outcome"], "{row}");
     }
 }
+
+#[test]
+fn reads_a_refusal_only_where_the_channel_says_nothing_reached_the_harness() {
+    let read = |reply: Value| admission(&Sent::from_reply(&reply), "refused", false);
+    let refused = |reason: &str| Admission::Refused {
+        reason: reason.to_owned(),
+    };
+    let uncertain = |reason: &str| Admission::Uncertain {
+        reason: reason.to_owned(),
+    };
+    assert_eq!(
+        read(json!({ "ok": true, "admitted": true })),
+        Admission::Admitted { queued: false }
+    );
+    let stale = json!({
+        "ok": false, "admitted": false, "bytesWritten": 0, "error": "stale-generation", "cause": "gone",
+    });
+    assert_eq!(read(stale), refused("gone"));
+    assert_eq!(
+        read(json!({ "ok": false, "admitted": false })),
+        refused("refused")
+    );
+    let cut = json!({ "ok": false, "admitted": null, "error": "uncertain", "cause": "cut off" });
+    assert_eq!(read(cut), uncertain("cut off"));
+    // An answer that does not say may have reached the harness: sending it
+    // again at once is how Pi got a message twice.
+    let transport = json!({ "ok": false, "error": "transport", "cause": "EISDIR" });
+    assert_eq!(read(transport), uncertain("EISDIR"));
+}

@@ -391,39 +391,33 @@ mod tests {
         }
 
         #[test]
-        fn a_window_opens_an_npm_shim_as_its_node_and_script() {
+        fn and_a_window_opens_on_the_shim_as_its_node_and_script_or_not_at_all() {
             let root = tempfile::tempdir().unwrap();
             let (bin, shim, script) = npm(root.path());
             fs::write(bin.join("node.exe"), "").unwrap();
+            let env = Env::from_vars([("OS", "Windows_NT"), ("PATH", "")]);
             let text = |path: &Path| path.to_string_lossy().into_owned();
-            let argv = [text(&shim), "--session-id".to_owned(), "a\nb".to_owned()];
-            assert_eq!(
-                pane_argv(&argv, &Env::default()).unwrap(),
-                [
-                    text(&bin.join("node.exe")),
-                    text(&script),
-                    "--session-id".to_owned(),
-                    "a\nb".to_owned()
-                ]
-            );
-        }
-
-        #[test]
-        fn a_window_opens_a_program_as_it_is_and_never_a_script_cmd_exe_must_read() {
-            let argv = ["/usr/local/bin/claude".to_owned(), "--resume".to_owned()];
-            assert_eq!(pane_argv(&argv, &Env::default()).unwrap(), argv);
-            assert_eq!(
-                pane_argv(&[], &Env::default()).unwrap(),
-                Vec::<String>::new()
-            );
-            let root = tempfile::tempdir().unwrap();
+            let words = |words: &[&str]| {
+                words
+                    .iter()
+                    .map(|&word| word.to_owned())
+                    .collect::<Vec<_>>()
+            };
+            let mut argv = vec![text(&shim)];
+            argv.extend(words(&["--model", "a b", "a\nb"]));
+            let mut opened = vec![text(&bin.join("node.exe")), text(&script)];
+            opened.extend(words(&["--model", "a b", "a\nb"]));
+            assert_eq!(pane_argv(&argv, &env).unwrap(), opened);
             let opaque = root.path().join("opaque.cmd");
             fs::write(&opaque, "@echo off\r\nrun.exe %*\r\n").unwrap();
-            let named = opaque.to_string_lossy().into_owned();
+            let named = text(&opaque);
             assert_eq!(
-                pane_argv(std::slice::from_ref(&named), &Env::default()).unwrap_err(),
+                pane_argv(std::slice::from_ref(&named), &env).unwrap_err(),
                 format!("{named} is not an npm shim, and only cmd.exe could run it in a window")
             );
+            let program = words(&["/usr/local/bin/pi", "x"]);
+            assert_eq!(pane_argv(&program, &env).unwrap(), program);
+            assert_eq!(pane_argv(&[], &env).unwrap(), Vec::<String>::new());
         }
 
         #[test]

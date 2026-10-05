@@ -82,3 +82,6 @@ pub(super) fn role(env: &Env, launch: &Launch) -> Result<Vec<String>, String> {
         "off".to_owned(),
     ])
 }
+
+#[cfg(test)]
+mod tests;

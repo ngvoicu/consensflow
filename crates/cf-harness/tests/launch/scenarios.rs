@@ -9,22 +9,18 @@ use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::task::{Context, Poll, Waker};
 
 use cf_base::env::Env;
 use cf_base::path;
-use cf_base::time::{Clock, SystemClock};
 use cf_harness::claude::ClaudeAdapter;
 use cf_harness::contract::{
     Adapter, Admission, Agent, HostError, Launch, LaunchId, Observed, Pane, PaneHost, Readiness,
-    Records, Window, Work,
+    Window, Work,
 };
-use cf_harness::records::{self, Cache, Options, Reading, IDLE_MS};
-use cf_proto::agents::Harness;
-use jiff::tz::TimeZone;
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
+
+use crate::fakes::{done, fake_executable, Local};
 
 /// A process id no process has (`DEAD`, runner.mjs).
 const DEAD: u32 = 999_999;
@@ -37,56 +33,6 @@ fn platform() -> &'static str {
         "darwin"
     } else {
         "linux"
-    }
-}
-
-/// The work a step does, done: nothing it is given ever waits.
-fn done<T>(mut work: Work<'_, T>) -> T {
-    match work.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
-        Poll::Ready(value) => value,
-        Poll::Pending => panic!("a step waited on nothing it was given"),
-    }
-}
-
-/// The records as the engine serves them, read here on the test's thread
-/// with a cache of readers, as the engine's worker keeps one.
-struct Local {
-    env: Env,
-    cache: RefCell<Cache>,
-}
-
-impl Local {
-    /// No scenario names a reset by a time of day alone, which a zone reads.
-    fn new(env: Env) -> Self {
-        let cache = Cache::new(records::open(TimeZone::UTC), IDLE_MS, SystemClock.now_ms());
-        Self {
-            env,
-            cache: RefCell::new(cache),
-        }
-    }
-}
-
-impl Records for Local {
-    fn look<'a>(
-        &'a self,
-        harness: Harness,
-        session: &'a str,
-        options: &'a Options,
-    ) -> Work<'a, Arc<Reading>> {
-        Box::pin(async move {
-            let now = SystemClock.now_ms();
-            self.cache
-                .borrow_mut()
-                .look(harness, session, &self.env, options, now)
-        })
-    }
-
-    fn has_transcript<'a>(
-        &'a self,
-        harness: Harness,
-        session: &'a str,
-    ) -> Work<'a, Result<bool, String>> {
-        Box::pin(async move { records::has_transcript(harness, session, &self.env) })
     }
 }
 
@@ -268,18 +214,6 @@ fn changes(before: &[(String, Value)], after: Vec<(String, Value)>) -> Value {
         .collect()
 }
 
-/// A stand-in CLI at `file` (`fakeExecutable`, tests/helpers.mjs): a shell
-/// script on POSIX, a `.cmd` on Windows.
-fn fake_executable(file: &str) {
-    if cfg!(windows) {
-        fs::write(format!("{file}.cmd"), "@echo off\r\nexit /b 0\r\n").unwrap();
-        return;
-    }
-    fs::write(file, "#!/bin/sh\nexit 0\n").unwrap();
-    #[cfg(unix)]
-    fs::set_permissions(file, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-}
-
 /// A text field of a step, none for null and for a field not there.
 fn text(value: &Value) -> Option<&str> {
     value.as_str()
@@ -421,7 +355,7 @@ fn ask(played: &Played, step: &Value) -> Value {
 /// One step, played: what it answered, written as the scenario writes it.
 fn step(played: &mut Played, step: &Value) -> Option<Value> {
     if let Some(name) = step["executable"].as_str() {
-        fake_executable(&path::join(&[&played.names.root, "bin", name]));
+        fake_executable(Path::new(&path::join(&[&played.names.root, "bin", name])));
         return None;
     }
     if step.get("write").is_some() {

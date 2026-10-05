@@ -50,3 +50,6 @@ pub(crate) fn write_role(
     write_file(Path::new(&file), content.as_bytes(), 0o600).map_err(said)?;
     Ok(RoleFile { root, file })
 }
+
+#[cfg(test)]
+mod tests;
