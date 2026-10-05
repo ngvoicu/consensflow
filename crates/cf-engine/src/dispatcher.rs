@@ -33,7 +33,7 @@ use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
 use crate::chief_switch::SwitchTo;
 use crate::record::Record;
-use crate::runtime::{all, begin, Begun, LocalWork};
+use crate::runtime::{all, begin, returning, Begun, LocalWork};
 use crate::scheduler::SchedulerState;
 use crate::seams::{EngineError, Seams};
 use crate::windows::{Activity, ActivityState, WindowsState};
@@ -44,6 +44,20 @@ pub enum SwitchWhen {
     Now,
     Turn,
 }
+
+/// An operation the engine's own work calls as well as its callers
+/// ([`Dispatcher::on_operation`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Operation {
+    /// A project comes back (`resumeProject`), from the human or from a restart.
+    ResumeProject(i64),
+    /// A window ended (`paneExited`), as the pane host says or as the engine
+    /// closing it finds.
+    PaneExited(Pane),
+}
+
+/// Hears the operations the engine's own work calls ([`Dispatcher::on_operation`]).
+pub type OperationListener = Rc<dyn Fn(&Operation)>;
 
 /// What became of a project open when the previous process ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,6 +100,7 @@ pub struct Dispatcher {
     leaving: RefCell<Vec<Rc<Record>>>,
     listeners: RefCell<Vec<Rc<dyn Fn()>>>,
     transcript_listeners: RefCell<Vec<Rc<dyn Fn()>>>,
+    operation_listeners: RefCell<Vec<OperationListener>>,
     /// What the windows keep across records (`windows`).
     pub(crate) windows: WindowsState,
     /// What the scheduler keeps across records (`scheduler`).
@@ -100,6 +115,7 @@ impl Dispatcher {
             leaving: RefCell::new(Vec::new()),
             listeners: RefCell::new(Vec::new()),
             transcript_listeners: RefCell::new(Vec::new()),
+            operation_listeners: RefCell::new(Vec::new()),
             windows: WindowsState::default(),
             scheduler: SchedulerState::default(),
         })
@@ -113,6 +129,20 @@ impl Dispatcher {
     /// Hears each look that copied something new of what a window wrote.
     pub fn on_transcript(&self, listener: Rc<dyn Fn()>) {
         self.transcript_listeners.borrow_mut().push(listener);
+    }
+
+    /// Hears each operation the engine's own work calls as well as its
+    /// callers, where it begins: a test writes them down as Node's recorder did.
+    pub fn on_operation(&self, listener: OperationListener) {
+        self.operation_listeners.borrow_mut().push(listener);
+    }
+
+    /// Tells the listeners an operation begins.
+    pub(crate) fn began(&self, operation: &Operation) {
+        let listeners: Vec<OperationListener> = self.operation_listeners.borrow().clone();
+        for listener in listeners {
+            listener(operation);
+        }
     }
 
     /// What a participant's window is doing.
@@ -204,6 +234,7 @@ impl Dispatcher {
     /// The human's Resume, and the restore after a restart: the chief comes
     /// back on its conversation.
     pub async fn resume_project(self: &Rc<Self>, project: i64) -> Result<ProjectView, EngineError> {
+        self.began(&Operation::ResumeProject(project));
         let resumed = self
             .seams
             .ledger
@@ -636,6 +667,7 @@ impl Dispatcher {
     /// returns, and what it still has to do (a chief's project closing) is
     /// returned, for the reader to run apart.
     pub fn pane_exited(self: &Rc<Self>, pane: Pane) -> Option<LocalWork> {
+        self.began(&Operation::PaneExited(pane.clone()));
         let this = Rc::clone(self);
         let mut work: LocalWork = Box::pin(async move {
             if let Err(cause) = this.exited(&pane).await {
@@ -827,7 +859,7 @@ impl Dispatcher {
             return Ok(());
         }
         // A participant forgotten while the step waits is done with.
-        let observed = match self.observe(participant, record).await {
+        let observed = match returning(self.observe(participant, record)).await {
             Ok(observed) => observed,
             Err(reason) => {
                 if !self.forgotten(record) {
@@ -843,7 +875,8 @@ impl Dispatcher {
         if !unnamed {
             record.window.borrow_mut().named = true;
         }
-        let drawing = (observed.items().is_empty() || unnamed) && !self.drawn(record).await;
+        let drawing =
+            (observed.items().is_empty() || unnamed) && !returning(self.drawn(record)).await;
         if self.forgotten(record) {
             return Ok(());
         }
@@ -894,15 +927,14 @@ impl Dispatcher {
                 .await;
         }
         if record.delivery.borrow().delivering.is_some() {
-            self.watch_arrival(record, &observed).await?;
+            returning(self.watch_arrival(record, &observed)).await?;
         }
         // A window that began to close in this step is not acted on.
         if record.window.borrow().retiring {
             return Ok(());
         }
         if participant.role != "chief" {
-            self.interrupt_if_stopped(participant, record, &observed)
-                .await?;
+            returning(self.interrupt_if_stopped(participant, record, &observed)).await?;
             if self.forgotten(record) {
                 return Ok(());
             }
@@ -960,8 +992,7 @@ impl Dispatcher {
             Activity::because(ActivityState::Out, format!("out of quota until {until}")),
         );
         if participant.role != "chief" {
-            self.interrupt_if_stopped(participant, record, observed)
-                .await?;
+            returning(self.interrupt_if_stopped(participant, record, observed)).await?;
             if !self.forgotten(record) {
                 self.close_if_free(record).await?;
             }

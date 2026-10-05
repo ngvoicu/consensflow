@@ -115,13 +115,18 @@ pub struct FakeRoster {
     pub designers: RefCell<HashSet<String>>,
     /// The agents file cannot be read.
     pub broken: Cell<bool>,
+    /// Every agent runs on this model, where a test's roster names one for all.
+    pub model: RefCell<Option<String>>,
 }
+
+/// Why the agents file cannot be read, as the roster says it.
+const UNREADABLE: &str = "Your agents file agents.json is not valid JSON: fix it or move it away; ConsensFlow left it as it is.";
 
 impl Roster for FakeRoster {
     fn agent(&self, name: &str) -> Result<Option<SavedAgent>, Refusal> {
         let at = self.recorder.call("roster", None, json!([name]));
         if self.broken.get() {
-            let refusal = Refusal::new("agents-unreadable", "the agents file cannot be read");
+            let refusal = Refusal::new("agents-unreadable", UNREADABLE);
             self.recorder
                 .answered(at, json!({ "$error": { "message": refusal.message } }));
             return Err(refusal);
@@ -130,10 +135,12 @@ impl Roster for FakeRoster {
             self.recorder.answered(at, Value::Null);
             return Ok(None);
         }
-        let model = MODELS
-            .iter()
-            .find(|(agent, _)| *agent == name)
-            .map(|(_, model)| (*model).to_owned());
+        let model = self.model.borrow().clone().or_else(|| {
+            MODELS
+                .iter()
+                .find(|(agent, _)| *agent == name)
+                .map(|(_, model)| (*model).to_owned())
+        });
         let designer = self.designers.borrow().contains(name);
         self.recorder.answered(
             at,

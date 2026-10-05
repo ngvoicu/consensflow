@@ -16,6 +16,8 @@ impl Ledger {
 
     /// Every project, oldest first.
     pub fn projects(&self) -> Result<Vec<ProjectView>, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("projects", None)?;
         projects::projects(&self.store)
     }
 

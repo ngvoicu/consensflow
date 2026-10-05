@@ -14,6 +14,12 @@
 //!   straight to it, so nothing that comes later takes it first.
 //! - Work begun together is awaited together ([`all`]), its first failure
 //!   answered as soon as it comes.
+//! - What an `async` function answers reaches its caller a turn after it was
+//!   made, in JavaScript, even when it waited on nothing. Where that order
+//!   decides what one participant's step sees of another's, the call is made
+//!   [`returning`] a turn too: a pass's steps cross-read the ledger (a note
+//!   one step writes is the chief's next delivery in the same pass), so a
+//!   step that took fewer turns than Node's would read it before it was there.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -133,6 +139,43 @@ pub async fn all<T, E>(begun: Vec<Begun<Result<T, E>>>) -> Result<Vec<T>, E> {
         answers[at] = Some(answer?);
     }
     Ok(answers.into_iter().flatten().collect())
+}
+
+/// Runs `work`, then waits a turn: what an `async` function answers reaches
+/// its caller in JavaScript a turn after it was made, even when the function
+/// waited on nothing, which `await` of a call that returned at once still
+/// costs. What was woken before goes ahead of the caller.
+pub(crate) async fn returning<T>(work: impl Future<Output = T>) -> T {
+    let answer = work.await;
+    next_turn().await;
+    answer
+}
+
+/// A wait of one turn: the work goes behind every piece of work woken before
+/// it, as an `await` of a JavaScript promise already kept did, and before
+/// whatever the system has still to say (a frame to read), as a microtask
+/// did.
+pub fn next_turn() -> NextTurn {
+    NextTurn { waited: false }
+}
+
+/// A wait of one turn ([`next_turn`]).
+pub struct NextTurn {
+    waited: bool,
+}
+
+impl Future for NextTurn {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<()> {
+        if self.waited {
+            Poll::Ready(())
+        } else {
+            self.waited = true;
+            context.waker().wake_by_ref();
+            Poll::Pending
+        }
+    }
 }
 
 /// Who holds a participant now (`runtime.running` and `runtime.acting`), and

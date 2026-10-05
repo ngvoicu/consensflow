@@ -4,7 +4,8 @@
 //!
 //! Both sides are read through one projection, which keeps what is the
 //! engine's behaviour and drops what is how it got there:
-//! - kept: where each of the engine's operations begins (by name); each
+//! - kept: where each of the engine's operations begins (by name, a window's
+//!   exit with its pane); each
 //!   event the ledger logs, whole; each call of the pane host, with what it
 //!   was given and answered; each call of an adapter by its method and what
 //!   names it (the launch, the message, the text, the conversation resumed or
@@ -75,12 +76,10 @@ static TRACES: LazyLock<HashMap<(Vec<String>, String), Value>> = LazyLock::new(|
 /// The tests whose effects may come in another order than Node's where two
 /// windows' interleave, and only there: JavaScript's microtask hops through
 /// nested async functions let a worker's launch overtake the chief's look.
-/// Each is one an exception is counted for.
-const INTERLEAVED: &[&str] = &[
-    "launches a worker with its task as the first message and records its answer as the result",
-    "keeps everything a member wrote in its turn, not only its last message",
-    "leaves a harness's commentary out of a result: Codex's progress notes are not its answer",
-];
+/// Each is one an exception is counted for. None is now: the kit's fakes and
+/// the engine wait the turns JavaScript's awaits waited (`runtime::returning`,
+/// the fakes' own), so each ported test's effects come in Node's order.
+const INTERLEAVED: &[&str] = &[];
 
 /// Holds a closed test to the Node trace of the test named `name` in `suites`.
 pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
@@ -129,6 +128,10 @@ fn projected(events: &[Value]) -> Vec<Value> {
 
 fn project(event: &Value) -> Option<Value> {
     if let Some(op) = event.get("op") {
+        // A window's exit is held with the pane it names.
+        if op == "paneExited" {
+            return Some(json!({ "op": op, "pane": event["args"][0] }));
+        }
         return Some(json!({ "op": op }));
     }
     let seam = event["seam"].as_str()?;
@@ -365,5 +368,20 @@ fn a_lookup_and_a_ledger_call_are_no_behaviour_and_a_revoke_of_nothing_is_none()
             json!({ "adapter": "adapter:codex", "method": "observe", "launch": "l" }),
             json!({ "trace forgets": 1 }),
         ]
+    );
+}
+
+#[test]
+fn a_windows_exit_is_held_with_the_pane_it_names() {
+    let exit =
+        |pane: &str| json!({ "op": "paneExited", "args": [{ "id": pane, "generation": 7 }] });
+    assert_eq!(
+        projected(std::slice::from_ref(&exit("p1-zeus"))),
+        [json!({ "op": "paneExited", "pane": { "id": "p1-zeus", "generation": 7 } })]
+    );
+    assert_ne!(
+        projected(std::slice::from_ref(&exit("p1-zeus"))),
+        projected(std::slice::from_ref(&exit("p1-diana"))),
+        "which window ended is held"
     );
 }

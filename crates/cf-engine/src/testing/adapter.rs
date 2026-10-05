@@ -19,8 +19,8 @@ use cf_harness::records::{Item, Options, Quota, Reading, Record, Role, Settlemen
 use cf_proto::agents::Harness;
 use serde_json::{json, Value};
 
-use super::executor::next_turn;
 use super::recorder::Recorder;
+use crate::runtime::next_turn;
 use crate::seams::Adapters;
 
 /// An agent's window, as the test tells it to be.
@@ -52,6 +52,10 @@ pub struct FakeAgent {
 /// What a test makes `ready` answer, where it gives the adapter one.
 pub type Ready = Rc<dyn Fn() -> Result<Readiness, String>>;
 
+/// What a test makes `prepare` do, where it gives the adapter one: told the
+/// launch as asked, it may fail it, before any window is made.
+pub type Prepare = Rc<dyn Fn(&Value) -> Result<(), String>>;
+
 /// The test's adapter, and its agents.
 pub struct FakeAdapter {
     recorder: Recorder,
@@ -64,6 +68,8 @@ pub struct FakeAdapter {
     /// A `ready` of the test's own; without one a window is ready, and
     /// nothing is asked (the JavaScript fake had none).
     pub ready: RefCell<Option<Ready>>,
+    /// A `prepare` of the test's own, that fails some launches.
+    pub prepare: RefCell<Option<Prepare>>,
 }
 
 impl FakeAdapter {
@@ -74,6 +80,7 @@ impl FakeAdapter {
             prepared: RefCell::new(Vec::new()),
             items: Cell::new(0),
             ready: RefCell::new(None),
+            prepare: RefCell::new(None),
         })
     }
 
@@ -231,6 +238,18 @@ impl Adapter for Asked {
         let at = fake
             .recorder
             .call(&seam, Some("prepare"), json!([asked.clone()]));
+        // A test's own `prepare` fails before the real one runs: nothing is
+        // prepared and no window made, as where it threw in JavaScript.
+        let own = fake.prepare.borrow().clone();
+        let overridden = own.is_some();
+        if let Some(Err(reason)) = own.map(|own| own(&asked)) {
+            return Box::pin(async move {
+                next_turn().await;
+                fake.recorder
+                    .answered(at, json!({ "$error": { "message": reason } }));
+                Err(reason)
+            });
+        }
         fake.prepared.borrow_mut().push(asked);
         let id = launch.id.as_str().to_owned();
         let native = launch
@@ -266,6 +285,12 @@ impl Adapter for Asked {
         });
         Box::pin(async move {
             next_turn().await;
+            // A test's own `prepare` is an async function that returns the
+            // real one's promise: its answer takes two turns more to settle.
+            if overridden {
+                next_turn().await;
+                next_turn().await;
+            }
             fake.recorder.answered(
                 at,
                 json!({
