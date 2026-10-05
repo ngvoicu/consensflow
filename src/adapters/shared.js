@@ -65,14 +65,15 @@ export const unnamed = (observed, reason) => ({ ...observed, waiting: { reason }
 
 /**
  * Text as a window can take it, for a first message and every later one. The
- * pane host refuses a frame with half a character in it (the dispatcher cuts
- * a long body at 3,000 code units, and an emoji across the cut leaves its
- * first half) and a paste with a control character other than tab and
- * newline; both were retried as a passing failure until the message was
- * dropped, and a harness's own API refuses half a character too. So half a
- * character is dropped, a CR before a newline goes as the host would drop
- * it, and every other control character is shown: as its Unicode picture
- * (ESC as ␛, a lone CR as ␍), or as U+FFFD for the C1 ones, which have none.
+ * pane host refuses a frame with half a character in it (a body over 16,000
+ * code units goes as its first 15,000, `delivery-text.js`, and an emoji
+ * across the cut leaves its first half) and a paste with a control
+ * character other than tab and newline; both were retried as a passing
+ * failure until the message was dropped, and a harness's own API refuses
+ * half a character too. So half a character is dropped, a CR before a
+ * newline goes as the host would drop it, and every other control character
+ * is shown: as its Unicode picture (ESC as ␛, a lone CR as ␍), or as U+FFFD
+ * for the C1 ones, which have none.
  * A window opened without a first message has none (null).
  */
 export function windowText(text) {

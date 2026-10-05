@@ -77,9 +77,11 @@ import { Windows } from './windows.js'
  *   account), or when the human says so; what was held for it goes on. A
  *   member low on quota takes nothing new. The human may also give a working
  *   or paused task back to the board (Reassign).
- * - What a human typed in a window and left unsent holds nothing (the
- *   owner's choice, 2026-10-01): a paste goes in behind it. The pane host
- *   holds only their keys pressed during a paste, until it is in.
+ * - What a human typed in a window and has not sent holds a paste until
+ *   they send or erase it (the owner's choice, 2026-10-03), and the board
+ *   says so (`holding`); a native send (Codex, Pi, OpenCode) leaves the
+ *   input box alone and waits for nothing. The pane host holds only their
+ *   keys pressed during a paste, until it is in.
  *
  * The dispatcher answers the human's operations, steps every window on each
  * pass, and holds each participant for one piece of work at a time. What it
