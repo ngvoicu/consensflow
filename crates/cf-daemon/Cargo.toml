@@ -38,8 +38,13 @@ tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "r
 url.workspace = true
 
 [dev-dependencies]
+# The API's player reads Node's traces (gzipped JSON, bodies that are no UTF-8)
+# and dumps the ledger's file as the recorder did.
+base64.workspace = true
 cf-engine = { workspace = true, features = ["test-support"] }
 cf-harness = { workspace = true, features = ["test-support"] }
+flate2.workspace = true
+rusqlite.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt", "signal", "sync", "test-util", "time"] }
 

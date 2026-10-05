@@ -1,15 +1,31 @@
 //! `GET /api/inbox` (`api.js:205-207`): the messages waiting in the caller's
-//! inbox.
-//!
-//! Its landing is the API's. Until then it answers as Node answers a route it
-//! has none for.
+//! inbox, newest first, at most a hundred: what the ledger holds for it, less
+//! what still waits for the human.
+
+use serde_json::json;
 
 use super::{Answer, Caller, Context, Failure, Request};
+use crate::api::views::{value, MessageSummary};
+
+/// How many messages the ledger gives an inbox when it is not told: Node's
+/// default.
+const LIMIT: i64 = 100;
 
 pub(super) async fn handle(
-    _context: &Context,
-    _caller: &Caller,
-    request: Request,
+    context: &Context,
+    caller: &Caller,
+    _request: Request,
 ) -> Result<Answer, Failure> {
-    Err(request.unknown_route())
+    let messages = context
+        .ledger
+        .borrow()
+        .inbox(caller.participant.id, LIMIT)?;
+    let summaries = messages
+        .iter()
+        .map(|message| value(&MessageSummary::from(message)))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Answer::ok(json!({ "messages": summaries })))
 }
+
+#[cfg(test)]
+mod tests;

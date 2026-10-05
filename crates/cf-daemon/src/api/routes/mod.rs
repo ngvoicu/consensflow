@@ -16,9 +16,6 @@
 //! A handler is given the context, the caller and the request. Where Node
 //! checks who may ask before it reads a body, the handler does, and reads the
 //! body ([`Request::json`]) only where Node did.
-//!
-//! Until a route's landing its handler answers as Node answers a route it has
-//! none for: 404 `unknown-route`.
 
 mod answers;
 mod door;
