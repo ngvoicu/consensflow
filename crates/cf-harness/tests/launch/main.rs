@@ -10,5 +10,6 @@
 
 mod claude;
 mod coverage;
+mod devin;
 mod scenarios;
 mod tables;

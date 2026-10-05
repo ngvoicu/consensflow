@@ -10,6 +10,7 @@
     "fileUrl": { "rows": 295, "held": "tests/launch/tables.rs" }
   },
   "scenarios": {
-    "claude-code": { "darwin": 44, "win32": 44, "held": "tests/launch/scenarios.rs" }
+    "claude-code": { "darwin": 44, "win32": 44, "held": "tests/launch/scenarios.rs" },
+    "devin": { "darwin": 136, "win32": 136, "held": "tests/launch/scenarios.rs" }
   }
 }

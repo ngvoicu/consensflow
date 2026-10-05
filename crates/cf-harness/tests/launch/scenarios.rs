@@ -11,7 +11,10 @@
 //! step holds waits until a step releases it, and the work begun is run by
 //! hand until nothing moves.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -19,11 +22,17 @@ use cf_base::env::Env;
 use cf_base::path;
 use cf_harness::claude::ClaudeAdapter;
 use cf_harness::contract::{
-    Adapter, Admission, Agent, HostError, Launch, LaunchId, Observed, Pane, Readiness, Window,
+    Adapter, Admission, Agent, HostError, Launch, LaunchId, Observed, Pane, Readiness, Window, Work,
 };
+use cf_harness::devin::DevinAdapter;
 use cf_harness::forget_launch;
+use cf_harness::seams::processes::{Child, Failed, Limits, Processes, Program, Streams};
 use cf_harness::seams::{Services, Time};
-use cf_harness::testing::{fake_executable, Answer, Driver, Fakes, OtherProcess, ScriptedHost};
+use cf_harness::testing::{
+    fake_executable, Answer, Driver, Fakes, OtherProcess, ScriptedHost, ScriptedProcesses,
+};
+use rusqlite::types::Value as Bound;
+use rusqlite::Connection;
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
@@ -120,7 +129,11 @@ impl Names {
                 live.map_or_else(|| value.clone(), |(name, _)| json!(name))
             }
             Value::String(text) => {
-                let text = text.replace(&self.root, "$ROOT");
+                // The root as a window names a program of the bundle's, with
+                // forward slashes, as well as with the platform's own.
+                let text = text
+                    .replace(&self.root, "$ROOT")
+                    .replace(&self.root.replace('\\', "/"), "$ROOT");
                 if text.starts_with("$ROOT") {
                     json!(posix(text))
                 } else {
@@ -143,11 +156,52 @@ struct Played {
     names: Names,
     env: Map<String, Value>,
     fakes: Fakes,
+    printing: Rc<Printing>,
     host: Rc<ScriptedHost>,
     adapter: Rc<dyn Adapter>,
     window: Option<Rc<dyn Window>>,
     launch: Option<LaunchId>,
     driver: Driver<Settled>,
+    /// The SQLite stores a scenario writes, by their names.
+    dbs: HashMap<String, Connection>,
+}
+
+/// The stand-in CLIs that print the text of a file each time they run
+/// (`fakeExecutable`'s `outputFile`), by the name they are found under, over
+/// the scripted programs that answer every other. A stand-in that says one
+/// thing is scripted (`every_answer`) and not kept here.
+struct Printing {
+    scripted: Rc<ScriptedProcesses>,
+    /// Each stand-in's name, what it says first, and the file it prints.
+    files: RefCell<Vec<(String, String, PathBuf)>>,
+}
+
+/// The name a program is found under: its file's.
+fn found_as(program: &Program) -> String {
+    program
+        .executable
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+}
+
+impl Processes for Printing {
+    fn run(&self, program: Program, limits: Limits) -> Work<'_, Result<String, Failed>> {
+        let name = found_as(&program);
+        let printed = self
+            .files
+            .borrow()
+            .iter()
+            .find(|(held, ..)| *held == name)
+            .map(|(_, said, file)| format!("{said}{}", fs::read_to_string(file).unwrap()));
+        match printed {
+            Some(text) => Box::pin(async move { Ok(text) }),
+            None => self.scripted.run(program, limits),
+        }
+    }
+
+    fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, String> {
+        self.scripted.spawn(program, streams)
+    }
 }
 
 /// A scenario's answer to a host request: at once, failing, or held.
@@ -485,18 +539,99 @@ fn pending(played: &Played) -> Vec<Value> {
         .collect()
 }
 
+/// A stand-in CLI that says `output` and prints the text of `outputFile`
+/// each time it runs (`fakeExecutable`): the program is scripted to answer
+/// every question with that text, its line end included.
+fn stand_in(played: &mut Played, name: &str, step: &Value) {
+    let found = fake_executable(Path::new(&path::join(&[&played.names.root, "bin", name])));
+    let name = found
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    let line_end = if cfg!(windows) { "\r\n" } else { "\n" };
+    let said = step["output"]
+        .as_str()
+        .filter(|output| !output.is_empty())
+        .map(|output| format!("{output}{line_end}"))
+        .unwrap_or_default();
+    played
+        .printing
+        .files
+        .borrow_mut()
+        .retain(|(held, ..)| *held != name);
+    if let Some(file) = step.get("outputFile") {
+        let file = PathBuf::from(played.names.real(file).as_str().unwrap());
+        played.printing.files.borrow_mut().push((name, said, file));
+    } else if step.get("output").is_some() {
+        played.fakes.processes.every_answer(&name, Ok(said));
+    }
+}
+
+/// A parameter as `node:sqlite` binds the JavaScript value: a number as a
+/// double, whatever it holds, text as text, null as NULL.
+fn bound(param: &Value) -> Bound {
+    match param {
+        Value::Null => Bound::Null,
+        Value::Number(number) => Bound::Real(number.as_f64().unwrap()),
+        Value::String(text) => Bound::Text(text.clone()),
+        other => panic!("a parameter no step binds: {other}"),
+    }
+}
+
+/// A step on a SQLite store of the scenario's: `new DatabaseSync(file)`,
+/// `.exec(sql)`, `.prepare(sql).run(...params)` or `.close()`.
+fn write_store(played: &mut Played, name: &str, step: &Value) {
+    if let Some(file) = step.get("open") {
+        let file = played.names.real(file);
+        let store = Connection::open(file.as_str().unwrap()).unwrap();
+        played.dbs.insert(name.to_owned(), store);
+    } else if let Some(sql) = step["exec"].as_str() {
+        played.dbs[name].execute_batch(sql).unwrap();
+    } else if let Some(sql) = step["run"].as_str() {
+        let params = step["params"].as_array().into_iter().flatten().map(bound);
+        played.dbs[name]
+            .execute(sql, rusqlite::params_from_iter(params))
+            .unwrap();
+    } else if step["close"] == json!(true) {
+        played.dbs.remove(name).unwrap().close().unwrap();
+    } else {
+        panic!("a db step with nothing to do: {step}");
+    }
+}
+
 /// Sets the root up as a step says: false for a step that is recorded.
 fn set_up(played: &mut Played, step: &Value) -> bool {
-    let names = &played.names;
     if let Some(name) = step["executable"].as_str() {
-        fake_executable(Path::new(&path::join(&[&names.root, "bin", name])));
+        stand_in(played, name, step);
         return true;
     }
+    if let Some(name) = step["db"].as_str() {
+        write_store(played, name, step);
+        return true;
+    }
+    let names = &played.names;
     if step.get("write").is_some() {
         let file = names.real(&step["write"]);
         let file = Path::new(file.as_str().unwrap());
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(file, names.real(&step["text"]).as_str().unwrap()).unwrap();
+        return true;
+    }
+    if step.get("append").is_some() {
+        let file = names.real(&step["append"]);
+        let file = Path::new(file.as_str().unwrap());
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(file)
+            .unwrap()
+            .write_all(names.real(&step["text"]).as_str().unwrap().as_bytes())
+            .unwrap();
+        return true;
+    }
+    if step.get("mkdir").is_some() {
+        let folder = names.real(&step["mkdir"]);
+        fs::create_dir_all(folder.as_str().unwrap()).unwrap();
         return true;
     }
     if step.get("remove").is_some() {
@@ -614,6 +749,7 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
 fn adapter(harness: &str, services: &Services) -> Rc<dyn Adapter> {
     match harness {
         "claude-code" => Rc::new(ClaudeAdapter::new(services)),
+        "devin" => Rc::new(DevinAdapter::new(services)),
         other => panic!("no adapter for {other}"),
     }
 }
@@ -639,7 +775,12 @@ fn play(scenario: &Value) -> Vec<Value> {
         .map(|(name, value)| (name.clone(), value.as_str().unwrap().to_owned()));
     let env_vars = Env::from_vars(vars);
     let fakes = Fakes::new(&env_vars);
-    let services = fakes.services(&env_vars, dir.path());
+    let printing = Rc::new(Printing {
+        scripted: Rc::clone(&fakes.processes),
+        files: RefCell::new(Vec::new()),
+    });
+    let mut services = fakes.services(&env_vars, dir.path());
+    services.processes = Rc::clone(&printing) as Rc<dyn Processes>;
     let adapter = adapter(scenario["harness"].as_str().unwrap(), &services);
     let mut played = Played {
         _dir: dir,
@@ -647,11 +788,13 @@ fn play(scenario: &Value) -> Vec<Value> {
         names,
         env,
         fakes,
+        printing,
         host: Rc::new(ScriptedHost::default()),
         adapter,
         window: None,
         launch: None,
         driver: Driver::default(),
+        dbs: HashMap::new(),
     };
     let mut records = Vec::new();
     for (index, each) in scenario["steps"].as_array().unwrap().iter().enumerate() {
