@@ -9,7 +9,9 @@
 //!
 //! Each harness's reader is in its own module, and [`reader`] is the switch
 //! between them. The readers kept from look to look are a [`Cache`], which
-//! [`open`] opens them for; [`answers`] reads a record whole, once.
+//! [`open`] opens them for; [`answers`] reads a record whole, once. The engine
+//! reads through a [`Thread`], which owns the caches and reads off its own
+//! thread.
 //!
 //! A reset a refusal names at a time of day but in no zone is read in the
 //! zone the caller gives as `local`, the machine's own where Node read the
@@ -23,9 +25,12 @@ use jiff::tz::TimeZone;
 
 use crate::{claude, codex, devin, opencode, pi};
 
+mod thread;
+
 pub use crate::shared::quota::{Level, Quota};
 pub use crate::shared::record::cache::{Cache, Look, Open, Options, PiSettlement, IDLE_MS};
 pub use crate::shared::record::reading::{Item, Reading, Record, Role, Settlement};
+pub use thread::Thread;
 
 /// The reader of the conversation `session` in `harness`'s record, in the
 /// places `env` names (`recordReader`): each look reads on from where the

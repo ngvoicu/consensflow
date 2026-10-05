@@ -19,6 +19,8 @@ cf-bridge = { path = "crates/cf-bridge" }
 cf-panes = { path = "crates/cf-panes" }
 cf-base = { path = "crates/cf-base" }
 cf-board = { path = "crates/cf-board" }
+cf-catalog = { path = "crates/cf-catalog" }
+cf-engine = { path = "crates/cf-engine" }
 cf-harness = { path = "crates/cf-harness" }
 cf-process = { path = "crates/cf-process" }
 cf-codex-session = { path = "crates/cf-codex-session" }

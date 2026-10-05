@@ -63,8 +63,37 @@ pub enum Level {
     Exhausted,
 }
 
+impl Quota {
+    /// How spent the quota is (JavaScript's `quota.state`): a refusal is
+    /// exhausted, a count says its own level.
+    pub fn level(&self) -> Level {
+        match self {
+            Quota::Exhausted { .. } => Level::Exhausted,
+            Quota::Usage { level, .. } => *level,
+        }
+    }
+
+    /// When the refusal happened, where its record said (`quota.at`); a
+    /// count has none.
+    pub fn at(&self) -> Option<&str> {
+        match self {
+            Quota::Exhausted { at, .. } => at.as_deref(),
+            Quota::Usage { .. } => None,
+        }
+    }
+
+    /// When the quota comes back, where its harness named it (`quota.resetsAt`).
+    pub fn resets_at(&self) -> Option<&str> {
+        match self {
+            Quota::Exhausted { resets_at, .. } | Quota::Usage { resets_at, .. } => {
+                resets_at.as_deref()
+            }
+        }
+    }
+}
+
 impl Level {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Level::Ok => "ok",
             Level::Low => "low",

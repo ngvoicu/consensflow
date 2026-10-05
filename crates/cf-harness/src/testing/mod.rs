@@ -46,18 +46,119 @@ fn polling() -> Option<usize> {
     POLLING.with(Cell::get)
 }
 
-/// A wait that ends once its flag is set.
-struct Flagged(Rc<Cell<bool>>);
+/// The end of a wait, which a test or a fake brings about, and the work that
+/// waits for it, woken then. The driver polls all its work again anyway; an
+/// executor that runs only the work it is told of (tokio's, the engine's
+/// kit) needs the telling.
+#[derive(Default)]
+pub(crate) struct Latch {
+    open: Cell<bool>,
+    waker: RefCell<Option<Waker>>,
+}
+
+impl Latch {
+    /// Ends the wait, waking the work that waits.
+    pub(crate) fn open(&self) {
+        self.open.set(true);
+        let waker = self.waker.borrow_mut().take();
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    }
+
+    pub(crate) fn is_open(&self) -> bool {
+        self.open.get()
+    }
+
+    /// Ready once open; until then the work polling is the one woken.
+    pub(crate) fn poll_open(&self, context: &Context<'_>) -> Poll<()> {
+        if self.open.get() {
+            Poll::Ready(())
+        } else {
+            *self.waker.borrow_mut() = Some(context.waker().clone());
+            Poll::Pending
+        }
+    }
+}
+
+/// A value a test gives later, and the work that waits for it, woken when it
+/// comes.
+pub(crate) struct Later<T> {
+    value: RefCell<Option<T>>,
+    waker: RefCell<Option<Waker>>,
+}
+
+impl<T> Default for Later<T> {
+    fn default() -> Self {
+        Self {
+            value: RefCell::new(None),
+            waker: RefCell::new(None),
+        }
+    }
+}
+
+impl<T> Later<T> {
+    /// Gives the value, waking the work that waits for it.
+    pub(crate) fn give(&self, value: T) {
+        *self.value.borrow_mut() = Some(value);
+        let waker = self.waker.borrow_mut().take();
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    }
+
+    /// The value once given; until then the work polling is the one woken.
+    pub(crate) fn poll_take(&self, context: &Context<'_>) -> Poll<T> {
+        let value = self.value.borrow_mut().take();
+        match value {
+            Some(value) => Poll::Ready(value),
+            None => {
+                *self.waker.borrow_mut() = Some(context.waker().clone());
+                Poll::Pending
+            }
+        }
+    }
+}
+
+/// `work`, which waits until `release` ends its wait: the release wakes it,
+/// once, as an executor that runs only woken work needs.
+#[cfg(test)]
+pub(crate) fn woken_by<T>(mut work: Work<'_, T>, release: impl FnOnce()) -> T {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::Wake;
+
+    /// A waker that counts how often it is woken.
+    struct Counting(AtomicUsize);
+
+    impl Wake for Counting {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let count = Arc::new(Counting(AtomicUsize::new(0)));
+    let waker = Waker::from(Arc::clone(&count));
+    let mut context = Context::from_waker(&waker);
+    assert!(
+        work.as_mut().poll(&mut context).is_pending(),
+        "it waits first"
+    );
+    release();
+    assert_eq!(count.0.load(Ordering::SeqCst), 1, "the release woke it");
+    match work.as_mut().poll(&mut context) {
+        Poll::Ready(value) => value,
+        Poll::Pending => panic!("woken and still waiting"),
+    }
+}
+
+/// A wait that ends once its latch is open.
+struct Flagged(Rc<Latch>);
 
 impl Future for Flagged {
     type Output = ();
 
-    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
-        if self.0.get() {
-            Poll::Ready(())
-        } else {
-            Poll::Pending
-        }
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<()> {
+        self.0.poll_open(context)
     }
 }
 
@@ -69,11 +170,11 @@ pub struct ManualTime {
     sleepers: RefCell<Vec<Sleeper>>,
 }
 
-/// A sleep armed: when it is due, the work it belongs to, and its flag.
+/// A sleep armed: when it is due, the work it belongs to, and its latch.
 struct Sleeper {
     due: i64,
     work: Option<usize>,
-    flag: Weak<Cell<bool>>,
+    flag: Weak<Latch>,
 }
 
 impl ManualTime {
@@ -104,8 +205,10 @@ impl ManualTime {
         }
         self.now.set(due.max(self.now.get()));
         if let Some(first) = sleepers.iter().position(|sleeper| sleeper.due == due) {
-            if let Some(flag) = sleepers.remove(first).flag.upgrade() {
-                flag.set(true);
+            let fired = sleepers.remove(first).flag.upgrade();
+            drop(sleepers);
+            if let Some(flag) = fired {
+                flag.open();
             }
         }
         true
@@ -134,7 +237,7 @@ impl Time for ManualTime {
     }
 
     fn sleep(&self, duration: Duration) -> Work<'_, ()> {
-        let flag = Rc::new(Cell::new(false));
+        let flag = Rc::new(Latch::default());
         let millis = i64::try_from(duration.as_millis()).unwrap_or(i64::MAX);
         let due = self.now.get().saturating_add(millis);
         self.sleepers.borrow_mut().push(Sleeper {
@@ -196,10 +299,10 @@ pub struct LocalRecords {
     held: RefCell<VecDeque<HeldLook>>,
 }
 
-/// A look held: the work it belongs to, and the flag that releases it.
+/// A look held: the work it belongs to, and the latch that releases it.
 struct HeldLook {
     work: Option<usize>,
-    flag: Rc<Cell<bool>>,
+    flag: Rc<Latch>,
 }
 
 impl LocalRecords {
@@ -223,8 +326,9 @@ impl LocalRecords {
 
     /// Releases the look held longest: whether one was.
     pub fn release(&self) -> bool {
-        self.held.borrow_mut().pop_front().is_some_and(|look| {
-            look.flag.set(true);
+        let look = self.held.borrow_mut().pop_front();
+        look.is_some_and(|look| {
+            look.flag.open();
             true
         })
     }
@@ -247,7 +351,7 @@ impl Records for LocalRecords {
         options: &'a Options,
     ) -> Work<'a, Arc<Reading>> {
         let held = self.hold.get().then(|| {
-            let flag = Rc::new(Cell::new(false));
+            let flag = Rc::new(Latch::default());
             self.held.borrow_mut().push_back(HeldLook {
                 work: polling(),
                 flag: Rc::clone(&flag),
@@ -278,7 +382,7 @@ impl Records for LocalRecords {
 type Reply = Result<Value, HostError>;
 
 /// Where a held request's answer is put when it is released.
-type Hold = Rc<RefCell<Option<Reply>>>;
+type Hold = Rc<Later<Reply>>;
 
 /// What a scripted host answers a request with.
 #[derive(Debug, Clone)]
@@ -341,8 +445,10 @@ impl ScriptedHost {
         let Some(at) = held.iter().position(|request| request.op == op) else {
             return false;
         };
-        if let Some(request) = held.remove(at) {
-            *request.hold.borrow_mut() = Some(answer);
+        let request = held.remove(at);
+        drop(held);
+        if let Some(request) = request {
+            request.hold.give(answer);
         }
         true
     }
@@ -364,11 +470,8 @@ struct Slot(Hold);
 impl Future for Slot {
     type Output = Reply;
 
-    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.0.borrow_mut().take() {
-            Some(answer) => Poll::Ready(answer),
-            None => Poll::Pending,
-        }
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        self.0.poll_take(context)
     }
 }
 
@@ -383,7 +486,7 @@ impl PaneHost for ScriptedHost {
         match next {
             Some(Answer::Now(answer)) => Box::pin(async move { answer }),
             Some(Answer::Held) => {
-                let slot = Rc::new(RefCell::new(None));
+                let slot = Rc::new(Later::default());
                 self.held.borrow_mut().push_back(HeldRequest {
                     op: op.to_owned(),
                     work: polling(),
@@ -656,6 +759,29 @@ mod tests {
         entropy.fill(&mut [0; 16]).unwrap();
         assert_eq!(entropy.take_draws(), [3, 16]);
         assert!(entropy.take_draws().is_empty());
+    }
+
+    #[test]
+    fn a_sleep_a_held_request_and_a_held_look_wake_the_work_that_waits_when_they_end() {
+        let time = ManualTime::new(1_000);
+        woken_by(time.sleep(Duration::from_millis(5)), || {
+            assert!(time.fire_next(i64::MAX));
+        });
+        let host = ScriptedHost::default();
+        host.answer("pane.claim", [Answer::Held]);
+        let answered = woken_by(host.request("pane.claim", serde_json::json!({})), || {
+            assert!(host.release("pane.claim", Ok(serde_json::json!(1))));
+        });
+        assert_eq!(answered.ok(), Some(serde_json::json!(1)));
+        let records = LocalRecords::new(
+            Env::from_vars([("HOME", "/nowhere")]),
+            Rc::new(ManualTime::new(0)),
+        );
+        records.hold(true);
+        let options = Options::default();
+        woken_by(records.look(Harness::Claude, "s", &options), || {
+            assert!(records.release());
+        });
     }
 
     #[test]

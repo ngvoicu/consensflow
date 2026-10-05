@@ -239,6 +239,8 @@ function settled(dispatcher) {
 }
 
 async function setup(fn, options = {}) {
+  // Each test numbers its items from i-1, as the Rust port's tests do.
+  order = 0
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-dispatch-'))
   let at = Date.parse('2026-09-19T12:00:00.000Z')
   const clock = {

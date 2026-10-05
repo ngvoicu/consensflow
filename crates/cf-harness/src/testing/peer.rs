@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::rc::{Rc, Weak};
 use std::task::{Context, Poll};
 
-use super::polling;
+use super::{polling, Later};
 use crate::contract::Work;
 use crate::seams::loopback::{BodyFailed, Loopback, Method, Reply, Request, FETCH_FAILED};
 
@@ -38,7 +38,7 @@ pub enum Sent {
 }
 
 /// Where a held answer is put when it is released.
-type Hold<T> = Rc<RefCell<Option<T>>>;
+type Hold<T> = Rc<Later<T>>;
 
 /// The bodies held, each of a reply to a route.
 type HeldBodies = Rc<RefCell<VecDeque<Held<Result<Vec<u8>, BodyFailed>>>>>;
@@ -117,12 +117,14 @@ impl ScriptedLoopback {
 
 /// Puts `answer` where the one held longest for `route` waits.
 fn release<T>(held: &RefCell<VecDeque<Held<T>>>, route: &str, answer: T) -> bool {
-    let mut held = held.borrow_mut();
-    let Some(at) = held.iter().position(|each| each.route == route) else {
+    let mut queue = held.borrow_mut();
+    let Some(at) = queue.iter().position(|each| each.route == route) else {
         return false;
     };
-    if let Some(each) = held.remove(at) {
-        *each.hold.borrow_mut() = Some(answer);
+    let each = queue.remove(at);
+    drop(queue);
+    if let Some(each) = each {
+        each.hold.give(answer);
     }
     true
 }
@@ -149,11 +151,8 @@ struct Slot<T> {
 impl<T> Future for Slot<T> {
     type Output = T;
 
-    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<T> {
-        match self.hold.borrow_mut().take() {
-            Some(answer) => Poll::Ready(answer),
-            None => Poll::Pending,
-        }
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<T> {
+        self.hold.poll_take(context)
     }
 }
 
@@ -169,7 +168,7 @@ impl<T> Drop for Slot<T> {
 
 /// A held thing for the work polled now.
 fn hold<T>(held: &Rc<RefCell<VecDeque<Held<T>>>>, route: &str) -> Slot<T> {
-    let slot = Rc::new(RefCell::new(None));
+    let slot = Rc::new(Later::default());
     held.borrow_mut().push_back(Held {
         route: route.to_owned(),
         work: polling(),
@@ -285,6 +284,16 @@ mod tests {
         let asked = peer.take_asked();
         assert_eq!(asked[0].url, "http://127.0.0.1:41000/session?directory=a+b");
         assert_eq!(asked.len(), 3);
+    }
+
+    #[test]
+    fn a_held_answer_wakes_the_work_that_waits_for_it() {
+        let peer = ScriptedLoopback::default();
+        peer.serve("GET /global/health", [Served::Held]);
+        let reply = crate::testing::woken_by(peer.send(get("/global/health")), || {
+            assert!(peer.release("GET /global/health", Served::NoHead));
+        });
+        assert_eq!(reply.err().as_deref(), Some("fetch failed"));
     }
 
     #[test]

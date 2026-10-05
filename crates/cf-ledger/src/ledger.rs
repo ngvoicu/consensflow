@@ -49,9 +49,16 @@ impl Default for Options {
     }
 }
 
+/// What a test does with the reads it watches ([`Ledger::watch`]): told the
+/// read's name and the id it was given, it may fail it.
+#[cfg(feature = "test-support")]
+pub type Watcher = Box<dyn FnMut(&str, Option<i64>) -> Result<(), LedgerError>>;
+
 /// The ledger of a home, open.
 pub struct Ledger {
     store: Store,
+    #[cfg(feature = "test-support")]
+    watcher: std::cell::RefCell<Option<Watcher>>,
 }
 
 /// Opens the ledger at `file`, made or brought to this build's schema: the
@@ -79,6 +86,8 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
     }
     Ok(Ledger {
         store: Store::new(db, options.clock, options.names, options.trace),
+        #[cfg(feature = "test-support")]
+        watcher: std::cell::RefCell::new(None),
     })
 }
 
@@ -104,6 +113,23 @@ fn opening_refusal(file: &Path, cause: LedgerError) -> LedgerError {
             409,
         ),
         _ => cause,
+    }
+}
+
+#[cfg(feature = "test-support")]
+impl Ledger {
+    /// Tells `watcher` of each read of `projects` and `next_delivery`, before
+    /// it is made: the engine's tests count them, or fail one.
+    pub fn watch(&mut self, watcher: Watcher) {
+        *self.watcher.get_mut() = Some(watcher);
+    }
+
+    /// Tells the watcher, if there is one, of the read about to be made.
+    pub(crate) fn watched(&self, read: &str, id: Option<i64>) -> Result<(), LedgerError> {
+        match self.watcher.borrow_mut().as_mut() {
+            Some(watcher) => watcher(read, id),
+            None => Ok(()),
+        }
     }
 }
 

@@ -1,0 +1,43 @@
+[package]
+name = "cf-engine"
+description = "ConsensFlow's engine: the dispatcher and the owners of what it orchestrates (scheduler, windows, deliveries, chief switch, transcripts), and the texts it writes (delivery text, handoff, role instructions)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+cf-base.workspace = true
+# The work tiers and how each one reads, for the chief's text.
+cf-catalog.workspace = true
+cf-harness.workspace = true
+cf-ledger.workspace = true
+cf-proto.workspace = true
+# A pass answers at its first failure while the other steps run on.
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# The kit's temporary ledger.
+tempfile = { workspace = true, optional = true }
+# Work that goes on apart from its caller, on the daemon's `LocalSet`.
+tokio = { workspace = true, features = ["rt"] }
+
+[features]
+# The kit the engine's tests and the daemon's run it with: an executor that
+# runs work to stillness, and the fakes.
+test-support = ["cf-harness/test-support", "cf-ledger/test-support", "dep:tempfile"]
+
+[dev-dependencies]
+cf-engine = { path = ".", features = ["test-support"] }
+# The dispatcher's traces, as the Node recorder wrote them, and the database
+# a test's ledger left, read as Node read its own.
+flate2.workspace = true
+rusqlite.workspace = true
+# The ported tests keep the patterns they matched with.
+regex.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

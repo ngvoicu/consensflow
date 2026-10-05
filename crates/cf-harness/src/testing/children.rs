@@ -4,13 +4,13 @@
 //! name (the lines it writes, and how it ends), and what was asked of them
 //! kept, the same on every platform, as a stand-in sees itself.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::future::poll_fn;
 use std::path::Path;
 use std::rc::Rc;
-use std::task::Poll;
 
+use super::Latch;
 use crate::contract::Work;
 use crate::seams::processes::{Child, Ending, Failed, Limits, Processes, Program, Streams};
 
@@ -184,12 +184,15 @@ impl Processes for ScriptedProcesses {
             .and_then(VecDeque::pop_front)
             .ok_or_else(|| missing(&named))?;
         // One that ends by itself and says nothing has ended once started.
-        let ended = script.ends == Ends::Itself && script.lines.is_empty();
+        let ended = Latch::default();
+        if script.ends == Ends::Itself && script.lines.is_empty() {
+            ended.open();
+        }
         Ok(Box::new(ScriptedChild {
             lines: RefCell::new(script.lines.into()),
             ends: script.ends,
             written: Rc::clone(&self.written),
-            ended: Cell::new(ended),
+            ended,
         }))
     }
 }
@@ -199,7 +202,7 @@ struct ScriptedChild {
     lines: RefCell<VecDeque<String>>,
     ends: Ends,
     written: Rc<RefCell<Vec<String>>>,
-    ended: Cell<bool>,
+    ended: Latch,
 }
 
 impl Child for ScriptedChild {
@@ -213,7 +216,7 @@ impl Child for ScriptedChild {
     fn read_line(&self, limit: usize) -> Work<'_, Result<Option<String>, String>> {
         let line = self.lines.borrow_mut().pop_front();
         if line.is_none() && self.ends == Ends::Itself {
-            self.ended.set(true);
+            self.ended.open();
         }
         Box::pin(async move {
             match line {
@@ -230,17 +233,11 @@ impl Child for ScriptedChild {
     }
 
     fn exited(&self) -> bool {
-        self.ended.get()
+        self.ended.is_open()
     }
 
     fn closed(&self) -> Work<'_, ()> {
-        Box::pin(poll_fn(|_| {
-            if self.ended.get() {
-                Poll::Ready(())
-            } else {
-                Poll::Pending
-            }
-        }))
+        Box::pin(poll_fn(|context| self.ended.poll_open(context)))
     }
 
     fn terminate(&self, how: Ending) {
@@ -251,7 +248,7 @@ impl Child for ScriptedChild {
             Ends::Never => false,
         };
         if ends {
-            self.ended.set(true);
+            self.ended.open();
         }
     }
 }
@@ -298,6 +295,23 @@ mod tests {
             .collect();
         assert_eq!(ran.len(), 4);
         assert_eq!(ran[3], ("codex mcp list".to_owned(), LIMITS));
+    }
+
+    #[test]
+    fn a_child_ended_when_asked_wakes_the_work_waiting_for_it_to_close() {
+        let scripted = ScriptedProcesses::default();
+        scripted.child(
+            "opencode",
+            ChildScript {
+                lines: Vec::new(),
+                ends: Ends::Asked,
+            },
+        );
+        let child = scripted
+            .spawn(program("/bin/opencode", &["serve"]), Streams::Quiet)
+            .unwrap();
+        crate::testing::woken_by(child.closed(), || child.terminate(Ending::Asked));
+        assert!(child.exited());
     }
 
     #[test]

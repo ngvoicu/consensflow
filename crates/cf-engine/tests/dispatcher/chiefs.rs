@@ -1,0 +1,126 @@
+//! What the suites about a project's chief share (the helpers of
+//! `core-dispatcher.test.mjs` between `a member whose saved agent is gone`
+//! and `switching the chief to another agent`): Codex's own fake, the chief
+//! of a project, the handoffs it was written, and a project replaced while
+//! something of it waits.
+
+use cf_engine::seams::EngineError;
+use cf_engine::testing::{Answer, Context, Made};
+use cf_engine::SwitchTo;
+use cf_ledger::{DeletedProject, MessageView, ParticipantView, ProjectView};
+use serde_json::json;
+
+use crate::fixtures::participant;
+
+/// A test's engine where Codex has a fake of its own, so a test sees which
+/// harness a window opened on (`withCodex`).
+pub fn with_codex() -> Context {
+    Context::made(Made {
+        codex: true,
+        ..Made::default()
+    })
+}
+
+/// The chief a switch is to.
+pub fn to(harness: &str, agent: &str) -> SwitchTo {
+    SwitchTo {
+        harness: harness.to_owned(),
+        agent: agent.to_owned(),
+    }
+}
+
+/// The project's chief as the ledger has it now (`chiefOf`).
+pub fn chief_of(context: &Context, project: i64) -> ParticipantView {
+    participant(context, project, "chief").expect("a chief")
+}
+
+/// The handoffs the chief was written, newest first (`handoffsOf`).
+pub fn handoffs_of(context: &Context, project: i64) -> Vec<MessageView> {
+    let chief = chief_of(context, project).id;
+    let inbox = context
+        .ledger
+        .borrow()
+        .inbox(chief, 100)
+        .expect("the chief's inbox");
+    inbox
+        .into_iter()
+        .filter(|message| message.body.starts_with("You are the chief now"))
+        .collect()
+}
+
+/// What the human heard from the project: the bodies of the notes to them.
+pub fn to_human(context: &Context, project: i64) -> Vec<String> {
+    let human = context.id(project, "human");
+    let inbox = context
+        .ledger
+        .borrow()
+        .inbox(human, 100)
+        .expect("the human's inbox");
+    inbox.into_iter().map(|message| message.body).collect()
+}
+
+/// A project replaced while something of it waits: the human closes and
+/// deletes it, and opens another, whose ids are its own, as the ledger never
+/// gives the deleted one's again (`replaceProject`).
+pub struct Replaced {
+    /// The project opened in its place.
+    pub fresh: ProjectView,
+    old: i64,
+    closing: Answer<Result<Option<ProjectView>, EngineError>>,
+    deleting: Answer<Result<DeletedProject, EngineError>>,
+}
+
+impl Replaced {
+    /// The old project's close and delete ended, and failed nothing
+    /// (`await gone`): the close answers the project as it is when it ends,
+    /// none once it was deleted meanwhile, as Node answered `null`.
+    pub fn gone(&self) {
+        let closed = self.closing.take().expect("the close ended");
+        assert_eq!(
+            closed.expect("the close").map(|project| project.id),
+            None,
+            "the close of project {}, deleted meanwhile",
+            self.old
+        );
+        self.deleting
+            .take()
+            .expect("the delete ended")
+            .expect("the delete");
+    }
+}
+
+/// Closes and deletes `old` while something of it waits, and opens another
+/// project, the old one's close and delete left to go on beside it.
+pub fn replace_project(context: &Context, old: &ProjectView) -> Replaced {
+    replace_project_with(context, old, &[])
+}
+
+/// A project replaced as [`replace_project`] does, the one opened in its
+/// place with these workers on its staff.
+pub fn replace_project_with(context: &Context, old: &ProjectView, workers: &[&str]) -> Replaced {
+    let closing = context.begin_close_project(old.id);
+    let deleting = context.begin_delete_project(old.id);
+    let staff: Vec<_> = workers
+        .iter()
+        .map(|agent| {
+            json!({ "agent": agent, "harness": "claude-code", "role": "worker", "tier": "standard" })
+        })
+        .collect();
+    let opening = context.begin_open_project(json!({
+        "directory": "/work/api",
+        "name": "api",
+        "chief": { "harness": "claude-code", "agent": "apollo" },
+        "staff": staff,
+    }));
+    let fresh = context
+        .finish(opening)
+        .expect("a project in its place")
+        .expect("the project");
+    assert_ne!(fresh.id, old.id, "the ledger never gives its id again");
+    Replaced {
+        fresh,
+        old: old.id,
+        closing,
+        deleting,
+    }
+}
