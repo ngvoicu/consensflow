@@ -35,6 +35,11 @@ http-body-util = "0.1"
 # HTTP/1 for the Codex window's broker, routes matched by hand, as the plan decided.
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+# Unicode as Node's ICU holds it, 17.0: normalization forms and general
+# categories, for the text Windows' console carries (`consoleText`). Already in
+# the build, through `url`.
+icu_normalizer = "2.3"
+icu_properties = "2.3"
 # The time zone database for the quota's resets, and nothing else of it. Its
 # defaults, with the database bundled on every platform and not only on
 # Windows (`tzdb-bundle-always`): the global one jiff reads by default is the

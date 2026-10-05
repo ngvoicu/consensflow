@@ -275,7 +275,7 @@ pub fn trim_start(text: &str) -> &str {
 }
 
 /// Whether JavaScript's `\s` and `.trim()` take `character` for white space.
-fn is_space(character: char) -> bool {
+pub fn is_space(character: char) -> bool {
     character == '\u{FEFF}' || (character != '\u{85}' && character.is_whitespace())
 }
 
