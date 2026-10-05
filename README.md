@@ -68,10 +68,8 @@ Download the latest version from
 
 **Mac** (Apple silicon, macOS 13.5 or later)
 
-1. Download the `.dmg`, open it, and drag ConsensFlow to Applications.
-2. The first time you open it, macOS blocks it, because the app is not
-   signed with an Apple certificate yet. Go to **System Settings → Privacy &
-   Security** and choose **Open Anyway**.
+Download the `.dmg`, open it, and drag ConsensFlow to Applications. The app
+is signed and notarized by Apple, so it opens like any other app.
 
 **Windows** (Windows 10 or 11, 64-bit)
 
