@@ -169,7 +169,7 @@ impl Dispatcher {
         let saved = self.seams.roster.agent(agent)?.ok_or_else(|| {
             EngineError::said("unknown-agent", format!("{agent} is not among your agents"))
         })?;
-        if !fits_role(saved.is_designer(), "chief") {
+        if !fits_role(saved.designer, "chief") {
             return Err(EngineError::said(
                 "image-agent-chief",
                 format!("{agent} is an image agent, which can only be an image designer"),

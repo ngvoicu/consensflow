@@ -9,8 +9,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use cf_base::refusal::Refusal;
-use cf_catalog::AgentRow;
-use cf_harness::contract::{Adapter, LaunchId, Records};
+use cf_harness::contract::{Adapter, Agent, LaunchId, Records};
 use cf_harness::seams::Time;
 use cf_ledger::{Ledger, LedgerError, ParticipantView, ProjectView};
 use cf_proto::trace::TraceLine;
@@ -82,10 +81,32 @@ pub trait LaunchFiles {
     fn forget(&self, launch: &LaunchId);
 }
 
-/// The saved agents, read at each launch (`roster`): an agent's row, none
-/// for one the human deleted, or why the agents file could not be read.
+/// A saved agent, as a launch and the chief's checks read it: the model it
+/// runs and the levels its harness reads, and whether it is an image agent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SavedAgent {
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub thinking: Option<String>,
+    pub designer: bool,
+}
+
+impl SavedAgent {
+    /// The agent as a launch is given it.
+    pub fn agent(&self) -> Agent<'_> {
+        Agent {
+            model: self.model.as_deref(),
+            effort: self.effort.as_deref(),
+            thinking: self.thinking.as_deref(),
+            designer: self.designer,
+        }
+    }
+}
+
+/// The saved agents, read at each launch (`roster`): an agent, none for one
+/// the human deleted, or why the agents file could not be read.
 pub trait Roster {
-    fn agent(&self, name: &str) -> Result<Option<AgentRow>, Refusal>;
+    fn agent(&self, name: &str) -> Result<Option<SavedAgent>, Refusal>;
 }
 
 /// The text each role's window starts with (`roles`), or why it has none,
