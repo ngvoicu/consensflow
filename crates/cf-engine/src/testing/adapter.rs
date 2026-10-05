@@ -3,9 +3,10 @@
 //! for any harness the test names it under ([`super::FakeAdapters`]); each
 //! window is an agent, found by its launch, and by the handle it is for.
 //! What a call does and reads, it does when called, as the JavaScript fake's
-//! async functions did; each is answered a turn later, as their promises
-//! were, and written down in the Node traces' shape, under the harness it
-//! was asked as. A test that replaced one of the fake's functions, or set
+//! async functions did, and is written down in the Node traces' shape, under
+//! the harness it was asked as. The turn an `await` of the call costs is the
+//! engine's, whether or not the call waited ([`crate::runtime::returning`]);
+//! the fake takes only the turns of its own promises. A test that replaced one of the fake's functions, or set
 //! what it reads, says what it did in its place ([`FakeAdapter::prepare`],
 //! [`FakeAdapter::after_prepare`], [`FakeAdapter::started`],
 //! [`FakeAdapter::deliver`], [`FakeAdapter::ready`],
@@ -323,7 +324,6 @@ impl Asked {
         let overridden = own.is_some();
         if let Some(Err(reason)) = own.map(|own| own(&asked)) {
             return Box::pin(async move {
-                next_turn().await;
                 fake.recorder
                     .answered(at, json!({ "$error": { "message": reason } }));
                 Err(reason)
@@ -363,9 +363,8 @@ impl Asked {
             Rc::clone(fake),
         ));
         Box::pin(async move {
-            next_turn().await;
             // A test's own `prepare` is an async function that returns the
-            // real one's promise: its answer takes two turns more to settle.
+            // real one's promise: its answer takes two turns to settle.
             if overridden {
                 next_turn().await;
                 next_turn().await;
@@ -430,11 +429,9 @@ impl Adapter for Asked {
             });
         };
         // A call held is made once the test lets it go, or, where the test
-        // gave a reason, fails in its place a turn after, as the wrapper's
-        // throw did.
+        // gave a reason, fails in its place, as the wrapper's throw did.
         Box::pin(async move {
             if let Some(reason) = wrapped.before().await {
-                next_turn().await;
                 return Err(reason);
             }
             let prepared = self.made(launch, asked, at).await;

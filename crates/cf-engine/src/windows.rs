@@ -20,7 +20,7 @@ use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
-use crate::runtime::{begin, next_turn};
+use crate::runtime::{begin, caught, returning};
 use crate::seams::{EngineError, SavedAgent};
 
 /// The key that interrupts a harness's current turn, how often it is pressed
@@ -274,12 +274,18 @@ impl Dispatcher {
         next
     }
 
-    /// What a window does now, told to the trace and the board when it changed.
-    pub(crate) fn set_activity(&self, record: &Record, activity: Activity) {
+    /// What a window does now, told to the trace and the board when it
+    /// changed. A trace that could not be told fails it, the window's
+    /// activity changed all the same.
+    pub(crate) fn set_activity(
+        &self,
+        record: &Record,
+        activity: Activity,
+    ) -> Result<(), EngineError> {
         {
             let mut window = record.window.borrow_mut();
             if window.activity == activity {
-                return;
+                return Ok(());
             }
             window.activity = activity.clone();
         }
@@ -289,8 +295,9 @@ impl Dispatcher {
                 state: activity.state.as_str().to_owned(),
                 reason: activity.reason,
             },
-        );
+        )?;
         self.changed();
+        Ok(())
     }
 
     /// Launches `participant`'s window on its harness, `message` its first if
@@ -378,19 +385,16 @@ impl Dispatcher {
             pane: pane.clone(),
             exited: false,
         });
-        let opened = self
-            .seams
-            .host
-            .open(OpenPane {
-                pane: pane.clone(),
-                cwd: project.directory.clone(),
-                argv: planned.argv.clone(),
-                env,
-                drop_env: planned.drop_env.clone(),
-            })
-            .await;
-        // `.catch(...)` made a promise of its own to wait on.
-        next_turn().await;
+        // `.catch(...)` made a promise of its own to wait on, a turn after
+        // the host's answer.
+        let opened = returning(self.seams.host.open(OpenPane {
+            pane: pane.clone(),
+            cwd: project.directory.clone(),
+            argv: planned.argv.clone(),
+            env,
+            drop_env: planned.drop_env.clone(),
+        }))
+        .await;
         let exited = record
             .window
             .borrow_mut()
@@ -434,9 +438,7 @@ impl Dispatcher {
             }
             // One that exited before its open was answered has gone already.
             if exited {
-                if let Some(rest) = self.pane_exited(pane) {
-                    rest.await;
-                }
+                Box::pin(self.exited(&pane)).await?;
             }
             return Ok(());
         }
@@ -470,14 +472,12 @@ impl Dispatcher {
         record.delivery.borrow_mut().delivering = delivering.clone();
         // A window that exited before its open was answered goes as any exit does.
         if exited {
-            if let Some(rest) = self.pane_exited(pane) {
-                rest.await;
-            }
+            Box::pin(self.exited(&pane)).await?;
             return Ok(());
         }
-        let started = planned.window.started().await;
-        // `.catch(...)` made a promise of its own to wait on.
-        next_turn().await;
+        // The adapter's `started` is an `async` function, and `.catch(...)`
+        // made a promise of its own to wait on.
+        let started = caught(planned.window.started()).await;
         if let (Err(error), Some(delivering)) = (&started, delivering) {
             record.delivery.borrow_mut().delivering = None;
             // The chief's window goes without taking its project with it: the chief is tried again.
@@ -572,8 +572,9 @@ impl Dispatcher {
             agent: saved.as_ref().map(SavedAgent::agent),
             instructions: &instructions,
         };
-        let prepared = adapter
-            .prepare(&launch)
+        // An `async` function: its answer, or its failure, reaches this
+        // step a turn after it was made, though Pi's never waits.
+        let prepared = returning(adapter.prepare(&launch))
             .await
             .map_err(|cause| EngineError::said("launch-failed", cause))?;
         Ok(Some(Planned {
@@ -749,7 +750,7 @@ impl Dispatcher {
         let Some(window) = record.window.borrow().window.clone() else {
             return Err("the window is closed".to_owned());
         };
-        let observed = window.observe().await?;
+        let observed = returning(window.observe()).await?;
         record.window.borrow_mut().settled = observed.settled;
         Ok(observed)
     }
@@ -766,17 +767,10 @@ impl Dispatcher {
             return true;
         }
         let snapshot = match pane {
-            Some(pane) => {
-                let answered = self
-                    .seams
-                    .host
-                    .request("pane.snapshot", pane_body(&pane))
-                    .await
-                    .ok();
-                // `.catch(() => null)` made a promise of its own to wait on.
-                next_turn().await;
-                answered
-            }
+            // `.catch(() => null)` made a promise of its own to wait on.
+            Some(pane) => returning(self.seams.host.request("pane.snapshot", pane_body(&pane)))
+                .await
+                .ok(),
             None => None,
         };
         let drawn = match snapshot
@@ -890,7 +884,7 @@ impl Dispatcher {
             part.pane.clone()
         };
         let killed = match pane {
-            Some(pane) => self.kill(record, &pane).await,
+            Some(pane) => self.kill(record, &pane).await?,
             None => false,
         };
         if !killed {
@@ -901,15 +895,18 @@ impl Dispatcher {
     }
 
     /// Kills a window: whether the pane host took the kill; the trace says
-    /// why not.
-    async fn kill(self: &Rc<Self>, record: &Rc<Record>, pane: &Pane) -> bool {
-        let error = match self.seams.host.kill(pane).await {
-            Ok(Killed::Killed) => return true,
+    /// why not, and a trace that cannot be told fails the kill.
+    async fn kill(self: &Rc<Self>, record: &Rc<Record>, pane: &Pane) -> Result<bool, EngineError> {
+        // `.catch(...)` made a promise of its own to wait on, a turn after
+        // the host's answer.
+        let killed = returning(self.seams.host.kill(pane)).await;
+        let error = match killed {
+            Ok(Killed::Killed) => return Ok(true),
             Ok(Killed::Refused { error }) => error,
             Err(error) => error.message,
         };
-        self.trace_window(record, WindowEvent::KillFailed { error: Some(error) });
-        false
+        self.trace_window(record, WindowEvent::KillFailed { error: Some(error) })?;
+        Ok(false)
     }
 
     /// A member's window closes once it holds no task, unless the human
@@ -936,26 +933,35 @@ impl Dispatcher {
     /// chief that could not take its first message): the exit settles what
     /// the window was doing, as any exit does, but a chief's does not close
     /// its project. Says whether the window goes: one whose kill the pane
-    /// host refused stays as it was, and no exit is made up for it.
+    /// host refused stays as it was, and no exit is made up for it. An exit
+    /// that cannot be settled fails the close, which is the caller's to hear
+    /// (the host's own exit event, with no caller, is told to the log).
     pub(crate) async fn close_own(
         self: &Rc<Self>,
         record: &Rc<Record>,
         pane: &Pane,
     ) -> Result<bool, EngineError> {
         record.window.borrow_mut().own_exit = true;
-        let retiring = record.window.borrow().retiring;
-        let went = if !retiring && !self.kill(record, pane).await {
-            false
-        } else {
-            let open = record.window.borrow().pane.as_ref() == Some(pane);
-            if open {
-                if let Some(rest) = self.pane_exited(pane.clone()) {
-                    rest.await;
-                }
-            }
-            true
-        };
+        let went = self.kill_and_settle(record, pane).await;
         record.window.borrow_mut().own_exit = false;
-        Ok(went)
+        went
+    }
+
+    async fn kill_and_settle(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        pane: &Pane,
+    ) -> Result<bool, EngineError> {
+        let retiring = record.window.borrow().retiring;
+        if !retiring && !self.kill(record, pane).await? {
+            return Ok(false);
+        }
+        let open = record.window.borrow().pane.as_ref() == Some(pane);
+        if open {
+            // An exit may close windows in turn: boxed, so the futures of
+            // closing and exiting are not each the other's inside.
+            Box::pin(self.exited(pane)).await?;
+        }
+        Ok(true)
     }
 }

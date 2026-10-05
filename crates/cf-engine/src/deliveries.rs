@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
-use crate::runtime::begin;
+use crate::runtime::{begin, caught, returning};
 use crate::seams::EngineError;
 
 /// An Enter, pressed once more for a paste its window did not send.
@@ -102,7 +102,7 @@ impl Dispatcher {
                         message: message.id,
                         reason: format!("the window is not ready for a paste: {}", held.sentence()),
                     },
-                );
+                )?;
             }
             return Ok(());
         }
@@ -111,7 +111,7 @@ impl Dispatcher {
             return Ok(());
         };
         self.seams.ledger.borrow_mut().begin_delivery(message.id)?;
-        let outcome = match window.deliver(host, &pane, &delivery_text(&message)).await {
+        let outcome = match returning(window.deliver(host, &pane, &delivery_text(&message))).await {
             Ok(admission) => admission,
             // An adapter that failed never handed it over, and its error must show.
             Err(error) => Admission::Refused {
@@ -221,7 +221,7 @@ impl Dispatcher {
         }
         if waited <= self.seams.limits.arrival_ms {
             if waited > ENTER_AGAIN_MS && !delivering.entered_again {
-                self.enter_again(record, delivering.message).await;
+                self.enter_again(record, delivering.message).await?;
             }
             return Ok(());
         }
@@ -238,13 +238,21 @@ impl Dispatcher {
     /// the text waits in the input, where a second paste would only stack a
     /// copy beside it. Pressed once, and only into a window quiet for a
     /// while; the next look tries again.
-    async fn enter_again(self: &Rc<Self>, record: &Rc<Record>, message: i64) {
+    async fn enter_again(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        message: i64,
+    ) -> Result<(), EngineError> {
         let Some(pane) = record.window.borrow().pane.clone() else {
-            return;
+            return Ok(());
         };
         self.entered_again(record, message, true);
         let body = json!({ "id": pane.id, "generation": pane.generation });
-        let snapshot = self.seams.host.request("pane.snapshot", body).await.ok();
+        // `.catch(() => null)` made a promise of its own to wait on, a turn
+        // after the host's answer.
+        let snapshot = returning(self.seams.host.request("pane.snapshot", body))
+            .await
+            .ok();
         let quiet = snapshot
             .as_ref()
             .and_then(|snapshot| snapshot.get("outputQuietMs"))
@@ -261,12 +269,13 @@ impl Dispatcher {
             && quiet.is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS);
         if !ready {
             self.entered_again(record, message, false);
-            return;
+            return Ok(());
         }
         let input = json!({ "id": pane.id, "generation": pane.generation, "bytes": [ENTER] });
-        // A key the host did not take is pressed again at the next look's Enter, if any.
-        let _ = self.seams.host.request("pane.input", input).await;
-        self.trace_window(record, WindowEvent::EnterAgain { message });
+        // A key the host did not take is pressed again at the next look's
+        // Enter, if any: `.catch(() => {})` made a promise of its own to wait on.
+        let _ = returning(self.seams.host.request("pane.input", input)).await;
+        self.trace_window(record, WindowEvent::EnterAgain { message })
     }
 
     /// Marks whether Enter was pressed again for `message`, while it is the one on its way.
@@ -487,10 +496,8 @@ impl Dispatcher {
                 .copied_item_with(message.recipient_id, &marker)?;
             let item = match copied {
                 Some(item) => Some(item),
-                None => {
-                    self.recorded_item_with(message.recipient_id, &marker)
-                        .await?
-                }
+                // An `async` method: its answer reaches this a turn after it was made.
+                None => returning(self.recorded_item_with(message.recipient_id, &marker)).await?,
             };
             match item {
                 None => {
@@ -539,11 +546,14 @@ impl Dispatcher {
         else {
             return Ok(None);
         };
-        let reading = self
-            .seams
-            .records
-            .look(harness, &session, &Options::default())
-            .await;
+        // The adapter's `record` is an `async` function, and `.catch(() =>
+        // null)` made a promise of its own to wait on.
+        let reading = caught(
+            self.seams
+                .records
+                .look(harness, &session, &Options::default()),
+        )
+        .await;
         let Reading::Known(record) = &*reading else {
             return Ok(None);
         };

@@ -1,94 +1,21 @@
-//! An executor that runs every piece of work spawned, the test's own
-//! included, in the order each was woken, until nothing can move; and a gate
-//! a test opens to let a wait end. Only work that is woken runs again, as on
-//! tokio's `LocalSet`, so a fake that never wakes what waits on it holds that
-//! work for good, as it would there. A panic in any work fails the test where
-//! it runs.
+//! What a test does with the engine's executor ([`crate::runtime::Executor`],
+//! the daemon's own, made strict so that a panic in any work fails the test
+//! where it runs): starting work and reading its answer, and a gate it opens
+//! to let a wait end. Only work that is woken runs again, as on the daemon's
+//! executor, so a fake that never wakes what waits on it holds that work for
+//! good, as it would there.
 
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Wake, Waker};
+use std::task::{Context, Poll, Waker};
 
-use crate::runtime::{LocalWork, Spawn};
-
-/// Runs the engine's work on the test's thread.
-#[derive(Default)]
-pub struct Executor {
-    tasks: RefCell<Vec<Option<LocalWork>>>,
-    woken: Arc<Mutex<VecDeque<usize>>>,
-}
-
-/// What wakes a piece of work: its number, queued to run again.
-struct Wakeup {
-    task: usize,
-    woken: Arc<Mutex<VecDeque<usize>>>,
-}
-
-impl Wake for Wakeup {
-    fn wake(self: Arc<Self>) {
-        self.wake_by_ref();
-    }
-
-    fn wake_by_ref(self: &Arc<Self>) {
-        self.woken.lock().expect("the queue").push_back(self.task);
-    }
-}
-
-impl Spawn for Executor {
-    fn spawn(&self, work: LocalWork) {
-        let task = self.add(work);
-        self.woken.lock().expect("the queue").push_back(task);
-    }
-}
+use crate::runtime::{Executor, Spawn};
 
 impl Executor {
-    /// Takes `work` in, not yet run: its number.
-    fn add(&self, work: LocalWork) -> usize {
-        let mut tasks = self.tasks.borrow_mut();
-        tasks.push(Some(work));
-        tasks.len() - 1
-    }
-
-    /// Polls piece of work `task` once, if it has not ended: whether it ran.
-    fn poll(&self, task: usize) -> bool {
-        let work = self.tasks.borrow_mut().get_mut(task).and_then(Option::take);
-        let Some(mut work) = work else {
-            return false;
-        };
-        let waker = Waker::from(Arc::new(Wakeup {
-            task,
-            woken: Arc::clone(&self.woken),
-        }));
-        if work
-            .as_mut()
-            .poll(&mut Context::from_waker(&waker))
-            .is_pending()
-        {
-            self.tasks.borrow_mut()[task] = Some(work);
-        }
-        true
-    }
-
-    /// Runs what is woken, in the order it was, until nothing is: whether
-    /// anything ran.
-    pub fn run(&self) -> bool {
-        let mut ran = false;
-        loop {
-            let next = self.woken.lock().expect("the queue").pop_front();
-            let Some(task) = next else {
-                return ran;
-            };
-            // Ended, or woken again before it ran: nothing to run.
-            ran |= self.poll(task);
-        }
-    }
-
     /// Starts `work` as work of its own, run with everything else by the next
-    /// [`Executor::run`]: where its answer will be.
+    /// [`Executor::drain`]: where its answer will be.
     pub fn start<T: 'static>(&self, work: impl Future<Output = T> + 'static) -> Answer<T> {
         let answer = Answer::default();
         let slot = answer.clone();
@@ -100,7 +27,7 @@ impl Executor {
 
     /// Starts `work` and polls it once where it is called, as JavaScript ran
     /// a call to its first wait; the rest is run, with everything else, by
-    /// the next [`Executor::run`]: where its answer will be.
+    /// the next [`Executor::drain`]: where its answer will be.
     pub fn start_now<T: 'static>(&self, work: impl Future<Output = T> + 'static) -> Answer<T> {
         let answer = Answer::default();
         let slot = answer.clone();
@@ -115,13 +42,8 @@ impl Executor {
     /// can move: its answer, if it has one by then.
     pub fn finish<T: 'static>(&self, work: impl Future<Output = T> + 'static) -> Option<T> {
         let answer = self.start(work);
-        self.run();
+        self.drain();
         answer.take()
-    }
-
-    /// How many pieces of work wait, not ended.
-    pub fn waiting(&self) -> usize {
-        self.tasks.borrow().iter().flatten().count()
     }
 }
 
@@ -209,7 +131,7 @@ mod tests {
 
     #[test]
     fn work_started_now_does_what_comes_before_its_first_wait_where_it_is_called() {
-        let executor = Executor::default();
+        let executor = Executor::strict();
         let log = Log::default();
         let (started, later) = (Rc::clone(&log), Rc::clone(&log));
         let answer = executor.start_now(async move {
@@ -222,19 +144,19 @@ mod tests {
         later.borrow_mut().push("caller");
         assert_eq!(*log.borrow(), ["start", "caller"]);
         assert!(!answer.ended());
-        executor.run();
+        executor.drain();
         assert_eq!(*log.borrow(), ["start", "caller", "end"]);
         assert_eq!(answer.take(), Some(7));
     }
 
     #[test]
-    fn work_started_waits_for_the_next_run_to_begin() {
-        let executor = Executor::default();
+    fn work_started_waits_for_the_next_drain_to_begin() {
+        let executor = Executor::strict();
         let log = Log::default();
         let started = Rc::clone(&log);
         let answer = executor.start(async move { started.borrow_mut().push("start") });
         assert!(log.borrow().is_empty());
-        executor.run();
+        executor.drain();
         assert_eq!(*log.borrow(), ["start"]);
         assert!(answer.ended());
     }

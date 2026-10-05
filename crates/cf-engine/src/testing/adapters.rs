@@ -12,7 +12,6 @@ use cf_proto::agents::Harness;
 use serde_json::json;
 
 use super::adapter::{Asked, FakeAdapter};
-use crate::runtime::next_turn;
 use crate::seams::Adapters;
 
 /// The adapters the test's engine is made with: the fake under every
@@ -101,7 +100,6 @@ impl Records for FakeRecords {
         );
         let reading = record_of(fake, session);
         Box::pin(async move {
-            next_turn().await;
             let written = match &reading {
                 Reading::Unknown(_) => json!({ "unknown": true }),
                 Reading::Known(record) => json!({ "items": record.items }),

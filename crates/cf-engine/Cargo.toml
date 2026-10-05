@@ -20,12 +20,10 @@ serde_json.workspace = true
 thiserror.workspace = true
 # The kit's temporary ledger.
 tempfile = { workspace = true, optional = true }
-# Work that goes on apart from its caller, on the daemon's `LocalSet`.
-tokio = { workspace = true, features = ["rt"] }
 
 [features]
-# The kit the engine's tests and the daemon's run it with: an executor that
-# runs work to stillness, and the fakes.
+# The kit the engine's tests and the daemon's run it with: what a test does
+# with the engine's executor, and the fakes.
 test-support = ["cf-harness/test-support", "cf-ledger/test-support", "dep:tempfile"]
 
 [dev-dependencies]
@@ -37,7 +35,8 @@ rusqlite.workspace = true
 # The ported tests keep the patterns they matched with.
 regex.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt"] }
+# The executor's tests run it on a real `LocalSet`, as the daemon does.
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
 
 [lints]
 workspace = true

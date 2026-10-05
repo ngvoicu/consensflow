@@ -69,6 +69,8 @@ impl Ledger {
         by: Option<&str>,
         because: Option<&str>,
     ) -> Result<TaskView, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("pause_task", Some(number))?;
         tasks::pause_task(&mut self.store, project_id, number, by, because)
     }
 
