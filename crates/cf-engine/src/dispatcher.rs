@@ -30,11 +30,10 @@ use cf_ledger::{
     TaskView,
 };
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
-use futures_util::future::try_join_all;
 
 use crate::chief_switch::SwitchTo;
 use crate::record::Record;
-use crate::runtime::{begin, Begun, LocalWork};
+use crate::runtime::{all, begin, Begun, LocalWork};
 use crate::seams::{EngineError, Seams};
 use crate::windows::{Activity, ActivityState};
 
@@ -260,9 +259,9 @@ impl Dispatcher {
                 };
                 Ok::<_, EngineError>((!went).then_some(handle))
             };
-            closing.push(self.exclusive(&record, work, true).await);
+            closing.push(self.exclusive(&record, work).await);
         }
-        let kept = try_join_all(closing.into_iter().flatten()).await?;
+        let kept = all(closing).await?;
         Ok(kept.into_iter().flatten().collect())
     }
 
@@ -282,9 +281,9 @@ impl Dispatcher {
             let this = Rc::clone(self);
             let held = Rc::clone(&record);
             let work = async move { this.close_leaving(&held).await };
-            closing.extend(self.exclusive(&record, work, true).await);
+            closing.push(self.exclusive(&record, work).await);
         }
-        try_join_all(closing).await?;
+        all(closing).await?;
         Ok(())
     }
 
@@ -414,10 +413,7 @@ impl Dispatcher {
             }
             this.release(project, number)
         };
-        self.exclusive(&record, work, true)
-            .await
-            .ok_or_else(|| EngineError::said("busy", "the participant is held"))?
-            .await
+        self.exclusive(&record, work).await.await
     }
 
     fn release(&self, project: i64, number: i64) -> Result<TaskReleased, EngineError> {
@@ -580,11 +576,7 @@ impl Dispatcher {
                 .remove_member(project, &handle)?;
             Ok((removed, left))
         };
-        let (removed, left) = self
-            .exclusive(&record, work, true)
-            .await
-            .ok_or_else(|| EngineError::said("busy", "the participant is held"))?
-            .await?;
+        let (removed, left) = self.exclusive(&record, work).await.await?;
         self.forget(&left).await?;
         self.changed();
         Ok(removed)
@@ -623,10 +615,10 @@ impl Dispatcher {
                 let record = self.record_of(participant.id);
                 let (this, at, who) = (Rc::clone(self), Rc::clone(&project), participant.clone());
                 let step = async move { this.step(&at, &who).await };
-                steps.extend(self.exclusive(&record, step, false).await);
+                steps.extend(self.try_exclusive(&record, step).await);
             }
         }
-        try_join_all(steps).await?;
+        all(steps).await?;
         Ok(())
     }
 
@@ -1013,10 +1005,7 @@ impl Dispatcher {
             }
             Ok(())
         };
-        self.exclusive(&record, work, true)
-            .await
-            .ok_or_else(|| EngineError::said("busy", "the participant is held"))?
-            .await?;
+        self.exclusive(&record, work).await.await?;
         self.project_now(project)
     }
 
@@ -1057,15 +1046,24 @@ impl Dispatcher {
 
     // --- small helpers ---------------------------------------------------------------
 
-    /// Runs `work` holding `record`'s participant: none when it is held and
-    /// `wait` is false, as a pass moves on; with `wait`, once its turn comes.
+    /// Runs `work` holding `record`'s participant once its turn comes: its
+    /// place in the queue taken now, its answer through the [`Begun`].
     pub(crate) async fn exclusive<T: 'static>(
         &self,
         record: &Rc<Record>,
         work: impl Future<Output = Result<T, EngineError>> + 'static,
-        wait: bool,
+    ) -> Begun<Result<T, EngineError>> {
+        record.hold.exclusive(&*self.seams.spawn, work).await
+    }
+
+    /// Runs `work` holding `record`'s participant if nothing holds it now:
+    /// none when it is held, as a pass moves on.
+    pub(crate) async fn try_exclusive<T: 'static>(
+        &self,
+        record: &Rc<Record>,
+        work: impl Future<Output = Result<T, EngineError>> + 'static,
     ) -> Option<Begun<Result<T, EngineError>>> {
-        record.hold.exclusive(&*self.seams.spawn, work, wait).await
+        record.hold.try_exclusive(&*self.seams.spawn, work).await
     }
 
     /// Begins a launch or a delivery apart from the pass, holding its
@@ -1120,10 +1118,8 @@ impl Dispatcher {
         };
         let this = Rc::clone(self);
         let opening = async move {
-            if let Some(begun) = this.exclusive(&record, work, true).await {
-                if let Err(cause) = begun.await {
-                    this.write_down(&cause);
-                }
+            if let Err(cause) = this.exclusive(&record, work).await.await {
+                this.write_down(&cause);
             }
         };
         drop(begin(&*self.seams.spawn, opening).await);

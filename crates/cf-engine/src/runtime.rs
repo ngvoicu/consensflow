@@ -12,13 +12,17 @@
 //!   from the pass. A pass that finds it held moves on; a human's operation
 //!   waits its turn, first come, first served, and the participant is handed
 //!   straight to it, so nothing that comes later takes it first.
+//! - Work begun together is awaited together ([`all`]), its first failure
+//!   answered as soon as it comes.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::future::{poll_fn, Future};
-use std::pin::Pin;
+use std::pin::{pin, Pin};
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
+
+use futures_util::stream::{FuturesUnordered, StreamExt};
 
 /// A piece of work on the engine's thread.
 pub type LocalWork = Pin<Box<dyn Future<Output = ()>>>;
@@ -115,6 +119,22 @@ impl<T> Answer<T> {
     }
 }
 
+/// The answers of work begun, in the order begun, as `Promise.all` gives
+/// them: the first failure as soon as it comes, whatever earlier work still
+/// waits on, the rest going on as the work of its own each is.
+pub async fn all<T, E>(begun: Vec<Begun<Result<T, E>>>) -> Result<Vec<T>, E> {
+    let mut answers: Vec<Option<T>> = std::iter::repeat_with(|| None).take(begun.len()).collect();
+    let mut pending: FuturesUnordered<_> = begun
+        .into_iter()
+        .enumerate()
+        .map(|(at, answer)| async move { (at, answer.await) })
+        .collect();
+    while let Some((at, answer)) = pending.next().await {
+        answers[at] = Some(answer?);
+    }
+    Ok(answers.into_iter().flatten().collect())
+}
+
 /// Who holds a participant now (`runtime.running` and `runtime.acting`), and
 /// who waits for it.
 #[derive(Default)]
@@ -135,23 +155,52 @@ impl Hold {
         self.running.get() || self.acting.get() || self.handed.get()
     }
 
-    /// Runs `work` for this participant once nothing else holds it
-    /// (`#exclusive`): none when it is held and `wait` is false, as a pass
-    /// that finds it busy moves on; with `wait`, once its turn comes. The
-    /// work is begun in place, and holds the participant until it ends.
+    /// Runs `work` for this participant if nothing holds it now
+    /// (`#exclusive` from a pass): none when it is held, as a pass that
+    /// finds it busy moves on. The work is begun in place, and holds the
+    /// participant until it ends.
+    pub async fn try_exclusive<T: 'static>(
+        self: &Rc<Self>,
+        spawn: &dyn Spawn,
+        work: impl Future<Output = T> + 'static,
+    ) -> Option<Begun<T>> {
+        if self.held() {
+            return None;
+        }
+        Some(self.hold_for(spawn, work).await)
+    }
+
+    /// Runs `work` for this participant once its turn comes (`#exclusive`
+    /// with `wait`): at once if nothing holds it, begun in place; else its
+    /// place in the queue is taken now, first come, first served, and the
+    /// work begins when the participant is handed to it. Its answer comes
+    /// through the [`Begun`] either way, which the caller may await with
+    /// others: every waiter it makes is in the queue before it awaits any.
     pub async fn exclusive<T: 'static>(
         self: &Rc<Self>,
         spawn: &dyn Spawn,
         work: impl Future<Output = T> + 'static,
-        wait: bool,
-    ) -> Option<Begun<T>> {
-        if self.held() {
-            if !wait {
-                return None;
-            }
-            Waiting::new(self).await;
-            self.handed.set(false);
+    ) -> Begun<T> {
+        if !self.held() {
+            return self.hold_for(spawn, work).await;
         }
+        let waiting = Waiting::new(self);
+        let hold = Rc::clone(self);
+        begin(spawn, async move {
+            waiting.await;
+            hold.handed.set(false);
+            hold.run_held(work).await
+        })
+        .await
+    }
+
+    /// Begins `work` in place, holding the participant from its first wait
+    /// until it ends.
+    async fn hold_for<T: 'static>(
+        self: &Rc<Self>,
+        spawn: &dyn Spawn,
+        work: impl Future<Output = T> + 'static,
+    ) -> Begun<T> {
         let hold = Rc::clone(self);
         let begun = begin(spawn, async move {
             let answer = work.await;
@@ -165,7 +214,24 @@ impl Hold {
         if !begun.ended() {
             self.running.set(true);
         }
-        Some(begun)
+        begun
+    }
+
+    /// Runs `work`, handed the participant, in the waiter's own work: its
+    /// start as JavaScript ran it, nothing held until it first waits; then
+    /// held until it ends, and the participant passed on.
+    async fn run_held<T>(&self, work: impl Future<Output = T>) -> T {
+        let mut work = pin!(work);
+        let answer = match poll_fn(|context| Poll::Ready(work.as_mut().poll(context))).await {
+            Poll::Ready(answer) => answer,
+            Poll::Pending => {
+                self.running.set(true);
+                work.await
+            }
+        };
+        self.running.set(false);
+        self.pass_on();
+        answer
     }
 
     /// Begins `work` apart from the pass, holding the participant until it

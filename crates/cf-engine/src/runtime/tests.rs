@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::*;
-use crate::testing::{Executor, Gate};
+use crate::testing::{next_turn, Executor, Gate};
 
 /// What a test's pieces of work did, in order.
 #[derive(Clone, Default)]
@@ -57,9 +57,9 @@ fn a_work_that_ends_where_it_is_begun_holds_nothing_after() {
     let hold = Rc::new(Hold::default());
     let (spawn, held) = (Rc::clone(&executor), Rc::clone(&hold));
     let answer = executor.finish(async move {
-        let begun = held.exclusive(&*spawn, async { 7 }, false).await;
+        let begun = held.exclusive(&*spawn, async { 7 }).await;
         assert!(!held.held(), "nothing holds it once its work ended");
-        begun.expect("not held").await
+        begun.await
     });
     assert_eq!(answer, Some(7));
     assert_eq!(executor.waiting(), 0);
@@ -77,21 +77,20 @@ fn a_pass_moves_on_from_a_participant_held_and_a_human_operation_waits_its_turn(
         gate.clone(),
     );
     executor.finish(async move {
-        held.exclusive(&*spawn, gated(step, opened, "step", "stepped"), false)
+        held.try_exclusive(&*spawn, gated(step, opened, "step", "stepped"))
             .await
             .expect("not held yet");
     });
     assert!(hold.held());
     let (spawn, held) = (Rc::clone(&executor), Rc::clone(&hold));
     let skipped =
-        executor.finish(async move { held.exclusive(&*spawn, async {}, false).await.is_none() });
+        executor.finish(async move { held.try_exclusive(&*spawn, async {}).await.is_none() });
     assert_eq!(skipped, Some(true), "a pass moves on");
     let (spawn, held, operation) = (Rc::clone(&executor), Rc::clone(&hold), log.clone());
     executor.spawn(Box::pin(async move {
-        let begun = held
-            .exclusive(&*spawn, async move { operation.push("operation") }, true)
+        held.exclusive(&*spawn, async move { operation.push("operation") })
+            .await
             .await;
-        begun.expect("waited").await;
     }));
     executor.run();
     assert_eq!(log.taken(), ["step"], "the operation waits");
@@ -113,17 +112,16 @@ fn waiters_are_served_first_come_and_nothing_takes_a_participant_handed_on() {
         gate.clone(),
     );
     executor.finish(async move {
-        held.exclusive(&*spawn, gated(step, opened, "step", "stepped"), false)
+        held.try_exclusive(&*spawn, gated(step, opened, "step", "stepped"))
             .await
             .expect("not held yet");
     });
     for name in ["first", "second"] {
         let (spawn, held, operation) = (Rc::clone(&executor), Rc::clone(&hold), log.clone());
         executor.spawn(Box::pin(async move {
-            let begun = held
-                .exclusive(&*spawn, async move { operation.push(name) }, true)
+            held.exclusive(&*spawn, async move { operation.push(name) })
+                .await
                 .await;
-            begun.expect("waited").await;
         }));
     }
     executor.run();
@@ -132,11 +130,119 @@ fn waiters_are_served_first_come_and_nothing_takes_a_participant_handed_on() {
     gate.open();
     let (spawn, held) = (Rc::clone(&executor), Rc::clone(&hold));
     executor.spawn(Box::pin(async move {
-        assert!(held.exclusive(&*spawn, async {}, false).await.is_none());
+        assert!(held.try_exclusive(&*spawn, async {}).await.is_none());
     }));
     executor.run();
     assert_eq!(log.taken(), ["step", "stepped", "first", "second"]);
     assert!(!hold.held());
+}
+
+#[test]
+fn operations_on_many_participants_each_take_their_place_at_once() {
+    // A Close of a project whose chief is held and whose member is not: the
+    // member's window goes now, the chief's once its step is over.
+    let executor = Rc::new(Executor::default());
+    let (chief, member) = (Rc::new(Hold::default()), Rc::new(Hold::default()));
+    let (log, gate) = (Log::default(), Gate::default());
+    let (spawn, held, step, opened) = (
+        Rc::clone(&executor),
+        Rc::clone(&chief),
+        log.clone(),
+        gate.clone(),
+    );
+    executor.finish(async move {
+        held.try_exclusive(&*spawn, gated(step, opened, "step", "stepped"))
+            .await
+            .expect("not held yet");
+    });
+    let (spawn, holds, closing) = (
+        Rc::clone(&executor),
+        [Rc::clone(&chief), Rc::clone(&member)],
+        log.clone(),
+    );
+    executor.spawn(Box::pin(async move {
+        let mut begun = Vec::new();
+        for (hold, name) in holds.iter().zip(["chief closed", "member closed"]) {
+            let closed = closing.clone();
+            begun.push(
+                hold.exclusive(&*spawn, async move { closed.push(name) })
+                    .await,
+            );
+        }
+        closing.push("all asked");
+        for closed in begun {
+            closed.await;
+        }
+        closing.push("all closed");
+    }));
+    executor.run();
+    assert_eq!(log.taken(), ["step", "member closed", "all asked"]);
+    gate.open();
+    executor.run();
+    assert_eq!(log.taken(), ["stepped", "chief closed", "all closed"]);
+}
+
+#[test]
+fn work_awaited_together_answers_its_first_failure_at_once_and_the_rest_goes_on() {
+    // More than the 30 above which `try_join_all` keeps each answer behind
+    // the ones before it.
+    let executor = Rc::new(Executor::default());
+    let (log, gate) = (Log::default(), Gate::default());
+    let (spawn, held, opened) = (Rc::clone(&executor), log.clone(), gate.clone());
+    let answered = executor.finish(async move {
+        let mut begun = Vec::new();
+        let first = {
+            let (held, opened) = (held.clone(), opened.clone());
+            async move {
+                gated(held, opened, "first", "first went on").await;
+                Ok(())
+            }
+        };
+        begun.push(begin(&*spawn, first).await);
+        for _ in 0..38 {
+            begun.push(begin(&*spawn, async { Ok(()) }).await);
+        }
+        let failing = async move {
+            next_turn().await;
+            Err("refused")
+        };
+        begun.push(begin(&*spawn, failing).await);
+        all(begun).await
+    });
+    assert_eq!(
+        answered,
+        Some(Err("refused")),
+        "answered while the first still waits"
+    );
+    assert_eq!(log.taken(), ["first"]);
+    gate.open();
+    executor.run();
+    assert_eq!(log.taken(), ["first went on"]);
+}
+
+#[test]
+fn work_awaited_together_answers_in_the_order_begun() {
+    let executor = Rc::new(Executor::default());
+    let gate = Gate::default();
+    let (spawn, opened) = (Rc::clone(&executor), gate.clone());
+    let answered = Rc::new(RefCell::new(None));
+    let keep = Rc::clone(&answered);
+    executor.spawn(Box::pin(async move {
+        let late = async move {
+            opened.wait().await;
+            Ok::<_, ()>("late")
+        };
+        let begun = vec![
+            begin(&*spawn, late).await,
+            begin(&*spawn, async { Ok("now") }).await,
+        ];
+        *keep.borrow_mut() = Some(all(begun).await);
+    }));
+    executor.run();
+    assert!(answered.borrow().is_none());
+    gate.open();
+    executor.run();
+    assert_eq!(answered.borrow_mut().take(), Some(Ok(vec!["late", "now"])));
 }
 
 #[test]
@@ -159,14 +265,13 @@ fn a_launch_going_on_apart_holds_its_participant_until_it_ends() {
                     .await;
             }
         };
-        held.exclusive(&*spawn, step, false).await.expect("free");
+        held.try_exclusive(&*spawn, step).await.expect("free");
     });
     assert!(hold.held(), "the launch holds its participant");
     let (spawn, held, operation) = (Rc::clone(&executor), Rc::clone(&hold), log.clone());
     executor.spawn(Box::pin(async move {
-        held.exclusive(&*spawn, async move { operation.push("operation") }, true)
+        held.exclusive(&*spawn, async move { operation.push("operation") })
             .await
-            .expect("waited")
             .await;
     }));
     executor.run();
@@ -183,7 +288,7 @@ fn work_that_fails_before_its_first_wait_lets_go_of_its_participant() {
     let (spawn, held) = (Rc::clone(&executor), Rc::clone(&hold));
     let failed = executor.finish(async move {
         let begun = held
-            .exclusive(&*spawn, async { Err::<(), _>("refused") }, false)
+            .try_exclusive(&*spawn, async { Err::<(), _>("refused") })
             .await
             .expect("free");
         begun.await
@@ -217,7 +322,7 @@ fn a_waiter_that_goes_away_leaves_its_place_and_one_handed_the_participant_passe
         gate.clone(),
     );
     executor.finish(async move {
-        held.exclusive(&*spawn, gated(step, opened, "step", "stepped"), false)
+        held.try_exclusive(&*spawn, gated(step, opened, "step", "stepped"))
             .await
             .expect("not held yet");
     });
@@ -230,9 +335,8 @@ fn a_waiter_that_goes_away_leaves_its_place_and_one_handed_the_participant_passe
     let given = Waiting::new(&hold);
     let (spawn, held, operation) = (Rc::clone(&executor), Rc::clone(&hold), log.clone());
     executor.spawn(Box::pin(async move {
-        held.exclusive(&*spawn, async move { operation.push("operation") }, true)
+        held.exclusive(&*spawn, async move { operation.push("operation") })
             .await
-            .expect("waited")
             .await;
     }));
     executor.run();
@@ -274,10 +378,9 @@ fn the_same_rules_hold_on_tokios_local_set() {
         let (log, hold) = (Log::default(), Rc::new(Hold::default()));
         let gate = Gate::default();
         let begun = hold
-            .exclusive(
+            .try_exclusive(
                 &LocalSpawn,
                 gated(log.clone(), gate.clone(), "step", "stepped"),
-                false,
             )
             .await
             .expect("free");
@@ -285,14 +388,13 @@ fn the_same_rules_hold_on_tokios_local_set() {
         let waiter = {
             let (hold, log) = (Rc::clone(&hold), log.clone());
             tokio::task::spawn_local(async move {
-                hold.exclusive(&LocalSpawn, async move { log.push("operation") }, true)
+                hold.exclusive(&LocalSpawn, async move { log.push("operation") })
                     .await
-                    .expect("waited")
                     .await;
             })
         };
         tokio::task::yield_now().await;
-        assert!(hold.exclusive(&LocalSpawn, async {}, false).await.is_none());
+        assert!(hold.try_exclusive(&LocalSpawn, async {}).await.is_none());
         gate.open();
         begun.await;
         waiter.await.expect("the waiter");
