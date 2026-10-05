@@ -21,35 +21,38 @@ use serde_json::Value;
 
 use crate::seams::{Loopback, Processes, Time};
 
-pub(super) use create::{create_session, Serve};
-pub(super) use launch::{launch_configuration, Launched};
-pub(super) use seed::{seed_session, Seed};
-pub(super) use send::{send, Target};
+pub use create::{create_session, Serve, TIMEOUT_MS};
+pub(super) use launch::launch_configuration;
+pub use launch::Launched;
+pub use seed::{seed_session, Seed, LIFETIME_MS};
+pub use send::{send, Target};
 pub(super) use state::{session_state, Shown};
+
+pub use crate::shared::admission::Sent;
 
 /// A launch's channel: its window's server, and the plugin's.
 #[derive(Debug, Clone)]
-pub(super) struct Channel {
-    pub(super) launch_id: String,
+pub struct Channel {
+    pub launch_id: String,
     /// The window's own server: `http://127.0.0.1:<port>`.
-    pub(super) endpoint: String,
-    pub(super) password: String,
-    pub(super) bridge: Bridge,
+    pub endpoint: String,
+    pub password: String,
+    pub bridge: Bridge,
 }
 
 /// The plugin's server, which the launch's token is the key to.
 #[derive(Debug, Clone)]
-pub(super) struct Bridge {
-    pub(super) endpoint: String,
-    pub(super) token: String,
+pub struct Bridge {
+    pub endpoint: String,
+    pub token: String,
 }
 
 /// What the engine gives the channel to wait and ask with.
 #[derive(Clone, Copy)]
-pub(super) struct Wires<'a> {
-    pub(super) time: &'a dyn Time,
-    pub(super) loopback: &'a dyn Loopback,
-    pub(super) processes: &'a dyn Processes,
+pub struct Wires<'a> {
+    pub time: &'a dyn Time,
+    pub loopback: &'a dyn Loopback,
+    pub processes: &'a dyn Processes,
 }
 
 impl Wires<'_> {

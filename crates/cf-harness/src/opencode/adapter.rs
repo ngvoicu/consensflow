@@ -40,7 +40,7 @@ use serde_json::Value;
 
 use super::channel::{
     create_session, launch_configuration, seed_session, send, session_state, Channel, Seed, Serve,
-    Shown, Target, Wires,
+    Shown, Target, Wires, LIFETIME_MS, TIMEOUT_MS,
 };
 use super::child_env::{child_env, Declared};
 use super::install::prepare_extension;
@@ -126,6 +126,7 @@ impl Adapter for OpenCodeAdapter {
                         directory: launch.directory,
                         env: &child_env(&with_role, &Declared::default()),
                         launched: &launched,
+                        timeout_ms: TIMEOUT_MS,
                     };
                     create_session(self.wires(), &serve).await?
                 }
@@ -243,6 +244,7 @@ impl Window for OpenCodeWindow {
                 model: self.model.as_deref().filter(|_| fresh),
                 variant: self.effort.as_deref().filter(|_| fresh),
                 resume: self.resumed,
+                lifetime_ms: LIFETIME_MS,
             };
             seed_session(self.wires(), &self.channel, &seed).await?;
             Ok(None)

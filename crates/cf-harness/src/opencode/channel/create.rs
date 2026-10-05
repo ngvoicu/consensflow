@@ -29,8 +29,9 @@ use crate::seams::loopback::{BodyFailed, Method, Request};
 use crate::seams::processes::{Child, Program, Streams};
 use crate::shared::child::stop;
 
-/// How long the whole of it has, from the start.
-const TIMEOUT_MS: i64 = 15_000;
+/// How long the whole of it has, from the start, for a window
+/// (`createSession`'s `timeoutMs`).
+pub const TIMEOUT_MS: i64 = 15_000;
 
 /// How long one health poll may take at most.
 const POLL_MS: i64 = 500;
@@ -45,22 +46,25 @@ const POLL_LIMIT: usize = 64 * 1024;
 const SESSION_LIMIT: usize = 1024 * 1024;
 
 /// What a throwaway server is run for.
-pub(crate) struct Serve<'a> {
-    pub(crate) executable: &'a str,
+pub struct Serve<'a> {
+    pub executable: &'a str,
     /// The folder the window will work in, which the server runs in.
-    pub(crate) directory: &'a str,
+    pub directory: &'a str,
     /// The environment the server inherits: the engine's, with what the
     /// window's role adds.
-    pub(crate) env: &'a Env,
-    pub(crate) launched: &'a Launched,
+    pub env: &'a Env,
+    pub launched: &'a Launched,
+    /// How long the whole of it has, from the start: [`TIMEOUT_MS`] for a
+    /// window.
+    pub timeout_ms: i64,
 }
 
 /// Makes one empty conversation in `serve.directory` on a server that is
 /// stopped before its id returns: the id, or why there is none.
-pub(crate) async fn create_session(wires: Wires<'_>, serve: &Serve<'_>) -> Result<String, String> {
+pub async fn create_session(wires: Wires<'_>, serve: &Serve<'_>) -> Result<String, String> {
     let canonical = real_path(serve.directory)
         .map_err(|_| "opencode session needs a working directory".to_owned())?;
-    let deadline = wires.time.wall_ms().saturating_add(TIMEOUT_MS);
+    let deadline = wires.time.wall_ms().saturating_add(serve.timeout_ms);
     // A child that did not start is none, and its failure is all it says.
     let child = wires
         .processes

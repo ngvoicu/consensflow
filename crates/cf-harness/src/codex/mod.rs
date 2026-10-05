@@ -14,3 +14,6 @@ pub mod record;
 mod role;
 
 pub use adapter::CodexAdapter;
+// What `codex-send` plays the channel's cases through (`src/bin/codex_send.rs`).
+#[cfg(feature = "test-support")]
+pub use channel::{send, Answer, Channel, Session, Shown, Target};

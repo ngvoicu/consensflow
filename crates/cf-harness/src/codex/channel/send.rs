@@ -32,27 +32,27 @@ const TRANSPORT: &str = "native-queue-transport";
 const ADMISSION: &str = "native-queue-admission";
 
 /// Where a message goes and what it is for.
-pub(crate) struct Target<'a> {
-    pub(crate) channel: &'a Channel,
+pub struct Target<'a> {
+    pub channel: &'a Channel,
     /// The thread the message is for: none until the broker has named it.
-    pub(crate) thread: Option<&'a str>,
+    pub thread: Option<&'a str>,
     /// The pane the send is claimed through.
-    pub(crate) pane: &'a Pane,
-    pub(crate) host: &'a dyn PaneHost,
+    pub pane: &'a Pane,
+    pub host: &'a dyn PaneHost,
 }
 
 /// What a send answered (the object `send` returned): what the window's
 /// broker did with the message, as far as the channel can tell.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Answer {
-    pub(crate) ok: bool,
+pub struct Answer {
+    pub ok: bool,
     /// Whether the broker took the message: its own word, or a refusal before
     /// the hand-over said so; none where it may have.
-    pub(crate) admitted: Option<bool>,
-    pub(crate) error: Option<String>,
+    pub admitted: Option<bool>,
+    pub error: Option<String>,
     /// `bytesWritten: 0`: nothing reached Codex.
-    pub(crate) zero_bytes: bool,
-    pub(crate) cause: Option<String>,
+    pub zero_bytes: bool,
+    pub cause: Option<String>,
 }
 
 impl Answer {
@@ -157,7 +157,7 @@ fn thread_named(thread: Option<&str>) -> Result<&str, String> {
 /// Sends `text` to the window `target` names: what became of it, or why it
 /// could not even be addressed (before the hand-over, nothing was asked of
 /// anyone).
-pub(crate) async fn send(
+pub async fn send(
     time: &dyn Time,
     loopback: &dyn Loopback,
     target: &Target<'_>,

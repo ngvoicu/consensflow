@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { it } from 'node:test'
-import { send, sessionState } from '../src/channels/codex.js'
+import { before, describe, it } from 'node:test'
+import * as javascript from '../src/channels/codex.js'
+import { cargoMissing, rustCodex } from './rust-channels.mjs'
 
 const SESSION = '01a0817b-e6b0-7f32-8e11-370dc000cbc0'
 
@@ -54,110 +55,141 @@ async function broker(t) {
   }
 }
 
-it('claims the pane, then hands the exact text to the broker for the thread it names', async (t) => {
-  const f = await broker(t)
-  const order = []
-  f.target.claim = async (request) => {
-    order.push(request)
-    return { ok: true }
-  }
-  assert.deepEqual(await send(f.target, 'a message with spaces\nand newlines'), {
-    ok: true,
-    admitted: true,
-  })
-  assert.deepEqual(order, [{ pane: 'codex-pane', generation: 3 }])
-  assert.deepEqual(
-    [f.received[0].launchId, f.received[0].sessionId, f.received[0].text],
-    ['owned', SESSION, 'a message with spaces\nand newlines'],
-  )
-})
+/** The launches and panes a send is refused for before it claims, and what each is refused in. */
+const UNCLAIMED = [
+  [
+    'an unscoped launch',
+    (target) => {
+      target.launch = { ...target.launch, kind: 'codex' }
+    },
+    /codex-queue launch configuration/,
+    "Rust's channel is made from a Codex broker alone: it holds no launch of another kind to refuse",
+  ],
+  [
+    'a launch without its broker',
+    (target) => {
+      target.launch = { ...target.launch, sessionBridge: undefined }
+    },
+    /session broker/,
+    "Rust's channel is its broker: a launch without one cannot be made",
+  ],
+  [
+    'a pane without an id',
+    (target) => {
+      target.pane = ''
+    },
+    /pane \{id, generation\}/,
+    false,
+  ],
+  [
+    'a pane of generation zero',
+    (target) => {
+      target.generation = 0
+    },
+    /pane \{id, generation\}/,
+    false,
+  ],
+]
 
-it('rejects malformed native session UUIDs before claiming', async (t) => {
-  const f = await broker(t)
-  for (const session of ['', 'not-a-uuid', 'aaaaaaaa-bbbb-4ccc-8ddd-40940940940', `${SESSION}\n`]) {
-    let claims = 0
-    f.target.session = session
-    f.target.claim = async () => {
-      claims += 1
-      return { ok: true }
+for (const [implementation, choose, skip] of [
+  ['JavaScript', () => javascript, false],
+  ['Rust', rustCodex, cargoMissing],
+]) {
+  describe(`Codex's channel to its broker, run by ${implementation}`, { skip }, () => {
+    let channel
+    before(() => {
+      channel = choose()
+    })
+    const send = (target, text) => channel.send(target, text)
+    const sessionState = (launch) => channel.sessionState(launch)
+
+    it('claims the pane, then hands the exact text to the broker for the thread it names', async (t) => {
+      const f = await broker(t)
+      const order = []
+      f.target.claim = async (request) => {
+        order.push(request)
+        return { ok: true }
+      }
+      assert.deepEqual(await send(f.target, 'a message with spaces\nand newlines'), {
+        ok: true,
+        admitted: true,
+      })
+      assert.deepEqual(order, [{ pane: 'codex-pane', generation: 3 }])
+      assert.deepEqual(
+        [f.received[0].launchId, f.received[0].sessionId, f.received[0].text],
+        ['owned', SESSION, 'a message with spaces\nand newlines'],
+      )
+    })
+
+    it('rejects malformed native session UUIDs before claiming', async (t) => {
+      const f = await broker(t)
+      for (const session of [
+        '',
+        'not-a-uuid',
+        'aaaaaaaa-bbbb-4ccc-8ddd-40940940940',
+        `${SESSION}\n`,
+      ]) {
+        let claims = 0
+        f.target.session = session
+        f.target.claim = async () => {
+          claims += 1
+          return { ok: true }
+        }
+        await assert.rejects(() => send(f.target, 'invalid session'), /UUID/)
+        assert.equal(claims, 0)
+      }
+      assert.deepEqual(f.received, [])
+    })
+
+    for (const [what, mutate, expected, rustCannot] of UNCLAIMED) {
+      it(`rejects ${what} before claiming`, {
+        skip: implementation === 'Rust' && rustCannot,
+      }, async (t) => {
+        const f = await broker(t)
+        const target = { ...f.target }
+        let claims = 0
+        mutate(target)
+        target.claim = async () => {
+          claims += 1
+          return { ok: true }
+        }
+        await assert.rejects(() => send(target, 'invalid caller'), expected)
+        assert.equal(claims, 0)
+        assert.deepEqual(f.received, [])
+      })
     }
-    await assert.rejects(() => send(f.target, 'invalid session'), /UUID/)
-    assert.equal(claims, 0)
-  }
-  assert.deepEqual(f.received, [])
-})
 
-it('rejects an unscoped launch, one without its broker, or a malformed pane before claiming', async (t) => {
-  const f = await broker(t)
-  const cases = [
-    [
-      (target) => {
-        target.launch = { ...target.launch, kind: 'codex' }
-      },
-      /codex-queue launch configuration/,
-    ],
-    [
-      (target) => {
-        target.launch = { ...target.launch, sessionBridge: undefined }
-      },
-      /session broker/,
-    ],
-    [
-      (target) => {
-        target.pane = ''
-      },
-      /pane \{id, generation\}/,
-    ],
-    [
-      (target) => {
-        target.generation = 0
-      },
-      /pane \{id, generation\}/,
-    ],
-  ]
-  for (const [mutate, expected] of cases) {
-    const target = { ...f.target }
-    let claims = 0
-    mutate(target)
-    target.claim = async () => {
-      claims += 1
-      return { ok: true }
-    }
-    await assert.rejects(() => send(target, 'invalid caller'), expected)
-    assert.equal(claims, 0)
-  }
-  assert.deepEqual(f.received, [])
-})
+    it('turns a stale native claim into an affirmative zero-byte refusal without asking the broker', async (t) => {
+      const f = await broker(t)
+      f.target.claim = async () => ({ ok: false, error: 'stale' })
+      assert.deepEqual(await send(f.target, 'stale message'), {
+        ok: false,
+        admitted: false,
+        error: 'failed-with-zero-bytes',
+        bytesWritten: 0,
+        cause: 'stale',
+      })
+      assert.deepEqual(f.received, [])
+    })
 
-it('turns a stale native claim into an affirmative zero-byte refusal without asking the broker', async (t) => {
-  const f = await broker(t)
-  f.target.claim = async () => ({ ok: false, error: 'stale' })
-  assert.deepEqual(await send(f.target, 'stale message'), {
-    ok: false,
-    admitted: false,
-    error: 'failed-with-zero-bytes',
-    bytesWritten: 0,
-    cause: 'stale',
+    it('uses the owned bridge for exact identity and rejects a session switch after the pane claim', async (t) => {
+      const f = await broker(t)
+      assert.deepEqual(await sessionState(f.launch), { sessionId: SESSION, available: true })
+      const switched = '01a09094-a559-7db0-bf50-e2309856c3c0'
+      f.target.claim = async () => {
+        f.select(switched)
+        return { ok: true }
+      }
+      assert.deepEqual(await send(f.target, 'complete reply'), {
+        ok: false,
+        admitted: false,
+        bytesWritten: 0,
+        error: 'native-session-changed',
+      })
+      assert.equal(f.received[0].sessionId, SESSION)
+      f.target.session = switched
+      assert.deepEqual(await send(f.target, 'complete reply'), { ok: true, admitted: true })
+      assert.equal(f.received[1].text, 'complete reply')
+    })
   })
-  assert.deepEqual(f.received, [])
-})
-
-it('uses the owned bridge for exact identity and rejects a session switch after the pane claim', async (t) => {
-  const f = await broker(t)
-  assert.deepEqual(await sessionState(f.launch), { sessionId: SESSION, available: true })
-  const switched = '01a09094-a559-7db0-bf50-e2309856c3c0'
-  f.target.claim = async () => {
-    f.select(switched)
-    return { ok: true }
-  }
-  assert.deepEqual(await send(f.target, 'complete reply'), {
-    ok: false,
-    admitted: false,
-    bytesWritten: 0,
-    error: 'native-session-changed',
-  })
-  assert.equal(f.received[0].sessionId, SESSION)
-  f.target.session = switched
-  assert.deepEqual(await send(f.target, 'complete reply'), { ok: true, admitted: true })
-  assert.equal(f.received[1].text, 'complete reply')
-})
+}

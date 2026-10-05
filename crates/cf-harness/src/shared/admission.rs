@@ -11,14 +11,14 @@ use crate::contract::Admission;
 
 /// A channel's answer to a send, as an adapter reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Sent {
+pub struct Sent {
     /// `ok: true`.
-    pub(crate) ok: bool,
+    pub ok: bool,
     /// `admitted: false`: refused before the hand-over.
-    pub(crate) refused: bool,
+    pub refused: bool,
     /// The channel's own words for what went wrong, then its code for it.
-    pub(crate) cause: Option<String>,
-    pub(crate) error: Option<String>,
+    pub cause: Option<String>,
+    pub error: Option<String>,
 }
 
 impl Sent {

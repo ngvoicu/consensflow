@@ -24,8 +24,8 @@ use crate::seams::loopback::{BodyFailed, Method, Request, TERMINATED};
 use crate::seams::{arm, Armed};
 
 /// How long the server has to answer, and the task to be posted, from the
-/// first request.
-const LIFETIME_MS: u64 = 60_000;
+/// first request, for a window (`seedSession`'s `timeoutMs`).
+pub const LIFETIME_MS: u64 = 60_000;
 
 /// How long one readiness poll, its body included, may take: an early
 /// request can stall even after the server is ready.
@@ -45,22 +45,25 @@ const LIFETIME_OVER: &str = "OpenCode task startup timed out";
 const NO_MODEL: &str = "OpenCode session has no valid current model and effort";
 
 /// The window's first message, and where it goes.
-pub(crate) struct Seed<'a> {
+pub struct Seed<'a> {
     /// The conversation it is for.
-    pub(crate) session: &'a str,
+    pub session: &'a str,
     /// The folder the window works in.
-    pub(crate) directory: &'a str,
-    pub(crate) text: &'a str,
+    pub directory: &'a str,
+    pub text: &'a str,
     /// The model and effort of a fresh conversation. A resumed one keeps its
     /// own.
-    pub(crate) model: Option<&'a str>,
-    pub(crate) variant: Option<&'a str>,
-    pub(crate) resume: bool,
+    pub model: Option<&'a str>,
+    pub variant: Option<&'a str>,
+    pub resume: bool,
+    /// How long the server has to answer and the task to be posted:
+    /// [`LIFETIME_MS`] for a window.
+    pub lifetime_ms: u64,
 }
 
 /// Posts the first message to `channel`'s server once it answers: how it
 /// failed, in ConsensFlow's sentences, or Node's for a folder that is gone.
-pub(crate) async fn seed_session(
+pub async fn seed_session(
     wires: Wires<'_>,
     channel: &Channel,
     seed: &Seed<'_>,
@@ -103,7 +106,7 @@ pub(crate) async fn seed_session(
             ("authorization".to_owned(), format!("Basic {credentials}")),
             ("content-type".to_owned(), "application/json".to_owned()),
         ],
-        lifetime: arm(wires.time, LIFETIME_MS),
+        lifetime: arm(wires.time, seed.lifetime_ms),
     };
     asked.ready().await?;
     if seed.resume {

@@ -12,4 +12,11 @@ pub mod record;
 mod role;
 
 pub use adapter::OpenCodeAdapter;
+// What `opencode-channel` plays the channel's cases through
+// (`src/bin/opencode_channel.rs`).
+#[cfg(feature = "test-support")]
+pub use channel::{
+    create_session, seed_session, send, Bridge, Channel, Launched, Seed, Sent, Serve, Target,
+    Wires, LIFETIME_MS, TIMEOUT_MS,
+};
 pub use install::{prepare_extension, Extension};

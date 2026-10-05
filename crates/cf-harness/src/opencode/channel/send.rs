@@ -23,16 +23,16 @@ const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 
 /// Where a message goes: the conversation it is for, and the pane it is
 /// claimed through.
-pub(crate) struct Target<'a> {
-    pub(crate) session: &'a str,
-    pub(crate) pane: &'a Pane,
-    pub(crate) host: &'a dyn PaneHost,
+pub struct Target<'a> {
+    pub session: &'a str,
+    pub pane: &'a Pane,
+    pub host: &'a dyn PaneHost,
 }
 
 /// Sends `text` to the window `channel` leads to, once the pane is claimed:
 /// what became of it as an adapter reads a send, or why it could not be
 /// asked of the pane at all.
-pub(crate) async fn send(
+pub async fn send(
     wires: Wires<'_>,
     channel: &Channel,
     target: &Target<'_>,

@@ -15,7 +15,7 @@ use url::Url;
 use crate::seams::loopback::{Loopback, Method, Request};
 use crate::seams::{arm, Time};
 
-pub(crate) use send::{send, Target};
+pub use send::{send, Answer, Target};
 
 /// How long the broker has to say what the window shows, over the request and
 /// its body.
@@ -28,7 +28,7 @@ const BODY_LIMIT: usize = 1024 * 1024;
 /// A launch's broker: where it listens and the token it is asked with, and
 /// the launch it serves.
 #[derive(Debug, Clone)]
-pub(crate) struct Channel {
+pub struct Channel {
     launch_id: String,
     endpoint: String,
     token: String,
@@ -36,16 +36,16 @@ pub(crate) struct Channel {
 
 /// What the broker says of the window (`sessionState`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Shown {
-    pub(crate) session: Session,
+pub struct Shown {
+    pub session: Session,
     /// Whether it would take a delivery now: a thread shown, no switch, its
     /// app-server connected.
-    pub(crate) available: bool,
+    pub available: bool,
 }
 
 /// The thread the window's TUI shows (`sessionId`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Session {
+pub enum Session {
     /// None yet: the window starts, switches threads or has no TUI attached.
     Unnamed,
     Thread(String),
@@ -87,7 +87,7 @@ fn parse(body: &[u8]) -> Option<Value> {
 }
 
 impl Channel {
-    pub(crate) fn new(launch_id: &str, endpoint: String, token: String) -> Self {
+    pub fn new(launch_id: &str, endpoint: String, token: String) -> Self {
         Self {
             launch_id: launch_id.to_owned(),
             endpoint,
@@ -119,7 +119,7 @@ impl Channel {
     /// not answer for this launch: nothing answered within a second, the
     /// answer was a refusal, was no JSON, was another launch's, or named a
     /// thread that is no id.
-    pub(crate) async fn shown(&self, time: &dyn Time, loopback: &dyn Loopback) -> Option<Shown> {
+    pub async fn shown(&self, time: &dyn Time, loopback: &dyn Loopback) -> Option<Shown> {
         let request = self.request("/session", None)?;
         let attempt = arm(time, SESSION_TIMEOUT_MS);
         let mut reply = attempt.bound(loopback.send(request)).await?.ok()?;
