@@ -18,6 +18,9 @@ mod config;
 mod tests;
 mod version;
 
+// What the admin judges a Devin by: the rule a launch holds to.
+pub(crate) use version::{minimum as minimum_version, supported as supported_version};
+
 use std::fs;
 use std::path::Path;
 

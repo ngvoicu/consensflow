@@ -18,7 +18,7 @@ static VERSION: LazyLock<Regex> =
 /// Whether Devin of `output`, what it says to `--version`, records complete
 /// worker replies: its first three dotted numbers are the minimum's or
 /// higher, compared a number at a time.
-pub(super) fn supported(output: &str) -> bool {
+pub(crate) fn supported(output: &str) -> bool {
     let Some(found) = VERSION.captures(output) else {
         return false;
     };
@@ -31,11 +31,17 @@ pub(super) fn supported(output: &str) -> bool {
     true
 }
 
+/// The oldest Devin that records complete worker replies, as its version is
+/// written (`DEVIN_MINIMUM_VERSION`).
+pub(crate) fn minimum() -> String {
+    MINIMUM.map(|part| part.to_string()).join(".")
+}
+
 /// What a launch is refused with when Devin is older than that.
 pub(super) fn required() -> String {
     format!(
         "Devin {} or newer is required for complete worker replies. Update Devin before opening this pane.",
-        MINIMUM.map(|part| part.to_string()).join(".")
+        minimum()
     )
 }
 

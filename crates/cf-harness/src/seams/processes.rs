@@ -12,10 +12,11 @@ use std::time::Duration;
 
 use cf_base::env::Env;
 use cf_base::file::{stat, FileError, Identity};
-use cf_process::{runnable, with_required, Ender};
+use cf_process::{runnable, with_required, CaptureFailed, Captured, Ender};
 pub use cf_process::{Ending, Failed, Limits, Streams};
 use futures_util::future::{FutureExt, LocalBoxFuture, Shared};
 
+use crate::admin::Capture;
 use crate::contract::Work;
 
 /// A program and all it is given: its executable as the adapter found it
@@ -104,6 +105,21 @@ impl Processes for SystemProcesses {
         started.retain(Ender::running);
         started.push(child.ender());
         Ok(Box::new(child))
+    }
+}
+
+/// The harness admin's programs run as this process's children, as a window's
+/// are, with both streams kept.
+impl Capture for SystemProcesses {
+    fn capture(
+        &self,
+        program: Program,
+        limits: Limits,
+    ) -> Work<'_, Result<Captured, CaptureFailed>> {
+        let (run, env) = self.start(&program);
+        Box::pin(
+            async move { cf_process::capture(&run, program.cwd.as_deref(), &env, limits).await },
+        )
     }
 }
 

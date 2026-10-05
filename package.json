@@ -32,6 +32,7 @@
     "goldens:catalog": "node tests/goldens/catalog/record.mjs",
     "goldens:path": "node tests/goldens/path/record.mjs",
     "goldens:launch": "node tests/goldens/launch/record.mjs",
+    "goldens:admin": "node tests/goldens/admin/record.mjs",
     "goldens:engine": "node tests/goldens/engine/record.mjs",
     "goldens:dispatcher": "node tests/goldens/engine/dispatcher/record.mjs",
     "goldens:records": "node tests/goldens/records/record.mjs",
