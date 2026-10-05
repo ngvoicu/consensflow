@@ -331,3 +331,23 @@ fn the_client_is_made_on_ring_and_installs_nothing_process_wide() {
         "no default provider was installed for the process"
     );
 }
+
+/// The client over a real TLS handshake (ring, the platform's verifier): the
+/// feed the admin reads for Codex, from npm's registry. It reaches the
+/// network, so it runs on demand only:
+/// `cargo test -p cf-daemon --lib real_https -- --ignored`.
+#[tokio::test]
+#[ignore = "reaches the network"]
+async fn real_https_reads_a_feed_from_npms_registry() {
+    let (status, body) = fetch("https://registry.npmjs.org/@openai/codex/latest")
+        .await
+        .expect("the registry answers over TLS");
+    assert_eq!(status, 200);
+    let release: serde_json::Value = serde_json::from_slice(&body).expect("a release as JSON");
+    assert!(
+        release["version"]
+            .as_str()
+            .is_some_and(|version| !version.is_empty()),
+        "{release}"
+    );
+}
