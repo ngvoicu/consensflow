@@ -17,18 +17,18 @@ use std::rc::Rc;
 
 use cf_base::env::Env;
 use cf_base::path;
-use cf_harness::claude::ClaudeAdapter;
 use cf_harness::contract::{
     Adapter, Admission, Agent, HostError, Launch, LaunchId, Observed, Pane, Readiness, Window,
 };
 use cf_harness::forget_launch;
-use cf_harness::pi::PiAdapter;
+use cf_harness::launch;
 use cf_harness::seams::loopback::BodyFailed;
 use cf_harness::seams::{Services, Time};
 use cf_harness::testing::{
     fake_executable, route, Answer, ChildScript, Driver, Ends, Fakes, OtherProcess, ScriptedHost,
     Sent, Served,
 };
+use cf_proto::agents::Harness;
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
@@ -724,11 +724,9 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
 
 /// The adapter a scenario plays against.
 fn adapter(harness: &str, services: &Services) -> Rc<dyn Adapter> {
-    match harness {
-        "claude-code" => Rc::new(ClaudeAdapter::new(services)),
-        "pi" => Rc::new(PiAdapter::new(services)),
-        other => panic!("no adapter for {other}"),
-    }
+    Harness::from_kind(harness)
+        .and_then(|harness| launch::adapter(harness, services))
+        .unwrap_or_else(|| panic!("no adapter for {harness}"))
 }
 
 /// The mask the files of a scenario are made under (`UMASK`, `runner.mjs`),

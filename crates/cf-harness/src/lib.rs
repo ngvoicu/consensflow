@@ -4,8 +4,9 @@
 //! readers of what each harness's own record of a conversation says
 //! ([`records`]), where each harness's CLI is ([`detect`]), how the engine
 //! launches a harness's window and works with it ([`contract`]), what it is
-//! given to do so ([`seams`]), and the files a launch leaves
-//! ([`forget_launch`], [`sweep_launches`]).
+//! given to do so ([`seams`]), which adapter launches which harness
+//! ([`launch::adapter`]), and the files a launch leaves ([`forget_launch`],
+//! [`sweep_launches`]).
 
 #![forbid(unsafe_code)]
 
@@ -14,6 +15,7 @@ pub mod codex;
 pub mod contract;
 pub mod detect;
 pub mod devin;
+pub mod launch;
 pub mod opencode;
 pub mod pi;
 pub mod records;
