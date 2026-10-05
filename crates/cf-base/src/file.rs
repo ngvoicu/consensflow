@@ -8,7 +8,10 @@
 //! - `write`: a folder made with every level above it, a file written in
 //!   place, and one written whole, each step's failure said;
 //! - `promises`: the `fs/promises` calls a channel makes, a file read
-//!   whole, renamed, and removed.
+//!   whole, renamed, and removed;
+//! - `sync`: the synchronous calls a bundle's installation makes besides
+//!   those of `write`, a file read whole, a folder of a name of its own made,
+//!   and a tree removed.
 
 use std::fs::{self, File, Metadata};
 use std::io;
@@ -18,11 +21,13 @@ use std::time::UNIX_EPOCH;
 mod errno;
 mod error;
 mod promises;
+mod sync;
 mod write;
 
 pub use errno::{errno_name, error_code, is_missing, uv_words};
 pub use error::FileError;
 pub use promises::{read_file, rename, rm_force};
+pub use sync::{make_temporary_folder, read_file_sync, remove_all};
 pub use write::{make_folder, write_file, write_whole, Mkdir};
 
 /// Which file an open file is, whatever its path: its device and inode on

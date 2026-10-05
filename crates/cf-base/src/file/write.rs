@@ -162,9 +162,20 @@ pub fn write_file(path: &Path, bytes: &[u8], mode: u32) -> Result<(), FileError>
     let _ = mode;
     let mut file = options
         .open(path)
-        .map_err(|error| FileError::call(error, "open", Some(path)))?;
+        .map_err(|error| open_failed(error, path))?;
     write_all(&mut file, bytes)?;
     close(file)
+}
+
+/// `open`'s failure for a file made anew, in Node's words. On Windows a
+/// folder in its way is `EISDIR`, as libuv reads the answer its own open of
+/// it gets (`fs__open`) and as Unix says it, where the system answers this
+/// open with access denied.
+fn open_failed(error: io::Error, path: &Path) -> FileError {
+    if cfg!(windows) && fs::metadata(path).is_ok_and(|found| found.is_dir()) {
+        return FileError::named("EISDIR", error, "open", Some(path), None);
+    }
+    FileError::call(error, "open", Some(path))
 }
 
 /// The close Node checks, where a write the system deferred (to a network

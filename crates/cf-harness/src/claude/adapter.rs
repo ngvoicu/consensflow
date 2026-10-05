@@ -43,6 +43,7 @@ use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
 use crate::seams::{self, Entropy, Services};
 use crate::shared::admission::admission;
+use crate::shared::record_state::switched_to;
 use crate::shared::{pane, window_args};
 
 /// A member runs in full-permission mode and reads what others wrote, so it
@@ -267,19 +268,19 @@ impl Window for ClaudeWindow {
                 ),
                 Reading::Unknown(_) => (true, false, false, None),
             };
-            let observed = |settled, waiting, switched| Observed {
+            let observed = |settled, waiting| Observed {
                 reading: Some(Arc::clone(&reading)),
                 settled,
                 waiting,
                 failed,
                 quota: quota.clone(),
-                switched,
+                switched: None,
                 unnamed: false,
             };
             Ok(match live {
-                // The window shows another conversation: the look is the
-                // old one's last, and the engine follows the window there.
-                Some(live) if self.elsewhere(&live) => observed(false, None, Some(live.session)),
+                Some(live) if self.elsewhere(&live) => {
+                    switched_to(observed(false, None), live.session)
+                }
                 live => {
                     // Claude's own status is the word on whether the window
                     // is at its prompt: a new window has no transcript until
@@ -294,7 +295,7 @@ impl Window for ClaudeWindow {
                         }) => Some(Waiting { reason }),
                         _ => None,
                     };
-                    observed(idle && (settled || empty), waiting, None)
+                    observed(idle && (settled || empty), waiting)
                 }
             })
         })

@@ -10,8 +10,9 @@
  * - `prepare`, `observe`, `ready`, `deliver`, `started` begin that work on
  *   the adapter or its window, through a pane host that answers each
  *   request as the step scripts it (`answers`), at once or held
- *   (`{held: true}`), and a peer on loopback that answers each `fetch` by
- *   its route as the step scripts it (`served`, `scriptedPeer`);
+ *   (`{held: true}`), for the pane `p1-zeus` of generation 1 unless the
+ *   step names its `pane`, and a peer on loopback that answers each `fetch`
+ *   by its route as the step scripts it (`served`, `scriptedPeer`);
  * - `release` answers a held host request (`release: op, answer`), a held
  *   fetch (`release: 'GET /session', answer`) or a held look
  *   (`release: 'look'`); `releaseBody` ends a held body (`releaseBody:
@@ -32,7 +33,8 @@
  * 41000 up, as Rust's `FixedPorts` hands them out; and `fetch` is the
  * scripted peer. A timeout signal's timer stands while a request or a body
  * waits under it, and is cleared once none does, as Rust's armed timer
- * goes with the waits it bounded.
+ * goes with the waits it bounded. What an adapter makes with the system's
+ * default modes comes out as the mask 022 leaves it, on every machine.
  *
  * Timers fire when due, one at a time, the first armed of those due
  * together first, each in a turn of the loop of its own, and the work runs
@@ -69,6 +71,7 @@ import path from 'node:path'
 import { PassThrough } from 'node:stream'
 import { cachedAnswers } from '../../../hosts/lib/completion.js'
 import { claudeCodeAdapter } from '../../../src/adapters/claude-code.js'
+import { piAdapter } from '../../../src/adapters/pi.js'
 import { forgetLaunch } from '../../../src/core/launch-files.js'
 import { fakeExecutable } from '../../helpers.mjs'
 
@@ -96,8 +99,11 @@ const TIMEOUT_MAX = 2 ** 31 - 1
  */
 const MACHINE_WAITS = new Set(['FSREQCALLBACK', 'FSREQPROMISE', 'FILEHANDLECLOSEREQ', 'Immediate'])
 
-const ADAPTERS = { 'claude-code': claudeCodeAdapter }
+const ADAPTERS = { 'claude-code': claudeCodeAdapter, pi: piAdapter }
 const WINDOWS = process.platform === 'win32'
+
+/** The mask files and folders are made under: the one nearly every machine has. */
+const UMASK = 0o022
 
 /** The machine's own timers, which the runner turns the loop with. */
 const real = {
@@ -906,7 +912,7 @@ function beginOwn(context, index, step) {
     context.children.script(step.children)
     const target = {
       launch: context.launch,
-      pane: { id: 'p1-zeus', generation: 1 },
+      pane: step.pane ?? { id: 'p1-zeus', generation: 1 },
       host: context.host,
     }
     const same = (value) => value ?? { undefined: true }
@@ -1083,6 +1089,7 @@ export async function play(scenario, adapters = ADAPTERS) {
     () => context.clock.machineLands(),
   )
   const restore = install(context)
+  const umask = process.umask(UMASK)
   try {
     if (JSON.stringify(scenario).includes('$OTHER')) context.other = startOther()
     context.env = realValue(context, scenario.env)
@@ -1113,6 +1120,7 @@ export async function play(scenario, adapters = ADAPTERS) {
     }
     return { ...scenario, records }
   } finally {
+    process.umask(umask)
     restore()
     context.machine.stop()
     context.other?.kill()

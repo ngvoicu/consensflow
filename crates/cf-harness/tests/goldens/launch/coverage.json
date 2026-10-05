@@ -6,10 +6,11 @@
     "windowText": { "rows": 270, "held": "tests/launch/tables.rs" },
     "consoleText": { "rows": 2011, "held": "tests/launch/tables.rs" },
     "admission": { "rows": 120, "held": "shared::admission" },
-    "recordState": { "rows": 16, "deferred": "landing 3, Pi: its first caller" },
+    "recordState": { "rows": 16, "held": "shared::record_state" },
     "fileUrl": { "rows": 295, "held": "tests/launch/tables.rs" }
   },
   "scenarios": {
-    "claude-code": { "darwin": 44, "win32": 44, "held": "tests/launch/scenarios.rs" }
+    "claude-code": { "darwin": 44, "win32": 44, "held": "tests/launch/scenarios.rs" },
+    "pi": { "darwin": 62, "win32": 62, "held": "tests/launch/scenarios.rs" }
   }
 }

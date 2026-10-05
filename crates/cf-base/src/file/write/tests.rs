@@ -418,3 +418,17 @@ fn a_folder_name_windows_refuses_ends_the_walk_where_node_ends_it() {
         )
     );
 }
+
+#[test]
+fn a_folder_in_the_way_of_a_file_written_is_eisdir_on_open() {
+    let dir = tempfile::tempdir().unwrap();
+    // Probed on Node v26.8.1 (`fs.promises.writeFile` over a folder), and
+    // recorded on Windows by the launch's goldens.
+    assert_eq!(
+        write_file(dir.path(), b"x", 0o666).unwrap_err().to_string(),
+        format!(
+            "EISDIR: illegal operation on a directory, open '{}'",
+            dir.path().display()
+        )
+    );
+}

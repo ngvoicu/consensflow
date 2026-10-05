@@ -34,3 +34,22 @@ pub(crate) async fn write_paste(host: &dyn PaneHost, pane: &Pane, body: &str) ->
 pub(crate) async fn snapshot(host: &dyn PaneHost, pane: &Pane) -> Result<Value, HostError> {
     host.request("pane.snapshot", named(pane)).await
 }
+
+/// Asks the pane host to admit a native send (`claim`): the pane is current,
+/// its input works and no paste is going in. It names its pane `pane`, not
+/// `id`. The host's answer is returned as it came, for each channel to read in
+/// its own words; a request it never answered is the answer `{ok: false,
+/// error: "transport", cause}`, the cause the host's word for it, else its
+/// message: a claim never fails.
+pub(crate) async fn claim(host: &dyn PaneHost, pane: &Pane) -> Value {
+    let request = json!({ "pane": pane.id, "generation": pane.generation });
+    match host.request("pane.claim", request).await {
+        Ok(answer) => answer,
+        Err(HostError { error, message }) => {
+            json!({ "ok": false, "error": "transport", "cause": error.unwrap_or(message) })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;
