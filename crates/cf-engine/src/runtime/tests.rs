@@ -246,6 +246,43 @@ fn work_awaited_together_answers_in_the_order_begun() {
 }
 
 #[test]
+fn an_operation_handed_its_participant_waits_its_turns_as_javascript_did() {
+    // What the operation begins before it waits goes before what it does after.
+    let executor = Rc::new(Executor::default());
+    let hold = Rc::new(Hold::default());
+    let (log, gate) = (Log::default(), Gate::default());
+    let (spawn, held, step, opened) = (
+        Rc::clone(&executor),
+        Rc::clone(&hold),
+        log.clone(),
+        gate.clone(),
+    );
+    executor.finish(async move {
+        held.try_exclusive(&*spawn, gated(step, opened, "step", "stepped"))
+            .await
+            .expect("not held yet");
+    });
+    let (spawn, held, operation) = (Rc::clone(&executor), Rc::clone(&hold), log.clone());
+    executor.spawn(Box::pin(async move {
+        let begins = Rc::clone(&spawn);
+        let work = async move {
+            operation.push("start");
+            let sibling = operation.clone();
+            Spawn::spawn(&*begins, Box::pin(async move { sibling.push("sibling") }));
+            next_turn().await;
+            operation.push("end");
+        };
+        held.exclusive(&*spawn, work).await.await;
+    }));
+    executor.run();
+    assert_eq!(log.taken(), ["step"]);
+    gate.open();
+    executor.run();
+    assert_eq!(log.taken(), ["stepped", "start", "sibling", "end"]);
+    assert!(!hold.held());
+}
+
+#[test]
 fn a_launch_going_on_apart_holds_its_participant_until_it_ends() {
     let executor = Rc::new(Executor::default());
     let hold = Rc::new(Hold::default());

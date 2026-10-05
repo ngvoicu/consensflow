@@ -219,16 +219,18 @@ impl Hold {
 
     /// Runs `work`, handed the participant, in the waiter's own work: its
     /// start as JavaScript ran it, nothing held until it first waits; then
-    /// held until it ends, and the participant passed on.
+    /// held until it ends, and the participant passed on. Each wait of the
+    /// work is the waiter's, so what was begun meanwhile goes first.
     async fn run_held<T>(&self, work: impl Future<Output = T>) -> T {
         let mut work = pin!(work);
-        let answer = match poll_fn(|context| Poll::Ready(work.as_mut().poll(context))).await {
-            Poll::Ready(answer) => answer,
-            Poll::Pending => {
+        let answer = poll_fn(|context| {
+            let polled = work.as_mut().poll(context);
+            if polled.is_pending() {
                 self.running.set(true);
-                work.await
             }
-        };
+            polled
+        })
+        .await;
         self.running.set(false);
         self.pass_on();
         answer

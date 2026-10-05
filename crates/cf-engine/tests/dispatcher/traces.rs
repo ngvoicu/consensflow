@@ -9,7 +9,8 @@
 //!   was given and answered; each call of an adapter by its method and what
 //!   names it (the launch, the message, the text, the conversation resumed or
 //!   read), and each launch with what it was given (the participant's
-//!   handle, its role, folder and role text, its agent's settings); each
+//!   handle, its project, role, folder and role text, its agent's
+//!   settings); each
 //!   token issued, with whom for, and revoked; each launch's files
 //!   forgotten; each line of the trace, each project it forgot, and each
 //!   line of the log, a failure by its words;
@@ -163,6 +164,7 @@ fn adapter_call(adapter: &str, method: Option<&str>, given: &Value) -> Value {
     }
     if method == Some("prepare") {
         named.insert("handle".to_owned(), given["participant"]["handle"].clone());
+        named.insert("project".to_owned(), given["project"]["id"].clone());
         for key in ["role", "directory", "instructions"] {
             named.insert(key.to_owned(), given[key].clone());
         }
@@ -305,6 +307,13 @@ fn a_launch_is_held_with_what_it_was_given() {
         projected(std::slice::from_ref(&node)),
         projected(std::slice::from_ref(&other)),
         "the model is held"
+    );
+    let mut other = rust.clone();
+    other["args"][0]["project"]["id"] = json!(2);
+    assert_ne!(
+        projected(std::slice::from_ref(&node)),
+        projected(std::slice::from_ref(&other)),
+        "the project is held"
     );
     let mut other = rust;
     other["args"][0]["instructions"] = json!("instructions for worker");
