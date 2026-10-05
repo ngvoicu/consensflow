@@ -48,15 +48,20 @@ impl Run {
     }
 }
 
-/// How to start `executable` with `args` here.
-pub fn runnable(executable: &Path, args: &[OsString], env: &Env) -> Run {
+/// Whether `executable` is a script for cmd.exe: a `.cmd` or a `.bat`.
+fn is_script(executable: &Path) -> bool {
     let name = executable.to_string_lossy();
-    let script = name.len() > 4
+    name.len() > 4
         && [".cmd", ".bat"].iter().any(|extension| {
             name.get(name.len() - 4..)
                 .is_some_and(|end| end.eq_ignore_ascii_case(extension))
-        });
-    if !script {
+        })
+}
+
+/// How to start `executable` with `args` here.
+pub fn runnable(executable: &Path, args: &[OsString], env: &Env) -> Run {
+    let name = executable.to_string_lossy();
+    if !is_script(executable) {
         return Run {
             program: executable.to_path_buf(),
             args: args.to_vec(),
@@ -91,6 +96,29 @@ pub fn runnable(executable: &Path, args: &[OsString], env: &Env) -> Run {
         args: args.collect(),
         verbatim: true,
     }
+}
+
+/// A window's program as the pane host starts it (`paneArgv`,
+/// `src/harnesses.js`). The host starts a file with each argument quoted the
+/// way programs read them, which cmd.exe does not, so an npm-installed
+/// harness on Windows (a `.cmd` shim) opens as the shim's own node and
+/// script; a script of any other shape cannot open a window.
+pub fn pane_argv(argv: &[String], env: &Env) -> Result<Vec<String>, String> {
+    let Some((executable, args)) = argv.split_first() else {
+        return Ok(Vec::new());
+    };
+    if !is_script(Path::new(executable)) {
+        return Ok(argv.to_vec());
+    }
+    let (program, script) = shim_target(Path::new(executable), env).ok_or_else(|| {
+        format!("{executable} is not an npm shim, and only cmd.exe could run it in a window")
+    })?;
+    let mut opened = vec![
+        program.to_string_lossy().into_owned(),
+        script.to_string_lossy().into_owned(),
+    ];
+    opened.extend(args.iter().cloned());
+    Ok(opened)
 }
 
 /// `text` with each of cmd.exe's special characters escaped with a caret.
@@ -359,6 +387,42 @@ mod tests {
                     args: vec![script.into_os_string(), "x".into()],
                     verbatim: false
                 }
+            );
+        }
+
+        #[test]
+        fn a_window_opens_an_npm_shim_as_its_node_and_script() {
+            let root = tempfile::tempdir().unwrap();
+            let (bin, shim, script) = npm(root.path());
+            fs::write(bin.join("node.exe"), "").unwrap();
+            let text = |path: &Path| path.to_string_lossy().into_owned();
+            let argv = [text(&shim), "--session-id".to_owned(), "a\nb".to_owned()];
+            assert_eq!(
+                pane_argv(&argv, &Env::default()).unwrap(),
+                [
+                    text(&bin.join("node.exe")),
+                    text(&script),
+                    "--session-id".to_owned(),
+                    "a\nb".to_owned()
+                ]
+            );
+        }
+
+        #[test]
+        fn a_window_opens_a_program_as_it_is_and_never_a_script_cmd_exe_must_read() {
+            let argv = ["/usr/local/bin/claude".to_owned(), "--resume".to_owned()];
+            assert_eq!(pane_argv(&argv, &Env::default()).unwrap(), argv);
+            assert_eq!(
+                pane_argv(&[], &Env::default()).unwrap(),
+                Vec::<String>::new()
+            );
+            let root = tempfile::tempdir().unwrap();
+            let opaque = root.path().join("opaque.cmd");
+            fs::write(&opaque, "@echo off\r\nrun.exe %*\r\n").unwrap();
+            let named = opaque.to_string_lossy().into_owned();
+            assert_eq!(
+                pane_argv(std::slice::from_ref(&named), &Env::default()).unwrap_err(),
+                format!("{named} is not an npm shim, and only cmd.exe could run it in a window")
             );
         }
 
