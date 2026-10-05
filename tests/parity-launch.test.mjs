@@ -117,3 +117,14 @@ test('a root reads as a file URL, in JSON, in a query and as a window names a pr
   assert.ok(forms.plain.includes(folder.replaceAll('\\', '/')))
   assert.equal(new Set(forms.plain).size, forms.plain.length, 'each form once')
 })
+
+test('a root on a Windows drive reads without its drive too, last, as HOMEPATH holds it', () => {
+  const folder = 'C:\\Users\\rhea\\AppData\\Local\\Temp\\consensflow launch %#-x\\node'
+  assert.equal(rootForms(folder).plain.at(-1), folder.slice('C:'.length))
+  const posix = '/tmp/consensflow launch %#-x/node'
+  assert.equal(
+    rootForms(posix).plain.includes(posix.slice(2)),
+    false,
+    'a root on no drive loses nothing',
+  )
+})

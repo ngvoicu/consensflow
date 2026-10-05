@@ -88,11 +88,13 @@ export function gained(before, after) {
  * The ways `root` reads in the text a plan makes besides as itself: as a file
  * URL (OpenCode's plugin), as JSON writes it (Windows' backslashes escaped),
  * as a URL's query holds it (`encodeURIComponent`; that with the parser's
- * `%27` for a quote; and a form's, with `+` for a space), and with slashes
- * where a window names a program of the bundle's.
+ * `%27` for a quote; and a form's, with `+` for a space), with slashes
+ * where a window names a program of the bundle's, and, on a Windows drive,
+ * without the drive, as HOMEPATH holds it (last: the others hold it).
  */
 export function rootForms(root) {
   const component = encodeURIComponent(root)
+  const driveless = /^[A-Za-z]:\\/.test(root) ? [root.slice(2)] : []
   return {
     fileUrl: pathToFileURL(root).href,
     plain: [
@@ -103,6 +105,7 @@ export function rootForms(root) {
         component.replaceAll("'", '%27'),
         new URLSearchParams({ d: root }).toString().slice(2),
         root.replaceAll('\\', '/'),
+        ...driveless,
       ]),
     ],
   }

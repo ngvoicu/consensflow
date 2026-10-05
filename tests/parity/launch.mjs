@@ -262,8 +262,10 @@ function agentOf(preset) {
 }
 
 const real = { ...process.env }
+// Found as the daemon finds them, through process.env itself: on Windows it
+// reads a name in any case (its Path is PATH), and a copy of it does not.
 const found = Object.fromEntries(
-  KINDS.map((kind) => [kind, harnessPath(harnessForKind(kind), real)]),
+  KINDS.map((kind) => [kind, harnessPath(harnessForKind(kind), process.env)]),
 )
 
 /**
