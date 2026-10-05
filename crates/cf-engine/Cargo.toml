@@ -1,0 +1,25 @@
+[package]
+name = "cf-engine"
+description = "ConsensFlow's engine: the dispatcher and the owners of what it orchestrates (scheduler, windows, deliveries, chief switch, transcripts), and the texts it writes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+cf-harness.workspace = true
+serde_json.workspace = true
+# Work that goes on apart from its caller, on the daemon's `LocalSet`.
+tokio = { workspace = true, features = ["rt"] }
+
+[features]
+# The kit the engine's tests and the daemon's run it with: an executor that
+# runs work to stillness, and the fakes.
+test-support = ["cf-harness/test-support"]
+
+[dev-dependencies]
+cf-engine = { path = ".", features = ["test-support"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true
