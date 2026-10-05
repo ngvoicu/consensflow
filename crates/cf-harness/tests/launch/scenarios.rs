@@ -98,10 +98,19 @@ impl Names {
     fn written(&self, value: &Value) -> Value {
         match value {
             Value::Array(items) => items.iter().map(|item| self.written(item)).collect(),
+            // A key beginning with `$` gets another, as Node's runner
+            // writes it: the runner's own (`$utf16`) stand apart.
             Value::Object(fields) => Value::Object(
                 fields
                     .iter()
-                    .map(|(key, item)| (key.clone(), self.written(item)))
+                    .map(|(key, item)| {
+                        let key = if key.starts_with('$') {
+                            format!("${key}")
+                        } else {
+                            key.clone()
+                        };
+                        (key, self.written(item))
+                    })
                     .collect(),
             ),
             Value::Number(number) => {
@@ -418,6 +427,18 @@ fn in_order_begun<W>(
         .collect();
     records.sort_by_key(|(op, _)| *op);
     records.into_iter().map(|(_, record)| record).collect()
+}
+
+#[test]
+fn a_key_beginning_with_a_dollar_is_written_with_another_as_node_s_runner_writes_it() {
+    let names = Names {
+        root: "/nowhere".to_owned(),
+        other: None,
+    };
+    assert_eq!(
+        names.written(&json!({"$utf16": [97], "plain": {"$ROOT": "$ROOT"}})),
+        json!({"$$utf16": [97], "plain": {"$$ROOT": "$ROOT"}})
+    );
 }
 
 #[test]

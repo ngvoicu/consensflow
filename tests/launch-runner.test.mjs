@@ -61,8 +61,44 @@ describe("the launch recorder's clock", () => {
             second = setTimeout(() => resolve('second'), 10)
           }),
       })),
-      /file work landed between two timers due together: Node fires the second before it lands/,
+      /file request or turn of the loop landed between two timers due together: Node fires the second before it lands/,
     )
+  })
+
+  it('refuses a turn of the loop landing while a timer due with the one that began it waits', async () => {
+    await assert.rejects(
+      played([{ observe: true }, { advance: 10 }], () => ({
+        observe: () =>
+          new Promise((resolve) => {
+            let second
+            setTimeout(() => {
+              setImmediate(() => {
+                clearTimeout(second)
+                resolve('first')
+              })
+            }, 10)
+            second = setTimeout(() => resolve('second'), 10)
+          }),
+      })),
+      /turn of the loop landed between two timers due together/,
+    )
+  })
+
+  it('runs what a timer queues with nextTick before its promises, as Node does', async () => {
+    const { records } = await played([{ observe: true }, { advance: 10 }], () => ({
+      observe: () =>
+        new Promise((resolve) => {
+          const order = []
+          setTimeout(() => {
+            Promise.resolve().then(() => {
+              order.push('promise')
+              resolve(order)
+            })
+            process.nextTick(() => order.push('tick'))
+          }, 10)
+        }),
+    }))
+    assert.deepEqual(records[1].settled, [{ answer: ['tick', 'promise'], op: 0 }])
   })
 
   it('refuses timers of different lengths due together', async () => {
@@ -125,16 +161,14 @@ describe('the launch recorder holds still', () => {
 })
 
 describe('the launch recorder writes', () => {
-  it('a string holding half a surrogate pair as its code units, apart from its escape', async () => {
-    let looks = 0
-    const { records } = await played([{ observe: true }, { observe: true }], () => ({
-      observe: async () => {
-        looks += 1
-        return looks === 1 ? 'a\ud800' : 'a\\ud800'
-      },
-    }))
-    assert.deepEqual(records[0].settled, [{ answer: { utf16: [0x61, 0xd800] }, op: 0 }])
-    assert.deepEqual(records[1].settled, [{ answer: 'a\\ud800', op: 1 }])
+  it('a string holding half a surrogate pair as its code units, apart from its escape and from an object', async () => {
+    const answers = ['a\ud800', 'a\\ud800', { $utf16: [0x61, 0xd800] }]
+    const steps = answers.map(() => ({ observe: true }))
+    const { records } = await played(steps, () => ({ observe: async () => answers.shift() }))
+    assert.deepEqual(
+      records.map((record) => record.settled[0].answer),
+      [{ $utf16: [0x61, 0xd800] }, 'a\\ud800', { $$utf16: [0x61, 0xd800] }],
+    )
   })
 
   it('a backslash in a POSIX name as the name’s own', {

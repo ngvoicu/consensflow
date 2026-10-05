@@ -82,9 +82,9 @@ impl ManualTime {
     /// the next, file work included, as Rust does file work where it is
     /// asked for. The Node recorder fires its timers the same way, and
     /// refuses a scenario where Node itself would not: timers of different
-    /// lengths due together, which Node orders by its timer lists, or file
-    /// work landing while a timer due with the one that began it waits,
-    /// which Node would have fired first.
+    /// lengths due together, which Node orders by its timer lists, or a
+    /// work's file request or turn of Node's loop landing while a timer due
+    /// with the one fired last waits, which Node would have fired first.
     pub fn fire_next(&self, until: i64) -> bool {
         let mut sleepers = self.sleepers.borrow_mut();
         sleepers.retain(|sleeper| sleeper.flag.strong_count() > 0);

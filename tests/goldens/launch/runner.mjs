@@ -17,8 +17,8 @@
  * - `close` closes the window as the engine does: its launch's files go,
  *   and the work still waiting on it keeps its hold.
  * After each, the work begun runs until it settles or waits on something a
- * step controls: a held request, a held look, a timer. Its file work is
- * done by then, none left in flight.
+ * step controls: a held request, a held look, a timer. What it waited on
+ * the machine for (file work, a turn of the loop) is done by then.
  *
  * Nothing waits on the machine: the clock (`Date.now`, timers, the timers
  * of `node:timers/promises` and `AbortSignal.timeout`) starts at
@@ -27,15 +27,18 @@
  * hand out, byte `i` being `(i * 7 + 3) % 256`.
  *
  * Timers fire when due, one at a time, the first armed of those due
- * together first, and the work runs until it holds still before the next
- * fires: file work included, as Rust does file work where it is asked for
- * (`ManualTime` in `crates/cf-harness/src/testing.rs`). Node itself fires
- * timers due together in one go, the continuations of each run before the
- * next but no file work, and orders those of different lengths by its
- * timer lists. A scenario where that would differ is refused: timers of
- * different lengths due together, or file work that lands while one due
- * with the timer that began it still waits. Every scenario recorded is one
- * Node plays the same way.
+ * together first, each in a turn of the loop of its own, and the work runs
+ * until it holds still before the next fires, its file work done: Rust does
+ * file work where it is asked for, so no timer fires while it goes on
+ * (`ManualTime` in `crates/cf-harness/src/testing.rs`), and here it takes
+ * no time on the clock. Node itself fires timers due together in one go,
+ * the continuations of each run before the next but nothing else, and
+ * orders those of different lengths by its timer lists. A scenario where
+ * that would differ is refused: timers of different lengths due together,
+ * or a work's file request or `setImmediate` landing while a timer due with
+ * the one fired last still waits. One difference stays, on purpose: on a
+ * slow disk Node may fire a later timer while file work is in flight, and
+ * Rust never does.
  *
  * A step's record is written so that it is the same on every run: every
  * path under the root is `$ROOT/…`; the process this runs as is `$PID`,
@@ -73,12 +76,13 @@ const EPOCH = Date.parse('2026-09-19T12:00:00Z')
 const TIMEOUT_MAX = 2 ** 31 - 1
 
 /**
- * The async resources a file system request makes, one each, from its start
- * until its callback or promise has run, probed on Node v26.8.1: a call's
- * (`FSREQCALLBACK`), a promise's (`FSREQPROMISE`), a file handle's close
- * (`FILEHANDLECLOSEREQ`). A watcher's would last, and none is used.
+ * The async resources a wait on the machine makes, one each, from its start
+ * until its callback or promise has run, probed on Node v26.8.1: a file
+ * request's (`FSREQCALLBACK`, `FSREQPROMISE`, and `FILEHANDLECLOSEREQ` for a
+ * file handle's close) and a `setImmediate`'s. A watcher's would last, and
+ * none is used.
  */
-const FILE_REQUESTS = new Set(['FSREQCALLBACK', 'FSREQPROMISE', 'FILEHANDLECLOSEREQ'])
+const MACHINE_WAITS = new Set(['FSREQCALLBACK', 'FSREQPROMISE', 'FILEHANDLECLOSEREQ', 'Immediate'])
 
 const ADAPTERS = { 'claude-code': claudeCodeAdapter }
 const WINDOWS = process.platform === 'win32'
@@ -90,16 +94,18 @@ const real = { setTimeout: globalThis.setTimeout, setImmediate: globalThis.setIm
 const posix = (text) => (WINDOWS ? text.replaceAll('\\', '/') : text)
 
 /**
- * The file work Node's thread pool does, which no step controls: how many
- * requests are in flight, and how many ever began. `lands` is told as each
+ * What the work begun waits on the machine for, which no step controls:
+ * file work on Node's thread pool, and turns of the loop. Only a work's own
+ * count, made in its async context (`owned`): the runner's turns do not.
+ * How many are in flight, how many ever began, and `lands` told as each
  * one's callback or promise is about to run.
  */
-function fileWork(lands) {
+function machineWork(owned, lands) {
   const inFlight = new Set()
   let begun = 0
   const hook = createHook({
     init(id, type) {
-      if (!FILE_REQUESTS.has(type)) return
+      if (!MACHINE_WAITS.has(type) || !owned()) return
       inFlight.add(id)
       begun += 1
     },
@@ -121,14 +127,15 @@ function fakeClock(owner) {
   const timers = []
   let now = EPOCH
   let next = 1
-  // When the timer fired last was due, and whether file work landed while
-  // another due then still waited: Node would have fired that one first.
+  // When the timer fired last was due, and whether a work's wait on the
+  // machine landed while another due then still waited: Node would have
+  // fired that one first.
   let firing = null
   let raced = false
   const refuseRace = () => {
     if (raced) {
       throw new Error(
-        'file work landed between two timers due together: Node fires the second before it lands',
+        "a work's file request or turn of the loop landed between two timers due together: Node fires the second before it lands",
       )
     }
   }
@@ -158,8 +165,8 @@ function fakeClock(owner) {
     clearTimeout,
     /** How long until each timer `work` armed is due, in the order armed. */
     waits: (work) => timers.filter((timer) => timer.work === work).map((timer) => timer.due - now),
-    /** File work landing: a race, if a timer due with the one fired last still waits. */
-    fileWorkLands() {
+    /** A wait on the machine landing: a race, if a timer due with the one fired last still waits. */
+    machineLands() {
       if (timers.some((timer) => timer.due === firing)) raced = true
     },
     /**
@@ -282,8 +289,12 @@ function realText(context, text) {
 function written(context, value) {
   if (Array.isArray(value)) return value.map((item) => written(context, item))
   if (value !== null && typeof value === 'object') {
+    // A key beginning with `$` gets another: the runner's own (`$utf16`) stand apart.
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, written(context, item)]),
+      Object.entries(value).map(([key, item]) => [
+        key.startsWith('$') ? `$${key}` : key,
+        written(context, item),
+      ]),
     )
   }
   if (typeof value === 'number') {
@@ -298,7 +309,7 @@ function written(context, value) {
   // Half a surrogate pair is no text every JSON reader holds, and Rust's
   // strings never do: such a string is written as its UTF-16 code units.
   if (!text.isWellFormed()) {
-    return { utf16: Array.from({ length: text.length }, (_, at) => text.charCodeAt(at)) }
+    return { $utf16: Array.from({ length: text.length }, (_, at) => text.charCodeAt(at)) }
   }
   return text
 }
@@ -551,18 +562,19 @@ function signature(context) {
     pending(context),
     context.requests.length,
     context.draws.length,
-    context.files.begun(),
+    context.machine.begun(),
   ])
 }
 
 /**
- * Turns the event loop until the scene holds still: no file work in flight,
- * every work begun settled or waiting on something a step controls, and
- * nothing changed, two turns running. A file request's callbacks and
- * continuations run before the loop turns again, so a turn that finds none
- * in flight finds none about to begin. What it cannot see is work waiting
- * on a step and on something else besides, no file work: no adapter's is.
- * Work that does not hold still in ten seconds fails the scenario.
+ * Turns the event loop until the scene holds still: nothing a work waits on
+ * the machine for in flight, every work begun settled or waiting on
+ * something a step controls, and nothing changed, two turns running. A file
+ * request's callbacks and continuations run before the loop turns again, so
+ * a turn that finds none in flight finds none about to begin. What it
+ * cannot see is work waiting on a step and on something else besides that
+ * is neither: no adapter's is. Work that does not hold still in ten seconds
+ * fails the scenario.
  */
 async function settleDown(context) {
   const started = performance.now()
@@ -571,13 +583,30 @@ async function settleDown(context) {
     await new Promise((resolve) => real.setImmediate(resolve))
     const now = signature(context)
     const quiet =
-      context.files.inFlight() === 0 && pending(context).every((entry) => entry.waits.length > 0)
+      context.machine.inFlight() === 0 && pending(context).every((entry) => entry.waits.length > 0)
     if (quiet && still === now) return
     still = quiet ? now : null
     if (performance.now() - started > 10_000) {
       throw new Error(`work waits on nothing a step controls: ${JSON.stringify(pending(context))}`)
     }
   }
+}
+
+/**
+ * Fires the next timer due by `until` in a turn of the loop of its own, as
+ * Node fires a timer: what its callback queues with `process.nextTick` then
+ * runs before its promises' continuations. Whether one fired.
+ */
+function fire(clock, until) {
+  return new Promise((resolve, reject) =>
+    real.setImmediate(() => {
+      try {
+        resolve(clock.fireNext(until))
+      } catch (cause) {
+        reject(cause)
+      }
+    }),
+  )
 }
 
 /** A recorded step, played: its record. */
@@ -594,7 +623,7 @@ async function record(context, index, step) {
   } else if (step.advance !== undefined) {
     const until = context.clock.now() + step.advance
     await settleDown(context)
-    while (context.clock.fireNext(until)) await settleDown(context)
+    while (await fire(context.clock, until)) await settleDown(context)
     context.clock.settleAt(until)
   } else if (step.close !== undefined) {
     // The engine closes the window: its launch's files go, and what it
@@ -637,7 +666,10 @@ export async function play(scenario, adapters = ADAPTERS) {
     als: new AsyncLocalStorage(),
   }
   context.clock = fakeClock(() => context.als.getStore())
-  context.files = fileWork(() => context.clock.fileWorkLands())
+  context.machine = machineWork(
+    () => context.als.getStore() !== undefined,
+    () => context.clock.machineLands(),
+  )
   const restore = install(context)
   try {
     if (JSON.stringify(scenario).includes('$OTHER')) context.other = startOther()
@@ -668,7 +700,7 @@ export async function play(scenario, adapters = ADAPTERS) {
     return { ...scenario, records }
   } finally {
     restore()
-    context.files.stop()
+    context.machine.stop()
     context.other?.kill()
     await fs.rm(root, { recursive: true, force: true })
   }
