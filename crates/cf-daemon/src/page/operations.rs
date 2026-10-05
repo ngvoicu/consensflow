@@ -1,74 +1,53 @@
 //! The table of the page's operations: which function serves which
-//! (`pageOperations`, `src/core/page.js:13-190`). **Frozen**: a landing
-//! replaces the arm of an operation with a call to its own module, and adds
-//! nothing else here.
-//!
-//! Until an operation lands it answers an error that names it, so the page
-//! shows which one is missing.
+//! (`pageOperations`, `src/core/page.js:13-190`). An operation is read and
+//! begun in its first poll, in the order its frame came: each arm reads the
+//! saved agents and the body, makes its one call on the ledger or the engine,
+//! and answers; none waits before it makes it.
 
 use cf_proto::page::PageOperation;
 use serde_json::Value;
 
-use super::{Page, Served};
+use super::body::Body;
+use super::{board, messages, projects, sessions, staff, tasks, Page, Served};
 
 /// Serves `operation`, asked with `body` (an object the page sent, or `{}`).
 /// Its fields follow `ok: true` in the answer; its error is the words the page
 /// shows.
 pub(super) async fn serve(page: &Page, operation: PageOperation, body: Value) -> Served {
-    let _ = (page, &body);
-    match operation {
+    let body = Body::new(&body);
+    let served = match operation {
         // The projects.
-        PageOperation::ProjectsList
-        | PageOperation::ProjectOpen
-        | PageOperation::ProjectResume
-        | PageOperation::ProjectClose
-        | PageOperation::ProjectDelete
-        | PageOperation::ProjectGate
+        PageOperation::ProjectsList => projects::list(page).await,
+        PageOperation::ProjectOpen => projects::open(page, body).await,
+        PageOperation::ProjectResume => projects::resume(page, body).await,
+        PageOperation::ProjectClose => projects::close(page, body).await,
+        PageOperation::ProjectDelete => projects::delete(page, body).await,
+        PageOperation::ProjectGate => projects::gate(page, body).await,
         // The agents and the staff.
-        | PageOperation::AgentsList
-        | PageOperation::StaffLast
-        | PageOperation::ChiefSwitch
-        | PageOperation::MemberAdd
-        | PageOperation::MemberRoles
-        | PageOperation::MemberRemove
-        | PageOperation::MemberBack
+        PageOperation::AgentsList => staff::agents(page).await,
+        PageOperation::StaffLast => staff::last(page).await,
+        PageOperation::ChiefSwitch => staff::switch_chief(page, body).await,
+        PageOperation::MemberAdd => staff::add(page, body).await,
+        PageOperation::MemberRoles => staff::roles(page, body).await,
+        PageOperation::MemberRemove => staff::remove(page, body).await,
+        PageOperation::MemberBack => staff::back(page, body).await,
         // The sessions' windows.
-        | PageOperation::SessionOpen
-        | PageOperation::SessionHide
-        | PageOperation::SessionEnd
+        PageOperation::SessionOpen => sessions::open(page, body).await,
+        PageOperation::SessionHide => sessions::hide(page, body).await,
+        PageOperation::SessionEnd => sessions::end(page, body).await,
         // The board and what is on it.
-        | PageOperation::BoardGet
-        | PageOperation::InboxGet
-        | PageOperation::TaskGet
-        | PageOperation::TaskTranscript
-        | PageOperation::TaskCancel
-        | PageOperation::TaskPause
-        | PageOperation::TaskReassign
-        | PageOperation::TaskResume
-        | PageOperation::TasksDelete
-        | PageOperation::MessageRead
-        | PageOperation::MessageApprove
-        | PageOperation::MessageDecline => unserved(operation),
-    }
-}
-
-/// An operation that has not landed: an error that names it.
-fn unserved(operation: PageOperation) -> Served {
-    Err(format!(
-        "the page operation {} is not served by this daemon yet",
-        operation.as_str()
-    ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn an_operation_not_landed_says_which_one_it_is() {
-        for operation in PageOperation::ALL {
-            let words = unserved(operation).unwrap_err();
-            assert!(words.contains(operation.as_str()), "{words}");
-        }
-    }
+        PageOperation::BoardGet => board::get(page, body).await,
+        PageOperation::InboxGet => board::inbox(page, body).await,
+        PageOperation::TaskGet => tasks::get(page, body).await,
+        PageOperation::TaskTranscript => tasks::transcript(page, body).await,
+        PageOperation::TaskCancel => tasks::cancel(page, body).await,
+        PageOperation::TaskPause => tasks::pause(page, body).await,
+        PageOperation::TaskReassign => tasks::reassign(page, body).await,
+        PageOperation::TaskResume => tasks::resume(page, body).await,
+        PageOperation::TasksDelete => tasks::delete(page, body).await,
+        PageOperation::MessageRead => messages::read(page, body).await,
+        PageOperation::MessageApprove => messages::approve(page, body).await,
+        PageOperation::MessageDecline => messages::decline(page, body).await,
+    };
+    served.map_err(|said| said.0)
 }
