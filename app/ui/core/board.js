@@ -529,7 +529,11 @@ export class BoardView {
       button(
         'Show terminal',
         'primary-button',
-        () => this.#actions.onShowTerminal(lane.participant, { closed: lane.pane === null }),
+        () =>
+          this.#actions.onShowTerminal(lane.participant, {
+            closed: lane.pane === null,
+            hidden: lane.hidden === true,
+          }),
         `Show ${laneName(lane.participant)}'s terminal`,
       ),
     )
@@ -744,11 +748,12 @@ export class BoardView {
 
   /**
    * A session's terminal is the human's to show and hide: shown, its card is
-   * in the dock; hidden, the card goes while its window works on. One whose
-   * window has closed opens again on its own conversation when shown, and
-   * its copy is on its last task's card. The session is deleted from here
-   * too. Each of these is an icon, named in its tip; a closed project's rows
-   * have none.
+   * in the dock; hidden, the card goes, and its window closes once nothing
+   * holds it open. One whose window has closed opens again on its own
+   * conversation when shown, and its copy is on its last task's card. The
+   * session is deleted from here too: it leaves the board and keeps its
+   * conversation. Each of these is an icon, named in its tip; a closed
+   * project's rows have none.
    */
   #rowTools(lane, board) {
     const { participant } = lane
@@ -770,7 +775,10 @@ export class BoardView {
               'Show terminal',
               () => {
                 const shown = this.#lane(participant)
-                this.#actions.onShowTerminal(shown.participant, { closed: shown.pane === null })
+                this.#actions.onShowTerminal(shown.participant, {
+                  closed: shown.pane === null,
+                  hidden: shown.hidden === true,
+                })
               },
               `Show ${name}'s terminal`,
             ),
@@ -914,7 +922,8 @@ export class TaskDrawer {
    * to do on it. The same task drawn again keeps whatever did not change in
    * place: each step of its story and its fold open or shut, and the drawer
    * where it was scrolled. `terminal`: the participant whose window works on
-   * the task and whether that window is closed, or null when it has none.
+   * the task, whether that window is closed and whether the human hid it, or
+   * null when it has none.
    */
   show(task, { total, closed = false, now = Date.now(), terminal = null }) {
     const same = this.#drawn(task)
@@ -1048,12 +1057,12 @@ export class TaskDrawer {
     const actions = []
     // Its window, in front in the dock (a closed one opens on its conversation).
     if (this.#terminal !== null) {
-      const { participant, closed } = this.#terminal
+      const { participant, closed, hidden } = this.#terminal
       actions.push(
         button(
           'Show terminal',
           'quiet-button',
-          () => this.#actions.onShowTerminal(participant, { closed }),
+          () => this.#actions.onShowTerminal(participant, { closed, hidden }),
           `Show ${laneName(participant)}'s terminal`,
         ),
       )

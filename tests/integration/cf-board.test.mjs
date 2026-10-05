@@ -1055,11 +1055,34 @@ describe('continuing a window with --after', () => {
       const still = await cf(chief, 'task', 'add', '--after', 'T-1', 'One more')
       assert.equal(still.code, 0, 'accepted work keeps the session')
       ledger.cancelTask(project.id, 3, { by: 'chief' })
+      // The session's window had a conversation, as the daemon opens one. The
+      // human deletes the session: a follow-up brings it back on the board.
+      const row = ledger.project(project.id).participants.find((p) => p.handle === session)
+      const { id: conversation } = ledger.startConversation(row.id, { harness: 'claude-code' })
+      ledger.bindConversation(conversation, 'native-zeus-1')
       ledger.endSession(project.id, session, { by: 'human' })
-      const gone = await cf(chief, 'task', 'add', '--after', 'T-1', 'One more')
+      const back = await cf(chief, 'task', 'add', '--after', 'T-1', 'Once more, after its deletion')
+      assert.equal(back.code, 0, back.err)
+      assert.equal(
+        back.out,
+        `T-4 continues in @${session}, the window that did T-1; its result arrives in your inbox.`,
+      )
       assert.deepEqual(
-        [gone.code, gone.err],
-        [1, 'cf: the session that did T-1 has ended: open the task for its tier instead'],
+        [ledger.task(project.id, 4).assignee, ledger.task(project.id, 4).state],
+        [session, 'queued'],
+      )
+      assert.equal(
+        ledger.project(project.id).participants.some((p) => p.handle === session),
+        true,
+        'the session is on the board again',
+      )
+      const again = await cf(chief, 'task', 'add', '--after', 'T-1', 'And another')
+      assert.deepEqual(
+        [again.code, again.err],
+        [
+          1,
+          `cf: @${session} is still on its work: wait for its result, or open the task for its tier`,
+        ],
       )
     })
   })
