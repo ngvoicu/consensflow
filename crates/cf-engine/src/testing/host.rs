@@ -2,7 +2,9 @@
 //! twin of `fakeHost` in `core-dispatcher.test.mjs`. What a call does and
 //! reads, it does when called, as the JavaScript fake's async functions did
 //! up to their first wait; each answer comes a turn later, as their promises
-//! did; and every call is written down in the Node traces' shape.
+//! did, and a turn more for each wait inside them (`open` waits on its hold,
+//! `kill` on each engine told of the exit); and every call is written down in
+//! the Node traces' shape.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -10,17 +12,18 @@ use std::rc::{Rc, Weak};
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use serde_json::{json, Map, Value};
 
-use super::executor::{next_turn, Gate};
+use super::executor::Gate;
 use super::recorder::Recorder;
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
+use crate::runtime::next_turn;
 
 /// What the test's pane host does, and what it was asked.
 #[derive(Default)]
 pub struct FakeHost {
     recorder: Recorder,
-    /// Where exits go: the engine, once made.
-    engine: RefCell<Weak<Dispatcher>>,
+    /// Where exits go: each engine made, in order (`host.onExit` of each).
+    engines: RefCell<Vec<Weak<Dispatcher>>>,
     opened: RefCell<Vec<OpenPane>>,
     killed: RefCell<Vec<Pane>>,
     requests: RefCell<Vec<(String, Value)>>,
@@ -46,9 +49,9 @@ impl FakeHost {
         })
     }
 
-    /// Exits go to `engine` (`host.onExit`).
+    /// Exits go to `engine` too (`host.onExit`).
     pub fn attach(&self, engine: &Rc<Dispatcher>) {
-        *self.engine.borrow_mut() = Rc::downgrade(engine);
+        self.engines.borrow_mut().push(Rc::downgrade(engine));
     }
 
     /// The panes opened, in order.
@@ -83,14 +86,21 @@ impl FakeHost {
         }
     }
 
-    /// Tells the engine `pane` ended and waits for what it does about it.
+    /// Tells each engine `pane` ended, one after the other, and waits for
+    /// what each does about it.
     pub async fn exited(&self, pane: Pane) {
-        let engine = self.engine.borrow().upgrade();
-        let Some(engine) = engine else {
-            return;
-        };
-        if let Some(rest) = engine.pane_exited(pane) {
-            rest.await;
+        let engines: Vec<Rc<Dispatcher>> = self
+            .engines
+            .borrow()
+            .iter()
+            .filter_map(Weak::upgrade)
+            .collect();
+        for engine in engines {
+            if let Some(rest) = engine.pane_exited(pane.clone()) {
+                rest.await;
+            }
+            // `await listener(...)`: the call returned a turn before the loop goes on.
+            next_turn().await;
         }
     }
 }
@@ -178,6 +188,9 @@ impl EngineHost for FakeHost {
                 answer["pid"] = json!(pid);
             }
             self.recorder.answered(at, answer);
+            // The JavaScript fake waited on its hold, and its answer reached
+            // the caller a turn after it returned.
+            next_turn().await;
             Ok(Opened::Open { pid })
         })
     }

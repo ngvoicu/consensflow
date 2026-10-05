@@ -26,7 +26,7 @@ tokio = { workspace = true, features = ["rt"] }
 [features]
 # The kit the engine's tests and the daemon's run it with: an executor that
 # runs work to stillness, and the fakes.
-test-support = ["cf-harness/test-support", "dep:tempfile"]
+test-support = ["cf-harness/test-support", "cf-ledger/test-support", "dep:tempfile"]
 
 [dev-dependencies]
 cf-engine = { path = ".", features = ["test-support"] }

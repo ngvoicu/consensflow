@@ -20,7 +20,7 @@ use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
-use crate::runtime::begin;
+use crate::runtime::{begin, next_turn};
 use crate::seams::{EngineError, SavedAgent};
 
 /// The key that interrupts a harness's current turn, how often it is pressed
@@ -767,12 +767,17 @@ impl Dispatcher {
             return true;
         }
         let snapshot = match pane {
-            Some(pane) => self
-                .seams
-                .host
-                .request("pane.snapshot", pane_body(&pane))
-                .await
-                .ok(),
+            Some(pane) => {
+                let answered = self
+                    .seams
+                    .host
+                    .request("pane.snapshot", pane_body(&pane))
+                    .await
+                    .ok();
+                // `.catch(() => null)` made a promise of its own to wait on.
+                next_turn().await;
+                answered
+            }
             None => None,
         };
         let drawn = match snapshot

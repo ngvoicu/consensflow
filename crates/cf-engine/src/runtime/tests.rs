@@ -406,6 +406,50 @@ fn a_panic_in_work_going_on_apart_fails_the_test() {
 }
 
 #[test]
+fn an_answer_reaches_its_caller_a_turn_after_it_was_made_as_an_awaited_async_function_does() {
+    // JavaScript's `await` of a call that returned at once still waited a
+    // turn: what was woken before the call returned goes ahead of its caller.
+    let executor = Rc::new(Executor::default());
+    let log = Log::default();
+    let (spawn, called) = (Rc::clone(&executor), log.clone());
+    executor.finish(async move {
+        let other = called.clone();
+        spawn.spawn(Box::pin(async move { other.push("other") }));
+        called.push("call");
+        let answer = returning(async { 7 }).await;
+        called.push("answered");
+        assert_eq!(answer, 7);
+    });
+    assert_eq!(log.taken(), ["call", "other", "answered"]);
+
+    // Without it the caller goes on at once.
+    let executor = Rc::new(Executor::default());
+    let (spawn, called) = (Rc::clone(&executor), log.clone());
+    executor.finish(async move {
+        let other = called.clone();
+        spawn.spawn(Box::pin(async move { other.push("other") }));
+        let _ = async { 7 }.await;
+        called.push("answered");
+    });
+    assert_eq!(log.taken(), ["answered", "other"]);
+
+    // And on tokio's `LocalSet`, as the daemon runs the engine.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("a runtime");
+    let local = tokio::task::LocalSet::new();
+    let order = local.block_on(&runtime, async {
+        let other = log.clone();
+        let spawned = tokio::task::spawn_local(async move { other.push("other") });
+        returning(async {}).await;
+        log.push("answered");
+        spawned.await.expect("the other work");
+        log.taken()
+    });
+    assert_eq!(order, ["other", "answered"]);
+}
+
+#[test]
 fn the_same_rules_hold_on_tokios_local_set() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()

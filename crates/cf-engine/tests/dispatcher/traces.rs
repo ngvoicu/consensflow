@@ -76,12 +76,10 @@ static TRACES: LazyLock<HashMap<(Vec<String>, String), Value>> = LazyLock::new(|
 /// The tests whose effects may come in another order than Node's where two
 /// windows' interleave, and only there: JavaScript's microtask hops through
 /// nested async functions let a worker's launch overtake the chief's look.
-/// Each is one an exception is counted for.
-const INTERLEAVED: &[&str] = &[
-    "launches a worker with its task as the first message and records its answer as the result",
-    "keeps everything a member wrote in its turn, not only its last message",
-    "leaves a harness's commentary out of a result: Codex's progress notes are not its answer",
-];
+/// Each is one an exception is counted for. None is now: the kit's fakes and
+/// the engine wait the turns JavaScript's awaits waited (`runtime::returning`,
+/// the fakes' own), so each ported test's effects come in Node's order.
+const INTERLEAVED: &[&str] = &[];
 
 /// Holds a closed test to the Node trace of the test named `name` in `suites`.
 pub fn held_to(closed: Closed, suites: &[&str], name: &str) {

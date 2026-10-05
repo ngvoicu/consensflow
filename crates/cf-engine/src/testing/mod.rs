@@ -9,12 +9,14 @@ mod adapter;
 mod context;
 mod executor;
 mod host;
+mod operations;
 mod recorder;
 mod seams;
 
-pub use adapter::{FakeAdapter, FakeAdapters, FakeAgent, FakeRecords, Ready};
-pub use context::{Closed, Context, Made, START_MS};
-pub use executor::{next_turn, Executor, Gate, GateWait, NextTurn};
+pub use crate::runtime::{next_turn, NextTurn};
+pub use adapter::{FakeAdapter, FakeAdapters, FakeAgent, FakeRecords, Prepare, Ready};
+pub use context::{Closed, Context, Engine, Made, START_MS};
+pub use executor::{Executor, Gate, GateWait};
 pub use host::{window_of, FakeHost};
 pub use recorder::Recorder;
 pub use seams::{

@@ -5,7 +5,19 @@
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod agent_gone;
+mod assigning;
+mod deleted_sessions;
+mod fixtures;
 mod lanes;
+mod no_adapter;
+mod out_of_quota;
+mod quota;
+mod review;
+mod session_windows;
+mod sessions;
+mod several_roles;
 mod switching;
 mod the_dispatcher;
 mod traces;
+mod unreadable_agents;

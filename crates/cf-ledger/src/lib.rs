@@ -40,6 +40,8 @@ pub use cf_proto::ledger::{
     TaskTranscript, TaskView, TierChange,
 };
 pub use conversations::{ChiefSwitch, TRANSCRIPT_ITEM_MAX};
+#[cfg(feature = "test-support")]
+pub use ledger::Watcher;
 pub use ledger::{open_ledger, Event, Ledger, Options};
 pub use messages::{NewNote, NewQuestion};
 pub use model::LedgerError;

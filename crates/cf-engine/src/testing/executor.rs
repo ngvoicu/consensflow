@@ -1,7 +1,6 @@
 //! An executor that runs every piece of work spawned, the test's own
 //! included, in the order each was woken, until nothing can move; a gate a
-//! test opens to let a wait end; and the turn JavaScript's async fakes
-//! answered on. Only work that is woken runs again, as on tokio's
+//! test opens to let a wait end. Only work that is woken runs again, as on tokio's
 //! `LocalSet`, so a fake that never wakes what waits on it holds that work
 //! for good, as it would there. A panic in any work fails the test where it
 //! runs.
@@ -136,31 +135,6 @@ impl Future for GateWait {
             Poll::Ready(())
         } else {
             self.0.wakers.borrow_mut().push(cx.waker().clone());
-            Poll::Pending
-        }
-    }
-}
-
-/// A wait of one turn: the work goes behind every piece of work woken before
-/// it, as an `await` of a JavaScript fake's promise did.
-pub fn next_turn() -> NextTurn {
-    NextTurn { waited: false }
-}
-
-/// A wait of one turn ([`next_turn`]).
-pub struct NextTurn {
-    waited: bool,
-}
-
-impl Future for NextTurn {
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<()> {
-        if self.waited {
-            Poll::Ready(())
-        } else {
-            self.waited = true;
-            context.waker().wake_by_ref();
             Poll::Pending
         }
     }

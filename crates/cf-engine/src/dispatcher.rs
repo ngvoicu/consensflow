@@ -33,7 +33,7 @@ use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
 use crate::chief_switch::SwitchTo;
 use crate::record::Record;
-use crate::runtime::{all, begin, Begun, LocalWork};
+use crate::runtime::{all, begin, returning, Begun, LocalWork};
 use crate::scheduler::SchedulerState;
 use crate::seams::{EngineError, Seams};
 use crate::windows::{Activity, ActivityState, WindowsState};
@@ -827,7 +827,7 @@ impl Dispatcher {
             return Ok(());
         }
         // A participant forgotten while the step waits is done with.
-        let observed = match self.observe(participant, record).await {
+        let observed = match returning(self.observe(participant, record)).await {
             Ok(observed) => observed,
             Err(reason) => {
                 if !self.forgotten(record) {
@@ -843,7 +843,8 @@ impl Dispatcher {
         if !unnamed {
             record.window.borrow_mut().named = true;
         }
-        let drawing = (observed.items().is_empty() || unnamed) && !self.drawn(record).await;
+        let drawing =
+            (observed.items().is_empty() || unnamed) && !returning(self.drawn(record)).await;
         if self.forgotten(record) {
             return Ok(());
         }
@@ -894,15 +895,14 @@ impl Dispatcher {
                 .await;
         }
         if record.delivery.borrow().delivering.is_some() {
-            self.watch_arrival(record, &observed).await?;
+            returning(self.watch_arrival(record, &observed)).await?;
         }
         // A window that began to close in this step is not acted on.
         if record.window.borrow().retiring {
             return Ok(());
         }
         if participant.role != "chief" {
-            self.interrupt_if_stopped(participant, record, &observed)
-                .await?;
+            returning(self.interrupt_if_stopped(participant, record, &observed)).await?;
             if self.forgotten(record) {
                 return Ok(());
             }
@@ -960,8 +960,7 @@ impl Dispatcher {
             Activity::because(ActivityState::Out, format!("out of quota until {until}")),
         );
         if participant.role != "chief" {
-            self.interrupt_if_stopped(participant, record, observed)
-                .await?;
+            returning(self.interrupt_if_stopped(participant, record, observed)).await?;
             if !self.forgotten(record) {
                 self.close_if_free(record).await?;
             }

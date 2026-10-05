@@ -48,6 +48,8 @@ impl Ledger {
 
     /// The head of a participant's queue that may go now, or none.
     pub fn next_delivery(&self, participant_id: i64) -> Result<Option<MessageView>, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("next_delivery", Some(participant_id))?;
         messages::next_delivery(&self.store, participant_id)
     }
 
