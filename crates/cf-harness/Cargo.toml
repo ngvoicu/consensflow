@@ -37,13 +37,29 @@ uuid.workspace = true
 [features]
 # The fakes of `testing`, for tests of other crates and of this one's
 # `tests/`, which turn it on through the dev-dependency below, and the
-# binary `pi-send`, which runs the channel's send on a runtime of its own.
+# binaries `pi-send`, `codex-send` and `opencode-channel`, which run a
+# channel's cases on a runtime of their own.
 test-support = ["tokio/rt"]
 
-# Pi's channel on the system's clock, for `tests/pi-message.test.mjs`.
+# Pi's channel on the system's clock, for `tests/pi-message.test.mjs` and
+# `tests/delivery-contract.test.mjs`.
 [[bin]]
 name = "pi-send"
 path = "src/bin/pi_send.rs"
+required-features = ["test-support"]
+
+# Codex's channel on the system's clock and loopback, for
+# `tests/codex-channel.test.mjs` and `tests/delivery-contract.test.mjs`.
+[[bin]]
+name = "codex-send"
+path = "src/bin/codex_send.rs"
+required-features = ["test-support"]
+
+# OpenCode's channel on the system's clock, loopback and processes, for
+# `tests/opencode-launch.test.mjs` and `tests/delivery-contract.test.mjs`.
+[[bin]]
+name = "opencode-channel"
+path = "src/bin/opencode_channel.rs"
 required-features = ["test-support"]
 
 [dev-dependencies]

@@ -1,85 +1,11 @@
 import assert from 'node:assert/strict'
-import { execFileSync, spawn } from 'node:child_process'
 import { access, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { before, describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
 import { createDeliveryExtension } from '../hosts/pi-extension/consensflow-delivery.mjs'
 import { send as sendWithJavaScript } from '../src/channels/pi.js'
-
-/**
- * Pi's channel in Rust (`crates/cf-harness`): the binary `pi-send`, built
- * once, which sends one message on the machine's own clock and randomness.
- * The cases below run against it as they run against JavaScript's `send`.
- */
-function buildSendBinary() {
-  const built = execFileSync(
-    'cargo',
-    [
-      'build',
-      '-p',
-      'cf-harness',
-      '--features',
-      'test-support',
-      '--bin',
-      'pi-send',
-      '--message-format=json',
-    ],
-    {
-      cwd: fileURLToPath(new URL('..', import.meta.url)),
-      encoding: 'utf8',
-      maxBuffer: 256 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  )
-  const artifact = built
-    .split('\n')
-    .filter((line) => line.startsWith('{'))
-    .map((line) => JSON.parse(line))
-    .find((message) => message.reason === 'compiler-artifact' && message.executable)
-  return artifact.executable
-}
-
-/**
- * `send` as the binary does it. The process cannot call back for a claim, so
- * what the claim answers (or the failure it throws) is asked for first.
- */
-function sendWithRust(binary) {
-  return async (target, text) => {
-    const { launchId, inbox, ack, ackTimeoutMs } = target.launch.channel
-    const claim = await target
-      .claim({ pane: target.pane, generation: target.generation })
-      .catch((cause) => ({ throws: cause.message, error: cause.error }))
-    const asked = {
-      channel: { launchId, inbox, ack, ackTimeoutMs },
-      session: target.session,
-      pane: target.pane,
-      generation: target.generation,
-      claim,
-      text,
-    }
-    const answered = await new Promise((resolve, reject) => {
-      const child = spawn(binary, [], { stdio: ['pipe', 'pipe', 'inherit'] })
-      let output = ''
-      child.stdout.setEncoding('utf8')
-      child.stdout.on('data', (chunk) => {
-        output += chunk
-      })
-      child.on('error', reject)
-      child.on('close', (code) => {
-        try {
-          resolve(JSON.parse(output))
-        } catch {
-          reject(new Error(`pi-send ended with ${code} and said ${JSON.stringify(output)}`))
-        }
-      })
-      child.stdin.end(JSON.stringify(asked))
-    })
-    if (answered.threw !== undefined) throw new Error(answered.threw)
-    return answered
-  }
-}
+import { cargoMissing, rustPi } from './rust-channels.mjs'
 
 function fakePi() {
   const handlers = new Map()
@@ -206,19 +132,9 @@ async function setup(
   }
 }
 
-/** Whether cargo is here: a machine without it holds the cases against JavaScript's `send` alone. */
-function hasCargo() {
-  try {
-    execFileSync('cargo', ['--version'], { stdio: 'ignore' })
-    return true
-  } catch {
-    return false
-  }
-}
-
 for (const [implementation, choose, skip] of [
   ['JavaScript', () => sendWithJavaScript, false],
-  ['Rust', () => sendWithRust(buildSendBinary()), hasCargo() ? false : 'cargo is not installed'],
+  ['Rust', () => rustPi().send, cargoMissing],
 ]) {
   describe(`consensflow Pi worker followup, sent by ${implementation}`, { skip }, () => {
     let sender

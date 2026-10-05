@@ -20,12 +20,12 @@ use crate::shared::token;
 
 /// How an OpenCode window is opened on its launch's channel.
 #[derive(Debug, Clone)]
-pub(crate) struct Launched {
-    pub(crate) args: Vec<String>,
+pub struct Launched {
+    pub args: Vec<String>,
     /// The environment the window is told of its channel by, in the order
     /// JavaScript built it.
-    pub(crate) env: Vec<(String, String)>,
-    pub(crate) channel: Channel,
+    pub env: Vec<(String, String)>,
+    pub channel: Channel,
 }
 
 /// The arguments and environment that open an OpenCode window on a server of
