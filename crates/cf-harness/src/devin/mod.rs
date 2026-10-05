@@ -12,6 +12,8 @@ mod session_hook;
 mod wire;
 mod wire_log;
 
+pub(crate) use install::{minimum_version, supported_version};
+
 pub use adapter::DevinAdapter;
 pub use question_hook::question_hook;
 pub use session_hook::session_hook;

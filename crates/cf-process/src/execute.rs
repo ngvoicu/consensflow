@@ -3,11 +3,9 @@
 //! said in Node's words (probed on Node v26.8.1).
 
 use std::path::Path;
-use std::process::Stdio;
 use std::time::Duration;
 
 use cf_base::env::Env;
-use cf_base::file::error_code;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::{terminate, Ending, Run};
@@ -15,7 +13,7 @@ use crate::{terminate, Ending, Run};
 /// How long a program asked to end at its timeout has before it is forced:
 /// Node waits for it as long as it runs, and a probe every launch shares
 /// would wait with it (a difference kept).
-const FORCE_AFTER: Duration = Duration::from_secs(2);
+pub(crate) const FORCE_AFTER: Duration = Duration::from_secs(2);
 
 /// How long a program may run and how much it may write to each stream:
 /// `execFile`'s `timeout` (none when zero) and `maxBuffer`, in bytes.
@@ -57,128 +55,21 @@ pub async fn execute(
     env: &Env,
     limits: Limits,
 ) -> Result<String, Failed> {
-    let mut command = tokio::process::Command::from(run.command());
-    command
-        .env_clear()
-        .envs(env.iter())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    if let Some(cwd) = cwd {
-        command.current_dir(cwd);
-    }
-    hide_window(&mut command);
-    let mut child = command.spawn().map_err(|failed| Failed {
-        message: format!(
-            "spawn {} {}",
-            run.program.to_string_lossy(),
-            error_code(&failed)
-        ),
-        code: None,
-        killed: false,
-        stdout: String::new(),
-    })?;
-    crate::job::adopt(&child);
-    let pid = child.id();
-    let _input = child.stdin.take();
-    let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
-        return Err(Failed {
-            message: "the program's output could not be read".to_owned(),
-            code: None,
-            killed: false,
-            stdout: String::new(),
-        });
-    };
-
-    let (mut stdout, mut stderr) = (stdout, stderr);
-    let (mut out, mut err) = (Read::default(), Read::default());
-    // Its streams read to their ends, then its exit, all within its time:
-    // none when it said too much.
-    let finished = async {
-        read_both(
-            &mut stdout,
-            &mut stderr,
-            &mut out,
-            &mut err,
-            limits.max_buffer,
-        )
-        .await;
-        if out.overflowed || err.overflowed {
-            None
-        } else {
-            Some(child.wait().await)
-        }
-    };
-    let mut killed = false;
-    let finished = if limits.timeout.is_zero() {
-        finished.await
-    } else if let Ok(finished) = tokio::time::timeout(limits.timeout, finished).await {
-        finished
-    } else {
-        killed = true;
-        None
-    };
-    let status = match finished {
-        Some(status) => status,
-        None => {
-            // As Node's `kill`: both streams closed first, so nothing it left
-            // running holds the answer back, then the program asked to end.
-            drop((stdout, stderr));
-            end(pid);
-            tokio::select! {
-                status = child.wait() => status,
-                () = tokio::time::sleep(FORCE_AFTER) => {
-                    if let Some(pid) = pid {
-                        terminate(pid, Ending::Forced);
-                    }
-                    child.wait().await
-                }
-            }
-        }
-    };
-
-    let stdout = String::from_utf8_lossy(&out.bytes).into_owned();
-    let stderr = String::from_utf8_lossy(&err.bytes).into_owned();
-    let status = status.map_err(|failed| Failed {
-        message: failed.to_string(),
-        code: None,
-        killed,
-        stdout: stdout.clone(),
-    })?;
-    for (stream, read) in [("stdout", &out), ("stderr", &err)] {
-        if read.overflowed {
-            return Err(Failed {
-                message: format!("{stream} maxBuffer length exceeded"),
-                code: None,
-                killed: false,
-                stdout,
-            });
-        }
-    }
-    if status.success() {
-        return Ok(stdout);
-    }
-    // Ended by a signal, Node has no code for it; on Windows this side's
-    // end is one too, where the system says 1.
-    let code = if cfg!(windows) && killed {
-        None
-    } else {
-        status.code()
-    };
-    Err(Failed {
-        message: format!("Command failed: {}\n{stderr}", command_line(run)),
-        code,
-        killed,
-        stdout,
-    })
+    crate::capture::capture(run, cwd, env, limits)
+        .await
+        .map(|captured| captured.stdout)
+        .map_err(|failed| Failed {
+            message: failed.message,
+            code: failed.code,
+            killed: failed.killed,
+            stdout: failed.stdout,
+        })
 }
 
-/// What a stream gave, up to the limit, and whether it gave more.
 #[derive(Default)]
-struct Read {
-    bytes: Vec<u8>,
-    overflowed: bool,
+pub(crate) struct Read {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) overflowed: bool,
 }
 
 impl Read {
@@ -198,7 +89,7 @@ impl Read {
 /// Reads both streams to their ends, keeping each one's first `limit`
 /// bytes, and stops at once when either says more, as Node's `maxBuffer`
 /// does.
-async fn read_both(
+pub(crate) async fn read_both(
     stdout: &mut (impl AsyncRead + Unpin),
     stderr: &mut (impl AsyncRead + Unpin),
     out: &mut Read,
@@ -224,7 +115,7 @@ async fn read_both(
 /// Asks the program to end, as `child.kill()` does: SIGTERM on Unix. On
 /// Windows its whole tree goes, where Node ends the program alone (and a
 /// `.cmd`'s own program, left running, keeps its streams open).
-fn end(pid: Option<u32>) {
+pub(crate) fn end(pid: Option<u32>) {
     if let Some(pid) = pid {
         terminate(pid, Ending::Asked);
     }
@@ -232,7 +123,7 @@ fn end(pid: Option<u32>) {
 
 /// The command as Node's message writes it: the file, then each argument,
 /// one space between, nothing quoted.
-fn command_line(run: &Run) -> String {
+pub(crate) fn command_line(run: &Run) -> String {
     std::iter::once(run.program.to_string_lossy())
         .chain(run.args.iter().map(|arg| arg.to_string_lossy()))
         .collect::<Vec<_>>()

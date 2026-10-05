@@ -30,9 +30,14 @@ use crate::contract::{HostError, PaneHost, Records, Work};
 use crate::records::{self, Cache, Options, Reading, IDLE_MS};
 use crate::seams::{Bundle, Entropy, Loopback, Ports, Probes, Processes, Services, Time};
 
+mod admin;
 mod children;
 mod peer;
 
+pub use admin::{
+    Asked, BodyEnding, Delivery, Response, Said, ScriptedCapture, ScriptedLatest, ScriptedNetwork,
+    Told,
+};
 pub use children::{called, name, named, ChildScript, Ends, ScriptedProcesses};
 pub use peer::{route, ScriptedLoopback, Sent, Served};
 

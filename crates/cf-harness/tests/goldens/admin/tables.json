@@ -1,0 +1,713 @@
+{
+  "sources": [
+    {
+      "id": "codex",
+      "executable": "/opt/homebrew/Caskroom/codex/0.1/bin/codex",
+      "source": {
+        "url": "https://formulae.brew.sh/api/cask/codex.json",
+        "format": "cask",
+        "distribution": "Homebrew",
+        "update": [
+          "/opt/homebrew/bin/brew",
+          "upgrade",
+          "--cask",
+          "codex"
+        ]
+      }
+    },
+    {
+      "id": "opencode",
+      "executable": "/opt/homebrew/Cellar/opencode/1/bin/opencode",
+      "source": {
+        "url": "https://formulae.brew.sh/api/formula/opencode.json",
+        "format": "formula",
+        "distribution": "Homebrew",
+        "update": [
+          "/opt/homebrew/bin/brew",
+          "upgrade",
+          "opencode"
+        ]
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "/opt/homebrew/Caskroom/claude-code@latest/2/bin/claude",
+      "source": {
+        "url": "https://formulae.brew.sh/api/cask/claude-code@latest.json",
+        "format": "cask",
+        "distribution": "Homebrew",
+        "update": [
+          "/opt/homebrew/bin/brew",
+          "upgrade",
+          "--cask",
+          "claude-code@latest"
+        ]
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "/opt/homebrew/Caskroom/claude-code/2/bin/claude",
+      "source": {
+        "url": "https://formulae.brew.sh/api/cask/claude-code.json",
+        "format": "cask",
+        "distribution": "Homebrew",
+        "update": [
+          "/opt/homebrew/bin/brew",
+          "upgrade",
+          "--cask",
+          "claude-code"
+        ]
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "/opt/homebrew/Cellar/claude-code/2/bin/claude",
+      "source": {
+        "url": "https://formulae.brew.sh/api/formula/claude-code.json",
+        "format": "formula",
+        "distribution": "Homebrew",
+        "update": [
+          "/opt/homebrew/bin/brew",
+          "upgrade",
+          "claude-code"
+        ]
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "/opt/homebrew/Caskroom/claude/2/bin/claude",
+      "source": {
+        "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/opt/homebrew/Caskroom/claude-code/2/bin/codex",
+      "source": {
+        "url": "https://registry.npmjs.org/@openai/codex/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/opt/homebrew/Cellar/codex-cli/1/bin/codex",
+      "source": {
+        "url": "https://registry.npmjs.org/@openai/codex/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/usr/local/Cellar/codex/1.2/bin/codex",
+      "source": {
+        "url": "https://formulae.brew.sh/api/formula/codex.json",
+        "format": "formula",
+        "distribution": "Homebrew",
+        "update": [
+          "/usr/local/bin/brew",
+          "upgrade",
+          "codex"
+        ]
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/home/linuxbrew/.linuxbrew/Cellar/codex/1/bin/codex",
+      "source": {
+        "url": "https://formulae.brew.sh/api/formula/codex.json",
+        "format": "formula",
+        "distribution": "Homebrew",
+        "update": [
+          "/home/linuxbrew/.linuxbrew/bin/brew",
+          "upgrade",
+          "codex"
+        ]
+      }
+    },
+    {
+      "id": "pi",
+      "executable": "/opt/homebrew/Cellar/pi/1/bin/pi",
+      "source": {
+        "url": "https://formulae.brew.sh/api/formula/pi.json",
+        "format": "formula",
+        "distribution": "Homebrew",
+        "update": [
+          "/opt/homebrew/bin/brew",
+          "upgrade",
+          "pi"
+        ]
+      }
+    },
+    {
+      "id": "devin",
+      "executable": "/opt/homebrew/Cellar/devin/1/bin/devin",
+      "source": {
+        "url": "https://formulae.brew.sh/api/formula/devin.json",
+        "format": "formula",
+        "distribution": "Homebrew",
+        "update": [
+          "/opt/homebrew/bin/brew",
+          "upgrade",
+          "devin"
+        ]
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/a/Cellar/other/1/Caskroom/codex/2/bin/codex",
+      "source": {
+        "url": "https://formulae.brew.sh/api/cask/codex.json",
+        "format": "cask",
+        "distribution": "Homebrew",
+        "update": [
+          "/a/Cellar/other/1/bin/brew",
+          "upgrade",
+          "--cask",
+          "codex"
+        ]
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/no-such-root/homebrew/Caskroom/codex",
+      "source": {
+        "url": "https://registry.npmjs.org/@openai/codex/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/no-such-root/homebrew/Caskroom/codex/",
+      "source": {
+        "url": "https://formulae.brew.sh/api/cask/codex.json",
+        "format": "cask",
+        "distribution": "Homebrew",
+        "update": [
+          "/no-such-root/homebrew/bin/brew",
+          "upgrade",
+          "--cask",
+          "codex"
+        ]
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "C:\\homebrew\\Cellar\\codex\\1\\bin\\codex.exe",
+      "source": {
+        "url": "https://formulae.brew.sh/api/formula/codex.json",
+        "format": "formula",
+        "distribution": "Homebrew",
+        "update": [
+          "C:/homebrew/bin/brew",
+          "upgrade",
+          "codex"
+        ]
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/opt/my brew/Caskroom/codex/0.1/bin/codex",
+      "source": {
+        "url": "https://formulae.brew.sh/api/cask/codex.json",
+        "format": "cask",
+        "distribution": "Homebrew",
+        "update": [
+          "/opt/my brew/bin/brew",
+          "upgrade",
+          "--cask",
+          "codex"
+        ]
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/opt/höme/Caskroom/codex/0.1/bin/codex",
+      "source": {
+        "url": "https://formulae.brew.sh/api/cask/codex.json",
+        "format": "cask",
+        "distribution": "Homebrew",
+        "update": [
+          "/opt/höme/bin/brew",
+          "upgrade",
+          "--cask",
+          "codex"
+        ]
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "/Users/me/.local/share/claude/versions/2.1.280",
+      "source": {
+        "url": "https://downloads.claude.ai/claude-code-releases/latest",
+        "format": "text",
+        "distribution": "Claude's installer, latest channel",
+        "update": [
+          "/Users/me/.local/share/claude/versions/2.1.280",
+          "update"
+        ]
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "/Users/me/.local/share/claude/versions",
+      "source": {
+        "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "/Users/me/.local/share/claude/versions/",
+      "source": {
+        "url": "https://downloads.claude.ai/claude-code-releases/latest",
+        "format": "text",
+        "distribution": "Claude's installer, latest channel",
+        "update": [
+          "/Users/me/.local/share/claude/versions/",
+          "update"
+        ]
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "/x/claude/versions/y/claude/versions/2",
+      "source": {
+        "url": "https://downloads.claude.ai/claude-code-releases/latest",
+        "format": "text",
+        "distribution": "Claude's installer, latest channel",
+        "update": [
+          "/x/claude/versions/y/claude/versions/2",
+          "update"
+        ]
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/Users/me/.local/share/claude/versions/2.1.280",
+      "source": {
+        "url": "https://registry.npmjs.org/@openai/codex/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "C:\\Users\\me\\.local\\share\\claude\\versions\\2.1.274\\claude.exe",
+      "source": {
+        "url": "https://downloads.claude.ai/claude-code-releases/latest",
+        "format": "text",
+        "distribution": "Claude's installer, latest channel",
+        "update": [
+          "C:/Users/me/.local/share/claude/versions/2.1.274/claude.exe",
+          "update"
+        ]
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "C:\\Users\\me\\.local\\bin\\claude.exe",
+      "source": {
+        "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "C:\\Users\\me\\.LOCAL\\BIN\\CLAUDE.EXE",
+      "source": {
+        "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "/Users/me/.claude/local/claude",
+      "source": {
+        "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "pi",
+      "executable": "/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js",
+      "source": {
+        "url": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest",
+        "format": "npm",
+        "distribution": "npm",
+        "update": [
+          "/usr/bin/npm",
+          "install",
+          "-g",
+          "@earendil-works/pi-coding-agent@latest"
+        ]
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js",
+      "source": {
+        "url": "https://registry.npmjs.org/@openai/codex/latest",
+        "format": "npm",
+        "distribution": "npm",
+        "update": [
+          "/opt/homebrew/bin/npm",
+          "install",
+          "-g",
+          "@openai/codex@latest"
+        ]
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "/Users/me/.nvm/versions/node/v22.1.0/lib/node_modules/@anthropic-ai/claude-code/cli.js",
+      "source": {
+        "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/latest",
+        "format": "npm",
+        "distribution": "npm",
+        "update": [
+          "/Users/me/.nvm/versions/node/v22.1.0/bin/npm",
+          "install",
+          "-g",
+          "@anthropic-ai/claude-code@latest"
+        ]
+      }
+    },
+    {
+      "id": "opencode",
+      "executable": "/usr/local/lib/node_modules/opencode-ai/bin/opencode",
+      "source": {
+        "url": "https://registry.npmjs.org/opencode-ai/latest",
+        "format": "npm",
+        "distribution": "npm",
+        "update": [
+          "/usr/local/bin/npm",
+          "install",
+          "-g",
+          "opencode-ai@latest"
+        ]
+      }
+    },
+    {
+      "id": "devin",
+      "executable": "/usr/lib/node_modules/devin/bin/devin",
+      "source": {
+        "url": "https://static.devin.ai/cli/current/manifest.json",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/a/lib/node_modules/x/lib/node_modules/@openai/codex/bin/codex.js",
+      "source": {
+        "url": "https://registry.npmjs.org/@openai/codex/latest",
+        "format": "npm",
+        "distribution": "npm",
+        "update": [
+          "/a/lib/node_modules/x/bin/npm",
+          "install",
+          "-g",
+          "@openai/codex@latest"
+        ]
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/lib/node_modules/codex",
+      "source": {
+        "url": "https://registry.npmjs.org/@openai/codex/latest",
+        "format": "npm",
+        "distribution": "npm",
+        "update": [
+          "bin/npm",
+          "install",
+          "-g",
+          "@openai/codex@latest"
+        ]
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js",
+      "source": {
+        "url": "https://registry.npmjs.org/@openai/codex/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "C:\\Users\\me\\AppData\\Roaming\\npm\\codex.cmd",
+      "source": {
+        "url": "https://registry.npmjs.org/@openai/codex/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/Users/me/.codex/bin/codex",
+      "source": {
+        "url": "https://registry.npmjs.org/@openai/codex/latest",
+        "format": "npm",
+        "distribution": "Codex's installer",
+        "update": [
+          "/Users/me/.codex/bin/codex",
+          "update"
+        ]
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "C:\\Users\\me\\.codex\\bin\\codex.exe",
+      "source": {
+        "url": "https://registry.npmjs.org/@openai/codex/latest",
+        "format": "npm",
+        "distribution": "Codex's installer",
+        "update": [
+          "C:/Users/me/.codex/bin/codex.exe",
+          "update"
+        ]
+      }
+    },
+    {
+      "id": "opencode",
+      "executable": "/Users/me/.opencode/bin/opencode",
+      "source": {
+        "url": "https://registry.npmjs.org/opencode-ai/latest",
+        "format": "npm",
+        "distribution": "OpenCode's installer",
+        "update": [
+          "/Users/me/.opencode/bin/opencode",
+          "upgrade"
+        ]
+      }
+    },
+    {
+      "id": "opencode",
+      "executable": "C:\\Users\\me\\.opencode\\bin\\opencode.exe",
+      "source": {
+        "url": "https://registry.npmjs.org/opencode-ai/latest",
+        "format": "npm",
+        "distribution": "OpenCode's installer",
+        "update": [
+          "C:/Users/me/.opencode/bin/opencode.exe",
+          "upgrade"
+        ]
+      }
+    },
+    {
+      "id": "pi",
+      "executable": "/Users/me/.pi/bin/pi",
+      "source": {
+        "url": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest",
+        "format": "npm",
+        "distribution": "Pi's installer",
+        "update": [
+          "/Users/me/.pi/bin/pi",
+          "update",
+          "--self"
+        ]
+      }
+    },
+    {
+      "id": "pi",
+      "executable": "C:\\Users\\me\\.pi\\bin\\pi.exe",
+      "source": {
+        "url": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest",
+        "format": "npm",
+        "distribution": "Pi's installer",
+        "update": [
+          "C:/Users/me/.pi/bin/pi.exe",
+          "update",
+          "--self"
+        ]
+      }
+    },
+    {
+      "id": "devin",
+      "executable": "/Users/me/.local/share/devin/cli/_versions/current/bin/devin",
+      "source": {
+        "url": "https://static.devin.ai/cli/current/manifest.json",
+        "format": "npm",
+        "distribution": "Devin's installer",
+        "update": [
+          "/Users/me/.local/share/devin/cli/_versions/current/bin/devin",
+          "update"
+        ]
+      }
+    },
+    {
+      "id": "devin",
+      "executable": "C:\\Users\\me\\AppData\\Local\\devin\\cli\\_versions\\current\\bin\\devin.exe",
+      "source": {
+        "url": "https://static.devin.ai/cli/current/manifest.json",
+        "format": "npm",
+        "distribution": "Devin's installer",
+        "update": [
+          "C:/Users/me/AppData/Local/devin/cli/_versions/current/bin/devin.exe",
+          "update"
+        ]
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "/Users/me/.claude/bin/claude",
+      "source": {
+        "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/Users/me/.codex/binx/codex",
+      "source": {
+        "url": "https://registry.npmjs.org/@openai/codex/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/Users/me/.codex/bin",
+      "source": {
+        "url": "https://registry.npmjs.org/@openai/codex/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/somewhere/else/codex",
+      "source": {
+        "url": "https://registry.npmjs.org/@openai/codex/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "/x/y",
+      "source": {
+        "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "opencode",
+      "executable": "/x/y",
+      "source": {
+        "url": "https://registry.npmjs.org/opencode-ai/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "pi",
+      "executable": "/x/y",
+      "source": {
+        "url": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "devin",
+      "executable": "/x/y",
+      "source": {
+        "url": "https://static.devin.ai/cli/current/manifest.json",
+        "format": "npm",
+        "distribution": null,
+        "update": null
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/opt/homebrew/Caskroom/codex/1/lib/node_modules/@openai/codex/bin/codex",
+      "source": {
+        "url": "https://formulae.brew.sh/api/cask/codex.json",
+        "format": "cask",
+        "distribution": "Homebrew",
+        "update": [
+          "/opt/homebrew/bin/brew",
+          "upgrade",
+          "--cask",
+          "codex"
+        ]
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/Users/me/.codex/bin/Caskroom/codex/1/codex",
+      "source": {
+        "url": "https://formulae.brew.sh/api/cask/codex.json",
+        "format": "cask",
+        "distribution": "Homebrew",
+        "update": [
+          "/Users/me/.codex/bin/bin/brew",
+          "upgrade",
+          "--cask",
+          "codex"
+        ]
+      }
+    },
+    {
+      "id": "claude",
+      "executable": "/Users/me/lib/node_modules/@anthropic-ai/claude-code/claude/versions/claude",
+      "source": {
+        "url": "https://downloads.claude.ai/claude-code-releases/latest",
+        "format": "text",
+        "distribution": "Claude's installer, latest channel",
+        "update": [
+          "/Users/me/lib/node_modules/@anthropic-ai/claude-code/claude/versions/claude",
+          "update"
+        ]
+      }
+    },
+    {
+      "id": "codex",
+      "executable": "/Users/me/lib/node_modules/@openai/codex/.codex/bin/codex",
+      "source": {
+        "url": "https://registry.npmjs.org/@openai/codex/latest",
+        "format": "npm",
+        "distribution": "npm",
+        "update": [
+          "/Users/me/bin/npm",
+          "install",
+          "-g",
+          "@openai/codex@latest"
+        ]
+      }
+    }
+  ]
+}

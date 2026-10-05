@@ -10,6 +10,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod admin;
 pub mod claude;
 pub mod codex;
 pub mod contract;
