@@ -316,6 +316,114 @@ describe("the launch recorder's peer on loopback", () => {
   })
 })
 
+describe("the launch recorder's children", () => {
+  const WINDOWS = process.platform === 'win32'
+  /** A stand-in's program and arguments as `runnable` gives them: on Windows its shim's node and script. */
+  const program = (name, ...args) =>
+    WINDOWS ? [process.execPath, [`C:\\bin\\${name}.mjs`, ...args]] : [`/bin/${name}`, args]
+  /** Starts `name` as the stand-in's window would, and what it said until it closed. */
+  const run = async (name, args, stdio, act) => {
+    const { spawn } = await import('node:child_process')
+    const [file, given] = program(name, ...args)
+    const child = spawn(file, given, { stdio })
+    const events = []
+    for (const event of ['spawn', 'error', 'exit', 'close']) {
+      child.on(event, (...values) => events.push([event, ...values.map((v) => v?.message ?? v)]))
+    }
+    const closed = new Promise((done) => child.on('close', done))
+    await act(child)
+    await closed
+    return { events, exitCode: child.exitCode, signalCode: child.signalCode }
+  }
+
+  it('speaks a line at a time, and keeps what it was started as and what it was sent', async () => {
+    const steps = [
+      { observe: true, children: { codex: [{ lines: ['{"id":1}', '{"id":2}'], ends: 'asked' }] } },
+    ]
+    const { records } = await played(steps, () => ({
+      observe: () =>
+        run('codex', ['app-server'], ['pipe', 'pipe', 'ignore'], async (child) => {
+          child.stdin.write('{"method":"initialize"}\n')
+          const lines = []
+          await new Promise((two) => {
+            child.stdout.on('data', (chunk) => {
+              lines.push(...String(chunk).split('\n').filter(Boolean))
+              if (lines.length === 2) two()
+            })
+          })
+          child.kill('SIGTERM')
+          child.lines = lines
+        }),
+    }))
+    assert.deepEqual(records[0].spawned, ['codex app-server'])
+    assert.deepEqual(records[0].written, ['{"method":"initialize"}'])
+    const { events, signalCode } = records[0].settled[0].answer
+    assert.deepEqual(events, [['spawn'], ['exit', null, 'SIGTERM'], ['close', null, 'SIGTERM']])
+    assert.equal(signalCode, 'SIGTERM')
+  })
+
+  it('ends by itself, and is not asked to end after it has', async () => {
+    const steps = [{ observe: true, children: { opencode: [{ ends: 'itself' }] } }]
+    const { records } = await played(steps, () => ({
+      observe: () =>
+        run('opencode', ['serve'], ['ignore', 'ignore', 'pipe'], async (child) => {
+          await new Promise((exited) => child.on('exit', exited))
+          child.refused = child.kill('SIGTERM')
+        }),
+    }))
+    assert.deepEqual(records[0].settled[0].answer.events, [
+      ['spawn'],
+      ['exit', 0, null],
+      ['close', 0, null],
+    ])
+  })
+
+  it('goes on asked when only forcing ends it, and ends when forced', {
+    skip: process.platform === 'win32' && 'an end on Windows is always forced',
+  }, async () => {
+    const steps = [{ observe: true, children: { opencode: [{ ends: 'forced' }] } }]
+    const { records } = await played(steps, () => ({
+      observe: () =>
+        run('opencode', ['serve'], ['ignore', 'ignore', 'pipe'], async (child) => {
+          child.kill('SIGTERM')
+          await Promise.resolve()
+          child.kill('SIGKILL')
+        }),
+    }))
+    assert.deepEqual(records[0].settled[0].answer.events, [
+      ['spawn'],
+      ['exit', null, 'SIGKILL'],
+      ['close', null, 'SIGKILL'],
+    ])
+  })
+
+  it('says error and close and no exit for a program that is not there, as Node does', async () => {
+    const { records } = await played([{ observe: true }], () => ({
+      observe: () => run('missing', [], ['ignore', 'ignore', 'pipe'], async () => {}),
+    }))
+    const { events, exitCode } = records[0].settled[0].answer
+    assert.equal(events[0][0], 'error')
+    assert.match(events[0][1], /^spawn .* ENOENT$/)
+    assert.deepEqual(events.slice(1), [['close', -2, null]])
+    assert.equal(exitCode, -2)
+  })
+
+  it('ends a scripted child that taskkill is asked to end, and nothing of the machine', async () => {
+    const steps = [{ observe: true, children: { opencode: [{ ends: 'never' }] } }]
+    const { records } = await played(steps, () => ({
+      observe: () =>
+        run('opencode', ['serve'], ['ignore', 'ignore', 'pipe'], async (child) => {
+          const { spawnSync } = await import('node:child_process')
+          spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'])
+        }),
+    }))
+    assert.deepEqual(records[0].settled[0].answer.events.slice(-2), [
+      ['exit', 1, null],
+      ['close', 1, null],
+    ])
+  })
+})
+
 describe("Pi's wait for its acknowledgement", () => {
   it('ends at its deadline on a clock that moves only with timers', async () => {
     // The last millisecond is slept out: read through, it never ended here.

@@ -60,18 +60,20 @@
  * why, and how Rust's own work settles instead.
  */
 import { AsyncLocalStorage, createHook } from 'node:async_hooks'
-import { spawn } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import { createRequire, syncBuiltinESMExports } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
+import { PassThrough } from 'node:stream'
 import { cachedAnswers } from '../../../hosts/lib/completion.js'
 import { claudeCodeAdapter } from '../../../src/adapters/claude-code.js'
 import { forgetLaunch } from '../../../src/core/launch-files.js'
 import { fakeExecutable } from '../../helpers.mjs'
 
 const require = createRequire(import.meta.url)
+const childProcess = require('node:child_process')
 const crypto = require('node:crypto')
 const net = require('node:net')
 const timersPromises = require('node:timers/promises')
@@ -98,7 +100,12 @@ const ADAPTERS = { 'claude-code': claudeCodeAdapter }
 const WINDOWS = process.platform === 'win32'
 
 /** The machine's own timers, which the runner turns the loop with. */
-const real = { setTimeout: globalThis.setTimeout, setImmediate: globalThis.setImmediate }
+const real = {
+  setTimeout: globalThis.setTimeout,
+  setImmediate: globalThis.setImmediate,
+  spawn: childProcess.spawn,
+  spawnSync: childProcess.spawnSync,
+}
 
 /** A path under the root with Windows' separators as POSIX's; on POSIX a backslash is a name's own. */
 const posix = (text) => (WINDOWS ? text.replaceAll('\\', '/') : text)
@@ -272,6 +279,10 @@ function install(context) {
   }
   globalThis.fetch = (input, init) => context.peer.fetch(input, init)
   net.createServer = () => portServer(context)
+  childProcess.spawn = (file, args = [], options = {}) =>
+    context.children.spawn(file, args, options)
+  childProcess.spawnSync = (file, args = [], options = {}) =>
+    context.children.spawnSync(file, args, options)
   timersPromises.setTimeout = (ms, value) =>
     new Promise((resolve) => clock.setTimeout(() => resolve(value), ms))
   let drawn = 0
@@ -299,6 +310,8 @@ function install(context) {
     AbortSignal.any = saved.abortAny
     globalThis.fetch = saved.fetch
     net.createServer = saved.createServer
+    childProcess.spawn = real.spawn
+    childProcess.spawnSync = real.spawnSync
     timersPromises.setTimeout = saved.promisedTimeout
     crypto.randomUUID = saved.randomUUID
     crypto.randomBytes = saved.randomBytes
@@ -667,11 +680,150 @@ function portServer(context) {
   return server
 }
 
+/**
+ * A program a step scripts in place of `spawn`'s child, the twin of Rust's
+ * `ScriptedProcesses` (`crates/cf-harness/src/testing/children.rs`): it
+ * writes its scripted lines, keeps every line it is sent, and ends as its
+ * script says (`itself` after its lines, `asked` when asked or forced,
+ * `forced` only when forced, `never`; on Windows, where an end is always
+ * forced, it ends). Its streams are those `stdio` asks for, its output
+ * open until it ends, and its events are a Node child's (probed on Node
+ * v26.8.1): `spawn`, then `exit` and `close` with its code, none after a
+ * signal; one asked to end after its exit is not asked (`kill` says false).
+ * One that is not there says `error`, then `close` with -2, and no `exit`.
+ */
+class ScriptedChild extends EventEmitter {
+  #ends
+
+  constructor(context, script, stdio) {
+    super()
+    this.#ends = script.ends ?? 'asked'
+    this.pid = context.pids.shift()
+    this.exitCode = null
+    this.signalCode = null
+    this.killed = false
+    const [input, output, errors] = Array.isArray(stdio) ? stdio : [stdio, stdio, stdio]
+    this.stdin = input === 'pipe' || input === undefined ? new PassThrough() : null
+    this.stdout = output === 'pipe' || output === undefined ? new PassThrough() : null
+    this.stderr = errors === 'pipe' || errors === undefined ? new PassThrough() : null
+    let unended = ''
+    this.stdin?.on('data', (chunk) => {
+      unended += chunk
+      for (let at = unended.indexOf('\n'); at >= 0; at = unended.indexOf('\n')) {
+        context.written.push(unended.slice(0, at))
+        unended = unended.slice(at + 1)
+      }
+    })
+    if (script.missing === true) {
+      queueMicrotask(() => {
+        this.emit('error', script.failed)
+        this.exitCode = -2
+        this.emit('close', -2, null)
+      })
+      return
+    }
+    for (const line of script.lines ?? []) this.stdout?.write(`${line}\n`)
+    queueMicrotask(() => {
+      this.emit('spawn')
+      if (this.#ends === 'itself') this.#exit(0, null)
+    })
+  }
+
+  kill(signal = 'SIGTERM') {
+    if (this.exitCode !== null || this.signalCode !== null) return false
+    const forced = signal === 'SIGKILL'
+    const ends =
+      WINDOWS ||
+      this.#ends === 'itself' ||
+      this.#ends === 'asked' ||
+      (this.#ends === 'forced' && forced)
+    this.killed = true
+    if (ends) this.#exit(null, signal)
+    return true
+  }
+
+  /** It exits, its streams close, and it says `exit`, then `close` once they have. */
+  #exit(code, signal) {
+    if (this.exitCode !== null || this.signalCode !== null) return
+    if (signal === null) this.exitCode = code
+    else this.signalCode = signal
+    const open = [this.stdout, this.stderr].filter((stream) => stream !== null)
+    for (const stream of open) {
+      stream.end()
+      if (stream.listenerCount('data') === 0) stream.resume()
+    }
+    queueMicrotask(() => {
+      this.emit('exit', this.exitCode, this.signalCode)
+      Promise.all(open.map((stream) => new Promise((ended) => stream.once('end', ended)))).then(
+        () => this.emit('close', this.exitCode, this.signalCode),
+      )
+    })
+  }
+
+  /**
+   * `taskkill /PID <pid> /T /F`, as `terminate` asks it on Windows: it ends
+   * any process, and Node, which sent no signal, reads the exit code 1 the
+   * system gives it.
+   */
+  forced() {
+    this.#exit(1, null)
+  }
+}
+
+/**
+ * The programs a step scripts for `spawn` (`children`: by the program's
+ * name, as its stand-in is named), each started one kept as Rust's fake
+ * keeps it: its name and its arguments. On Windows a stand-in runs as its
+ * shim's node and script (`runnable`), so the script names it.
+ */
+function scriptedChildren(context) {
+  const left = new Map()
+  const started = []
+  const named = (file, args) => {
+    const shim = WINDOWS && /\.mjs$/i.test(args[0] ?? '')
+    if (WINDOWS && !shim) {
+      throw new Error(`a spawned stand-in runs as a JavaScript one on Windows: ${file}`)
+    }
+    const [program, rest] = shim ? [args[0], args.slice(1)] : [file, args]
+    return [path.basename(program).replace(/\.(mjs|cmd|bat|exe)$/i, ''), ...rest]
+  }
+  return {
+    script(children) {
+      for (const [name, list] of Object.entries(children ?? {})) {
+        left.set(name, [...(left.get(name) ?? []), ...list])
+      }
+    },
+    spawn(file, args, options) {
+      const [name, ...rest] = named(file, args)
+      const failed = Object.assign(new Error(`spawn ${file} ENOENT`), { code: 'ENOENT' })
+      const script = left.get(name)?.shift() ?? { missing: true, failed }
+      const child = new ScriptedChild(context, script, options.stdio)
+      context.spawned.push([name, ...rest].join(' '))
+      started.push(child)
+      return child
+    },
+    spawnSync(file, args, options) {
+      if (path.basename(file).toLowerCase().startsWith('taskkill')) {
+        const pid = Number(args[args.indexOf('/PID') + 1])
+        started.find((child) => child.pid === pid)?.forced()
+        return { status: 0, signal: null, output: [], stdout: '', stderr: '' }
+      }
+      return real.spawnSync(file, args, options)
+    },
+    unused() {
+      return [...left]
+        .filter(([, list]) => list.length > 0)
+        .map(([name]) => name)
+        .sort()
+    },
+  }
+}
+
 /** A live process of the scenario's own besides this one: `$OTHER`. */
 function startOther() {
   return WINDOWS
-    ? spawn('ping', ['-n', '600', '127.0.0.1'], { stdio: 'ignore' })
-    : spawn('sleep', ['600'], { stdio: 'ignore' })
+    ? real.spawn('ping', ['-n', '600', '127.0.0.1'], { stdio: 'ignore' })
+    : real.spawn('sleep', ['600'], { stdio: 'ignore' })
 }
 
 /** Sets the scene as a step says: false for a step that is recorded. */
@@ -751,6 +903,7 @@ function beginOwn(context, index, step) {
   } else {
     context.host.script(step.answers)
     context.peer.script(step.served)
+    context.children.script(step.children)
     const target = {
       launch: context.launch,
       pane: { id: 'p1-zeus', generation: 1 },
@@ -795,6 +948,8 @@ function signature(context) {
     pending(context),
     context.requests.length,
     context.fetches.length,
+    context.spawned.length,
+    context.written.length,
     context.draws.length,
     context.machine.begun(),
   ])
@@ -848,6 +1003,8 @@ async function record(context, index, step) {
   const before = tree(context.root)
   context.requests = []
   context.fetches = []
+  context.spawned = []
+  context.written = []
   context.draws = []
   if (step.release !== undefined) {
     // A route has a space in it (`GET /session`), a host's operation none.
@@ -879,13 +1036,19 @@ async function record(context, index, step) {
     .filter((entry) => entry.settled !== null)
     .map((entry) => ({ ...entry.settled, op: entry.op }))
   context.work = context.work.filter((entry) => entry.settled === null)
-  const unused = [...context.host.unused(step.optional), ...context.peer.unused(step.optional)]
+  const unused = [
+    ...context.host.unused(step.optional),
+    ...context.peer.unused(step.optional),
+    ...context.children.unused(),
+  ]
   return written(context, {
     step: index,
     settled,
     pending: pending(context),
     requests: context.requests,
     ...(context.fetches.length > 0 ? { fetches: context.fetches } : {}),
+    ...(context.spawned.length > 0 ? { spawned: context.spawned } : {}),
+    ...(context.written.length > 0 ? { written: context.written } : {}),
     ...(unused.length > 0 ? { unused } : {}),
     draws: context.draws,
     tree: changes(before, tree(context.root)),
@@ -906,8 +1069,12 @@ export async function play(scenario, adapters = ADAPTERS) {
     work: [],
     requests: [],
     fetches: [],
+    spawned: [],
+    written: [],
     draws: [],
     ports: Array.from({ length: 100 }, (_, index) => 41_000 + index),
+    // A scripted child's pid, none a live process has (`DEAD` and on).
+    pids: Array.from({ length: 100 }, (_, index) => DEAD - 1 - index),
     als: new AsyncLocalStorage(),
   }
   context.clock = fakeClock(() => context.als.getStore())
@@ -922,6 +1089,7 @@ export async function play(scenario, adapters = ADAPTERS) {
     await fs.mkdir(path.join(root, 'bin'), { recursive: true })
     context.host = scriptedHost(context)
     context.peer = scriptedPeer(context)
+    context.children = scriptedChildren(context)
     context.looks = scriptedLooks(context)
     context.adapter = adapters[scenario.harness]({
       env: context.env,

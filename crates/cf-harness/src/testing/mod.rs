@@ -33,7 +33,7 @@ use crate::seams::{Bundle, Entropy, Loopback, Ports, Probes, Processes, Services
 mod children;
 mod peer;
 
-pub use children::ScriptedProcesses;
+pub use children::{ChildScript, Ends, ScriptedProcesses};
 pub use peer::{route, ScriptedLoopback, Sent, Served};
 
 thread_local! {

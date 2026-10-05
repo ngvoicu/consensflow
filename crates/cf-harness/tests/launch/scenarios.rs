@@ -25,7 +25,8 @@ use cf_harness::forget_launch;
 use cf_harness::seams::loopback::BodyFailed;
 use cf_harness::seams::{Services, Time};
 use cf_harness::testing::{
-    fake_executable, route, Answer, Driver, Fakes, OtherProcess, ScriptedHost, Sent, Served,
+    fake_executable, route, Answer, ChildScript, Driver, Ends, Fakes, OtherProcess, ScriptedHost,
+    Sent, Served,
 };
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
@@ -179,6 +180,24 @@ fn served(given: &Value) -> Served {
         _ => Sent::Now(Vec::new()),
     };
     Served::Head { status, body }
+}
+
+/// A child as a scenario scripts it: the lines it writes, and how it ends
+/// (`itself`, `asked`, the default, `forced`, `never`).
+fn child(given: &Value) -> ChildScript {
+    let lines = given["lines"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|line| line.as_str().unwrap().to_owned())
+        .collect();
+    let ends = match given["ends"].as_str() {
+        Some("itself") => Ends::Itself,
+        Some("forced") => Ends::Forced,
+        Some("never") => Ends::Never,
+        _ => Ends::Asked,
+    };
+    ChildScript { lines, ends }
 }
 
 /// A host's response as a scenario writes it: `{throws: message}` for a
@@ -378,6 +397,11 @@ fn begin_asking(played: &mut Played, id: usize, step: &Value) {
     for (route, answers) in step["served"].as_object().into_iter().flatten() {
         let answers = answers.as_array().unwrap().iter().map(served);
         played.fakes.loopback.serve(route, answers);
+    }
+    for (name, scripts) in step["children"].as_object().into_iter().flatten() {
+        for script in scripts.as_array().unwrap() {
+            played.fakes.processes.child(name, child(script));
+        }
     }
     for (op, answers) in step["answers"].as_object().into_iter().flatten() {
         let answers: Vec<Answer> = answers
@@ -664,6 +688,14 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
     if !fetches.is_empty() {
         fields.insert("fetches".to_owned(), json!(fetches));
     }
+    let spawned = played.fakes.processes.take_spawned();
+    if !spawned.is_empty() {
+        fields.insert("spawned".to_owned(), json!(spawned));
+    }
+    let written = played.fakes.processes.take_written();
+    if !written.is_empty() {
+        fields.insert("written".to_owned(), json!(written));
+    }
     // The host's operations and then the peer's routes, each in order, as
     // Node's runner lists them.
     let optional = step["optional"].as_array().cloned().unwrap_or_default();
@@ -673,6 +705,7 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
         .into_iter()
         .chain(played.fakes.loopback.unused())
         .filter(|op| !optional.contains(&json!(op)))
+        .chain(played.fakes.processes.unused())
         .collect();
     if !unused.is_empty() {
         fields.insert("unused".to_owned(), json!(unused));
