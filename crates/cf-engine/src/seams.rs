@@ -1,9 +1,10 @@
 //! What the engine is made with (the options of `src/core/dispatcher.js`):
 //! the ledger, the pane host, an adapter for each harness, the records, the
 //! clock and the launch ids, who a window's token is for, the environment a
-//! pane starts with, the saved agents, the role texts, the trace, the log
-//! and the launch files. The daemon gives the real ones (3.6); the kit gives
-//! fakes that write down what they were asked.
+//! pane starts with, the saved agents, the role texts, the trace, where it
+//! says it calls one of its own operations, the log and the launch files.
+//! The daemon gives the real ones (3.6); the kit gives fakes that write down
+//! what they were asked.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -13,6 +14,7 @@ use cf_harness::contract::{Adapter, Agent, LaunchId, Records};
 use cf_harness::seams::Time;
 use cf_ledger::{Ledger, LedgerError, ParticipantView, ProjectView};
 use cf_proto::trace::TraceLine;
+use serde_json::Value;
 
 use crate::host::EngineHost;
 use crate::runtime::Spawn;
@@ -67,6 +69,13 @@ pub trait Credentials {
 pub trait Trace {
     fn line(&self, line: TraceLine);
     fn forget(&self, project: i64);
+}
+
+/// Where the engine tells that it calls one of its own operations from
+/// inside it: Node's recording dispatcher wrote each call of an operation
+/// where it began, whoever made it. The daemon's hears none.
+pub trait Operations {
+    fn called(&self, operation: &str, args: Value);
 }
 
 /// What failed apart from anything that waits for it (`log.error`): a launch
@@ -158,7 +167,9 @@ impl Default for Limits {
     }
 }
 
-/// Everything the engine is made with.
+/// Everything the engine is made with. Made of shared parts, a copy is the
+/// same ledger, host and fakes: a second engine of the same daemon (a restart).
+#[derive(Clone)]
 pub struct Seams {
     /// Shared with whoever else reads and writes the board (the API, the
     /// page): borrowed for one call at a time, never across a wait.
@@ -173,6 +184,7 @@ pub struct Seams {
     pub roster: Rc<dyn Roster>,
     pub roles: Rc<dyn Roles>,
     pub trace: Rc<dyn Trace>,
+    pub operations: Rc<dyn Operations>,
     pub log: Rc<dyn Log>,
     pub launch_files: Rc<dyn LaunchFiles>,
     pub spawn: Rc<dyn Spawn>,

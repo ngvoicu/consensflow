@@ -1,27 +1,24 @@
 //! A harness adapter whose agents do exactly what the test tells them: the
-//! twin of `fakeAdapter` in `core-dispatcher.test.mjs`. One adapter answers
-//! for any harness the test names it under; each window is an agent, found
-//! by its launch, and by the handle it is for. What a call does and reads, it
-//! does when called, as the JavaScript fake's async functions did; each is
-//! answered a turn later, as their promises were, and written down in the
-//! Node traces' shape, under the harness it was asked as.
+//! twin of `fakeAdapter` in `core-dispatcher.test.mjs`. An adapter answers
+//! for any harness the test names it under ([`super::FakeAdapters`]); each
+//! window is an agent, found by its launch, and by the handle it is for.
+//! What a call does and reads, it does when called, as the JavaScript fake's
+//! async functions did; each is answered a turn later, as their promises
+//! were, and written down in the Node traces' shape, under the harness it
+//! was asked as.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use cf_harness::contract::{
-    Adapter, Admission, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records, Waiting,
-    Window, Work,
-};
-use cf_harness::records::{Item, Options, Quota, Reading, Record, Role, Settlement};
-use cf_proto::agents::Harness;
+use cf_harness::contract::{Adapter, Launch, Prepared, Readiness, Waiting, Window, Work};
+use cf_harness::records::{Item, Quota, Reading, Record, Role, Settlement};
 use serde_json::{json, Value};
 
-use super::executor::next_turn;
+use super::executor::{next_turn, Gate};
 use super::recorder::Recorder;
-use crate::seams::Adapters;
+use super::window::FakeWindow;
 
 /// An agent's window, as the test tells it to be.
 #[derive(Debug, Clone)]
@@ -52,29 +49,67 @@ pub struct FakeAgent {
 /// What a test makes `ready` answer, where it gives the adapter one.
 pub type Ready = Rc<dyn Fn() -> Result<Readiness, String>>;
 
+/// What a test makes `started` answer, where it gives the adapter one: the
+/// conversation the harness named, or why the window could not take its
+/// first message.
+pub type Started = Rc<dyn Fn() -> Result<Option<String>, String>>;
+
 /// The test's adapter, and its agents.
 pub struct FakeAdapter {
-    recorder: Recorder,
+    pub(super) recorder: Recorder,
     agents: RefCell<Vec<FakeAgent>>,
     /// Each launch prepared, as asked, in the shape of the JavaScript
     /// fake's `prepared`: its launch id, participant's handle, role,
     /// project, folder, resume, message, agent and instructions.
     prepared: RefCell<Vec<Value>>,
-    items: Cell<u64>,
+    /// The test's items are numbered across its adapters.
+    items: Rc<Cell<u64>>,
     /// A `ready` of the test's own; without one a window is ready, and
     /// nothing is asked (the JavaScript fake had none).
     pub ready: RefCell<Option<Ready>>,
+    /// A `started` of the test's own.
+    pub started: RefCell<Option<Started>>,
+    /// Every `prepare` fails with this, and prepares nothing, until the test
+    /// takes it away.
+    pub prepare_fails: RefCell<Option<String>>,
+    /// How many `prepare`s failed so.
+    failed_prepares: Cell<usize>,
+    /// Every `deliver` waits for this gate, and is made once it opens.
+    pub hold_deliveries: RefCell<Option<Gate>>,
+    /// Every `observe` of the window of this launch waits for the gate, and
+    /// is made once it opens.
+    pub hold_observes: RefCell<Option<(String, Gate)>>,
 }
 
 impl FakeAdapter {
     pub fn new(recorder: Recorder) -> Rc<Self> {
+        Self::numbering(recorder, Rc::new(Cell::new(0)))
+    }
+
+    /// Another adapter of the same test, with agents of its own: Codex's
+    /// own fake (`fakeAdapter('codex')`), its items numbered with this one's.
+    pub fn another(&self) -> Rc<Self> {
+        Self::numbering(self.recorder.clone(), Rc::clone(&self.items))
+    }
+
+    fn numbering(recorder: Recorder, items: Rc<Cell<u64>>) -> Rc<Self> {
         Rc::new(Self {
             recorder,
             agents: RefCell::new(Vec::new()),
             prepared: RefCell::new(Vec::new()),
-            items: Cell::new(0),
+            items,
             ready: RefCell::new(None),
+            started: RefCell::new(None),
+            prepare_fails: RefCell::new(None),
+            failed_prepares: Cell::new(0),
+            hold_deliveries: RefCell::new(None),
+            hold_observes: RefCell::new(None),
         })
+    }
+
+    /// How many `prepare`s failed ([`FakeAdapter::prepare_fails`]).
+    pub fn failed_prepares(&self) -> usize {
+        self.failed_prepares.get()
     }
 
     /// The launches prepared, in order.
@@ -166,7 +201,7 @@ impl FakeAdapter {
         });
     }
 
-    fn of_launch<T>(&self, launch: &str, read: impl FnOnce(&mut FakeAgent) -> T) -> T {
+    pub(super) fn of_launch<T>(&self, launch: &str, read: impl FnOnce(&mut FakeAgent) -> T) -> T {
         let mut agents = self.agents.borrow_mut();
         let agent = agents
             .iter_mut()
@@ -177,7 +212,7 @@ impl FakeAdapter {
 
     /// What the record of `session` holds (`adapter.record`): the latest
     /// window's on it.
-    fn record_of(&self, session: &str) -> Reading {
+    pub(super) fn record_of(&self, session: &str) -> Reading {
         let agents = self.agents.borrow();
         match agents.iter().rev().find(|agent| agent.native == session) {
             None => Reading::Unknown("unknown".to_owned()),
@@ -194,18 +229,18 @@ impl FakeAdapter {
 }
 
 /// The adapter as the engine asks it for one harness.
-struct Asked {
+pub(super) struct Asked {
     harness: String,
     fake: Rc<FakeAdapter>,
 }
 
-/// One window of the fake: its agent, by its launch, and the conversation
-/// the window is followed on (the launch bag's `nativeSession`).
-struct FakeWindow {
-    seam: String,
-    launch: String,
-    session: RefCell<String>,
-    fake: Rc<FakeAdapter>,
+impl Asked {
+    pub(super) fn new(harness: &str, fake: Rc<FakeAdapter>) -> Self {
+        Self {
+            harness: harness.to_owned(),
+            fake,
+        }
+    }
 }
 
 impl Adapter for Asked {
@@ -231,6 +266,17 @@ impl Adapter for Asked {
         let at = fake
             .recorder
             .call(&seam, Some("prepare"), json!([asked.clone()]));
+        // A failing one prepared nothing: no agent, and nothing prepared.
+        let failing = fake.prepare_fails.borrow().clone();
+        if let Some(reason) = failing {
+            fake.failed_prepares.set(fake.failed_prepares.get() + 1);
+            return Box::pin(async move {
+                next_turn().await;
+                fake.recorder
+                    .answered(at, json!({ "$error": { "message": reason } }));
+                Err(reason)
+            });
+        }
         fake.prepared.borrow_mut().push(asked);
         let id = launch.id.as_str().to_owned();
         let native = launch
@@ -258,12 +304,12 @@ impl Adapter for Asked {
         }
         fake.agents.borrow_mut().push(agent);
         let handle = launch.handle.to_owned();
-        let window: Rc<dyn Window> = Rc::new(FakeWindow {
+        let window: Rc<dyn Window> = Rc::new(FakeWindow::new(
             seam,
-            launch: id.clone(),
-            session: RefCell::new(native.clone()),
-            fake: Rc::clone(fake),
-        });
+            id.clone(),
+            native.clone(),
+            Rc::clone(fake),
+        ));
         Box::pin(async move {
             next_turn().await;
             fake.recorder.answered(
@@ -284,259 +330,5 @@ impl Adapter for Asked {
                 window,
             })
         })
-    }
-}
-
-impl Window for FakeWindow {
-    fn opened(&self, _pid: Option<u32>) {}
-
-    fn follow(&self, session: &str) {
-        *self.session.borrow_mut() = session.to_owned();
-    }
-
-    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
-        let at = self.call(
-            "started",
-            json!([{ "launch": { "launchId": self.launch } }]),
-        );
-        Box::pin(async move {
-            next_turn().await;
-            self.fake.recorder.answered(at, json!({}));
-            Ok(None)
-        })
-    }
-
-    fn ready<'a>(
-        &'a self,
-        _host: &'a dyn PaneHost,
-        _pane: &'a Pane,
-    ) -> Work<'a, Result<Readiness, String>> {
-        let ready = self.fake.ready.borrow().clone();
-        let Some(ready) = ready else {
-            return Box::pin(async { Ok(Readiness::Ready) });
-        };
-        let at = self.call("ready", json!([{ "launch": { "launchId": self.launch } }]));
-        let answer = ready();
-        Box::pin(async move {
-            next_turn().await;
-            let written = match &answer {
-                Ok(Readiness::Ready) => json!(true),
-                Ok(Readiness::Held(held)) => json!(held.sentence()),
-                Err(error) => json!({ "$error": { "message": error } }),
-            };
-            self.fake.recorder.answered(at, written);
-            answer
-        })
-    }
-
-    fn deliver<'a>(
-        &'a self,
-        _host: &'a dyn PaneHost,
-        pane: &'a Pane,
-        text: &'a str,
-    ) -> Work<'a, Result<Admission, String>> {
-        let at = self.call(
-            "deliver",
-            json!([{
-                "launch": { "launchId": self.launch },
-                "pane": { "id": pane.id, "generation": pane.generation },
-                "text": text,
-            }]),
-        );
-        let admission = self.fake.of_launch(&self.launch, |agent| {
-            if !agent.admit {
-                return Admission::Refused {
-                    reason: "refused by the test".to_owned(),
-                };
-            }
-            if agent.arrive {
-                agent.items.push(self.fake.item(Role::User, text));
-                agent.settled = false;
-                // A message that arrives starts a turn: the one before it ended as it did.
-                agent.failed = false;
-            }
-            Admission::Admitted {
-                queued: agent.queued,
-            }
-        });
-        Box::pin(async move {
-            next_turn().await;
-            let written = match &admission {
-                Admission::Admitted { queued: true } => json!({ "admitted": true, "queued": true }),
-                Admission::Admitted { queued: false } => json!({ "admitted": true }),
-                Admission::Refused { reason } | Admission::Uncertain { reason } => {
-                    json!({ "admitted": false, "reason": reason })
-                }
-            };
-            self.fake.recorder.answered(at, written);
-            Ok(admission)
-        })
-    }
-
-    fn observe(&self) -> Work<'_, Result<Observed, String>> {
-        // JavaScript handed the fake the participant's conversation, which
-        // this window follows: its session.
-        let session = self.session.borrow().clone();
-        let at = self.call(
-            "observe",
-            json!([{
-                "launch": { "launchId": self.launch },
-                "conversation": { "nativeSession": session },
-            }]),
-        );
-        let observed = self
-            .fake
-            .of_launch(&self.launch, |agent| looked(agent, &session));
-        Box::pin(async move {
-            next_turn().await;
-            self.fake.recorder.answered(at, observed_json(&observed));
-            Ok(observed)
-        })
-    }
-}
-
-impl FakeWindow {
-    fn call(&self, method: &str, args: Value) -> usize {
-        self.fake.recorder.call(&self.seam, Some(method), args)
-    }
-}
-
-/// What a look at `agent`'s window finds, its launch on `session`.
-fn looked(agent: &FakeAgent, session: &str) -> Observed {
-    let reading = |items: Vec<Item>| {
-        Some(Arc::new(Reading::Known(Record {
-            items,
-            in_flight: false,
-            asking: false,
-            failed: false,
-            quota: None,
-            settlement: Settlement::Unknown,
-        })))
-    };
-    // A window that shows another conversation than its launch's: that
-    // record's last look, and which session it shows now.
-    if let Some(shows) = agent.shows.as_ref().filter(|shows| *shows != session) {
-        return Observed {
-            reading: reading(agent.records.get(session).cloned().unwrap_or_default()),
-            settled: false,
-            waiting: None,
-            failed: agent.failed,
-            quota: agent.quota.clone(),
-            switched: Some(shows.clone()),
-            unnamed: false,
-        };
-    }
-    let waiting = match &agent.unnamed {
-        Some(reason) => Some(Waiting {
-            reason: Some(reason.clone()),
-        }),
-        None => agent.waiting.clone(),
-    };
-    Observed {
-        reading: reading(agent.items.clone()),
-        settled: agent.settled,
-        waiting,
-        failed: agent.failed,
-        quota: agent.quota.clone(),
-        switched: None,
-        unnamed: agent.unnamed.is_some(),
-    }
-}
-
-/// A look as the Node traces write the fake's answer.
-fn observed_json(observed: &Observed) -> Value {
-    let mut written = json!({
-        "items": observed.items(),
-        "settled": observed.settled,
-        "waiting": observed.waiting.as_ref().map(|waiting| json!({ "reason": waiting.reason })),
-        "quota": observed.quota.as_deref(),
-        "failed": observed.failed,
-    });
-    if let Some(session) = &observed.switched {
-        written["switched"] = json!({ "nativeSession": session });
-    }
-    if observed.unnamed {
-        written["unnamed"] = json!(true);
-    }
-    written
-}
-
-/// The adapters the test's engine is made with: the fake under every
-/// harness the test names, as `{ 'claude-code': adapter, opencode: adapter }`.
-pub struct FakeAdapters {
-    harnesses: Vec<String>,
-    fake: Rc<FakeAdapter>,
-}
-
-impl FakeAdapters {
-    pub fn new(fake: Rc<FakeAdapter>, harnesses: &[&str]) -> Self {
-        Self {
-            harnesses: harnesses
-                .iter()
-                .map(|harness| (*harness).to_owned())
-                .collect(),
-            fake,
-        }
-    }
-}
-
-impl Adapters for FakeAdapters {
-    fn adapter(&self, harness: &str) -> Option<Rc<dyn Adapter>> {
-        self.harnesses
-            .iter()
-            .any(|named| named == harness)
-            .then(|| {
-                Rc::new(Asked {
-                    harness: harness.to_owned(),
-                    fake: Rc::clone(&self.fake),
-                }) as Rc<dyn Adapter>
-            })
-    }
-}
-
-/// The records as the fake's agents write them: the engine's look at a
-/// conversation with no window (`adapter.record` in JavaScript).
-pub struct FakeRecords {
-    fake: Rc<FakeAdapter>,
-}
-
-impl FakeRecords {
-    pub fn new(fake: Rc<FakeAdapter>) -> Self {
-        Self { fake }
-    }
-}
-
-impl Records for FakeRecords {
-    fn look<'a>(
-        &'a self,
-        harness: Harness,
-        session: &'a str,
-        _options: &'a Options,
-    ) -> Work<'a, Arc<Reading>> {
-        let seam = format!("adapter:{}", harness.kind());
-        let at = self.fake.recorder.call(
-            &seam,
-            Some("record"),
-            json!([{ "conversation": { "nativeSession": session } }]),
-        );
-        let reading = self.fake.record_of(session);
-        Box::pin(async move {
-            next_turn().await;
-            let written = match &reading {
-                Reading::Unknown(_) => json!({ "unknown": true }),
-                Reading::Known(record) => json!({ "items": record.items }),
-            };
-            self.fake.recorder.answered(at, written);
-            Arc::new(reading)
-        })
-    }
-
-    fn has_transcript<'a>(
-        &'a self,
-        _harness: Harness,
-        session: &'a str,
-    ) -> Work<'a, Result<bool, String>> {
-        let known = !matches!(self.fake.record_of(session), Reading::Unknown(_));
-        Box::pin(async move { Ok(known) })
     }
 }

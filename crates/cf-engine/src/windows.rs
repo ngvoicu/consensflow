@@ -20,7 +20,7 @@ use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
-use crate::runtime::begin;
+use crate::runtime::{begin, LocalWork};
 use crate::seams::{EngineError, SavedAgent};
 
 /// The key that interrupts a harness's current turn, how often it is pressed
@@ -172,11 +172,6 @@ pub(crate) struct WindowsState {
     generation: Cell<i64>,
 }
 
-/// What a part of the engine not ported yet answers.
-pub(crate) fn not_ported(what: &str) -> EngineError {
-    EngineError::said("not-ported", format!("{what} is not ported yet"))
-}
-
 /// A pane as the pane host's requests name it.
 fn pane_body(pane: &Pane) -> Value {
     json!({ "id": pane.id, "generation": pane.generation })
@@ -241,6 +236,17 @@ impl Dispatcher {
                 format!("ConsensFlow cannot open {harness} windows"),
             )),
         }
+    }
+
+    /// The exit of a window that the engine itself learns of (a launch that
+    /// finds its pane gone, a close whose kill came with no exit): the
+    /// engine's own call of the operation the host's exits are, told as such
+    /// ([`crate::seams::Operations`]).
+    fn exited_here(self: &Rc<Self>, pane: &Pane) -> Option<LocalWork> {
+        self.seams
+            .operations
+            .called("paneExited", json!([pane_body(pane)]));
+        self.pane_exited(pane.clone())
     }
 
     /// A window that exited: its token is revoked, its files in the home go
@@ -437,7 +443,7 @@ impl Dispatcher {
             }
             // One that exited before its open was answered has gone already.
             if exited {
-                if let Some(rest) = self.pane_exited(pane) {
+                if let Some(rest) = self.exited_here(&pane) {
                     rest.await;
                 }
             }
@@ -473,7 +479,7 @@ impl Dispatcher {
         record.delivery.borrow_mut().delivering = delivering.clone();
         // A window that exited before its open was answered goes as any exit does.
         if exited {
-            if let Some(rest) = self.pane_exited(pane) {
+            if let Some(rest) = self.exited_here(&pane) {
                 rest.await;
             }
             return Ok(());
@@ -945,7 +951,7 @@ impl Dispatcher {
         } else {
             let open = record.window.borrow().pane.as_ref() == Some(pane);
             if open {
-                if let Some(rest) = self.pane_exited(pane.clone()) {
+                if let Some(rest) = self.exited_here(pane) {
                     rest.await;
                 }
             }

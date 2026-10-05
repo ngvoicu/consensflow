@@ -30,6 +30,7 @@ use cf_ledger::{
     TaskView,
 };
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
+use serde_json::json;
 
 use crate::chief_switch::SwitchTo;
 use crate::record::Record;
@@ -527,6 +528,9 @@ impl Dispatcher {
             .collect();
         let mut outcomes = Vec::new();
         for project in due {
+            self.seams
+                .operations
+                .called("resumeProject", json!([project]));
             let resumed = self.resume_project(project).await;
             self.seams.ledger.borrow_mut().forget_resume(project)?;
             outcomes.push(Resumed {

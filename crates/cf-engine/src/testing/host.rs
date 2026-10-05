@@ -19,8 +19,9 @@ use crate::host::{EngineHost, Killed, OpenPane, Opened};
 #[derive(Default)]
 pub struct FakeHost {
     recorder: Recorder,
-    /// Where exits go: the engine, once made.
-    engine: RefCell<Weak<Dispatcher>>,
+    /// Where exits go: each engine made on this host, in the order made
+    /// (`host.onExit`).
+    engines: RefCell<Vec<Weak<Dispatcher>>>,
     opened: RefCell<Vec<OpenPane>>,
     killed: RefCell<Vec<Pane>>,
     requests: RefCell<Vec<(String, Value)>>,
@@ -30,6 +31,12 @@ pub struct FakeHost {
     pub refuse_kills: Cell<bool>,
     /// An open waits for this gate.
     pub hold: RefCell<Option<Gate>>,
+    /// The window of this handle exits as the next open is answered: the
+    /// host sends the exit first, in the same read as its answer.
+    pub exit_after_open: RefCell<Option<String>>,
+    /// A kill of the window of this generation waits for the gate, and is
+    /// made once it opens.
+    pub hold_kill: RefCell<Option<(u64, Gate)>>,
     /// A kill's exit is held until the test sends it.
     pub hold_exits: Cell<bool>,
     /// What `pane.snapshot` answers besides `ok`.
@@ -46,9 +53,10 @@ impl FakeHost {
         })
     }
 
-    /// Exits go to `engine` (`host.onExit`).
+    /// Exits go to `engine` too, after the engines attached before it
+    /// (`host.onExit`).
     pub fn attach(&self, engine: &Rc<Dispatcher>) {
-        *self.engine.borrow_mut() = Rc::downgrade(engine);
+        self.engines.borrow_mut().push(Rc::downgrade(engine));
     }
 
     /// The panes opened, in order.
@@ -83,18 +91,23 @@ impl FakeHost {
         }
     }
 
-    /// Tells the engine `pane` ended and waits for what it does about it.
+    /// Tells each engine `pane` ended, one after the other, and waits for
+    /// what each does about it.
     pub async fn exited(&self, pane: Pane) {
-        let engine = self.engine.borrow().upgrade();
-        let Some(engine) = engine else {
-            return;
-        };
-        self.recorder.op(
-            "paneExited",
-            json!([{ "id": pane.id, "generation": pane.generation }]),
-        );
-        if let Some(rest) = engine.pane_exited(pane) {
-            rest.await;
+        let engines: Vec<Rc<Dispatcher>> = self
+            .engines
+            .borrow()
+            .iter()
+            .filter_map(Weak::upgrade)
+            .collect();
+        for engine in engines {
+            self.recorder.op(
+                "paneExited",
+                json!([{ "id": pane.id, "generation": pane.generation }]),
+            );
+            if let Some(rest) = engine.pane_exited(pane.clone()) {
+                rest.await;
+            }
         }
     }
 }
@@ -181,6 +194,10 @@ impl EngineHost for FakeHost {
             if let Some(pid) = pid {
                 answer["pid"] = json!(pid);
             }
+            let leaves = self.exit_after_open.borrow_mut().take();
+            if let Some(handle) = leaves {
+                self.exit(&handle).await;
+            }
             self.recorder.answered(at, answer);
             Ok(Opened::Open { pid })
         })
@@ -190,8 +207,20 @@ impl EngineHost for FakeHost {
         let at = self
             .recorder
             .call("host", Some("kill"), json!([pane_json(pane)]));
-        self.killed.borrow_mut().push(pane.clone());
+        let held = self
+            .hold_kill
+            .borrow()
+            .clone()
+            .filter(|(generation, _)| *generation == pane.generation)
+            .map(|(_, gate)| gate);
+        if held.is_none() {
+            self.killed.borrow_mut().push(pane.clone());
+        }
         Box::pin(async move {
+            if let Some(gate) = held {
+                gate.wait().await;
+                self.killed.borrow_mut().push(pane.clone());
+            }
             if self.refuse_kills.get() {
                 next_turn().await;
                 let error = "refused by the test".to_owned();

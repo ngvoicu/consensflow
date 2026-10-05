@@ -16,21 +16,24 @@ use cf_base::time::Clock;
 use cf_harness::seams::Time;
 use cf_harness::testing::ManualTime;
 use cf_ledger::{
-    open_ledger, Ledger, NewProject, NewTask, Options, ProjectView, TaskCreated, TaskThread,
+    open_ledger, Ledger, MessageView, NewNote, NewTask, Options, ProjectView, TaskCreated,
+    TaskThread,
 };
 use serde_json::{json, Value};
 
-use super::adapter::{FakeAdapter, FakeAdapters, FakeRecords};
+use super::adapter::FakeAdapter;
+use super::adapters::{FakeAdapters, FakeRecords};
+use super::driver::Driver;
 use super::executor::Executor;
 use super::host::FakeHost;
 use super::recorder::Recorder;
 use super::seams::{
-    CountingLaunchIds, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv, FakeRoles,
-    FakeRoster, FakeTrace,
+    CountingLaunchIds, FakeCredentials, FakeLaunchFiles, FakeLog, FakeOperations, FakePaneEnv,
+    FakeRoles, FakeRoster, FakeTrace,
 };
 use crate::chief_switch::SwitchTo;
 use crate::dispatcher::{Dispatcher, SwitchWhen};
-use crate::seams::{EngineError, Limits, Seams};
+use crate::seams::{Adapters, EngineError, Limits, Seams};
 
 /// 2026-09-19T12:00:00.000Z, where every test's clock starts.
 pub const START_MS: i64 = 1_789_819_200_000;
@@ -58,6 +61,9 @@ impl Clock for TestClock {
 pub struct Made {
     /// The harnesses the fake adapter answers for.
     pub harnesses: Vec<&'static str>,
+    /// Codex has a fake of its own ([`Context::codex`]), so a test sees which
+    /// harness a window opened on (`withCodex`).
+    pub codex: bool,
 }
 
 impl Default for Made {
@@ -65,6 +71,7 @@ impl Default for Made {
         Self {
             // The fake answers for any harness; OpenCode is here for a mixed staff.
             harnesses: vec!["claude-code", "opencode"],
+            codex: false,
         }
     }
 }
@@ -77,11 +84,15 @@ pub struct Context {
     pub time: Rc<ManualTime>,
     pub host: Rc<FakeHost>,
     pub adapter: Rc<FakeAdapter>,
+    /// The fake of Codex's own, which answers for it when the test made it so.
+    pub codex: Rc<FakeAdapter>,
     pub roster: Rc<FakeRoster>,
     pub trace: Rc<FakeTrace>,
     pub log: Rc<FakeLog>,
     pub launch_files: Rc<FakeLaunchFiles>,
     pub dispatcher: Rc<Dispatcher>,
+    /// What every engine of the test is made with.
+    seams: Seams,
     file: PathBuf,
     // Last, so the ledger's file goes after the ledger.
     _dir: tempfile::TempDir,
@@ -126,6 +137,12 @@ impl Context {
         let executor = Rc::new(Executor::default());
         let host = FakeHost::new(recorder.clone());
         let adapter = FakeAdapter::new(recorder.clone());
+        let codex = adapter.another();
+        let mut table = FakeAdapters::new(&adapter, &made.harnesses);
+        if made.codex {
+            table = table.with("codex", &codex);
+        }
+        let adapters = Rc::new(table);
         let roster = Rc::new(FakeRoster {
             recorder: recorder.clone(),
             gone: RefCell::new(HashSet::new()),
@@ -146,11 +163,11 @@ impl Context {
             recorder: recorder.clone(),
             forgotten: RefCell::new(Vec::new()),
         });
-        let dispatcher = Dispatcher::new(Seams {
+        let seams = Seams {
             ledger: Rc::clone(&ledger),
             host: Rc::clone(&host) as Rc<_>,
-            adapters: Rc::new(FakeAdapters::new(Rc::clone(&adapter), &made.harnesses)),
-            records: Rc::new(FakeRecords::new(Rc::clone(&adapter))),
+            adapters: Rc::clone(&adapters) as Rc<dyn Adapters>,
+            records: Rc::new(FakeRecords::new(adapters)),
             time: Rc::clone(&time) as Rc<dyn Time>,
             launch_ids: Rc::new(CountingLaunchIds::default()),
             credentials: Rc::new(FakeCredentials {
@@ -165,6 +182,9 @@ impl Context {
                 recorder: recorder.clone(),
             }),
             trace: Rc::clone(&trace) as Rc<_>,
+            operations: Rc::new(FakeOperations {
+                recorder: recorder.clone(),
+            }),
             log: Rc::clone(&log) as Rc<_>,
             launch_files: Rc::clone(&launch_files) as Rc<_>,
             spawn: Rc::clone(&executor) as Rc<_>,
@@ -173,7 +193,8 @@ impl Context {
                 launch_ms: 120_000,
                 max_attempts: 3,
             },
-        });
+        };
+        let dispatcher = Dispatcher::new(seams.clone());
         host.attach(&dispatcher);
         Self {
             executor,
@@ -182,14 +203,34 @@ impl Context {
             time,
             host,
             adapter,
+            codex,
             roster,
             trace,
             log,
             launch_files,
             dispatcher,
+            seams,
             file,
             _dir: dir,
         }
+    }
+
+    /// Drives the test's engine (`context.dispatcher`).
+    pub fn driver(&self) -> Driver {
+        Driver::new(
+            Rc::clone(&self.executor),
+            self.recorder.clone(),
+            Rc::clone(&self.dispatcher),
+        )
+    }
+
+    /// A second engine on the same ledger, host and fakes: the daemon
+    /// started again (`make`). It hears the host's exits after the first's.
+    /// A test drops it before it closes.
+    pub fn make(&self) -> Driver {
+        let dispatcher = Dispatcher::new(self.seams.clone());
+        self.host.attach(&dispatcher);
+        Driver::new(Rc::clone(&self.executor), self.recorder.clone(), dispatcher)
     }
 
     /// Runs `work` and all it begins to stillness: its answer.
@@ -199,20 +240,29 @@ impl Context {
             .expect("the work waits on nothing the test releases")
     }
 
+    /// Runs everything begun to stillness (the turn of the event loop the
+    /// Node tests' `flush` waits for).
+    pub fn settle(&self) {
+        self.executor.run();
+    }
+
+    /// The pane host sends the exit of `handle`'s last window (`host.exit`),
+    /// and the engine's work runs to stillness.
+    pub fn exit(&self, handle: &str) {
+        let host = Rc::clone(&self.host);
+        let handle = handle.to_owned();
+        self.run(async move { host.exit(&handle).await });
+    }
+
     /// One pass, everything it began run to stillness.
     pub fn pass(&self) -> Result<(), EngineError> {
-        self.recorder.op("pass", json!([]));
-        let dispatcher = Rc::clone(&self.dispatcher);
-        self.run(async move { dispatcher.pass().await })
+        self.driver().pass()
     }
 
     /// A project opened (`dispatcher.openProject`), `request` as the API
     /// gives it, run to stillness.
     pub fn open_project(&self, request: Value) -> Result<ProjectView, EngineError> {
-        self.recorder.op("openProject", json!([request.clone()]));
-        let request = NewProject::from_json(&request)?;
-        let dispatcher = Rc::clone(&self.dispatcher);
-        self.run(async move { dispatcher.open_project(request).await })
+        self.driver().open_project(request)
     }
 
     /// A project with its chief window up, `workers` (standard workers on
@@ -242,18 +292,49 @@ impl Context {
             .expect("a project with its tiers")
     }
 
-    /// The id of `handle` in `project`, as the ledger has it now.
-    pub fn id(&self, project: i64, handle: &str) -> i64 {
+    /// The project as the ledger has it now.
+    pub fn project(&self, project: i64) -> ProjectView {
         self.ledger
             .borrow()
             .project(project)
             .expect("the ledger read")
-            .expect("the project")
+            .unwrap_or_else(|| panic!("no project {project}"))
+    }
+
+    /// The id of `handle` in `project`, as the ledger has it now.
+    pub fn id(&self, project: i64, handle: &str) -> i64 {
+        self.project(project)
             .participants
             .into_iter()
             .find(|participant| participant.handle == handle)
             .map(|participant| participant.id)
             .unwrap_or_else(|| panic!("no @{handle} in project {project}"))
+    }
+
+    /// A note as the ledger is asked for it (`ledger.note`): from a
+    /// participant, or from ConsensFlow itself when `from` is none.
+    pub fn note(&self, project: i64, from: Option<&str>, to: &str, body: &str) -> MessageView {
+        self.ledger
+            .borrow_mut()
+            .note(
+                project,
+                &NewNote {
+                    from: from.map(str::to_owned),
+                    to: to.to_owned(),
+                    task: None,
+                    body: body.to_owned(),
+                },
+            )
+            .expect("a note")
+    }
+
+    /// The message `id` as the ledger has it now.
+    pub fn message(&self, id: i64) -> MessageView {
+        self.ledger
+            .borrow()
+            .message(id)
+            .expect("the ledger read")
+            .unwrap_or_else(|| panic!("no message {id}"))
     }
 
     /// A task from the chief to `to` by name (`ledger.createTask`).
@@ -299,12 +380,7 @@ impl Context {
         when: SwitchWhen,
         note: bool,
     ) -> Result<ProjectView, EngineError> {
-        self.recorder.op(
-            "switchChief",
-            json!([project, { "harness": to.harness, "agent": to.agent }]),
-        );
-        let dispatcher = Rc::clone(&self.dispatcher);
-        self.run(async move { dispatcher.switch_chief(project, to, when, note).await })
+        self.driver().switch_chief(project, to, when, note)
     }
 
     /// The test is over: nothing may have failed unseen, and the engine and
@@ -319,11 +395,12 @@ impl Context {
             dispatcher,
             host,
             adapter,
+            seams,
             file,
             _dir: dir,
             ..
         } = self;
-        drop((executor, dispatcher, host, adapter));
+        drop((executor, dispatcher, host, adapter, seams));
         let ledger = Rc::try_unwrap(ledger)
             .unwrap_or_else(|_| panic!("something of the test still holds the ledger"));
         drop(ledger.into_inner());

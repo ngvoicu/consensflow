@@ -80,22 +80,54 @@ impl Executor {
         }
     }
 
-    /// Runs `work` as work of its own, with everything else, until nothing
-    /// can move: its answer, if it has one by then.
-    pub fn finish<T: 'static>(&self, work: impl Future<Output = T> + 'static) -> Option<T> {
+    /// Begins `work` where the test calls it, as JavaScript ran an async
+    /// call to its first wait: polled here, and what is left of it goes on
+    /// as work of its own, which [`Executor::run`] carries on. Its answer
+    /// comes through the [`Pending`] returned.
+    pub fn begin<T: 'static>(&self, work: impl Future<Output = T> + 'static) -> Pending<T> {
         let answer = Rc::new(RefCell::new(None));
         let slot = Rc::clone(&answer);
-        self.spawn(Box::pin(async move {
+        let mut whole: LocalWork = Box::pin(async move {
             *slot.borrow_mut() = Some(work.await);
-        }));
+        });
+        // Whatever it waits on now is waited on again, with the work's own
+        // waker, at its first poll as work of its own.
+        if whole
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+        {
+            self.spawn(whole);
+        }
+        Pending(answer)
+    }
+
+    /// Begins `work` and runs it, with everything else, until nothing can
+    /// move: its answer, if it has one by then.
+    pub fn finish<T: 'static>(&self, work: impl Future<Output = T> + 'static) -> Option<T> {
+        let pending = self.begin(work);
         self.run();
-        let taken = answer.borrow_mut().take();
-        taken
+        pending.answer()
     }
 
     /// How many pieces of work wait, not ended.
     pub fn waiting(&self) -> usize {
         self.tasks.borrow().iter().flatten().count()
+    }
+}
+
+/// The answer of work begun ([`Executor::begin`]), once it has one.
+pub struct Pending<T>(Rc<RefCell<Option<T>>>);
+
+impl<T> Pending<T> {
+    /// The answer, taken: none while the work waits, or once it was taken.
+    pub fn answer(&self) -> Option<T> {
+        self.0.borrow_mut().take()
+    }
+
+    /// Whether the work ended and its answer is still here.
+    pub fn ended(&self) -> bool {
+        self.0.borrow().is_some()
     }
 }
 

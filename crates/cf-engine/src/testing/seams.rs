@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 
 use super::recorder::Recorder;
 use crate::seams::{
-    Credentials, LaunchFiles, LaunchIds, Log, PaneEnv, Roles, Roster, SavedAgent, Trace,
+    Credentials, LaunchFiles, LaunchIds, Log, Operations, PaneEnv, Roles, Roster, SavedAgent, Trace,
 };
 
 /// The saved model of each fake agent, as the roster gives it at launch.
@@ -177,6 +177,19 @@ impl Trace for FakeTrace {
         self.lines.borrow_mut().retain(
             |line| !matches!(&line.what, Traced::Window { project: of, .. } if *of == Some(project)),
         );
+    }
+}
+
+/// The engine's own calls of its operations (`paneExited` from a launch or a
+/// close, `resumeProject` from a restart), written down where they begin as
+/// the human's and the host's are.
+pub struct FakeOperations {
+    pub(crate) recorder: Recorder,
+}
+
+impl Operations for FakeOperations {
+    fn called(&self, operation: &str, args: Value) {
+        self.recorder.op(operation, args);
     }
 }
 
