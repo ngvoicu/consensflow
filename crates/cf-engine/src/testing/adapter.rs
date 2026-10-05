@@ -9,7 +9,8 @@
 //! what it reads, says what it did in its place ([`FakeAdapter::prepare`],
 //! [`FakeAdapter::after_prepare`], [`FakeAdapter::started`],
 //! [`FakeAdapter::deliver`], [`FakeAdapter::ready`],
-//! [`FakeAdapter::hold_observes`], [`FakeAdapter::interrupt`]).
+//! [`FakeAdapter::hold_observes`], [`FakeAdapter::hold_prepares`],
+//! [`FakeAdapter::hold_deliveries`], [`FakeAdapter::interrupt`]).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -102,6 +103,13 @@ pub struct FakeAdapter {
     /// Every `observe` of the window of this launch waits for the gate, and
     /// is made once it opens.
     pub hold_observes: RefCell<Option<(String, Gate)>>,
+    /// Every `prepare` for the participant of this handle waits for the gate,
+    /// and is made once it opens: its launch is asked at once, and no window
+    /// is made before.
+    pub hold_prepares: RefCell<Option<(String, Gate)>>,
+    /// Every `deliver` into the window of this launch waits for the gate,
+    /// and is made once it opens.
+    pub hold_deliveries: RefCell<Option<(String, Gate)>>,
     /// The keys that interrupt a turn in its windows (`adapter.interrupt`):
     /// Escape once, as an adapter that says no more.
     pub interrupt: Cell<Interrupt>,
@@ -130,6 +138,8 @@ impl FakeAdapter {
             after_prepare: RefCell::new(None),
             deliver: RefCell::new(None),
             hold_observes: RefCell::new(None),
+            hold_prepares: RefCell::new(None),
+            hold_deliveries: RefCell::new(None),
             interrupt: Cell::new(Interrupt {
                 presses: 1,
                 close_after: None,
@@ -280,35 +290,23 @@ impl Asked {
             fake,
         }
     }
-}
 
-impl Adapter for Asked {
-    fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
+    /// What `prepare` does once it is made: the launch `asked`, written down
+    /// at `at`, is prepared, or failed by a test's own `prepare`.
+    /// `overridden` is whether a test put an async function of its own in
+    /// the fake's place.
+    fn prepared<'a>(
+        &'a self,
+        launch: &'a Launch<'a>,
+        seam: String,
+        asked: Value,
+        at: usize,
+        overridden: bool,
+    ) -> Work<'a, Result<Prepared, String>> {
         let fake = &self.fake;
-        let seam = format!("adapter:{}", self.harness);
-        let asked = json!({
-            "launchId": launch.id.as_str(),
-            "participant": { "handle": launch.handle },
-            "role": launch.role,
-            "project": { "id": launch.project },
-            "directory": launch.directory,
-            "resume": launch.resume,
-            "message": launch.message,
-            "agent": launch.agent.map(|agent| json!({
-                "model": agent.model,
-                "effort": agent.effort,
-                "thinking": agent.thinking,
-                "designer": agent.designer,
-            })),
-            "instructions": launch.instructions,
-        });
-        let at = fake
-            .recorder
-            .call(&seam, Some("prepare"), json!([asked.clone()]));
         // A test's own `prepare` fails before the real one runs: nothing is
         // prepared and no window made, as where it threw in JavaScript.
         let own = fake.prepare.borrow().clone();
-        let overridden = own.is_some();
         if let Some(Err(reason)) = own.map(|own| own(&asked)) {
             return Box::pin(async move {
                 next_turn().await;
@@ -381,6 +379,46 @@ impl Adapter for Asked {
                 window,
             })
         })
+    }
+}
+
+impl Adapter for Asked {
+    fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
+        let fake = &self.fake;
+        let seam = format!("adapter:{}", self.harness);
+        let asked = json!({
+            "launchId": launch.id.as_str(),
+            "participant": { "handle": launch.handle },
+            "role": launch.role,
+            "project": { "id": launch.project },
+            "directory": launch.directory,
+            "resume": launch.resume,
+            "message": launch.message,
+            "agent": launch.agent.map(|agent| json!({
+                "model": agent.model,
+                "effort": agent.effort,
+                "thinking": agent.thinking,
+                "designer": agent.designer,
+            })),
+            "instructions": launch.instructions,
+        });
+        let at = fake
+            .recorder
+            .call(&seam, Some("prepare"), json!([asked.clone()]));
+        let hold = fake.hold_prepares.borrow().clone();
+        let overridden = hold.is_some() || fake.prepare.borrow().is_some();
+        let gate = hold
+            .filter(|(handle, _)| handle.as_str() == launch.handle)
+            .map(|(_, gate)| gate);
+        match gate {
+            // The launch is asked at once, and nothing is prepared until the
+            // test lets it go.
+            Some(gate) => Box::pin(async move {
+                gate.wait().await;
+                self.prepared(launch, seam, asked, at, overridden).await
+            }),
+            None => self.prepared(launch, seam, asked, at, overridden),
+        }
     }
 
     fn interrupt(&self) -> Interrupt {

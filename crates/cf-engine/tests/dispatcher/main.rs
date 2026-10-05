@@ -7,6 +7,7 @@
 
 mod agent_gone;
 mod assigning;
+mod cancelled_task;
 mod chief_not_up;
 mod chiefs;
 mod closing;
@@ -18,6 +19,7 @@ mod lanes;
 mod looks;
 mod no_adapter;
 mod out_of_quota;
+mod participant_leaves;
 mod quota;
 mod restart;
 mod review;
@@ -32,4 +34,6 @@ mod tasks;
 mod the_dispatcher;
 mod traces;
 mod unreadable_agents;
+mod window_closes;
+mod window_takes_long;
 mod windows;
