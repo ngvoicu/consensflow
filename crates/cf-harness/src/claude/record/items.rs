@@ -114,7 +114,8 @@ impl Items {
     }
 
     /// The items in the record's order: an item's `seq` is its line's place,
-    /// and those of one line are ordered by id, as `localeCompare` orders.
+    /// and those of one line are ordered by id, as `localeCompare` orders
+    /// under ICU's root collation, whatever the machine's locale.
     pub(super) fn sorted(&self) -> Result<Vec<Item>, String> {
         let entries: Vec<&Entry> = self.list.iter().collect();
         let sorted = sort(entries, |left, right| {

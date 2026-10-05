@@ -254,6 +254,14 @@ function collationTable() {
     'prt_0',
     'prt_Z',
     'prt_z',
+    // Pairs a locale's collation tailors where root's does not: Danish and
+    // Norwegian `aa` after `z`, Lithuanian `y` before `j`, Hungarian `cs`.
+    'aa',
+    'z',
+    'y',
+    'j',
+    'cs',
+    'cz',
     '',
     ' ',
     'a b',
@@ -269,6 +277,29 @@ function collationTable() {
     pairs: words.map((left) =>
       words.map((right) => ['<', '=', '>'][sign(left, right) + 1]).join(''),
     ),
+  }
+}
+
+/**
+ * Throws unless this process's `localeCompare` orders ASCII as ICU's root
+ * does, as `localeCompare(…, 'en')` does: the goldens, and the Rust readers,
+ * hold root's order. A locale may tailor letters alone or pairs of them
+ * (Norwegian, Czech and Hungarian tailor pairs only), so every one- and
+ * two-character string of ASCII letters and digits is sorted both ways.
+ */
+export function refuseTailoredCollation() {
+  const alphabet = [...'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz']
+  const strings = [
+    ...alphabet,
+    ...alphabet.flatMap((left) => alphabet.map((right) => left + right)),
+  ]
+  const bare = [...strings].sort((left, right) => left.localeCompare(right))
+  const root = [...strings].sort((left, right) => left.localeCompare(right, 'en'))
+  if (bare.some((text, at) => text !== root[at])) {
+    const locale = new Intl.Collator().resolvedOptions().locale
+    throw new Error(
+      `this process collates as ${locale}, which orders ASCII as root does not: unset LC_ALL, LC_MESSAGES and LANG first`,
+    )
   }
 }
 

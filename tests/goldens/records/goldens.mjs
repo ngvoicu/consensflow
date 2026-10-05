@@ -27,7 +27,7 @@ import { opencodeCases, opencodeSequences } from './opencode.mjs'
 import { play } from './runner.mjs'
 import { suiteScenarios } from './suite.mjs'
 import { sweepScenarios } from './sweep.mjs'
-import { DEFAULT_ZONE, tables } from './tables.mjs'
+import { DEFAULT_ZONE, refuseTailoredCollation, tables } from './tables.mjs'
 import { versionScenarios } from './versions.mjs'
 
 export { DEFAULT_ZONE }
@@ -45,6 +45,7 @@ async function played(scenarios) {
  */
 export async function recordsGoldens() {
   if (process.env.TZ !== DEFAULT_ZONE) throw new Error(`set TZ=${DEFAULT_ZONE} first`)
+  refuseTailoredCollation()
   const files = {
     'tests/goldens/records/sequences.json': await played([
       ...jsonlSequences(),

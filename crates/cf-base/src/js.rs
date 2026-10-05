@@ -217,6 +217,13 @@ fn collation_weights(character: char) -> Option<(u32, u32)> {
 /// digits before letters), then its third (a lowercase letter before its
 /// capital). Beyond ASCII it orders by code point, where ICU would weigh
 /// each script: no id ConsensFlow sorts holds such a character.
+///
+/// Node collated by the process's locale (`LC_ALL`, else `LC_MESSAGES`,
+/// else `LANG`), and some tailor ASCII: Danish and Norwegian put `aa` after
+/// `z`, Lithuanian `y` before `j`, and Danish a capital before its small
+/// letter. This is root's order on every machine: a difference kept on
+/// purpose, with Calliope, since what it sorts are ids, words of no
+/// language.
 pub fn locale_compare(left: &str, right: &str) -> Ordering {
     let weights = |text: &str| {
         text.chars()
