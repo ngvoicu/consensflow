@@ -1,6 +1,6 @@
 {
   "name": "consensflow",
-  "version": "3.0.0-alpha.76",
+  "version": "3.0.0-alpha.77",
   "description": "Native terminal workspace where a Chief of Staff runs your project with a staff of coding agents.",
   "license": "MIT",
   "type": "module",
