@@ -32,7 +32,6 @@ use cf_base::js;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
 use serde_json::Value;
-use uuid::Uuid;
 
 use super::install;
 use super::status::{self, State, Status};
@@ -42,6 +41,7 @@ use crate::contract::{
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
+use crate::seams::{self, Entropy, Services};
 use crate::shared::admission::admission;
 use crate::shared::{pane, window_args};
 
@@ -57,6 +57,7 @@ const MEMBER_ISOLATION: [&str; 2] = ["--strict-mcp-config", "--no-chrome"];
 pub struct ClaudeAdapter {
     env: Env,
     records: Rc<dyn Records>,
+    entropy: Rc<dyn Entropy>,
     /// Where Claude keeps its own status of each of its processes, made
     /// whole once, as Node resolved it when it made the adapter; or why
     /// there is none.
@@ -64,14 +65,13 @@ pub struct ClaudeAdapter {
 }
 
 impl ClaudeAdapter {
-    /// The adapter of windows that run with `env`, their conversations read
-    /// through `records`.
-    pub fn new(env: Env, records: Rc<dyn Records>) -> Self {
-        let statuses = status::folder(&env);
+    /// The adapter of the windows the engine's `services` serve.
+    pub fn new(services: &Services) -> Self {
         Self {
-            env,
-            records,
-            statuses,
+            env: services.env.clone(),
+            records: Rc::clone(&services.records),
+            entropy: Rc::clone(&services.entropy),
+            statuses: status::folder(&services.env),
         }
     }
 }
@@ -82,18 +82,19 @@ impl Adapter for ClaudeAdapter {
             let executable = executable(Harness::Claude, &self.env)?;
             let settings = install::settings(&self.env, launch.id, launch.role != "chief")?;
             let role = install::role(&self.env, launch)?;
-            // Kept from Node on purpose: an environment that names no home
-            // fails here, where Node read the process's own and opened a
-            // window it would never see the status of.
-            let statuses = self.statuses.clone()?;
             // Claude keeps a conversation only once something was said in
             // it: a window that closed before that (opened by hand, then
             // lost to a restart) has nothing to resume, and `--resume` would
             // exit at once. It starts afresh under the same id, so the
             // conversation stays bound.
-            let session = launch
-                .resume
-                .map_or_else(|| Uuid::new_v4().to_string(), str::to_owned);
+            let session = match launch.resume {
+                Some(resume) => resume.to_owned(),
+                None => seams::uuid(&*self.entropy)?,
+            };
+            // Kept from Node on purpose: an environment that names no home
+            // fails here, where Node read the process's own and opened a
+            // window it would never see the status of.
+            let statuses = self.statuses.clone()?;
             let resumable = match launch.resume {
                 Some(resume) => self.records.has_transcript(Harness::Claude, resume).await?,
                 None => false,
@@ -263,7 +264,7 @@ impl Window for ClaudeWindow {
                 Reading::Unknown(_) => (true, false, false, None),
             };
             let observed = |settled, waiting, switched| Observed {
-                reading: Arc::clone(&reading),
+                reading: Some(Arc::clone(&reading)),
                 settled,
                 waiting,
                 failed,

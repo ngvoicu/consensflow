@@ -10,15 +10,24 @@ publish = false
 cf-base.workspace = true
 cf-process.workspace = true
 cf-proto.workspace = true
+getrandom.workspace = true
 jiff.workspace = true
 regex.workspace = true
 rusqlite.workspace = true
 # `rc`: a reading's quota is shared, as Node shared the object.
 serde = { workspace = true, features = ["rc"] }
 serde_json.workspace = true
+# The engine's timer, which a window's waits sleep on.
+tokio = { workspace = true, features = ["time"] }
 uuid.workspace = true
 
+[features]
+# The fakes of `testing`, for tests of other crates and of this one's
+# `tests/`, which turn it on through the dev-dependency below.
+test-support = []
+
 [dev-dependencies]
+cf-harness = { path = ".", features = ["test-support"] }
 flate2.workspace = true
 # `parity:records` digests each text as Node's half does.
 sha2.workspace = true

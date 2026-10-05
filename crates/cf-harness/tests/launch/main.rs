@@ -10,6 +10,5 @@
 
 mod claude;
 mod coverage;
-mod fakes;
 mod scenarios;
 mod tables;

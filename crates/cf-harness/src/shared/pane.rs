@@ -14,8 +14,8 @@ fn named(pane: &Pane) -> Value {
 
 /// Pastes `body` into the pane (`writePaste`). The host says whether a paste
 /// it did not finish wrote nothing (`admitted: false`) or may have written
-/// some; an answer that never came (the bridge ended, its deadline passed)
-/// may have been written: uncertain, never a refusal.
+/// some; an answer that never came (the bridge ended) or did not say (its
+/// deadline passed) may have been written: uncertain, never a refusal.
 pub(crate) async fn write_paste(host: &dyn PaneHost, pane: &Pane, body: &str) -> Sent {
     let mut request = named(pane);
     request["body"] = json!(body);

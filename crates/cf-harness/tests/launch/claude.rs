@@ -10,6 +10,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::fs;
+use std::path::Path;
 use std::rc::Rc;
 
 use cf_base::env::Env;
@@ -20,10 +21,9 @@ use cf_harness::contract::{
     Waiting, Window,
 };
 use cf_harness::records::Role;
+use cf_harness::testing::{fake_executable, finished, AnsweringHost, Fakes, OtherProcess};
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
-
-use crate::fakes::{done, fake_executable, Answering, Local, Other};
 
 /// The launch's id: a uuid, as the engine mints one (Node's tests took any
 /// filename-safe word).
@@ -35,8 +35,15 @@ const DEAD: u32 = 999_999;
 /// A throwaway home, Claude config folder and a stand-in `claude` on PATH.
 struct Home {
     _dir: TempDir,
+    root: String,
     vars: Vec<(String, String)>,
     executable: String,
+}
+
+/// An adapter of windows that run with `env`, served by fakes, its bundle
+/// under `root`.
+fn adapter(env: &Env, root: &Path) -> ClaudeAdapter {
+    ClaudeAdapter::new(&Fakes::new(env).services(env, root))
 }
 
 impl Home {
@@ -59,6 +66,7 @@ impl Home {
         let executable = fake_executable(&dir.path().join("bin").join("claude"));
         Self {
             _dir: dir,
+            root,
             vars,
             executable: executable.to_string_lossy().into_owned(),
         }
@@ -75,8 +83,7 @@ impl Home {
 
     /// An adapter of windows that run with this home's environment.
     fn adapter(&self) -> ClaudeAdapter {
-        let env = self.env();
-        ClaudeAdapter::new(env.clone(), Rc::new(Local::new(env)))
+        adapter(&self.env(), Path::new(&self.root))
     }
 
     /// The transcript of `session`, in Claude's project folder for /work/app.
@@ -174,7 +181,7 @@ fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, Strin
         agent: request.agent,
         instructions: request.instructions,
     };
-    done(adapter.prepare(&launch))
+    finished(adapter.prepare(&launch))
 }
 
 /// The window of a prepared launch.
@@ -406,8 +413,7 @@ fn refuses_to_launch_when_claude_is_not_installed() {
     let mut vars = home.vars.clone();
     vars.retain(|(name, _)| name != "PATH");
     vars.push(("PATH".to_owned(), "/nowhere".to_owned()));
-    let env = Env::from_vars(vars);
-    let adapter = ClaudeAdapter::new(env.clone(), Rc::new(Local::new(env)));
+    let adapter = adapter(&Env::from_vars(vars), Path::new(&home.root));
     let Err(refused) = prepare(&adapter, &Request::default()) else {
         panic!("a launch with no claude");
     };
@@ -430,10 +436,10 @@ fn reads_the_conversation_from_the_transcript_and_waits_for_claude_itself_to_say
     let window = window(&home.adapter(), &Request::resumed(session));
     // A transcript that settled before this window opened is not the window
     // at its prompt: Claude's own status says when it is.
-    let observed = done(window.observe()).unwrap();
+    let observed = finished(window.observe()).unwrap();
     assert!(!observed.settled, "no word from Claude yet");
     home.status(session, &json!({ "status": "idle" }), me());
-    let observed = done(window.observe()).unwrap();
+    let observed = finished(window.observe()).unwrap();
     assert!(observed.settled);
     assert_eq!(observed.waiting, None);
     let items: Vec<(Role, &str, bool)> = observed
@@ -451,7 +457,7 @@ fn reads_the_conversation_from_the_transcript_and_waits_for_claude_itself_to_say
 
     let waiting = json!({ "status": "waiting", "waitingFor": "permission to run a command" });
     home.status(session, &waiting, me());
-    let observed = done(window.observe()).unwrap();
+    let observed = finished(window.observe()).unwrap();
     assert!(!observed.settled);
     assert_eq!(
         observed.waiting,
@@ -461,7 +467,7 @@ fn reads_the_conversation_from_the_transcript_and_waits_for_claude_itself_to_say
     );
 
     home.status(session, &json!({ "status": "busy" }), me());
-    assert!(!done(window.observe()).unwrap().settled);
+    assert!(!finished(window.observe()).unwrap().settled);
 }
 
 #[test]
@@ -469,19 +475,19 @@ fn counts_a_new_window_with_no_transcript_yet_as_idle_once_claude_says_so() {
     let home = Home::new();
     let session = "e2c56db5-dffb-48d2-b060-d0f5a71096e0";
     let window = window(&home.adapter(), &Request::resumed(session));
-    let before = done(window.observe()).unwrap();
+    let before = finished(window.observe()).unwrap();
     assert!(
         !before.settled && before.items().is_empty(),
         "still starting"
     );
     home.status(session, &json!({ "status": "idle" }), me());
-    let after = done(window.observe()).unwrap();
+    let after = finished(window.observe()).unwrap();
     assert!(after.settled && after.items().is_empty());
 }
 
 /// A host whose window can always be read, with no paste on its way.
-fn readable() -> Answering<impl Fn(&str) -> Result<Value, HostError>> {
-    Answering::new(|op| {
+fn readable() -> AnsweringHost<impl Fn(&str) -> Result<Value, HostError>> {
+    AnsweringHost::new(|op| {
         Ok(if op == "pane.snapshot" {
             json!({ "ok": true, "pasteInFlight": false })
         } else {
@@ -510,18 +516,18 @@ fn follows_the_window_to_the_conversation_a_clear_or_resume_left_it_on() {
     );
     let window = window(&home.adapter(), &Request::resumed(first));
     home.status(first, &json!({ "status": "idle" }), me());
-    assert!(done(window.observe()).unwrap().settled);
-    assert_eq!(done(window.ready(&host, &pane)), Ok(Readiness::Ready));
+    assert!(finished(window.observe()).unwrap().settled);
+    assert_eq!(finished(window.ready(&host, &pane)), Ok(Readiness::Ready));
 
     // /clear: the window's own Claude process now names another conversation.
     home.status(cleared, &json!({ "status": "idle" }), me());
-    let observed = done(window.observe()).unwrap();
+    let observed = finished(window.observe()).unwrap();
     assert_eq!(observed.switched.as_deref(), Some(cleared));
     assert!(!observed.settled);
     let texts: Vec<&str> = observed.items().iter().map(|item| &*item.text).collect();
     assert_eq!(texts, ["hello", "Hi"], "the old conversation's last look");
     assert_eq!(
-        done(window.ready(&host, &pane)),
+        finished(window.ready(&host, &pane)),
         Ok(Readiness::Held(Held::ShowsAnother))
     );
 
@@ -535,12 +541,12 @@ fn follows_the_window_to_the_conversation_a_clear_or_resume_left_it_on() {
             stop_line(cleared, 3),
         ],
     );
-    let followed = done(window.observe()).unwrap();
+    let followed = finished(window.observe()).unwrap();
     assert_eq!(followed.switched, None);
     assert!(followed.settled);
     let texts: Vec<&str> = followed.items().iter().map(|item| &*item.text).collect();
     assert_eq!(texts, ["fresh start", "Ready"]);
-    assert_eq!(done(window.ready(&host, &pane)), Ok(Readiness::Ready));
+    assert_eq!(finished(window.ready(&host, &pane)), Ok(Readiness::Ready));
 }
 
 #[test]
@@ -552,16 +558,16 @@ fn follows_a_clear_before_the_first_look_by_the_status_file_named_after_the_wind
     // The pane host named the window's process, whose Claude was cleared
     // before ConsensFlow first looked; another Claude still shows the
     // launch's conversation (the human resumed it elsewhere).
-    let other = Other::start();
+    let other = OtherProcess::start();
     home.status(cleared, &json!({ "status": "idle" }), me());
     home.status(first, &json!({ "status": "idle" }), other.pid());
     let named = window(&adapter, &Request::resumed(first));
     named.opened(Some(me()));
-    let observed = done(named.observe()).unwrap();
+    let observed = finished(named.observe()).unwrap();
     assert_eq!(observed.switched.as_deref(), Some(cleared));
     // Unnamed, the window's process is the first whose file names the
     // launch's conversation, as it always was: here, the wrong one.
-    let guessed = done(window(&adapter, &Request::resumed(first)).observe()).unwrap();
+    let guessed = finished(window(&adapter, &Request::resumed(first)).observe()).unwrap();
     assert_eq!((guessed.switched, guessed.settled), (None, true));
 }
 
@@ -576,10 +582,10 @@ fn takes_the_first_status_file_naming_the_launchs_conversation_when_none_is_name
     let window = window(&home.adapter(), &Request::resumed(first));
     window.opened(Some(DEAD));
     home.status(first, &json!({ "status": "idle" }), me());
-    assert!(done(window.observe()).unwrap().settled);
+    assert!(finished(window.observe()).unwrap().settled);
     // That process is the window's from then on: a /clear in it is followed.
     home.status(cleared, &json!({ "status": "idle" }), me());
-    let observed = done(window.observe()).unwrap();
+    let observed = finished(window.observe()).unwrap();
     assert_eq!(observed.switched.as_deref(), Some(cleared));
 }
 
@@ -598,12 +604,12 @@ fn gives_the_window_text_it_can_take_and_leaves_a_paste_the_bridge_lost_uncertai
     let plan = prepare(&adapter, &request).unwrap();
     assert_eq!(plan.argv.last().map(String::as_str), Some(taken));
     let answer: RefCell<Result<Value, HostError>> = RefCell::new(Ok(json!({ "ok": true })));
-    let host = Answering::new(|_| answer.borrow().clone());
+    let host = AnsweringHost::new(|_| answer.borrow().clone());
     let pane = Pane {
         id: "s1-zeus".to_owned(),
         generation: 7,
     };
-    let deliver = || done(plan.window.deliver(&host, &pane, text)).unwrap();
+    let deliver = || finished(plan.window.deliver(&host, &pane, text)).unwrap();
     assert_eq!(deliver(), Admission::Admitted { queued: false });
     let pasted = host.asked.borrow().last().unwrap().1["body"].clone();
     assert_eq!(pasted, taken);
@@ -640,7 +646,7 @@ fn pastes_a_message_into_the_window_waiting_for_a_paste_on_its_way_and_for_what_
     let home = Home::new();
     let paste_in_flight = Cell::new(false);
     let unsent = Cell::new(false);
-    let host = Answering::new(|op| {
+    let host = AnsweringHost::new(|op| {
         Ok(match op {
             "pane.snapshot" => json!({
                 "ok": true, "pasteInFlight": paste_in_flight.get(), "unsent": unsent.get(),
@@ -657,9 +663,9 @@ fn pastes_a_message_into_the_window_waiting_for_a_paste_on_its_way_and_for_what_
         &home.adapter(),
         &Request::resumed("e2c56db5-dffb-48d2-b060-d0f5a71096e0"),
     );
-    assert_eq!(done(window.ready(&host, &pane)), Ok(Readiness::Ready));
+    assert_eq!(finished(window.ready(&host, &pane)), Ok(Readiness::Ready));
     assert_eq!(
-        done(window.deliver(&host, &pane, "hello")),
+        finished(window.deliver(&host, &pane, "hello")),
         Ok(Admission::Admitted { queued: false })
     );
     assert_eq!(
@@ -671,7 +677,7 @@ fn pastes_a_message_into_the_window_waiting_for_a_paste_on_its_way_and_for_what_
     );
     paste_in_flight.set(true);
     assert_eq!(
-        done(window.ready(&host, &pane)),
+        finished(window.ready(&host, &pane)),
         Ok(Readiness::Held(Held::Because(
             "a paste is on its way to the window".to_owned()
         )))
@@ -681,7 +687,7 @@ fn pastes_a_message_into_the_window_waiting_for_a_paste_on_its_way_and_for_what_
     paste_in_flight.set(false);
     unsent.set(true);
     assert_eq!(
-        done(window.ready(&host, &pane)),
+        finished(window.ready(&host, &pane)),
         Ok(Readiness::Held(Held::Unsent))
     );
 }
@@ -706,7 +712,7 @@ fn reports_a_refused_request_as_exhausted_quota_with_the_reset_its_text_names() 
         &[user_line(session, 1, TASK), record(session, 2, &refused)],
     );
     let window = window(&home.adapter(), &Request::resumed(session));
-    let observed = done(window.observe()).unwrap();
+    let observed = finished(window.observe()).unwrap();
     assert_eq!(
         serde_json::to_value(&observed.quota).unwrap(),
         json!({
@@ -723,5 +729,5 @@ fn reports_a_refused_request_as_exhausted_quota_with_the_reset_its_text_names() 
             stop_line(session, 3),
         ],
     );
-    assert_eq!(done(window.observe()).unwrap().quota, None);
+    assert_eq!(finished(window.observe()).unwrap().quota, None);
 }

@@ -425,9 +425,11 @@ name = "cf-harness"
 version = "3.0.0-alpha.73"
 dependencies = [
  "cf-base",
+ "cf-harness",
  "cf-process",
  "cf-proto",
  "flate2",
+ "getrandom 0.4.3",
  "jiff",
  "regex",
  "rusqlite",
@@ -435,6 +437,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "tokio",
  "uuid",
 ]
 

@@ -73,8 +73,10 @@ pub struct Launch<'a> {
     pub instructions: &'a str,
 }
 
-/// The model a window runs on and the levels its harness reads; an empty
-/// one is none, as JavaScript's `if (model)` read them.
+/// The model a window runs on and the levels its harness reads, as the
+/// launch gives them: `Some("")` is an empty one, which a window's
+/// arguments take for none (`if (model)`), and OpenCode's first message is
+/// refused for (`variant: ''`).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Agent<'a> {
     pub model: Option<&'a str>,
@@ -162,8 +164,10 @@ pub trait PaneHost {
     fn request<'a>(&'a self, op: &'a str, body: Value) -> Work<'a, Result<Value, HostError>>;
 }
 
-/// A request the pane host never answered: the bridge ended, or its deadline
-/// passed, `error` its word for which, when it said.
+/// A request the pane host never answered: the bridge ended first, `error`
+/// its word for it (`eof`). A passed deadline and a frame too large are
+/// answers (`{ok: false, error: 'deadline'}`, `src/bridge.js`), which the
+/// adapter reads as it reads any other.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostError {
     pub error: Option<String>,
@@ -222,7 +226,8 @@ pub enum Admission {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Observed {
     /// The harness's record of the conversation.
-    pub reading: Arc<Reading>,
+    /// None where the window has not named a conversation to read yet.
+    pub reading: Option<Arc<Reading>>,
     pub settled: bool,
     pub waiting: Option<Waiting>,
     pub failed: bool,
@@ -238,9 +243,9 @@ pub struct Observed {
 impl Observed {
     /// The conversation's items: none where its record could not be read.
     pub fn items(&self) -> &[Item] {
-        match &*self.reading {
-            Reading::Known(record) => &record.items,
-            Reading::Unknown(_) => &[],
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => &record.items,
+            Some(Reading::Unknown(_)) | None => &[],
         }
     }
 }

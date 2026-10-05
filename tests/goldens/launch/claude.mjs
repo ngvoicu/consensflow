@@ -11,6 +11,18 @@ export const LAUNCH = '0a1b2c3d-4e5f-4061-8a7b-9c0d1e2f3a4b'
 const SESSION = '0f8fad5b-d9cb-469f-a165-70867728950e'
 const OTHER = '6a2f41ac-8c1d-4c55-9b4e-2f1e8a3d9c70'
 
+/**
+ * The session id a fresh Claude window draws: the first 16 bytes of the
+ * scripted stream (`runner.mjs`), as a version 4 uuid.
+ */
+const DRAWN = (() => {
+  const bytes = Buffer.from(Array.from({ length: 16 }, (_, index) => (index * 7 + 3) % 256))
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = bytes.toString('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+})()
+
 const ENV = {
   HOME: '$ROOT/home',
   CONSENSFLOW_HOME: '$ROOT/consensflow',
@@ -88,7 +100,7 @@ const opened = (name, steps, fields = {}) => ({
   env: ENV,
   steps: [
     { executable: 'claude' },
-    { prepare: launch(fields), draws: { $SESSION: 'nativeSession' } },
+    { prepare: launch(fields) },
     { opened: { pid: '$PID' } },
     ...steps,
   ],
@@ -107,17 +119,11 @@ const notSettled = (why) => ({
 })
 
 export function claudeScenarios() {
-  const prepared = (
-    name,
-    fields,
-    before = [],
-    draws = { $SESSION: 'nativeSession' },
-    { env = ENV, after = [], kept } = {},
-  ) => ({
+  const prepared = (name, fields, before = [], { env = ENV, after = [], kept } = {}) => ({
     name: `claude: ${name}`,
     harness: 'claude-code',
     env,
-    steps: [...before, { prepare: launch(fields), draws, ...(kept ? { kept } : {}) }, ...after],
+    steps: [...before, { prepare: launch(fields), ...(kept ? { kept } : {}) }, ...after],
   })
   const resumedLive = [
     { opened: { pid: '$PID' } },
@@ -156,20 +162,17 @@ export function claudeScenarios() {
       'a conversation Claude kept is resumed on its session, and its window looks there',
       { resume: SESSION, message: null },
       [installed, transcript(SESSION, [user(SESSION, 1, 'Write the parser')])],
-      {},
       { after: resumedLive },
     ),
     prepared(
       'a resumed conversation is given its follow-up',
       { resume: SESSION, message: 'And the tests' },
       [installed, transcript(SESSION, [user(SESSION, 1, 'Write the parser')])],
-      {},
     ),
     prepared(
       'a conversation Claude never kept starts afresh under the same id, its window there',
       { resume: SESSION, message: 'Review T-1' },
       [installed],
-      {},
       { after: resumedLive },
     ),
     prepared('a window with no first message', { message: null }, [installed]),
@@ -191,19 +194,17 @@ export function claudeScenarios() {
       'a resumed conversation with no home to look in is refused, after its files were written',
       { resume: SESSION, message: null },
       [installed],
-      {},
       { env: HOMELESS },
     ),
     prepared(
       'a fresh window with no home is refused, after its files were written',
       {},
       [installed],
-      { $SESSION: 'nativeSession' },
       {
         env: HOMELESS,
         kept: {
           why: 'no home is "missing home in env": Node read the process\'s own, and opened a window whose status it read from another home',
-          answer: { refused: 'missing home in env' },
+          answer: { throws: 'missing home in env' },
         },
       },
     ),
@@ -211,17 +212,16 @@ export function claudeScenarios() {
       'a conversation of an empty id is refused',
       { resume: '', message: null },
       [installed],
-      {},
       {
         kept: {
           why: "a sentence of Rust's own where V8 threw its TypeError: no ledger holds an empty id",
-          answer: { refused: 'a Claude window opens on a session id' },
+          answer: { throws: 'a Claude window opens on a session id' },
         },
       },
     ),
   ]
   const live = (fields) => ({
-    status: { pid: '$PID', sessionId: '$SESSION', kind: 'interactive', ...fields },
+    status: { pid: '$PID', sessionId: DRAWN, kind: 'interactive', ...fields },
   })
   const looks = [
     opened('a new window with neither a transcript nor a status is not settled', [{ observe: {} }]),
@@ -230,19 +230,19 @@ export function claudeScenarios() {
       { observe: {} },
     ]),
     opened('a settled transcript and an idle Claude settle the window', [
-      transcript('$SESSION', [
-        user('$SESSION', 1, 'Write the parser'),
-        answer('$SESSION', 2, 'Done.'),
-        stopped('$SESSION', 3),
+      transcript(DRAWN, [
+        user(DRAWN, 1, 'Write the parser'),
+        answer(DRAWN, 2, 'Done.'),
+        stopped(DRAWN, 3),
       ]),
       live({ status: 'idle' }),
       { observe: {} },
     ]),
     opened('a busy Claude is not settled, its transcript settled or not', [
-      transcript('$SESSION', [
-        user('$SESSION', 1, 'Write the parser'),
-        answer('$SESSION', 2, 'Done.'),
-        stopped('$SESSION', 3),
+      transcript(DRAWN, [
+        user(DRAWN, 1, 'Write the parser'),
+        answer(DRAWN, 2, 'Done.'),
+        stopped(DRAWN, 3),
       ]),
       live({ status: 'busy' }),
       { observe: {} },
@@ -267,32 +267,32 @@ export function claudeScenarios() {
     ]),
     opened("a window's Claude found by the first status file naming its conversation", [
       { opened: { pid: '$DEAD' } },
-      { status: { pid: '$PID', sessionId: '$SESSION', status: 'idle' } },
+      { status: { pid: '$PID', sessionId: DRAWN, status: 'idle' } },
       { observe: {} },
       { status: { pid: '$PID', sessionId: OTHER, status: 'idle' } },
       { observe: {} },
     ]),
     opened("a dead process's status file and an unreadable one say nothing", [
-      { status: { pid: '$DEAD', sessionId: '$SESSION', status: 'idle' } },
+      { status: { pid: '$DEAD', sessionId: DRAWN, status: 'idle' } },
       { write: '$ROOT/claude/sessions/12.json', text: '{not json' },
       { write: '$ROOT/claude/sessions/notes.json', text: '{}' },
       { observe: {} },
     ]),
     opened("the pane's own child is taken before another Claude naming the conversation", [
-      { status: { pid: '$OTHER', sessionId: '$SESSION', status: 'busy' } },
+      { status: { pid: '$OTHER', sessionId: DRAWN, status: 'busy' } },
       live({ status: 'idle' }),
       { observe: {} },
     ]),
     opened("a Claude keeps its place among the files, with its last file's status", [
       { opened: { pid: '$DEAD' } },
       { status: { pid: '$PID', sessionId: OTHER, status: 'idle' }, file: '1.json' },
-      { status: { pid: '$OTHER', sessionId: '$SESSION', status: 'busy' }, file: '2.json' },
-      { status: { pid: '$PID', sessionId: '$SESSION', status: 'idle' }, file: '3.json' },
+      { status: { pid: '$OTHER', sessionId: DRAWN, status: 'busy' }, file: '2.json' },
+      { status: { pid: '$PID', sessionId: DRAWN, status: 'idle' }, file: '3.json' },
       { observe: {} },
     ]),
     opened('the Claude a window found is kept when its file goes, never traded for another', [
       { opened: { pid: '$DEAD' } },
-      { status: { pid: '$OTHER', sessionId: '$SESSION', status: 'idle' }, file: '2.json' },
+      { status: { pid: '$OTHER', sessionId: DRAWN, status: 'idle' }, file: '2.json' },
       { observe: {} },
       { remove: '$ROOT/claude/sessions/2.json' },
       live({ status: 'idle' }),
@@ -305,19 +305,19 @@ export function claudeScenarios() {
       { observe: {} },
     ]),
     opened('an idle Claude whose transcript cannot be read is settled and empty', [
-      { write: '$ROOT/claude/projects/-work-app/$SESSION.jsonl', text: '{not json}\n' },
+      { write: `$ROOT/claude/projects/-work-app/${DRAWN}.jsonl`, text: '{not json}\n' },
       live({ status: 'idle' }),
       { observe: {} },
     ]),
     opened('an idle Claude with a turn its transcript has not finished is not settled', [
-      transcript('$SESSION', [user('$SESSION', 1, 'Write the parser')]),
+      transcript(DRAWN, [user(DRAWN, 1, 'Write the parser')]),
       live({ status: 'idle' }),
       { observe: {} },
     ]),
     opened("a switch keeps the old conversation's items, its failure and its quota", [
-      transcript('$SESSION', [
-        user('$SESSION', 1, 'Write the parser'),
-        answer('$SESSION', 2, "You've hit your limit · resets in 2 hours", {
+      transcript(DRAWN, [
+        user(DRAWN, 1, 'Write the parser'),
+        answer(DRAWN, 2, "You've hit your limit · resets in 2 hours", {
           isApiErrorMessage: true,
           apiErrorStatus: 429,
         }),
@@ -326,7 +326,7 @@ export function claudeScenarios() {
       { observe: {} },
     ]),
     opened('a status file of process 0 says nothing', [
-      { status: { pid: 0, sessionId: '$SESSION', status: 'idle' }, file: '7.json' },
+      { status: { pid: 0, sessionId: DRAWN, status: 'idle' }, file: '7.json' },
       {
         observe: {},
         kept: notSettled(
@@ -340,9 +340,9 @@ export function claudeScenarios() {
         observe: {},
         kept: notSettled('Node looked the word up in an object, and found what every object has'),
       },
-      { status: { pid: '$PID', sessionId: '$SESSION', status: ['idle'] } },
+      { status: { pid: '$PID', sessionId: DRAWN, status: ['idle'] } },
       { observe: {}, kept: notSettled('Node took a list for its text') },
-      { status: { pid: '$PID', sessionId: '$SESSION', status: { toString: 1 } } },
+      { status: { pid: '$PID', sessionId: DRAWN, status: { toString: 1 } } },
       {
         observe: {},
         kept: notSettled('Node failed the look on an object with a toString of its own'),
@@ -350,7 +350,7 @@ export function claudeScenarios() {
     ]),
     opened('a status file JSON writes past what a double or a depth holds says nothing', [
       {
-        statusText: '{"pid":$PID,"sessionId":"$SESSION","status":"idle","big":1e400}',
+        statusText: `{"pid":$PID,"sessionId":"${DRAWN}","status":"idle","big":1e400}`,
         file: '1.json',
       },
       {
@@ -358,7 +358,7 @@ export function claudeScenarios() {
         kept: notSettled('Node read 1e400 as Infinity; JSON here holds no such number'),
       },
       {
-        statusText: `{"pid":$PID,"sessionId":"$SESSION","status":"idle","deep":${'['.repeat(200)}${']'.repeat(200)}}`,
+        statusText: `{"pid":$PID,"sessionId":"${DRAWN}","status":"idle","deep":${'['.repeat(200)}${']'.repeat(200)}}`,
         file: '1.json',
       },
       {
@@ -367,9 +367,9 @@ export function claudeScenarios() {
       },
     ]),
     opened('a refused request is exhausted quota, with the reset its text names', [
-      transcript('$SESSION', [
-        user('$SESSION', 1, 'Write the parser'),
-        answer('$SESSION', 2, "You've hit your limit · resets in 2 hours", {
+      transcript(DRAWN, [
+        user(DRAWN, 1, 'Write the parser'),
+        answer(DRAWN, 2, "You've hit your limit · resets in 2 hours", {
           isApiErrorMessage: true,
           apiErrorStatus: 429,
           message: {
@@ -382,6 +382,21 @@ export function claudeScenarios() {
       ]),
       live({ status: 'idle' }),
       { observe: {} },
+    ]),
+  ]
+  const waits = [
+    opened("a look reads Claude's status before the conversation it waits for", [
+      live({ status: 'idle' }),
+      { holdLooks: true },
+      { observe: {} },
+      { holdLooks: false },
+      live({ status: 'busy' }),
+      { release: 'look' },
+    ]),
+    opened('a window closed while its paste is held keeps the paste going, its files gone', [
+      { deliver: 'Hello', answers: { 'pane.write_paste': [{ held: true }] } },
+      { close: {} },
+      { release: 'pane.write_paste', answer: { ok: true } },
     ]),
   ]
   const ready = [
@@ -463,5 +478,5 @@ export function claudeScenarios() {
       },
     ]),
   ]
-  return [...plans, ...looks, ...ready, ...deliveries]
+  return [...plans, ...looks, ...waits, ...ready, ...deliveries]
 }

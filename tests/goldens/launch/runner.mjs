@@ -1,40 +1,161 @@
 /**
- * Plays a launch scenario against Node's adapters and writes down what each
- * step did: the oracle `crates/cf-harness` is held to.
+ * Plays a launch scenario against Node's adapters and records what each
+ * step did: the oracle `crates/cf-harness` is held to, step by step, by the
+ * Rust player (`crates/cf-harness/tests/launch/scenarios.rs`).
  *
- * A scenario is data. Its steps set up a root (stand-in CLIs, files, a
- * harness's own status files), prepare a launch, open its window, look at
- * it, ask whether it is ready and deliver to it, through a pane host that
- * answers what the scenario says and writes down what it was asked. The
- * Rust test plays the same steps against its own adapters.
+ * A scenario is data. Some steps set the scene and record nothing: stand-in
+ * CLIs, files, a harness's own status files, what the engine tells a
+ * window (`opened`, `follow`), and whether looks at a harness's record
+ * wait to be released (`holdLooks`). The others are recorded:
+ * - `prepare`, `observe`, `ready`, `deliver`, `started` begin that work on
+ *   the adapter or its window, through a pane host that answers each
+ *   request as the step scripts it, at once or held (`{held: true}`);
+ * - `release` answers a held host request (`release: op, answer`) or a
+ *   held look (`release: 'look'`);
+ * - `advance` moves the clock by that many milliseconds, firing the timers
+ *   due on the way one time at a time;
+ * - `close` closes the window as the engine does: its launch's files go,
+ *   and the work still waiting on it keeps its hold.
+ * After each, the work begun runs until it settles or waits on something a
+ * step controls: a held request, a held look, a timer.
  *
- * What a step did is written so that it is the same on every run:
- * - every path under the root is `$ROOT/…`;
- * - a value the adapter drew at random (Claude's session id) is named
- *   (`$SESSION`) wherever it shows, and a later step names it so too;
- * - the process this runs as is `$PID`, one long dead `$DEAD`, and a
- *   second live one, which a scenario that names it is given, `$OTHER`;
- * - a step the scenario asks of the adapter writes down what it did to the
- *   tree under the root: each file and folder it made, changed or removed,
- *   with its mode and a file's text.
+ * Nothing waits on the machine: the clock (`Date.now`, timers, the timers
+ * of `node:timers/promises` and `AbortSignal.timeout`) starts at
+ * 2026-09-19T12:00:00Z and moves only when a step advances it, and
+ * randomness (`randomUUID`, `randomBytes`) is the stream the Rust fakes
+ * hand out, byte `i` being `(i * 7 + 3) % 256`.
+ *
+ * A step's record is written so that it is the same on every run: every
+ * path under the root is `$ROOT/…`; the process this runs as is `$PID`,
+ * one long dead `$DEAD`, a second live one a scenario names `$OTHER`; and
+ * it lists the work that settled (its step, and what it answered or
+ * threw), the work still waiting, the requests asked, the size of every
+ * random draw, and what the step did to the tree under the root.
  *
  * A step may carry `kept`: a difference Rust keeps from Node on purpose,
- * why, and the fields Rust answers instead. Node's answer is recorded as
- * ever; the Rust player holds its own to `kept`, and to Node's elsewhere.
+ * why, and how Rust's own work settles instead.
  */
 import { spawn } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import fs from 'node:fs/promises'
+import { createRequire, syncBuiltinESMExports } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
+import { cachedAnswers } from '../../../hosts/lib/completion.js'
 import { claudeCodeAdapter } from '../../../src/adapters/claude-code.js'
+import { forgetLaunch } from '../../../src/core/launch-files.js'
 import { fakeExecutable } from '../../helpers.mjs'
+
+const require = createRequire(import.meta.url)
+const crypto = require('node:crypto')
+const timersPromises = require('node:timers/promises')
 
 /** A process id no process has: macOS's pids stop below it, and Windows' are multiples of four. */
 export const DEAD = 999_999
 
+/** When a scenario's clock starts. */
+const EPOCH = Date.parse('2026-09-19T12:00:00Z')
+
 const ADAPTERS = { 'claude-code': claudeCodeAdapter }
 const WINDOWS = process.platform === 'win32'
+
+/** The machine's own timers, which the runner turns the loop with. */
+const real = { setTimeout: globalThis.setTimeout, setImmediate: globalThis.setImmediate }
+
+/** A clock that moves only when told, and its timers. */
+function fakeClock() {
+  const timers = []
+  let now = EPOCH
+  let next = 1
+  const setTimeout = (callback, ms = 0, ...args) => {
+    const timer = { id: next++, due: now + Math.max(0, Number(ms) || 0), callback, args }
+    timers.push(timer)
+    const handle = { unref: () => handle, ref: () => handle, hasRef: () => true, id: timer.id }
+    handle[Symbol.toPrimitive] = () => timer.id
+    return handle
+  }
+  const clearTimeout = (handle) => {
+    const at = timers.findIndex((timer) => timer.id === (handle?.id ?? handle))
+    if (at >= 0) timers.splice(at, 1)
+  }
+  return {
+    now: () => now,
+    setTimeout,
+    clearTimeout,
+    armed: () => timers.length,
+    /** Fires the timers due first, if by `until`: whether there were any. */
+    fireNext(until) {
+      if (timers.length === 0) return false
+      const due = Math.min(...timers.map((timer) => timer.due))
+      if (due > until) return false
+      now = Math.max(now, due)
+      const firing = timers.filter((timer) => timer.due === due)
+      for (const timer of firing) timers.splice(timers.indexOf(timer), 1)
+      for (const timer of firing) timer.callback(...timer.args)
+      return true
+    },
+    settleAt(until) {
+      now = Math.max(now, until)
+    },
+  }
+}
+
+/** Puts the scenario's clock and randomness where the adapters read them; what puts them back. */
+function install(context) {
+  const clock = context.clock
+  const saved = {
+    setTimeout: globalThis.setTimeout,
+    clearTimeout: globalThis.clearTimeout,
+    now: Date.now,
+    abortTimeout: AbortSignal.timeout,
+    promisedTimeout: timersPromises.setTimeout,
+    randomUUID: crypto.randomUUID,
+    randomBytes: crypto.randomBytes,
+  }
+  globalThis.setTimeout = clock.setTimeout
+  globalThis.clearTimeout = clock.clearTimeout
+  Date.now = clock.now
+  AbortSignal.timeout = (ms) => {
+    const controller = new AbortController()
+    clock.setTimeout(
+      () =>
+        controller.abort(
+          new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+        ),
+      ms,
+    )
+    return controller.signal
+  }
+  timersPromises.setTimeout = (ms, value) =>
+    new Promise((resolve) => clock.setTimeout(() => resolve(value), ms))
+  let drawn = 0
+  const take = (count) => {
+    const bytes = Buffer.alloc(count)
+    for (let index = 0; index < count; index += 1) bytes[index] = ((drawn + index) * 7 + 3) % 256
+    drawn += count
+    context.draws.push(count)
+    return bytes
+  }
+  crypto.randomBytes = (count) => take(count)
+  crypto.randomUUID = () => {
+    const bytes = take(16)
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    const hex = bytes.toString('hex')
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+  syncBuiltinESMExports()
+  return () => {
+    globalThis.setTimeout = saved.setTimeout
+    globalThis.clearTimeout = saved.clearTimeout
+    Date.now = saved.now
+    AbortSignal.timeout = saved.abortTimeout
+    timersPromises.setTimeout = saved.promisedTimeout
+    crypto.randomUUID = saved.randomUUID
+    crypto.randomBytes = saved.randomBytes
+    syncBuiltinESMExports()
+  }
+}
 
 /** The process ids a scenario names, by their names. */
 function pids(context) {
@@ -42,32 +163,29 @@ function pids(context) {
   return { $PID: process.pid, $DEAD: DEAD, ...other }
 }
 
-/** `$ROOT/a/b` as a path under `root`, a named process as its id, the named values as drawn. */
-function real(context, value) {
-  if (Array.isArray(value)) return value.map((item) => real(context, item))
+/** `$ROOT/a/b` as a path under `root`, a named process as its id. */
+function realValue(context, value) {
+  if (Array.isArray(value)) return value.map((item) => realValue(context, item))
   if (value !== null && typeof value === 'object') {
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, real(context, item)]),
+      Object.entries(value).map(([key, item]) => [key, realValue(context, item)]),
     )
   }
   if (typeof value !== 'string') return value
   if (Object.hasOwn(pids(context), value)) return pids(context)[value]
-  let text = value
-  for (const [name, drawn] of Object.entries(context.named)) text = text.replaceAll(name, drawn)
-  if (!text.startsWith('$ROOT')) return text
-  return path.join(context.root, ...text.slice('$ROOT'.length).split('/').filter(Boolean))
+  if (!value.startsWith('$ROOT')) return value
+  return path.join(context.root, ...value.slice('$ROOT'.length).split('/').filter(Boolean))
 }
 
-/** A file's text with the named processes and values in it: JSON that no object writes. */
+/** A file's text with the named processes in it: JSON that no object writes. */
 function realText(context, text) {
   let filled = text
   for (const [name, pid] of Object.entries(pids(context)))
     filled = filled.replaceAll(name, `${pid}`)
-  for (const [name, drawn] of Object.entries(context.named)) filled = filled.replaceAll(name, drawn)
   return filled
 }
 
-/** What a step answered, with the root, the named values and the live processes written as the scenario writes them. */
+/** What a step recorded, with the root and the live processes written as the scenario writes them. */
 function written(context, value) {
   if (Array.isArray(value)) return value.map((item) => written(context, item))
   if (value !== null && typeof value === 'object') {
@@ -83,10 +201,8 @@ function written(context, value) {
   }
   if (typeof value !== 'string') return value
   let text = value
-  for (const [name, drawn] of Object.entries(context.named)) text = text.replaceAll(drawn, name)
-  const root = context.root
   const slashed = (text) => text.replaceAll('\\', '/')
-  if (text.includes(root)) text = text.replaceAll(root, '$ROOT')
+  if (text.includes(context.root)) text = text.replaceAll(context.root, '$ROOT')
   return text.startsWith('$ROOT') ? slashed(text) : text
 }
 
@@ -124,25 +240,75 @@ function changes(before, after) {
   return made.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0))
 }
 
+/** A host's response as a scenario writes it, or the error it throws (`{throws: message}`). */
+function respond(context, given) {
+  if (given?.throws !== undefined) throw Object.assign(new Error(given.throws), given)
+  return realValue(context, given)
+}
+
 /**
- * A pane host that answers each request as the scenario says, the next
- * answer for its operation each time (`{throws: message}` for one that
- * fails), and writes down what it was asked. An answer the step left
- * unasked is the scenario's mistake, unless its operation is `optional`.
+ * A pane host that answers each request with the next answer scripted for
+ * its operation, at once or held until released, and writes down what it
+ * was asked. A request with no answer left fails.
  */
-function scriptedHost(context, answers) {
-  const left = new Map(Object.entries(answers ?? {}).map(([op, list]) => [op, [...list]]))
+function scriptedHost(context) {
+  const left = new Map()
+  const held = []
   return {
+    script(answers) {
+      for (const [op, list] of Object.entries(answers ?? {})) {
+        left.set(op, [...(left.get(op) ?? []), ...list])
+      }
+    },
     async request(op, body) {
       context.requests.push(written(context, { op, body }))
       const answer = left.get(op)?.shift()
       if (answer === undefined) throw new Error(`no answer for ${op}`)
-      if (answer?.throws !== undefined) throw Object.assign(new Error(answer.throws), answer)
-      return real(context, answer)
+      if (answer?.held === true) {
+        return new Promise((resolve, reject) => held.push({ op, resolve, reject }))
+      }
+      return respond(context, answer)
     },
+    release(op, answer) {
+      const at = held.findIndex((each) => each.op === op)
+      if (at < 0) return false
+      const [request] = held.splice(at, 1)
+      try {
+        request.resolve(respond(context, answer))
+      } catch (cause) {
+        request.reject(cause)
+      }
+      return true
+    },
+    held: () => held.length,
     unused(optional = []) {
-      return [...left].filter(([op, list]) => list.length > 0 && !optional.includes(op))
+      return [...left]
+        .filter(([op, list]) => list.length > 0 && !optional.includes(op))
+        .map(([op]) => op)
+        .sort()
     },
+  }
+}
+
+/** The looks at a harness's record, as the engine serves them, held until released when the scene says so. */
+function scriptedLooks() {
+  const answers = cachedAnswers()
+  const held = []
+  let hold = false
+  return {
+    answers: (...args) =>
+      hold
+        ? new Promise((resolve, reject) => held.push(() => answers(...args).then(resolve, reject)))
+        : answers(...args),
+    hold(value) {
+      hold = value
+    },
+    release() {
+      const look = held.shift()
+      look?.()
+      return look !== undefined
+    },
+    held: () => held.length,
   }
 }
 
@@ -153,20 +319,20 @@ function startOther() {
     : spawn('sleep', ['600'], { stdio: 'ignore' })
 }
 
-/** Sets the root up as a step says: false for a step that asks the adapter. */
+/** Sets the scene as a step says: false for a step that is recorded. */
 async function setUp(context, step) {
   if (step.executable !== undefined) {
     fakeExecutable(path.join(context.root, 'bin', step.executable))
     return true
   }
   if (step.write !== undefined) {
-    const file = real(context, step.write)
+    const file = realValue(context, step.write)
     await fs.mkdir(path.dirname(file), { recursive: true })
-    await fs.writeFile(file, real(context, step.text))
+    await fs.writeFile(file, realValue(context, step.text))
     return true
   }
   if (step.remove !== undefined) {
-    await fs.rm(real(context, step.remove), { force: true })
+    await fs.rm(realValue(context, step.remove), { force: true })
     return true
   }
   if (step.status !== undefined || step.statusText !== undefined) {
@@ -178,32 +344,41 @@ async function setUp(context, step) {
       await fs.writeFile(path.join(folder, step.file), realText(context, step.statusText))
       return true
     }
-    const { pid, ...fields } = real(context, step.status)
+    const { pid, ...fields } = realValue(context, step.status)
     const file = step.file ?? `${pid}.json`
     await fs.writeFile(path.join(folder, file), JSON.stringify({ pid, ...fields }))
     return true
   }
   if (step.opened !== undefined) {
     // What the engine writes into a window's launch once its pane opened.
-    const { pid } = real(context, step.opened)
+    const { pid } = realValue(context, step.opened)
     if (pid !== undefined) context.launch.pid = pid
     return true
   }
   if (step.follow !== undefined) {
-    context.launch.nativeSession = real(context, step.follow)
+    context.launch.nativeSession = realValue(context, step.follow)
+    return true
+  }
+  if (step.holdLooks !== undefined) {
+    context.looks.hold(step.holdLooks === true)
     return true
   }
   return false
 }
 
-/** A step that asks the adapter, played: what it answered. */
-async function ask(context, step) {
+/** Begins the work a step asks of the adapter or its window. */
+function begin(context, index, step) {
+  const settle = (work, written) =>
+    work.then(
+      (value) => ({ answer: written(value) }),
+      (cause) => ({ throws: cause.message }),
+    )
+  let work
   if (step.prepare !== undefined) {
-    try {
-      const plan = await context.adapter.prepare(real(context, step.prepare))
+    const launch = realValue(context, step.prepare)
+    context.launchId = launch.launchId
+    work = settle(context.adapter.prepare(launch), (plan) => {
       context.launch = plan.launch
-      for (const [name, field] of Object.entries(step.draws ?? {}))
-        context.named[name] = plan[field]
       // The launch bag is the window's own state, which its later steps show.
       return {
         argv: plan.argv,
@@ -211,56 +386,147 @@ async function ask(context, step) {
         dropEnv: plan.dropEnv,
         nativeSession: plan.nativeSession ?? null,
       }
-    } catch (cause) {
-      return { refused: cause.message }
+    })
+  } else {
+    context.host.script(step.answers)
+    const target = {
+      launch: context.launch,
+      pane: { id: 'p1-zeus', generation: 1 },
+      host: context.host,
     }
+    const same = (value) => value ?? { undefined: true }
+    if (step.observe !== undefined)
+      work = settle(context.adapter.observe({ ...target, conversation: null }), same)
+    else if (step.ready !== undefined) work = settle(context.adapter.ready(target), same)
+    else if (step.deliver !== undefined)
+      work = settle(context.adapter.deliver({ ...target, text: step.deliver }), same)
+    else if (step.started !== undefined)
+      work = settle(context.adapter.started(target), (started) => started.nativeSession ?? null)
+    else throw new Error(`a step of no kind: ${JSON.stringify(step)}`)
   }
-  context.requests = []
-  const host = scriptedHost(context, step.answers)
-  const pane = { id: 'p1-zeus', generation: 1 }
-  const call = async () => {
-    if (step.observe !== undefined) {
-      return context.adapter.observe({ launch: context.launch, pane, host, conversation: null })
-    }
-    if (step.ready !== undefined)
-      return context.adapter.ready({ launch: context.launch, pane, host })
-    if (step.deliver !== undefined) {
-      return context.adapter.deliver({ launch: context.launch, pane, host, text: step.deliver })
-    }
-    throw new Error(`a step of no kind: ${JSON.stringify(step)}`)
-  }
-  let answer
-  try {
-    answer = { answer: (await call()) ?? { undefined: true } }
-  } catch (cause) {
-    answer = { throws: cause.message }
-  }
-  const unused = host.unused(step.optional)
-  if (unused.length > 0) throw new Error(`answers left unasked: ${JSON.stringify(unused)}`)
-  return { ...answer, requests: context.requests }
+  const entry = { op: index, settled: null }
+  work.then((outcome) => {
+    entry.settled = outcome
+  })
+  context.work.push(entry)
 }
 
-/** Plays `scenario` in a root of its own: what each step answered, by its index. */
+/** What the scene holds still: every begun work settled, or waiting on something a step controls. */
+function signature(context) {
+  return JSON.stringify([
+    context.work.map((entry) => entry.settled !== null),
+    context.requests.length,
+    context.host.held(),
+    context.looks.held(),
+    context.clock.armed(),
+    context.draws.length,
+  ])
+}
+
+/**
+ * Turns the event loop until the scene holds still: the begun work cannot
+ * move (as many held things as work waiting), and nothing changed for a
+ * while, as file system work finishes on Node's thread pool.
+ */
+async function settleDown(context) {
+  const waiting = () => context.work.filter((entry) => entry.settled === null).length
+  const holds = () => context.host.held() + context.looks.held() + context.clock.armed()
+  let last = signature(context)
+  let since = performance.now()
+  const started = since
+  for (;;) {
+    await new Promise((resolve) => real.setImmediate(resolve))
+    await new Promise((resolve) => real.setTimeout(resolve, 2))
+    const now = signature(context)
+    if (now !== last) {
+      last = now
+      since = performance.now()
+      continue
+    }
+    const still = performance.now() - since >= 40
+    if (still && waiting() <= holds()) return
+    if (performance.now() - started > 10_000) return
+  }
+}
+
+/** A recorded step, played: its record. */
+async function record(context, index, step) {
+  const before = tree(context.root)
+  context.requests = []
+  context.draws = []
+  if (step.release !== undefined) {
+    const released =
+      step.release === 'look'
+        ? context.looks.release()
+        : context.host.release(step.release, step.answer)
+    if (!released) throw new Error(`${step.release}: nothing held to release`)
+  } else if (step.advance !== undefined) {
+    const until = context.clock.now() + step.advance
+    await settleDown(context)
+    while (context.clock.fireNext(until)) await settleDown(context)
+    context.clock.settleAt(until)
+  } else if (step.close !== undefined) {
+    // The engine closes the window: its launch's files go, and what it
+    // still waits on keeps its own hold of the window.
+    forgetLaunch(context.env.CONSENSFLOW_HOME, context.launchId)
+  } else {
+    begin(context, index, step)
+  }
+  await settleDown(context)
+  const settled = context.work
+    .filter((entry) => entry.settled !== null)
+    .map((entry) => ({ ...entry.settled, op: entry.op }))
+  context.work = context.work.filter((entry) => entry.settled === null)
+  const unused = context.host.unused(step.optional)
+  return written(context, {
+    step: index,
+    settled,
+    pending: context.work.map((entry) => entry.op),
+    requests: context.requests,
+    ...(unused.length > 0 ? { unused } : {}),
+    draws: context.draws,
+    tree: changes(before, tree(context.root)),
+  })
+}
+
+/** Plays `scenario` in a root of its own: each recorded step's record. */
 export async function play(scenario) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cf-launch-golden-'))
-  const context = { root, named: {}, launch: null, requests: [], other: null }
+  const context = {
+    root,
+    other: null,
+    launch: null,
+    launchId: null,
+    work: [],
+    requests: [],
+    draws: [],
+    clock: fakeClock(),
+  }
+  const restore = install(context)
   try {
     if (JSON.stringify(scenario).includes('$OTHER')) context.other = startOther()
-    context.env = real(context, scenario.env)
+    context.env = realValue(context, scenario.env)
     await fs.mkdir(path.join(root, 'bin'), { recursive: true })
-    context.adapter = ADAPTERS[scenario.harness]({ env: context.env })
-    const answers = []
+    context.host = scriptedHost(context)
+    context.looks = scriptedLooks()
+    context.adapter = ADAPTERS[scenario.harness]({
+      env: context.env,
+      answers: context.looks.answers,
+    })
+    const records = []
     for (const [index, each] of scenario.steps.entries()) {
       if (await setUp(context, each)) continue
-      const before = tree(root)
-      const answer = await ask(context, each).catch((cause) => {
+      const recorded = await record(context, index, each).catch((cause) => {
         throw new Error(`${scenario.name}, step ${index}: ${cause.message}`)
       })
-      const after = tree(root)
-      answers.push(written(context, { step: index, ...answer, tree: changes(before, after) }))
+      if (recorded.unused !== undefined) {
+        throw new Error(`${scenario.name}, step ${index}: answers left unasked: ${recorded.unused}`)
+      }
+      records.push(recorded)
     }
-    return { ...scenario, answers }
+    return { ...scenario, records }
   } finally {
+    restore()
     context.other?.kill()
     await fs.rm(root, { recursive: true, force: true })
   }
