@@ -5446,3 +5446,297 @@ describe('a harness ConsensFlow has no adapter for', () => {
     })
   })
 })
+
+/**
+ * Holds each call of `object[name]` that `which` picks until the test lets it
+ * go, then makes it; the call's arguments are the adapter's own
+ * (`windowOfLaunch` picks the window of a launch).
+ */
+function holdCalls(object, name, which) {
+  const call = object[name]
+  let release
+  const held = new Promise((resolve) => {
+    release = resolve
+  })
+  object[name] = async (...args) => {
+    if (!which(...args)) return call(...args)
+    await held
+    return call(...args)
+  }
+  return release
+}
+
+/** A look at, or a delivery into, the window of this launch. */
+const windowOfLaunch =
+  (launchId) =>
+  ({ launch }) =>
+    launch.launchId === launchId
+
+/** The ledger's list of projects fails once, the next time it is read: the test's own failure of it. */
+function failNextRead(ledger) {
+  const projects = ledger.projects.bind(ledger)
+  let failing = true
+  ledger.projects = () => {
+    if (failing) {
+      failing = false
+      throw new Error('the ledger could not be read')
+    }
+    return projects()
+  }
+}
+
+/** One call of the ledger's `method` fails, the next time it is made: the test's own failure of a write. */
+function failNextWrite(ledger, method) {
+  const call = ledger[method].bind(ledger)
+  let failing = true
+  ledger[method] = (...args) => {
+    if (failing) {
+      failing = false
+      throw new Error('the ledger could not be written')
+    }
+    return call(...args)
+  }
+}
+
+describe('a window whose exit cannot be settled', () => {
+  it('fails the Close that made its exit, which nothing logs: the exit it settles is its own', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      // The kill is taken and its exit has not come yet: the Close settles the exit itself.
+      context.host.holdExits = true
+      failNextRead(context.ledger)
+      await assert.rejects(
+        context.dispatcher.closeProject(project.id),
+        /the ledger could not be read/,
+      )
+      assert.equal(context.ledger.project(project.id).state, 'suspended')
+      assert.equal(context.dispatcher.pane(id('chief')), null, 'its window has gone')
+      // The exit was the engine's own, and no longer: the chief's next window, which closes by
+      // itself, closes the project as any chief's exit does.
+      await context.dispatcher.resumeProject(project.id)
+      await context.dispatcher.pass()
+      await context.host.exit('chief')
+      assert.equal(context.ledger.project(project.id).state, 'suspended', 'the chief closed it')
+    })
+  })
+
+  it("fails the Close that made the exit of a member's window when the pause of its task cannot be written", async () => {
+    await setup(async (context) => {
+      const { project, id } = await withStaff(context)
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.host.holdExits = true
+      failNextWrite(context.ledger, 'pauseTask')
+      await assert.rejects(
+        context.dispatcher.closeProject(project.id),
+        /the ledger could not be written/,
+      )
+      assert.equal(context.ledger.task(project.id, 1).state, 'working', 'its pause was not written')
+      assert.equal(context.dispatcher.pane(id('zeus')), null, 'its window has gone')
+    })
+  })
+})
+
+describe('a window whose trace cannot be told', () => {
+  it('fails the Close of a window the pane host would not kill, and traces nothing of it', async () => {
+    await setup(async (context) => {
+      const { project, id } = await withStaff(context)
+      await context.dispatcher.pass()
+      context.host.refuseKills = true
+      failNextRead(context.ledger)
+      await assert.rejects(
+        context.dispatcher.closeProject(project.id),
+        /the ledger could not be read/,
+      )
+      assert.notEqual(context.dispatcher.pane(id('chief')), null, 'its window stays')
+    })
+  })
+
+  it('fails the step of a window whose activity changed and could not be traced, and the activity changed all the same', async () => {
+    await setup(async (context) => {
+      const { id } = await withStaff(context)
+      const release = holdCalls(
+        context.adapter,
+        'observe',
+        windowOfLaunch(context.adapter.agent('chief').launchId),
+      )
+      const stepping = context.dispatcher.pass()
+      failNextRead(context.ledger)
+      release()
+      await assert.rejects(stepping, /the ledger could not be read/)
+      assert.equal(context.dispatcher.activity(id('chief')).state, 'idle')
+    })
+  })
+})
+
+describe('adapters that fail without waiting', () => {
+  it('begins the preparation of every launch of a pass before it writes the failure of the first', async () => {
+    await setup(async (context) => {
+      const { project } = await withStaff(context, ['zeus', 'diana'])
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+      context.ledger.createTask(project.id, { from: 'chief', to: 'diana', body: 'Lexer' })
+      // Nothing is written, nothing is waited for: the rejection is the adapter's whole answer.
+      context.adapter.prepare = async () => {
+        throw new Error('the settings could not be written')
+      }
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        [1, 2].map((number) => context.ledger.task(project.id, number).state),
+        ['failed', 'failed'],
+      )
+    })
+  })
+})
+
+describe('an answer and an exit that come in separate callbacks', () => {
+  it('finishes the task of a worker whose look found its answer before the exit that comes in the next callback', async () => {
+    await setup(async (context) => {
+      const { open, task, id } = await withTiers(context, { workers: ['zeus'] })
+      open()
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'working')
+      const release = holdCalls(
+        context.adapter,
+        'observe',
+        windowOfLaunch(context.adapter.agent('zeus').launchId),
+      )
+      const stepping = context.dispatcher.pass()
+      context.adapter.answer('zeus', 'Parser done')
+      release()
+      // The pane host's frame is a callback of its own: what the answer set
+      // going (promise continuations, all of them) is over before it runs.
+      const exit = new Promise((resolve) => setImmediate(() => resolve(context.host.exit('zeus'))))
+      await stepping
+      await exit
+      assert.equal(task(1).state, 'done', 'the answer was collected, not paused for the exit')
+      assert.equal(context.dispatcher.pane(id('zeus-amber-pine')), null, 'its window closed')
+    })
+  })
+})
+
+/** Runs `work` in the microtask that comes `turns` turns from now: one hop of a settled promise is a turn. */
+const afterTurns = (turns, work) => {
+  let chain = Promise.resolve()
+  for (let turn = 1; turn < turns; turn += 1) chain = chain.then(() => {})
+  return chain.then(work)
+}
+
+/**
+ * A note the test writes straight to the ledger `turns` turns after it began
+ * something. Where it falls among what the engine does says how many turns
+ * the engine waited meanwhile; `zeus` writes it, which the engine never does.
+ */
+const tickAfter = (context, project, turns) =>
+  afterTurns(turns, () =>
+    context.ledger.note(project.id, { from: 'zeus', to: 'human', body: 'Tick' }),
+  )
+
+/**
+ * An adapter's methods are `async` functions, and an `await` of one is a
+ * turn, with the one more of a `.catch(...)` where a call has it, whether or
+ * not the call waited. A note written at either side of the turn where the
+ * engine goes on tells a wait too long from one too short: the Rust engine
+ * takes these turns itself, and its fakes wait only for themselves.
+ */
+describe('the turns the engine waits at the pane host and the adapters', () => {
+  // The kill the pane host refused is traced after the host's answer, its `catch` and the `await` of that.
+  for (const turns of [1, 2]) {
+    it(`a note written ${turns} turns after a Close whose kill is refused`, async () => {
+      await setup(async (context) => {
+        const { project } = await withStaff(context, ['zeus'])
+        await context.dispatcher.pass()
+        context.host.refuseKills = true
+        const closing = context.dispatcher.closeProject(project.id)
+        tickAfter(context, project, turns)
+        await assert.rejects(closing, /would not close/)
+      })
+    })
+  }
+
+  // The old window of a Switch chief is looked at, an `async` method whose answer `catch` makes a promise of.
+  for (const turns of [2, 3]) {
+    it(`a note written ${turns} turns after a Switch chief whose old window is looked at`, async () => {
+      await withCodex(async (context) => {
+        const { project } = await withStaff(context, ['zeus'])
+        await context.dispatcher.pass()
+        const switching = context.dispatcher.switchChief(project.id, {
+          harness: 'codex',
+          agent: 'astraeus',
+        })
+        tickAfter(context, project, turns)
+        await switching
+      })
+    })
+  }
+
+  // A launch that cannot take its first message learns it from `started`, which `catch` makes a promise of.
+  for (const turns of [5, 6]) {
+    it(`a note written ${turns} turns after a pass whose launch cannot take its first message`, async () => {
+      await setup(async (context) => {
+        const { project } = await withStaff(context, ['zeus'])
+        context.adapter.started = async () => {
+          throw new Error('the server never answered')
+        }
+        context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Parser' })
+        const passing = context.dispatcher.pass()
+        tickAfter(context, project, turns)
+        await passing
+      })
+    })
+  }
+
+  // A message its harness took before a restart is found in the harness's own record: the adapter's
+  // `record` (an `async` method, and the `catch` of it) and the method that reads it, which answers a turn later.
+  for (const turns of [2, 3]) {
+    it(`a note written ${turns} turns after a restart that finds a message in its harness's record`, async () => {
+      await setup(async (context) => {
+        const { project } = await withStaff(context, ['zeus'])
+        await context.dispatcher.pass()
+        context.ledger.note(project.id, { from: 'human', to: 'chief', body: 'Taken' })
+        await context.dispatcher.pass()
+        context.ledger.suspendForRestart()
+        const after = context.make()
+        const restarting = after.resumeAfterRestart()
+        tickAfter(context, project, turns)
+        await restarting
+      })
+    })
+  }
+
+  // A delivery the harness refuses is settled after the `await` of the adapter's `deliver`, an `async` method.
+  for (const turns of [3, 4]) {
+    it(`a note written ${turns} turns after a pass whose delivery the harness refuses`, async () => {
+      await setup(async (context) => {
+        const { project } = await withStaff(context, ['zeus'])
+        await context.dispatcher.pass()
+        context.adapter.agent('chief').admit = false
+        context.ledger.note(project.id, { from: 'human', to: 'chief', body: 'hello' })
+        const passing = context.dispatcher.pass()
+        tickAfter(context, project, turns)
+        await passing
+      })
+    })
+  }
+
+  // The Enter for a paste is pressed after the window's snapshot and the key, each a request whose `catch` makes a promise.
+  for (const turns of [4, 6, 7]) {
+    it(`a note written ${turns} turns after a pass that presses Enter again`, async () => {
+      await setup(async (context) => {
+        const { project } = await withStaff(context, ['zeus'])
+        context.adapter.agent('chief').arrive = false
+        context.host.snapshot = { outputQuietMs: 5_000 }
+        context.ledger.note(project.id, { from: 'human', to: 'chief', body: 'hello' })
+        await context.dispatcher.pass()
+        context.clock.advance(11_000)
+        const passing = context.dispatcher.pass()
+        tickAfter(context, project, turns)
+        await passing
+      })
+    })
+  }
+})

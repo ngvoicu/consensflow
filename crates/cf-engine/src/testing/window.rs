@@ -4,6 +4,11 @@
 //! is written down in the Node traces' shape, its launch bag as the
 //! JavaScript fake's was: the launch, its conversation, and the window's
 //! process once the pane host named it.
+//!
+//! The turn an `await` of a call costs is the engine's. The one exception is
+//! `ready`, which the JavaScript fake does not have unless a test gives it
+//! one, where the engine awaits none: a `ready` of the test's own takes that
+//! turn here, since the engine cannot tell it is there.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -85,17 +90,14 @@ impl Window for FakeWindow {
         let early = (!matches!(wrapped, Wrapped::Held { .. }))
             .then(|| started.as_ref().map_or(Ok(()), |started| started()));
         Box::pin(async move {
-            // A start the test named a conversation for gives it, and the
-            // wrapper's promise settles a turn after.
+            // A start the test named a conversation for gives it.
             if let Some(native) = wrapped.before().await {
-                next_turn().await;
                 self.fake
                     .recorder
                     .answered(at, json!({ "nativeSession": native }));
                 return Ok(Some(native));
             }
             let answer = early.unwrap_or_else(|| started.map_or(Ok(()), |started| started()));
-            next_turn().await;
             let answered = match answer {
                 Ok(()) => {
                     self.fake.recorder.answered(at, json!({}));
@@ -116,13 +118,16 @@ impl Window for FakeWindow {
     fn ready<'a>(
         &'a self,
         _host: &'a dyn PaneHost,
-        _pane: &'a Pane,
+        pane: &'a Pane,
     ) -> Work<'a, Result<Readiness, String>> {
         let ready = self.fake.ready.borrow().clone();
         let Some(ready) = ready else {
             return Box::pin(async { Ok(Readiness::Ready) });
         };
-        let args = json!([{ "launch": self.bag() }]);
+        let args = json!([{
+            "launch": self.bag(),
+            "pane": { "id": pane.id, "generation": pane.generation },
+        }]);
         let at = self.call("ready", args.clone());
         let wrapped = self.fake.ready_holds.wrap(&args);
         // Made when called, or once the test lets a held call go.
@@ -185,7 +190,6 @@ impl Window for FakeWindow {
                 Ok(now) => now.await,
                 Err(later) => later().await,
             };
-            next_turn().await;
             let written = match &outcome {
                 Ok(Admission::Admitted { queued: true }) => {
                     json!({ "admitted": true, "queued": true })
@@ -216,14 +220,12 @@ impl Window for FakeWindow {
         // Made when called, or once the test lets a held look go.
         let early = (!matches!(wrapped, Wrapped::Held { .. })).then(|| self.look(&session));
         Box::pin(async move {
-            // A look the test made fail fails a turn after it is let go, as
-            // the wrapper's throw did.
+            // A look the test made fail fails once it is let go, as the
+            // wrapper's throw did.
             if let Some(reason) = wrapped.before().await {
-                next_turn().await;
                 return Err(reason);
             }
             let observed = early.unwrap_or_else(|| self.look(&session));
-            next_turn().await;
             self.fake.recorder.answered(at, observed_json(&observed));
             wrapped.after().await;
             Ok(observed)

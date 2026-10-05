@@ -1,7 +1,8 @@
 //! What the engine asked of its seams, in order, written as the Node traces
 //! write it (`tests/goldens/engine/dispatcher/`), so that one projection
-//! reads both sides: `{op, args}` where one of the engine's operations
-//! begins, `{seam, method?, args, answer}` for each call of a seam (a call
+//! reads both sides: `{op, args, answer}` where one of the engine's
+//! operations begins (its answer, or `threw`, once it ends),
+//! `{seam, method?, args, answer}` for each call of a seam (a call
 //! that waits gets its answer once it has one), and `{seam: "event", event}`
 //! for each event the ledger logs. The engine's sleeps are written down too,
 //! as `{seam: "time", method: "sleep", args: [ms]}`, which the Node traces
@@ -17,11 +18,19 @@ use serde_json::{json, Value};
 pub struct Recorder(Rc<RefCell<Vec<Value>>>);
 
 impl Recorder {
-    /// Writes down where one of the engine's operations begins.
-    pub fn op(&self, name: &str, args: Value) {
-        self.0
-            .borrow_mut()
-            .push(json!({ "op": name, "args": args }));
+    /// Writes down where one of the engine's operations begins: its place,
+    /// for its answer to go to.
+    pub fn op(&self, name: &str, args: Value) -> usize {
+        let mut events = self.0.borrow_mut();
+        events.push(json!({ "op": name, "args": args }));
+        events.len() - 1
+    }
+
+    /// What the operation written down at `at` failed with, in its own words.
+    pub fn threw(&self, at: usize, message: &str) {
+        if let Some(call) = self.0.borrow_mut().get_mut(at) {
+            call["threw"] = json!({ "$error": { "message": message } });
+        }
     }
 
     /// Writes down a call of `seam` (its `method`, when it is an object's),

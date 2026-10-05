@@ -5,11 +5,14 @@
 //! Both sides are read through one projection, which keeps what is the
 //! engine's behaviour and drops what is how it got there:
 //! - kept: where each operation the test calls begins (by name; the
-//!   engine's calls of its own operations are its insides, unmarked); each
+//!   engine's calls of its own operations are its insides, unmarked), with
+//!   what it answered, whole (the project as the ledger had it when it
+//!   answered, or none), or the words it failed with; each
 //!   event the ledger logs, whole; each call of the pane host, with what it
 //!   was given and answered; each call of an adapter by its method and what
 //!   names it (the launch, the message, the text, the conversation resumed or
-//!   read), and each launch with what it was given (the participant's
+//!   read, and the pane a `ready` or a delivery is for), and each launch with
+//!   what it was given (the participant's
 //!   handle, its project, role, folder and role text, its agent's
 //!   settings); each
 //!   token issued, with whom for, and revoked; each launch's files
@@ -128,7 +131,15 @@ fn projected(events: &[Value]) -> Vec<Value> {
 
 fn project(event: &Value) -> Option<Value> {
     if let Some(op) = event.get("op") {
-        return Some(json!({ "op": op }));
+        let mut kept = Map::new();
+        kept.insert("op".to_owned(), op.clone());
+        if let Some(answer) = event.get("answer") {
+            kept.insert("answer".to_owned(), answer.clone());
+        }
+        if let Some(threw) = event.get("threw") {
+            kept.insert("threw".to_owned(), said(threw));
+        }
+        return Some(Value::Object(kept));
     }
     let seam = event["seam"].as_str()?;
     let method = event.get("method").and_then(Value::as_str);
@@ -181,6 +192,10 @@ fn adapter_call(adapter: &str, method: Option<&str>, given: &Value) -> Value {
         if let Some(value) = value {
             named.insert(key.to_owned(), value.clone());
         }
+    }
+    // The pane a window is asked about or given a message in: the window's own.
+    if matches!(method, Some("ready" | "deliver")) {
+        named.insert("pane".to_owned(), given["pane"].clone());
     }
     if method == Some("prepare") {
         named.insert("handle".to_owned(), given["participant"]["handle"].clone());

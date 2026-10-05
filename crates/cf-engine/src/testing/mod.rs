@@ -1,5 +1,6 @@
 //! The kit the engine's tests run it with, as `core-dispatcher.test.mjs`
-//! made its fakes: an executor that runs the engine's work to stillness, a
+//! made its fakes: the engine's own executor, which the kit drains to
+//! stillness, the answers of the work a test starts on it, a
 //! gate, holds a test puts on the fakes' calls ([`Holds`]), the time (a clock
 //! the test moves, and timers that are the loop's),
 //! a pane host and an adapter whose agents do what the test tells them,
@@ -23,7 +24,7 @@ mod window;
 pub use adapter::{AfterPrepare, Deliver, FakeAdapter, FakeAgent, Prepare, Ready, Started, Taking};
 pub use adapters::{FakeAdapters, FakeRecords};
 pub use context::{Closed, Context, Made, START_MS};
-pub use executor::{Answer, Executor, Gate, GateWait};
+pub use executor::{Answer, Gate, GateWait};
 pub use holds::Holds;
 pub use host::{window_of, FakeHost, OnRequest};
 pub use operations::Restarted;

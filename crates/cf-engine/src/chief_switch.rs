@@ -19,6 +19,7 @@ use crate::deliveries::Delivering;
 use crate::dispatcher::Dispatcher;
 use crate::handoff::{handoff_text, history_pages, is_handoff, last_words, Handoff};
 use crate::record::Record;
+use crate::runtime::caught;
 use crate::seams::EngineError;
 use cf_proto::ledger::SwitchedFrom;
 
@@ -273,7 +274,9 @@ impl Dispatcher {
         let mut cut = false;
         let pane = record.window.borrow().pane.clone();
         if let Some(pane) = pane {
-            let observed = self.observe(chief, record).await.ok();
+            // `windows.observe` is an `async` function, and `.catch(() =>
+            // null)` made a promise of its own to wait on.
+            let observed = caught(self.observe(chief, record)).await.ok();
             if self.forgotten(record) {
                 return Ok(());
             }

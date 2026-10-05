@@ -5,6 +5,7 @@
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod adapters_failing_at_once;
 mod agent_gone;
 mod assigning;
 mod cancelled_task;
@@ -13,6 +14,7 @@ mod chiefs;
 mod closing;
 mod deleted_sessions;
 mod deliveries;
+mod exit_unsettled;
 mod fixtures;
 mod interrupts;
 mod lanes;
@@ -24,6 +26,7 @@ mod participant_leaves;
 mod quota;
 mod restart;
 mod review;
+mod separate_callbacks;
 mod session_windows;
 mod sessions;
 mod several_roles;
@@ -35,7 +38,9 @@ mod switching_refused;
 mod tasks;
 mod the_dispatcher;
 mod throws_early;
+mod trace_untold;
 mod traces;
+mod turns_at_seams;
 mod undeliverable;
 mod unreadable_agents;
 mod unsent;

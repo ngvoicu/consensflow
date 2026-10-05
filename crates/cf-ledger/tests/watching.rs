@@ -1,6 +1,7 @@
 //! What the engine's tests watch of the ledger (`test-support`): each read of
-//! `projects` and `next_delivery` is told before it is made, with the id it
-//! was given, and a read the watcher fails fails.
+//! `projects` and `next_delivery`, and each write of `pause_task`, is told
+//! before it is made, with the id it was given, and a call the watcher fails
+//! fails.
 
 #![cfg(feature = "test-support")]
 // A test's own scaffolding expects, as the tests do.
@@ -55,4 +56,28 @@ fn a_watcher_is_told_each_read_it_watches_with_its_id_and_may_fail_one() {
             ("next_delivery".to_owned(), Some(chief)),
         ]
     );
+}
+
+#[test]
+fn a_watcher_is_told_a_pause_by_its_tasks_number_before_it_is_written_and_may_fail_it() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger =
+        open_ledger(&dir.path().join("consensflow.db"), Options::default()).expect("a ledger");
+    let created = ledger.create_project(&project()).expect("a project");
+    let told = Rc::new(RefCell::new(Vec::new()));
+    let heard = Rc::clone(&told);
+    ledger.watch(Box::new(move |call, id| {
+        heard.borrow_mut().push((call.to_owned(), id));
+        if call == "pause_task" {
+            return Err(LedgerError::refused("watched", "the write was failed"));
+        }
+        Ok(())
+    }));
+
+    // Failed before the ledger looks for the task, which this one has not.
+    let refused = ledger
+        .pause_task(created.id, 7, None, None)
+        .expect_err("the write fails");
+    assert_eq!(refused.code(), Some("watched"));
+    assert_eq!(*told.borrow(), [("pause_task".to_owned(), Some(7))]);
 }

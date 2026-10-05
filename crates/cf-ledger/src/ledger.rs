@@ -49,8 +49,8 @@ impl Default for Options {
     }
 }
 
-/// What a test does with the reads it watches ([`Ledger::watch`]): told the
-/// read's name and the id it was given, it may fail it.
+/// What a test does with the calls it watches ([`Ledger::watch`]): told the
+/// call's name and the id it was given, it may fail it.
 #[cfg(feature = "test-support")]
 pub type Watcher = Box<dyn FnMut(&str, Option<i64>) -> Result<(), LedgerError>>;
 
@@ -118,16 +118,17 @@ fn opening_refusal(file: &Path, cause: LedgerError) -> LedgerError {
 
 #[cfg(feature = "test-support")]
 impl Ledger {
-    /// Tells `watcher` of each read of `projects` and `next_delivery`, before
-    /// it is made: the engine's tests count them, or fail one.
+    /// Tells `watcher` of each read of `projects` and `next_delivery`, and
+    /// each write of `pause_task` (by its task's number), before it is made:
+    /// the engine's tests count them, or fail one.
     pub fn watch(&mut self, watcher: Watcher) {
         *self.watcher.get_mut() = Some(watcher);
     }
 
-    /// Tells the watcher, if there is one, of the read about to be made.
-    pub(crate) fn watched(&self, read: &str, id: Option<i64>) -> Result<(), LedgerError> {
+    /// Tells the watcher, if there is one, of the call about to be made.
+    pub(crate) fn watched(&self, call: &str, id: Option<i64>) -> Result<(), LedgerError> {
         match self.watcher.borrow_mut().as_mut() {
-            Some(watcher) => watcher(read, id),
+            Some(watcher) => watcher(call, id),
             None => Ok(()),
         }
     }

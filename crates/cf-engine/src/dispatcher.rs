@@ -5,7 +5,7 @@
 //! test of `core-dispatcher.test.mjs`, ported under its sentence.
 //!
 //! It answers the human's operations, steps every window on each pass, and
-//! holds each participant for one piece of work at a time ([`Hold`]). What
+//! holds each participant for one piece of work at a time ([`crate::runtime::Hold`]). What
 //! it orchestrates has an owner each, a module of its own on this type: who
 //! takes which task and who is out of quota (`scheduler`), each window's
 //! launch, looks and close (`windows`), what goes into a window and what
@@ -523,7 +523,8 @@ impl Dispatcher {
     /// Once, at start: what was on its way to a window is settled, and the
     /// projects open when the previous process ended come back.
     pub async fn resume_after_restart(self: &Rc<Self>) -> Result<Vec<Resumed>, EngineError> {
-        self.settle_in_flight().await?;
+        // An `async` method: its answer reaches this a turn after it was made.
+        returning(self.settle_in_flight()).await?;
         let due: Vec<i64> = self
             .seams
             .ledger
@@ -642,7 +643,10 @@ impl Dispatcher {
     /// A window ended (`pane.exit` from the pane host), told where the
     /// host's frame is read: what the exit changes is changed before this
     /// returns, and what it still has to do (a chief's project closing) is
-    /// returned, for the reader to run apart.
+    /// returned, for the reader to spawn onto the executor and run apart.
+    /// Nobody awaits an exit the host sent, so one that cannot be settled is
+    /// written down; the engine's own close of a window fails with it
+    /// instead.
     pub fn pane_exited(self: &Rc<Self>, pane: Pane) -> Option<LocalWork> {
         let this = Rc::clone(self);
         let mut work: LocalWork = Box::pin(async move {
@@ -658,7 +662,10 @@ impl Dispatcher {
         }
     }
 
-    async fn exited(self: &Rc<Self>, pane: &Pane) -> Result<(), EngineError> {
+    /// What a window's exit settles: the engine's own close of a window
+    /// awaits it and fails with it; the host's event (`pane_exited`) tells it
+    /// to the log.
+    pub(crate) async fn exited(self: &Rc<Self>, pane: &Pane) -> Result<(), EngineError> {
         let ended = |candidate: Option<&Pane>| candidate.is_some_and(|candidate| candidate == pane);
         let record = {
             let records = self.records.borrow();
@@ -839,7 +846,7 @@ impl Dispatcher {
             Ok(observed) => observed,
             Err(reason) => {
                 if !self.forgotten(record) {
-                    self.set_activity(record, Activity::because(ActivityState::Unknown, reason));
+                    self.set_activity(record, Activity::because(ActivityState::Unknown, reason))?;
                 }
                 return Ok(());
             }
@@ -871,7 +878,7 @@ impl Dispatcher {
             } else {
                 Activity::of(ActivityState::Working)
             };
-            self.set_activity(record, activity);
+            self.set_activity(record, activity)?;
         }
         self.copy(participant, record, &observed)?;
         // The human switched the window to another conversation: this look was the old one's last.
@@ -966,7 +973,7 @@ impl Dispatcher {
         self.set_activity(
             record,
             Activity::because(ActivityState::Out, format!("out of quota until {until}")),
-        );
+        )?;
         if participant.role != "chief" {
             returning(self.interrupt_if_stopped(participant, record, observed)).await?;
             if !self.forgotten(record) {
@@ -1047,7 +1054,7 @@ impl Dispatcher {
         self.set_activity(
             record,
             Activity::because(ActivityState::Out, format!("out of quota until {until}")),
-        );
+        )?;
         let delivering = record.delivery.borrow_mut().delivering.take();
         if let Some(delivering) = delivering {
             self.settle_failure(delivering, "the harness ran out of quota", true)?;
@@ -1172,9 +1179,15 @@ impl Dispatcher {
             .is_none_or(|kept| !Rc::ptr_eq(kept, record))
     }
 
-    /// Tells the trace what happened at a window, named by its project and participant.
-    pub(crate) fn trace_window(&self, record: &Record, event: WindowEvent) {
-        let project = self.project_of(record.id).ok().flatten();
+    /// Tells the trace what happened at a window, named by its project and
+    /// participant. A ledger that cannot be read says nothing is traced, and
+    /// why: the step or the operation that was telling it fails.
+    pub(crate) fn trace_window(
+        &self,
+        record: &Record,
+        event: WindowEvent,
+    ) -> Result<(), EngineError> {
+        let project = self.project_of(record.id)?;
         let participant = project.as_ref().and_then(|project| {
             project
                 .participants
@@ -1190,6 +1203,7 @@ impl Dispatcher {
                 event,
             },
         });
+        Ok(())
     }
 
     pub(crate) fn project_of(&self, participant: i64) -> Result<Option<ProjectView>, EngineError> {

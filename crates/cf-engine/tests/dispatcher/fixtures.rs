@@ -2,12 +2,15 @@
 //! helpers it hands back, the quotas a harness says, and the patterns the
 //! tests matched with.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use cf_base::time::iso;
 use cf_engine::testing::Context;
 use cf_harness::contract::Pane;
 use cf_harness::records::{Level, Quota};
 use cf_harness::seams::Time;
-use cf_ledger::{NewTask, ParticipantView, ProjectView, TaskThread, TaskView};
+use cf_ledger::{LedgerError, NewTask, ParticipantView, ProjectView, TaskThread, TaskView};
 use regex::Regex;
 
 /// Asserts `text` matches `pattern` (`assert.match`).
@@ -15,6 +18,29 @@ use regex::Regex;
 pub fn assert_match(text: &str, pattern: &str) {
     let found = Regex::new(pattern).expect("the pattern").is_match(text);
     assert!(found, "{text:?} does not match /{pattern}/");
+}
+
+/// The ledger's list of projects fails once, the next time it is read
+/// (`failNextRead`): what the engine reads of it first after this is lost.
+pub fn fail_next_read(context: &Context) {
+    fail_next(context, "projects", "the ledger could not be read");
+}
+
+/// The ledger's pause of a task fails once, the next time it is written
+/// (`failNextWrite`).
+pub fn fail_next_write(context: &Context) {
+    fail_next(context, "pause_task", "the ledger could not be written");
+}
+
+/// The ledger's `call` fails once, the next time it is made, in `words`.
+fn fail_next(context: &Context, call: &'static str, words: &'static str) {
+    let failing = Rc::new(Cell::new(true));
+    context.ledger.borrow_mut().watch(Box::new(move |made, _| {
+        if made == call && failing.replace(false) {
+            return Err(LedgerError::refused("ledger-failed", words));
+        }
+        Ok(())
+    }));
 }
 
 /// A task's state and its assignee, to be read as `[state, assignee]`.
