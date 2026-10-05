@@ -26,9 +26,10 @@
  *
  * The live stores are the ones this environment names (HOME, CLAUDE_CONFIG_DIR,
  * CODEX_HOME, PI_CODING_AGENT_*, XDG_DATA_HOME, APPDATA, LOCALAPPDATA,
- * OPENCODE_*, and Pi's evidence, CF_DELIVERY_*), read and never written to
- * (though SQLite may make a store's `-wal` and `-shm` beside it, where it has
- * none); a place named relative to the working folder is refused. Devin's wire logs
+ * OPENCODE_*, and Pi's evidence, CF_DELIVERY_*): their transcripts and their
+ * stores' rows are read and never written, though SQLite may make a store's
+ * `-wal` and `-shm` where it has none, and marks a reader in its `-shm`. A
+ * place named relative to the working folder is refused. Devin's wire logs
  * are ConsensFlow's own: only with `--with-wires` are they read, from its
  * home. The snapshot holds the texts: it is removed, unless the halves
  * differ, when it is kept for the difference to be read again.
@@ -136,8 +137,8 @@ const env = Object.fromEntries(
  * when the copy was made.
  */
 const sources = new Map()
-function source(key, stamp) {
-  sources.set(key, [...(sources.get(key) ?? []), [stamp, stamp()]])
+function source(key, stamp, was = stamp()) {
+  sources.set(key, [...(sources.get(key) ?? []), [stamp, was]])
 }
 /** A file's size and time of writing: none where it is not, so that one made since is seen. */
 const fileStamp = (file) => () => {
@@ -151,8 +152,12 @@ const fileStamp = (file) => () => {
 /** Whether nothing the copies for any of `keys` came from changed since. */
 const unchanged = (...keys) =>
   keys.every((key) => (sources.get(key) ?? []).every(([stamp, was]) => stamp() === was))
-/** The places copied to: a place two copies name (Pi's sessions in Claude's folder) is copied once. */
-const copied = new Set()
+/**
+ * The places copied to, each with its source's stamp as it was copied: a
+ * place two copies name (Pi's sessions in Claude's folder) is copied once,
+ * and both watch its source from that copy on.
+ */
+const copied = new Map()
 
 /** Throws unless `to` is in the snapshot: a copy never writes a live store. */
 function inSnapshot(to) {
@@ -176,9 +181,14 @@ function nudged(x, steps) {
  */
 function copy(key, file, to) {
   inSnapshot(to)
-  source(key, fileStamp(file))
-  if (copied.has(to)) return
-  copied.add(to)
+  const stamp = fileStamp(file)
+  if (copied.has(to)) {
+    source(key, stamp, copied.get(to))
+    return
+  }
+  const was = stamp()
+  copied.set(to, was)
+  source(key, stamp, was)
   fs.mkdirSync(path.dirname(to), { recursive: true })
   fs.copyFileSync(file, to)
   const want = fs.statSync(file).mtimeMs
@@ -255,14 +265,16 @@ function rows(file, sql) {
  * store not in WAL mode, whose writers a read would hold up.
  */
 function copyStore(key, file, to) {
+  // Watched before it is looked for: a store made since in a place higher up
+  // OpenCode's list is seen.
+  source(key, fileStamp(file))
+  source(key, fileStamp(`${file}-wal`))
   if (!fs.existsSync(file)) return null
   inSnapshot(to)
   const db = new DatabaseSync(file, { readOnly: true })
   try {
     const mode = db.prepare('pragma journal_mode').get().journal_mode
     if (mode !== 'wal') return `${file} is in ${mode} mode, not WAL`
-    source(key, fileStamp(file))
-    source(key, fileStamp(`${file}-wal`))
     fs.mkdirSync(path.dirname(to), { recursive: true })
     db.prepare('vacuum into ?').run(to)
     return null
@@ -332,8 +344,9 @@ const HARNESSES = {
       if (live.CF_DELIVERY_SETTLED !== undefined && launch !== undefined) {
         for (const name of [`${launch}.json`, `${launch}.working.json`]) {
           const file = path.join(live.CF_DELIVERY_SETTLED, name)
+          // Watched before it is looked for: one made between is seen.
+          source('pi', fileStamp(file))
           if (fs.existsSync(file)) copy('pi', file, path.join(env.CF_DELIVERY_SETTLED, name))
-          else source('pi', fileStamp(file))
         }
       }
       return null
@@ -381,8 +394,8 @@ const HARNESSES = {
       source('devin', () => launches().sort().join('\n'))
       for (const name of launches()) {
         const file = path.join(wires(live), name, 'wire.jsonl')
+        source('devin', fileStamp(file))
         if (fs.existsSync(file)) copy('devin', file, path.join(wires(env), name, 'wire.jsonl'))
-        else source('devin', fileStamp(file))
       }
       return null
     },
