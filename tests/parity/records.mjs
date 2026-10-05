@@ -37,7 +37,6 @@
  *   npm run parity:records [-- --limit 25 --with-wires]
  */
 import { spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -51,6 +50,7 @@ import { home } from '../../hosts/lib/completion/shared.js'
 import { answers, cachedAnswers } from '../../hosts/lib/completion.js'
 import { devinFolders, opencodeStores, piSessionDir } from '../../src/harnesses.js'
 import { refuseTailoredCollation } from '../goldens/records/tables.mjs'
+import { digest } from './digest.mjs'
 
 const REPO = path.join(import.meta.dirname, '..', '..')
 
@@ -409,63 +409,6 @@ const ours = JSON.parse(
   ),
 ).reasons.ours
 
-/**
- * `value` with each text in it made whole (`toWellFormed`: a lone surrogate
- * is U+FFFD, as the Rust readers hold it), and whether each already was.
- */
-function wellFormed(value) {
-  let whole = true
-  const walk = (value) => {
-    if (typeof value === 'string') {
-      const made = value.toWellFormed()
-      whole &&= made === value
-      return made
-    }
-    if (Array.isArray(value)) return value.map(walk)
-    if (value !== null && typeof value === 'object') {
-      return Object.fromEntries(Object.entries(value).map(([name, field]) => [name, walk(field)]))
-    }
-    return value
-  }
-  return [walk(value), whole]
-}
-
-/**
- * What the Rust half compares of a reading: never the text itself. Its texts
- * are made whole first, and `wellFormed` says whether they were: a lone
- * surrogate, which the Rust readers read as U+FFFD, is a difference kept on
- * purpose, and the Rust half counts it so, never as the same.
- */
-function digest(raw) {
-  const [reading, whole] = wellFormed(raw)
-  if (reading.unknown) {
-    const own = ours.some((prefix) => reading.reason.startsWith(prefix))
-    return {
-      unknown: true,
-      reason: own ? reading.reason : 'unreadable: «platform»',
-      wellFormed: whole,
-    }
-  }
-  return {
-    items: reading.items.map((item) => [
-      item.id,
-      item.role,
-      item.complete,
-      // An item's time, or none where it holds none: undefined is not null.
-      item.at === undefined ? [] : [item.at],
-      item.text.length,
-      createHash('sha256').update(item.text).digest('hex'),
-      item.commentary === true,
-    ]),
-    inFlight: reading.inFlight,
-    asking: reading.asking,
-    failed: reading.failed,
-    quota: reading.quota,
-    settlement: reading.settlement.state,
-    wellFormed: whole,
-  }
-}
-
 /** The size of the transcript the snapshot holds of `session`; none for a store. */
 async function transcriptSize(kind, session) {
   const file = await TRANSCRIPTS[kind]?.(session, env)
@@ -490,10 +433,10 @@ try {
     let written = 0
     for (const session of sessions) {
       const read = cachedAnswers()
-      const first = digest(await read(kind, session, env))
-      const again = digest(await read(kind, session, env))
+      const first = digest(await read(kind, session, env), ours)
+      const again = digest(await read(kind, session, env), ours)
       const started = performance.now()
-      const there = digest(await answers(kind, session, live))
+      const there = digest(await answers(kind, session, live), ours)
       const ms = performance.now() - started
       if (JSON.stringify(there) !== JSON.stringify(first)) {
         if (unchanged(kind, `${kind}\n${session}`)) {
