@@ -188,6 +188,134 @@ describe('the launch recorder writes', () => {
   })
 })
 
+describe("the launch recorder's peer on loopback", () => {
+  const ask = (url, init) =>
+    fetch(url, init)
+      .then(async (response) => ({ status: response.status, body: await response.text() }))
+      .catch((cause) => ({ name: cause.name, message: cause.message }))
+
+  it('answers a route as the step scripts it and writes each request down as it was written', async () => {
+    const steps = [
+      { observe: true, served: { 'POST /deliver': [{ status: 200, body: '{"ok":true}' }] } },
+    ]
+    const { records } = await played(steps, () => ({
+      observe: () =>
+        ask('http://127.0.0.1:41000/deliver?directory=a+b', {
+          method: 'POST',
+          headers: { authorization: 'Bearer t' },
+          body: '{"text":"x"}',
+        }),
+    }))
+    assert.deepEqual(records[0].settled, [{ answer: { status: 200, body: '{"ok":true}' }, op: 0 }])
+    assert.deepEqual(records[0].fetches, [
+      {
+        route: 'POST /deliver',
+        url: 'http://127.0.0.1:41000/deliver?directory=a+b',
+        headers: [['authorization', 'Bearer t']],
+        body: '{"text":"x"}',
+      },
+    ])
+  })
+
+  it('holds a head and then a body until steps release them, each a wait of the work', async () => {
+    const steps = [
+      { observe: true, served: { 'GET /session': [{ held: true }] } },
+      { release: 'GET /session', answer: { status: 200, body: { held: true } } },
+      { releaseBody: 'GET /session', body: 'whole' },
+    ]
+    const { records } = await played(steps, () => ({
+      observe: () => ask('http://127.0.0.1:41000/session'),
+    }))
+    assert.deepEqual(records[0].pending, [{ op: 0, waits: [{ fetch: 'GET /session' }] }])
+    assert.deepEqual(records[1].pending, [{ op: 0, waits: [{ fetch: 'GET /session' }] }])
+    assert.deepEqual(records[2].settled, [{ answer: { status: 200, body: 'whole' }, op: 0 }])
+  })
+
+  it('fails as undici does: no head, a body cut, a timeout before the head and in the body', async () => {
+    const steps = [
+      {
+        observe: true,
+        served: {
+          'GET /none': [{ noHead: true }],
+          'GET /cut': [{ status: 200, body: { cut: true } }],
+          'GET /slow': [{ held: true }],
+          'GET /slow-body': [{ status: 200, body: { held: true } }],
+        },
+      },
+      { advance: 100 },
+    ]
+    const { records } = await played(steps, () => ({
+      observe: () =>
+        Promise.all([
+          ask('http://127.0.0.1:41000/none'),
+          ask('http://127.0.0.1:41000/cut'),
+          ask('http://127.0.0.1:41000/slow', { signal: AbortSignal.timeout(100) }),
+          ask('http://127.0.0.1:41000/slow-body', { signal: AbortSignal.timeout(100) }),
+        ]),
+    }))
+    const timeout = { name: 'TimeoutError', message: 'The operation was aborted due to timeout' }
+    assert.deepEqual(records[1].settled, [
+      {
+        answer: [
+          { name: 'TypeError', message: 'fetch failed' },
+          { name: 'TypeError', message: 'terminated' },
+          timeout,
+          timeout,
+        ],
+        op: 0,
+      },
+    ])
+  })
+
+  it('clears a timeout once no request or body waits under it, as Rust drops its timer', async () => {
+    const steps = [
+      { observe: true, served: { 'GET /health': [{ status: 200, body: 'up' }] } },
+      { advance: 100 },
+    ]
+    const { records } = await played(steps, () => ({
+      observe: async () => {
+        const lifetime = new AbortController()
+        setTimeout(() => lifetime.abort(new Error('over')), 5000)
+        const attempt = AbortSignal.any([lifetime.signal, AbortSignal.timeout(500)])
+        const answer = await ask('http://127.0.0.1:41000/health', { signal: attempt })
+        await after(100)
+        return { ...answer, aborted: attempt.aborted }
+      },
+    }))
+    // The attempt's 500 ms went with its request: only the lifetime and the sleep wait.
+    assert.deepEqual(records[0].pending, [{ op: 0, waits: [{ timer: 5000 }, { timer: 100 }] }])
+    assert.deepEqual(records[1].settled, [
+      { answer: { status: 200, body: 'up', aborted: false }, op: 0 },
+    ])
+  })
+
+  it('gives a reply of no content no body', async () => {
+    const steps = [{ observe: true, served: { 'POST /prompt': [{ status: 204 }] } }]
+    const { records } = await played(steps, () => ({
+      observe: () =>
+        fetch('http://127.0.0.1:41000/prompt', { method: 'POST' }).then((reply) => reply.body),
+    }))
+    assert.deepEqual(records[0].settled, [{ answer: { undefined: true }, op: 0 }])
+  })
+
+  it('hands out free ports on loopback from 41000 up, as Rust does', async () => {
+    const { records } = await played([{ observe: true }], () => ({
+      observe: async () => {
+        const { createServer } = await import('node:net')
+        const ports = []
+        for (const _ of [1, 2]) {
+          const server = createServer()
+          await new Promise((listening) => server.listen(0, '127.0.0.1', listening))
+          ports.push(server.address().port)
+          await new Promise((closed) => server.close(closed))
+        }
+        return ports
+      },
+    }))
+    assert.deepEqual(records[0].settled, [{ answer: [41000, 41001], op: 0 }])
+  })
+})
+
 describe("Pi's wait for its acknowledgement", () => {
   it('ends at its deadline on a clock that moves only with timers', async () => {
     // The last millisecond is slept out: read through, it never ended here.

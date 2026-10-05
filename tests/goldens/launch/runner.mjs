@@ -9,9 +9,13 @@
  * wait to be released (`holdLooks`). The others are recorded:
  * - `prepare`, `observe`, `ready`, `deliver`, `started` begin that work on
  *   the adapter or its window, through a pane host that answers each
- *   request as the step scripts it, at once or held (`{held: true}`);
- * - `release` answers a held host request (`release: op, answer`) or a
- *   held look (`release: 'look'`);
+ *   request as the step scripts it (`answers`), at once or held
+ *   (`{held: true}`), and a peer on loopback that answers each `fetch` by
+ *   its route as the step scripts it (`served`, `scriptedPeer`);
+ * - `release` answers a held host request (`release: op, answer`), a held
+ *   fetch (`release: 'GET /session', answer`) or a held look
+ *   (`release: 'look'`); `releaseBody` ends a held body (`releaseBody:
+ *   route, body`);
  * - `advance` moves the clock by that many milliseconds, firing the timers
  *   due on the way one time at a time;
  * - `close` closes the window as the engine does: its launch's files go,
@@ -22,9 +26,13 @@
  *
  * Nothing waits on the machine: the clock (`Date.now`, timers, the timers
  * of `node:timers/promises` and `AbortSignal.timeout`) starts at
- * 2026-09-19T12:00:00Z and moves only when a step advances it, and
- * randomness (`randomUUID`, `randomBytes`) is the stream the Rust fakes
- * hand out, byte `i` being `(i * 7 + 3) % 256`.
+ * 2026-09-19T12:00:00Z and moves only when a step advances it; randomness
+ * (`randomUUID`, `randomBytes`) is the stream the Rust fakes hand out, byte
+ * `i` being `(i * 7 + 3) % 256`; a free port on loopback is the next from
+ * 41000 up, as Rust's `FixedPorts` hands them out; and `fetch` is the
+ * scripted peer. A timeout signal's timer stands while a request or a body
+ * waits under it, and is cleared once none does, as Rust's armed timer
+ * goes with the waits it bounded.
  *
  * Timers fire when due, one at a time, the first armed of those due
  * together first, each in a turn of the loop of its own, and the work runs
@@ -44,8 +52,9 @@
  * path under the root is `$ROOT/…`; the process this runs as is `$PID`,
  * one long dead `$DEAD`, a second live one a scenario names `$OTHER`; and
  * it lists the work that settled (its step, and what it answered or
- * threw), the work still waiting, the requests asked, the size of every
- * random draw, and what the step did to the tree under the root.
+ * threw), the work still waiting, the requests asked of the host and, when
+ * there were any, of the peer (`fetches`), the size of every random draw,
+ * and what the step did to the tree under the root.
  *
  * A step may carry `kept`: a difference Rust keeps from Node on purpose,
  * why, and how Rust's own work settles instead.
@@ -64,6 +73,7 @@ import { fakeExecutable } from '../../helpers.mjs'
 
 const require = createRequire(import.meta.url)
 const crypto = require('node:crypto')
+const net = require('node:net')
 const timersPromises = require('node:timers/promises')
 
 /** A process id no process has: macOS's pids stop below it, and Windows' are multiples of four. */
@@ -208,6 +218,9 @@ function install(context) {
     clearTimeout: globalThis.clearTimeout,
     now: Date.now,
     abortTimeout: AbortSignal.timeout,
+    abortAny: AbortSignal.any,
+    fetch: globalThis.fetch,
+    createServer: net.createServer,
     promisedTimeout: timersPromises.setTimeout,
     randomUUID: crypto.randomUUID,
     randomBytes: crypto.randomBytes,
@@ -215,17 +228,50 @@ function install(context) {
   globalThis.setTimeout = clock.setTimeout
   globalThis.clearTimeout = clock.clearTimeout
   Date.now = clock.now
+  // A timeout signal's timer, and the signals a signal is made of: a wait
+  // under a signal holds every timeout it comes from (`context.signals`).
+  const timeouts = new Map()
+  const sources = new Map()
   AbortSignal.timeout = (ms) => {
     const controller = new AbortController()
-    clock.setTimeout(
+    const handle = clock.setTimeout(
       () =>
         controller.abort(
           new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
         ),
       ms,
     )
+    timeouts.set(controller.signal, { handle, waits: 0 })
     return controller.signal
   }
+  AbortSignal.any = (signals) => {
+    const made = saved.abortAny.call(AbortSignal, signals)
+    sources.set(made, [...signals])
+    return made
+  }
+  context.signals = {
+    /** A wait under `signal` begun: what ends it, clearing each timeout no wait is under now. */
+    hold(signal) {
+      const held = []
+      const walk = (each) => {
+        if (timeouts.has(each)) held.push(timeouts.get(each))
+        for (const source of sources.get(each) ?? []) walk(source)
+      }
+      if (signal !== undefined && signal !== null) walk(signal)
+      for (const timeout of held) timeout.waits += 1
+      let over = false
+      return () => {
+        if (over) return
+        over = true
+        for (const timeout of held) {
+          timeout.waits -= 1
+          if (timeout.waits === 0) clock.clearTimeout(timeout.handle)
+        }
+      }
+    },
+  }
+  globalThis.fetch = (input, init) => context.peer.fetch(input, init)
+  net.createServer = () => portServer(context)
   timersPromises.setTimeout = (ms, value) =>
     new Promise((resolve) => clock.setTimeout(() => resolve(value), ms))
   let drawn = 0
@@ -250,6 +296,9 @@ function install(context) {
     globalThis.clearTimeout = saved.clearTimeout
     Date.now = saved.now
     AbortSignal.timeout = saved.abortTimeout
+    AbortSignal.any = saved.abortAny
+    globalThis.fetch = saved.fetch
+    net.createServer = saved.createServer
     timersPromises.setTimeout = saved.promisedTimeout
     crypto.randomUUID = saved.randomUUID
     crypto.randomBytes = saved.randomBytes
@@ -436,6 +485,188 @@ function scriptedLooks(context) {
   }
 }
 
+/** The statuses a response has no body with. */
+const NULL_BODY = new Set([101, 204, 205, 304])
+
+/**
+ * A peer on loopback the scene scripts, the twin of Rust's
+ * `ScriptedLoopback` (`crates/cf-harness/src/testing/peer.rs`): `fetch`
+ * answered by its route (`GET /session`: the method and the URL's path)
+ * with the next answer scripted for it (`served`): a head at once
+ * (`{status, body}`, the body its text, `{held: true}` until a step ends it,
+ * or `{cut: true}`), none (`{noHead: true}`), or held until a step releases
+ * it (`{held: true}`). Each request is written down as its caller wrote it.
+ * The failures are undici's (probed on Node v26.8.1): no head is `TypeError:
+ * fetch failed`, a body broken off `TypeError: terminated`, and an abort of
+ * the request's signal rejects the head or errors the body still coming
+ * with the signal's own reason. A request with no answer left gets no head.
+ */
+function scriptedPeer(context) {
+  const left = new Map()
+  const heads = []
+  const bodies = []
+  const drop = (list, entry) => list.splice(list.indexOf(entry), 1)
+  const failed = () => new TypeError('fetch failed')
+  // The body as a stream that says when its reader is done with it.
+  const response = (route, answer, signal, work, over) => {
+    if (NULL_BODY.has(answer.status)) {
+      over()
+      return new Response(null, { status: answer.status })
+    }
+    let controller
+    let rest = null
+    const stream = new ReadableStream({
+      start: (made) => {
+        controller = made
+      },
+      // A stream pulls again from inside `enqueue`: the bytes are taken first.
+      pull: () => {
+        if (rest === null) return
+        if (rest.length > 0) {
+          const bytes = rest
+          rest = new Uint8Array(0)
+          controller.enqueue(bytes)
+          return
+        }
+        controller.close()
+        over()
+      },
+      cancel: over,
+    })
+    const body = answer.body
+    if (typeof body === 'string') rest = new TextEncoder().encode(body)
+    else if (body?.cut === true) {
+      controller.error(new TypeError('terminated'))
+      over()
+    } else {
+      const entry = {
+        route,
+        work,
+        send: (text) => {
+          rest = new Uint8Array(0)
+          controller.enqueue(new TextEncoder().encode(text))
+        },
+        cut: (cause) => {
+          controller.error(cause)
+          over()
+        },
+      }
+      bodies.push(entry)
+      signal?.addEventListener(
+        'abort',
+        () => {
+          if (bodies.includes(entry)) {
+            drop(bodies, entry)
+            entry.cut(signal.reason)
+          }
+        },
+        { once: true },
+      )
+    }
+    return new Response(stream, { status: answer.status })
+  }
+  return {
+    script(served) {
+      for (const [route, list] of Object.entries(served ?? {})) {
+        left.set(route, [...(left.get(route) ?? []), ...list])
+      }
+    },
+    async fetch(input, init = {}) {
+      const url = String(input instanceof Request ? input.url : input)
+      const method = String(init.method ?? 'GET').toUpperCase()
+      const route = `${method} ${new URL(url).pathname}`
+      context.fetches.push(
+        written(context, {
+          route,
+          url,
+          headers: Object.entries(init.headers ?? {}),
+          body: init.body ?? null,
+        }),
+      )
+      const signal = init.signal
+      signal?.throwIfAborted()
+      const answer = left.get(route)?.shift()
+      if (answer === undefined || answer.noHead === true) throw failed()
+      const over = context.signals.hold(signal)
+      const work = context.als.getStore()
+      if (answer.held !== true) return response(route, answer, signal, work, over)
+      return new Promise((resolve, reject) => {
+        const entry = {
+          route,
+          work,
+          answer: (given) => {
+            if (given?.noHead === true) {
+              over()
+              reject(failed())
+            } else resolve(response(route, given, signal, work, over))
+          },
+        }
+        heads.push(entry)
+        signal?.addEventListener(
+          'abort',
+          () => {
+            if (heads.includes(entry)) {
+              drop(heads, entry)
+              over()
+              reject(signal.reason)
+            }
+          },
+          { once: true },
+        )
+      })
+    },
+    /** Answers the request to `route` held longest: whether one was. */
+    release(route, answer) {
+      const entry = heads.find((each) => each.route === route)
+      if (entry === undefined) return false
+      drop(heads, entry)
+      entry.answer(answer)
+      return true
+    },
+    /** Ends the body held longest of a reply to `route`, its text or `{cut: true}`: whether one was. */
+    releaseBody(route, body) {
+      const entry = bodies.find((each) => each.route === route)
+      if (entry === undefined) return false
+      drop(bodies, entry)
+      if (body?.cut === true) entry.cut(new TypeError('terminated'))
+      else entry.send(body)
+      return true
+    },
+    /** The routes `work` waits on, a head or a body held, in the order asked. */
+    waits: (work) =>
+      [...heads, ...bodies].filter((entry) => entry.work === work).map((entry) => entry.route),
+    unused(optional = []) {
+      return [...left]
+        .filter(([route, list]) => list.length > 0 && !optional.includes(route))
+        .map(([route]) => route)
+        .sort()
+    },
+  }
+}
+
+/**
+ * What `net.createServer` gives `freeLoopbackPort` (`src/channels.js`): a
+ * server that listens on the next free port from 41000 up, as Rust's
+ * `FixedPorts` hands them out, and on nothing at all.
+ */
+function portServer(context) {
+  let port = null
+  const server = {
+    once: () => server,
+    listen: (_port, _host, listening) => {
+      port = context.ports.shift()
+      queueMicrotask(listening)
+      return server
+    },
+    address: () => ({ address: '127.0.0.1', family: 'IPv4', port }),
+    close: (closed) => {
+      queueMicrotask(() => closed?.())
+      return server
+    },
+  }
+  return server
+}
+
 /** A live process of the scenario's own besides this one: `$OTHER`. */
 function startOther() {
   return WINDOWS
@@ -519,6 +750,7 @@ function beginOwn(context, index, step) {
     })
   } else {
     context.host.script(step.answers)
+    context.peer.script(step.served)
     const target = {
       launch: context.launch,
       pane: { id: 'p1-zeus', generation: 1 },
@@ -550,6 +782,7 @@ function pending(context) {
       waits: [
         ...context.clock.waits(entry.op).map((timer) => ({ timer })),
         ...context.host.waits(entry.op).map((request) => ({ request })),
+        ...context.peer.waits(entry.op).map((fetch) => ({ fetch })),
         ...Array.from({ length: context.looks.waits(entry.op) }, () => ({ look: true })),
       ],
     }))
@@ -561,6 +794,7 @@ function signature(context) {
     context.work.map((entry) => entry.settled !== null),
     pending(context),
     context.requests.length,
+    context.fetches.length,
     context.draws.length,
     context.machine.begun(),
   ])
@@ -613,13 +847,21 @@ function fire(clock, until) {
 async function record(context, index, step) {
   const before = tree(context.root)
   context.requests = []
+  context.fetches = []
   context.draws = []
   if (step.release !== undefined) {
+    // A route has a space in it (`GET /session`), a host's operation none.
     const released =
       step.release === 'look'
         ? context.looks.release()
-        : context.host.release(step.release, step.answer)
+        : step.release.includes(' ')
+          ? context.peer.release(step.release, step.answer)
+          : context.host.release(step.release, step.answer)
     if (!released) throw new Error(`${step.release}: nothing held to release`)
+  } else if (step.releaseBody !== undefined) {
+    if (!context.peer.releaseBody(step.releaseBody, step.body)) {
+      throw new Error(`${step.releaseBody}: no body held to end`)
+    }
   } else if (step.advance !== undefined) {
     const until = context.clock.now() + step.advance
     await settleDown(context)
@@ -637,12 +879,13 @@ async function record(context, index, step) {
     .filter((entry) => entry.settled !== null)
     .map((entry) => ({ ...entry.settled, op: entry.op }))
   context.work = context.work.filter((entry) => entry.settled === null)
-  const unused = context.host.unused(step.optional)
+  const unused = [...context.host.unused(step.optional), ...context.peer.unused(step.optional)]
   return written(context, {
     step: index,
     settled,
     pending: pending(context),
     requests: context.requests,
+    ...(context.fetches.length > 0 ? { fetches: context.fetches } : {}),
     ...(unused.length > 0 ? { unused } : {}),
     draws: context.draws,
     tree: changes(before, tree(context.root)),
@@ -662,7 +905,9 @@ export async function play(scenario, adapters = ADAPTERS) {
     launchId: null,
     work: [],
     requests: [],
+    fetches: [],
     draws: [],
+    ports: Array.from({ length: 100 }, (_, index) => 41_000 + index),
     als: new AsyncLocalStorage(),
   }
   context.clock = fakeClock(() => context.als.getStore())
@@ -676,6 +921,7 @@ export async function play(scenario, adapters = ADAPTERS) {
     context.env = realValue(context, scenario.env)
     await fs.mkdir(path.join(root, 'bin'), { recursive: true })
     context.host = scriptedHost(context)
+    context.peer = scriptedPeer(context)
     context.looks = scriptedLooks(context)
     context.adapter = adapters[scenario.harness]({
       env: context.env,

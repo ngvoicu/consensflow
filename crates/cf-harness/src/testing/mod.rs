@@ -34,7 +34,7 @@ mod children;
 mod peer;
 
 pub use children::ScriptedProcesses;
-pub use peer::{ScriptedLoopback, Sent, Served};
+pub use peer::{route, ScriptedLoopback, Sent, Served};
 
 thread_local! {
     /// The work the driver polls now, which a wait made meanwhile belongs to.

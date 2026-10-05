@@ -127,8 +127,8 @@ fn release<T>(held: &RefCell<VecDeque<Held<T>>>, route: &str, answer: T) -> bool
     true
 }
 
-/// A request's route: its method and its URL's path.
-fn route(request: &Request) -> String {
+/// A request's route: its method and its URL's path (`GET /session`).
+pub fn route(request: &Request) -> String {
     let method = match request.method {
         Method::Get => "GET",
         Method::Post => "POST",

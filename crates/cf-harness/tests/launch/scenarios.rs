@@ -22,8 +22,11 @@ use cf_harness::contract::{
     Adapter, Admission, Agent, HostError, Launch, LaunchId, Observed, Pane, Readiness, Window,
 };
 use cf_harness::forget_launch;
+use cf_harness::seams::loopback::BodyFailed;
 use cf_harness::seams::{Services, Time};
-use cf_harness::testing::{fake_executable, Answer, Driver, Fakes, OtherProcess, ScriptedHost};
+use cf_harness::testing::{
+    fake_executable, route, Answer, Driver, Fakes, OtherProcess, ScriptedHost, Sent, Served,
+};
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
@@ -156,6 +159,26 @@ fn answer(names: &Names, given: &Value) -> Answer {
         return Answer::Held;
     }
     Answer::Now(response(names, given))
+}
+
+/// A peer's answer as a scenario writes it: `{held: true}`, `{noHead:
+/// true}`, or a head's status and its body (its text, `{held: true}`,
+/// `{cut: true}`).
+fn served(given: &Value) -> Served {
+    if given.get("held") == Some(&json!(true)) {
+        return Served::Held;
+    }
+    if given.get("noHead") == Some(&json!(true)) {
+        return Served::NoHead;
+    }
+    let status = u16::try_from(given["status"].as_u64().unwrap()).unwrap();
+    let body = match &given["body"] {
+        Value::String(text) => Sent::Now(text.as_bytes().to_vec()),
+        held if held.get("held") == Some(&json!(true)) => Sent::Held,
+        cut if cut.get("cut") == Some(&json!(true)) => Sent::Cut,
+        _ => Sent::Now(Vec::new()),
+    };
+    Served::Head { status, body }
 }
 
 /// A host's response as a scenario writes it: `{throws: message}` for a
@@ -352,6 +375,10 @@ fn begin_prepare(played: &mut Played, id: usize, given: &Value) {
 
 /// Begins what a step asks the window.
 fn begin_asking(played: &mut Played, id: usize, step: &Value) {
+    for (route, answers) in step["served"].as_object().into_iter().flatten() {
+        let answers = answers.as_array().unwrap().iter().map(served);
+        played.fakes.loopback.serve(route, answers);
+    }
     for (op, answers) in step["answers"].as_object().into_iter().flatten() {
         let answers: Vec<Answer> = answers
             .as_array()
@@ -475,6 +502,14 @@ fn pending(played: &Played) -> Vec<Value> {
                     .into_iter()
                     .map(|request| json!({ "request": request })),
             );
+            waits.extend(
+                played
+                    .fakes
+                    .loopback
+                    .waits(op)
+                    .into_iter()
+                    .map(|fetch| json!({ "fetch": fetch })),
+            );
             waits.extend((0..played.fakes.records.waits(op)).map(|_| json!({ "look": true })));
             assert!(
                 !waits.is_empty(),
@@ -565,13 +600,25 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
         let given = played.names.real(&step["prepare"]);
         begin_prepare(played, index, &given);
     } else if let Some(op) = step["release"].as_str() {
+        // A route has a space in it (`GET /session`), a host's operation none.
         let released = if op == "look" {
             played.fakes.records.release()
+        } else if op.contains(' ') {
+            played.fakes.loopback.release(op, served(&step["answer"]))
         } else {
             let given = response(&played.names, &step["answer"]);
             played.host.release(op, given)
         };
         assert!(released, "{op}: nothing held to release");
+    } else if let Some(route) = step["releaseBody"].as_str() {
+        let body = match &step["body"] {
+            Value::String(text) => Ok(text.as_bytes().to_vec()),
+            _ => Err(BodyFailed::Cut),
+        };
+        assert!(
+            played.fakes.loopback.release_body(route, body),
+            "{route}: no body held to end"
+        );
     } else if let Some(millis) = step["advance"].as_i64() {
         advance = Some(millis);
     } else if step.get("close").is_some() {
@@ -596,10 +643,35 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
         .map(|(op, body)| json!({ "op": op, "body": body }))
         .collect();
     fields.insert("requests".to_owned(), json!(asked));
-    let unused = played.host.unused();
-    let optional = step["optional"].as_array().cloned().unwrap_or_default();
-    let unused: Vec<String> = unused
+    let fetches: Vec<Value> = played
+        .fakes
+        .loopback
+        .take_asked()
         .into_iter()
+        .map(|request| {
+            let headers: Vec<Value> = request
+                .headers
+                .iter()
+                .map(|(name, value)| json!([name, value]))
+                .collect();
+            let body = request
+                .body
+                .as_deref()
+                .map(|bytes| String::from_utf8_lossy(bytes).into_owned());
+            json!({ "route": route(&request), "url": request.url, "headers": headers, "body": body })
+        })
+        .collect();
+    if !fetches.is_empty() {
+        fields.insert("fetches".to_owned(), json!(fetches));
+    }
+    // The host's operations and then the peer's routes, each in order, as
+    // Node's runner lists them.
+    let optional = step["optional"].as_array().cloned().unwrap_or_default();
+    let unused: Vec<String> = played
+        .host
+        .unused()
+        .into_iter()
+        .chain(played.fakes.loopback.unused())
         .filter(|op| !optional.contains(&json!(op)))
         .collect();
     if !unused.is_empty() {
