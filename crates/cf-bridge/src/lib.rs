@@ -3,11 +3,15 @@
 //! their responses, handlers run off the reader's thread, a bounded writer
 //! queue, frame size limits and an orderly shutdown. The pane host runs it as
 //! [`Role::Host`]; which end a program is decides the ids it mints and the
-//! ones it accepts.
+//! ones it accepts. With the `local` feature, [`local`] is the daemon's end of
+//! the same protocol: one thread, over tokio streams.
 
 // One function calls into C, to make a pipe non-blocking; everything else is safe Rust.
 #![deny(unsafe_code)]
 #![deny(clippy::undocumented_unsafe_blocks)]
+
+#[cfg(feature = "local")]
+pub mod local;
 
 use std::collections::HashMap;
 use std::fmt;
