@@ -1,0 +1,24 @@
+[package]
+name = "cf-engine"
+description = "ConsensFlow's engine: what its windows are told, as text (delivery text, handoff, role instructions)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+cf-base.workspace = true
+# The work tiers and how each one reads, for the chief's text.
+cf-catalog.workspace = true
+cf-proto.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+# The ported tests keep the patterns they matched with.
+[dev-dependencies]
+regex.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

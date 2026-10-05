@@ -421,6 +421,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cf-engine"
+version = "3.0.0-alpha.73"
+dependencies = [
+ "cf-base",
+ "cf-catalog",
+ "cf-proto",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "cf-harness"
 version = "3.0.0-alpha.73"
 dependencies = [
