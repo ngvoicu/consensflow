@@ -18,12 +18,14 @@ use std::rc::Rc;
 use cf_base::env::Env;
 use cf_base::path;
 use cf_harness::claude::ClaudeAdapter;
+use cf_harness::codex::CodexAdapter;
 use cf_harness::contract::{
     Adapter, Admission, Agent, HostError, Launch, LaunchId, Observed, Pane, Readiness, Window,
 };
 use cf_harness::forget_launch;
 use cf_harness::pi::PiAdapter;
 use cf_harness::seams::loopback::BodyFailed;
+use cf_harness::seams::processes::Failed;
 use cf_harness::seams::{Services, Time};
 use cf_harness::testing::{
     fake_executable, route, Answer, ChildScript, Driver, Ends, Fakes, OtherProcess, ScriptedHost,
@@ -393,17 +395,22 @@ fn begin_prepare(played: &mut Played, id: usize, given: &Value) {
     });
 }
 
+/// Scripts the programs a step has `spawn` start.
+fn script_children(played: &Played, step: &Value) {
+    for (name, scripts) in step["children"].as_object().into_iter().flatten() {
+        for script in scripts.as_array().unwrap() {
+            played.fakes.processes.child(name, child(script));
+        }
+    }
+}
+
 /// Begins what a step asks the window.
 fn begin_asking(played: &mut Played, id: usize, step: &Value) {
     for (route, answers) in step["served"].as_object().into_iter().flatten() {
         let answers = answers.as_array().unwrap().iter().map(served);
         played.fakes.loopback.serve(route, answers);
     }
-    for (name, scripts) in step["children"].as_object().into_iter().flatten() {
-        for script in scripts.as_array().unwrap() {
-            played.fakes.processes.child(name, child(script));
-        }
-    }
+    script_children(played, step);
     for (op, answers) in step["answers"].as_object().into_iter().flatten() {
         let answers: Vec<Answer> = answers
             .as_array()
@@ -509,6 +516,35 @@ fn the_window_kept_is_the_one_prepared_last_and_records_go_in_the_order_begun() 
     assert_eq!(records, [json!({"op": 0}), json!({"op": 1})]);
 }
 
+#[test]
+fn a_stand_in_prints_what_it_says_and_fails_in_the_words_execfile_fails_in() {
+    let file = Path::new("/root/bin/codex");
+    let answer = |said: Value| stand_in_answer(file, "mcp list --json", &said);
+    assert_eq!(answer(json!({"stdout": "[]\n"})), Ok("[]\n".to_owned()));
+    assert_eq!(
+        answer(json!({"exit": 0, "stderr": "ignored"})),
+        Ok(String::new())
+    );
+    assert_eq!(
+        answer(json!({"stdout": "half", "stderr": "boom\n", "exit": 3})),
+        Err(Failed {
+            message: "Command failed: /root/bin/codex mcp list --json\nboom\n".to_owned(),
+            code: Some(3),
+            killed: false,
+            stdout: "half".to_owned(),
+        })
+    );
+    assert_eq!(
+        answer(json!({"overflows": true})),
+        Err(Failed {
+            message: "stdout maxBuffer length exceeded".to_owned(),
+            code: None,
+            killed: false,
+            stdout: String::new(),
+        })
+    );
+}
+
 /// The work still waiting, each with what it waits on: its timers (how long
 /// until each is due), its held requests, its held looks. Work waiting on
 /// nothing a step controls waits on what no step can release: a defect of
@@ -551,11 +587,52 @@ fn pending(played: &Played) -> Vec<Value> {
         .collect()
 }
 
+/// How many runs a stand-in CLI that says what it answers is scripted for:
+/// it answers as often as it is asked, and a scripted run answers once.
+const ASKED: usize = 100;
+
+/// What a stand-in CLI at `file` answers to `arguments` (`answeringBy`,
+/// runner.mjs): what it prints, or how it fails.
+fn stand_in_answer(file: &Path, arguments: &str, said: &Value) -> Result<String, Failed> {
+    let stdout = said["stdout"].as_str().unwrap_or_default().to_owned();
+    if said["overflows"] == json!(true) {
+        return Err(Failed {
+            message: "stdout maxBuffer length exceeded".to_owned(),
+            code: None,
+            killed: false,
+            stdout: String::new(),
+        });
+    }
+    match said["exit"].as_i64().filter(|code| *code != 0) {
+        Some(code) => Err(Failed {
+            message: format!(
+                "Command failed: {} {arguments}\n{}",
+                file.display(),
+                said["stderr"].as_str().unwrap_or_default()
+            ),
+            code: Some(i32::try_from(code).unwrap()),
+            killed: false,
+            stdout,
+        }),
+        None => Ok(stdout),
+    }
+}
+
 /// Sets the root up as a step says: false for a step that is recorded.
 fn set_up(played: &mut Played, step: &Value) -> bool {
     let names = &played.names;
     if let Some(name) = step["executable"].as_str() {
-        fake_executable(Path::new(&path::join(&[&names.root, "bin", name])));
+        let file = fake_executable(Path::new(&path::join(&[&names.root, "bin", name])));
+        let program = file.file_stem().unwrap().to_string_lossy().into_owned();
+        for (arguments, said) in step["says"].as_object().into_iter().flatten() {
+            for _ in 0..ASKED {
+                let answer = stand_in_answer(&file, arguments, said);
+                played
+                    .fakes
+                    .processes
+                    .run_answer(&format!("{program} {arguments}"), answer);
+            }
+        }
         return true;
     }
     if step.get("write").is_some() {
@@ -628,6 +705,7 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
     let before = tree(&root);
     let mut advance = None;
     if step.get("prepare").is_some() {
+        script_children(played, step);
         let given = played.names.real(&step["prepare"]);
         begin_prepare(played, index, &given);
     } else if let Some(op) = step["release"].as_str() {
@@ -726,6 +804,7 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
 fn adapter(harness: &str, services: &Services) -> Rc<dyn Adapter> {
     match harness {
         "claude-code" => Rc::new(ClaudeAdapter::new(services)),
+        "codex" => Rc::new(CodexAdapter::new(services)),
         "pi" => Rc::new(PiAdapter::new(services)),
         other => panic!("no adapter for {other}"),
     }

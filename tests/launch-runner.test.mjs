@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import { send } from '../src/channels/pi.js'
+import { BUNDLE_CF } from '../src/core/pane-cf.js'
+import { runnable } from '../src/harnesses.js'
 import { play } from './goldens/launch/runner.mjs'
 
 /** Plays `steps` against a stand-in adapter whose window does what `window` says. */
@@ -454,6 +458,83 @@ describe("Pi's wait for its acknowledgement", () => {
         answer: { ok: false, admitted: null, error: 'uncertain', cause: 'admission-unknown' },
         op: 0,
       },
+    ])
+  })
+})
+
+describe("the launch recorder's stand-ins and bundle", () => {
+  const WINDOWS = process.platform === 'win32'
+  /** Runs the stand-in `name` of the scenario's `bin` with `args`, as an adapter runs a CLI. */
+  const ask = async (env, name, args, options = {}) => {
+    const file = path.join(path.dirname(env.HOME), 'bin', WINDOWS ? `${name}.cmd` : name)
+    const run = runnable(file, args, env)
+    return promisify(execFile)(run.file, run.args, { ...run.options, env, ...options }).then(
+      ({ stdout }) => ({ stdout }),
+      (cause) => ({ code: cause.code, stdout: cause.stdout, stderr: cause.stderr }),
+    )
+  }
+
+  it('answers a run by its arguments: what it prints, what it says apart and how it exits', async () => {
+    const says = {
+      'queue --help': { stdout: 'usage\n' },
+      'mcp list --json': { stdout: 'half', stderr: 'boom\n', exit: 3 },
+    }
+    const steps = [{ executable: 'codex', says }, { observe: true }]
+    const { records } = await played(steps, (env) => ({
+      observe: async () => [
+        await ask(env, 'codex', ['queue', '--help']),
+        await ask(env, 'codex', ['mcp', 'list', '--json']),
+        await ask(env, 'codex', ['--version']),
+      ],
+    }))
+    const [help, failed, unasked] = records[0].settled[0].answer
+    assert.deepEqual(help, { stdout: 'usage\n' })
+    assert.deepEqual(failed, { code: 3, stdout: 'half', stderr: 'boom\n' })
+    assert.equal(unasked.code, 99)
+    assert.match(unasked.stderr, /a stand-in not told to answer: --version/)
+  })
+
+  it('says more than any buffer holds when it overflows', async () => {
+    const steps = [{ executable: 'codex', says: { list: { overflows: true } } }, { observe: true }]
+    const { records } = await played(steps, (env) => ({
+      observe: () => ask(env, 'codex', ['list'], { maxBuffer: 1024 * 1024 }),
+    }))
+    assert.equal(records[0].settled[0].answer.code, 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER')
+  })
+
+  it('starts the children a prepare says it starts, as it does for any other step', async () => {
+    const steps = [
+      {
+        prepare: { launchId: 'launch-1' },
+        children: { codex: [{ lines: ['{"id":1}'], ends: 'asked' }] },
+      },
+    ]
+    const { records } = await played(steps, () => ({
+      prepare: async () => {
+        // Imported once the recorder has put its own where the adapters read it.
+        const { spawn } = await import('node:child_process')
+        const [program, args] = WINDOWS
+          ? [process.execPath, ['C:\\bin\\codex.mjs', 'app-server']]
+          : ['/bin/codex', ['app-server']]
+        const child = spawn(program, args, { stdio: ['pipe', 'pipe', 'ignore'] })
+        child.stdin.write('hello\n')
+        child.kill()
+        return { argv: [], env: {}, dropEnv: [], nativeSession: null, launch: {} }
+      },
+    }))
+    assert.deepEqual(records[0].spawned, ['codex app-server'])
+    assert.deepEqual(records[0].written, ['hello'])
+  })
+
+  it('writes the bundle’s native cf under the root, wherever the checkout is', async () => {
+    const { records } = await played([{ observe: true }], () => ({
+      observe: async () => [BUNDLE_CF, `${BUNDLE_CF} codex-session`, 'elsewhere/cf'],
+    }))
+    const cf = WINDOWS ? 'cf.exe' : 'cf'
+    assert.deepEqual(records[0].settled[0].answer, [
+      `$ROOT/bundle/bin/${cf}`,
+      `$ROOT/bundle/bin/${cf} codex-session`,
+      'elsewhere/cf',
     ])
   })
 })

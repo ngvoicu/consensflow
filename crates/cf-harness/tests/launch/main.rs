@@ -9,6 +9,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod claude;
+mod codex;
 mod coverage;
 mod pi;
 mod scenarios;

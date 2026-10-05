@@ -1,6 +1,16 @@
-//! Codex: where it keeps a thread's rollout, what the rollout says of the
+//! Codex: its windows, the channel to the broker of the supervisor they run
+//! under, where it keeps a thread's rollout, what the rollout says of the
 //! thread, and the quota it reports ahead of time.
 
+mod adapter;
+mod channel;
+#[cfg(test)]
+mod fakes;
+mod launch;
+mod mcp;
 pub(crate) mod paths;
 mod quota;
 pub mod record;
+mod role;
+
+pub use adapter::CodexAdapter;

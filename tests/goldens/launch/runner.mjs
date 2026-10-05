@@ -4,15 +4,17 @@
  * Rust player (`crates/cf-harness/tests/launch/scenarios.rs`).
  *
  * A scenario is data. Some steps set the scene and record nothing: stand-in
- * CLIs, files, a harness's own status files, what the engine tells a
- * window (`opened`, `follow`), and whether looks at a harness's record
- * wait to be released (`holdLooks`). The others are recorded:
+ * CLIs (one that is given `says` answers a run by its arguments), files, a
+ * harness's own status files, what the engine tells a window (`opened`,
+ * `follow`), and whether looks at a harness's record wait to be released
+ * (`holdLooks`). The others are recorded:
  * - `prepare`, `observe`, `ready`, `deliver`, `started` begin that work on
  *   the adapter or its window, through a pane host that answers each
  *   request as the step scripts it (`answers`), at once or held
  *   (`{held: true}`), for the pane `p1-zeus` of generation 1 unless the
- *   step names its `pane`, and a peer on loopback that answers each `fetch`
- *   by its route as the step scripts it (`served`, `scriptedPeer`);
+ *   step names its `pane`, a peer on loopback that answers each `fetch`
+ *   by its route as the step scripts it (`served`, `scriptedPeer`), and the
+ *   programs `spawn` starts (`children`, `scriptedChildren`);
  * - `release` answers a held host request (`release: op, answer`), a held
  *   fetch (`release: 'GET /session', answer`) or a held look
  *   (`release: 'look'`); `releaseBody` ends a held body (`releaseBody:
@@ -51,7 +53,8 @@
  * Rust never does.
  *
  * A step's record is written so that it is the same on every run: every
- * path under the root is `$ROOT/…`; the process this runs as is `$PID`,
+ * path under the root is `$ROOT/…`, the bundle's native `cf` among them
+ * (`$ROOT/bundle/bin/cf`); the process this runs as is `$PID`,
  * one long dead `$DEAD`, a second live one a scenario names `$OTHER`; and
  * it lists the work that settled (its step, and what it answered or
  * threw), the work still waiting, the requests asked of the host and, when
@@ -71,9 +74,11 @@ import path from 'node:path'
 import { PassThrough } from 'node:stream'
 import { cachedAnswers } from '../../../hosts/lib/completion.js'
 import { claudeCodeAdapter } from '../../../src/adapters/claude-code.js'
+import { codexAdapter } from '../../../src/adapters/codex.js'
 import { piAdapter } from '../../../src/adapters/pi.js'
 import { forgetLaunch } from '../../../src/core/launch-files.js'
-import { fakeExecutable } from '../../helpers.mjs'
+import { BUNDLE_CF } from '../../../src/core/pane-cf.js'
+import { fakeExecutable, fakeNodeExecutable } from '../../helpers.mjs'
 
 const require = createRequire(import.meta.url)
 const childProcess = require('node:child_process')
@@ -99,7 +104,7 @@ const TIMEOUT_MAX = 2 ** 31 - 1
  */
 const MACHINE_WAITS = new Set(['FSREQCALLBACK', 'FSREQPROMISE', 'FILEHANDLECLOSEREQ', 'Immediate'])
 
-const ADAPTERS = { 'claude-code': claudeCodeAdapter, pi: piAdapter }
+const ADAPTERS = { 'claude-code': claudeCodeAdapter, codex: codexAdapter, pi: piAdapter }
 const WINDOWS = process.platform === 'win32'
 
 /** The mask files and folders are made under: the one nearly every machine has. */
@@ -372,7 +377,10 @@ function written(context, value) {
     return live === undefined ? value : live[0]
   }
   if (typeof value !== 'string') return value
-  let text = value.replaceAll(context.root, '$ROOT')
+  // The bundle's native `cf` is wherever this checkout is: a record names it
+  // under the root, where Rust's fakes put theirs (`bundle` in `testing`).
+  const bundled = path.join(context.root, 'bundle', 'bin', path.basename(BUNDLE_CF))
+  let text = value.replaceAll(BUNDLE_CF, bundled).replaceAll(context.root, '$ROOT')
   if (text.startsWith('$ROOT')) text = posix(text)
   // Half a surrogate pair is no text every JSON reader holds, and Rust's
   // strings never do: such a string is written as its UTF-16 code units.
@@ -832,10 +840,36 @@ function startOther() {
     : real.spawn('sleep', ['600'], { stdio: 'ignore' })
 }
 
+/**
+ * The source of a stand-in CLI that answers by its arguments (`says`: the
+ * arguments, a space between each, to what it prints and how it exits:
+ * `{stdout, stderr, exit}`, or `{overflows: true}` for more than any buffer
+ * holds), as Rust's `ScriptedProcesses` answers a run. One asked what it was
+ * not told to answer fails and says so.
+ */
+function answeringBy(says) {
+  return `const says = ${JSON.stringify(says)}
+const asked = process.argv.slice(2).join(' ')
+const said = says[asked]
+if (said === undefined) {
+  process.stderr.write(\`a stand-in not told to answer: \${asked}\\n\`)
+  process.exitCode = 99
+} else if (said.overflows === true) {
+  process.stdout.write('x'.repeat(1024 * 1024 + 1))
+} else {
+  process.stdout.write(said.stdout ?? '')
+  process.stderr.write(said.stderr ?? '')
+  process.exitCode = said.exit ?? 0
+}
+`
+}
+
 /** Sets the scene as a step says: false for a step that is recorded. */
 async function setUp(context, step) {
   if (step.executable !== undefined) {
-    fakeExecutable(path.join(context.root, 'bin', step.executable))
+    const file = path.join(context.root, 'bin', step.executable)
+    if (step.says === undefined) fakeExecutable(file)
+    else fakeNodeExecutable(file, answeringBy(step.says))
     return true
   }
   if (step.write !== undefined) {
@@ -894,6 +928,7 @@ function beginOwn(context, index, step) {
     )
   let work
   if (step.prepare !== undefined) {
+    context.children.script(step.children)
     const launch = realValue(context, step.prepare)
     context.launchId = launch.launchId
     work = settle(context.adapter.prepare(launch), (plan) => {

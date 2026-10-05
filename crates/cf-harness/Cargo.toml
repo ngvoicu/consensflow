@@ -7,6 +7,8 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+# A Codex broker's token, as the bridge's `randomBytes(24).toString('base64url')`.
+base64.workspace = true
 cf-base.workspace = true
 cf-process.workspace = true
 cf-proto.workspace = true
