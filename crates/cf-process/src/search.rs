@@ -31,10 +31,26 @@ fn candidate_names(command: &str, env: &Env) -> Vec<String> {
 pub fn on_path(command: &str, env: &Env) -> Option<PathBuf> {
     let separator = if cfg!(windows) { ';' } else { ':' };
     let path = env.os("PATH")?.to_string_lossy().into_owned();
+    find_in(
+        command,
+        path.split(separator)
+            .filter(|folder| !folder.is_empty())
+            .map(PathBuf::from),
+        env,
+    )
+}
+
+/// The first of `folders` that holds `command` as a file this user can
+/// start, by the names `env`'s system gives it, as an absolute path.
+pub fn find_in(
+    command: &str,
+    folders: impl IntoIterator<Item = PathBuf>,
+    env: &Env,
+) -> Option<PathBuf> {
     let names = candidate_names(command, env);
-    path.split(separator)
-        .filter(|folder| !folder.is_empty())
-        .flat_map(|folder| names.iter().map(move |name| Path::new(folder).join(name)))
+    folders
+        .into_iter()
+        .flat_map(|folder| names.iter().map(move |name| folder.join(name)))
         .find(|candidate| startable(candidate))
         .and_then(|found| std::path::absolute(found).ok())
 }

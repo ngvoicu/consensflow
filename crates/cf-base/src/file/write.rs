@@ -1,6 +1,7 @@
-//! A file written whole or not at all, step by step as `saveDocument`
-//! (`src/roster.js`) writes it, each step's failure said as the call of
-//! Node's that failed.
+//! Files and folders made as Node makes them, each failure said as the call
+//! of Node's that failed: a folder with every level above it, a file written
+//! in place, and a file written whole or not at all, step by step as
+//! `saveDocument` (`src/roster.js`) writes it.
 
 use std::ffi::OsString;
 use std::fs::{self, File};
@@ -26,29 +27,35 @@ pub fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), FileError> {
         .parent()
         .filter(|folder| !folder.as_os_str().is_empty())
     {
-        make_folder(folder)?;
+        make_folder(folder, 0o777)?;
     }
     let mut temporary = OsString::from(path.as_os_str());
     temporary.push(format!(".{}.tmp", std::process::id()));
     let temporary = PathBuf::from(temporary);
-    write_new(&temporary, bytes)
+    write_file(&temporary, bytes, 0o666)
         .and_then(|()| rename(&temporary, path))
         .map_err(|failure| remove(&temporary).err().unwrap_or(failure))
 }
 
-/// `mkdirSync(folder, { recursive: true })`, as Node's `MKDirpSync` walks it:
-/// a folder that is not there is made after the one above it, and the path
-/// in a failure is the whole one asked for, not the level that failed. A
+/// `mkdir(folder, { recursive: true, mode })`, as Node's `MKDirpSync` walks
+/// it: a folder that is not there is made after the one above it, with
+/// `mode` (less the umask; Windows has none), and the path in a failure is
+/// the whole one asked for, not the level that failed. A
 /// level the system refuses for permission, space or because it is not a
 /// directory ends the walk; one that is there already is a folder, or is
 /// not, which is `EEXIST` for the path itself and `ENOTDIR` for a file in
 /// the way of a level above. Reconstructed from Node's behaviour, not read
 /// from its C++ (not at hand): the walk's Unix answers are probed, its
 /// Windows ones are not.
-fn make_folder(folder: &Path) -> Result<(), FileError> {
+pub fn make_folder(folder: &Path, mode: u32) -> Result<(), FileError> {
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, mode);
+    #[cfg(not(unix))]
+    let _ = mode;
     let mut pending = vec![folder.to_path_buf()];
     while let Some(next) = pending.pop() {
-        let Err(error) = fs::create_dir(&next) else {
+        let Err(error) = builder.create(&next) else {
             continue;
         };
         let name = mkdir_error_name(&error);
@@ -109,13 +116,21 @@ fn not_a_folder(name: Option<&str>, levels_below: bool) -> &'static str {
     }
 }
 
-/// `writeFileSync(temporary, text)`: the file made as the flag `w` makes it
-/// (`open`, with the temporary's path), the bytes written to it, and the
-/// file closed, its close checked as Node checks it: the rename is never
+/// `writeFile(path, bytes, { mode })`: the file opened as the flag `w` opens
+/// it (`open`, with its path), made with `mode` (less the umask) when it is
+/// not there and keeping its own when it is, the bytes written to it, and
+/// the file closed, its close checked as Node checks it: a rename is never
 /// made over a file written short.
-fn write_new(temporary: &Path, bytes: &[u8]) -> Result<(), FileError> {
-    let mut file =
-        File::create(temporary).map_err(|error| FileError::call(error, "open", Some(temporary)))?;
+pub fn write_file(path: &Path, bytes: &[u8], mode: u32) -> Result<(), FileError> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, mode);
+    #[cfg(not(unix))]
+    let _ = mode;
+    let mut file = options
+        .open(path)
+        .map_err(|error| FileError::call(error, "open", Some(path)))?;
     write_all(&mut file, bytes)?;
     close(file)
 }

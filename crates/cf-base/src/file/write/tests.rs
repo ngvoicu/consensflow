@@ -181,10 +181,59 @@ fn what_is_not_there_is_no_failure_to_remove_and_a_file_is_removed() {
     assert!(folder.is_dir());
 }
 
+#[test]
+fn a_file_written_in_place_replaces_what_the_file_held() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    write_file(&path, b"a longer first text", 0o600).unwrap();
+    write_file(&path, b"short", 0o600).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), b"short");
+    assert_eq!(left_in(dir.path()), ["settings.json"], "nothing beside it");
+    let folder = dir.path().join("missing");
+    let said = write_file(&folder.join("x"), b"", 0o600).unwrap_err();
+    assert_eq!(
+        said.to_string(),
+        format!(
+            "ENOENT: no such file or directory, open '{}'",
+            folder.join("x").display()
+        )
+    );
+}
+
 #[cfg(unix)]
 mod unix {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    /// The permissions of what is at `path`.
+    fn mode_of(path: &Path) -> u32 {
+        fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn every_level_a_folder_makes_has_its_mode_and_one_there_keeps_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let there = dir.path().join("there");
+        fs::create_dir(&there).unwrap();
+        fs::set_permissions(&there, fs::Permissions::from_mode(0o755)).unwrap();
+        let folder = there.join("a").join("b");
+        make_folder(&folder, 0o700).unwrap();
+        assert_eq!(mode_of(&there), 0o755);
+        assert_eq!(mode_of(&there.join("a")), 0o700);
+        assert_eq!(mode_of(&folder), 0o700);
+        make_folder(&folder, 0o700).unwrap();
+    }
+
+    #[test]
+    fn a_new_file_has_its_mode_and_one_there_keeps_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        write_file(&path, b"{}", 0o600).unwrap();
+        assert_eq!(mode_of(&path), 0o600);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        write_file(&path, b"{}", 0o600).unwrap();
+        assert_eq!(mode_of(&path), 0o644);
+    }
 
     /// A folder whose permissions are `mode` until the guard goes, which
     /// opens it again so that the temporary folder can be removed.

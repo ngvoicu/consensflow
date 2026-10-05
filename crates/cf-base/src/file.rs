@@ -5,7 +5,8 @@
 //!
 //! - `errno`: libuv's names and words for a failure;
 //! - `error`: a failed file operation, said as Node's error says it;
-//! - `write`: a file written whole, each step's failure said.
+//! - `write`: a folder made with every level above it, a file written in
+//!   place, and one written whole, each step's failure said.
 
 use std::fs::{self, File, Metadata};
 use std::io;
@@ -18,7 +19,7 @@ mod write;
 
 pub use errno::{errno_name, error_code, is_missing, uv_words};
 pub use error::FileError;
-pub use write::write_whole;
+pub use write::{make_folder, write_file, write_whole};
 
 /// Which file an open file is, whatever its path: its device and inode on
 /// Unix, its volume and file index on Windows (Node's `stat` calls the

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { launchGoldens } from './goldens.mjs'
 
 const CRATE = fileURLToPath(new URL('../../../crates/cf-harness', import.meta.url))
-const files = launchGoldens()
+const files = await launchGoldens()
 for (const [relative, text] of Object.entries(files)) {
   const path = join(CRATE, ...relative.split('/'))
   mkdirSync(join(path, '..'), { recursive: true })

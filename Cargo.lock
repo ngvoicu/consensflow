@@ -424,6 +424,7 @@ name = "cf-harness"
 version = "3.0.0-alpha.73"
 dependencies = [
  "cf-base",
+ "cf-process",
  "cf-proto",
  "flate2",
  "jiff",
@@ -433,6 +434,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "uuid",
 ]
 
 [[package]]
@@ -473,6 +475,7 @@ dependencies = [
  "cf-base",
  "libc",
  "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
