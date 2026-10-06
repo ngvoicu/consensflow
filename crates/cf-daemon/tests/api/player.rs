@@ -16,16 +16,17 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use base64::Engine;
-use serde_json::{json, Value};
+use serde_json::Value;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use crate::checks;
-use crate::replay::{answer, compare, differs, undefined};
-use crate::rig::{closed, Rig};
+use crate::front::{self, Reply};
+use crate::names::Names;
+use crate::rig::Rig;
 use crate::runs::{self, Ran};
-use crate::trace::{self, Names};
-use crate::wire::{self, Reply};
+use crate::support::compare::differs;
+use crate::support::trace::{self, Tally};
 
 /// How long a step may wait for what it needs of the API or of `cf`.
 const WAIT: Duration = Duration::from_secs(60);
@@ -55,13 +56,15 @@ struct Player {
     /// What the API did that belongs to what is still running.
     events: Vec<Value>,
     kicks: usize,
+    /// What has been compared so far.
+    tally: Tally,
 }
 
-/// Plays the trace called `name`: why it was not answered as Node answered, if
-/// it was not.
-pub async fn play(name: &str) -> Result<(), String> {
+/// Plays the trace called `name`: what it held of it, or why it was not
+/// answered as Node answered.
+pub async fn play(name: &str) -> Result<Tally, String> {
     let rig = Rc::new(Rig::start().await);
-    let trace = trace::load(name, &rig.ledger_file());
+    let trace = trace::load(name);
     let steps = trace["steps"].as_array().cloned().unwrap_or_default();
     let mut made: HashMap<u64, Vec<Value>> = HashMap::new();
     for step in &steps {
@@ -72,7 +75,7 @@ pub async fn play(name: &str) -> Result<(), String> {
         }
     }
     let mut player = Player {
-        names: Names::new(&rig.address()),
+        names: Names::new(&front::address(&rig.api)),
         rig,
         trace,
         made,
@@ -81,6 +84,7 @@ pub async fn play(name: &str) -> Result<(), String> {
         closes: HashMap::new(),
         events: Vec::new(),
         kicks: 0,
+        tally: Tally::default(),
     };
     for (at, step) in steps.iter().enumerate() {
         let kind = step["kind"].as_str().unwrap_or("?");
@@ -91,7 +95,9 @@ pub async fn play(name: &str) -> Result<(), String> {
     }
     player
         .finish()
-        .map_err(|why| format!("{name}, at its end: {why}"))
+        .map_err(|why| format!("{name}, at its end: {why}"))?;
+    player.tally.traces += 1;
+    Ok(player.tally)
 }
 
 impl Player {
@@ -102,6 +108,8 @@ impl Player {
                 let participant = step["participant"]["id"].as_i64().expect("a participant");
                 let token = self
                     .rig
+                    .front
+                    .context
                     .credentials
                     .issue(step["project"].as_i64().expect("a project"), participant);
                 self.names
@@ -110,7 +118,7 @@ impl Player {
             }
             "revoke" => {
                 let token = self.names.token(step["token"].as_str().expect("a token"));
-                self.rig.credentials.revoke(&token);
+                self.rig.front.context.credentials.revoke(&token);
                 Ok(())
             }
             "exchange" => self.exchange(step).await,
@@ -135,29 +143,14 @@ impl Player {
     /// A call the test made on its ledger.
     fn ledger(&mut self, step: &Value) -> Result<(), String> {
         self.hold()?;
-        self.rig.queues.give(step);
-        let method = step["method"].as_str().unwrap_or_default();
-        let answered = if method == "close" {
-            let left = closed(&self.rig);
-            if let Some(why) = compare(
-                "the database it left",
-                &left,
-                &self.trace["ledger"]["final"],
-            ) {
-                return Err(why);
-            }
-            undefined()
-        } else {
-            answer(&mut self.rig.ledger.borrow_mut(), step)
-        };
-        if let Some(why) = self.rig.queues.settle(&[step]) {
+        if step["method"] != "close" {
+            return self.rig.ledger.apply(step).map_or(Ok(()), Err);
+        }
+        if let Some(why) = self.rig.ledger.close(step, &self.trace["ledger"]["final"]) {
             return Err(why);
         }
-        if let Some(why) = compare("its answer", &answered, &step["result"]) {
-            return Err(why);
-        }
-        let logged = json!(self.rig.take_events());
-        compare("the events it logged", &logged, &step["events"]).map_or(Ok(()), Err)
+        self.tally.databases += 1;
+        Ok(())
     }
 
     /// An exchange of the test's own: sent here. One that is a run's is the
@@ -169,7 +162,7 @@ impl Player {
         let id = step["id"].as_u64().expect("an id");
         self.until_received(id - 1).await?;
         self.hold()?;
-        self.rig.queues.give(step);
+        self.rig.ledger.give(step);
         self.save_agents(std::slice::from_ref(step));
         let sending = self.send(step);
         if step["detached"] == true {
@@ -187,7 +180,9 @@ impl Player {
             .map_err(|why| format!("the exchange failed: {why}"))?
             .map_err(|why| format!("no answer: {why}"))?;
         let (events, kicks) = self.take();
-        checks::exchange(&self.rig, step, &reply, &events, kicks)
+        checks::exchange(&self.rig, step, &reply, &events, kicks)?;
+        self.tally.exchanges += 1;
+        Ok(())
     }
 
     /// Sends the request of an exchange, as the trace has it.
@@ -211,11 +206,11 @@ impl Player {
             (None, Some(text)) => Some(text.as_bytes().to_vec()),
             (None, None) => None,
         };
-        let address = self.rig.address();
+        let address = front::address(&self.rig.api);
         tokio::task::spawn_local(async move {
-            wire::send(
+            front::send(
                 &address,
-                wire::Request {
+                front::Request {
                     method: &method,
                     target: &target,
                     authorization: authorization.as_deref(),
@@ -246,7 +241,7 @@ impl Player {
         let exchanges = self.made.get(&id).cloned().unwrap_or_default();
         self.hold()?;
         for exchange in &exchanges {
-            self.rig.queues.give(exchange);
+            self.rig.ledger.give(exchange);
         }
         self.save_agents(&exchanges);
         let strings = |key: &str| -> Vec<String> {
@@ -300,18 +295,20 @@ impl Player {
             .map_err(|_| "cf did not end".to_owned())?
             .map_err(|_| "cf was lost".to_owned())?;
         let stdout = step["stdout"].as_str().unwrap_or_default();
-        if ran.stdout != stdout {
-            return Err(differs("its output", &ran.stdout, stdout));
+        if let Some(why) = differs("its output", &ran.stdout, stdout) {
+            return Err(why);
         }
         let stderr = step["stderr"].as_str().unwrap_or_default();
-        if ran.stderr != stderr {
-            return Err(differs("its error output", &ran.stderr, stderr));
+        if let Some(why) = differs("its error output", &ran.stderr, stderr) {
+            return Err(why);
         }
         if ran.code.map(i64::from) != step["code"].as_i64() {
             return Err(format!("ended with {:?}, Node {}", ran.code, step["code"]));
         }
+        self.tally.runs += 1;
         for exchange in &exchanges {
             checks::made(&self.rig, &self.names, exchange)?;
+            self.tally.exchanges += 1;
         }
         let (events, kicks) = self.take_all();
         let all: Vec<&Value> = exchanges.iter().collect();
@@ -331,7 +328,9 @@ impl Player {
                 .map_err(|why| format!("the exchange failed: {why}"))?
                 .map_err(|why| format!("no answer: {why}"))?;
             let (events, kicks) = self.take_all();
-            return checks::exchange(&self.rig, &waiting.step, &reply, &events, kicks);
+            checks::exchange(&self.rig, &waiting.step, &reply, &events, kicks)?;
+            self.tally.exchanges += 1;
+            return Ok(());
         }
         if let Some(id) = step["close"].as_u64() {
             let closing = self
@@ -385,7 +384,7 @@ impl Player {
 
     /// What the API did since it was last asked.
     fn take(&self) -> (Vec<Value>, usize) {
-        (self.rig.take_events(), self.rig.take_kicks())
+        (self.rig.ledger.take_events(), self.rig.front.take_kicks())
     }
 
     /// What it did, with what was held for what has run.
@@ -406,6 +405,7 @@ impl Player {
             // A trace with no ledger of its own never closed this one: its
             // file is let go here, where it is held open until the home goes.
             self.rig
+                .ledger
                 .ledger
                 .borrow_mut()
                 .close_in_place()

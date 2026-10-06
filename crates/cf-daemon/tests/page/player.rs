@@ -4,25 +4,25 @@
 //! kicks and the events its own ledger calls logged compared with Node's; the
 //! ledger left as Node left it.
 
-use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
 
 use cf_bridge::local::Bridge;
-use cf_daemon::errors::Errors;
-use cf_daemon::files::{Log, Trace};
 use cf_daemon::host::daemon_bridge;
 use cf_daemon::page::{self, Engine, Page};
 use cf_daemon::seams::DaemonSpawn;
 use rusqlite::Connection;
 use serde_json::Value;
 use tokio::io::{duplex, split};
-use tokio::task::{JoinHandle, LocalSet};
+use tokio::task::JoinHandle;
 
-use crate::ledger::{differs, Rig};
+use crate::ledger::Rig;
+use crate::notes::Notes;
 use crate::standin::Standin;
-use crate::trace;
+use crate::support::compare::{compare, differs};
+use crate::support::daemon::{executor, Kicks};
+use crate::support::trace::{self, Tally};
 use crate::world::World;
 
 /// The daemon's end of a bridge with the page's operations on it, and the
@@ -47,50 +47,46 @@ struct Player {
     /// test gave the page a ledger of its own.
     page_ledger: Rc<Rig>,
     standin: Rc<Standin>,
+    notes: Rc<Notes>,
     spawn: Rc<DaemonSpawn>,
-    kicks: Rc<Cell<u32>>,
+    kicks: Kicks,
     world: World,
     connected: Option<Connected>,
     problems: Vec<String>,
+    /// What has been compared so far.
+    tally: Tally,
 }
 
-/// Plays the trace `name`: why it was not answered as Node's was; none when it was.
-pub fn play(name: &str) -> Vec<String> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    LocalSet::new().block_on(&runtime, replay(name))
+/// Plays the trace `name`: what it held of it, or why it was not answered as
+/// Node's was.
+pub fn play(name: &str) -> Result<Tally, Vec<String>> {
+    trace::locally(replay(name))
 }
 
-async fn replay(name: &str) -> Vec<String> {
-    let root = tempfile::tempdir().unwrap();
-    let daemon_home = tempfile::tempdir().unwrap();
-    let ledger = root.path().join("consensflow.db");
-    let trace = trace::load(name, root.path(), &ledger);
+async fn replay(name: &str) -> Result<Tally, Vec<String>> {
+    // The daemon's log and trace, and the ledgers: the world is a folder of its own.
+    let home = tempfile::tempdir().unwrap();
+    let trace = trace::load(name);
     let steps = trace["steps"].as_array().cloned().unwrap_or_default();
 
-    let errors = Rc::new(Errors::new(
-        Rc::new(Log::new(daemon_home.path())),
-        Rc::new(Trace::new(daemon_home.path())),
-    ));
-    let spawn = Rc::new(DaemonSpawn::new(errors));
-    spawn.drive();
-
-    let rig = Rc::new(Rig::open(&ledger));
+    let (spawn, _, _) = executor(home.path());
+    let rig = Rc::new(Rig::open(&home.path().join("consensflow.db")));
     let page_ledger = match page_staff(&steps) {
-        Some(staff) => Rc::new(seeded(&root.path().join("page.db"), &staff)),
+        Some(staff) => Rc::new(seeded(&home.path().join("page.db"), &staff)),
         None => Rc::clone(&rig),
     };
+    let notes = Rc::new(Notes::default());
     let mut player = Player {
-        standin: Rc::new(Standin::new(Rc::clone(&rig))),
+        standin: Rc::new(Standin::new(Rc::clone(&rig), Rc::clone(&notes))),
         rig,
         page_ledger,
+        notes,
         spawn,
-        kicks: Rc::new(Cell::new(0)),
-        world: World::new(root.path()),
+        kicks: Kicks::new(),
+        world: World::new(),
         connected: None,
         problems: Vec::new(),
+        tally: Tally::default(),
     };
     let mut closed = false;
     for (at, step) in steps.iter().enumerate() {
@@ -102,16 +98,19 @@ async fn replay(name: &str) -> Vec<String> {
                 }
             }
             "ledger" if step["method"] == "close" => {
-                player.rig.close_into(&trace["ledger"]["final"]);
+                match player.rig.close(step, &trace["ledger"]["final"]) {
+                    Some(why) => player.problems.push(why),
+                    None => player.tally.databases += 1,
+                }
                 closed = true;
             }
-            "ledger" => player.rig.apply(step),
+            "ledger" => player.problems.extend(player.rig.apply(step)),
             "operation" => player.operation(step).await,
             other => player.problems.push(format!(
                 "a step of kind {other}, which a page trace has not"
             )),
         }
-        let noted = player.rig.problems();
+        let noted = player.notes.take();
         player.problems.extend(noted);
         for problem in &mut player.problems[before..] {
             *problem = format!("step {at}: {problem}");
@@ -125,19 +124,22 @@ async fn replay(name: &str) -> Vec<String> {
     if !Rc::ptr_eq(&player.rig, &player.page_ledger) {
         let _ = player.page_ledger.ledger.borrow_mut().close_in_place();
     }
-    player.problems
+    if !player.problems.is_empty() {
+        return Err(player.problems);
+    }
+    player.tally.traces += 1;
+    Ok(player.tally)
 }
 
 impl Player {
     /// The page, over the environment the world has now.
     fn connect(&mut self) -> &Bridge {
-        let kicks = Rc::clone(&self.kicks);
         let engine: Rc<dyn Engine> = Rc::clone(&self.standin) as _;
         let page = Rc::new(Page {
             ledger: Rc::clone(&self.page_ledger.ledger),
             engine,
             env: self.world.env(),
-            kick: Rc::new(move || kicks.set(kicks.get() + 1)),
+            kick: self.kicks.waker(),
         });
         let (daemon_end, app_end) = duplex(256 * 1024);
         let (daemon_input, daemon_output) = split(daemon_end);
@@ -161,7 +163,7 @@ impl Player {
     async fn operation(&mut self, step: &Value) {
         let name = step["name"].as_str().unwrap_or_default().to_owned();
         let what = format!("operation {} ({name})", step["id"]);
-        self.rig.queue(step);
+        self.rig.give(step);
         // The stand-ins of the test: what the daemon would give, but for the
         // page's own ledger, which the page reads itself.
         self.standin.expect(
@@ -173,7 +175,7 @@ impl Player {
                 .cloned()
                 .collect(),
         );
-        self.kicks.set(0);
+        self.kicks.take();
         let app = match &self.connected {
             Some(connected) => connected.app.clone(),
             None => self.connect().clone(),
@@ -185,11 +187,9 @@ impl Player {
         .await;
         match answered {
             Ok(Ok(reply)) => {
-                if let Some(why) = differs(
-                    &format!("{what}'s reply"),
-                    &reply.to_string(),
-                    step["reply"].as_str().unwrap_or_default(),
-                ) {
+                let recorded = step["reply"].as_str().unwrap_or_default();
+                if let Some(why) = differs(&format!("{what}'s reply"), reply.to_string(), recorded)
+                {
                     self.problems.push(why);
                 }
             }
@@ -200,18 +200,21 @@ impl Player {
                 .problems
                 .push(format!("{what} was not answered in time")),
         }
-        let kicks = u64::from(self.kicks.get());
+        let kicks = self.kicks.take();
         if step["kicks"] != kicks {
             self.problems.push(format!(
                 "{what} woke the dispatcher {kicks} times, Node {}",
                 step["kicks"]
             ));
         }
-        self.rig.settle(&what, step);
-        let logged = Value::Array(self.rig.logged());
-        self.rig
-            .compare(&format!("{what} logged"), &logged, &step["events"]);
+        if let Some(why) = self.rig.settle(&[step]) {
+            self.problems.push(format!("{what} {why}"));
+        }
+        let logged = Value::Array(self.rig.take_events());
+        self.problems
+            .extend(compare(&format!("{what} logged"), &logged, &step["events"]));
         self.problems.extend(self.standin.leftover());
+        self.tally.operations += 1;
     }
 }
 

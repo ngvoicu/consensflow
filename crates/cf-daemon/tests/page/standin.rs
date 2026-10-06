@@ -16,17 +16,20 @@ use cf_engine::seams::EngineError;
 use cf_engine::{SwitchTo, SwitchWhen};
 use cf_harness::contract::Work;
 use cf_ledger::{
-    ChiefSwitch, DeletedProject, LedgerError, NewProject, ParticipantView, ProjectView,
+    ChiefSwitch, DeletedProject, Ledger, LedgerError, NewProject, ParticipantView, ProjectView,
     RemovedMember, TaskReleased,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::ledger::{differs, Rig};
+use crate::ledger::Rig;
+use crate::notes::Notes;
+use crate::support::compare::differs;
 
 /// The engine of a trace: what its operations call, as Node's stand-ins answered.
 pub struct Standin {
     rig: Rc<Rig>,
+    notes: Rc<Notes>,
     seams: RefCell<VecDeque<Value>>,
 }
 
@@ -34,14 +37,16 @@ pub struct Standin {
 /// are still to be made.
 struct Seam {
     rig: Rc<Rig>,
+    notes: Rc<Notes>,
     recorded: Value,
     calls: VecDeque<Value>,
 }
 
 impl Standin {
-    pub fn new(rig: Rc<Rig>) -> Self {
+    pub fn new(rig: Rc<Rig>, notes: Rc<Notes>) -> Self {
         Self {
             rig,
+            notes,
             seams: RefCell::new(VecDeque::new()),
         }
     }
@@ -64,12 +69,12 @@ impl Standin {
     /// with these arguments.
     fn seam(&self, method: &str, args: Vec<Value>) -> Seam {
         let Some(recorded) = self.seams.borrow_mut().pop_front() else {
-            self.rig
-                .problem(format!("called {method} past Node's last call"));
-            return Seam::none(&self.rig);
+            self.notes
+                .note(format!("called {method} past Node's last call"));
+            return Seam::none(&self.rig, &self.notes);
         };
         if recorded["method"] != method || recorded["seam"] != "dispatcher" {
-            self.rig.problem(format!(
+            self.notes.note(format!(
                 "called dispatcher.{method}, Node {}",
                 named(&recorded)
             ));
@@ -80,12 +85,13 @@ impl Standin {
         let given = normal(&recorded["args"]);
         if asked != given {
             let what = format!("{method}'s arguments");
-            if let Some(why) = differs(&what, &asked.to_string(), &given.to_string()) {
-                self.rig.problem(why);
+            if let Some(why) = differs(&what, asked.to_string(), given.to_string()) {
+                self.notes.note(why);
             }
         }
         Seam {
             rig: Rc::clone(&self.rig),
+            notes: Rc::clone(&self.notes),
             calls: recorded["calls"]
                 .as_array()
                 .cloned()
@@ -132,34 +138,44 @@ fn normal(args: &Value) -> Value {
 
 impl Seam {
     /// A call there was none of: the problem is noted, and the answer is empty.
-    fn none(rig: &Rc<Rig>) -> Self {
+    fn none(rig: &Rc<Rig>, notes: &Rc<Notes>) -> Self {
         Self {
             rig: Rc::clone(rig),
+            notes: Rc::clone(notes),
             recorded: json!({}),
             calls: VecDeque::new(),
         }
     }
 
-    /// The next ledger call Node's stand-in made, made here.
+    /// The next ledger call Node's stand-in made, made here: on the same
+    /// ledger as the operation's own calls, which are held to their own
+    /// readings and events meanwhile.
     fn call<T: Serialize>(
         &mut self,
         method: &str,
-        make: impl FnOnce(&mut cf_ledger::Ledger) -> Result<T, LedgerError>,
+        make: impl FnOnce(&mut Ledger) -> Result<T, LedgerError>,
     ) -> Result<T, LedgerError> {
-        match self.calls.pop_front() {
-            Some(recorded) => self.rig.call(&recorded, method, make),
-            None => {
-                self.rig.problem(format!(
-                    "made ledger {method}, which Node's stand-in did not"
-                ));
-                make(&mut self.rig.ledger.borrow_mut())
-            }
+        let Some(recorded) = self.calls.pop_front() else {
+            self.notes.note(format!(
+                "made ledger {method}, which Node's stand-in did not"
+            ));
+            return make(&mut self.rig.ledger.borrow_mut());
+        };
+        let what = format!("the stand-in's ledger {method}");
+        if recorded["method"] != method {
+            self.notes
+                .note(format!("{what}: Node's call was {}", recorded["method"]));
         }
+        let (made, problem) = self.rig.around(&recorded, make);
+        if let Some(why) = problem {
+            self.notes.note(format!("{what}: {why}"));
+        }
+        made
     }
 
     fn expect_no_calls(&self) {
         for call in &self.calls {
-            self.rig.problem(format!(
+            self.notes.note(format!(
                 "never made the ledger call {} that Node's stand-in made",
                 call["method"]
             ));
@@ -173,8 +189,8 @@ impl Seam {
         match answered {
             Ok(value) => {
                 if said.get("refusal").is_some() {
-                    self.rig
-                        .problem(format!("answered, where Node refused: {}", said["refusal"]));
+                    self.notes
+                        .note(format!("answered, where Node refused: {}", said["refusal"]));
                     return;
                 }
                 let ours = serde_json::to_value(value).unwrap_or(Value::Null);
@@ -183,14 +199,14 @@ impl Seam {
                 } else {
                     said["result"].clone()
                 };
-                if let Some(why) = differs("the answer", &ours.to_string(), &theirs.to_string()) {
-                    self.rig.problem(why);
+                if let Some(why) = differs("the answer", ours.to_string(), theirs.to_string()) {
+                    self.notes.note(why);
                 }
             }
             Err(error) => {
                 if said["refusal"]["message"] != error.to_string() {
-                    self.rig
-                        .problem(format!("refused with {error:?}, Node {}", said["refusal"]));
+                    self.notes
+                        .note(format!("refused with {error:?}, Node {}", said["refusal"]));
                 }
             }
         }

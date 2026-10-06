@@ -9,15 +9,24 @@
 // The player's own scaffolding: a failure in it is the test's.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-mod ledger;
+mod notes;
 mod player;
 mod standin;
-mod trace;
+
+// What the three players share, taken whole.
+#[path = "../support/ledger.rs"]
+mod ledger;
+#[path = "../support/mod.rs"]
+mod support;
+#[path = "../support/world.rs"]
 mod world;
 
-use std::path::Path;
-
 use cf_proto::page::PageOperation;
+use support::trace::{self, Tally};
+
+/// The suites of the page's traces: the 28 tests of `core-page.test.mjs` and the
+/// 8 of `corners-page.test.mjs`.
+const SUITES: [&str; 2] = ["core-page", "corners-page"];
 
 /// Every operation of the page is asked by some trace: what the traces hold is
 /// the whole of what the page can ask.
@@ -25,8 +34,8 @@ use cf_proto::page::PageOperation;
 fn the_traces_ask_every_operation_of_the_page() {
     let mut asked = std::collections::BTreeSet::new();
     let (mut operations, mut calls) = (0, 0);
-    for name in trace::names() {
-        let played = trace::load(&name, Path::new("/root"), Path::new("/ledger.db"));
+    for name in trace::names(&SUITES) {
+        let played = trace::load(&name);
         for step in played["steps"].as_array().unwrap() {
             if step["kind"] == "operation" {
                 operations += 1;
@@ -45,14 +54,17 @@ fn the_traces_ask_every_operation_of_the_page() {
 /// Every page trace of Node's answers here as it answered there.
 #[test]
 fn every_page_trace_is_answered_as_node_answered() {
-    let names = trace::names();
-    // The 28 tests of `core-page.test.mjs` and the 8 of `corners-page.test.mjs`.
+    let names = trace::names(&SUITES);
     assert_eq!(names.len(), 36, "{names:?}: npm run goldens:daemon");
+    let mut held = Tally::default();
     let failed: Vec<String> = names
         .iter()
-        .filter_map(|name| {
-            let problems = player::play(name);
-            (!problems.is_empty()).then(|| format!("{name}:\n  {}", problems.join("\n  ")))
+        .filter_map(|name| match player::play(name) {
+            Ok(tally) => {
+                held += tally;
+                None
+            }
+            Err(problems) => Some(format!("{name}:\n  {}", problems.join("\n  "))),
         })
         .collect();
     println!(
@@ -60,6 +72,7 @@ fn every_page_trace_is_answered_as_node_answered() {
         names.len(),
         failed.len()
     );
+    println!("held: {held}");
     assert!(
         failed.is_empty(),
         "{} of {} traces answered otherwise:\n{}",
