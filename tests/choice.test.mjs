@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { assertStarted, NATIVE_CF, noteRan, START_WORDS, startLine } from './choice.mjs'
-import { cliEnv, cliTarget } from './cli-target.mjs'
+import { cliTarget } from './cli-target.mjs'
 import { daemonCommand } from './helpers.mjs'
 import { CLI_LEGS, DAEMON_LEGS, legEnv, ranProblem, runLeg } from './legs.mjs'
 
@@ -411,16 +411,10 @@ describe('which cf the suites of the CLI run, in the same words', () => {
     )
   })
 
-  it('names the runtime to the verbs the native cf hands on, and to no other', () => {
-    const native = cliTarget({ named: 'native', leg: '', fallback: 'node' })
-    const node = cliTarget({ named: 'node', leg: '', fallback: 'node' })
-    for (const verb of ['setup', 'doctor']) {
-      assert.equal(cliEnv(native, [verb], {}).CONSENSFLOW_NODE, process.execPath)
-      assert.equal(cliEnv(node, [verb], {}).CONSENSFLOW_NODE, undefined)
+  it('names no runtime to either cf, so a native cf that handed a verb to Node would fail', () => {
+    for (const named of ['node', 'native']) {
+      const { env } = cliTarget({ named, leg: '', fallback: 'node' })
+      assert.deepEqual(Object.keys(env), ['CONSENSFLOW_DAEMON'])
     }
-    for (const verb of ['catalog', 'agent', 'help']) {
-      assert.equal(cliEnv(native, [verb], { A: '1' }).CONSENSFLOW_NODE, undefined)
-    }
-    assert.deepEqual(cliEnv(node, ['catalog'], { A: '1' }), { A: '1', CONSENSFLOW_DAEMON: 'node' })
   })
 })

@@ -6,12 +6,43 @@
 #![allow(clippy::expect_used)]
 
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 /// `cf args` with `env` added and `input` on its standard input.
-#[allow(clippy::disallowed_methods)] // The tests start cf themselves.
 pub fn cf<S: AsRef<str>>(args: &[S], env: &[(&str, &str)], input: &str) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_cf"));
+    cf_at(Path::new(env!("CARGO_BIN_EXE_cf")), args, env, input)
+}
+
+/// The binary under test as the system spells its place, which a program run
+/// by it reads back as its own: a copy of it elsewhere is another `cf`, as a
+/// second install of ConsensFlow is.
+#[allow(dead_code)] // Not every test that runs `cf` asks where it is.
+pub fn own_cf() -> PathBuf {
+    plain(std::fs::canonicalize(env!("CARGO_BIN_EXE_cf")).expect("cf is there"))
+}
+
+/// A resolved `path` as a program reports it: Windows resolves a path to its
+/// verbatim form (`\\?\C:\…`), which is not what a program says of where it
+/// runs, so that prefix goes (but not a share's, `\\?\UNC\…`).
+#[allow(dead_code)] // Not every test that runs `cf` resolves a place.
+pub fn plain(path: PathBuf) -> PathBuf {
+    path.to_string_lossy()
+        .strip_prefix(r"\\?\")
+        .filter(|plain| !plain.starts_with(r"UNC\"))
+        .map_or(path.clone(), PathBuf::from)
+}
+
+/// `cf args` as the binary at `program` runs it, with `env` added and `input`
+/// on its standard input.
+#[allow(clippy::disallowed_methods)] // The tests start cf themselves.
+pub fn cf_at<S: AsRef<str>>(
+    program: &Path,
+    args: &[S],
+    env: &[(&str, &str)],
+    input: &str,
+) -> Output {
+    let mut command = Command::new(program);
     for (name, _) in std::env::vars_os() {
         let name = name.to_string_lossy();
         if ["CONSENSFLOW_", "CF_", "CHISEL_"]

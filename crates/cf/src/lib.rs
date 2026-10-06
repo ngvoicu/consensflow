@@ -2,7 +2,8 @@
 //! participant's token in `CONSENSFLOW_TOKEN`) it is the board's commands,
 //! answered here against the daemon's API; anywhere else it is the CLI's
 //! standalone commands, which its Node sources beside this binary still
-//! answer, but for the ones `standalone` answers once the switch is on.
+//! answer, but for the ones `standalone` answers once the switch is on: all of
+//! them but `ui`, which is the daemon's.
 //! `cf hook <harness>` is what a harness's hooks run, in a window or
 //! not; it says only what its harness reads, and never fails.
 //! `cf codex-session <codex> <args…>` is what a Codex window runs in Codex's place.

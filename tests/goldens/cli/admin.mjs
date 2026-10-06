@@ -1,9 +1,10 @@
 /**
  * Scenarios for `cf setup` and `cf doctor`: what they say and what they leave
  * in the folder, with the harnesses' CLIs standing in on a PATH of its own.
- * They are recorded for the day Rust answers them (the launcher and the stale
- * hooks it needs are another landing's), and `cf` still hands them to Node's
- * sources until then: the Rust player does not play them yet.
+ * The Rust player plays them as it plays the rest; the launcher they name
+ * (`$NODE` and `$REPO`) is put as the binary's own there, and the two
+ * differences the launcher's new shape makes are the player's to state, with
+ * their reasons (crates/cf/tests/cli_goldens/paired.rs).
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
