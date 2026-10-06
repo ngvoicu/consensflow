@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { cliTarget } from './cli-target.mjs'
 
 /**
  * Every `cf …` that ConsensFlow's own words name is a command cf has: a
@@ -33,11 +34,13 @@ function commandsOf(usage, prefix) {
   return commands
 }
 
-// Run here, not in a window: a window's token makes cf its board.
-const outside = execFileSync(process.execPath, ['bin/cf.mjs', 'help'], {
+// Run here, not in a window: a window's token makes cf its board. By the cf these
+// tests run: Node's, or the native one (tests/cli-target.mjs, `npm run test:clis`).
+const target = cliTarget()
+const outside = execFileSync(target.command, [...target.args, 'help'], {
   cwd: REPO,
   encoding: 'utf8',
-  env: { ...process.env, CONSENSFLOW_TOKEN: '' },
+  env: { ...process.env, CONSENSFLOW_TOKEN: '', ...target.env },
 })
 const COMMANDS = new Map([
   ...commandsOf(outside, ''),

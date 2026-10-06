@@ -62,6 +62,10 @@ jobs:
       # native cf ui (step 3.6, behind its switch until the flip).
       - run: npm run test:daemons
         timeout-minutes: 20
+      # The CLI's suites against both CLIs: Node's cf.mjs, and the native cf
+      # answering the standalone verbs behind the switch (step 4, until the flip).
+      - run: npm run test:clis
+        timeout-minutes: 15
       # Cargo reads app/src-tauri/.cargo/config.toml from the folder it runs in:
       # on Windows its runner gives each test binary the manifest it needs.
       # The PTY tests read their children with no time limit of their own; a

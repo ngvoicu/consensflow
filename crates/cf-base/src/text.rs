@@ -33,6 +33,19 @@ pub fn utf16_prefix(text: &str, units: usize) -> Cow<'_, str> {
     Cow::Borrowed(text)
 }
 
+/// `text.padEnd(width)`: spaces after it up to `width` UTF-16 code units, so
+/// an emoji, two units wide in a column of units and one character, is
+/// padded as JavaScript padded it. A text of `width` units or more is as it
+/// was.
+pub fn pad_end(text: &str, width: usize) -> String {
+    let mut padded = text.to_owned();
+    padded.extend(std::iter::repeat_n(
+        ' ',
+        width.saturating_sub(utf16_len(text)),
+    ));
+    padded
+}
+
 /// Text as a window can take it, for a first message and every later one
 /// (`windowText`, `src/adapters/shared.js`). The pane host refuses a paste
 /// with a control character other than tab and newline, and a harness's own
@@ -68,6 +81,18 @@ mod tests {
         assert_eq!(utf16_len("abc"), 3);
         assert_eq!(utf16_len("ăîș"), 3);
         assert_eq!(utf16_len("a😀"), 3);
+    }
+
+    #[test]
+    fn pads_to_units_as_pad_end_does_and_never_cuts() {
+        assert_eq!(pad_end("ab", 5), "ab   ");
+        assert_eq!(pad_end("", 2), "  ");
+        assert_eq!(pad_end("abcdef", 3), "abcdef");
+        assert_eq!(pad_end("abc", 3), "abc");
+        // An emoji is two units, a letter with its accent apart is two.
+        assert_eq!(pad_end("a😀", 5), "a😀  ");
+        assert_eq!(pad_end("e\u{301}", 4), "e\u{301}  ");
+        assert_eq!(pad_end("日本語", 5), "日本語  ");
     }
 
     #[test]

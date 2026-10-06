@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { promisify } from 'node:util'
 import { rosterPath } from '../src/roster.js'
+import { cliEnv, cliTarget } from './cli-target.mjs'
 import { fakeExecutable, tempEnv } from './helpers.mjs'
 
 /** A launcher is `cf` on POSIX and `cf.cmd` on Windows. */
@@ -13,10 +14,12 @@ const CMD = process.platform === 'win32' ? '.cmd' : ''
 const run = promisify(execFile)
 const CF = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
 const FIXTURES = join(import.meta.dirname, 'fixtures')
+/** The cf these tests run: Node's, or the native one (tests/cli-target.mjs, `npm run test:clis`). */
+const target = cliTarget()
 async function cf(args, env) {
   try {
-    const { stdout, stderr } = await run(process.execPath, [CF, ...args], {
-      env,
+    const { stdout, stderr } = await run(target.command, [...target.args, ...args], {
+      env: cliEnv(target, args, env),
       timeout: 30_000,
     })
     return { code: 0, stdout, stderr }
@@ -34,6 +37,15 @@ function stubCli(t, name) {
 describe('cf manages the roster', () => {
   const t = tempEnv()
   after(() => t.cleanup())
+
+  it(`runs ${target.name}`, async () => {
+    // Node's sources are run by a runtime the app names, and the native cf is
+    // given none for the catalog: that it answers says it is the native cf that
+    // did, and did not hand the verb on.
+    const out = await cf(['catalog', '--harness', 'pi'], t.env)
+    assert.equal(out.code, 0, out.stderr)
+    assert.match(out.stdout, /^pi:\n/)
+  })
 
   it('adds, lists, edits and removes an agent', async () => {
     const added = await cf(
@@ -119,14 +131,11 @@ describe('cf manages the roster', () => {
     const { spawn } = await import('node:child_process')
     // `false` never reads: the pipe is closed before cf writes anything, so
     // every write EPIPEs. PIPESTATUS surfaces cf's own exit code.
-    const child = spawn(
-      '/bin/bash',
-      ['-c', `"${process.execPath}" "${CF}" help | false; exit \${PIPESTATUS[0]}`],
-      {
-        env: { ...t.env, PATH: `${t.env.PATH}:/usr/bin:/bin` },
-        stdio: ['ignore', 'ignore', 'pipe'],
-      },
-    )
+    const command = [target.command, ...target.args].map((word) => `"${word}"`).join(' ')
+    const child = spawn('/bin/bash', ['-c', `${command} help | false; exit \${PIPESTATUS[0]}`], {
+      env: { ...t.env, ...target.env, PATH: `${t.env.PATH}:/usr/bin:/bin` },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    })
     let stderr = ''
     child.stderr.on('data', (chunk) => {
       stderr += chunk
@@ -186,7 +195,9 @@ describe('role files belong to pane launch, not CLI administration', () => {
 })
 
 describe('the standalone switch-over (TEST-PANE-47)', () => {
-  it('removes direct conversation writes and terminal-window discovery from cf', () => {
+  it('removes direct conversation writes and terminal-window discovery from cf', {
+    skip: target.native && "a look at Node's sources",
+  }, () => {
     const source = readFileSync(CF, 'utf8')
     assert.doesNotMatch(source, /\bsaveThread\b|liveWindowElsewhere|CMUX_SURFACE_ID|cmux tree/)
   })
