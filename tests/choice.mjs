@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -22,6 +22,14 @@ import { fileURLToPath } from 'node:url'
  * reads, once the leg is over, what the run said it ran (`noteRan`, into the
  * file `CONSENSFLOW_TEST_RAN`), and fails a leg that ran what is not its own,
  * or did not say.
+ *
+ * The product chooses by the home, not by the environment: a `use-node` file in
+ * ConsensFlow's home sends everything that writes that home to Node
+ * (`src/use-node.js`, `crates/cf-base/src/way_back.rs`), and without it
+ * everything is native. So a test's choice is made in its own home
+ * (`chooseHome`): the Node leg's home has the file, the native leg's has not,
+ * whatever starts in it. `CONSENSFLOW_DAEMON`, which chose before the flip, is
+ * read by nothing.
  */
 
 /** The native `cf` of this checkout, where `npm run build:cf` puts it. */
@@ -32,14 +40,46 @@ export const NATIVE_CF = join(
 )
 
 /**
- * What a test runs when it is told nothing: Node's. The flip moves these two
- * words (landing A7). Nothing that names its leg moves with them.
+ * Says the native `cf` of this checkout is built, which every suite that runs
+ * it (and, since the flip, every one that runs nothing else) needs: `npm test`
+ * runs the native one by default, so it needs `npm run build:cf` first, as CI's
+ * prepare-sidecar step has it. A missing one is this sentence and not an ENOENT
+ * from wherever it was first copied or started.
  */
-export const DEFAULT_DAEMON = 'node'
-export const DEFAULT_CLI = 'node'
+export function assertBuilt(file = NATIVE_CF) {
+  assert.ok(existsSync(file), `missing built cf: ${file}; build it with npm run build:cf`)
+}
+
+/**
+ * What a test runs when it is told nothing: the native one, as the product
+ * does since the flip. Nothing that names its leg moves with these two words.
+ */
+export const DEFAULT_DAEMON = 'native'
+export const DEFAULT_CLI = 'native'
 
 /** The two implementations, by the word that selects each. */
 export const KINDS = ['node', 'native']
+
+/** The file whose presence in a home is the way back to Node (`src/use-node.js`). */
+export const WAY_BACK = 'use-node'
+
+/**
+ * Makes `home` the home of the implementation `kind` names: `node`'s has the
+ * way back's file in it, `native`'s has not. Taken away as well as made, since
+ * a home that went back to Node stays there until the file goes, and a restart
+ * on the other implementation is a restart of the same home.
+ */
+export function chooseHome(kind, home) {
+  assert.ok(KINDS.includes(kind), `no implementation is called ${kind}`)
+  assert.ok(typeof home === 'string' && home !== '', `a home to choose in: ${home}`)
+  const file = join(home, WAY_BACK)
+  if (kind === 'node') {
+    mkdirSync(home, { recursive: true })
+    writeFileSync(file, '')
+  } else {
+    rmSync(file, { force: true })
+  }
+}
 
 /** How each is said in a sentence. */
 const NAMES = { node: "Node's", native: 'the native' }
@@ -155,8 +195,13 @@ export function noteRan(kind) {
  * once it is the one asked for: one that is not is refused, which fails the
  * suite by itself, and a stand-in that a test starts to see it refused
  * (tests/integration/liar-daemon.mjs) is not what the leg ran.
+ *
+ * With the `home` it ran on, the home is held to the choice as well: the
+ * product's `cf` verbs choose by the file in it, so a home that says another
+ * implementation than the daemon would have the daemon and the verbs differ for
+ * one home.
  */
-export function assertStarted(asked, log, pid) {
+export function assertStarted(asked, log, pid, home = undefined) {
   const start = startLine(log, pid)
   assert.notEqual(
     start,
@@ -168,6 +213,17 @@ export function assertStarted(asked, log, pid) {
     asked.kind,
     `${NAMES[asked.kind]} daemon was asked for, but the start line in its log says ${start.runtime}: ${start.line}`,
   )
+  if (home !== undefined) {
+    assert.equal(
+      existsSync(join(home, WAY_BACK)),
+      asked.kind === 'node',
+      `${NAMES[asked.kind]} daemon was asked for, but ${home} ${
+        asked.kind === 'node' ? 'has no' : 'has a'
+      } ${WAY_BACK} file: the cf verbs of that home would be ${
+        asked.kind === 'node' ? "the native cf's" : "Node's"
+      } (chooseHome)`,
+    )
+  }
   noteRan(start.kind)
   return start
 }

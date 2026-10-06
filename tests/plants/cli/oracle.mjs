@@ -10,7 +10,7 @@ const MEANT = 'holds the Rust CLI to what Node answers now'
 export const PLANTS = [
   {
     name: 'oracle: the legacy CLI pads a name of the catalog to 13',
-    edits: [['bin/cf.mjs', 'entry.name.padEnd(12)', 'entry.name.padEnd(13)']],
+    edits: [['src/cli.js', 'entry.name.padEnd(12)', 'entry.name.padEnd(13)']],
     runs: [HELD],
     meant: MEANT,
   },
@@ -18,7 +18,7 @@ export const PLANTS = [
     name: 'oracle: the legacy CLI says a different usage',
     edits: [
       [
-        'bin/cf.mjs',
+        'src/cli.js',
         'Prepare private launcher and integrations',
         'Prepare the launcher and integrations',
       ],

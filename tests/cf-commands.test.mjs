@@ -3,7 +3,8 @@ import { execFileSync } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { cliTarget } from './cli-target.mjs'
+import { cliEnv, cliTarget } from './cli-target.mjs'
+import { tempEnv } from './helpers.mjs'
 
 /**
  * Every `cf …` that ConsensFlow's own words name is a command cf has: a
@@ -35,13 +36,21 @@ function commandsOf(usage, prefix) {
 }
 
 // Run here, not in a window: a window's token makes cf its board. By the cf these
-// tests run: Node's, or the native one (tests/cli-target.mjs, `npm run test:clis`).
+// tests run: the native one, or Node's (tests/cli-target.mjs, `npm run test:clis`),
+// in a home of its own, which a tokenless cf looks in for the way back to Node.
 const target = cliTarget()
-const outside = execFileSync(target.command, [...target.args, 'help'], {
-  cwd: REPO,
-  encoding: 'utf8',
-  env: { ...process.env, CONSENSFLOW_TOKEN: '', ...target.env },
-})
+const outside = (() => {
+  const t = tempEnv()
+  try {
+    return execFileSync(target.command, [...target.args, 'help'], {
+      cwd: REPO,
+      encoding: 'utf8',
+      env: cliEnv(target, { ...process.env, ...t.env, CONSENSFLOW_TOKEN: '' }),
+    })
+  } finally {
+    t.cleanup()
+  }
+})()
 const COMMANDS = new Map([
   ...commandsOf(outside, ''),
   ...commandsOf(USAGE, 'cf '),

@@ -15,6 +15,7 @@ import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { proveAgents } from './agents-proof.mjs'
+import { chooseHome, DEFAULT_DAEMON } from './choice.mjs'
 
 /**
  * The packaged smoke: the REAL `.app`, not this checkout.
@@ -122,12 +123,24 @@ function locateApp() {
 /**
  * What the first line of a daemon's log says of the daemon that started: Node's
  * names its runtime (`node v26…`), the native one says `rust`. Which of the two
- * the app starts is the app's to choose (`CONSENSFLOW_DAEMON`, and its default),
- * so the smoke reads which ran from the log, and holds it to the choice made.
+ * the app starts is the home's to choose: the native one, unless the home has
+ * taken the way back (a `use-node` file in it). The smoke reads which ran from
+ * the log, and holds it to the choice it made in its box's home, which
+ * `CONSENSFLOW_TEST_DAEMON` names (`node`, `native`; none is the native one,
+ * the default the flip made).
  */
 const START_LINES = {
   node: / start pid \d+ node v\d+\.\d+\.\d+ home /,
   native: / start pid \d+ rust \S+ home /,
+}
+
+/** The daemon the run asks for, by the tests' own selector; the default's when it names none. */
+function askedDaemon() {
+  const named = process.env.CONSENSFLOW_TEST_DAEMON || DEFAULT_DAEMON
+  if (!(named in START_LINES)) {
+    throw new Error(`CONSENSFLOW_TEST_DAEMON is ${named}: the smoke knows node and native`)
+  }
+  return named
 }
 
 /** `node`, `native`, or null where the line is neither's. */
@@ -298,6 +311,8 @@ function sandbox() {
   for (const dir of [paths.home, paths.state, paths.workspace, paths.bin, paths.probe]) {
     mkdirSync(dir, { recursive: true })
   }
+  // The daemon the app starts, and every `cf` of this home, is chosen by the home.
+  chooseHome(askedDaemon(), paths.state)
   const tag = `smoke-${process.pid}-${Date.now()}`
   const harness = join(paths.bin, 'claude')
   writeFileSync(harness, FAKE_HARNESS, 'utf8')
@@ -335,11 +350,6 @@ process.stdin.on('data', chunk => {
       CFSMOKE_PIDFILE: paths.pidFile,
       CFSMOKE_PASTE_READER: pasteReader,
       CFSMOKE_TAG: tag,
-      // The daemon as the app chooses it: CONSENSFLOW_DAEMON=native runs the
-      // native one (step 3.6, behind its switch until the flip).
-      ...(process.env.CONSENSFLOW_DAEMON
-        ? { CONSENSFLOW_DAEMON: process.env.CONSENSFLOW_DAEMON }
-        : {}),
     },
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   }
@@ -560,7 +570,8 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   const opened = await app.waitFor('project')
   assert.equal(opened.data.ok, true, `project.open refused: ${JSON.stringify(opened.data)}`)
   // The daemon the app chose, Node's or the native one: its own log says which
-  // started, and a choice made by name (`CONSENSFLOW_DAEMON`) is the one that ran.
+  // started, and the one the home asked for (the file in it, or the default,
+  // which is the native one) is the one that ran.
   const [started] = readFileSync(join(box.env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8').split('\n')
   const ran = daemonOf(started)
   assert.notEqual(
@@ -568,15 +579,11 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     null,
     `the daemon's first line is neither Node's nor the native one's: ${started}`,
   )
-  const asked = box.env.CONSENSFLOW_DAEMON
-  if (asked !== undefined) {
-    assert.ok(
-      asked in START_LINES,
-      `CONSENSFLOW_DAEMON is ${asked}: the smoke knows node and native`,
-    )
-    assert.equal(ran, asked, `asked for the ${asked} daemon, the ${ran} one started: ${started}`)
-  }
-  t.diagnostic(`the daemon that ran: ${ran} (${asked ? 'asked for' : "the app's default"})`)
+  const asked = askedDaemon()
+  assert.equal(ran, asked, `asked for the ${asked} daemon, the ${ran} one started: ${started}`)
+  t.diagnostic(
+    `the daemon that ran: ${ran} (${process.env.CONSENSFLOW_TEST_DAEMON ? 'asked for' : "the app's default"})`,
+  )
 
   const rendered = await app.waitFor('rendered')
   assert.match(rendered.data.banner, new RegExp(`CFSMOKE-READY ${box.tag}`))
@@ -760,13 +767,11 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   // 6b. A second packaged `cf ui` on the app's home is a second ConsensFlow,
   //     and the same lock refuses it, whichever daemon holds the ledger. Exit 1
   //     alone could be a dependency the bundle lacks, so it is the ledger's own
-  //     words that must be on stderr, and no handle line on stdout. It asks for
-  //     the daemon that is running, and Node's runs on the bundle's Node, as a
-  //     window's cf is given it.
-  const second = await withPackagedCf(found.cf, box, ['ui', '--json', '--no-open'], {
-    CONSENSFLOW_DAEMON: ran,
-    CONSENSFLOW_NODE: found.node,
-  })
+  //     words that must be on stderr, and no handle line on stdout. It is the
+  //     daemon the home chose that is asked for, by the file in the home and by
+  //     nothing in the environment, and Node's runs on the Node `cf` finds beside
+  //     itself in the bundle: none is named to it.
+  const second = await withPackagedCf(found.cf, box, ['ui', '--json', '--no-open'])
   assert.equal(second.signal, null, `the second cf ui never ended: ${second.out}${second.err}`)
   assert.equal(second.code, 1, `the second cf ui ended ${second.code}: ${second.out}${second.err}`)
   assert.match(

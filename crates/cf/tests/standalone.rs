@@ -1,8 +1,9 @@
-//! Which `cf` answers the standalone verbs, as a process: the ones Rust answers
-//! once the switch (`CONSENSFLOW_DAEMON=native`) is on, with no runtime named;
-//! the ones it still hands to Node's sources while it is off; and a window's
-//! token, which makes `cf` the board whatever the switch says. What the verbs
-//! say is held to Node's recording in `cli_goldens`.
+//! Which `cf` answers the standalone verbs, as a process: by default Rust
+//! answers all of them, `setup` and `doctor` too, with no runtime named and no
+//! environment variable asked (the way back, which sends every verb to Node for
+//! a home that has taken it, is `way_back.rs`'s); and a window's token makes
+//! `cf` the board. What the verbs say is held to Node's recording in
+//! `cli_goldens`.
 //!
 //! And what `setup` and `doctor` do with the command that `setup` makes, which
 //! only a binary in a place of its own can show: a `cf` is told apart from
@@ -19,8 +20,6 @@ use std::path::{Path, PathBuf};
 
 use common::{cf, cf_at, own_cf, plain};
 
-const NODE_NEEDED: &str = "cf: CONSENSFLOW_NODE is not set:";
-
 fn said(ran: &std::process::Output) -> (Option<i32>, String, String) {
     (
         ran.status.code(),
@@ -30,28 +29,37 @@ fn said(ran: &std::process::Output) -> (Option<i32>, String, String) {
 }
 
 #[test]
-fn the_switch_is_what_turns_the_verbs_on_and_no_runtime_is_named_for_them() {
+fn rust_answers_by_default_whatever_the_old_switch_says_and_no_runtime_is_named_for_it() {
     for args in [&["help"][..], &["--version"], &["catalog"], &["bogus"]] {
-        // Off: Node's sources answer, and none is named.
-        let (code, out, err) = said(&cf(args, &[], ""));
-        assert_eq!((code, out.as_str()), (Some(1), ""), "{args:?}");
-        assert!(err.starts_with(NODE_NEEDED), "{args:?}: {err}");
-        // On: Rust answers, and still none is named.
-        let (_, _, err) = said(&cf(args, &[("CONSENSFLOW_DAEMON", "native")], ""));
-        assert!(!err.contains("CONSENSFLOW_NODE"), "{args:?}: {err}");
+        let (_, answer, expected_err) = said(&cf(args, &[], ""));
+        for stray in ["native", "node", ""] {
+            // `CONSENSFLOW_DAEMON` was the switch before the flip: nothing reads it now.
+            let ran = said(&cf(args, &[("CONSENSFLOW_DAEMON", stray)], ""));
+            assert_eq!(
+                ran,
+                (ran.0, answer.clone(), expected_err.clone()),
+                "{args:?}"
+            );
+        }
+        assert!(
+            !expected_err.contains("Node") && !expected_err.contains("CONSENSFLOW_NODE"),
+            "{args:?}: {expected_err}"
+        );
     }
+    let (code, out, err) = said(&cf(&["bogus"], &[], ""));
+    assert_eq!(
+        (code, out.as_str(), err.as_str()),
+        (
+            Some(1),
+            "",
+            "cf: unknown command \"bogus\" — run `cf help`\n"
+        )
+    );
 }
 
 #[test]
-fn a_window_token_is_the_board_whatever_the_switch_says() {
-    let (code, out, err) = said(&cf(
-        &["help"],
-        &[
-            ("CONSENSFLOW_DAEMON", "native"),
-            ("CONSENSFLOW_TOKEN", "participant"),
-        ],
-        "",
-    ));
+fn a_window_token_is_the_board() {
+    let (code, out, err) = said(&cf(&["help"], &[("CONSENSFLOW_TOKEN", "participant")], ""));
     assert_eq!((code, err.as_str()), (Some(0), ""));
     assert!(out.starts_with("cf inside a ConsensFlow window"), "{out}");
 }
@@ -60,11 +68,7 @@ fn a_window_token_is_the_board_whatever_the_switch_says() {
 fn a_json_word_is_the_verbs_own_and_is_not_taken_out_before_the_verb_reads_it() {
     // The board takes `--json` out wherever it stands; the CLI's verbs are
     // handed the words as they came, so here it is the command.
-    let (code, _, err) = said(&cf(
-        &["--json", "catalog"],
-        &[("CONSENSFLOW_DAEMON", "native")],
-        "",
-    ));
+    let (code, _, err) = said(&cf(&["--json", "catalog"], &[], ""));
     assert_eq!(code, Some(1));
     assert_eq!(err, "cf: unknown command \"--json\" — run `cf help`\n");
 }
@@ -100,12 +104,12 @@ impl User {
             .join(format!("{name}{extension}"))
     }
 
-    /// `cf args` as the binary at `program` runs it for this user, the switch
-    /// on or off.
-    fn run_at(
+    /// `cf args` as the binary at `program` runs it for this user, with `extra`
+    /// in its environment besides what makes the user's.
+    fn run_with(
         &self,
         program: &Path,
-        switch: Option<&str>,
+        extra: &[(&str, &str)],
         args: &[&str],
     ) -> (Option<i32>, String, String) {
         let at = |name: &str| self.at(name).to_string_lossy().into_owned();
@@ -115,7 +119,7 @@ impl User {
             ("CLAUDE_CONFIG_DIR", at("claude")),
             ("PATH", at("bin")),
         ];
-        vars.extend(switch.map(|switch| ("CONSENSFLOW_DAEMON", switch.to_owned())));
+        vars.extend(extra.iter().map(|(name, text)| (*name, (*text).to_owned())));
         let vars: Vec<(&str, &str)> = vars
             .iter()
             .map(|(name, text)| (*name, text.as_str()))
@@ -123,9 +127,14 @@ impl User {
         said(&cf_at(program, args, &vars, ""))
     }
 
-    /// `cf args` as this build runs it for this user, with the switch on.
+    /// `cf args` as the binary at `program` runs it for this user.
+    fn run_at(&self, program: &Path, args: &[&str]) -> (Option<i32>, String, String) {
+        self.run_with(program, &[], args)
+    }
+
+    /// `cf args` as this build runs it for this user.
     fn run(&self, args: &[&str]) -> (Option<i32>, String, String) {
-        self.run_at(&own_cf(), Some("native"), args)
+        self.run_at(&own_cf(), args)
     }
 
     /// A copy of the binary in a folder of its own under this user's: another `cf`.
@@ -147,18 +156,27 @@ const CLAIMS: &str =
     " — another ConsensFlow. `cf` runs that one; `cf setup` from this one claims the command.";
 
 #[test]
-fn setup_and_doctor_are_the_switchs_too_and_name_no_runtime() {
+fn setup_and_doctor_are_answered_by_default_whatever_the_old_switch_says_and_name_no_runtime() {
+    // Run from the build's own folder, which is no bundle: no Node is beside it,
+    // so a verb handed on to Node's sources would be refused for want of one.
+    // `CONSENSFLOW_DAEMON` was the switch before the flip: nothing reads it now.
     for verb in ["setup", "doctor"] {
-        let user = User::new();
-        // Off: Node's sources answer, and none is named.
-        let (code, out, err) = user.run_at(&own_cf(), None, &[verb]);
-        assert_eq!((code, out.as_str()), (Some(1), ""), "{verb}");
-        assert!(err.starts_with(NODE_NEEDED), "{verb}: {err}");
-        assert!(!user.at("consensflow").exists(), "{verb}: made while off");
-        // On: Rust answers, and still none is named.
-        let (code, out, err) = user.run(&[verb]);
-        assert_eq!((code, err.as_str()), (Some(0), ""), "{verb}");
-        assert!(!out.is_empty(), "{verb}");
+        for stray in [None, Some("native"), Some("node"), Some("")] {
+            let user = User::new();
+            let extra: Vec<_> = stray
+                .map(|stray| ("CONSENSFLOW_DAEMON", stray))
+                .into_iter()
+                .collect();
+            let (code, out, err) = user.run_with(&own_cf(), &extra, &[verb]);
+            assert_eq!((code, err.as_str()), (Some(0), ""), "{verb}, {stray:?}");
+            assert!(!out.is_empty(), "{verb}, {stray:?}");
+            // `setup` makes the command in the home, and `doctor` makes nothing.
+            assert_eq!(
+                user.at("consensflow").exists(),
+                verb == "setup",
+                "{verb}, {stray:?}"
+            );
+        }
     }
 }
 
@@ -191,7 +209,7 @@ fn a_command_that_runs_another_cf_is_another_consensflow_until_setup_from_this_o
     let user = User::new();
     let own = own_cf();
     let other = user.copy("other");
-    assert_eq!(user.run_at(&other, Some("native"), &["setup"]).0, Some(0));
+    assert_eq!(user.run_at(&other, &["setup"]).0, Some(0));
     let theirs = format!("command:      {}", other.display());
     let (_, out, _) = user.run(&["doctor"]);
     assert_eq!(
@@ -199,7 +217,7 @@ fn a_command_that_runs_another_cf_is_another_consensflow_until_setup_from_this_o
         Some(format!("{theirs}{CLAIMS}").as_str())
     );
     // From the copy it runs, it is plain.
-    let (_, out, _) = user.run_at(&other, Some("native"), &["doctor"]);
+    let (_, out, _) = user.run_at(&other, &["doctor"]);
     assert_eq!(command_line(&out), Some(theirs.as_str()));
     // This one claims it.
     assert_eq!(user.run(&["setup"]).0, Some(0));
@@ -208,7 +226,7 @@ fn a_command_that_runs_another_cf_is_another_consensflow_until_setup_from_this_o
         command_line(&out),
         Some(format!("command:      {}", own.display()).as_str())
     );
-    let (_, out, _) = user.run_at(&other, Some("native"), &["doctor"]);
+    let (_, out, _) = user.run_at(&other, &["doctor"]);
     assert_eq!(
         command_line(&out),
         Some(format!("command:      {}{CLAIMS}", own.display()).as_str())
@@ -219,7 +237,7 @@ fn a_command_that_runs_another_cf_is_another_consensflow_until_setup_from_this_o
 fn a_command_that_runs_a_cf_that_is_gone_is_missing() {
     let user = User::new();
     let gone = user.copy("gone");
-    assert_eq!(user.run_at(&gone, Some("native"), &["setup"]).0, Some(0));
+    assert_eq!(user.run_at(&gone, &["setup"]).0, Some(0));
     fs::remove_file(&gone).expect("removed");
     let (code, out, _) = user.run(&["doctor"]);
     assert_eq!(code, Some(0));
@@ -284,16 +302,13 @@ fn a_cf_run_from_where_macos_translocates_an_app_still_makes_the_command_it_is_a
     let user = User::new();
     let transient =
         user.copy("AppTranslocation/0A1B2C/d/ConsensFlow.app/Contents/Resources/cli/bin");
-    assert_eq!(
-        user.run_at(&transient, Some("native"), &["setup"]).0,
-        Some(0)
-    );
+    assert_eq!(user.run_at(&transient, &["setup"]).0, Some(0));
     let text = fs::read_to_string(user.command("consensflow")).expect("the command");
     assert!(
         text.contains(&format!("exec \"{}\"", transient.display())),
         "{text}"
     );
-    let (code, out, _) = user.run_at(&transient, Some("native"), &["doctor"]);
+    let (code, out, _) = user.run_at(&transient, &["doctor"]);
     assert_eq!(code, Some(0));
     assert_eq!(
         command_line(&out),

@@ -1,38 +1,24 @@
 /**
- * Plants in which `cf` answers the standalone verbs: the switch, a window's
- * token, the verbs left to others, the words as they came, and a reader that
- * went away. The tests of the module and of the process catch them; three are
- * given to the suites of the CLI alone, run against both CLIs, which must catch
- * them too.
+ * Plants in which `cf` answers the standalone verbs: the verbs themselves, `ui`
+ * (the daemon's, no verb here), the words as they came, and a reader that went
+ * away. The tests of the module, of the library and of the process catch them;
+ * three are given to the suites of the CLI alone, run against both CLIs, which
+ * must catch them too. Which implementation answers (the home's file, a window's
+ * token) is `flip.mjs`'s.
  */
-import { BOTH, GOLDENS, lines, PROCESS, STANDALONE, UNITS } from './kit.mjs'
+import { BOTH, GOLDENS, LIBRARY, lines, PROCESS, STANDALONE, UNITS } from './kit.mjs'
 
 const MOD = `${STANDALONE}/mod.rs`
-const SWITCH =
-  'if env.text("CONSENSFLOW_DAEMON") != Some("native") || env.text("CONSENSFLOW_TOKEN").is_some() {'
+const LIB = 'crates/cf/src/lib.rs'
 
 export const PLANTS = [
   {
-    name: 'dispatch: the switch is not looked at',
-    edits: [[MOD, SWITCH, 'if env.text("CONSENSFLOW_TOKEN").is_some() {']],
-    runs: [UNITS],
-    meant: 'it_answers_nothing_while_the_switch_is_off_whatever_the_verb',
-  },
-  {
-    // The suites give the native cf its switch, so one that ignored it would pass
-    // them: what they see is a verb handed back to Node's sources, with no runtime.
-    name: 'dispatch: the catalog is handed to Node though the switch is on, seen by the suites of the CLI',
-    edits: [
-      [MOD, 'Some("catalog") => catalog::run(rest, out),', 'Some("catalog") => return Ok(None),'],
-    ],
+    // The suites give the native cf no Node beside it, and one that did not
+    // answer the verb would say it is no command.
+    name: 'dispatch: the catalog is an unknown command, seen by the suites of the CLI',
+    edits: [[MOD, '        Some("catalog") => catalog::run(rest, out),\n', '']],
     runs: [BOTH],
     meant: 'runs the native cf',
-  },
-  {
-    name: 'dispatch: a window token does not make cf the board',
-    edits: [[MOD, SWITCH, 'if env.text("CONSENSFLOW_DAEMON") != Some("native") {']],
-    runs: [UNITS],
-    meant: 'a_window_token_makes_cf_the_board_which_this_module_does_not_answer',
   },
   {
     name: 'dispatch: setup and doctor are answered as unknown commands',
@@ -49,31 +35,62 @@ export const PLANTS = [
       ],
     ],
     runs: [UNITS, PROCESS],
-    meant: 'ui_is_the_one_verb_left_to_the_daemon_with_the_switch_on',
+    meant: 'with_no_folder_to_keep_the_agents_in_a_verb_that_needs_it_says_so',
   },
   {
-    // As for the catalog: the suites give the native cf its switch and no runtime,
-    // so a setup handed back to Node's sources is a setup that fails.
-    name: 'dispatch: setup is handed to Node though the switch is on, seen by the suites of the CLI',
-    edits: [
-      [MOD, 'Some("setup") => setup::run(env, rest, out),', 'Some("setup") => return Ok(None),'],
-    ],
+    // As for the catalog.
+    name: 'dispatch: setup is an unknown command, seen by the suites of the CLI',
+    edits: [[MOD, '        Some("setup") => setup::run(env, rest, out),\n', '']],
     runs: [BOTH],
     meant: 'roster edits, setup and diagnostic reads leave role files and old manifests alone',
+  },
+  {
+    name: 'dispatch: ui is answered by the module as a verb',
+    edits: [
+      [
+        MOD,
+        '        Some("doctor") => doctor::run(env, out),\n',
+        '        Some("doctor") => doctor::run(env, out),\n        Some("ui") => Ok(()),\n',
+      ],
+    ],
+    runs: [UNITS],
+    meant: 'ui_is_the_daemons_and_reaching_this_module_it_is_an_unknown_command',
+  },
+  {
+    // The old fallthrough: a `ui` the module did not answer went to Node's
+    // sources, a daemon for a home that runs native. The test calls the
+    // library, and the Node it would start is none (the test's own folder
+    // bundles none), so what it sees is the refusal.
+    name: 'dispatch: a ui that reaches run is run on Node',
+    edits: [
+      [
+        LIB,
+        '            None => standalone::run(env, args, out, err),\n',
+        lines(
+          '            None if args.first().is_some_and(|word| word == "ui") => {',
+          '                node::run(args, std::path::Path::new("use-node"), err)',
+          '            }',
+          '            None => standalone::run(env, args, out, err),',
+          '',
+        ),
+      ],
+    ],
+    runs: [LIBRARY],
+    meant: 'a_ui_that_reaches_the_library_is_an_unknown_command_and_starts_nothing',
   },
   {
     name: 'dispatch: the verbs are handed the words with --json taken out',
     edits: [
       [
-        'crates/cf/src/lib.rs',
-        'None => match standalone::run(env, args, out, err)? {',
+        LIB,
+        'None => standalone::run(env, args, out, err),',
         lines(
-          'None => match standalone::run(',
-          '            env,',
-          '            &args.iter().filter(|arg| *arg != "--json").cloned().collect::<Vec<_>>(),',
-          '            out,',
-          '            err,',
-          '        )? {',
+          'None => standalone::run(',
+          '                env,',
+          '                &args.iter().filter(|arg| *arg != "--json").cloned().collect::<Vec<_>>(),',
+          '                out,',
+          '                err,',
+          '            ),',
         ),
       ],
     ],

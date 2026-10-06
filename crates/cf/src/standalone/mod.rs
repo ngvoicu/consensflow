@@ -5,10 +5,13 @@
 //! (`cf_launcher`, `cf_harness`). `tests/cli_goldens` holds them to what Node
 //! said (`npm run goldens:cli`), file by file.
 //!
-//! They are dormant until the flip (step 4): reached only with
-//! `CONSENSFLOW_DAEMON=native`, as `cf ui` is, and tokenless (a window has its
-//! participant's token, and there `cf` is the board). Without the switch every
-//! tokenless verb goes to the CLI's Node sources as it always did.
+//! They are what `cf` answers by default (the flip, step 4), for a tokenless
+//! command (a window has its participant's token, and there `cf` is the
+//! board) in a home that has not taken the way back: with the `use-node` file
+//! in it every tokenless command goes to the CLI's Node sources instead
+//! (`crate::run` asks `cf_base::way_back`, once). `ui` is the daemon's, which
+//! `main` runs before any of this (`crate::native_ui`): reaching this module it
+//! is an unknown command, like any word that is no verb.
 //!
 //! A verb says what it prints as it goes, and what stops it as `cf: <words>`
 //! with exit code 1: Node's `fail` and every error `main` caught.
@@ -63,19 +66,15 @@ impl From<Refusal> for Stop {
 /// How a verb ended.
 type Done = Result<(), Stop>;
 
-/// Runs `args` as a standalone verb when it is one answered here, and the
-/// switch is on: its exit code. None when it is not for this module: the
-/// switch is off, a window's token is there, or the verb is `ui`, which
-/// `cf_daemon` answers. Only a failure to write is an error.
+/// Runs `args` as a standalone verb: its exit code, and a word that is none is
+/// an unknown command. The caller has found no window's token and no way back
+/// to Node. Only a failure to write is an error.
 pub fn run(
     env: &Env,
     args: &[OsString],
     out: &mut dyn Write,
     err: &mut dyn Write,
-) -> io::Result<Option<u8>> {
-    if env.text("CONSENSFLOW_DAEMON") != Some("native") || env.text("CONSENSFLOW_TOKEN").is_some() {
-        return Ok(None);
-    }
+) -> io::Result<u8> {
     // Node reads its arguments as UTF-8, and a byte that is none as U+FFFD.
     let words: Vec<String> = args
         .iter()
@@ -96,17 +95,16 @@ pub fn run(
         Some("setup") => setup::run(env, rest, out),
         // Whatever words follow it are no matter, as in Node.
         Some("doctor") => doctor::run(env, out),
-        Some("ui") => return Ok(None),
         Some(other) => Err(Stop::Said(format!(
             "unknown command {} — run `cf help`",
             js::stringify(&Value::from(other))
         ))),
     };
     match done {
-        Ok(()) => Ok(Some(0)),
+        Ok(()) => Ok(0),
         Err(Stop::Said(words)) => {
             writeln!(err, "cf: {words}")?;
-            Ok(Some(1))
+            Ok(1)
         }
         Err(Stop::Io(failed)) => Err(failed),
     }

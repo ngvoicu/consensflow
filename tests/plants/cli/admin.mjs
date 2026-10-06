@@ -125,14 +125,24 @@ export const PLANTS = [
     'with_no_folder_to_keep_the_agents_in_a_verb_that_needs_it_says_so',
   ),
   unit(
-    'setup is handed to Node though the switch is on',
-    [[MOD, 'Some("setup") => setup::run(env, rest, out),', 'Some("setup") => return Ok(None),']],
-    'ui_is_the_one_verb_left_to_the_daemon_with_the_switch_on',
+    'setup is an unknown command',
+    [[MOD, '        Some("setup") => setup::run(env, rest, out),\n', '']],
+    'with_no_folder_to_keep_the_agents_in_a_verb_that_needs_it_says_so',
   ),
   unit(
-    'doctor is handed to Node though the switch is on',
-    [[MOD, 'Some("doctor") => doctor::run(env, out),', 'Some("doctor") => return Ok(None),']],
-    'ui_is_the_one_verb_left_to_the_daemon_with_the_switch_on',
+    'doctor is an unknown command',
+    [
+      [
+        MOD,
+        lines(
+          '        // Whatever words follow it are no matter, as in Node.',
+          '        Some("doctor") => doctor::run(env, out),',
+          '',
+        ),
+        '',
+      ],
+    ],
+    'with_no_folder_to_keep_the_agents_in_a_verb_that_needs_it_says_so',
   ),
   {
     name: 'setup and doctor: the cf the command names is not the one that runs',

@@ -1,5 +1,5 @@
-//! The native daemon's stop as a process (`cf ui --json --no-open` with
-//! `CONSENSFLOW_DAEMON=native`), over real pipes, as the app ends it: its
+//! The native daemon's stop as a process (`cf ui --json --no-open`), over
+//! real pipes, as the app ends it: its
 //! input ended; SIGTERM with its input left open (Windows delivers none);
 //! its output broken with its input left open. Each ends the daemon with exit
 //! 0, and its log as `core-daemon.test.mjs:186-191` reads it.
@@ -10,8 +10,8 @@
 //! asks): a pass waiting on a window that never answers, a door waiting for an
 //! answer, an idle connection, and a request with its body half sent.
 
-// The tests start cf themselves.
-#![allow(clippy::disallowed_methods)]
+// The tests start cf themselves, and make the folders and files they start it on.
+#![allow(clippy::disallowed_methods, clippy::expect_used)]
 
 mod daemon;
 
@@ -363,45 +363,81 @@ fn a_program_the_daemon_is_waiting_for_is_ended_when_it_stops() {
     }
 }
 
-#[test]
-fn without_the_switch_cf_ui_is_not_the_native_daemon() {
-    // Not the switch's value: the daemon is asked for by `native` and nothing else.
-    let root = Root::new();
-    let ran = std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
+/// `cf ui --json --no-open` in `root`'s home as a process that ends on its own
+/// (it is no daemon, or it is refused one), with `extra` in its environment.
+fn ui_that_ends(root: &Root, extra: &[(&str, &str)]) -> std::process::Output {
+    std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
         .args(["ui", "--json", "--no-open"])
         .env_clear()
-        .env("CONSENSFLOW_DAEMON", "yes")
+        .envs(extra.iter().copied())
         .env("CONSENSFLOW_HOME", root.home())
         .env("HOME", root.dir.path())
         .stdin(std::process::Stdio::null())
         .output()
-        .expect("cf runs");
-    // It goes to the CLI's Node sources, which this binary has no runtime for here.
-    assert_ne!(ran.status.code(), Some(0));
-    assert!(
-        String::from_utf8_lossy(&ran.stderr).contains("CONSENSFLOW_NODE is not set"),
-        "{}",
-        String::from_utf8_lossy(&ran.stderr)
-    );
-    assert!(!root.home().join("daemon.log").exists(), "no daemon ran");
+        .expect("cf runs")
+}
+
+/// The way back's file in `root`'s home.
+fn take_the_way_back(root: &Root) {
+    std::fs::create_dir_all(root.home()).expect("the home");
+    std::fs::write(root.home().join("use-node"), "").expect("the way back");
+}
+
+#[test]
+fn with_the_way_back_cf_ui_is_not_the_native_daemon_whatever_the_old_switch_says() {
+    // The `use-node` file in the home sends `ui` to the CLI's Node sources, as it
+    // sends every tokenless command; this binary has no Node bundled beside it.
+    for stray in [&[][..], &[("CONSENSFLOW_DAEMON", "native")]] {
+        let root = Root::new();
+        take_the_way_back(&root);
+        let ran = ui_that_ends(&root, stray);
+        assert_ne!(ran.status.code(), Some(0), "{stray:?}");
+        assert!(
+            String::from_utf8_lossy(&ran.stderr).contains("sends this home's commands to Node"),
+            "{stray:?}: {}",
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        assert!(!root.home().join("daemon.log").exists(), "no daemon ran");
+    }
+}
+
+#[test]
+fn without_the_way_back_cf_ui_is_the_native_daemon_whatever_the_old_switch_says() {
+    // `CONSENSFLOW_DAEMON` was the switch before the flip, and a terminal does not
+    // inherit the app's environment: nothing reads it, so the home decides alone.
+    for stray in ["node", "native", "", "yes"] {
+        let root = Root::new();
+        let daemon = Daemon::start_with(&root, &[("CONSENSFLOW_DAEMON", stray)]);
+        assert!(daemon.handle["url"].is_string(), "{stray:?}");
+        let lines = said(&root.log());
+        assert!(
+            lines[0].starts_with("info start pid ") && lines[0].contains(" rust "),
+            "{stray:?}: {lines:?}"
+        );
+    }
 }
 
 #[test]
 fn a_window_s_cf_ui_is_the_board_and_never_the_daemon() {
-    let root = Root::new();
-    let ran = std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
-        .args(["ui", "--json", "--no-open"])
-        .env_clear()
-        .env("CONSENSFLOW_DAEMON", "native")
-        .env("CONSENSFLOW_TOKEN", "a-windows-token")
-        .env("CONSENSFLOW_URL", "http://127.0.0.1:9")
-        .env("CONSENSFLOW_HOME", root.home())
-        .env("HOME", root.dir.path())
-        .stdin(std::process::Stdio::null())
-        .output()
-        .expect("cf runs");
-    assert_ne!(ran.status.code(), Some(0), "the board has no such command");
-    assert!(!root.home().join("daemon.log").exists(), "no daemon ran");
+    // Whatever the home says of the way back, which here is both.
+    for way_back in [false, true] {
+        let root = Root::new();
+        if way_back {
+            take_the_way_back(&root);
+        }
+        let ran = std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
+            .args(["ui", "--json", "--no-open"])
+            .env_clear()
+            .env("CONSENSFLOW_TOKEN", "a-windows-token")
+            .env("CONSENSFLOW_URL", "http://127.0.0.1:9")
+            .env("CONSENSFLOW_HOME", root.home())
+            .env("HOME", root.dir.path())
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("cf runs");
+        assert_ne!(ran.status.code(), Some(0), "the board has no such command");
+        assert!(!root.home().join("daemon.log").exists(), "no daemon ran");
+    }
 }
 
 #[test]
@@ -412,7 +448,6 @@ fn a_daemon_that_cannot_start_says_why_in_cf_s_words_and_exits_1() {
     let ran = std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
         .args(["ui", "--json", "--no-open"])
         .env_clear()
-        .env("CONSENSFLOW_DAEMON", "native")
         .env("CONSENSFLOW_HOME", root.home())
         .env("HOME", root.dir.path())
         .stdin(std::process::Stdio::piped())
@@ -440,7 +475,6 @@ fn an_option_cf_ui_does_not_know_is_refused_as_node_refuses_it() {
     let ran = std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
         .args(["ui", "--foo"])
         .env_clear()
-        .env("CONSENSFLOW_DAEMON", "native")
         .stdin(std::process::Stdio::null())
         .output()
         .expect("cf runs");

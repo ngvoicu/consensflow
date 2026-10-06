@@ -1,10 +1,12 @@
 //! What the repair rewrites: the repair the app runs at its start, in the flip
-//! release and in the deletion release. A command of ours that does not name
-//! this bundle's `cf` is rewritten in the new shape, with the home it pinned
-//! and with no other. The cases are the ones an upgrade meets: an old command,
-//! an old command of another home, one that names a `cf` that is gone, and what
-//! a user who skipped the flip release has. What it leaves as it is, and says,
-//! is `repair_holds.rs`'s.
+//! release and in the deletion release. A command of ours that serves the home
+//! the app runs on and does not name this bundle's `cf` is rewritten in the new
+//! shape, with the home it pinned and with no other. The cases are the ones an
+//! upgrade meets: an old command, one that names a `cf` that is gone, and what
+//! a user who skipped the flip release has. The home a command serves is its
+//! pin's, or the default one's where it pins none (`repair_homes.rs`'s: what is
+//! left as it is for another home). What else it leaves as it is, and says, is
+//! `repair_holds.rs`'s.
 
 // A test's own folders and files: a failure in them is the test's.
 #![allow(clippy::unwrap_used)]
@@ -24,7 +26,9 @@ fn an_old_command_is_rewritten_in_the_new_shape_by_both_its_names() {
         let home = Home::new();
         let this = Bundle::new(home.root(), "This");
         let old = Bundle::new(home.root(), "Old");
-        let env = home.env(windows);
+        // The live app's: no `CONSENSFLOW_HOME`, so its home is the default one,
+        // which the old commands, pinning none, talk to.
+        let env = home.plain_env(windows);
         for file in files(&home, windows) {
             write(&file, &old_launcher(windows, &old.node, &old.cf_mjs, None));
         }
@@ -58,7 +62,7 @@ fn a_rewritten_command_is_a_program_the_system_runs() {
     // The mode an old file may have lost: the repair gives it back.
     fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
 
-    repair(&home.env(false), &this.cf, &at(&home));
+    repair(&home.plain_env(false), &this.cf, &at(&home));
 
     assert_eq!(
         fs::metadata(&file).unwrap().permissions().mode() & 0o777,
@@ -98,7 +102,7 @@ fn a_cf_named_in_the_verbatim_spelling_is_written_and_known_in_the_plain_one() {
             None,
         );
         write(&file, &old);
-        repair(&env, cf, &at(&home));
+        repair(&home.plain_env(true), cf, &at(&home));
         assert_eq!(read(&file), expected(true, Path::new(plain), None));
     }
 }
@@ -120,8 +124,10 @@ fn an_old_command_keeps_the_home_it_pinned() {
                 &old_launcher(windows, &old.node, &old.cf_mjs, Some(&candidate)),
             );
         }
+        // The Candidate's own app: its home is the one the commands pin.
+        let env = home.env_with(windows, &[("CONSENSFLOW_HOME", Some(candidate.as_str()))]);
 
-        repair(&home.env(windows), &this.cf, &at(&home));
+        repair(&env, &this.cf, &at(&home));
 
         for file in files(&home, windows) {
             assert_eq!(read(&file), expected(windows, &this.cf, Some(&candidate)));
@@ -130,46 +136,50 @@ fn an_old_command_keeps_the_home_it_pinned() {
 }
 
 #[test]
-fn an_old_command_of_another_home_keeps_that_home_and_not_the_one_that_repairs_it() {
-    for windows in forms() {
-        let home = Home::new();
-        let this = Bundle::new(home.root(), "This");
-        let old = Bundle::new(home.root(), "Old");
-        // The environment names a home of its own, which the command does not.
-        let other = home.root().join("another-home").display().to_string();
-        let [file, _] = files(&home, windows);
-        write(
-            &file,
-            &old_launcher(windows, &old.node, &old.cf_mjs, Some(&other)),
-        );
-        let env = home.env(windows);
-        assert_ne!(env.text("CONSENSFLOW_HOME"), Some(other.as_str()));
-
-        repair(&env, &this.cf, &at(&home));
-
-        assert_eq!(read(&file), expected(windows, &this.cf, Some(&other)));
-    }
-}
-
-#[test]
-fn an_old_command_that_pins_no_home_pins_none_where_the_environment_names_one() {
+fn an_old_command_that_pins_no_home_pins_none_where_the_live_app_repairs_it() {
     for windows in forms() {
         let home = Home::new();
         let this = Bundle::new(home.root(), "This");
         let old = Bundle::new(home.root(), "Old");
         let [file, _] = files(&home, windows);
         write(&file, &old_launcher(windows, &old.node, &old.cf_mjs, None));
-        // The environment has a CONSENSFLOW_HOME, as the Candidate's has.
-        let env = home.env(windows);
-        assert!(env.text("CONSENSFLOW_HOME").is_some());
 
-        repair(&env, &this.cf, &at(&home));
+        repair(&home.plain_env(windows), &this.cf, &at(&home));
 
         assert_eq!(
             read(&file),
             expected(windows, &this.cf, None),
             "the repair changes what runs, never which home a command talks to"
         );
+    }
+}
+
+#[test]
+fn a_home_named_as_the_default_one_is_served_with_or_without_a_pin() {
+    // The live app run with `CONSENSFLOW_HOME` naming `~/.consensflow` itself: its
+    // home is the default one, so a command that pins it and one that pins none
+    // both serve it.
+    for windows in forms() {
+        let home = Home::new();
+        let this = Bundle::new(home.root(), "This");
+        let old = Bundle::new(home.root(), "Old");
+        let default = home.default_home().display().to_string();
+        let [pinned, unpinned] = files(&home, windows);
+        write(
+            &pinned,
+            &old_launcher(windows, &old.node, &old.cf_mjs, Some(&default)),
+        );
+        write(
+            &unpinned,
+            &old_launcher(windows, &old.node, &old.cf_mjs, None),
+        );
+        let env = home.env_with(windows, &[("CONSENSFLOW_HOME", Some(default.as_str()))]);
+
+        let repaired = repair(&env, &this.cf, &at(&home));
+
+        assert_eq!(outcomes(&repaired), [Repair::Rewritten, Repair::Rewritten]);
+        assert_eq!(read(&pinned), expected(windows, &this.cf, Some(&default)));
+        assert_eq!(read(&unpinned), expected(windows, &this.cf, None));
     }
 }
 
@@ -222,11 +232,17 @@ fn a_command_of_ours_that_says_nothing_either_shape_does_is_rewritten_with_the_p
         };
         write(&pinned, &strange(pin));
         write(&plain, &strange(""));
-
-        repair(&home.env(windows), &this.cf, &at(&home));
-
         let kept = if windows { "C:\\kept" } else { "/kept" };
+
+        // The app of the home it pins repairs the one that pins it, and the
+        // default home's app the other: each with the pin it has.
+        repair(
+            &home.env_with(windows, &[("CONSENSFLOW_HOME", Some(kept))]),
+            &this.cf,
+            &at(&home),
+        );
         assert_eq!(read(&pinned), expected(windows, &this.cf, Some(kept)));
+        repair(&home.plain_env(windows), &this.cf, &at(&home));
         assert_eq!(read(&plain), expected(windows, &this.cf, None));
     }
 }
@@ -246,7 +262,7 @@ fn every_place_given_is_looked_in_in_order() {
         }
         let places = Places::at(vec![first.clone(), second.clone()]);
 
-        let repaired = repair(&home.env(windows), &this.cf, &places);
+        let repaired = repair(&home.plain_env(windows), &this.cf, &places);
 
         assert_eq!(
             outcomes(&repaired),

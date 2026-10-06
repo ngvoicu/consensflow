@@ -58,12 +58,12 @@ jobs:
       # binary of cf-panes, which no Tauri bundle ships.
       - run: npm run build:bridge
       - run: npm run test:integration
-      # The daemon's suites and the rig's against both daemons, Node's and the
-      # native cf ui (step 3.6, behind its switch until the flip).
+      # The daemon's suites and the rig's against both daemons, Node's (the way
+      # back, a home's `use-node` file) and the native cf ui, the default.
       - run: npm run test:daemons
         timeout-minutes: 20
-      # The CLI's suites against both CLIs: Node's cf.mjs, and the native cf
-      # answering the standalone verbs behind the switch (step 4, until the flip).
+      # The CLI's suites against both CLIs: Node's cf.mjs (the way back), and the
+      # native cf, which answers every standalone verb by default.
       - run: npm run test:clis
         timeout-minutes: 15
       # Cargo reads app/src-tauri/.cargo/config.toml from the folder it runs in:

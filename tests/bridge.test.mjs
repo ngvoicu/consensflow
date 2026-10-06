@@ -853,10 +853,13 @@ describe('cf ui --json --no-open speaks the bridge after its handle line', () =>
     const { spawn } = await import('node:child_process')
     const { join } = await import('node:path')
     const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
-    // `cf ui` as the app runs it: through cf.mjs on Node, or the native `cf`
-    // that CONSENSFLOW_TEST_DAEMON names (`npm run test:daemons` runs both), and
-    // the daemon it starts is the one asked for: the start line in its log says so.
-    const started = daemonCommand([cf, 'ui', '--json', '--no-open'])
+    // `cf ui` as the app runs it: the native `cf`, or through cf.mjs on Node for a
+    // home that has taken the way back (CONSENSFLOW_TEST_DAEMON names which;
+    // `npm run test:daemons` runs both), and the daemon it starts is the one
+    // asked for: the start line in its log says so.
+    const started = daemonCommand([cf, 'ui', '--json', '--no-open'], {
+      home: t.env.CONSENSFLOW_HOME,
+    })
     const child = spawn(started.command, started.args, {
       env: { ...t.env, ...started.env },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -888,6 +891,7 @@ describe('cf ui --json --no-open speaks the bridge after its handle line', () =>
         started,
         readFileSync(join(t.env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8'),
         child.pid,
+        t.env.CONSENSFLOW_HOME,
       )
       assert.ok(handle.url.length > 0)
       assert.match(handle.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)

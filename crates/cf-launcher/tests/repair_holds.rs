@@ -81,7 +81,7 @@ fn of_two_names_the_one_that_is_ours_is_rewritten_and_the_one_that_is_not_is_not
         write(&ours, &old_launcher(windows, &old.node, &old.cf_mjs, None));
         write(&theirs, "someone else's\n");
 
-        let repaired = repair(&home.env(windows), &this.cf, &at(&home));
+        let repaired = repair(&home.plain_env(windows), &this.cf, &at(&home));
 
         assert_eq!(outcomes(&repaired), [Repair::Rewritten, Repair::Unmarked]);
         assert_eq!(read(&ours), expected(windows, &this.cf, None));
@@ -121,7 +121,7 @@ fn a_command_that_is_there_under_one_name_is_not_made_under_the_other() {
         let [consensflow, cf] = files(&home, windows);
         write(&cf, &old_launcher(windows, &old.node, &old.cf_mjs, None));
 
-        let repaired = repair(&home.env(windows), &this.cf, &at(&home));
+        let repaired = repair(&home.plain_env(windows), &this.cf, &at(&home));
 
         assert_eq!(outcomes(&repaired), [Repair::Absent, Repair::Rewritten]);
         assert!(!consensflow.exists());
@@ -134,21 +134,18 @@ fn a_repair_run_twice_writes_nothing_the_second_time() {
         let home = Home::new();
         let this = Bundle::new(home.root(), "This");
         let old = Bundle::new(home.root(), "Old");
-        let candidate = home
-            .root()
-            .join(".consensflow-candidate")
-            .display()
-            .to_string();
+        // The live app's home is the default one: a command may pin it or pin none.
+        let default = home.default_home().display().to_string();
         let found = files(&home, windows);
         write(
             &found[0],
-            &old_launcher(windows, &old.node, &old.cf_mjs, Some(&candidate)),
+            &old_launcher(windows, &old.node, &old.cf_mjs, Some(&default)),
         );
         write(
             &found[1],
             &old_launcher(windows, &old.node, &old.cf_mjs, None),
         );
-        let env = home.env(windows);
+        let env = home.plain_env(windows);
 
         let first = repair(&env, &this.cf, &at(&home));
         assert_eq!(outcomes(&first), [Repair::Rewritten, Repair::Rewritten]);
@@ -217,7 +214,7 @@ fn an_app_opened_from_where_it_was_downloaded_leaves_the_command_as_it_is() {
         }
         let before = (read(&file), read(&other));
 
-        let repaired = repair(&env, &translocated, &at(&home));
+        let repaired = repair(&home.plain_env(windows), &translocated, &at(&home));
 
         assert_eq!(outcomes(&repaired), [Repair::Transient, Repair::Transient]);
         assert_eq!((read(&file), read(&other)), before);
@@ -243,7 +240,7 @@ fn a_command_that_cannot_be_read_is_said_and_the_other_name_is_repaired_all_the_
         fs::create_dir_all(&consensflow).unwrap();
         write(&cf, &old_launcher(windows, &old.node, &old.cf_mjs, None));
 
-        let repaired = repair(&home.env(windows), &this.cf, &at(&home));
+        let repaired = repair(&home.plain_env(windows), &this.cf, &at(&home));
 
         assert_eq!(
             repaired[0].outcome,
@@ -269,7 +266,7 @@ fn a_command_that_cannot_be_written_is_said_with_the_call_that_failed() {
         return; // Root may write any file.
     }
 
-    let repaired = repair(&home.env(false), &this.cf, &at(&home));
+    let repaired = repair(&home.plain_env(false), &this.cf, &at(&home));
 
     assert_eq!(
         repaired[0].outcome,

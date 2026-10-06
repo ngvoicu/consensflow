@@ -27,9 +27,9 @@ const ONLY_NODE_CAN = NATIVE && "a test of Node's own modules, which the native 
 /** What the start line of the daemon under test says, and no other's does: `node v26.8.1`, `rust 3.0.0`. */
 const STARTS = START_WORDS[CHOSEN.kind]
 
-/** The daemon as a child, the one under test; Node flags only go to Node's. */
+/** The daemon as a child, the one under test; Node flags only go to Node's. Its home is made the choice's own. */
 function startDaemon(env, nodeFlags = []) {
-  const started = daemonCommand([...nodeFlags, DAEMON])
+  const started = daemonCommand([...nodeFlags, DAEMON], { home: env.CONSENSFLOW_HOME })
   return spawn(started.command, started.args, {
     env: { ...env, ...started.env },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -41,7 +41,7 @@ function startDaemon(env, nodeFlags = []) {
  * the native `cf`. It is the process a start that fails ends, with what that says.
  */
 function startCli(env) {
-  const named = daemonCommand([])
+  const named = daemonCommand([], { home: env.CONSENSFLOW_HOME })
   const [command, args] = named.native
     ? [named.command, named.args]
     : [process.execPath, [path.join(BUNDLE_BIN, 'cf.mjs'), 'ui', '--json', '--no-open']]
@@ -434,7 +434,7 @@ async function daemonOverItsBridge(t, { agents = [], preload = null } = {}) {
   }
   await until(() => handle, 'said it was ready')
   // The daemon that answers is the one under test: its log's start line says so.
-  assertStarted(CHOSEN, await readFile(path.join(home, 'daemon.log'), 'utf8'), child.pid)
+  assertStarted(CHOSEN, await readFile(path.join(home, 'daemon.log'), 'utf8'), child.pid, home)
   return {
     home,
     workspace,

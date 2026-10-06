@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { terminalRuntime } from '../../src/terminal.js'
+import { launcherEntry } from './launcher-entry.mjs'
 
 const APP = dirname(dirname(fileURLToPath(import.meta.url)))
 const STAGED = join(APP, 'src-tauri', 'resources', 'cli')
@@ -37,20 +37,21 @@ for (const bundle of BUNDLES) mirror(bundle)
 const written = [...BUNDLES]
 
 /**
- * Where `cf` on PATH keeps its CLI. The launcher names the cf.mjs it runs, so
- * the copy is its grandparent — checked rather than assumed, because a path
- * that does not hold a CLI is not one to rsync `--delete` over.
+ * Where `cf` on PATH keeps its CLI. The launcher names the cf.mjs it runs, or the
+ * native `cf` beside it (the shape an app's start repairs it to), so the copy is
+ * its grandparent either way — checked rather than assumed, because a path that
+ * does not hold a CLI is not one to rsync `--delete` over.
  */
 const onPath = () => {
-  const runtime = terminalRuntime(process.env)
-  if (runtime === null) return null
-  if (runtime.live) {
+  const found = launcherEntry(process.env)
+  if (found === null) return null
+  if (found.live) {
     process.stdout.write(
-      `the command on PATH runs the installed ConsensFlow (${runtime.entry}) — not syncing into the live app\n`,
+      `the command on PATH runs the installed ConsensFlow (${found.entry}) — not syncing into the live app\n`,
     )
     return null
   }
-  const root = dirname(dirname(runtime.entry))
+  const root = dirname(dirname(found.entry))
   return existsSync(join(root, 'bin', 'cf.mjs')) ? root : null
 }
 

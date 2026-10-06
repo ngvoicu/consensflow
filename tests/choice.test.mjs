@@ -4,8 +4,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { assertStarted, NATIVE_CF, noteRan, START_WORDS, startLine } from './choice.mjs'
-import { cliTarget } from './cli-target.mjs'
+import {
+  assertStarted,
+  chooseHome,
+  NATIVE_CF,
+  noteRan,
+  START_WORDS,
+  startLine,
+  WAY_BACK,
+} from './choice.mjs'
+import { cliEnv, cliTarget } from './cli-target.mjs'
 import { daemonCommand } from './helpers.mjs'
 import { CLI_LEGS, DAEMON_LEGS, legEnv, ranProblem, runLeg } from './legs.mjs'
 
@@ -18,32 +26,37 @@ const NODE_LINE = '2026-10-06T10:00:00.000Z info start pid 4242 node v26.8.1 hom
 const RUST_LINE =
   '2026-10-06T10:00:00.000Z info start pid 4242 rust 3.0.0-alpha.79 home /tmp/consensflow'
 
+/** A folder of this test's own, made and removed round `body`. */
+function inAFolder(body) {
+  const folder = mkdtempSync(join(tmpdir(), 'cf-choice-'))
+  try {
+    return body(folder)
+  } finally {
+    rmSync(folder, { recursive: true, force: true })
+  }
+}
+
 describe('which daemon a test starts, in words', () => {
-  it('starts Node’s for `node`, whatever the default is, and says so to the product', () => {
+  it('starts Node’s for `node`, whatever the default is', () => {
     for (const fallback of ['node', 'native']) {
       const started = daemonCommand(['daemon.mjs'], { named: 'node', leg: '', fallback })
       assert.equal(started.kind, 'node')
       assert.equal(started.native, false)
       assert.equal(started.command, process.execPath)
       assert.deepEqual(started.args, ['daemon.mjs'])
-      assert.deepEqual(started.env, {
-        CONSENSFLOW_NODE: process.execPath,
-        CONSENSFLOW_DAEMON: 'node',
-      })
+      // The product chooses by the home, not by an environment variable.
+      assert.deepEqual(started.env, { CONSENSFLOW_NODE: process.execPath })
     }
   })
 
-  it('starts the native cf of this checkout for `native`, whatever the default is, behind its switch', () => {
+  it('starts the native cf of this checkout for `native`, whatever the default is', () => {
     for (const fallback of ['node', 'native']) {
       const started = daemonCommand(['daemon.mjs'], { named: 'native', leg: '', fallback })
       assert.equal(started.kind, 'native')
       assert.equal(started.native, true)
       assert.equal(started.command, NATIVE_CF)
       assert.deepEqual(started.args, ['ui', '--json', '--no-open'])
-      assert.deepEqual(started.env, {
-        CONSENSFLOW_NODE: process.execPath,
-        CONSENSFLOW_DAEMON: 'native',
-      })
+      assert.deepEqual(started.env, { CONSENSFLOW_NODE: process.execPath })
     }
   })
 
@@ -57,7 +70,38 @@ describe('which daemon a test starts, in words', () => {
       [started.kind, started.command, started.args],
       ['native', '/build/cf', ['ui', '--json']],
     )
-    assert.equal(started.env.CONSENSFLOW_DAEMON, 'native')
+    assert.equal(started.env.CONSENSFLOW_DAEMON, undefined)
+  })
+
+  it('makes the choice in the home it is given: the file for Node’s, none for the native one’s', () => {
+    inAFolder((home) => {
+      assert.equal(existsSync(join(home, WAY_BACK)), false, 'a home with no choice made')
+      daemonCommand([], { named: 'node', leg: '', fallback: 'native', home })
+      assert.equal(existsSync(join(home, WAY_BACK)), true)
+      // A restart of the same home on the other daemon takes the file away.
+      daemonCommand([], { named: 'native', leg: '', fallback: 'node', home })
+      assert.equal(existsSync(join(home, WAY_BACK)), false)
+      // The default is the native one's, and its home has no file either.
+      chooseHome('node', home)
+      daemonCommand([], { named: undefined, leg: '', home })
+      assert.equal(existsSync(join(home, WAY_BACK)), false)
+    })
+  })
+
+  it('makes a home that is not there yet, for Node’s', () => {
+    inAFolder((folder) => {
+      const home = join(folder, 'not', 'yet')
+      chooseHome('node', home)
+      assert.equal(existsSync(join(home, WAY_BACK)), true)
+      chooseHome('native', join(folder, 'never', 'made'))
+      assert.equal(existsSync(join(folder, 'never')), false, 'the native one makes nothing')
+    })
+  })
+
+  it('refuses a choice it does not know and a home that is none', () => {
+    assert.throws(() => chooseHome('both', '/h'), /no implementation is called both/)
+    assert.throws(() => chooseHome('node', ''), /a home to choose in/)
+    assert.throws(() => chooseHome('native', undefined), /a home to choose in/)
   })
 
   it('starts the default for nothing, and the default is the tests’ to name', () => {
@@ -248,6 +292,34 @@ describe('which daemon started, from its log', () => {
       /Node's daemon was asked for, and its log holds no start line of pid 1/,
     )
   })
+
+  it('holds the home it ran on to the choice as well: the cf verbs of a home choose by its file', () => {
+    inAFolder((home) => {
+      chooseHome('node', home)
+      assert.equal(assertStarted({ kind: 'node' }, `${NODE_LINE}\n`, 4242, home).kind, 'node')
+      assert.throws(
+        () => assertStarted({ kind: 'native' }, `${RUST_LINE}\n`, 4242, home),
+        /the native daemon was asked for, but .* has a use-node file/,
+      )
+      chooseHome('native', home)
+      assert.equal(assertStarted({ kind: 'native' }, `${RUST_LINE}\n`, 4242, home).kind, 'native')
+      assert.throws(
+        () => assertStarted({ kind: 'node' }, `${NODE_LINE}\n`, 4242, home),
+        /Node's daemon was asked for, but .* has no use-node file/,
+      )
+    })
+  })
+
+  it('notes for the runner only a daemon whose home agrees with it', () => {
+    const said = withRanFile(() => {
+      inAFolder((home) => {
+        chooseHome('native', home)
+        assert.throws(() => assertStarted({ kind: 'node' }, `${NODE_LINE}\n`, 4242, home))
+        assert.throws(() => assertStarted({ kind: 'native' }, `${NODE_LINE}\n`, 4242, home))
+      })
+    })
+    assert.equal(said, null)
+  })
 })
 
 /** Runs `body` with the file the runner names in the environment, and answers what was said in it. */
@@ -378,13 +450,13 @@ describe('which cf the suites of the CLI run, in the same words', () => {
     for (const fallback of ['node', 'native']) {
       const node = cliTarget({ named: 'node', leg: '', fallback })
       assert.deepEqual(
-        [node.kind, node.native, node.command, node.args, node.env],
-        ['node', false, process.execPath, [CF_MJS], { CONSENSFLOW_DAEMON: 'node' }],
+        [node.kind, node.native, node.command, node.args],
+        ['node', false, process.execPath, [CF_MJS]],
       )
       const native = cliTarget({ named: 'native', leg: '', fallback })
       assert.deepEqual(
-        [native.kind, native.native, native.command, native.args, native.env],
-        ['native', true, NATIVE_CF, [], { CONSENSFLOW_DAEMON: 'native' }],
+        [native.kind, native.native, native.command, native.args],
+        ['native', true, NATIVE_CF, []],
       )
     }
   })
@@ -411,10 +483,18 @@ describe('which cf the suites of the CLI run, in the same words', () => {
     )
   })
 
-  it('names no runtime to either cf, so a native cf that handed a verb to Node would fail', () => {
-    for (const named of ['node', 'native']) {
-      const { env } = cliTarget({ named, leg: '', fallback: 'node' })
-      assert.deepEqual(Object.keys(env), ['CONSENSFLOW_DAEMON'])
-    }
+  it('makes the choice in the home of a run, and names no runtime to either cf', () => {
+    // A runtime named to the native cf would let it hand a verb on to Node and be
+    // none the worse for it: the environment of a run is the test's own, and the
+    // home in it the only thing that says which implementation answers.
+    const native = cliTarget({ named: 'native', leg: '', fallback: 'node' })
+    const node = cliTarget({ named: 'node', leg: '', fallback: 'node' })
+    inAFolder((home) => {
+      const env = { A: '1', CONSENSFLOW_HOME: home }
+      assert.deepEqual(cliEnv(node, env), env, 'the environment is the test’s')
+      assert.equal(existsSync(join(home, WAY_BACK)), true)
+      assert.deepEqual(cliEnv(native, env), env)
+      assert.equal(existsSync(join(home, WAY_BACK)), false)
+    })
   })
 })
