@@ -170,6 +170,15 @@ fn queues_a_delivery_in_flight_at_the_refusal_again_and_keeps_a_coordinators_own
         ("open".to_owned(), None, "cancelled".to_owned()),
         "the task goes back to the board and the answer in flight goes with it"
     );
+    // Not held to Node's recording: what was in flight goes with the task, in
+    // the brief of the window that takes it next, once.
+    assert!(
+        tiers.task(1).task.body.contains(
+            "Kept from before, never delivered to @zeus-amber-pine:\n\n(answer m-3 from @chief to m-2 of @zeus-amber-pine: Which?)\nThis one"
+        ),
+        "{}",
+        tiers.task(1).task.body
+    );
 
     // A pass runs every window at once, so the note may reach the chief on
     // this pass or the next; it answers, then takes its own work.
@@ -226,11 +235,6 @@ fn queues_a_delivery_in_flight_at_the_refusal_again_and_keeps_a_coordinators_own
         state_of(later.id),
         "delivered",
         "its queue resumes after the reset"
-    );
-    held_to(
-        context.close(),
-        SUITES,
-        "queues a delivery in flight at the refusal again, and keeps a coordinator's own tasks for after its reset",
     );
 }
 

@@ -7,8 +7,8 @@ export const PLANTS = [
     edits: [
       [
         `${DAEMON}/api/routes/door.rs`,
-        '    while answer.is_none() && Instant::now() < until && !context.closing.is_set() {',
-        '    while answer.is_none() && Instant::now() < until {',
+        '        if context.closing.is_set() || context.credentials.resolve(request.bearer()).is_none() {',
+        '        if context.credentials.resolve(request.bearer()).is_none() {',
       ],
       [
         `${DAEMON}/api/routes/door.rs`,
@@ -24,12 +24,13 @@ export const PLANTS = [
     edits: [
       [
         `${DAEMON}/api/routes/door.rs`,
+        lines('            () = context.closing.wait() => {}', '        }', '    }'),
         lines(
+          '            () = context.closing.wait() => {}',
           '        }',
-          '        answer = context.ledger.borrow().answer_to(asked.id)?;',
+          '        return unanswered(&asked);',
           '    }',
         ),
-        lines('        }', '    }'),
       ],
     ],
     runs: [daemon('door::')],

@@ -3,7 +3,7 @@
 use serde_json::Value;
 
 use super::Ledger;
-use crate::{messages, LedgerError, MessageView, NewNote, NewQuestion};
+use crate::{messages, Begun, Claim, LedgerError, MessageView, NewNote, NewQuestion, Read};
 
 impl Ledger {
     /// One message, or none.
@@ -36,9 +36,46 @@ impl Ledger {
         messages::answer(&mut self.store, question_id, from, body, choices)
     }
 
-    /// The answer to a question, or none while it waits.
-    pub fn answer_to(&self, question_id: i64) -> Result<Option<MessageView>, LedgerError> {
-        messages::answer_to(&self.store, question_id)
+    /// A door asks for the answer to its question, as the one who asked it:
+    /// the answer, claimed for it; none yet; or the door is shut.
+    pub fn claim_answer(&mut self, question_id: i64, asker: i64) -> Result<Claim, LedgerError> {
+        messages::claim_answer(&mut self.store, question_id, asker)
+    }
+
+    /// A door says whether it handed the answer it claimed to its harness, as
+    /// the one the answer was for.
+    pub fn settle_claim(
+        &mut self,
+        answer_id: i64,
+        recipient: i64,
+        received: bool,
+    ) -> Result<(), LedgerError> {
+        messages::settle_claim(&mut self.store, answer_id, recipient, received)
+    }
+
+    /// Answers of `recipient` among `ids` that `cf` served whole are received.
+    pub fn receive_read(
+        &mut self,
+        recipient: i64,
+        ids: &[i64],
+        via: Read,
+    ) -> Result<(), LedgerError> {
+        messages::receive_read(&mut self.store, recipient, ids, via)
+    }
+
+    /// The claims no door acknowledged on answers for a participant are voided,
+    /// for `because`.
+    pub fn release_claims(
+        &mut self,
+        participant_id: i64,
+        because: &str,
+    ) -> Result<(), LedgerError> {
+        messages::release_claims(&mut self.store, participant_id, because)
+    }
+
+    /// Every claim of every window is voided: no door survives a start.
+    pub fn release_all_claims(&mut self) -> Result<(), LedgerError> {
+        messages::release_all_claims(&mut self.store)
     }
 
     /// The participants something waits on, each once.
@@ -53,9 +90,28 @@ impl Ledger {
         messages::next_delivery(&self.store, participant_id)
     }
 
-    /// A message's delivery into its window begins.
-    pub fn begin_delivery(&mut self, message_id: i64) -> Result<MessageView, LedgerError> {
+    /// A message's delivery into its window begins: it, and the rows its paste carries.
+    pub fn begin_delivery(&mut self, message_id: i64) -> Result<Begun, LedgerError> {
         messages::begin_delivery(&mut self.store, message_id)
+    }
+
+    /// The newest message pasted into a participant's window about a task and proved.
+    pub fn last_pasted(
+        &self,
+        participant_id: i64,
+        task_id: i64,
+    ) -> Result<Option<MessageView>, LedgerError> {
+        messages::last_pasted(&self.store, participant_id, task_id)
+    }
+
+    /// The first task message a participant's window received about a task on
+    /// its own, with what its paste carried.
+    pub fn first_received(
+        &self,
+        participant_id: i64,
+        task_id: i64,
+    ) -> Result<Option<Begun>, LedgerError> {
+        messages::first_received(&self.store, participant_id, task_id)
     }
 
     /// The harness's own record proves the message arrived.

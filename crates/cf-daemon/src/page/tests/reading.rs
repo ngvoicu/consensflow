@@ -12,7 +12,7 @@ use super::*;
 use crate::roster::offerable;
 
 /// A home whose agents file holds `rows`, and the environment that names it.
-fn home_with(rows: &str) -> (tempfile::TempDir, Env) {
+pub(super) fn home_with(rows: &str) -> (tempfile::TempDir, Env) {
     let home = tempfile::tempdir().unwrap();
     std::fs::write(
         home.path().join("agents.json"),

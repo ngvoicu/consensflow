@@ -126,6 +126,80 @@ pub struct Scene {
     pub question: MessageView,
 }
 
+impl Scene {
+    /// The id of `handle` in the project.
+    pub fn id(&self, handle: &str) -> i64 {
+        self.project
+            .participants
+            .iter()
+            .find(|participant| participant.handle == handle)
+            .unwrap_or_else(|| panic!("no @{handle}"))
+            .id
+    }
+
+    /// The chief chooses `label` for `question`: the answer, queued for zeus.
+    pub fn choose(&self, question: i64, label: &str) -> MessageView {
+        let chief = self.id("chief");
+        self.context
+            .ledger
+            .borrow_mut()
+            .answer(question, chief, None, Some(&serde_json::json!([[label]])))
+            .unwrap()
+    }
+
+    /// The next message the dispatcher would hand zeus's window, by its words.
+    pub fn next_for_zeus(&self) -> Option<String> {
+        let next = self
+            .context
+            .ledger
+            .borrow()
+            .next_delivery(self.id("zeus"))
+            .unwrap();
+        next.map(|message| message.body)
+    }
+
+    /// The door of zeus claims the answer to `question`, as its poll does.
+    pub fn claim(&self, question: i64) {
+        let zeus = self.id("zeus");
+        let claimed = self
+            .context
+            .ledger
+            .borrow_mut()
+            .claim_answer(question, zeus)
+            .unwrap();
+        assert!(
+            matches!(claimed, cf_ledger::Claim::Answered(_)),
+            "{claimed:?}"
+        );
+    }
+
+    /// The chief pauses T-1.
+    pub fn pause(&self) {
+        self.context
+            .ledger
+            .borrow_mut()
+            .pause_task(self.project.id, 1, Some("chief"), None)
+            .unwrap();
+    }
+
+    /// Message `id`, as the ledger has it now.
+    pub fn message(&self, id: i64) -> MessageView {
+        let found = self.context.ledger.borrow().message(id).unwrap();
+        found.unwrap_or_else(|| panic!("no m-{id}"))
+    }
+
+    /// How many events of `kind` the project has logged.
+    pub fn logged(&self, kind: &str) -> usize {
+        let events = self
+            .context
+            .ledger
+            .borrow()
+            .events(self.project.id, 0, 500)
+            .unwrap();
+        events.iter().filter(|event| event.kind == kind).count()
+    }
+}
+
 /// A scene with its ledger open on a file of its own.
 pub fn scene() -> Scene {
     let home = tempfile::tempdir().unwrap();

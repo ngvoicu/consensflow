@@ -53,8 +53,14 @@ export const ICONS = {
 }
 /** How many cards a cell shows: more are one tile, a stack and how many, whose cards open in a dialog. */
 const CELL_HOLDS = 3
-const columnOf = (task) =>
-  FINISHED.includes(task.state) ? 'finished' : task.state === 'paused' ? 'queued' : task.state
+export const columnOf = (task) =>
+  task.questionPending
+    ? 'working'
+    : FINISHED.includes(task.state)
+      ? 'finished'
+      : task.state === 'paused'
+        ? 'queued'
+        : task.state
 const STATE_LABEL = {
   open: 'Open',
   queued: 'Queued',
@@ -66,6 +72,13 @@ const STATE_LABEL = {
   failed: 'Failed',
   cancelled: 'Cancelled',
 }
+/**
+ * How a card says its state: a task that waits for an answer while its window
+ * goes on working (it asked, and kept at it) is at work, with a question
+ * pending, and sits in Working.
+ */
+export const stateLabel = (task) =>
+  task.questionPending ? 'Working, question pending' : STATE_LABEL[task.state]
 const ACTIVITY_LABEL = {
   working: 'Working',
   idle: 'Idle',
@@ -114,12 +127,19 @@ const roleOf = (task, roles) => task.pool ?? roles[0]
 
 /**
  * A row's tasks, the newest first: its own, and those it asked for that
- * wait for a member, which sit in its backlog.
+ * wait for a member, which sit in its backlog. A task of its own that waits
+ * while its window is at work has a question pending, and says so: the board
+ * keeps it `waiting`, and the window's activity is what tells the two apart.
  */
-const rowTasks = (lane, board) =>
-  [...lane.tasks, ...board.open.filter((task) => task.requester === lane.participant.handle)].sort(
-    (a, b) => b.number - a.number,
-  )
+export const rowTasks = (lane, board) =>
+  [
+    ...lane.tasks.map((task) =>
+      task.state === 'waiting' && lane.activity?.state === 'working'
+        ? { ...task, questionPending: true }
+        : task,
+    ),
+    ...board.open.filter((task) => task.requester === lane.participant.handle),
+  ].sort((a, b) => b.number - a.number)
 
 /**
  * The cards a row holds, the newest first: a folded member's row holds its
@@ -303,6 +323,10 @@ export function laneStatus(lane, board, now) {
   }
   if (lane.switching) {
     return ['switching', `Switching the chief to ${lane.switching.agent} after this turn`]
+  }
+  // A stop its window ignored in every round: the human can cancel the task to end it.
+  if (lane.unstopped) {
+    return ['unstopped', `Did not stop for T-${lane.unstopped.task}: still on its earlier turn`]
   }
   if (outOfQuota(participant, now)) {
     return ['out', `Out of quota until ${backAt(participant.outUntil, now)}`]
@@ -859,15 +883,16 @@ export class BoardView {
     const card = button('', 'card', () => this.#actions.onOpenTask(task.number))
     card.dataset.task = String(task.number)
     card.dataset.state = task.state
+    if (task.questionPending) card.dataset.pending = 'question'
     card.setAttribute(
       'aria-label',
-      `T-${task.number}, ${task.title}, ${STATE_LABEL[task.state]}, from ${who(task.requester)}`,
+      `T-${task.number}, ${task.title}, ${stateLabel(task)}, from ${who(task.requester)}`,
     )
     card.append(
       element('span', 'card-number', `T-${task.number}`),
       element('span', 'card-title', task.title),
       element('span', 'card-route', route(task)),
-      element('span', 'card-state', STATE_LABEL[task.state]),
+      element('span', 'card-state', stateLabel(task)),
     )
     // A result reads by its first line: its drawer has it whole.
     if (task.result) card.append(element('span', 'card-result', task.result.trim().split('\n')[0]))

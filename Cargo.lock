@@ -529,6 +529,7 @@ version = "3.0.0-alpha.79"
 dependencies = [
  "base64 0.22.1",
  "cf-base",
+ "cf-ledger",
  "cf-proto",
  "flate2",
  "rusqlite",

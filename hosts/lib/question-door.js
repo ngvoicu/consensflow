@@ -7,6 +7,12 @@
  * window. When the answer does not come in time, the door gives up and the
  * harness's own dialog takes over; when the window answered first, the
  * board's copy of the question gets that answer, so nobody answers it twice.
+ *
+ * The answer a poll finds is claimed for the door, and is received only once
+ * the door says it handed it over (`acknowledge`): a door that never says so
+ * leaves the answer to arrive a second time as text, and loses none. A door
+ * the board shut (the task was stopped) is refused with the words its model
+ * is to hear, which are handed over as they are.
  */
 
 /** How long a door waits for the board before the harness's own dialog takes over. */
@@ -32,6 +38,7 @@ export function boardClient({
       // Answered, and refused: not the same as a board that cannot be reached.
       throw Object.assign(new Error(value.message ?? `ConsensFlow answered ${response.status}`), {
         refused: true,
+        code: value.error,
       })
     }
     return value
@@ -41,10 +48,13 @@ export function boardClient({
 /**
  * What a member's window tells its model when the board refuses its
  * question: nobody watches a member's window, so its own dialog would hold
- * the task for good.
+ * the task for good. A door the board shut says in its own words that its
+ * answer comes as a message, and those words go as they are.
  */
 export const refusalReason = (cause) =>
-  `ConsensFlow could not put this question to the chief (${cause.message}). Ask with cf ask "…" instead.`
+  cause.code === 'door-closed'
+    ? cause.message
+    : `ConsensFlow could not put this question to the chief (${cause.message}). Ask with cf ask "…" instead.`
 
 /**
  * Puts the questions on the board and waits for their answer: `{ id, answer }`,
@@ -68,6 +78,16 @@ export async function askTheBoard(client, questions, { signal } = {}) {
   }
   return { id: message.id, answer }
 }
+
+/**
+ * The door handed the answer it claimed to its harness, or could not: the board
+ * is told so, which makes the answer received, or gives the claim back. What
+ * the board says to it is of no use to a door that has done what it was for,
+ * so a failure (a board of Node's, which knows no such route, included) is
+ * not raised.
+ */
+export const acknowledge = (client, answer, received) =>
+  client('POST', `/api/answers/${answer.id}/receipt`, { received }).catch(() => {})
 
 /** The window answered first: the board's copy of the question takes that answer, from the asker. */
 export const answerFromWindow = (client, id, choices) =>

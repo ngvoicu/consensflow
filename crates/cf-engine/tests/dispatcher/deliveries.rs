@@ -150,7 +150,7 @@ fn presses_enter_once_more_for_a_paste_its_window_has_not_sent_into_a_quiet_wind
     assert_eq!(enters(&context), 0, "not into a window that just printed");
     // Quiet now: the Enter sends what sat in the input, and the record shows it.
     context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
-    let (adapter, header) = (Rc::downgrade(&context.adapter), delivery_text(&note));
+    let (adapter, header) = (Rc::downgrade(&context.adapter), delivery_text(&note, &[]));
     *context.host.on_request.borrow_mut() = Some(Rc::new(move |op: &str, body: &Value| {
         let enter = op == "pane.input" && body["bytes"][0] == 13;
         if let (true, Some(adapter)) = (enter, adapter.upgrade()) {
@@ -244,7 +244,7 @@ fn counts_a_delivery_only_by_its_header_in_what_the_window_was_given_never_in_a_
     let note = context.note(project.id, "zeus", "chief", "hello");
     context.pass().unwrap();
     // The agent's own command prints the header (cf inbox read, a grep of a log).
-    let header = delivery_text(&context.message(note.id));
+    let header = delivery_text(&context.message(note.id), &[]);
     let printed = [
         context.adapter.item(Role::Tool, &header),
         context.adapter.item(Role::Custom, &header),

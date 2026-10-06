@@ -2,8 +2,12 @@
 //! (`tests/goldens/ledger/`; `npm run goldens:ledger` records them into
 //! `tests/traces/`): the same file to start from, the same clock readings and
 //! the same calls, and each call's answer or refusal, the events it logged and
-//! the clock readings it took, then the database it left, compared exactly.
-//! A trace that calls what this crate does not do yet is skipped and counted.
+//! the clock readings it took, then the database it left, compared exactly,
+//! but for the four columns of migration 0011 that Node's ledger never writes
+//! (`cf_ledger::testing`). A call this replay does not know fails its trace;
+//! a trace the receipt and stop redesign moved on purpose is named in
+//! [`DEPARTED`], with why, and is counted and printed instead of replayed: a
+//! test replays those too, and holds each to still departing.
 
 // The replay's own scaffolding: a failure in it is the test's.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -18,6 +22,7 @@ use base64::Engine;
 use cf_base::js;
 use cf_base::time::{parse, Clock};
 use cf_ledger::model::{parse_gate, parse_roles};
+use cf_ledger::testing::{hold_apart_what_node_never_logs, hold_apart_what_node_never_writes};
 use cf_ledger::{
     open_ledger, ChiefSwitch, Event, Ledger, LedgerError, NewMember, NewNote, NewProject,
     NewQuestion, NewTask, Options,
@@ -30,10 +35,87 @@ use serde_json::{json, Value};
 enum Outcome {
     /// Every call answered as Node's did: the methods called, one per call.
     Replayed(Vec<String>),
-    /// Calls something this crate does not do yet.
+    /// Probes what only JavaScript could be handed: nothing to replay here.
     Skipped(String),
     Failed(String),
 }
+
+/// The traces the redesign moved on purpose, by their file's name without
+/// `.json.gz`, each with the one thing that differs from Node's. Found by
+/// replaying the recordings against this ledger, not by guessing: a trace is
+/// here when its replay fails for a rule the redesign changed, and only then.
+const DEPARTED: &[(&str, &str)] = &[
+    ("core-api-006", "the door's read `answerTo` is gone (a poll claims with `claim_answer`), and a choice answer lands queued, not read"),
+    ("core-daemon-001", DOOR_READ),
+    ("core-dispatcher-010", REASON_PAUSE),
+    ("core-dispatcher-065", KEPT_IN_BRIEF),
+    ("core-dispatcher-107", KEPT_IN_BRIEF),
+    ("core-page-014", REASON_RELEASE),
+    ("ledger-gate-006", DOOR_READ),
+    ("ledger-gate-007", DOOR_READ),
+    ("ledger-gate-008", "the door's read `answerTo` is gone, and the choice answer the human approves lands queued, not read for the door"),
+    ("ledger-messages-009", "the door's read `answerTo` is gone, and a choice answer lands queued: its task waits until it is received"),
+    ("ledger-messages-010", READ_AT_ONCE),
+    ("ledger-messages-011", "the asker's own window answering first is received at once with the receipt `{window: true}` and its time; Node left both empty"),
+    ("ledger-messages-013", READ_AT_ONCE),
+    ("ledger-messages-014", READ_AT_ONCE),
+    ("ledger-messages-015", READ_AT_ONCE),
+    ("ledger-messages-017", DOOR_READ),
+    ("ledger-messages-022", DOOR_READ),
+    ("ledger-projects-002", KEPT_IN_BRIEF),
+    ("ledger-schema-005", KEPT_IN_BRIEF),
+    ("ledger-schema-006", KEPT_IN_BRIEF),
+    ("ledger-schema-007", KEPT_IN_BRIEF),
+    ("ledger-schema-010", KEPT_IN_BRIEF),
+    ("ledger-schema-011", KEPT_IN_BRIEF),
+    ("ledger-schema-013", KEPT_IN_BRIEF),
+    ("ledger-schema-014", KEPT_IN_BRIEF),
+    ("ledger-schema-016", KEPT_IN_BRIEF),
+    ("ledger-schema-017", KEPT_IN_BRIEF),
+    ("ledger-schema-019", KEPT_IN_BRIEF),
+    ("ledger-schema-020", KEPT_IN_BRIEF),
+    ("ledger-schema-021", KEPT_IN_BRIEF),
+    ("ledger-schema-023", KEPT_IN_BRIEF),
+    ("ledger-schema-024", KEPT_IN_BRIEF),
+    ("ledger-schema-025", KEPT_IN_BRIEF),
+    ("ledger-schema-027", KEPT_IN_BRIEF),
+    ("ledger-staff-008", KEPT_BY_PAUSE),
+    ("ledger-staff-019", KEPT_BY_PAUSE),
+    ("ledger-tasks-005", REASON_PAUSE),
+    ("ledger-tasks-016", KEPT_BY_PAUSE),
+    ("ledger-tasks-018", KEPT_BY_PAUSE),
+    ("ledger-tasks-020", REASON_PAUSE),
+    ("ledger-tasks-023", STOP_IN_EVENT),
+    ("ledger-tasks-024", STOP_IN_EVENT),
+    ("ledger-tasks-026", STOP_IN_EVENT),
+    ("ledger-tiered-013", KEPT_IN_BRIEF),
+    ("ledger-tiered-014", WINDOW_ENDED),
+];
+
+/// The door's poll is a write now, `claim_answer`; `answerTo`, its read, went.
+const DOOR_READ: &str =
+    "the door's read `answerTo` is gone: a poll claims the answer with `claim_answer`";
+/// An answer is received, not read at its creation.
+const READ_AT_ONCE: &str =
+    "a choice answer lands queued: Node marked it read and stamped it at its creation, two clock readings more";
+/// What a window kept goes to the next window in the brief, not with the old one.
+const KEPT_IN_BRIEF: &str =
+    "a release carries what the old window kept into the task's brief, once (\"Kept from before\"); Node let it go with the window";
+/// The reason a release gives the rows it carried.
+const REASON_RELEASE: &str =
+    "a release cancels the old window's kept rows with the reason `carried into T-n's brief for its next window`; Node gave none";
+/// The reason a pause gives what the chief wrote and takes back.
+const REASON_PAUSE: &str =
+    "a chief's pause withdraws what the chief wrote for the window with the reason `withdrawn by @chief's pause`; Node gave none";
+/// A pause keeps what is on its way, as a receipt alone resolves it.
+const KEPT_BY_PAUSE: &str =
+    "a pause or a hold keeps what is on its way (a question, a task message, a result); Node's `dropQueued` cancelled every queued row of the task";
+/// A pause's event says which stop it asked.
+const STOP_IN_EVENT: &str =
+    "a pause's `task.state` event carries `stop`, the sequence of the stop it asked: Node's has no such key";
+/// The reason a release gives what the old window still held for the human.
+const WINDOW_ENDED: &str =
+    "a release withdraws what the old window still held for the human with the reason `withdrawn: @x's window ended first`; Node gave none";
 
 /// What Node's ledger drew in each call (the clock's readings, session
 /// names), answered here in the same order; drawing past them is noted.
@@ -90,8 +172,8 @@ fn traces() -> PathBuf {
         .join("traces")
 }
 
-#[test]
-fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
+/// Every recorded trace, by its file's name without `.json.gz`, in that order.
+fn recorded() -> Vec<(String, String)> {
     let mut names: Vec<PathBuf> = std::fs::read_dir(traces())
         .expect("the traces: npm run goldens:ledger")
         .map(|entry| entry.unwrap().path())
@@ -99,15 +181,39 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
         .collect();
     names.sort();
     assert!(!names.is_empty(), "no traces: npm run goldens:ledger");
+    names
+        .iter()
+        .map(|name| {
+            let mut text = String::new();
+            flate2::read::GzDecoder::new(std::fs::File::open(name).unwrap())
+                .read_to_string(&mut text)
+                .unwrap();
+            let stem = name.file_name().unwrap().to_string_lossy();
+            (stem.trim_end_matches(".json.gz").to_string(), text)
+        })
+        .collect()
+}
+
+/// Why a trace departed, when it is named in [`DEPARTED`].
+fn departed(trace: &str) -> Option<&'static str> {
+    DEPARTED
+        .iter()
+        .find(|(name, _)| *name == trace)
+        .map(|(_, why)| *why)
+}
+
+#[test]
+fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
+    let traces = recorded();
     let (mut replayed, mut skipped, mut failed) = (0, BTreeMap::<String, usize>::new(), Vec::new());
     let mut calls = BTreeMap::<String, usize>::new();
-    for name in &names {
-        let mut text = String::new();
-        flate2::read::GzDecoder::new(std::fs::File::open(name).unwrap())
-            .read_to_string(&mut text)
-            .unwrap();
-        let trace = name.file_name().unwrap().to_string_lossy().to_string();
-        match replay(&text) {
+    let mut left = Vec::new();
+    for (trace, text) in &traces {
+        if let Some(why) = departed(trace) {
+            left.push(format!("  {trace}: {why}"));
+            continue;
+        }
+        match replay(text) {
             Outcome::Replayed(methods) => {
                 replayed += 1;
                 for method in methods {
@@ -120,10 +226,14 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
     }
     let skipped_count: usize = skipped.values().sum();
     println!(
-        "{replayed} traces replayed, {skipped_count} skipped, {} failed of {}",
+        "{replayed} traces replayed, {} departed, {skipped_count} skipped, {} failed of {}",
+        left.len(),
         failed.len(),
-        names.len()
+        traces.len()
     );
+    for line in &left {
+        println!("{line}");
+    }
     for (why, count) in &skipped {
         println!("  skipped {count}: {why}");
     }
@@ -141,6 +251,26 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
     assert!(replayed > 0, "nothing replayed");
 }
 
+/// A trace is named in [`DEPARTED`] because it differs from Node's, and
+/// for no other reason: one that no longer differs, or that is not there, is
+/// a line to take out, not a test left passing.
+#[test]
+fn every_departed_trace_is_there_and_still_departs() {
+    let traces = recorded();
+    let mut wrong = Vec::new();
+    for (trace, why) in DEPARTED {
+        match traces.iter().find(|(name, _)| name == trace) {
+            None => wrong.push(format!("{trace} is not a recorded trace ({why})")),
+            Some((_, text)) => {
+                if !matches!(replay(text), Outcome::Failed(_)) {
+                    wrong.push(format!("{trace} replays as Node's did now ({why})"));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 fn replay(text: &str) -> Outcome {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("consensflow.db");
@@ -149,9 +279,12 @@ fn replay(text: &str) -> Outcome {
     let trace: Value =
         serde_json::from_str(&text.replace("«ledger»", &path[1..path.len() - 1])).unwrap();
     let calls = trace["calls"].as_array().cloned().unwrap_or_default();
-    // A trace is replayed only whole: anything it calls that this crate does not do skips it.
-    if let Some(unknown) = calls.iter().find_map(unsupported) {
-        return Outcome::Skipped(unknown);
+    // A trace is replayed only whole: a call this replay does not know fails it.
+    if let Some(unknown) = calls.iter().find_map(unknown_call) {
+        return Outcome::Failed(unknown);
+    }
+    if let Some(probe) = calls.iter().find_map(probe_of_javascript) {
+        return Outcome::Skipped(probe);
     }
     let held = start_from(&trace["initial"], &file);
     let readings = Draws::<i64>::new();
@@ -222,11 +355,12 @@ fn replay(text: &str) -> Outcome {
         if let Some(why) = settled.into_iter().flatten().next() {
             return Outcome::Failed(format!("call {at} ({method}) {why}"));
         }
-        let logged: Vec<Value> = told
+        let mut logged: Vec<Value> = told
             .borrow_mut()
             .drain(..)
             .map(|event| json!({ "at": event.at, "project": event.project, "kind": event.kind, "data": event.data }))
             .collect();
+        hold_apart_what_node_never_logs(&mut logged);
         if let Some(why) = compare(&format!("call {at} ({method})"), &answer, &call["result"]) {
             return Outcome::Failed(why);
         }
@@ -238,7 +372,8 @@ fn replay(text: &str) -> Outcome {
             return Outcome::Failed(why);
         }
         if method == "close" {
-            if let Some(why) = compare("the database it left", &dump(&file), &trace["final"]) {
+            let (ours, theirs) = (held_apart(dump(&file)), held_apart(trace["final"].clone()));
+            if let Some(why) = compare("the database it left", &ours, &theirs) {
                 return Outcome::Failed(why);
             }
         }
@@ -251,8 +386,8 @@ fn replay(text: &str) -> Outcome {
     )
 }
 
-/// What this crate does not do yet, in one call; none when it does all of it.
-fn unsupported(call: &Value) -> Option<String> {
+/// A call this replay does not know, said as the failure it is; none for a method it does.
+fn unknown_call(call: &Value) -> Option<String> {
     let method = call["method"].as_str().unwrap_or_default();
     const DONE: &[&str] = &[
         "createProject",
@@ -314,7 +449,6 @@ fn unsupported(call: &Value) -> Option<String> {
         "note",
         "ask",
         "answer",
-        "answerTo",
         "nextDelivery",
         "withWork",
         "beginDelivery",
@@ -334,15 +468,14 @@ fn unsupported(call: &Value) -> Option<String> {
         "latestTranscript",
         "latestMessages",
     ];
-    if !DONE.contains(&method) {
-        return Some(format!("calls {method}"));
-    }
-    // A probe of what only JavaScript could be handed, which the Rust
-    // signature rules out.
-    if method == "copyTranscript" && !call["args"][1].is_array() {
-        return Some("hands copyTranscript items that are no list".into());
-    }
-    None
+    (!DONE.contains(&method)).then(|| format!("calls {method}, which this replay does not know"))
+}
+
+/// A probe of what only JavaScript could be handed, which the Rust signature
+/// rules out: the one thing a trace is skipped for.
+fn probe_of_javascript(call: &Value) -> Option<String> {
+    (call["method"] == "copyTranscript" && !call["args"][1].is_array())
+        .then(|| "hands copyTranscript items that are no list".into())
 }
 
 /// A value a call passed, as the recorder wrote it: `undefined` is no value,
@@ -585,11 +718,10 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
             field(args, 1, "body"),
             field(args, 1, "choices"),
         )),
-        "answerTo" => encode(ledger.answer_to(id())),
         "nextDelivery" => encode(ledger.next_delivery(id())),
         // A Set, as the recorder wrote it.
         "withWork" => ledger.with_work(id()).map(|ids| json!({ "$set": ids })),
-        "beginDelivery" => encode(ledger.begin_delivery(id())),
+        "beginDelivery" => encode(ledger.begin_delivery(id()).map(|begun| begun.message)),
         "confirmDelivery" => encode(ledger.confirm_delivery(id(), arg(args, 1))),
         "cancelMessage" => encode(ledger.cancel_message(id(), text(arg(args, 1)))),
         "retryDelivery" => encode(
@@ -805,6 +937,14 @@ fn insert(db: &Connection, table: &str, contents: &Value) {
         ))
         .unwrap();
     }
+}
+
+/// A dump with what only this ledger writes held apart.
+fn held_apart(mut dump: Value) -> Value {
+    if let Some(Value::Object(tables)) = dump.get_mut("tables") {
+        hold_apart_what_node_never_writes(tables);
+    }
+    dump
 }
 
 /// The database a ledger left, as the recorder dumps it: its version, its

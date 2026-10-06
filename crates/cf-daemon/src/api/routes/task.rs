@@ -7,10 +7,11 @@
 //! the digits as the path had them, read as `Number(...)` reads them.
 
 use cf_base::js;
-use cf_ledger::{NewQuestion, TaskThread};
+use cf_ledger::{MessageView, NewQuestion, Read, TaskThread};
 use hyper::Method;
 use serde_json::{json, Map, Value};
 
+use super::answers::received_whole;
 use super::{Answer, Caller, Context, Failure, Request, TaskAction};
 use crate::api::views::{value, MessageSummary, TaskSummary};
 
@@ -51,9 +52,13 @@ pub(super) async fn handle(
     let get = request.method == Method::GET;
     if action.is_none() && get {
         // The thread as far as the human has let it go: a gated message waits
-        // unseen.
+        // unseen, and is not received. What the thread says whole of the
+        // answers for the caller is read by it.
         task.messages.retain(|message| message.state != "gated");
-        return Ok(Answer::ok(json!({ "task": value(&task)? })));
+        let answer = Answer::ok(json!({ "task": value(&task)? }));
+        let served: Vec<&MessageView> = task.messages.iter().collect();
+        received_whole(context, caller, &served, Read::Task)?;
+        return Ok(answer);
     }
     if action == Some(TaskAction::Transcript) && get {
         return transcript(context, caller, &task, &request);

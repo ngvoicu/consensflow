@@ -6,7 +6,7 @@
 use hyper::Method;
 use serde_json::{json, Value};
 
-use crate::api::routes::tests::support::{api, working_task};
+use crate::api::routes::tests::support::{api, state_of, working_task};
 use crate::testing::{scene, Scene};
 
 async fn note(scene: &Scene, token: &str, body: &str) -> (u16, Value) {
@@ -51,6 +51,25 @@ async fn a_member_notes_whoever_gave_it_its_task_with_the_task_named() {
         said.as_object().unwrap().keys().collect::<Vec<_>>(),
         ["message"]
     );
+    assert_eq!(scene.kicks.get(), 1);
+}
+
+#[tokio::test]
+async fn a_member_whose_task_the_pause_has_not_stopped_yet_notes_about_that_task() {
+    let scene = scene();
+    let number = working_task(&scene);
+    scene.pause();
+    let (status, said) = note(&scene, &scene.zeus, r#"{"body":"Half of it is done."}"#).await;
+    assert_eq!(status, 201, "{said}");
+    assert_eq!(
+        said["message"]["recipient"], "chief",
+        "to whoever gave it the task"
+    );
+    assert_eq!(
+        said["message"]["task"], number,
+        "about the task it was stopped on"
+    );
+    assert_eq!(state_of(&scene, number), "paused", "a note moves nothing");
     assert_eq!(scene.kicks.get(), 1);
 }
 

@@ -737,3 +737,100 @@ describe("schema 10: the chief's reads of its history are logged under the role'
     })
   })
 })
+
+describe("schema 11: a task's stops, a message's carrier, claim and shut door", () => {
+  const carrier =
+    'carried_by INTEGER\n    CONSTRAINT message_carried_by_fk REFERENCES message (id) ON DELETE CASCADE, claimed_at TEXT, door_closed_at TEXT,'
+
+  it('adds to the schema 10 had the four columns the Rust ledger keeps, and nothing else', async () => {
+    await withDir(async (dir) => {
+      const [before, after] = [10, 11].map((version) => schemaAt(dir, version))
+      const sql = (schema, name) => schema.find((row) => row.name === name).sql
+      assert.equal(
+        sql(after, 'task'),
+        sql(before, 'task').replace(
+          'paused_at TEXT,',
+          'paused_at TEXT, stop_seq INTEGER NOT NULL DEFAULT 0,',
+        ),
+      )
+      assert.equal(
+        sql(after, 'message'),
+        sql(before, 'message').replace(
+          'urgent INTEGER NOT NULL DEFAULT 0,',
+          `urgent INTEGER NOT NULL DEFAULT 0, ${carrier}`,
+        ),
+      )
+      const others = (schema) =>
+        schema.filter((row) => row.name !== 'task' && row.name !== 'message')
+      assert.deepEqual(others(after), others(before), 'nothing else differs')
+    })
+  })
+
+  it('migrates a schema-10 ledger with every row as it was: never stopped, carried, claimed or shut', async () => {
+    await withDir(async (dir) => {
+      const file = ledgerAt(dir, 10)
+      const before = contents(file)
+
+      const after = contents(migratedTo(file, 11))
+      assert.equal(after.version, 11)
+      assert.deepEqual(
+        after.rows,
+        {
+          ...before.rows,
+          task: before.rows.task.map((row) => ({ ...row, stop_seq: 0 })),
+          message: before.rows.message.map((row) => ({
+            ...row,
+            carried_by: null,
+            claimed_at: null,
+            door_closed_at: null,
+          })),
+        },
+        'every row, with its id and references',
+      )
+      assert.deepEqual(after.schema, schemaAt(dir, 11), "the schema is a fresh schema-11 ledger's")
+    })
+  })
+
+  it('leaves the four columns as they were made, whatever this ledger goes on to write', async () => {
+    await withDir(async (dir) => {
+      const file = migratedTo(ledgerAt(dir, 10), 11)
+      const ledger = openLedger(file, { now: clock(), names: names() })
+      try {
+        const app = ledger.projects().find((project) => project.name === 'app')
+        const { task } = ledger.createTask(app.id, {
+          from: 'chief',
+          pool: 'worker',
+          tier: 'standard',
+          body: 'More',
+        })
+        ledger.pauseTask(app.id, task.number, { by: 'chief' })
+        ledger.cancelTask(app.id, task.number, { by: 'chief' })
+        ledger.note(app.id, { from: 'chief', to: 'human', body: 'Done' })
+      } finally {
+        ledger.close()
+      }
+      const { rows } = contents(file)
+      assert.deepEqual([...new Set(rows.task.map((row) => row.stop_seq))], [0], 'no stop counted')
+      for (const column of ['carried_by', 'claimed_at', 'door_closed_at']) {
+        assert.deepEqual([...new Set(rows.message.map((row) => row[column]))], [null], column)
+      }
+    })
+  })
+
+  it('is refused by a build that knows only schema 10', async () => {
+    await withDir(async (dir) => {
+      const file = path.join(dir, 'consensflow.db')
+      const ledger = openLedger(file, { now: clock(), names: names() })
+      busyProject(ledger, '/work/app')
+      ledger.close()
+      const before = contents(file)
+      const db = new DatabaseSync(file)
+      assert.throws(() => migrate(db, MIGRATIONS.slice(0, 10)), {
+        code: 'ledger-newer',
+        message: `this home was written by a newer ConsensFlow (schema ${SCHEMA_VERSION}; this build knows 10)`,
+      })
+      db.close()
+      assert.deepEqual(contents(file), before, 'and left as it was')
+    })
+  })
+})

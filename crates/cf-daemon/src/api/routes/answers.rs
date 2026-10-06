@@ -3,8 +3,15 @@
 //! project, and every project's chief is `@chief`, so a question is answered
 //! only in the caller's own project; the ledger decides who may answer and
 //! how, and the dispatcher is woken once the answer is written.
+//!
+//! `POST /api/answers/<id>/receipt`: a door that claimed an answer for its
+//! harness says whether it handed it over (`{"received": true}`) or did not.
+//! Only the answer's own recipient says so, and only handing it over makes it
+//! read; a door that was shut meanwhile is refused (409 `door-closed`), and
+//! the answer comes as a message.
 
 use cf_base::js;
+use cf_ledger::{MessageView, Read};
 use serde_json::{json, Value};
 
 use super::{Answer, Caller, Context, Failure, Request};
@@ -40,6 +47,73 @@ pub(super) async fn handle(
     Ok(Answer::created(
         json!({ "message": value(&MessageSummary::from(&answer))? }),
     ))
+}
+
+/// Answers `cf` has just served whole to the one they were for are received
+/// by it: among `served`, the ones for the caller that still wait in the
+/// queue are `read`, and the dispatcher is woken, for the task they were what
+/// waited for may go on. What was served to anyone else, or in part, is not
+/// the answers' receipt, and `served` leaves it out.
+pub(super) fn received_whole(
+    context: &Context,
+    caller: &Caller,
+    served: &[&MessageView],
+    via: Read,
+) -> Result<(), Failure> {
+    let ids: Vec<i64> = served
+        .iter()
+        .filter(|message| {
+            message.kind == "answer"
+                && message.state == "queued"
+                && message.recipient_id == caller.participant.id
+        })
+        .map(|message| message.id)
+        .collect();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(caller.participant.id, &ids, via)?;
+    (context.kick)();
+    Ok(())
+}
+
+/// What the door says of an answer it claimed: the ledger decides what that
+/// makes of it, and the dispatcher is woken, for a received answer may
+/// have been what its task waited for.
+pub(super) async fn receipt(
+    context: &Context,
+    caller: &Caller,
+    mut request: Request,
+    id: &str,
+) -> Result<Answer, Failure> {
+    let body = request.json().await?;
+    let received = body
+        .get("received")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| {
+            Failure::refuse(
+                400,
+                "invalid-receipt",
+                "received is true (handed over) or false (not)",
+            )
+        })?;
+    // Digits past what a message's number holds name no answer.
+    let number = id.parse::<i64>().unwrap_or(0);
+    context
+        .ledger
+        .borrow_mut()
+        .settle_claim(number, caller.participant.id, received)?;
+    (context.kick)();
+    let answer = context.ledger.borrow().message(number)?;
+    Ok(Answer::ok(json!({
+        "message": match &answer {
+            Some(answer) => value(&MessageSummary::from(answer))?,
+            None => Value::Null,
+        },
+    })))
 }
 
 /// `Number.isInteger(id) && id > 0`: a JSON number that is a whole number and

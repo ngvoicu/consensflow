@@ -1,7 +1,9 @@
 //! `POST /api/questions` (`api.js:222-243`): a member's question for the chief,
 //! which the member's task waits on. The chief asks the human in its own
 //! terminal, and is refused here before the body is read. The door waiting for
-//! the answer is [`super::door`].
+//! the answer is [`super::door`]. A window the pause has not stopped yet is
+//! still on its task, and its question is about it, born with its door shut
+//! when the turn that asks is an old one.
 
 use cf_ledger::NewQuestion;
 use serde_json::{json, Value};
@@ -26,7 +28,7 @@ pub(super) async fn ask(
     let active = context
         .ledger
         .borrow()
-        .active_task(caller.participant.id, true)?;
+        .task_in_hand(caller.participant.id)?;
     if active.is_none() {
         refuse_cancelled(context, caller)?;
     }

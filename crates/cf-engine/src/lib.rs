@@ -26,11 +26,13 @@ pub mod roles;
 pub mod runtime;
 mod scheduler;
 pub mod seams;
+mod stops;
 mod transcripts;
 mod windows;
 
 pub use chief_switch::SwitchTo;
 pub use dispatcher::{require_chief_agent, require_open, Dispatcher, Resumed, SwitchWhen};
+pub use stops::Unstopped;
 pub use windows::{Activity, ActivityState};
 
 // The kit other crates' tests run the engine with: a failure in it is the

@@ -1,9 +1,13 @@
 //! `GET /api/inbox` (`api.js:205-207`): the messages waiting in the caller's
 //! inbox, newest first, at most a hundred: what the ledger holds for it, less
-//! what still waits for the human.
+//! what still waits for the human. An answer whose summary shows all of it
+//! (what the list says of a message is its first line, cut) has been read
+//! whole by whoever it is for, and is received.
 
+use cf_ledger::{MessageView, Read};
 use serde_json::json;
 
+use super::answers::received_whole;
 use super::{Answer, Caller, Context, Failure, Request};
 use crate::api::views::{value, MessageSummary};
 
@@ -20,11 +24,17 @@ pub(super) async fn handle(
         .ledger
         .borrow()
         .inbox(caller.participant.id, LIMIT)?;
-    let summaries = messages
+    let shown: Vec<MessageSummary> = messages.iter().map(MessageSummary::from).collect();
+    let summaries = shown.iter().map(value).collect::<Result<Vec<_>, _>>()?;
+    let answer = Answer::ok(json!({ "messages": summaries }));
+    let whole: Vec<&MessageView> = messages
         .iter()
-        .map(|message| value(&MessageSummary::from(message)))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(Answer::ok(json!({ "messages": summaries })))
+        .zip(&shown)
+        .filter(|(message, summary)| summary.preview == message.body)
+        .map(|(message, _)| message)
+        .collect();
+    received_whole(context, caller, &whole, Read::Inbox)?;
+    Ok(answer)
 }
 
 #[cfg(test)]

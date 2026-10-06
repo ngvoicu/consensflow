@@ -10,7 +10,9 @@ use hyper::Method;
 use serde_json::{json, Value};
 
 use super::{items_of, whole};
-use crate::api::routes::tests::support::{api, gated_brief, open_task, working_task};
+use crate::api::routes::tests::support::{
+    answered_question, api, gated_brief, open_task, state_of, working_question, working_task,
+};
 use crate::testing::{scene, Scene};
 
 fn refused(answered: &(u16, Value)) -> (u16, &str, &str) {
@@ -191,6 +193,62 @@ async fn a_task_is_read_whole_with_its_thread_less_what_waits_for_the_human() {
         .unwrap();
     assert_eq!(thread.messages.len(), 1);
     assert_eq!(thread.messages[0].state, "gated");
+}
+
+#[tokio::test]
+async fn a_thread_read_by_the_one_its_answers_are_for_receives_them_and_a_coordinators_read_does_not(
+) {
+    let scene = scene();
+    let answer = answered_question(&scene, "JSON");
+    // The chief gave the task: the answers in its thread are zeus's, not the chief's.
+    let (status, _) = get(&scene, &scene.chief, "1").await;
+    assert_eq!(status, 200);
+    assert_eq!(scene.message(answer.id).state, "queued");
+    assert_eq!(scene.kicks.get(), 0);
+    // zeus reads its thread: it is served as it was, and the answer is received.
+    let (status, said) = get(&scene, &scene.zeus, "1").await;
+    assert_eq!(status, 200);
+    let served = said["task"]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["id"] == answer.id)
+        .unwrap();
+    assert_eq!(served["state"], "queued", "the response was composed first");
+    let read = scene.message(answer.id);
+    assert_eq!(read.state, "read");
+    assert_eq!(read.receipt, json!({ "read": "task" }));
+    assert_eq!(state_of(&scene, 1), "working");
+    assert_eq!(scene.kicks.get(), 1);
+    // Once received it is not written again.
+    get(&scene, &scene.zeus, "1").await;
+    assert_eq!(scene.logged("message.read"), 1);
+    assert_eq!(scene.kicks.get(), 1);
+}
+
+#[tokio::test]
+async fn a_gated_answer_is_left_out_of_the_thread_and_is_not_received() {
+    let scene = scene();
+    let question = working_question(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .set_gate(scene.project.id, true)
+        .unwrap();
+    let answer = scene.choose(question.id, "red");
+    assert_eq!(answer.state, "gated");
+    let (status, said) = get(&scene, &scene.zeus, "1").await;
+    assert_eq!(status, 200);
+    let ids: Vec<&Value> = said["task"]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|message| &message["id"])
+        .collect();
+    assert!(!ids.contains(&&json!(answer.id)), "{ids:?}");
+    assert_eq!(scene.message(answer.id).state, "gated");
+    assert_eq!(scene.kicks.get(), 0);
 }
 
 #[tokio::test]

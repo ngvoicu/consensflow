@@ -23,6 +23,7 @@ async function fixture(t, useEnvironment = false, boardUrl = null) {
     calls.push(input)
     return { data: undefined, response: { status: 204 } }
   }
+  let failReply = false
   const previous = process.env.CF_OPENCODE_SESSION_BRIDGE
   const board = { url: process.env.CONSENSFLOW_URL, token: process.env.CONSENSFLOW_TOKEN }
   if (useEnvironment) process.env.CF_OPENCODE_SESSION_BRIDGE = JSON.stringify(configuration)
@@ -43,6 +44,7 @@ async function fixture(t, useEnvironment = false, boardUrl = null) {
           session: { promptAsync: (input) => send(input) },
           question: {
             reply: async (input) => {
+              if (failReply) throw new Error('the question was rejected')
               replies.push(input)
               return { data: true }
             },
@@ -96,6 +98,9 @@ async function fixture(t, useEnvironment = false, boardUrl = null) {
     },
     setSend(value) {
       send = value
+    },
+    failReplies() {
+      failReply = true
     },
   }
 }
@@ -215,7 +220,15 @@ test('OpenCode loads the native default export and process-local launch configur
 /** A stand-in for the board's API: the question posted, the answer when the test gives it. */
 async function fakeBoard(t) {
   const { createServer: createHttpServer } = await import('node:http')
-  const state = { posted: [], answered: [], answer: null, tokens: [], refuse: null }
+  const state = {
+    posted: [],
+    answered: [],
+    answer: null,
+    tokens: [],
+    refuse: null,
+    shut: null,
+    receipts: [],
+  }
   const server = createHttpServer(async (request, response) => {
     state.tokens.push(request.headers.authorization)
     const chunks = []
@@ -231,9 +244,14 @@ async function fakeBoard(t) {
       return json(201, { message: { id: 40 + state.posted.length } })
     }
     if (request.method === 'GET' && request.url.startsWith('/api/questions/')) {
+      if (state.shut) return json(409, { error: 'door-closed', message: state.shut })
       for (let i = 0; i < 40 && state.answer === null; i++)
         await new Promise((r) => setTimeout(r, 25))
       return json(200, { question: {}, answer: state.answer })
+    }
+    if (request.method === 'POST' && /^\/api\/answers\/\d+\/receipt$/.test(request.url)) {
+      state.receipts.push({ at: request.url, ...body })
+      return json(200, { message: null })
     }
     if (request.method === 'POST' && request.url === '/api/answers') {
       state.answered.push(body)
@@ -288,6 +306,40 @@ test("OpenCode's question tool is answered from the board through the plugin", a
   for (let i = 0; i < 100 && f.replies.length === 0; i++)
     await new Promise((r) => setTimeout(r, 10))
   assert.deepEqual(f.replies, [{ requestID: 'q-1', answers: [['blue']] }])
+})
+
+test('OpenCode: an answer handed to the tool is acknowledged to the board after it, and a reply that failed gives the claim back', async (t) => {
+  const board = await fakeBoard(t)
+  const f = await fixture(t, false, board.url)
+  f.emit('question.asked', ASKED)
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  board.state.answer = { id: 50, from: 'chief', body: 'Colour: blue', choices: [['blue']] }
+  for (let i = 0; i < 100 && board.state.receipts.length === 0; i++)
+    await new Promise((r) => setTimeout(r, 10))
+  assert.deepEqual(f.replies, [{ requestID: 'q-1', answers: [['blue']] }], 'handed over')
+  assert.deepEqual(board.state.receipts, [{ at: '/api/answers/50/receipt', received: true }])
+
+  const failing = await fakeBoard(t)
+  const g = await fixture(t, false, failing.url)
+  g.failReplies()
+  g.emit('question.asked', ASKED)
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  failing.state.answer = { id: 51, from: 'chief', body: 'Colour: red', choices: [['red']] }
+  for (let i = 0; i < 100 && failing.state.receipts.length === 0; i++)
+    await new Promise((r) => setTimeout(r, 10))
+  assert.deepEqual(failing.state.receipts, [{ at: '/api/answers/51/receipt', received: false }])
+})
+
+test("OpenCode: a door the board shut is answered with the board's words, as they are", async (t) => {
+  const board = await fakeBoard(t)
+  board.state.shut =
+    'T-1 was stopped, so m-41 is not answered here: its answer comes to you as a message when the task goes on. Do not ask it again; end your turn now.'
+  const f = await fixture(t, false, board.url)
+  f.emit('question.asked', ASKED)
+  for (let i = 0; i < 100 && f.replies.length === 0; i++)
+    await new Promise((r) => setTimeout(r, 10))
+  assert.deepEqual(f.replies, [{ requestID: 'q-1', answers: [[board.state.shut]] }])
+  assert.deepEqual(board.state.receipts, [], 'nothing was handed over')
 })
 
 test('OpenCode: a question the board refuses is answered with the reason, never left to a dialog nobody sees', async (t) => {

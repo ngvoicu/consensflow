@@ -6,8 +6,12 @@
 //!
 //! The question hooks of `cf hook` and the Codex window's broker (`cf
 //! codex-session`) ask through [`ask`], where a closed window ends the wait.
-//! OpenCode's extension keeps its own copy, `hosts/lib/question-door.js`:
-//! the harness loads it into its own runtime.
+//! An answer is claimed for the door when it polls for it, and is the door's
+//! to hand to its harness: once it has, it says so ([`acknowledge`]), which
+//! is what makes the answer received. A door that was shut by a pause is
+//! refused, and what the board says it is passed on as it is. OpenCode's
+//! extension keeps its own copy, `hosts/lib/question-door.js`: the harness
+//! loads it into its own runtime.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -31,14 +35,35 @@ pub fn board_of(env: &Env) -> Option<Board> {
 }
 
 /// Puts `questions` on the board and waits up to `wait` for the chief's
-/// answer, or until `stop` is raised: what came of it.
+/// answer, or until `stop` is raised: what came of it. A door the board
+/// shut (the task was stopped) is told so in the board's own words, which
+/// the window hands to its model as they are; any other refusal is wrapped in
+/// what points the model to `cf ask`.
 pub fn ask(board: &Board, questions: &[Question], wait: Duration, stop: &AtomicBool) -> Reply {
     match ask_the_board_until(board, questions, wait, stop) {
         Ok(Some(answer)) => Reply::Answered(answer),
+        Err(cause) if cause.code() == Some(DOOR_CLOSED) => Reply::Refused(cause.to_string()),
         Err(cause) if cause.is_refusal() => Reply::Refused(refusal_reason(&cause)),
         Ok(None) | Err(_) => Reply::Unanswered,
     }
 }
+
+/// The door has handed `answer` to its harness (or could not): the board is
+/// told, as the door that claimed it, and an answer handed over is received.
+/// What the board says back is of no use to a door that has already done
+/// what it was for: a refusal (the door was shut meanwhile, so the answer
+/// comes as a message too), a daemon that cannot be reached, a daemon of
+/// Node's that knows no such route: none of them is raised.
+pub fn acknowledge(board: &Board, answer: &Answer, received: bool) {
+    let Some(id) = answer.id() else {
+        return;
+    };
+    let path = format!("/api/answers/{id}/receipt");
+    let _ = board.post(&path, &json!({ "received": received }));
+}
+
+/// The code the board gives a door it has shut.
+const DOOR_CLOSED: &str = "door-closed";
 
 /// How long a door waits for the board before the harness's own dialog takes over.
 pub const DOOR_WAIT: Duration = Duration::from_millis(3_500_000);
@@ -233,6 +258,98 @@ mod tests {
             refusal_reason(&refused),
             "ConsensFlow could not put this question to the chief (T-3 was cancelled). Ask with cf ask \"…\" instead."
         );
+    }
+
+    #[test]
+    fn a_door_the_board_shut_is_refused_in_the_boards_own_words_and_any_other_refusal_is_wrapped() {
+        let closed = "T-1 was stopped, so m-5 is not answered here: its answer comes to you as a message when the task goes on. Do not ask it again; end your turn now.";
+        let api = scripted(vec![
+            reply(201, json!({ "message": { "id": 5 } })),
+            reply(409, json!({ "error": "door-closed", "message": closed })),
+            reply(
+                403,
+                json!({ "error": "ask-in-your-terminal", "message": "ask the human in your terminal" }),
+            ),
+            reply(201, json!({ "message": { "id": 6 } })),
+            reply(
+                403,
+                json!({ "error": "not-your-question", "message": "m-6 was asked by someone else" }),
+            ),
+        ]);
+        let board = Board::new(Some(&api.url), "tok");
+        let stop = AtomicBool::new(false);
+        let asked = |board: &Board| ask(board, &one_question(), DOOR_WAIT, &stop);
+        assert_eq!(asked(&board), Reply::Refused(closed.to_owned()));
+        assert_eq!(
+            asked(&board),
+            Reply::Refused(
+                "ConsensFlow could not put this question to the chief (ask the human in your terminal). Ask with cf ask \"…\" instead."
+                    .to_owned()
+            ),
+            "refused when it was put"
+        );
+        assert_eq!(
+            asked(&board),
+            Reply::Refused(
+                "ConsensFlow could not put this question to the chief (m-6 was asked by someone else). Ask with cf ask \"…\" instead."
+                    .to_owned()
+            ),
+            "refused at the poll, for another reason than a shut door"
+        );
+    }
+
+    fn answer_numbered(id: Option<i64>) -> Answer {
+        serde_json::from_value(json!({ "id": id, "choices": [["SQLite"]] })).unwrap()
+    }
+
+    #[test]
+    fn an_answer_handed_over_or_not_is_said_so_to_the_board_and_nothing_it_says_back_is_raised() {
+        let api = scripted(vec![
+            reply(200, json!({ "message": { "id": 13, "state": "read" } })),
+            reply(200, json!({ "message": { "id": 13, "state": "queued" } })),
+            reply(
+                409,
+                json!({ "error": "door-closed", "message": "m-13 is not answered here" }),
+            ),
+            // A daemon of Node's has no such route.
+            reply(
+                404,
+                json!({ "error": "unknown-route", "message": "no such command: POST /api/answers/13/receipt" }),
+            ),
+        ]);
+        let board = Board::new(Some(&api.url), "tok");
+        let answer = answer_numbered(Some(13));
+        for received in [true, false, true, true] {
+            acknowledge(&board, &answer, received);
+        }
+        let said: Vec<_> = api
+            .received()
+            .into_iter()
+            .map(|request| {
+                let body = request.json();
+                (request.method, request.path, body)
+            })
+            .collect();
+        let receipt = |received: bool| {
+            (
+                "POST".to_owned(),
+                "/api/answers/13/receipt".to_owned(),
+                Some(json!({ "received": received })),
+            )
+        };
+        assert_eq!(
+            said,
+            [receipt(true), receipt(false), receipt(true), receipt(true)]
+        );
+    }
+
+    #[test]
+    fn an_answer_with_no_number_is_not_acknowledged_and_a_board_that_is_not_there_is_not_raised() {
+        let api = scripted(vec![]);
+        let board = Board::new(Some(&api.url), "tok");
+        acknowledge(&board, &answer_numbered(None), true);
+        assert!(api.received().is_empty(), "it has no number to say");
+        acknowledge(&Board::new(None, "tok"), &answer_numbered(Some(13)), true);
     }
 
     #[test]

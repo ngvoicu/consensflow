@@ -26,9 +26,13 @@ pub enum BoardError {
     NoUrl,
     #[error("ConsensFlow is not answering at {url} ({cause})")]
     Unreachable { url: String, cause: String },
-    /// Answered, and refused: the API's own message, or its status.
+    /// Answered, and refused: the API's own message, or its status, and the
+    /// code the API gave it, when it gave one.
     #[error("{message}")]
-    Refused { message: String },
+    Refused {
+        code: Option<String>,
+        message: String,
+    },
     /// Answered with a body that lacks what the call reads from it.
     #[error("ConsensFlow's answer to {path} has no {what}")]
     Malformed { path: String, what: &'static str },
@@ -38,6 +42,14 @@ impl BoardError {
     /// Whether the daemon answered and refused, as opposed to not answering at all.
     pub fn is_refusal(&self) -> bool {
         matches!(self, BoardError::Refused { .. })
+    }
+
+    /// The code the API gave a refusal (`door-closed`), when it gave one.
+    pub fn code(&self) -> Option<&str> {
+        match self {
+            BoardError::Refused { code, .. } => code.as_deref(),
+            _ => None,
+        }
     }
 }
 
@@ -183,7 +195,11 @@ impl Board {
                 .get("message")
                 .and_then(Value::as_str)
                 .map_or_else(|| format!("ConsensFlow answered {status}"), str::to_string);
-            return Err(BoardError::Refused { message });
+            let code = value
+                .get("error")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            return Err(BoardError::Refused { code, message });
         }
         Ok(Answer {
             path: path.to_string(),
@@ -346,17 +362,22 @@ mod tests {
     }
 
     #[test]
-    fn a_refusal_carries_the_apis_message_or_its_status() {
+    fn a_refusal_carries_the_apis_message_or_its_status_and_the_code_it_gave() {
         let api = scripted(vec![
-            reply(409, json!({ "message": "T-3 is not yours" })),
+            reply(
+                409,
+                json!({ "error": "not-yours", "message": "T-3 is not yours" }),
+            ),
             reply(500, json!({})),
         ]);
         let board = Board::new(Some(&api.url), "tok");
         let refused = board.get("/api/tasks/3").unwrap_err();
         assert!(refused.is_refusal());
         assert_eq!(refused.to_string(), "T-3 is not yours");
+        assert_eq!(refused.code(), Some("not-yours"));
         let bare = board.get("/api/tasks").unwrap_err();
         assert_eq!(bare.to_string(), "ConsensFlow answered 500");
+        assert_eq!(bare.code(), None, "it gave none");
     }
 
     #[test]

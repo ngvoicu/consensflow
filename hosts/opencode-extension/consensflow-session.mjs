@@ -1,5 +1,11 @@
 import { createServer } from 'node:http'
-import { answerFromWindow, askTheBoard, boardClient, refusalReason } from '../lib/question-door.js'
+import {
+  acknowledge,
+  answerFromWindow,
+  askTheBoard,
+  boardClient,
+  refusalReason,
+} from '../lib/question-door.js'
 
 export const id = 'consensflow-session'
 const SESSION = /^ses_[A-Za-z0-9]+$/
@@ -48,9 +54,18 @@ export async function tui(api, options) {
         { signal: control.signal },
       )
       if (control.window !== undefined) {
+        // An answer the board gave in the same moment was claimed and is not handed over.
+        if (asked.answer !== null) await acknowledge(board, asked.answer, false)
         await answerFromWindow(board, asked.id, control.window)
       } else if (asked.answer !== null) {
-        await api.client.question.reply({ requestID: id, answers: asked.answer.choices })
+        // Handed to the tool, then said so: the other way round, an answer would be lost.
+        const handed = await api.client.question
+          .reply({ requestID: id, answers: asked.answer.choices })
+          .then(
+            () => true,
+            () => false,
+          )
+        await acknowledge(board, asked.answer, handed)
       }
     } catch (cause) {
       // Refused: the model hears why, as the answer. Not reached: the window's

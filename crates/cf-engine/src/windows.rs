@@ -1,17 +1,16 @@
 //! A window's lifecycle (`src/core/windows.js`): launch (prepare, token,
-//! `pane.open`, conversation, `started`), look (`observe`, `drawn`),
-//! interrupt (Escape rounds), and close (`retire`, `close_if_free`,
-//! `close_own`). It owns the record's window part, the generation of each
-//! pane, and the chief's relaunch backoff.
+//! `pane.open`, conversation, `started`), look (`observe`, `drawn`), and close
+//! (`retire`, `close_if_free`, `close_own`). It owns the record's window part,
+//! the generation of each pane, and the chief's relaunch backoff. What a
+//! window owes a stop of its task, and how it is interrupted, is `stops`.
 
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
 use cf_harness::contract::{Interrupt, Launch, LaunchId, Observed, Pane, Window};
-use cf_harness::records::Role;
 use cf_harness::seams::Time;
-use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView};
+use cf_ledger::{Begun, MessageView, NewNote, ParticipantView, ProjectView, Stop};
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
@@ -22,12 +21,10 @@ use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
 use crate::runtime::{begin, caught, returning};
 use crate::seams::{EngineError, SavedAgent};
+use crate::stops::{Interrupted, Unstopped};
 
-/// The key that interrupts a harness's current turn, how often it is pressed
-/// again for a window still working, how soon, and the gap of a double press.
+/// The key that interrupts a harness's current turn, and the gap of a double press.
 const ESCAPE: u8 = 27;
-const INTERRUPT_ROUNDS: u32 = 3;
-const INTERRUPT_AGAIN_MS: i64 = 3_000;
 const DOUBLE_PRESS: Duration = Duration::from_millis(150);
 
 /// How long a fresh window's output must hold still before its screen counts as drawn.
@@ -104,15 +101,6 @@ pub(crate) struct Relaunch {
     pub(crate) at: i64,
 }
 
-/// The rounds of Escape one stop of a task has had: its key, how many, and
-/// when the last was.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Interrupted {
-    stop: String,
-    rounds: u32,
-    at: i64,
-}
-
 /// The record's window part.
 pub(crate) struct WindowPart {
     /// The harness's window on its launch (the adapter's `launch` bag).
@@ -139,7 +127,14 @@ pub(crate) struct WindowPart {
     pub(crate) drawn: bool,
     /// It named its first conversation.
     pub(crate) named: bool,
+    /// The last stop this window process paid: its task and the sequence. It
+    /// dies with the window, and a window opened later owes nothing for the
+    /// stops asked before it opened.
+    pub(crate) stopped: Option<(i64, i64)>,
+    /// The rounds the stop it owes has had.
     pub(crate) interrupted: Option<Interrupted>,
+    /// The stop it ignored in every round, while it lasts.
+    pub(crate) unstopped: Option<Unstopped>,
     pub(crate) activity: Activity,
 }
 
@@ -160,7 +155,9 @@ impl Default for WindowPart {
             relaunch: None,
             drawn: false,
             named: false,
+            stopped: None,
             interrupted: None,
+            unstopped: None,
             activity: Activity::of(ActivityState::Closed),
         }
     }
@@ -249,6 +246,9 @@ impl Dispatcher {
             window.retiring = false;
             window.hidden = false;
             window.settled = false;
+            window.stopped = None;
+            window.interrupted = None;
+            window.unstopped = None;
             window.activity = Activity::of(ActivityState::Closed);
             taken
         };
@@ -336,6 +336,9 @@ impl Dispatcher {
             queued: false,
             entered_again: false,
         });
+        // The stops this window owes are those asked before this look: a pause
+        // that comes while it is prepared or opened is asked after it, and is owed.
+        let captured = self.seams.ledger.borrow().stop_of(participant.id)?;
         let planned = match self
             .plan(
                 record,
@@ -367,6 +370,18 @@ impl Dispatcher {
         // may be gone: no window opens for it.
         if self.forgotten(record) {
             self.seams.launch_files.forget(&launch_id);
+            return Ok(());
+        }
+        // A pause that came while the launch was prepared stopped the task this
+        // message was to go in on: no window opens for it, and it waits for the
+        // words that resume the task.
+        if participant.role != "chief"
+            && !self.launch_holds(participant, delivering.as_ref(), captured)?
+        {
+            self.seams.launch_files.forget(&launch_id);
+            if let Some(delivering) = delivering {
+                self.give_back(delivering, "a pause came while its window was prepared")?;
+            }
             return Ok(());
         }
         let token = self.seams.credentials.issue(project.id, participant.id);
@@ -468,6 +483,7 @@ impl Dispatcher {
             part.activity = Activity::of(ActivityState::Starting);
             part.drawn = false;
             part.named = false;
+            part.stopped = captured.map(|stop| (stop.task_id, stop.seq));
         }
         record.delivery.borrow_mut().delivering = delivering.clone();
         // A window that exited before its open was answered goes as any exit does.
@@ -530,9 +546,9 @@ impl Dispatcher {
         launch_id: &LaunchId,
         delivering: Option<&Delivering>,
     ) -> Result<Option<Planned>, EngineError> {
-        if let Some(first) = first {
-            self.seams.ledger.borrow_mut().begin_delivery(first.id)?;
-        }
+        let begun = first
+            .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
+            .transpose()?;
         // A harness that lost its adapter fails what came for it, and says why.
         let harness = participant.harness.as_deref().unwrap_or_default();
         self.require_adapter(harness)?;
@@ -553,8 +569,9 @@ impl Dispatcher {
         };
         // A session plays the role of the task it was started for; a member
         // or the chief its own.
-        let text = first
-            .map(|first| self.launch_text(project, participant, first, resume))
+        let text = begun
+            .as_ref()
+            .map(|begun| self.launch_text(project, participant, begun, resume))
             .transpose()?;
         let instructions = self
             .seams
@@ -639,35 +656,61 @@ impl Dispatcher {
         )
     }
 
-    /// A member's fresh session starts from nothing: when its first message
-    /// is not the task's own brief (a reopening, an answer), the brief goes
-    /// in first. A resumed conversation has it already.
+    /// Whether a launch prepared for its first message still holds: the
+    /// message is still on its way, and no stop was asked of its window since
+    /// the launch began, which is a pause that came in between.
+    fn launch_holds(
+        &self,
+        participant: &ParticipantView,
+        delivering: Option<&Delivering>,
+        captured: Option<Stop>,
+    ) -> Result<bool, EngineError> {
+        let Some(delivering) = delivering else {
+            return Ok(true);
+        };
+        let ledger = self.seams.ledger.borrow();
+        let on_its_way = ledger
+            .message(delivering.message)?
+            .is_some_and(|message| message.state == "delivering");
+        Ok(on_its_way && ledger.stop_of(participant.id)? == captured)
+    }
+
+    /// What a window's first message reads, which `begin_delivery` told: a
+    /// member's fresh session starts from nothing, so when its first message is
+    /// not the task's own brief (a reopening, an answer) the brief goes in
+    /// first, as it was received with what its paste carried; a brief that
+    /// was never received, held for the human's approval or not, is not the
+    /// window's to read before it is. A resumed conversation has it already.
     fn launch_text(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
-        message: &MessageView,
+        first: &Begun,
         resume: Option<&str>,
     ) -> Result<String, EngineError> {
-        let text = delivery_text(message);
-        let Some(number) = message
+        let text = delivery_text(&first.message, &first.carried);
+        let Some(number) = first
+            .message
             .task_number
             .filter(|_| resume.is_none() && participant.role != "chief")
         else {
             return Ok(text);
         };
-        let task = self.seams.ledger.borrow().task(project.id, number)?;
-        let brief = task.as_ref().and_then(|thread| {
-            thread.messages.iter().find(|candidate| {
-                candidate.kind == "task"
-                    && candidate.recipient == participant.handle
-                    && candidate.state != "cancelled"
-            })
-        });
-        Ok(match brief {
-            Some(brief) if brief.id != message.id => format!("{}\n\n{text}", delivery_text(brief)),
-            _ => text,
-        })
+        let ledger = self.seams.ledger.borrow();
+        let Some(thread) = ledger.task(project.id, number)? else {
+            return Ok(text);
+        };
+        // Only a brief that arrived is found, so it is neither the message
+        // being sent now nor one that rides in it.
+        Ok(
+            match ledger.first_received(participant.id, thread.task.id)? {
+                Some(brief) => format!(
+                    "{}\n\n{text}",
+                    delivery_text(&brief.message, &brief.carried)
+                ),
+                None => text,
+            },
+        )
     }
 
     /// A launch that did not come up. A member's first message fails with
@@ -785,89 +828,6 @@ impl Dispatcher {
             record.window.borrow_mut().drawn = true;
         }
         drawn
-    }
-
-    /// A window whose task stopped stops too. A paused task's window stays
-    /// open, but its agent is interrupted. An agent still at work on a turn
-    /// about a task cancelled under its window is interrupted as well. A
-    /// turn the human began since in a window they opened is theirs, and
-    /// goes on.
-    pub(crate) async fn interrupt_if_stopped(
-        self: &Rc<Self>,
-        participant: &ParticipantView,
-        record: &Rc<Record>,
-        observed: &Observed,
-    ) -> Result<(), EngineError> {
-        let paused = self.seams.ledger.borrow().paused_task(participant.id)?;
-        if let Some(paused) = paused {
-            // The chief's tell reached the window during this pause: the agent
-            // answers it and ends its own turn, uninterrupted.
-            let told = self
-                .seams
-                .ledger
-                .borrow()
-                .told_since_paused(participant.id, paused.task.id)?;
-            if !told {
-                let at = paused.task.paused_at.as_deref().unwrap_or("null");
-                self.interrupt(record, format!("{} paused {at}", paused.task.id))
-                    .await;
-            }
-            return Ok(());
-        }
-        if record.window.borrow().activity.state != ActivityState::Working {
-            return Ok(());
-        }
-        let cancelled = self.seams.ledger.borrow().last_task(participant.id)?;
-        let Some(cancelled) = cancelled.filter(|thread| thread.task.state == "cancelled") else {
-            return Ok(());
-        };
-        let turn = observed
-            .items()
-            .iter()
-            .rev()
-            .find(|item| item.role == Role::User);
-        let about = cancelled.messages.iter().any(|message| {
-            message.recipient_id == participant.id
-                && turn.is_some_and(|turn| turn.text.contains(&marker_of(message.id)))
-        });
-        if about {
-            self.interrupt(record, format!("{} cancelled", cancelled.task.id))
-                .await;
-        }
-        Ok(())
-    }
-
-    /// Escape interrupts the turn a task's `stop` is for, and again a few
-    /// seconds later while the window still reads as working, since a
-    /// harness may ignore the key while it thinks: three rounds at most for
-    /// each stop. Only a window at work is: Escape to an idle window opens
-    /// Devin's rewind, and clears what the human was typing into Claude.
-    async fn interrupt(self: &Rc<Self>, record: &Rc<Record>, stop: String) {
-        let (pane, keys, done) = {
-            let part = record.window.borrow();
-            if part.activity.state != ActivityState::Working {
-                return;
-            }
-            let done = part
-                .interrupted
-                .clone()
-                .filter(|interrupted| interrupted.stop == stop);
-            (part.pane.clone(), part.keys, done)
-        };
-        if done.as_ref().is_some_and(|done| {
-            done.rounds >= INTERRUPT_ROUNDS || self.now() - done.at < INTERRUPT_AGAIN_MS
-        }) {
-            return;
-        }
-        record.window.borrow_mut().interrupted = Some(Interrupted {
-            stop,
-            rounds: done.map_or(0, |done| done.rounds) + 1,
-            at: self.now(),
-        });
-        let (Some(pane), Some(keys)) = (pane, keys) else {
-            return;
-        };
-        press_interrupt(&*self.seams.host, &*self.seams.time, &pane, keys).await;
     }
 
     /// A session's window closes with its task; its conversation stays, so a

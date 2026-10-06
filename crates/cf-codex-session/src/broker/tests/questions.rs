@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::rc::Weak;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -12,7 +12,7 @@ use cf_board::scripted::{reply, scripted};
 use cf_board::Board;
 use serde_json::{json, Value};
 
-use super::fixture::{run, wait, Fixture, Options, Tui, A};
+use super::fixture::{run, wait, Fixture, Options, Tui, A, B};
 
 /// Codex's request for the question tool, as the app-server sends it.
 fn request_user_input() -> Value {
@@ -44,6 +44,8 @@ struct HeldBoard {
     url: String,
     released: Arc<AtomicBool>,
     polls: Arc<AtomicUsize>,
+    /// What it was posted, by path.
+    posted: Arc<Mutex<Vec<(String, Value)>>>,
 }
 
 impl HeldBoard {
@@ -53,18 +55,28 @@ impl HeldBoard {
         let url = format!("http://{}", listener.local_addr().expect("its address"));
         let released = Arc::new(AtomicBool::new(false));
         let polls = Arc::new(AtomicUsize::new(0));
-        let (held, counted) = (Arc::clone(&released), Arc::clone(&polls));
+        let posted = Arc::new(Mutex::new(Vec::new()));
+        let (held, counted, kept) = (
+            Arc::clone(&released),
+            Arc::clone(&polls),
+            Arc::clone(&posted),
+        );
         thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                let (held, counted, answer) =
-                    (Arc::clone(&held), Arc::clone(&counted), answer.clone());
-                thread::spawn(move || serve(stream, &held, &counted, &answer));
+                let (held, counted, answer, kept) = (
+                    Arc::clone(&held),
+                    Arc::clone(&counted),
+                    answer.clone(),
+                    Arc::clone(&kept),
+                );
+                thread::spawn(move || serve(stream, &held, &counted, &answer, &kept));
             }
         });
         Self {
             url,
             released,
             polls,
+            posted,
         }
     }
 
@@ -77,10 +89,26 @@ impl HeldBoard {
     fn polls(&self) -> usize {
         self.polls.load(Ordering::SeqCst)
     }
+
+    /// What it was told of the answers it gave: each receipt's `received`, in order.
+    fn receipts(&self) -> Vec<Value> {
+        let posted = self.posted.lock().expect("what was posted");
+        posted
+            .iter()
+            .filter(|(path, _)| path.ends_with("/receipt"))
+            .map(|(_, body)| body["received"].clone())
+            .collect()
+    }
 }
 
 /// One request of the board: a question is taken, a poll waits to be released.
-fn serve(stream: TcpStream, released: &AtomicBool, polls: &AtomicUsize, answer: &Value) {
+fn serve(
+    stream: TcpStream,
+    released: &AtomicBool,
+    polls: &AtomicUsize,
+    answer: &Value,
+    posted: &Mutex<Vec<(String, Value)>>,
+) {
     let mut reader = BufReader::new(stream.try_clone().expect("clone the stream"));
     let mut request = String::new();
     reader.read_line(&mut request).expect("a request line");
@@ -101,6 +129,12 @@ fn serve(stream: TcpStream, released: &AtomicBool, polls: &AtomicUsize, answer: 
     let mut body = vec![0; length];
     reader.read_exact(&mut body).expect("a body");
     let (status, reply) = if request.starts_with("POST") {
+        let path = request.split_whitespace().nth(1).unwrap_or_default();
+        let body = serde_json::from_slice(&body).unwrap_or(Value::Null);
+        posted
+            .lock()
+            .expect("what was posted")
+            .push((path.to_owned(), body));
         (201, json!({ "message": { "id": 61 } }))
     } else {
         polls.fetch_add(1, Ordering::SeqCst);
@@ -392,6 +426,7 @@ fn a_question_whose_tui_connection_ended_stops_asking_at_its_next_poll_and_the_o
 #[test]
 fn a_pair_keeps_no_handle_of_a_question_answered_long_ago() {
     run(async {
+        // Each question is put, polled for its answer, and the answer then acknowledged.
         let replies = (0..4)
             .flat_map(|at| {
                 [
@@ -402,6 +437,7 @@ fn a_pair_keeps_no_handle_of_a_question_answered_long_ago() {
                             "id": 70 + at, "from": "chief", "body": "Colour: blue", "choices": [["blue"]],
                         } }),
                     ),
+                    reply(200, json!({ "message": null })),
                 ]
             })
             .collect();
@@ -432,5 +468,126 @@ fn a_pair_keeps_no_handle_of_a_question_answered_long_ago() {
             after_one,
             "four answered questions hold no more than one"
         );
+    });
+}
+
+/// A request for the question tool on `thread`, as `id`.
+fn request_on(thread: &str, id: &str) -> Value {
+    let mut request = request_user_input();
+    request["id"] = json!(id);
+    request["params"]["threadId"] = json!(thread);
+    request
+}
+
+/// Codex says its turn on `thread` is over.
+fn turn_completed(thread: &str) -> Value {
+    json!({
+        "method": "turn/completed",
+        "params": { "threadId": thread, "turn": { "id": "turn-1", "status": "interrupted" } },
+    })
+}
+
+/// Codex says `thread` is idle.
+fn went_idle(thread: &str) -> Value {
+    json!({
+        "method": "thread/status/changed",
+        "params": { "threadId": thread, "status": { "type": "idle" } },
+    })
+}
+
+/// A question is held at the board; the turn that asked it ends; the board
+/// then gives its answer, which is not handed over: the TUI is shown nothing,
+/// Codex is sent nothing, and the board is told the answer was not received.
+async fn an_ended_turn_ends_the_question_it_asked(ending: Value) {
+    let board = HeldBoard::start(json!({ "id": 70, "choices": [["red"]] }));
+    let (f, tui) = window(&board.url, Duration::from_secs(60)).await;
+    f.codex.send_json(1, &request_user_input());
+    wait(|| board.polls() == 1).await;
+    f.codex.send_json(1, &ending);
+    wait(|| tui.has_seen(|message| message["method"] == ending["method"])).await;
+    board.release();
+    wait(|| !board.receipts().is_empty()).await;
+    assert_eq!(board.receipts(), [json!(false)], "the claim is given back");
+    assert!(asked_of(&f, "ask-1").is_none(), "Codex is sent nothing");
+    assert!(
+        !showed_the_dialog(&tui),
+        "the obsolete request never reaches the TUI"
+    );
+    assert_eq!(board.polls(), 1, "and it is not asked again");
+}
+
+#[test]
+fn a_turn_that_completes_ends_the_poll_of_the_question_it_asked_and_the_answer_is_given_back() {
+    run(an_ended_turn_ends_the_question_it_asked(turn_completed(A)));
+}
+
+#[test]
+fn a_thread_that_goes_idle_ends_the_poll_of_the_question_it_asked_and_the_answer_is_given_back() {
+    run(an_ended_turn_ends_the_question_it_asked(went_idle(A)));
+}
+
+#[test]
+fn the_end_of_one_threads_turn_leaves_the_questions_of_another_to_be_answered() {
+    run(async {
+        let board = HeldBoard::start(json!({ "id": 70, "choices": [["red"]] }));
+        let (f, tui) = window(&board.url, Duration::from_secs(60)).await;
+        f.codex.send_json(1, &request_on(A, "ask-a"));
+        f.codex.send_json(1, &request_on(B, "ask-b"));
+        wait(|| board.polls() == 2).await;
+        f.codex.send_json(1, &turn_completed(A));
+        wait(|| tui.has_seen(|message| message["method"] == "turn/completed")).await;
+        board.release();
+        wait(|| asked_of(&f, "ask-b").is_some() && board.receipts().len() == 2).await;
+        assert_eq!(
+            asked_of(&f, "ask-b").unwrap()["result"]["answers"]["colour"]["answers"],
+            json!(["red"]),
+            "the question of the thread whose turn went on is answered"
+        );
+        assert!(asked_of(&f, "ask-a").is_none(), "the other was not");
+        let mut receipts = board.receipts();
+        receipts.sort_by_key(ToString::to_string);
+        assert_eq!(
+            receipts,
+            [json!(false), json!(true)],
+            "one given back, one handed over"
+        );
+        assert!(!showed_the_dialog(&tui));
+    });
+}
+
+#[test]
+fn an_answer_the_turn_outlived_is_handed_over_and_acknowledged_as_received() {
+    run(async {
+        let board = HeldBoard::start(json!({ "id": 70, "choices": [["blue"]] }));
+        let (f, _tui) = window(&board.url, Duration::from_secs(60)).await;
+        f.codex.send_json(1, &request_user_input());
+        wait(|| board.polls() == 1).await;
+        board.release();
+        wait(|| !board.receipts().is_empty()).await;
+        assert_eq!(
+            asked_of(&f, "ask-1").unwrap()["result"]["answers"]["colour"]["answers"],
+            json!(["blue"]),
+            "Codex had the answer by the time the board was told"
+        );
+        assert_eq!(board.receipts(), [json!(true)]);
+    });
+}
+
+#[test]
+fn a_pair_that_retires_ends_every_question_it_holds_whatever_thread_asked_it() {
+    run(async {
+        let board = HeldBoard::start(json!({ "id": 70, "choices": [["red"]] }));
+        let (f, tui) = window(&board.url, Duration::from_secs(60)).await;
+        f.codex.send_json(1, &request_on(A, "ask-a"));
+        f.codex.send_json(1, &request_on(B, "ask-b"));
+        wait(|| board.polls() == 2).await;
+        tui.terminate();
+        wait(|| !f.codex.is_open(1)).await;
+        board.release();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(board.polls(), 2, "no poll once its connection ended");
+        for id in ["ask-a", "ask-b"] {
+            assert!(asked_of(&f, id).is_none(), "{id} was answered for nobody");
+        }
     });
 }

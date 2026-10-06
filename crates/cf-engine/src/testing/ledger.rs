@@ -4,6 +4,7 @@
 //! Node traces hold the events they log).
 
 use cf_ledger::{MessageView, NewNote, NewQuestion, NewTask, TaskCreated};
+use serde_json::json;
 
 use super::context::Context;
 
@@ -114,5 +115,32 @@ impl Context {
             .borrow_mut()
             .resume_task(project, number, Some("chief"), body)
             .expect("the task resumed");
+    }
+
+    /// The human pauses task `number` (`ledger.pauseTask` by `human`): what the
+    /// chief wrote for its window is not taken back.
+    pub fn human_pause(&self, project: i64, number: i64) {
+        self.ledger
+            .borrow_mut()
+            .pause_task(project, number, Some("human"), None)
+            .expect("the task paused");
+    }
+
+    /// The daemon holds task `number` while its member is out of quota, until
+    /// a time the test never reaches (`ledger.holdTask`).
+    pub fn hold_task(&self, project: i64, number: i64) {
+        self.ledger
+            .borrow_mut()
+            .hold_task(project, number, "2099-01-01T00:00:00.000Z", "out of quota")
+            .expect("the task held");
+    }
+
+    /// The chief answers `question` in words (`ledger.answer`).
+    pub fn answer(&self, project: i64, question: i64, body: &str) -> MessageView {
+        let chief = self.id(project, "chief");
+        self.ledger
+            .borrow_mut()
+            .answer(question, chief, Some(&json!(body)), None)
+            .expect("an answer")
     }
 }

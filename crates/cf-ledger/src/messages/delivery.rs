@@ -1,13 +1,17 @@
 //! A message's way into a window: the head of a participant's queue that
 //! may go now, its delivery begun, confirmed by the harness's own record,
-//! cancelled, retried or failed, and what is still on its way.
+//! cancelled, retried or failed, and what is still on its way. What a
+//! window keeps rides in the paste of the message that sends it on
+//! (`carrying`), and what the paste proves arrived is each of them.
 
 use cf_base::json::js_order;
-use cf_proto::ledger::MessageView;
+use cf_proto::ledger::{Begun, MessageView};
 use rusqlite::params;
 use serde_json::{json, Value};
 
-use super::{known_message, message_task, messages, require_message, unanswered};
+use super::carrying::{adopt, carried, release_carried};
+use super::receipt::reconcile;
+use super::{known_message, message_task, messages, require_message};
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::store::Store;
 use crate::views::MESSAGE_SELECT;
@@ -37,8 +41,13 @@ pub(crate) fn with_work(store: &Store, project_id: i64) -> Result<Vec<i64>, Ledg
 }
 
 /// The head of a participant's queue that may go now, or none. A member's
-/// session is its task's: a task message waits while it holds one, and a
-/// message about no task of its own (a stray note) never opens a window.
+/// session is its task's: a row of its goes only for a task it holds (queued,
+/// working or waiting), a tell for the window goes whatever its task, and a
+/// task message waits while it holds one at work. A row that rides in another
+/// message's paste, or that a door took for its harness, is not the head; and
+/// while a task message for the window waits for the human's approval, nothing
+/// else about its task goes, whoever wrote it and in whatever order they are
+/// approved: the words that came first are not passed over.
 pub(crate) fn next_delivery(
     store: &Store,
     participant_id: i64,
@@ -58,42 +67,112 @@ pub(crate) fn next_delivery(
     let next = store
         .db
         .prepare(&format!(
-            "SELECT id FROM message
-       WHERE recipient_id = ? AND state = 'queued'
-         AND (kind != 'task' OR ? = 0 OR NOT EXISTS (
-           SELECT 1 FROM task WHERE assignee_id = ? AND state IN ('working', 'waiting')
+            "SELECT m.id FROM message m
+       WHERE m.recipient_id = ?1 AND m.state = 'queued'
+         AND m.carried_by IS NULL AND m.claimed_at IS NULL
+         AND (m.kind != 'task' OR ?2 = 0 OR NOT EXISTS (
+           SELECT 1 FROM task WHERE assignee_id = ?1 AND state IN ('working', 'waiting')
          ))
-         AND (? = 0 OR kind = 'task' OR urgent = 1 OR task_id IN (
-           SELECT id FROM task WHERE assignee_id = ? AND state IN ({})
+         AND (?2 = 0 OR m.urgent = 1 OR m.task_id IN (
+           SELECT id FROM task WHERE assignee_id = ?1 AND state IN ({})
          ))
-       ORDER BY id LIMIT 1",
+         AND (m.urgent = 1 OR m.task_id IS NULL OR NOT EXISTS (
+           SELECT 1 FROM message words WHERE words.task_id = m.task_id
+             AND words.recipient_id = m.recipient_id AND words.kind = 'task'
+             AND words.state = 'gated'
+         ))
+       ORDER BY m.id LIMIT 1",
             sql_list(&HELD_TASK_STATES)
         ))?
-        .query_map(
-            params![
-                participant_id,
-                serial,
-                participant_id,
-                serial,
-                participant_id
-            ],
-            |row| row.get::<_, i64>("id"),
-        )?
+        .query_map(params![participant_id, serial], |row| row.get::<_, i64>(0))?
         .next()
         .transpose()?;
     next.map_or(Ok(None), |id| store.message(id))
 }
 
-pub(crate) fn begin_delivery(
-    store: &mut Store,
-    message_id: i64,
-) -> Result<MessageView, LedgerError> {
+/// The newest message pasted into a participant's window about a task, and
+/// proved by what the window's record showed: a task message or an answer
+/// that is `delivered` and rides in no other's paste. What the window wrote
+/// after its marker is the task's result.
+pub(crate) fn last_pasted(
+    store: &Store,
+    participant_id: i64,
+    task_id: i64,
+) -> Result<Option<MessageView>, LedgerError> {
+    Ok(messages(
+        store,
+        &format!(
+            "{MESSAGE_SELECT} WHERE m.task_id = ? AND m.recipient_id = ?
+         AND m.kind IN ('task', 'answer') AND m.state = 'delivered' AND m.carried_by IS NULL
+       ORDER BY m.id DESC LIMIT 1"
+        ),
+        params![task_id, participant_id],
+    )?
+    .into_iter()
+    .next())
+}
+
+/// The first task message a participant's window received about a task that
+/// was pasted on its own (the brief, most often), with what its paste
+/// carried. A window that starts afresh on the task begins from it.
+pub(crate) fn first_received(
+    store: &Store,
+    participant_id: i64,
+    task_id: i64,
+) -> Result<Option<Begun>, LedgerError> {
+    let first = messages(
+        store,
+        &format!(
+            "{MESSAGE_SELECT} WHERE m.task_id = ? AND m.recipient_id = ?
+         AND m.kind = 'task' AND m.state IN ('delivered', 'read') AND m.carried_by IS NULL
+       ORDER BY m.id LIMIT 1"
+        ),
+        params![task_id, participant_id],
+    )?
+    .into_iter()
+    .next();
+    first
+        .map(|message| {
+            let carried = messages(
+                store,
+                &format!(
+                    "{MESSAGE_SELECT} WHERE m.carried_by = ? AND m.state = 'delivered' ORDER BY m.id"
+                ),
+                params![message.id],
+            )?;
+            Ok(Begun { message, carried })
+        })
+        .transpose()
+}
+
+/// A message's delivery begins: it is what the paste is told by, with the
+/// rows it carries, which are the ones still waiting now and no others.
+pub(crate) fn begin_delivery(store: &mut Store, message_id: i64) -> Result<Begun, LedgerError> {
     store.write(|store| {
         let message = require_message(store, message_id, "queued")?;
         if message.recipient_role == "human" {
             return Err(LedgerError::refused_with(
                 "human-reads-in-app",
                 "the human reads messages in the app",
+                409,
+            ));
+        }
+        let (carrier, claimed): (Option<i64>, Option<String>) = store.db.query_row(
+            "SELECT carried_by, claimed_at FROM message WHERE id = ?",
+            [message_id],
+            |row| Ok((row.get("carried_by")?, row.get("claimed_at")?)),
+        )?;
+        if let Some(carrier) = carrier {
+            return Err(LedgerError::refused_with(
+                "invalid-transition",
+                format!("message {message_id} rides in the paste of m-{carrier}"),
+                409,
+            ));
+        }
+        if claimed.is_some() {
+            return Err(LedgerError::refused_with(
+                "invalid-transition",
+                format!("message {message_id} is claimed by the door that asked for it"),
                 409,
             ));
         }
@@ -129,11 +208,16 @@ pub(crate) fn begin_delivery(
             "delivery.begun",
             json!({ "message": message_id, "attempt": message.attempts + 1 }),
         )?;
-        known_message(store, message_id)
+        Ok(Begun {
+            message: known_message(store, message_id)?,
+            carried: carried(store, message_id)?,
+        })
     })
 }
 
-/// The harness's own record proves the message arrived: `receipt` is what it showed.
+/// The harness's own record proves the message arrived: `receipt` is what it
+/// showed. What its paste carried arrived with it, in the same step; then
+/// the task it is about is reconciled once.
 pub(crate) fn confirm_delivery(
     store: &mut Store,
     message_id: i64,
@@ -147,30 +231,29 @@ pub(crate) fn confirm_delivery(
             "UPDATE message SET state = 'delivered', delivered_at = ?, receipt = ? WHERE id = ?",
             params![at, receipt, message_id],
         )?;
-        store.log(
-            message.project_id,
-            "delivery.confirmed",
-            json!({ "message": message_id }),
+        let rode: Vec<i64> = carried(store, message_id)?
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        store.db.execute(
+            "UPDATE message SET state = 'delivered', delivered_at = ?, receipt = ?
+         WHERE carried_by = ? AND state = 'queued'",
+            params![at, json!({ "carrier": message_id }).to_string(), message_id],
         )?;
+        let mut data = json!({ "message": message_id });
+        if !rode.is_empty() {
+            data["carried"] = json!(rode);
+        }
+        store.log(message.project_id, "delivery.confirmed", data)?;
         if let Some(task) = message_task(store, message_id)? {
-            // A task whose window already asked a question arrives waiting, not working.
-            if message.kind == "task" && task.state == "queued" {
-                let to = if unanswered(store, task.id)? {
-                    "waiting"
-                } else {
-                    "working"
-                };
-                store.move_task(&task, to, json!({}))?;
-            }
-            if message.kind == "answer" && task.state == "waiting" {
-                store.move_task(&task, "working", json!({}))?;
-            }
+            reconcile(store, task.id)?;
         }
         known_message(store, message_id)
     })
 }
 
-/// A message not yet delivered that no longer applies: it will not be delivered.
+/// A message not yet delivered that no longer applies: it will not be
+/// delivered, and what it carried is its own again.
 pub(crate) fn cancel_message(
     store: &mut Store,
     message_id: i64,
@@ -197,11 +280,16 @@ pub(crate) fn cancel_message(
             "delivery.cancelled",
             json!({ "message": message_id, "reason": reason }),
         )?;
+        if let Some(task) = message_task(store, message_id)? {
+            release_carried(store, task.id)?;
+        }
         known_message(store, message_id)
     })
 }
 
-/// Queued again; `refund` gives back the attempt when the window went before it could land.
+/// Queued again; `refund` gives back the attempt when the window went before
+/// it could land. It joins the task message that waits for its window, if one
+/// does: a resume that came while it was on its way.
 pub(crate) fn retry_delivery(
     store: &mut Store,
     message_id: i64,
@@ -221,11 +309,13 @@ pub(crate) fn retry_delivery(
             "delivery.retried",
             json!({ "message": message_id, "reason": reason }),
         )?;
+        adopt(store, message_id)?;
         known_message(store, message_id)
     })
 }
 
-/// A delivery given up: a task it carried, still queued, fails with it.
+/// A delivery given up: a task it carried, still queued, fails with it, and
+/// what it carried is its own again, for the reopening to take.
 pub(crate) fn fail_delivery(
     store: &mut Store,
     message_id: i64,
@@ -244,6 +334,7 @@ pub(crate) fn fail_delivery(
             json!({ "message": message_id, "reason": reason }),
         )?;
         if let Some(task) = message_task(store, message_id)? {
+            release_carried(store, task.id)?;
             if message.kind == "task" && task.state == "queued" {
                 store.move_task(&task, "failed", json!({}))?;
             }

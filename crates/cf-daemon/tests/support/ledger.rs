@@ -184,7 +184,10 @@ impl Rig {
     fn events_after(&self, before: usize) -> Vec<Value> {
         let mut waiting = self.told.borrow_mut();
         let from = before.min(waiting.len());
-        waiting.split_off(from).iter().map(event_json).collect()
+        let mut taken: Vec<Value> = waiting.split_off(from).iter().map(event_json).collect();
+        // The stop a pause counted is in the event, and Node's never says it.
+        cf_ledger::testing::hold_apart_what_node_never_logs(&mut taken);
+        taken
     }
 
     /// The events logged since they were last taken.
@@ -403,7 +406,7 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, LedgerError> {
                 },
             ),
         ),
-        "beginDelivery" => encode(ledger.begin_delivery(id())),
+        "beginDelivery" => encode(ledger.begin_delivery(id()).map(|begun| begun.message)),
         "confirmDelivery" => encode(ledger.confirm_delivery(id(), arg(args, 1))),
         "approveMessage" => encode(ledger.approve_message(id(), text(field(args, 1, "by")))),
         other => panic!("the player does not replay the ledger's {other} yet"),

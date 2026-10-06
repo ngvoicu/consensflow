@@ -2,7 +2,9 @@
 //! `src/core/api.js:79-310`, and `taskRoute`, `:312-386`). **Frozen**: the
 //! table is [`recognize`], the order of the checks around it is
 //! [`super::handle`], and a route's place is its own module, which a landing
-//! fills in without touching this file.
+//! fills in without touching this file. Its one route that Node's has no
+//! twin of is the door's receipt (`POST /api/answers/<n>/receipt`), which the
+//! receipt and stop redesign added after the answers' own.
 //!
 //! The order of a request's checks, as Node has it:
 //!
@@ -97,6 +99,8 @@ pub enum Route {
     Question { id: String },
     /// `POST /api/answers`.
     Answers,
+    /// `POST /api/answers/<id>/receipt`: a door says it handed its answer over.
+    AnswerReceipt { id: String },
 }
 
 /// The route a request is for, in Node's order; none for the rest.
@@ -139,7 +143,18 @@ pub fn recognize(method: &Method, path: &str) -> Option<Route> {
     if post && path == "/api/answers" {
         return Some(Route::Answers);
     }
+    if let (true, Some(id)) = (post, answer_receipt(path)) {
+        return Some(Route::AnswerReceipt { id });
+    }
     None
+}
+
+/// `/api/answers/(\d+)/receipt` whole: the digits as the path had them.
+fn answer_receipt(path: &str) -> Option<String> {
+    let id = path
+        .strip_prefix("/api/answers/")?
+        .strip_suffix("/receipt")?;
+    is_digits(id).then(|| id.to_owned())
 }
 
 /// `/api/tasks/(\d+)(?:/(done|accept|reopen|cancel|pause|resume|tell|transcript))?`
@@ -186,6 +201,7 @@ pub async fn dispatch(
         Route::Note => notes::handle(context, caller, request).await,
         Route::Question { id } => door::handle(context, caller, request, &id).await,
         Route::Answers => answers::handle(context, caller, request).await,
+        Route::AnswerReceipt { id } => answers::receipt(context, caller, request, &id).await,
     }
 }
 

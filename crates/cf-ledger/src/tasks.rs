@@ -22,7 +22,8 @@ pub(crate) use finishing::{
 pub use giving::NewTask;
 pub(crate) use giving::{assign_task, check_release, create_task, release_task};
 pub(crate) use pausing::{
-    clear_hold, held_tasks_due, hold_task, pause_task, paused_task, resume_task, told_since_paused,
+    clear_hold, held_tasks_due, hold_task, pause_task, paused_task, resume_task, stop_of,
+    task_in_hand, told_since_paused,
 };
 
 /// What a paused task's window is told when it goes on: the human's Resume
@@ -37,6 +38,38 @@ fn delivery_body(task: &TaskRow) -> String {
         None => task.body.clone(),
         Some(purpose) => format!("Critical work: {purpose}. {CRITICAL_RULE}\n\n{}", task.body),
     }
+}
+
+/// The words that send a window on, as the task message that carries them
+/// reads: with the task's brief before them when no task message for the
+/// window was received or is on its way, so that the body never builds a
+/// brief that a row still holds.
+fn carrier_body(
+    store: &Store,
+    task: &TaskRow,
+    window: i64,
+    words: &str,
+) -> Result<String, LedgerError> {
+    let held = store
+        .db
+        .prepare(
+            "SELECT 1 FROM message WHERE task_id = ? AND recipient_id = ? AND kind = 'task'
+               AND state IN ('delivered', 'read', 'queued', 'gated', 'delivering')",
+        )?
+        .exists(params![task.id, window])?;
+    Ok(if held {
+        words.to_owned()
+    } else {
+        format!("{}\n\n{words}", delivery_body(task))
+    })
+}
+
+/// Messages by their numbers, as a note names them: `m-3, m-5`.
+fn m_list(ids: &[i64]) -> String {
+    ids.iter()
+        .map(|id| format!("m-{id}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// "standard worker", "image designer": who an open task waits for.

@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use cf_engine::testing::Context;
-use cf_engine::ActivityState;
+use cf_engine::{ActivityState, Unstopped};
 use cf_harness::contract::{Interrupt, Pane};
 use serde_json::{json, Value};
 
@@ -91,6 +91,12 @@ fn interrupts_a_task_paused_again_after_a_resume_however_many_rounds_its_first_p
         3,
         "three rounds for the first pause"
     );
+    // Every round ignored: the stop is given up on, and the board says so.
+    let zeus = context.id(project.id, "zeus");
+    assert_eq!(
+        context.dispatcher.unstopped(zeus),
+        Some(Unstopped { task: 1, rounds: 3 })
+    );
     context.resume_task(project.id, 1, "Carry on");
     context.pass().unwrap();
     context.adapter.busy("zeus");
@@ -102,11 +108,12 @@ fn interrupts_a_task_paused_again_after_a_resume_however_many_rounds_its_first_p
         4,
         "the second pause is a stop of its own"
     );
-    held_to(
-        context.close(),
-        SUITES,
-        "interrupts a task paused again after a resume, however many rounds its first pause took",
+    assert_eq!(
+        context.dispatcher.unstopped(zeus),
+        None,
+        "its rounds begin again, and what the first ignored is not its"
     );
+    // Not held to Node's recording: the first stop's ignored rounds were said, to the human and the chief.
 }
 
 #[test]

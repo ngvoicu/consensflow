@@ -1,5 +1,7 @@
 //! The door's wait, on the clock that moves only when nothing else can run:
-//! how long it holds, what ends it early, and what it refuses.
+//! how long it holds, what ends it early, what it refuses, and what a poll
+//! writes: the answer it finds is claimed for the door, and nothing is
+//! claimed for a daemon that is stopping or a window that is gone.
 
 use std::time::Duration;
 
@@ -8,6 +10,7 @@ use serde_json::{json, Value};
 
 use super::*;
 use crate::api::callers::caller_of;
+use crate::api::routes::tests::support::working_question;
 use crate::testing::{request, said, scene, Scene};
 
 /// The door of `zeus` for message `id`, asked as `target` says, answered when it is.
@@ -142,16 +145,128 @@ async fn the_daemon_stopping_answers_a_waiting_door_at_once_with_what_there_is()
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_answer_that_came_as_the_daemon_stops_is_given_not_dropped() {
+async fn an_answer_that_came_as_the_daemon_stops_is_not_claimed_and_stays_the_ledgers_to_deliver() {
+    let scene = scene();
+    let question = working_question(&scene);
+    let id = question.id.to_string();
+    let target = format!("/api/questions/{id}?wait=25000");
+    let (waiting, ()) = tokio::join!(door(&scene, &scene.zeus, &target, &id), async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        scene.choose(question.id, "red");
+        scene.context.closing.set();
+    });
+    assert_eq!(
+        (waiting.0, &waiting.1["answer"]),
+        (200, &Value::Null),
+        "the door ends with nothing, and a hook that gets none leaves it to the window's own dialog"
+    );
+    assert_eq!(
+        scene.next_for_zeus(),
+        Some("H: red".to_owned()),
+        "the answer is still the ledger's: it goes in as a message"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_poll_claims_the_answer_it_finds_so_the_paste_skips_it_and_wakes_the_dispatcher() {
+    let scene = scene();
+    let question = working_question(&scene);
+    scene.choose(question.id, "red");
+    assert!(
+        scene.next_for_zeus().is_some(),
+        "before the poll it is the next to be pasted"
+    );
+    let id = question.id.to_string();
+    let (status, body) = door(&scene, &scene.zeus, &format!("/api/questions/{id}"), &id).await;
+    assert_eq!(
+        (status, &body["answer"]["choices"]),
+        (200, &json!([["red"]]))
+    );
+    assert_eq!(scene.next_for_zeus(), None, "claimed: not pasted");
+    assert_eq!(scene.kicks.get(), 1, "the dispatcher is woken");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_same_answer_comes_again_to_a_second_poll_which_writes_nothing() {
+    let scene = scene();
+    let question = working_question(&scene);
+    scene.choose(question.id, "red");
+    let id = question.id.to_string();
+    let target = format!("/api/questions/{id}");
+    let first = door(&scene, &scene.zeus, &target, &id).await;
+    let again = door(&scene, &scene.zeus, &target, &id).await;
+    assert_eq!(first, again, "a reply that was lost is given again");
+    let claims = scene
+        .context
+        .ledger
+        .borrow()
+        .events(scene.project.id, 0, 500)
+        .unwrap()
+        .iter()
+        .filter(|event| event.kind == "delivery.claimed")
+        .count();
+    assert_eq!(claims, 1, "claimed once");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_door_a_pause_shut_is_refused_at_once_in_the_words_its_model_is_to_hear() {
+    let scene = scene();
+    let question = working_question(&scene);
+    scene.pause();
+    let id = question.id.to_string();
+    let started = Instant::now();
+    let target = format!("/api/questions/{id}?wait=20000");
+    let (status, body) = door(&scene, &scene.zeus, &target, &id).await;
+    assert_eq!(started.elapsed(), Duration::ZERO, "it does not wait");
+    assert_eq!(
+        (status, body),
+        (
+            409,
+            json!({
+                "error": "door-closed",
+                "message": format!("T-1 was stopped, so m-{id} is not answered here: its answer comes to you as a message when the task goes on. Do not ask it again; end your turn now.")
+            })
+        )
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_window_that_exited_ends_its_poll_at_the_next_look_and_nothing_is_claimed_for_it() {
+    let scene = scene();
+    let question = working_question(&scene);
+    let id = question.id.to_string();
+    let target = format!("/api/questions/{id}?wait=25000");
+    let started = Instant::now();
+    let (waiting, ()) = tokio::join!(door(&scene, &scene.zeus, &target, &id), async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        scene.context.credentials.revoke(&scene.zeus);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        scene.choose(question.id, "red");
+    });
+    assert_eq!((waiting.0, &waiting.1["answer"]), (200, &Value::Null));
+    assert_eq!(started.elapsed(), Duration::from_millis(250));
+    assert!(
+        scene.next_for_zeus().is_some(),
+        "nothing was claimed for it"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_ledger_is_never_held_across_the_wait() {
     let scene = scene();
     let id = scene.question.id.to_string();
     let target = format!("/api/questions/{id}?wait=25000");
     let (waiting, ()) = tokio::join!(door(&scene, &scene.zeus, &target, &id), async {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        answer(&scene, "Just in time.");
+        for _ in 0..3 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert!(
+                scene.context.ledger.try_borrow_mut().is_ok(),
+                "a waiting door holds no borrow"
+            );
+        }
         scene.context.closing.set();
     });
-    assert_eq!(waiting.1["answer"]["body"], "Just in time.");
+    assert_eq!(waiting.0, 200);
 }
 
 #[tokio::test(start_paused = true)]

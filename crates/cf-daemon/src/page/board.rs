@@ -8,7 +8,8 @@ use super::Page;
 
 /// `board.get`: the ledger's board, each lane with what the dispatcher knows of
 /// its window: after the lane's own fields, in this order, `agentMissing`,
-/// `activity`, `pane`, `hidden`, `switching` and `holding`.
+/// `activity`, `pane`, `hidden`, `switching` and `holding`, and, only while a
+/// stop of its task is ignored in every round, `unstopped`.
 pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let board = page.ledger.borrow().board(body.whole("project")?)?;
     let agents = saved(&page.env)?;
@@ -46,6 +47,10 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         );
         // A message that waits until the human sends what they typed there.
         fields.insert("holding".to_owned(), json!(page.engine.holding(id)?));
+        // A window that would not stop: its task, and how often it was told to.
+        if let Some(ignored) = page.engine.unstopped(id) {
+            fields.insert("unstopped".to_owned(), ignored);
+        }
     }
     one("board", shown)
 }

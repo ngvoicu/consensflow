@@ -37,7 +37,9 @@ mod relay;
 mod rig;
 mod runs;
 
-// What the three players share, taken whole.
+// What the players share, taken whole.
+#[path = "../support/departed.rs"]
+mod departed;
 #[path = "../support/front.rs"]
 mod front;
 #[path = "../support/ledger.rs"]
@@ -51,14 +53,37 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use cf_daemon::api::body::Body;
 use cf_daemon::api::request::Request;
 use cf_daemon::screens::recognize;
+use departed::Departed;
 use hyper::Method;
 use support::trace::{self, Tally};
 
 /// The suites of the API's traces, and of `cf` against it.
 const SUITES: [&str; 4] = ["core-api", "core-daemon", "corners-api", "cf-board"];
 
-/// Plays every trace of `suites`, each against an API of its own: what each
-/// that was not answered as Node answered it said.
+/// The traces the receipt and stop redesign moved on purpose: a choice answer
+/// is received, not read at its creation, and a resume takes in what its
+/// window kept. Found by playing them against the daemon.
+const DEPARTED: &[Departed] = &[
+    (
+        "core-api-006",
+        "the answer to a question with options lands `queued`: it is read when received, not when written",
+    ),
+    (
+        "cf-board-003",
+        "a resume carries the brief that never arrived and logs `message.carried`: one more clock reading, so the task's `updatedAt` is a second later",
+    ),
+    (
+        "cf-board-023",
+        "the answer to a question with options lands `queued`: it is read when received, not when written",
+    ),
+    (
+        "cf-board-024",
+        "the answer to a question with options lands `queued`: it is read when received, not when written",
+    ),
+];
+
+/// Plays every trace of `suites` but the departed, each against an API of its
+/// own: what each that was not answered as Node answered it said.
 fn play_all(suites: &[&str], expected: usize) {
     let names = trace::names(suites);
     assert_eq!(
@@ -66,9 +91,10 @@ fn play_all(suites: &[&str], expected: usize) {
         expected,
         "the traces of {suites:?}: npm run goldens:daemon"
     );
+    let to_hold = departed::held(&names, DEPARTED);
     let mut failures = Vec::new();
     let mut held = Tally::default();
-    for name in &names {
+    for name in &to_hold {
         let played = catch_unwind(AssertUnwindSafe(|| trace::locally(player::play(name))));
         match played {
             Ok(Ok(tally)) => held += tally,
@@ -77,11 +103,15 @@ fn play_all(suites: &[&str], expected: usize) {
         }
     }
     println!(
-        "{} traces played, {} failed of {}",
-        names.len() - failures.len(),
+        "{} traces played, {} departed, {} failed of {}",
+        to_hold.len() - failures.len(),
+        names.len() - to_hold.len(),
         failures.len(),
         names.len()
     );
+    for line in departed::said(&names, DEPARTED) {
+        println!("{line}");
+    }
     println!("held: {held}");
     assert!(
         failures.is_empty(),
@@ -89,6 +119,19 @@ fn play_all(suites: &[&str], expected: usize) {
         failures.len(),
         failures.join("\n")
     );
+}
+
+/// A trace is named in [`DEPARTED`] because it differs from Node's, and for no
+/// other reason.
+#[test]
+fn every_departed_trace_is_there_and_still_departs() {
+    let wrong = departed::wrong(DEPARTED, &SUITES, |name| {
+        matches!(
+            catch_unwind(AssertUnwindSafe(|| trace::locally(player::play(name)))),
+            Ok(Ok(_))
+        )
+    });
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 #[test]

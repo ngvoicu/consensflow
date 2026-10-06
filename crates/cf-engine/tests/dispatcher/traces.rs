@@ -35,7 +35,12 @@
 //! which may differ by how independent windows interleave, and only so
 //! ([`lanes`]). The database each side left is held equal whole, table by
 //! table, each value as SQLite quotes it, the test's temporary folder
-//! written «dir».
+//! written «dir», but for the four columns of migration 0011 that only this
+//! ledger writes (`cf_ledger::testing`), held apart on both sides.
+//!
+//! A test of the receipt and stop redesign has no Node trace: its rule is Node's
+//! no more, so it is not held to one (`held_to` panics for a test with none)
+//! and asserts what it holds directly.
 
 use std::collections::HashMap;
 use std::fs;
@@ -44,6 +49,7 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use cf_engine::testing::Closed;
+use cf_ledger::testing::{hold_apart_what_node_never_logs, hold_apart_what_node_never_writes};
 
 use crate::lanes;
 use flate2::read::GzDecoder;
@@ -94,7 +100,14 @@ pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
         panic!("no Node trace of {suites:?} › {name}: npm run goldens:dispatcher")
     });
     let node = projected(trace["events"].as_array().expect("its events"));
-    let rust = projected(&closed.events);
+    // The stop a pause counted is in the ledger's event, and Node's never says it.
+    let mut logged = closed.events.clone();
+    for line in &mut logged {
+        if let Some(event) = line.get_mut("event") {
+            hold_apart_what_node_never_logs(std::slice::from_mut(event));
+        }
+    }
+    let rust = projected(&logged);
     if INTERLEAVED.contains(&name) {
         if let Some(difference) = lanes::first_difference(&node, &rust) {
             panic!("{name}: the engine's effects differ {difference}");
@@ -116,9 +129,20 @@ pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
         );
     }
     let left = dump(&closed.file, closed.dir.path());
-    let node_left = trace["finals"].as_array().and_then(|finals| finals.last());
+    // What Node's ledger never writes is held apart on both sides, so a
+    // recording made before the migration and one made after it are the same.
+    let node_left = trace["finals"]
+        .as_array()
+        .and_then(|finals| finals.last())
+        .cloned()
+        .map(|mut left| {
+            if let Value::Object(tables) = &mut left {
+                hold_apart_what_node_never_writes(tables);
+            }
+            left
+        });
     assert_eq!(
-        Some(&left),
+        Some(left),
         node_left,
         "{name}: the database the engine left differs"
     );
@@ -294,6 +318,7 @@ fn dump(file: &Path, folder: &Path) -> Value {
             .expect("each row");
         tables.insert(name, json!({ "columns": columns, "rows": rows }));
     }
+    hold_apart_what_node_never_writes(&mut tables);
     let text = Value::Object(tables).to_string();
     let folder = serde_json::to_string(&folder.to_string_lossy()).expect("the folder as JSON");
     serde_json::from_str(&text.replace(&folder[1..folder.len() - 1], "«dir»"))

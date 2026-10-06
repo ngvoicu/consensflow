@@ -62,7 +62,7 @@ fn is_not_confirmed_when_it_shows_after_all_and_its_window_goes_with_its_work() 
         .unwrap();
     let shown = context
         .adapter
-        .item(Role::User, &delivery_text(&context.message(answer.id)));
+        .item(Role::User, &delivery_text(&context.message(answer.id), &[]));
     context
         .adapter
         .with("zeus", |agent| agent.items.push(shown));
@@ -80,12 +80,17 @@ fn is_not_confirmed_when_it_shows_after_all_and_its_window_goes_with_its_work() 
             .any(|killed| killed.generation == pane.generation),
         "the window went with its work"
     );
-    // And the task went on elsewhere.
+    // And the task went on elsewhere, with what was on its way in the brief
+    // of the window that took it, once. (Not held to Node's recording, which
+    // let that go with the window.)
     assert_match(&tiers.assignee(1), "^diana-");
-    held_to(
-        context.close(),
-        SUITES,
-        "is not confirmed when it shows after all, and its window goes with its work",
+    let first = context.adapter.prepared().last().unwrap()["message"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        first.contains("(answer m-3 from @chief to m-2 of @zeus-amber-pine: Which grammar?)\nThe small one\n\nReassigned from @zeus-amber-pine (by @human)"),
+        "{first}"
     );
 }
 

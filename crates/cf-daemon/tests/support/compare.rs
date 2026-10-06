@@ -38,9 +38,22 @@ pub fn compare(what: &str, actual: &Value, expected: &Value) -> Option<String> {
 }
 
 /// The database of the closed ledger at `file` against the one Node left
-/// (`ledger.final` of the trace).
+/// (`ledger.final` of the trace), the columns only this ledger writes held
+/// apart (`cf_ledger::testing`).
 pub fn left(file: &Path, expected: &Value) -> Option<String> {
-    compare("the database it left", &dump(file), expected)
+    compare(
+        "the database it left",
+        &held_apart(dump(file)),
+        &held_apart(expected.clone()),
+    )
+}
+
+/// A dump with what Node's ledger never writes taken out of its tables.
+fn held_apart(mut dump: Value) -> Value {
+    if let Some(Value::Object(tables)) = dump.get_mut("tables") {
+        cf_ledger::testing::hold_apart_what_node_never_writes(tables);
+    }
+    dump
 }
 
 /// The database a ledger left, as the recorder dumps it (`tests/goldens/ledger`,

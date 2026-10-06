@@ -132,6 +132,9 @@ pub(crate) struct TaskRow {
     pub(crate) purpose: Option<String>,
     pub(crate) taken_from_id: Option<i64>,
     pub(crate) deleted_at: Option<String>,
+    pub(crate) paused_at: Option<String>,
+    /// How many stops its pauses have asked of its window.
+    pub(crate) stop_seq: i64,
 }
 
 impl TaskRow {
@@ -150,6 +153,8 @@ impl TaskRow {
             purpose: row.get("purpose")?,
             taken_from_id: row.get("taken_from_id")?,
             deleted_at: row.get("deleted_at")?,
+            paused_at: row.get("paused_at")?,
+            stop_seq: row.get("stop_seq")?,
         })
     }
 }

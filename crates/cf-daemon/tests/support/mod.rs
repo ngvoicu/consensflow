@@ -21,7 +21,9 @@
 //!   exchange or an operation, held to the `wrote` of the trace, and the one
 //!   masking the recorder does there;
 //! - `ledger.rs` (API, page): the ledger the trace's own calls are made again
-//!   on, with the clock and the names Node's drew.
+//!   on, with the clock and the names Node's drew;
+//! - `departed.rs` (API, page): the traces the receipt and stop redesign moved
+//!   on purpose, each named with why, played apart, and held to still departing.
 //!
 //! What a trace names that varies is put where it is used, by whoever owns the
 //! thing that varies, and no player puts them all: `«root»` by the world, the

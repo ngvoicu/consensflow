@@ -1,11 +1,15 @@
 //! Messages: notes, questions and their answers (`src/ledger/messages.js`),
 //! delivered into a window one at a time and oldest first, except the
-//! human's, which wait in the app until read (`delivery`); and the human's
-//! gate, which holds one agent's word to another until the human passes it
-//! on or declines it (`gate`).
+//! human's, which wait in the app until read (`delivery`); what a window
+//! keeps, which rides in the paste of the words that send it on
+//! (`carrying`); what makes a message received, and what that does to its
+//! task (`receipt`); and the human's gate, which holds one agent's word to
+//! another until the human passes it on or declines it (`gate`).
 
+mod carrying;
 mod delivery;
 mod gate;
+mod receipt;
 
 use cf_proto::ledger::{MessageView, Question};
 use rusqlite::{params, OptionalExtension};
@@ -18,11 +22,17 @@ use crate::store::Store;
 use crate::tasks::pause_task;
 use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
 
+pub(crate) use carrying::{adopt, fold, release_carried, transfer};
 pub(crate) use delivery::{
-    begin_delivery, cancel_message, confirm_delivery, fail_delivery, in_flight, next_delivery,
-    retry_delivery, with_work,
+    begin_delivery, cancel_message, confirm_delivery, fail_delivery, first_received, in_flight,
+    last_pasted, next_delivery, retry_delivery, with_work,
 };
 pub(crate) use gate::{approve_message, decline_message, mark_read};
+pub use receipt::Read;
+pub(crate) use receipt::{
+    claim_answer, door_born_closed, receive_read, reconcile, release_all_claims, release_claims,
+    settle_claim,
+};
 
 /// A note: from a participant (ConsensFlow itself when none) to another,
 /// about one of the project's tasks or none.
@@ -114,6 +124,19 @@ pub(crate) fn ask(
             Some(options) => render_questions(options),
             None => question.body.clone().unwrap_or_default(),
         };
+        // The window that asks about its task, and the task as it is now.
+        let asking = match question.task {
+            Some(number) => {
+                let row = store.task_row(project_id, number)?;
+                let asker = store.participant_by_handle(project_id, from)?;
+                (row.assignee_id == Some(asker.id) && !question.urgent).then_some(row)
+            }
+            None => None,
+        };
+        let shut = match &asking {
+            Some(row) => door_born_closed(store, row)?,
+            None => false,
+        };
         let message = send(
             store,
             project_id,
@@ -125,14 +148,11 @@ pub(crate) fn ask(
                 kind: "question",
                 questions: options.as_deref(),
                 urgent: question.urgent,
+                door_closed: shut,
             },
         )?;
-        if let Some(number) = question.task {
-            let row = store.task_row(project_id, number)?;
-            let asker = store.participant_by_handle(project_id, from)?;
-            if row.assignee_id == Some(asker.id) && row.state == "working" {
-                store.move_task(&row, "waiting", json!({}))?;
-            }
+        if let Some(row) = asking {
+            reconcile(store, row.id)?;
         }
         Ok(message)
     })
@@ -225,7 +245,7 @@ pub(crate) fn answer(
                 task_id,
                 reply_to: Some(question_id),
                 body: &text,
-                collected: picks.is_some(),
+                from_window,
                 choices: picks.as_deref(),
                 ..Queued::default()
             },
@@ -240,70 +260,26 @@ pub(crate) fn answer(
             withdraw(store, question_id, &format!("answered by @{}", answerer.handle))?;
         }
         let answer = known_message(store, id)?;
+        // The asker's own window gave this one: it has it, and its task goes on.
         if answer.state == "read" {
-            resume(store, task_id)?;
+            if let Some(task_id) = task_id {
+                reconcile(store, task_id)?;
+            }
         }
         Ok(answer)
     })
 }
 
-/// A choice answer is read by the door that asked, at once: the asker's task goes on.
-fn resume(store: &mut Store, task_id: Option<i64>) -> Result<(), LedgerError> {
-    let Some(task_id) = task_id else {
-        return Ok(());
-    };
-    let task = store
-        .db
-        .query_row("SELECT * FROM task WHERE id = ?", [task_id], TaskRow::read)?;
-    if task.state == "waiting" {
-        store.move_task(&task, "working", json!({}))?;
-    }
-    Ok(())
-}
-
-/// Whether a question on the task still waits for its answer.
-fn unanswered(store: &Store, task_id: i64) -> Result<bool, LedgerError> {
-    Ok(store
-        .db
-        .prepare(
-            "SELECT 1 FROM message q WHERE q.task_id = ? AND q.kind = 'question'
-           AND NOT EXISTS (
-             SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer'
-               AND a.state NOT IN ('gated', 'cancelled')
-           )
-         LIMIT 1",
-        )?
-        .exists([task_id])?)
-}
-
-/// Whether a question has an answer, on its way or still gated; a declined one never counts.
+/// Whether a question has an answer, on its way or still gated; one that was
+/// declined, or that failed to arrive, never counts: the question takes another.
 fn answered(store: &Store, question_id: i64) -> Result<bool, LedgerError> {
     Ok(store
         .db
         .prepare(
-            "SELECT 1 FROM message WHERE reply_to = ? AND kind = 'answer' AND state != 'cancelled'",
+            "SELECT 1 FROM message WHERE reply_to = ? AND kind = 'answer'
+               AND state NOT IN ('cancelled', 'failed')",
         )?
         .exists([question_id])?)
-}
-
-/// The answer to a question, or none while it waits: for the one asked, or
-/// for the human's approval.
-pub(crate) fn answer_to(
-    store: &Store,
-    question_id: i64,
-) -> Result<Option<MessageView>, LedgerError> {
-    Ok(store
-        .db
-        .query_row(
-            &format!(
-                "{MESSAGE_SELECT} WHERE m.reply_to = ? AND m.kind = 'answer'
-         AND m.state NOT IN ('gated', 'cancelled')
-       ORDER BY m.id LIMIT 1"
-            ),
-            [question_id],
-            message_view,
-        )
-        .optional()?)
 }
 
 /// What is on its way to a participant (queued, or being delivered), oldest first.

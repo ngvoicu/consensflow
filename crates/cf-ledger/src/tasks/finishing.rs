@@ -6,7 +6,8 @@ use cf_proto::ledger::{TaskMoved, TaskView};
 use rusqlite::params;
 use serde_json::json;
 
-use super::{delivery_body, require_on_board, require_task_state, task_by_id};
+use super::{carrier_body, delivery_body, require_on_board, require_task_state, task_by_id};
+use crate::messages::fold;
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES,
     MAX_BODY, MEMBER_ROLES,
@@ -153,6 +154,9 @@ fn release_waiting(
 
 /// A follow-up on a finished or failed task: it goes back to its assignee's
 /// queue, and a session the human deleted is brought back to the board for it.
+/// The follow-up is a task message that carries what the window kept for the
+/// task (which is what delivers what a delivery that failed let go of), and
+/// the brief before it when none is received or on its way.
 pub(crate) fn reopen_task(
     store: &mut Store,
     project_id: i64,
@@ -183,6 +187,7 @@ pub(crate) fn reopen_task(
         };
         require_active(&assignee)?;
         withdraw_gated(store, task.id, &format!("sent back by @{by}"))?;
+        let words = carrier_body(store, &task, assignee.id, body)?;
         let message_id = queue(
             store,
             project_id,
@@ -191,10 +196,11 @@ pub(crate) fn reopen_task(
                 from: Some(author.id),
                 kind: "task",
                 task_id: Some(task.id),
-                body,
+                body: &words,
                 ..Queued::default()
             },
         )?;
+        fold(store, &task, assignee.id, message_id)?;
         store.move_task(&task, "queued", json!({ "by": by, "message": message_id }))?;
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,

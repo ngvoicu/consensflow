@@ -13,8 +13,8 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use cf_board::Board;
-use cf_proto::questions::Reply;
+use cf_board::{door, Board};
+use cf_proto::questions::{Answer, Reply};
 use futures_util::StreamExt;
 use serde_json::Value;
 use tokio::task::AbortHandle;
@@ -44,6 +44,14 @@ enum Said {
     TooMuch,
 }
 
+/// A question Codex asked that the board is answering for it: the thread it
+/// is on, and what stops its poll. The poll is the request's own: it ends
+/// with the turn that asked it, and not only with the pair.
+struct Held {
+    thread: Option<String>,
+    stop: Arc<AtomicBool>,
+}
+
 pub(super) struct Pair {
     id: ClientId,
     shared: Rc<Shared>,
@@ -54,8 +62,8 @@ pub(super) struct Pair {
     waiting: RefCell<Option<Waiting>>,
     tui: Outbox,
     native: Outbox,
-    /// Raised when the pair ends, so a question it asked stops at its next poll.
-    cancel: Arc<AtomicBool>,
+    /// The questions the board is answering, each with the flag that ends its poll.
+    held: RefCell<Vec<Held>>,
     retired: Cell<bool>,
     tasks: RefCell<Vec<AbortHandle>>,
 }
@@ -77,7 +85,7 @@ impl Pair {
             })),
             tui,
             native,
-            cancel: Arc::new(AtomicBool::new(false)),
+            held: RefCell::new(Vec::new()),
             retired: Cell::new(false),
             tasks: RefCell::new(Vec::new()),
         });
@@ -204,6 +212,7 @@ impl Pair {
             &mut self.requests.borrow_mut(),
             &message,
         );
+        self.end_questions_of(&message);
         if message.get("method").and_then(Value::as_str) == Some(REQUEST_USER_INPUT) {
             if let (Some(id), Some(board)) = (message.get("id"), &self.shared.board) {
                 self.hold_question(id.clone(), message.get("params"), text, Arc::clone(board));
@@ -213,9 +222,43 @@ impl Pair {
         self.forward(&self.tui, text);
     }
 
+    /// The turn a thread was on is over, or the thread is idle: the questions
+    /// Codex asked on it were asked by a turn that has ended (an interrupt
+    /// ends one in the middle of its question), so what asked them is not
+    /// waiting for an answer any more, and their polls stop. Another thread's
+    /// go on.
+    fn end_questions_of(&self, message: &Value) {
+        let params = message.get("params");
+        let over = match message.get("method").and_then(Value::as_str) {
+            Some("turn/completed") => true,
+            Some("thread/status/changed") => {
+                params
+                    .and_then(|params| params.get("status"))
+                    .and_then(|status| status.get("type"))
+                    .and_then(Value::as_str)
+                    == Some("idle")
+            }
+            _ => false,
+        };
+        let thread = params
+            .and_then(|params| params.get("threadId"))
+            .and_then(Value::as_str);
+        if let (true, Some(thread)) = (over, thread) {
+            for held in self.held.borrow().iter() {
+                if held.thread.as_deref() == Some(thread) {
+                    held.stop.store(true, Ordering::SeqCst);
+                }
+            }
+        }
+    }
+
     /// Codex asked its client a question: the board answers it, while the
     /// frames of this pair and every other go on. When nobody answers in time
-    /// the request goes on to the TUI, as it came.
+    /// the request goes on to the TUI, as it came, unless the turn that asked
+    /// it ended meanwhile: then the request is obsolete, nothing goes to the
+    /// TUI, and an answer the board gave is given back, not handed over. The
+    /// stop is read and the answer queued in one step, so no turn ends
+    /// between them.
     fn hold_question(
         self: &Rc<Self>,
         id: Value,
@@ -229,15 +272,33 @@ impl Pair {
         };
         let this = Rc::clone(self);
         let wait = self.shared.question_wait;
-        let stop = Arc::clone(&self.cancel);
+        let stop = Arc::new(AtomicBool::new(false));
+        self.held.borrow_mut().push(Held {
+            thread: params
+                .and_then(|params| params.get("threadId"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            stop: Arc::clone(&stop),
+        });
         self.spawn(async move {
-            let asking = asked.clone();
+            let (asking, polling, ending) = (asked.clone(), Arc::clone(&board), Arc::clone(&stop));
             let outcome =
-                tokio::task::spawn_blocking(move || asking.ask(&board, wait, &stop)).await;
-            match outcome {
-                Ok(Reply::Answered(answer)) => this.answer_codex(&asked.answered(&id, &answer)),
-                Ok(Reply::Refused(reason)) => this.answer_codex(&asked.refused(&id, &reason)),
-                Ok(Reply::Unanswered) | Err(_) => this.forward(&this.tui, text),
+                tokio::task::spawn_blocking(move || asking.ask(&polling, wait, &ending)).await;
+            let ended = stop.load(Ordering::SeqCst);
+            this.held
+                .borrow_mut()
+                .retain(|held| !Arc::ptr_eq(&held.stop, &stop));
+            match (outcome, ended) {
+                (Ok(Reply::Answered(answer)), false) => {
+                    this.answer_codex(&asked.answered(&id, &answer));
+                    acknowledge(board, answer, true).await;
+                }
+                (Ok(Reply::Answered(answer)), true) => acknowledge(board, answer, false).await,
+                (Ok(Reply::Refused(reason)), false) => {
+                    this.answer_codex(&asked.refused(&id, &reason));
+                }
+                (Ok(Reply::Unanswered) | Err(_), false) => this.forward(&this.tui, text),
+                (_, true) => {}
             }
         });
     }
@@ -268,11 +329,20 @@ impl Pair {
         }
         self.shared.state.borrow_mut().retire(self.id);
         self.shared.pairs.borrow_mut().remove(&self.id);
-        self.cancel.store(true, Ordering::Relaxed);
+        for held in self.held.borrow().iter() {
+            held.stop.store(true, Ordering::SeqCst);
+        }
         self.tui.close();
         self.native.close();
         for task in self.tasks.borrow_mut().drain(..) {
             task.abort();
         }
     }
+}
+
+/// Tells the board, off the broker's thread, whether the answer it claimed
+/// for Codex's request was handed over: the board's answer to that is of no
+/// use to a request that is settled either way.
+async fn acknowledge(board: Arc<Board>, answer: Answer, received: bool) {
+    let _ = tokio::task::spawn_blocking(move || door::acknowledge(&board, &answer, received)).await;
 }
