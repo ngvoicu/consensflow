@@ -1,4 +1,4 @@
-import { RESUME_WORDS } from '../ledger/index.js'
+import { LedgerError, RESUME_WORDS } from '../ledger/index.js'
 
 /** A reset this near holds a task with its window rather than sending it back to the board. */
 const HOLD_MS = 30 * 60_000
@@ -257,7 +257,11 @@ export class Scheduler {
     }
   }
 
-  /** A held task whose time has come goes on in its own window, unless its member is still out. */
+  /**
+   * A held task whose time has come goes on in its own window, unless its
+   * member is still out. One the ledger refuses to resume is its own trouble
+   * (`#stayPaused`): the others, and the rest of the pass, go on.
+   */
   resumeHeld() {
     for (const held of this.#ledger.heldTasksDue(new Date(this.#now()).toISOString())) {
       const project = this.#ledger.project(held.projectId)
@@ -265,9 +269,37 @@ export class Scheduler {
       const assignee = project.participants.find((p) => p.id === held.assigneeId)
       const owner = assignee === undefined ? null : this.memberOf(project, assignee)
       if (owner !== null && this.isOut(owner)) continue
-      this.#ledger.resumeTask(held.projectId, held.number, { body: RESUME_WORDS })
+      try {
+        this.#ledger.resumeTask(held.projectId, held.number, { body: RESUME_WORDS })
+      } catch (cause) {
+        // A refusal is this task's; the ledger failing is the pass's.
+        if (!(cause instanceof LedgerError)) throw cause
+        this.#stayPaused(held, cause)
+      }
       this.#changed()
     }
+  }
+
+  /**
+   * A held task the ledger would not resume (its session was deleted while it
+   * was held, and a task given to a session is its own: only a follow-up
+   * brings the session back, and that is not the daemon's to do): it stays
+   * paused with its words, its hold cleared so it is not due again, and its
+   * requester is told once that it waits for a decision.
+   */
+  #stayPaused(held, cause) {
+    const task = this.#ledger.task(held.projectId, held.number)
+    this.#ledger.clearHold(held.projectId, held.number, { because: cause.message })
+    // A member given the task by name has no session to name: the refusal says it.
+    const why =
+      cause.code === 'session-ended' && task.session !== null
+        ? `@${task.session}, the session it was given to, was deleted`
+        : `it could not go on when its hold ended (${cause.message})`
+    this.#ledger.note(held.projectId, {
+      to: task.requester,
+      task: held.number,
+      body: `T-${held.number} stays paused: ${why}. It waits for your decision: cancel it, or give the work again.`,
+    })
   }
 
   /**

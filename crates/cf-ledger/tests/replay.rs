@@ -299,6 +299,7 @@ fn unsupported(call: &Value) -> Option<String> {
         "acceptTask",
         "pauseTask",
         "holdTask",
+        "clearHold",
         "heldTasksDue",
         "pausedTask",
         "toldSincePaused",
@@ -503,6 +504,9 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
             text(field(args, 2, "until")),
             text(field(args, 2, "because")),
         )),
+        "clearHold" => {
+            encode(ledger.clear_hold(id(), integer(arg(args, 1)), text(field(args, 2, "because"))))
+        }
         "heldTasksDue" => encode(ledger.held_tasks_due(text(arg(args, 0)))),
         "pausedTask" => encode(ledger.paused_task(id())),
         "toldSincePaused" => encode(ledger.told_since_paused(id(), integer(arg(args, 1)))),

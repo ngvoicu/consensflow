@@ -427,6 +427,25 @@ export function holdTask(store, projectId, number, { until, because }) {
   })
 }
 
+/**
+ * The daemon ends a task's hold without resuming it, when it cannot go on at
+ * its time: the task stays paused, as the chief's or the human's pause leaves
+ * it, and is not due again. It goes on only when one of them resumes it, or
+ * is called off.
+ */
+export function clearHold(store, projectId, number, { because }) {
+  requireText(because, 'because', 1000)
+  return store.write(() => {
+    const task = store.taskRow(projectId, number)
+    requireTaskState(task, ['paused'], 'clear the hold of')
+    store.db
+      .prepare('UPDATE task SET held_until = NULL, updated_at = ? WHERE id = ?')
+      .run(store.at(), task.id)
+    store.log(projectId, 'task.hold-cleared', { task: number, because })
+    return taskById(store, task.id)
+  })
+}
+
 /** The held tasks whose time has come, oldest first. */
 export function heldTasksDue(store, nowIso) {
   return store.db

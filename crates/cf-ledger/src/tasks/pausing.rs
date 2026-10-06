@@ -103,6 +103,34 @@ pub(crate) fn hold_task(
     })
 }
 
+/// The daemon ends a task's hold without resuming it, when it cannot go on at
+/// its time: the task stays paused, as the chief's or the human's pause leaves
+/// it, and is not due again. It goes on only when one of them resumes it, or
+/// is called off.
+pub(crate) fn clear_hold(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    because: &str,
+) -> Result<TaskView, LedgerError> {
+    model::require_text(because, "because", 1000)?;
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        require_task_state(&task, &["paused"], "clear the hold of")?;
+        let at = store.at();
+        store.db.execute(
+            "UPDATE task SET held_until = NULL, updated_at = ? WHERE id = ?",
+            params![at, task.id],
+        )?;
+        store.log(
+            project_id,
+            "task.hold-cleared",
+            json!({ "task": number, "because": because }),
+        )?;
+        task_by_id(store, task.id)
+    })
+}
+
 /// The held tasks whose time has come at `now` (an ISO time), oldest first.
 pub(crate) fn held_tasks_due(store: &Store, now: &str) -> Result<Vec<HeldTask>, LedgerError> {
     Ok(store

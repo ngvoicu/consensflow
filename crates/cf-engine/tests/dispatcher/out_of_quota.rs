@@ -357,3 +357,211 @@ fn reaches_the_chief_again_once_the_human_says_it_is_back_before_its_reset() {
         "reaches the chief again once the human says it is back before its reset",
     );
 }
+
+#[test]
+fn keeps_a_held_task_paused_its_hold_cleared_when_its_session_was_deleted_before_the_hold_ended_and_tells_its_requester_once_while_every_other_task_goes_on(
+) {
+    // A follow-up (--after) is given to no tier: it is its session's own, and
+    // only another follow-up brings a deleted session back. The hold's end
+    // failed every pass at its start, so nothing was delivered, launched or
+    // collected for anyone (calliope, 2026-10-06).
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open_body("Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.answer("zeus", "Parser done");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    context.create_task(
+        tiers.project.id,
+        NewTask {
+            from: "chief".to_owned(),
+            after: Some(1),
+            body: "Now the lexer".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    tiers.open_body("Docs");
+    tiers.open_for("worker", "light", "Rename a file");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    for (number, session) in [
+        (2, "zeus-amber-pine"),
+        (3, "diana-brisk-birch"),
+        (4, "hera-calm-brook"),
+    ] {
+        assert_eq!(
+            placed(&tiers.task(number).task),
+            ("working", Some(session)),
+            "the lexer in the session that wrote the parser; the docs and the rename given to their tiers"
+        );
+    }
+    let resets_at = after(&context, 20 * 60_000);
+    for member in ["zeus", "diana"] {
+        context
+            .adapter
+            .quota(member, Some(exhausted(None, Some(&resets_at))));
+    }
+    context.pass().unwrap();
+    for number in [2, 3] {
+        let held = tiers.task(number).task;
+        assert_eq!(
+            (held.state.as_str(), held.held_until),
+            ("paused", Some(resets_at.clone())),
+            "both held with their windows: the lexer has no tier to go back to"
+        );
+    }
+    // The agent, stopped, says where it was; that is not a result while the task is held.
+    context.adapter.answer("diana", "Stopped at the docs.");
+    context
+        .end_session(tiers.project.id, "zeus-amber-pine")
+        .unwrap();
+    let on_board = || tiers.participant("zeus-amber-pine").is_some();
+    assert!(!on_board(), "the human deleted the session that had T-2");
+    let launches = || {
+        context
+            .adapter
+            .prepared()
+            .iter()
+            .filter(|launch| launch["participant"]["handle"] == "zeus-amber-pine")
+            .count()
+    };
+    let (launched, told) = (launches(), tiers.notes("chief").len());
+
+    context.advance(21 * 60_000);
+    tiers.open_body("Tests");
+    let mut passes = 0;
+    let mut pass = || {
+        passes += 1;
+        context
+            .pass()
+            .unwrap_or_else(|failed| panic!("pass {passes}, after the hold ended: {failed}"));
+        let lexer = tiers.task(2).task;
+        assert_eq!(
+            (
+                lexer.state.as_str(),
+                lexer.held_until,
+                lexer.assignee.as_deref(),
+                lexer.body.as_str()
+            ),
+            ("paused", None, Some("zeus-amber-pine"), "Now the lexer"),
+            "it stays paused with its words, and is not due again"
+        );
+    };
+    pass();
+    assert_eq!(
+        tiers.task(3).task.state,
+        "queued",
+        "T-3, held with it and due after it, goes on in the pass that cannot resume T-2"
+    );
+    context.adapter.answer("hera", "Renamed");
+    pass();
+    pass();
+    assert_eq!(
+        tiers.notes("chief")[told..],
+        ["T-2 stays paused: @zeus-amber-pine, the session it was given to, was deleted. It waits for your decision: cancel it, or give the work again."],
+        "the requester hears once, not in every pass"
+    );
+    let inbox = context
+        .ledger
+        .borrow()
+        .inbox(tiers.id("diana-brisk-birch"), 100)
+        .unwrap();
+    assert_eq!(
+        (tiers.task(3).task.state.as_str(), inbox[0].body.as_str()),
+        ("working", "Resumed: Go on where you stopped."),
+        "T-3, held at the same time and after it in the pass, went on in its own window"
+    );
+    assert_eq!(
+        tiers.task(4).task.state,
+        "done",
+        "the rename's answer was collected"
+    );
+    let tests = tiers.task(5).task;
+    assert_eq!(
+        (
+            tests.state.as_str(),
+            tests
+                .assignee
+                .is_some_and(|assignee| assignee.starts_with("diana-"))
+        ),
+        ("working", true),
+        "the new task was given out, launched and delivered"
+    );
+    assert!(!on_board(), "nothing brings the deleted session back");
+    assert_eq!(launches(), launched, "nor opens a window for it");
+    assert!(
+        context
+            .ledger
+            .borrow()
+            .held_tasks_due("2099-01-01T00:00:00.000Z")
+            .unwrap()
+            .is_empty(),
+        "none is due"
+    );
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(tiers.project.id, 2, "chief")
+        .unwrap();
+    assert_eq!(
+        tiers.task(2).task.state,
+        "cancelled",
+        "the requester can decide"
+    );
+    held_to(
+        context.close(),
+        SUITES,
+        "keeps a held task paused, its hold cleared, when its session was deleted before the hold ended, and tells its requester once while every other task goes on",
+    );
+}
+
+#[test]
+fn keeps_a_held_task_paused_its_hold_cleared_when_the_member_it_was_given_to_by_name_left_the_staff_and_says_what_the_ledger_refused(
+) {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    context.give(tiers.project.id, "zeus", "Write the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let resets_at = after(&context, 20 * 60_000);
+    context
+        .adapter
+        .quota("zeus", Some(exhausted(None, Some(&resets_at))));
+    context.pass().unwrap();
+    let held = tiers.task(1).task;
+    assert_eq!(
+        (held.state.as_str(), held.held_until),
+        ("paused", Some(resets_at))
+    );
+    // A member that leaves takes back what is in its hands, but not what is paused.
+    context.remove_member(tiers.project.id, "zeus").unwrap();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let told = tiers.notes("chief").len();
+
+    context.advance(21 * 60_000);
+    for pass in 1..=2 {
+        context
+            .pass()
+            .unwrap_or_else(|failed| panic!("pass {pass}, after the hold ended: {failed}"));
+        let task = tiers.task(1).task;
+        assert_eq!(
+            (
+                task.state.as_str(),
+                task.held_until,
+                task.assignee.as_deref()
+            ),
+            ("paused", None, Some("zeus"))
+        );
+    }
+    assert_eq!(
+        tiers.notes("chief")[told..],
+        ["T-1 stays paused: it could not go on when its hold ended (the window that had T-1 has ended: cancel it and open the work for its tier). It waits for your decision: cancel it, or give the work again."]
+    );
+    held_to(
+        context.close(),
+        SUITES,
+        "keeps a held task paused, its hold cleared, when the member it was given to by name left the staff, and says what the ledger refused",
+    );
+}

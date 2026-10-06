@@ -10,10 +10,14 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use cf_base::refusal::Refusal;
 use cf_base::time;
 use cf_harness::contract::Observed;
 use cf_harness::records::{Level, Quota, Role};
-use cf_ledger::{Candidate, NewNote, ParticipantView, ProjectView, TaskCard, RESUME_WORDS};
+use cf_ledger::{
+    Candidate, HeldTask, LedgerError, NewNote, ParticipantView, ProjectView, TaskCard, TaskThread,
+    RESUME_WORDS,
+};
 use serde_json::Value;
 
 use crate::deliveries::Delivering;
@@ -385,7 +389,8 @@ impl Dispatcher {
     }
 
     /// A held task whose time has come goes on in its own window, unless its
-    /// member is still out.
+    /// member is still out. One the ledger refuses to resume is its own
+    /// trouble (`stay_paused`): the others, and the rest of the pass, go on.
     pub(crate) fn resume_held(&self) -> Result<(), EngineError> {
         let due = self
             .seams
@@ -404,14 +409,64 @@ impl Dispatcher {
             if owner.is_some_and(|owner| self.is_out(&owner)) {
                 continue;
             }
-            self.seams.ledger.borrow_mut().resume_task(
+            let resumed = self.seams.ledger.borrow_mut().resume_task(
                 held.project_id,
                 held.number,
                 None,
                 RESUME_WORDS,
-            )?;
+            );
+            match resumed {
+                Ok(_) => {}
+                // A refusal is this task's; the ledger failing is the pass's.
+                Err(LedgerError::Refused(refusal)) => self.stay_paused(&held, &refusal)?,
+                Err(failed) => return Err(failed.into()),
+            }
             self.changed();
         }
+        Ok(())
+    }
+
+    /// A held task the ledger would not resume (its session was deleted while
+    /// it was held, and a task given to a session is its own: only a
+    /// follow-up brings the session back, and that is not the daemon's to
+    /// do): it stays paused with its words, its hold cleared so it is not due
+    /// again, and its requester is told once that it waits for a decision.
+    fn stay_paused(&self, held: &HeldTask, refusal: &Refusal) -> Result<(), EngineError> {
+        let thread = self
+            .seams
+            .ledger
+            .borrow()
+            .task(held.project_id, held.number)?;
+        let Some(TaskThread { task, .. }) = thread else {
+            return Ok(());
+        };
+        self.seams.ledger.borrow_mut().clear_hold(
+            held.project_id,
+            held.number,
+            &refusal.message,
+        )?;
+        // A member given the task by name has no session to name: the refusal says it.
+        let why = match task.session {
+            Some(session) if refusal.code == "session-ended" => {
+                format!("@{session}, the session it was given to, was deleted")
+            }
+            _ => format!(
+                "it could not go on when its hold ended ({})",
+                refusal.message
+            ),
+        };
+        self.seams.ledger.borrow_mut().note(
+            held.project_id,
+            &NewNote {
+                from: None,
+                to: task.requester,
+                task: Some(held.number),
+                body: format!(
+                    "T-{} stays paused: {why}. It waits for your decision: cancel it, or give the work again.",
+                    held.number
+                ),
+            },
+        )?;
         Ok(())
     }
 

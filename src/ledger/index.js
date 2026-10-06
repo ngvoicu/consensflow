@@ -323,6 +323,9 @@ class Ledger {
   holdTask(projectId, number, request) {
     return tasks.holdTask(this.#store, projectId, number, request)
   }
+  clearHold(projectId, number, request) {
+    return tasks.clearHold(this.#store, projectId, number, request)
+  }
   heldTasksDue(nowIso) {
     return tasks.heldTasksDue(this.#store, nowIso)
   }
