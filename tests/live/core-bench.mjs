@@ -16,12 +16,21 @@
  * State lives in a throwaway home; the harnesses use the real logins. Opt-in,
  * never part of `npm test`:
  *
- *   npm run bench:core [-- [--chief claude|opencode] opencode pi devin claude codex]
+ *   npm run bench:core [-- [--chief claude|opencode] [--daemon node|native] [--steps all|questions] opencode pi devin claude codex]
+ *
+ * The daemon is Node's unless `--daemon native` names the native one, which
+ * this checkout builds (`npm run build:bridge`, `npm run build:cf`). On the
+ * native daemon a question's answer must also have been received at its
+ * harness's door (see `npm run live:door`): claimed, acknowledged, and never
+ * pasted.
  */
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseArgs } from 'node:util'
 import { startIntegration } from '../integration/harness.mjs'
+import { AGENTS, BRIEF, QUESTION_TOOL, tierFlag } from './bench-agents.mjs'
+import { traceOf, useNativeDaemon } from './native-daemon.mjs'
 import { trustForClaude } from './trust-claude.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -29,63 +38,30 @@ const DAEMON = join(HERE, 'core-live-daemon.mjs')
 const H = process.env.HOME
 const WORKSPACE = join(H, '.consensflow-candidate', 'bench', 'workspace')
 
-// One cheap model per harness (brain: operations/test-models.md).
-/** What each harness calls its question tool, for the worker's brief; none for Pi. */
-const QUESTION_TOOL = {
-  claude: 'AskUserQuestion tool',
-  opencode: 'question tool',
-  codex: 'request_user_input tool',
-  devin: 'ask_user_question tool',
-}
-
-// Each harness's worker keeps a tier of its own: the daemon picks a member
-// by tier alone, and a step that needs one harness's question tool must land
-// on that harness. Critical work names a purpose; the flag carries it.
-const AGENTS = {
-  claude: {
-    id: 'bench-claude',
-    kind: 'claude-code',
-    model: 'claude-sonnet-5',
-    workTier: 'complex',
+const { values, positionals } = parseArgs({
+  allowPositionals: true,
+  options: {
+    chief: { type: 'string', default: 'opencode' },
+    reviewer: { type: 'string', default: 'devin' },
+    daemon: { type: 'string', default: 'node' },
+    steps: { type: 'string', default: 'all' },
   },
-  opencode: {
-    id: 'bench-opencode',
-    kind: 'opencode',
-    model: 'opencode/muse-spark-1.3-contributor-free',
-    workTier: 'light',
-  },
-  pi: {
-    id: 'bench-pi',
-    kind: 'pi',
-    model: 'openrouter/meta/muse-spark-1.3',
-    workTier: 'standard',
-  },
-  // SWE-1.6 Slow, the free plan's, is not on Devin Pro (2026-10-03); SWE-2 is free there.
-  devin: {
-    id: 'bench-devin',
-    kind: 'devin',
-    model: 'swe-2',
-    effort: 'medium',
-    workTier: 'critical',
-  },
-  codex: { id: 'bench-codex', kind: 'codex', model: 'gpt-5.6-luna', workTier: 'critical' },
-}
-const tierFlag = (tier) =>
-  tier === 'critical' ? '--tier critical --purpose hard-problem' : `--tier ${tier}`
-const args = process.argv.slice(2)
-const chiefAt = args.indexOf('--chief')
-const CHIEF = chiefAt === -1 ? 'opencode' : args[chiefAt + 1]
-const named =
-  chiefAt === -1 ? args : args.filter((_arg, index) => index !== chiefAt && index !== chiefAt + 1)
-const reviewerAt = named.indexOf('--reviewer')
-const REVIEWER = reviewerAt === -1 ? 'devin' : named[reviewerAt + 1]
-const workers =
-  reviewerAt === -1
-    ? named
-    : named.filter((_arg, index) => index !== reviewerAt && index !== reviewerAt + 1)
-const wanted = workers.length ? workers : ['opencode', 'pi', 'devin']
+})
+const [CHIEF, REVIEWER] = [values.chief, values.reviewer]
+const wanted = positionals.length ? positionals : ['opencode', 'pi', 'devin']
 if (!AGENTS[REVIEWER]) throw new Error(`unsupported bench reviewer: ${REVIEWER}`)
 if (!['claude', 'opencode'].includes(CHIEF)) throw new Error(`unsupported bench chief: ${CHIEF}`)
+if (!['node', 'native'].includes(values.daemon)) {
+  throw new Error(`unsupported bench daemon: ${values.daemon}`)
+}
+if (!['all', 'questions'].includes(values.steps)) {
+  throw new Error(`unsupported bench steps: ${values.steps}`)
+}
+/** Every step, or `--steps questions`: the question door's alone, with no delivery baseline, review or restart. */
+const ALL = values.steps === 'all'
+/** The native daemon is chosen here, by the driver: the receipt and stop design is its own. */
+const NATIVE = values.daemon === 'native'
+if (NATIVE) useNativeDaemon(DAEMON)
 
 // A clean environment: never this shell's Claude session identity.
 const ENV = {
@@ -131,12 +107,6 @@ async function until(predicate, timeoutMs, stepMs = 1000) {
 }
 
 mkdirSync(WORKSPACE, { recursive: true })
-// The bench measures delivery, not judgment: a chief left to guess its job
-// explores for minutes after every result, and each delivery waits for that.
-const BRIEF =
-  'This folder is an automated ConsensFlow bench. Do exactly what each message asks and ' +
-  'nothing more. When a ConsensFlow message arrives, reply with one line that names it ' +
-  'and run no tools unless the message tells you to run a command.\n'
 for (const name of ['AGENTS.md', 'CLAUDE.md']) writeFileSync(join(WORKSPACE, name), BRIEF)
 
 const writeRoster = (home) =>
@@ -206,7 +176,7 @@ try {
   }, 180_000)
   record('chief-ready', Boolean(chief), { chief: CHIEF, activity: (await lane('chief'))?.activity })
 
-  for (const name of wanted) {
+  for (const name of ALL ? wanted : []) {
     const agent = AGENTS[name]
     const marker = `BENCH_OK_${name.toUpperCase()}`
     const started = Date.now()
@@ -386,13 +356,41 @@ try {
             }),
       },
     )
+    // The native daemon's receipt (design §1.2, §1.6): the answer was claimed by the
+    // harness's door and acknowledged `received: true`, which is what the receipt
+    // `{"door": true}` is, and never pasted; its task waited, then worked, then ended.
+    if (NATIVE && answer) {
+      const seen = traceOf(app.env.CONSENSFLOW_HOME)()
+      const about = (kind) =>
+        seen.filter((event) => event.kind === kind && event.data?.message === answer.id)
+      const moves = seen
+        .filter((event) => event.kind === 'task.state' && event.data?.task === question.taskNumber)
+        .map((event) => event.data.to)
+      const waited = moves.indexOf('waiting')
+      record(
+        `${name}-answer-received-at-its-door`,
+        answer.receipt?.door === true &&
+          about('delivery.claimed').length >= 1 &&
+          about('delivery.begun').length === 0 &&
+          answer.attempts === 0 &&
+          waited !== -1 &&
+          moves.indexOf('working', waited) !== -1,
+        {
+          receipt: answer.receipt,
+          claimed: about('delivery.claimed').length,
+          pasted: about('delivery.begun').length,
+          attempts: answer.attempts,
+          task: moves.join(' → '),
+        },
+      )
+    }
   }
 
   // A review, live: the chief puts it on the board for the reviewer's tier
   // like any task, the reviewer takes it in a session of its own, and its
   // findings come back to the chief as the result. Nothing is reviewed unless
   // the chief asks.
-  {
+  if (ALL) {
     const started = Date.now()
     const marker = 'BENCH_REVIEW_OK'
     // Only the task the chief creates from here on counts, not the baseline's.
@@ -447,24 +445,26 @@ try {
 
   // Restart: a new daemon and pane host over the same home, in the app's quit
   // order. The project must come back on its chief's own conversation.
-  const chiefFrame = app.openFrames.find((frame) => frame.id === `p${project}-chief`)
-  app.killDaemon()
-  await until(() => app.daemonExited(), 10_000, 100)
-  await app.close({ preserveRoot: true })
-  app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV, existingRoot: root })
-  const back = await until(async () => {
-    const projects = (await app.requestNode('projects.list', {})).projects
-    return projects.find((s) => s.id === project)?.state === 'open'
-  }, 120_000)
-  const reopened = await until(
-    () => app.openFrames.find((frame) => frame.id === `p${project}-chief`),
-    60_000,
-  )
-  record('restart-restores-project', Boolean(back && reopened), {
-    back: Boolean(back),
-    before: chiefFrame?.argv?.slice(-4),
-    after: reopened?.argv?.slice(-4),
-  })
+  if (ALL) {
+    const chiefFrame = app.openFrames.find((frame) => frame.id === `p${project}-chief`)
+    app.killDaemon()
+    await until(() => app.daemonExited(), 10_000, 100)
+    await app.close({ preserveRoot: true })
+    app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV, existingRoot: root })
+    const back = await until(async () => {
+      const projects = (await app.requestNode('projects.list', {})).projects
+      return projects.find((s) => s.id === project)?.state === 'open'
+    }, 120_000)
+    const reopened = await until(
+      () => app.openFrames.find((frame) => frame.id === `p${project}-chief`),
+      60_000,
+    )
+    record('restart-restores-project', Boolean(back && reopened), {
+      back: Boolean(back),
+      before: chiefFrame?.argv?.slice(-4),
+      after: reopened?.argv?.slice(-4),
+    })
+  }
 } finally {
   await app.close()
   const slug = WORKSPACE.replace(/[^A-Za-z0-9]/g, '-')
