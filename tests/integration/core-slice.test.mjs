@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -190,9 +190,17 @@ test('a restart brings the project back on its chief’s own conversation', asyn
   })
   const root = app.root
   try {
+    // The human's own agent, not the rig's: the restart must keep the roster.
+    await writeFile(
+      join(app.env.CONSENSFLOW_HOME, 'agents.json'),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        agents: [{ id: 'my-chief', kind: 'claude-code', model: 'fake-chief' }],
+      })}\n`,
+    )
     const opened = await app.requestNode('project.open', {
       directory: app.workspace,
-      agent: 'chief',
+      agent: 'my-chief',
     })
     const project = opened.project.id
     const first = await app.openFrame(`p${project}-chief`)

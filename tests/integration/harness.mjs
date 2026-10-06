@@ -198,7 +198,9 @@ export async function startIntegration({
       ([, value]) => value !== null && value !== undefined,
     ),
   )
-  writeRoster(env)
+  // A restart over the same home keeps its roster, as the app's does: the
+  // agents a test wrote are still the ones its chief and staff run on.
+  if (existingRoot === null) writeRoster(env)
 
   // The daemon under test: Node's, or the native one CONSENSFLOW_TEST_DAEMON names.
   const started = daemonCommand([daemon])

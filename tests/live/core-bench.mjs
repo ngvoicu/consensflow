@@ -189,6 +189,16 @@ try {
     `p${project}-${(await lane(handle))?.participant.handle ?? handle}`
   const inbox = async (participant) =>
     (await app.requestNode('inbox.get', { project, participant })).messages
+  /**
+   * The human types into the chief's window once it is idle; false when it
+   * never was (a dialog of its own left open), so that step fails and the
+   * bench goes on to the next.
+   */
+  const tell = (text) =>
+    app.tell(project, text, { idleMs: 300_000 }).then(
+      () => true,
+      () => false,
+    )
 
   const chief = await until(async () => {
     const chiefLane = await lane('chief')
@@ -200,15 +210,15 @@ try {
     const agent = AGENTS[name]
     const marker = `BENCH_OK_${name.toUpperCase()}`
     const started = Date.now()
-    await app.tell(
-      project,
+    const told = await tell(
       `Run exactly this command in your shell, then reply with one line:\ncf task add ${tierFlag(tiers[name])} "Reply with exactly: ${marker}"\nWhen its result arrives, do not accept it yet: reply with one line and wait for my next message.`,
-      { idleMs: 300_000 },
     )
-    const task = await until(
-      async () => (await lane(agent.id))?.tasks.find((t) => t.requester === 'chief'),
-      300_000,
-    )
+    const task = told
+      ? await until(
+          async () => (await lane(agent.id))?.tasks.find((t) => t.requester === 'chief'),
+          300_000,
+        )
+      : null
     record(`${name}-dispatched-by-chief`, Boolean(task), {
       seconds: Math.round((Date.now() - started) / 1000),
       ...(task ? { task: task.number } : { chiefActivity: (await lane('chief'))?.activity }),
@@ -261,18 +271,18 @@ try {
     {
       const again = `BENCH_AGAIN_${name.toUpperCase()}`
       const begun = Date.now()
-      await app.tell(
-        project,
+      const told = await tell(
         `Run exactly this command in your shell, then reply with one line:\ncf task add --after T-${task.number} "Reply with exactly: ${again}"`,
-        { idleMs: 300_000 },
       )
-      const follow = await until(
-        async () =>
-          (await board()).lanes
-            .flatMap((l) => l.tasks)
-            .find((t) => t.requester === 'chief' && t.number > task.number && t.pool === null),
-        300_000,
-      )
+      const follow = told
+        ? await until(
+            async () =>
+              (await board()).lanes
+                .flatMap((l) => l.tasks)
+                .find((t) => t.requester === 'chief' && t.number > task.number && t.pool === null),
+            300_000,
+          )
+        : null
       record(`${name}-continued-in-same-window`, follow?.assignee === task.assignee, {
         seconds: Math.round((Date.now() - begun) / 1000),
         ...(follow
@@ -310,22 +320,22 @@ try {
   for (const name of wanted.filter((candidate) => QUESTION_TOOL[candidate])) {
     const started = Date.now()
     const worker = AGENTS[name]
-    await app.tell(
-      project,
+    const told = await tell(
       `Run exactly this command in your shell, then reply with one line:\ncf task add ${tierFlag(tiers[name])} "Use your ${QUESTION_TOOL[name]} to ask me which colour I prefer, with the options red and blue. After I answer, reply with exactly one line: COLOUR=<the answer>"`,
-      { idleMs: 300_000 },
     )
-    const question = await until(
-      async () =>
-        (await inbox('chief')).find(
-          (m) =>
-            m.kind === 'question' &&
-            m.sender !== null &&
-            m.sender.startsWith(worker.id) &&
-            m.questions !== null,
-        ),
-      300_000,
-    )
+    const question = told
+      ? await until(
+          async () =>
+            (await inbox('chief')).find(
+              (m) =>
+                m.kind === 'question' &&
+                m.sender !== null &&
+                m.sender.startsWith(worker.id) &&
+                m.questions !== null,
+            ),
+          300_000,
+        )
+      : null
     record(`${name}-question-asked`, Boolean(question), {
       seconds: Math.round((Date.now() - started) / 1000),
       ...(question
@@ -402,21 +412,22 @@ try {
     const tier = reviewer.member?.tier
     const flag =
       tier === 'critical' ? '--tier critical --purpose critical-review' : `--tier ${tier}`
-    await app.tell(
-      project,
+    const told = await tell(
       `Run exactly this command in your shell, then reply with one line:\ncf task add --review ${flag} "Review this one-line result of T-1 for spelling: BENCH_OK_PI. No files are involved. Reply with exactly: ${marker}"`,
-      { idleMs: 300_000 },
     )
-    const review = await until(
-      async () =>
-        (await board()).lanes
-          .flatMap((l) => l.tasks)
-          .find((t) => t.number > before && t.pool === 'reviewer' && t.state === 'done'),
-      300_000,
-    )
+    const review = told
+      ? await until(
+          async () =>
+            (await board()).lanes
+              .flatMap((l) => l.tasks)
+              .find((t) => t.number > before && t.pool === 'reviewer' && t.state === 'done'),
+          300_000,
+        )
+      : null
     record('review-finished', Boolean(review), {
       seconds: Math.round((Date.now() - started) / 1000),
       reviewer: review?.assignee ?? (await lane('bench-reviewer'))?.activity,
+      ...(told ? {} : { chief: (await lane('chief'))?.activity }),
     })
     const delivered = review
       ? await until(
