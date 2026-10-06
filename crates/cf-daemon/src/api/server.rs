@@ -56,6 +56,7 @@ use tokio::task::AbortHandle;
 use tokio::time::sleep;
 
 use super::answer::{Answer, Content, Failure};
+use super::body::Body;
 use super::context::Closing;
 use super::request::Request;
 use crate::errors::{contain, Errors};
@@ -282,6 +283,13 @@ impl<F: Future> Future for Drained<F> {
 /// stop it; a panic in it is a 500. What the first part woke is run to its
 /// end before the connection goes on.
 async fn respond(server: &Rc<Server>, request: hyper::Request<Incoming>) -> Response<Full<Bytes>> {
+    // The body comes through a pump beside the request, which reads and lets
+    // go what is left of it once the request no longer reads it.
+    let (parts, incoming) = request.into_parts();
+    let spawn = Rc::clone(&server.spawn);
+    let (body, pump) = Body::pumped(incoming, move || spawn.drain());
+    tokio::task::spawn_local(pump);
+    let request = hyper::Request::from_parts(parts, body);
     let state = Rc::clone(server);
     let begun = begin(&*server.spawn, async move {
         let outcome = contain(async {

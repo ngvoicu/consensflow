@@ -58,7 +58,7 @@ impl Request {
 
     /// The request hyper read: its header as a text of Latin-1 characters
     /// (Node's), and its body as it arrives.
-    pub fn from_hyper(request: hyper::Request<hyper::body::Incoming>) -> Result<Self, Failure> {
+    pub fn from_hyper(request: hyper::Request<Body>) -> Result<Self, Failure> {
         let authorization = request.headers().get(AUTHORIZATION).map(|value| {
             // Node reads a header's bytes as Latin-1, each a character of its own.
             value
@@ -69,12 +69,7 @@ impl Request {
         });
         let method = request.method().clone();
         let target = request.uri().to_string();
-        Self::new(
-            method,
-            &target,
-            authorization,
-            Body::incoming(request.into_body()),
-        )
+        Self::new(method, &target, authorization, request.into_body())
     }
 
     /// `METHOD /path`, as the API words an unknown route.
