@@ -314,7 +314,10 @@ fn the_runtime_goes_under_a_parent_the_older_apps_collector_never_reads() {
 
 /// What the cleanup sees of "running" is a program that cannot be opened for
 /// writing; here a read-only file stands in for it, for either program of a
-/// runtime. A running one, as Windows holds it, is the test below.
+/// runtime. It refuses every kind of open, an open for appending too, so it
+/// cannot show which open the check makes: the tests that follow do, with a
+/// file that may only be appended to (macOS) and with a program that runs
+/// (Windows).
 #[test]
 fn a_runtime_with_a_program_that_cannot_be_written_stays_whole_and_the_others_go() {
     let dir = tempfile::tempdir().expect("dir");
@@ -366,6 +369,71 @@ fn a_runtime_with_a_program_that_cannot_be_written_stays_whole_and_the_others_go
     assert!(root.join("9.9.8-00000001").join("cli").is_dir());
 }
 
+/// A file that may only be appended to (macOS's `UF_APPEND`), which refuses an
+/// open for writing and grants one for appending, as Windows does a program
+/// that runs. It is let go when this is dropped: a file so held cannot be
+/// removed, and a failed assertion must not leave one behind.
+#[cfg(target_os = "macos")]
+struct AppendOnly(PathBuf);
+
+#[cfg(target_os = "macos")]
+impl AppendOnly {
+    const UF_APPEND: libc::c_uint = 0x0000_0004;
+
+    fn set(path: &Path) -> Self {
+        Self::flags(path, Self::UF_APPEND).expect("a file system that keeps user flags");
+        Self(path.to_path_buf())
+    }
+
+    fn flags(path: &Path, flags: libc::c_uint) -> io::Result<()> {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+
+        let path = CString::new(path.as_os_str().as_bytes()).expect("a path with no NUL");
+        // SAFETY: `path` is a NUL-terminated string that outlives the call.
+        if unsafe { libc::chflags(path.as_ptr(), flags) } == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for AppendOnly {
+    fn drop(&mut self) {
+        let _ = Self::flags(&self.0, 0);
+    }
+}
+
+/// The check asks of a program that it refuses an open for writing, not that
+/// it refuses every open: Windows grants an open for appending to a program
+/// that runs, and `append` asks for no more. Here a file that may only be
+/// appended to is that program: the check sees it run, and an open for
+/// appending (the check's first form) would not.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_program_that_refuses_a_write_open_and_grants_an_append_open_is_seen_to_run() {
+    let dir = tempfile::tempdir().expect("dir");
+    let folder = old_runtime(dir.path(), "9.9.8-00000001", &[&["node.exe"]]);
+    let node = folder.join("node.exe");
+    assert!(!runs(&folder), "a plain file is no program that runs");
+
+    let held = AppendOnly::set(&node);
+    assert!(
+        OpenOptions::new().append(true).open(&node).is_ok(),
+        "it grants an open for appending"
+    );
+    assert!(
+        OpenOptions::new().write(true).open(&node).is_err(),
+        "and refuses one for writing"
+    );
+    assert!(runs(&folder), "so it is seen to run");
+
+    drop(held);
+    assert!(!runs(&folder), "and is not once it is let go");
+}
+
 /// A program that runs until it is ended: Windows' own command interpreter,
 /// copied to `at` under the name of the program it stands in for, which waits
 /// for a command on a standard input that nobody writes to.
@@ -410,6 +478,41 @@ impl Drop for Running {
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
+}
+
+/// The check on one real process, and what it rests on. A program that runs
+/// refuses an open for writing and grants one for appending, and `append` is
+/// all that std's `OpenOptions` asks for with it: a check made of that open
+/// (the first form of this one) sees no program run, and the cleanup takes a
+/// runtime from under its daemon. A read-only file refuses every open and
+/// cannot tell the two apart, so a process that runs is used here. `runs`
+/// holds while it does, and lets go once it has ended.
+#[cfg(windows)]
+#[test]
+fn a_program_that_runs_refuses_a_write_open_and_grants_an_append_open() {
+    let dir = tempfile::tempdir().expect("dir");
+    let folder = dir.path().join("runtime");
+    let node = folder.join("node.exe");
+    let running = Running::start(&node);
+
+    let writable = OpenOptions::new().write(true).open(&node).is_ok();
+    let appendable = OpenOptions::new().append(true).open(&node).is_ok();
+    let seen = runs(&folder);
+    running.end();
+
+    assert!(!writable, "a program that runs refuses an open for writing");
+    assert!(
+        appendable,
+        "and grants an open for appending, which is why `runs` does not make it"
+    );
+    assert!(seen, "a runtime whose node.exe runs is seen to run");
+
+    // Windows lets go of an ended program's file a moment after it ends.
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    while runs(&folder) && std::time::Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(250));
+    }
+    assert!(!runs(&folder), "and is not seen to run once it has ended");
 }
 
 /// Proven with real processes, started from the runtime's own files: what

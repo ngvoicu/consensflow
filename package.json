@@ -31,6 +31,7 @@
     "test:daemons": "node tests/daemons.mjs",
     "test:agents": "node tests/agents-daemons.mjs",
     "test:clis": "node tests/clis.mjs",
+    "test:app": "node tests/app-tests.mjs",
     "clippy:windows": "node tests/windows-clippy.mjs",
     "plants:daemon": "node tests/plants/daemon.mjs",
     "plants:cli": "node tests/plants/cli.mjs",

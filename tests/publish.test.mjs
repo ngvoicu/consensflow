@@ -25,9 +25,10 @@ import { builtFiles, folderOf, githubSim, latestJson, publishedAssets } from './
  */
 
 const SCRIPT = fileURLToPath(new URL('../app/scripts/publish.mjs', import.meta.url))
-const BRIDGE = '3.0.0-alpha.80'
-const OLDER = '3.0.0-alpha.79'
-const LATER = '3.0.0-alpha.81'
+/** alpha.80 is built from the code before the bridge: an ordinary release, which the old feed serves until the bridge reaches it. */
+const BRIDGE = '3.0.0-alpha.81'
+const OLDER = '3.0.0-alpha.80'
+const LATER = '3.0.0-alpha.82'
 const RULE = checkManifest({
   feeds: { alpha: 'feed-alpha', stable: 'feed-stable' },
   legacy: { alpha: 'update-alpha', stable: 'update-stable' },
@@ -213,7 +214,7 @@ describe('publishing the bridge', () => {
       assert.equal(github.title('update-alpha'), 'Alpha update feed, pinned')
       assert.match(
         github.notes('update-alpha'),
-        /^Pinned to ConsensFlow 3\.0\.0-alpha\.80, the first release to read feed-alpha: .*from it on read feed-alpha\./,
+        /^Pinned to ConsensFlow 3\.0\.0-alpha\.81, the first release to read feed-alpha: .*from it on read feed-alpha\./,
       )
     })
   })
@@ -240,11 +241,7 @@ describe('publishing the bridge', () => {
   })
 
   it('is refused for a missing file, or a missing set of notes, before anything is asked', async () => {
-    for (const path of [
-      'nsis/ConsensFlow_3.0.0-alpha.80_x64-setup.exe',
-      'notes.txt',
-      'latest.json',
-    ]) {
+    for (const path of [`nsis/ConsensFlow_${BRIDGE}_x64-setup.exe`, 'notes.txt', 'latest.json']) {
       await within(BRIDGE, {}, async ({ github, dir, publish }) => {
         rmSync(join(dir, ...path.split('/')))
         await assert.rejects(
@@ -287,7 +284,7 @@ describe('publishing a later release', () => {
     await within(LATER, { serving: OLDER }, async ({ github, publish }) => {
       await assert.rejects(
         publish(),
-        /3\.0\.0-alpha\.81 may not move a feed, and nothing was moved:\n- update-alpha serves 3\.0\.0-alpha\.79, not the bridge 3\.0\.0-alpha\.80/,
+        /3\.0\.0-alpha\.82 may not move a feed, and nothing was moved:\n- update-alpha serves 3\.0\.0-alpha\.80, not the bridge 3\.0\.0-alpha\.81/,
       )
       assert.deepEqual(github.calls, [], 'no release, no feed, not so much as a look')
       assert.equal(github.has(`v${LATER}`), false)
@@ -313,7 +310,7 @@ describe('publishing a later release', () => {
 
   it('is refused for a release before the bridge', async () => {
     await within(OLDER, {}, async ({ github, publish }) => {
-      await assert.rejects(publish(), /3\.0\.0-alpha\.79 comes before the bridge/)
+      await assert.rejects(publish(), /3\.0\.0-alpha\.80 comes before the bridge/)
       assert.deepEqual(github.calls, [])
     })
   })
@@ -342,24 +339,24 @@ describe('the bridge that failed before it moved update-alpha, and the release a
         ...extra,
       })
     try {
-      // alpha.80: the release is made and the new feed moved, and the run dies at update-alpha.
+      // alpha.81, the bridge: the release is made and the new feed moved, and the run dies at update-alpha.
       github.fail((args) => args.includes('update-alpha') && 'the network went away')
       await assert.rejects(run(BRIDGE, dirs[0]), /the network went away/)
       assert.equal(github.isDraft(`v${BRIDGE}`), false, 'its release is public')
       assert.equal(github.asset('feed-alpha', LATEST).toString(), bridge[LATEST])
       assert.equal(github.asset('update-alpha', LATEST).toString(), latestJson(github.base, OLDER))
 
-      // alpha.81 is made from a tree that holds the tag of alpha.80 and its manifest: it is refused.
+      // alpha.82 is made from a tree that holds the tag of alpha.81 and its manifest: it is refused.
       github.fail(() => undefined)
       const calls = github.calls.length
       await assert.rejects(
         run(LATER, dirs[1]),
-        /update-alpha serves 3\.0\.0-alpha\.79, not the bridge/,
+        /update-alpha serves 3\.0\.0-alpha\.80, not the bridge/,
       )
       assert.equal(github.calls.length, calls, 'nothing was asked of gh for it')
       assert.equal(github.has(`v${LATER}`), false)
 
-      // Running alpha.80 again finishes it: no "release exists" stop, no second release.
+      // Running alpha.81 again finishes it: no "release exists" stop, no second release.
       const finished = await run(BRIDGE, dirs[0])
       assert.deepEqual(finished.feeds, { 'feed-alpha': 'kept', 'update-alpha': 'replaced' })
       assert.equal(finished.release, 'kept')
@@ -369,7 +366,7 @@ describe('the bridge that failed before it moved update-alpha, and the release a
       )
       assert.equal(github.asset('update-alpha', LATEST).toString(), bridge[LATEST])
 
-      // Now alpha.81 may move its feed.
+      // Now alpha.82 may move its feed.
       const next = await run(LATER, dirs[1])
       assert.equal(next.release, 'created')
       assert.equal(github.asset('feed-alpha', LATEST).toString(), later[LATEST])
@@ -538,7 +535,7 @@ describe('a publish cut short while it moves the feeds', () => {
   it('stops where gh cannot tell whether a release is there, and makes nothing', async () => {
     await within(BRIDGE, {}, async ({ github, publish }) => {
       github.fail((args) => args[1] === 'view' && 'HTTP 401: Bad credentials')
-      await assert.rejects(publish(), /could not look at the release v3\.0\.0-alpha\.80: HTTP 401/)
+      await assert.rejects(publish(), /could not look at the release v3\.0\.0-alpha\.81: HTTP 401/)
       assert.deepEqual(changes(github), [])
     })
   })
@@ -795,11 +792,11 @@ describe('only the push of a version tag publishes, from the command line', {
       })
     })
   }
-  const args = ['--dir', '.', '--tag', 'v3.0.0-alpha.80', '--base', 'http://127.0.0.1:1']
+  const args = ['--dir', '.', '--tag', `v${BRIDGE}`, '--base', 'http://127.0.0.1:1']
   const tagPush = {
     GITHUB_EVENT_NAME: 'push',
     GITHUB_REF_TYPE: 'tag',
-    GITHUB_REF_NAME: 'v3.0.0-alpha.80',
+    GITHUB_REF_NAME: `v${BRIDGE}`,
     GH_REPO: 'ngvoicu/consensflow',
   }
 
@@ -818,8 +815,8 @@ describe('only the push of a version tag publishes, from the command line', {
       [{ ...tagPush, GITHUB_REF_TYPE: 'branch' }, /this is push on branch/],
       [{}, /this is not a workflow on nothing/],
       [
-        { ...tagPush, GITHUB_REF_NAME: 'v3.0.0-alpha.81' },
-        /this run is for v3\.0\.0-alpha\.81, and it was asked to publish v3\.0\.0-alpha\.80/,
+        { ...tagPush, GITHUB_REF_NAME: `v${LATER}` },
+        /this run is for v3\.0\.0-alpha\.82, and it was asked to publish v3\.0\.0-alpha\.81/,
       ],
     ]) {
       const ran = await run(args, { GH_REPO: 'ngvoicu/consensflow', ...env })

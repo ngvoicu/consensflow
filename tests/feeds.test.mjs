@@ -44,10 +44,15 @@ const OLD_LAYOUT = [
 const NODE_FREE = [`${ROOT}MacOS/app`, `${ROOT}Resources/cli/bin/cf`]
 const needsTar = { skip: process.platform === 'win32' && 'the release pipeline is macOS and Linux' }
 
-/** The rule these tests hold the code to, whatever bridge the repository's manifest names today. */
-const BRIDGE = '3.0.0-alpha.80'
-const OLDER = '3.0.0-alpha.79'
-const LATER = '3.0.0-alpha.81'
+/**
+ * The rule these tests hold the code to, whatever bridge the repository's
+ * manifest names today. alpha.80 is built from the code before the bridge: an
+ * ordinary release on the old feed, which is what the old feed serves until the
+ * bridge reaches it.
+ */
+const BRIDGE = '3.0.0-alpha.81'
+const OLDER = '3.0.0-alpha.80'
+const LATER = '3.0.0-alpha.82'
 const RULE = checkManifest({
   feeds: { alpha: 'feed-alpha', stable: 'feed-stable' },
   legacy: { alpha: 'update-alpha', stable: 'update-stable' },
@@ -81,7 +86,7 @@ describe('the manifest the app and the release workflow read', () => {
       [(m) => Object.assign(m.bridge, { legacy: [] }), /bridge\.legacy names the channels in use/],
       [
         (m) => Object.assign(m.bridge, { legacy: ['stable'] }),
-        /bridge\.legacy names the channels in use that 3\.0\.0-alpha\.80 belongs to \(alpha\)/,
+        /bridge\.legacy names the channels in use that 3\.0\.0-alpha\.81 belongs to \(alpha\)/,
       ],
     ]) {
       assert.throws(() => checkManifest(made(change)), says)
@@ -114,14 +119,16 @@ describe('which release comes before which', () => {
       }
     }
     assert.equal(compareVersions('3.0.0-alpha.9', '3.0.0-alpha.10'), -1)
-    assert.equal(compareVersions('3.0.0-alpha.80', '3.0.0'), -1)
+    assert.equal(compareVersions(BRIDGE, '3.0.0'), -1)
+    assert.equal(compareVersions(OLDER, BRIDGE), -1, 'the release before the bridge')
+    assert.equal(compareVersions(LATER, BRIDGE), 1, 'the release after it')
     assert.throws(() => compareVersions('3.0', '3.0.0'), /not a semantic version/)
   })
 })
 
 describe('the feeds a release moves', () => {
   it('takes every release into alpha, and a stable one into stable as well', () => {
-    assert.deepEqual(channelsOf('3.0.0-alpha.80'), ['alpha'])
+    assert.deepEqual(channelsOf(BRIDGE), ['alpha'])
     assert.deepEqual(channelsOf('3.0.0'), ['alpha', 'stable'])
     assert.throws(() => channelsOf('v3.0.0'), /not a semantic version/)
     assert.throws(() => channelsOf('3.0'), /not a semantic version/)
@@ -133,7 +140,7 @@ describe('the feeds a release moves', () => {
     assert.equal(roleOf('3.0.0', RULE), 'later')
     assert.throws(
       () => roleOf(OLDER, RULE),
-      /3\.0\.0-alpha\.79 comes before the bridge 3\.0\.0-alpha\.80.*set bridge\.version to the first release made from this tree/,
+      /3\.0\.0-alpha\.80 comes before the bridge 3\.0\.0-alpha\.81.*set bridge\.version to the first release made from this tree/,
     )
   })
 
@@ -181,13 +188,13 @@ describe('the feeds a release moves', () => {
   })
 
   it('names the files a release publishes, in the order it uploads them', () => {
-    assert.deepEqual(releaseAssets('3.0.0-alpha.80'), {
-      dmg: 'ConsensFlow_3.0.0-alpha.80_aarch64.dmg',
-      archive: 'ConsensFlow_3.0.0-alpha.80_aarch64.app.tar.gz',
-      signature: 'ConsensFlow_3.0.0-alpha.80_aarch64.app.tar.gz.sig',
+    assert.deepEqual(releaseAssets('3.0.0-alpha.81'), {
+      dmg: 'ConsensFlow_3.0.0-alpha.81_aarch64.dmg',
+      archive: 'ConsensFlow_3.0.0-alpha.81_aarch64.app.tar.gz',
+      signature: 'ConsensFlow_3.0.0-alpha.81_aarch64.app.tar.gz.sig',
       metadata: 'latest.json',
-      installer: 'nsis/ConsensFlow_3.0.0-alpha.80_x64-setup.exe',
-      portable: 'portable/ConsensFlow_3.0.0-alpha.80_x64-portable.exe',
+      installer: 'nsis/ConsensFlow_3.0.0-alpha.81_x64-setup.exe',
+      portable: 'portable/ConsensFlow_3.0.0-alpha.81_x64-portable.exe',
     })
   })
 })
@@ -369,7 +376,7 @@ describe('before a later release moves a feed: the old feeds serve the bridge, w
   it('refuses where the old feed still serves the release before the bridge', async () => {
     // The bridge's tag is in the repository, and its release failed before it moved update-alpha.
     assert.deepEqual(await found((github) => feedOf(github, OLDER)), [
-      'update-alpha serves 3.0.0-alpha.79, not the bridge 3.0.0-alpha.80: the apps that read it do not reach the bridge',
+      'update-alpha serves 3.0.0-alpha.80, not the bridge 3.0.0-alpha.81: the apps that read it do not reach the bridge',
     ])
   })
 
@@ -388,7 +395,7 @@ describe('before a later release moves a feed: the old feeds serve the bridge, w
       }),
     )
     assert.deepEqual(problems, [
-      "update-alpha names the bridge 3.0.0-alpha.80, but is not the bridge's own latest.json byte for byte",
+      "update-alpha names the bridge 3.0.0-alpha.81, but is not the bridge's own latest.json byte for byte",
     ])
   })
 
@@ -464,7 +471,7 @@ describe('before a later release moves a feed: the old feeds serve the bridge, w
     )
     assert.match(elsewhere[0], /names https:\/\/example\.invalid\/a\.tar\.gz for the Mac, not /)
     const another = await found(
-      published((text) => text.replace('"version":"3.0.0-alpha.80"', '"version":"3.0.0-alpha.99"')),
+      published((text) => text.replace(`"version":"${BRIDGE}"`, '"version":"3.0.0-alpha.99"')),
     )
     assert.deepEqual(another, [
       `the bridge's v${BRIDGE}/latest.json names 3.0.0-alpha.99, not ${BRIDGE}`,
@@ -580,7 +587,7 @@ describe('after a release is published: the files and the feeds serve what the r
       }),
     )
     assert.deepEqual(problems, [
-      'update-alpha serves 3.0.0-alpha.79, not the bridge 3.0.0-alpha.80: the apps that read it do not reach the bridge',
+      'update-alpha serves 3.0.0-alpha.80, not the bridge 3.0.0-alpha.81: the apps that read it do not reach the bridge',
     ])
   })
 
@@ -591,7 +598,7 @@ describe('after a release is published: the files and the feeds serve what the r
         assets: { 'latest.json': latestJson(github.base, LATER) },
       }),
     )
-    assert.match(problems[0], /^update-alpha serves 3\.0\.0-alpha\.81, not the bridge/)
+    assert.match(problems[0], /^update-alpha serves 3\.0\.0-alpha\.82, not the bridge/)
   })
 
   it('finds a required old feed that is not there, or fails to load', async () => {

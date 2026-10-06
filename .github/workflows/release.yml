@@ -16,7 +16,7 @@
 # would be refused for.
 #
 # The update feeds. Installed apps read a rolling release's latest.json: the
-# apps before the bridge (3.0.0-alpha.79 and earlier) read update-alpha and
+# apps before the bridge (3.0.0-alpha.80 and earlier) read update-alpha and
 # update-stable, the bridge and those after it read feed-alpha and feed-stable
 # (app/feeds.json, which also records which release is the bridge). Every
 # release moves the new feed of its channels. The bridge moves the old feed of

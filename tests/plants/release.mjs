@@ -1,16 +1,16 @@
 /**
  * Plants bugs in what releases and the agents screens are made of, one at a
  * time, and checks that a test catches each: the rule of the feeds and its
- * checks, the publisher, the release workflow's text, and the agents of both
- * daemons as the packaged smoke holds them. A plant is a few pieces of text
- * replaced in the sources; the tests that should notice are run (never in
- * parallel: the sources are changed under them) and each plant is reported
- * caught or missed. Every file a plant touches is first copied outside the
- * repository and is put back from that copy, byte for byte, whatever the run
- * came to, on Ctrl-C and on being terminated too; a run killed past that leaves
- * the copies in the folder it says first. The native `cf` that `bin/` holds is
- * built again from the sources as they are once the plants are done, if a plant
- * had it built from its own.
+ * checks, the publisher, the release workflow's text, the portable app's
+ * collector, and the agents of both daemons as the packaged smoke holds them. A
+ * plant is a few pieces of text replaced in the sources; the tests that should
+ * notice are run (never in parallel: the sources are changed under them) and
+ * each plant is reported caught or missed. Every file a plant touches is first
+ * copied outside the repository and is put back from that copy, byte for byte,
+ * whatever the run came to, on Ctrl-C and on being terminated too; a run killed
+ * past that leaves the copies in the folder it says first. The native `cf` that
+ * `bin/` holds is built again from the sources as they are once the plants are
+ * done, if a plant had it built from its own.
  *
  *   npm run plants:release                  # every plant
  *   npm run plants:release -- feeds publish   # the plants whose names hold a word
@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url'
 import { PLANTS as AGENTS } from './release/agents.mjs'
 import { PLANTS as FEEDS } from './release/feeds.mjs'
 import { BOTH } from './release/kit.mjs'
+import { PLANTS as PORTABLE } from './release/portable.mjs'
 import { PLANTS as PUBLISH } from './release/publish.mjs'
 import { PLANTS as WORKFLOW } from './release/workflow.mjs'
 
@@ -37,7 +38,7 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const RUN_LIMIT = 10 * 60 * 1000
 
 /** Every plant, by area. */
-const PLANTS = [...FEEDS, ...PUBLISH, ...WORKFLOW, ...AGENTS]
+const PLANTS = [...FEEDS, ...PUBLISH, ...WORKFLOW, ...PORTABLE, ...AGENTS]
 
 const args = process.argv.slice(2)
 const words = args.filter((arg) => !arg.startsWith('--'))
@@ -107,10 +108,11 @@ function leave(code) {
 }
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => leave(130))
 
-/** The tests a run's output says failed: `node --test`'s. */
+/** The tests a run's output says failed: `node --test`'s, and `cargo test`'s. */
 function failed(output) {
   const names = []
   for (const hit of output.matchAll(/^\s*✖ (.+?) \(\d[\d.]*ms\)$/gm)) names.push(hit[1])
+  for (const hit of output.matchAll(/^test (\S+) \.\.\. FAILED$/gm)) names.push(hit[1])
   return [...new Set(names)]
 }
 

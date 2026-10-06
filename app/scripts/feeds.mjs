@@ -4,7 +4,7 @@
  * what a release must find true before it moves a feed, and after.
  *
  * An installed app reads the `latest.json` of a rolling GitHub release, the
- * feed of its channel. The apps before the bridge (3.0.0-alpha.79 and earlier)
+ * feed of its channel. The apps before the bridge (3.0.0-alpha.80 and earlier)
  * read `update-alpha` and `update-stable`; the bridge and every release after
  * it read `feed-alpha` and `feed-stable` (app/feeds.json names both
  * generations of feeds, and the bridge; app/src-tauri/src/updates.rs reads the
@@ -63,9 +63,9 @@ const BUNDLE = 'ConsensFlow.app/Contents/'
 /**
  * What the updater of the apps before the bridge asks of an archive
  * (`validate_bundle` in app/src-tauri/src/update_install.rs at
- * v3.0.0-alpha.79, in every app already installed): these files, and
- * something in these folders. An archive without them is one those apps
- * download and refuse.
+ * v3.0.0-alpha.79, which 3.0.0-alpha.80 shares, in every app already
+ * installed): these files, and something in these folders. An archive without
+ * them is one those apps download and refuse.
  */
 const OLD_APPS_REQUIRE = [
   `${BUNDLE}MacOS/node`,

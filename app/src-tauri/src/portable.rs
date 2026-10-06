@@ -214,8 +214,7 @@ fn extract(file: &mut File, payload: &Payload, into: &Path) -> io::Result<()> {
 
 /// Every runtime under `root` but `keep` goes, best effort: an older one, and
 /// what an unpack that stopped left behind. One of which a program runs
-/// stays, whole, for its daemon and its windows: Windows does not let a
-/// running program be opened for writing.
+/// ([`runs`]) stays, whole, for its daemon and its windows.
 fn remove_other_runtimes(root: &Path, keep: &Path) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
@@ -230,19 +229,25 @@ fn remove_other_runtimes(root: &Path, keep: &Path) {
 
 /// Whether a program of `folder`'s runtime, its `node.exe` or its
 /// `cli/bin/cf.exe`, cannot be opened for writing: on Windows, because it
-/// runs.
+/// runs. For writing, and not for appending: Windows refuses a program that
+/// runs the right to write its data (`FILE_WRITE_DATA`, which `write` asks
+/// for) and grants it the right to append (`FILE_APPEND_DATA`, which is all
+/// `append` asks for: std takes `FILE_WRITE_DATA` out of it). An open for
+/// appending succeeds on a program that runs, and so tells nothing of it.
 fn runs(folder: &Path) -> bool {
     PROGRAMS.iter().any(|parts| {
         let program = parts
             .iter()
             .fold(folder.to_path_buf(), |path, part| path.join(part));
-        program.is_file() && OpenOptions::new().append(true).open(program).is_err()
+        program.is_file() && OpenOptions::new().write(true).open(program).is_err()
     })
 }
 
 /// Moves `path` into a folder of its own under `root`, then removes that
 /// folder: what goes is never left half there, and what Windows holds on to
-/// stays where it was.
+/// stays where it was. A program that runs is not held so: its folder moves,
+/// and the removal deletes all of it but the program. [`runs`] is what keeps
+/// such a folder, not this.
 fn remove_aside(root: &Path, path: &Path) {
     let Ok(aside) = tempfile::Builder::new()
         .prefix(".removing-")

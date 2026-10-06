@@ -296,7 +296,10 @@ describe('the publish job, run as written', { skip }, () => {
 describe('the Mac job, as a hand run and as a tag run', { skip }, () => {
   const FEEDS = { alpha: 'feed-alpha', stable: 'feed-stable' }
   const LEGACY = { alpha: 'update-alpha', stable: 'update-stable' }
-  const BRIDGE = '3.0.0-alpha.80'
+  /** alpha.80 is built from the code before the bridge: an ordinary release, which the old feed serves until the bridge reaches it. */
+  const BRIDGE = '3.0.0-alpha.81'
+  const OLDER = '3.0.0-alpha.80'
+  const LATER = '3.0.0-alpha.82'
   /** A checkout of the scripts and the manifest, at the version `package.json` says. */
   function project(version) {
     const root = mkdtempSync(join(tmpdir(), 'cf-mac-'))
@@ -326,7 +329,7 @@ describe('the Mac job, as a hand run and as a tag run', { skip }, () => {
     // The bridge's tag is made and its release failed: update-alpha serves the release before it.
     github.release('update-alpha', {
       prerelease: true,
-      assets: { 'latest.json': latestJson(github.base, '3.0.0-alpha.79') },
+      assets: { 'latest.json': latestJson(github.base, OLDER) },
     })
     github.release(`v${BRIDGE}`, { assets: publishedAssets(builtFiles(github.base, BRIDGE)) })
     // The workflow gives the command no patience of its own: a read that does not serve the bridge is read again for a minute.
@@ -334,17 +337,17 @@ describe('the Mac job, as a hand run and as a tag run', { skip }, () => {
       DOWNLOADS,
       github.base,
     )
-    const root = project('3.0.0-alpha.81')
+    const root = project(LATER)
     try {
       const tag = await bash(script, { cwd: root, env: env('push', github) })
       assert.equal(tag.status, 1, `${tag.stdout}${tag.stderr}`)
-      assert.match(tag.stderr, /^feeds: update-alpha serves 3\.0\.0-alpha\.79, not the bridge/m)
+      assert.match(tag.stderr, /^feeds: update-alpha serves 3\.0\.0-alpha\.80, not the bridge/m)
 
       const hand = await bash(script, { cwd: root, env: env('workflow_dispatch', github) })
       assert.equal(hand.status, 0, `${hand.stdout}${hand.stderr}`)
       assert.match(
         hand.stderr,
-        /^feeds \(a tag would be refused\): update-alpha serves 3\.0\.0-alpha\.79/m,
+        /^feeds \(a tag would be refused\): update-alpha serves 3\.0\.0-alpha\.80/m,
       )
 
       // The bridge itself has nothing to ask, whatever the feeds serve.
@@ -363,7 +366,7 @@ describe('the Mac job, as a hand run and as a tag run', { skip }, () => {
     const notes = stepScript(NOTES)
     const plan = notes.slice(notes.indexOf('dry=()'))
     assert.ok(plan.includes('feeds.mjs plan'), 'the step plans the feeds')
-    const root = project('3.0.0-alpha.79')
+    const root = project(OLDER)
     const github = await githubSim()
     const run = (event, version) =>
       bash(`set -euo pipefail\nversion=${version}\nout=${dir}\narchive=archive.tar.gz\n${plan}`, {
@@ -371,22 +374,22 @@ describe('the Mac job, as a hand run and as a tag run', { skip }, () => {
         env: env(event, github),
       })
     try {
-      const tag = await run('push', '3.0.0-alpha.79')
+      const tag = await run('push', OLDER)
       assert.equal(tag.status, 1, `${tag.stdout}${tag.stderr}`)
       assert.match(
         tag.stderr,
-        /^feeds: 3\.0\.0-alpha\.79 comes before the bridge 3\.0\.0-alpha\.80/m,
+        /^feeds: 3\.0\.0-alpha\.80 comes before the bridge 3\.0\.0-alpha\.81/m,
       )
       assert.equal(tag.stdout, '')
 
-      const hand = await run('workflow_dispatch', '3.0.0-alpha.79')
+      const hand = await run('workflow_dispatch', OLDER)
       assert.equal(hand.status, 0, `${hand.stdout}${hand.stderr}`)
       assert.match(
         hand.stderr,
-        /^feeds \(a tag would be refused\): 3\.0\.0-alpha\.79 comes before the bridge/m,
+        /^feeds \(a tag would be refused\): 3\.0\.0-alpha\.80 comes before the bridge/m,
       )
 
-      const later = await run('push', '3.0.0-alpha.81')
+      const later = await run('push', LATER)
       assert.equal(later.status, 0, `${later.stdout}${later.stderr}`)
       assert.equal(later.stdout, 'feed-alpha\n')
     } finally {
