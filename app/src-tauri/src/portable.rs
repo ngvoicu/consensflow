@@ -52,10 +52,11 @@ const MARKER: &str = ".unpacked";
 /// collector empties of every runtime whose `node.exe` is not running.
 const RUNTIME_PARENT: &str = "portable-runtime";
 /// The programs of a runtime that run on their own, as the parts of their
-/// paths in it: Node, which is the daemon until the flip, and `cf.exe`, which
-/// is the native daemon and every window's `cf`. The release that drops Node
-/// from the payload keeps `node.exe` here: a runtime of the flip release shares
-/// this parent, and its daemon may be Node's.
+/// paths in it: Node, which is the daemon of a home that has taken the way back
+/// (every home's before the flip), and `cf.exe`, which is the native daemon and
+/// every window's `cf`. The release that drops Node from the payload keeps
+/// `node.exe` here: a runtime of the flip release shares this parent, and its
+/// daemon may be Node's.
 const PROGRAMS: [&[&str]; 2] = [&["node.exe"], &["cli", "bin", "cf.exe"]];
 
 /// Where an exe carries its runtime.

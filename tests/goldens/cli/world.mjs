@@ -4,7 +4,7 @@
  * home that has not, so the oracle is not run through it: no `use-node` file
  * may be in the folder a scenario is played in, which the recording lists), and
  * writes down what it did: the oracle `crates/cf` is held to, case by case, by
- * the Rust player (`crates/cf/tests/cli_goldens.rs`).
+ * the Rust player (`crates/cf/tests/cli_goldens/`).
  *
  * A scenario is data: `{ name, args, env, stdin, files, pipe, kept }`.
  * - `args`: the words after `cf`.

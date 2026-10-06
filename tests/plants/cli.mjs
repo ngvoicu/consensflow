@@ -9,9 +9,10 @@
  * caught or missed. Every file a plant touches is first copied outside the
  * repository and is put back from that copy, byte for byte, whatever the run
  * came to, on Ctrl-C and on being terminated too; a run killed past that leaves
- * the copies in the folder it says first. The native `cf` that `bin/` holds is
- * built again from the sources as they are once the plants are done, if a plant
- * had it built from its own.
+ * the copies in the folder it says first. The native `cf` that `bin/` holds,
+ * which the suites of Node run, is built again from the sources as they are after
+ * each plant that had it built from its own, so that no plant's tests meet the
+ * build of another's.
  *
  *   npm run plants:cli                  # every plant
  *   npm run plants:cli -- parser dispatch   # the plants whose names hold a word
@@ -28,6 +29,7 @@ import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from '
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { PLANTS as ADMIN } from './cli/admin.mjs'
 import { PLANTS as DISPATCH } from './cli/dispatch.mjs'
 import { PLANTS as FLIP } from './cli/flip.mjs'
 import { BOTH, BUILD } from './cli/kit.mjs'
@@ -40,7 +42,7 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const RUN_LIMIT = 10 * 60 * 1000
 
 /** Every plant, by area. */
-const PLANTS = [...PARSER, ...VERBS, ...DISPATCH, ...FLIP, ...ORACLE]
+const PLANTS = [...PARSER, ...VERBS, ...ADMIN, ...DISPATCH, ...FLIP, ...ORACLE]
 
 const args = process.argv.slice(2)
 const words = args.filter((arg) => !arg.startsWith('--'))
@@ -78,8 +80,28 @@ process.stdout.write(`copies of what is planted are kept in ${saved}\n`)
 /** What is planted now: its files, with the copies they go back from. */
 let planting = null
 let running = null
-/** Whether a run built the native `cf` of `bin/` from planted sources. */
+/** Whether a run built the native `cf` of `bin/` from planted sources, which stays there until `rebuild`. */
 let built = false
+
+/**
+ * Builds the native `cf` of `bin/` again from the sources as they are, if a run
+ * built it from planted ones: whether it is as the sources say.
+ */
+function rebuild() {
+  if (!built) return true
+  built = false
+  const again = spawnSync(
+    process.execPath,
+    [join(REPO, 'app', 'scripts', 'build-cf.mjs'), '--offline'],
+    { cwd: REPO, encoding: 'utf8' },
+  )
+  if (again.status !== 0) {
+    process.stdout.write(
+      `the native cf of bin/ is not built again:\n${again.stdout}${again.stderr}\n`,
+    )
+  }
+  return again.status === 0
+}
 
 /** Puts every file of the plant in hand back from its copy, and says if one was not. */
 function restore() {
@@ -105,6 +127,7 @@ function endRun() {
 function leave(code) {
   endRun()
   restore()
+  rebuild()
   rmSync(saved, { recursive: true, force: true })
   process.exit(code)
 }
@@ -206,16 +229,8 @@ for (const plant of chosen) {
       .filter((line) => /^(running \d+ test|test result:|ℹ (tests|pass|fail))/.test(line))
     process.stdout.write(`${summary.map((line) => `    ${line}`).join('\n')}\n`)
   }
+  if (!rebuild()) wrong += 1
 }
 rmSync(saved, { recursive: true, force: true })
-if (built) {
-  process.stdout.write('the native cf of bin/ is built again from the sources as they are\n')
-  const again = spawnSync(
-    process.execPath,
-    [join(REPO, 'app', 'scripts', 'build-cf.mjs'), '--offline'],
-    { cwd: REPO, stdio: 'inherit' },
-  )
-  if (again.status !== 0) wrong += 1
-}
 process.stdout.write(`${chosen.length - wrong} of ${chosen.length} plants caught\n`)
 process.exit(wrong === 0 ? 0 : 1)

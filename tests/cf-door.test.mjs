@@ -18,10 +18,10 @@ import { tempEnv, windowsEnv } from './helpers.mjs'
  * modules the door loaded (`tests/fixtures/module-spy.mjs`), not by what it
  * printed, which the two implementations print alike (`goldens:cli`).
  *
- * `setup` and `doctor` are the two verbs the native `cf` still hands to Node's
- * sources, so they stay Node's here whatever the home says: handed back, they
- * would go round and round between the two. The test of that is the one that goes
- * when the native `cf` answers them (NODE_ONLY of bin/cf.mjs).
+ * `setup` and `doctor` go the way of every other verb: the native `cf` answers
+ * them, and the door has nothing of its own for them. Their words name the home
+ * they ran in, so they are held in one home and not compared across two
+ * (`HOMED`).
  *
  * Where the door must not forward, it is run beside a stand-in for the native
  * `cf` that says it was reached (`reached`): a door that forwarded there anyway
@@ -45,8 +45,8 @@ const VERBS = [
   ['frobnicate'],
   ['ui', '--foo'],
 ]
-/** The verbs the native cf hands to Node's sources: the exception. */
-const NODE_ONLY = [['setup'], ['doctor']]
+/** The verbs whose words name the home they ran in (`home:`, where the command is made): no two homes give one answer. */
+const HOMED = [['setup'], ['doctor']]
 
 /** The door beside the real native cf, and the door beside a stand-in that says it was reached. */
 let bundle
@@ -108,7 +108,7 @@ describe('bin/cf.mjs, the door', () => {
   it('hands each verb to the native cf beside it whole, and its stdio and exit code back, when the home has no way back', {
     skip: WINDOWS && 'a shell script stands in for the native cf',
   }, () => {
-    for (const args of VERBS) {
+    for (const args of [...VERBS, ...HOMED]) {
       const t = home(false)
       try {
         const forwarded = door(args, t, {}, guarded)
@@ -141,15 +141,19 @@ describe('bin/cf.mjs, the door', () => {
   })
 
   it('runs each verb on Node’s own CLI, in its process, when the home has taken the way back', () => {
-    for (const args of VERBS) {
+    for (const args of [...VERBS, ...HOMED]) {
       const t = home(true)
       const u = home(false)
       try {
         const ran = door(args, t, {}, guarded)
         assert.deepEqual(ran.loaded, ['cli', 'use-node'], args.join(' '))
         assert.ok(!ran.out.startsWith('reached|'), `${args.join(' ')}: ${ran.out}`)
-        // The two print alike, so the proof of who ran is the module and not the words.
-        assert.deepEqual(answer(ran), native(args, u), args.join(' '))
+        if (HOMED.includes(args)) {
+          assert.equal(ran.code, 0, `${args.join(' ')}: ${ran.err}`)
+        } else {
+          // The two print alike, so the proof of who ran is the module and not the words.
+          assert.deepEqual(answer(ran), native(args, u), args.join(' '))
+        }
       } finally {
         t.cleanup()
         u.cleanup()
@@ -190,19 +194,22 @@ describe('bin/cf.mjs, the door', () => {
     }
   })
 
-  it('keeps setup and doctor on Node’s CLI, which the native cf hands them to, whatever the home says', () => {
-    for (const args of NODE_ONLY) {
-      for (const wayBack of [false, true]) {
-        const t = home(wayBack)
-        try {
-          const ran = door(args, t, {}, guarded)
-          assert.deepEqual(ran.loaded, ['cli', 'use-node'], `${args} (way back: ${wayBack})`)
-          assert.ok(!ran.out.startsWith('reached|'), `${args}: ${ran.out}`)
-          assert.equal(ran.code, 0, ran.err)
-        } finally {
-          t.cleanup()
-        }
-      }
+  it('hands setup and doctor to the native cf as it hands every verb: it makes the command, and says it', () => {
+    const t = home(false)
+    try {
+      const made = door(['setup'], t)
+      assert.deepEqual(made.loaded, ['use-node'])
+      assert.equal(made.code, 0, made.err)
+      // The command names the native cf of this bundle: the native cf wrote it.
+      const command = join(t.env.CONSENSFLOW_HOME, 'bin', WINDOWS ? 'cf.cmd' : 'cf')
+      assert.ok(readFileSync(command, 'utf8').includes(bundle.cf), command)
+      // `doctor` reads and writes nothing, so the same home gives the same answer to the cf itself.
+      const said = door(['doctor'], t)
+      assert.deepEqual(said.loaded, ['use-node'])
+      assert.deepEqual(answer(said), native(['doctor'], t))
+      assert.ok(said.out.split('\n').includes(`command:      ${bundle.cf}`), said.out)
+    } finally {
+      t.cleanup()
     }
   })
 

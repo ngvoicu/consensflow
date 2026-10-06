@@ -14,6 +14,8 @@ cf-catalog.workspace = true
 cf-codex-session.workspace = true
 cf-daemon.workspace = true
 cf-harness.workspace = true
+# The terminal command `setup` writes and `doctor` reads.
+cf-launcher.workspace = true
 cf-process.workspace = true
 cf-proto.workspace = true
 form_urlencoded.workspace = true

@@ -15,10 +15,30 @@ pub fn cf<S: AsRef<str>>(args: &[S], env: &[(&str, &str)], input: &str) -> Outpu
     cf_at(Path::new(env!("CARGO_BIN_EXE_cf")), args, env, input)
 }
 
-/// The `cf` at `program`, run as [`cf`] runs one. A tokenless `cf` looks in the
-/// home for the way back to Node (`cf_base::way_back`), so the home is a
-/// folder of this run's own unless the case names one: the machine's own
-/// `~/.consensflow` is nobody's to look in.
+/// The binary under test as the system spells its place, which a program run
+/// by it reads back as its own: a copy of it elsewhere is another `cf`, as a
+/// second install of ConsensFlow is.
+#[allow(dead_code)] // Not every test that runs `cf` asks where it is.
+pub fn own_cf() -> PathBuf {
+    plain(std::fs::canonicalize(env!("CARGO_BIN_EXE_cf")).expect("cf is there"))
+}
+
+/// A resolved `path` as a program reports it: Windows resolves a path to its
+/// verbatim form (`\\?\C:\…`), which is not what a program says of where it
+/// runs, so that prefix goes (but not a share's, `\\?\UNC\…`).
+#[allow(dead_code)] // Not every test that runs `cf` resolves a place.
+pub fn plain(path: PathBuf) -> PathBuf {
+    path.to_string_lossy()
+        .strip_prefix(r"\\?\")
+        .filter(|plain| !plain.starts_with(r"UNC\"))
+        .map_or(path.clone(), PathBuf::from)
+}
+
+/// `cf args` as the binary at `program` runs it, with `env` added and `input`
+/// on its standard input. A tokenless `cf` looks in the home for the way back
+/// to Node (`cf_base::way_back`), so the home is a folder of this run's own
+/// unless the case names one: the machine's own `~/.consensflow` is nobody's to
+/// look in.
 #[allow(clippy::disallowed_methods)] // The tests start cf themselves.
 pub fn cf_at<S: AsRef<str>>(
     program: &Path,
@@ -77,7 +97,7 @@ impl Bundle {
         let dir = tempfile::tempdir().expect("a bundle");
         // The folder as the running `cf` will name it: `current_exe` is
         // resolved (`/var` is `/private/var` on a Mac), and plain on Windows.
-        let root = plain(&std::fs::canonicalize(dir.path()).expect("the bundle's folder"));
+        let root = plain(std::fs::canonicalize(dir.path()).expect("the bundle's folder"));
         let (resources, node_at) = if cfg!(windows) {
             (root.clone(), root.join("node.exe"))
         } else {
@@ -117,17 +137,6 @@ impl Bundle {
         given.extend(env.iter().copied());
         cf_at(&self.cf, args, &given, "")
     }
-}
-
-/// A path as Windows' `GetModuleFileName` writes one, without the prefix a
-/// resolved path has; any other path as it is.
-#[allow(dead_code)]
-fn plain(path: &Path) -> PathBuf {
-    let text = path.to_string_lossy();
-    if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
-        return PathBuf::from(format!(r"\\{share}"));
-    }
-    PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text))
 }
 
 /// A home, with the file that is the way back to Node in it or not.

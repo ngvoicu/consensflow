@@ -5,8 +5,7 @@ Step 4 flips the app to Rust, and the verbs Node's CLI answers by itself
 are recorded first, from `node src/cli.js` as it is (the CLI `bin/cf.mjs` runs
 for a home that has taken the way back to Node; `bin/cf.mjs` itself hands every
 command of any other home to the native `cf`, so it is no oracle), and `crates/cf`
-(`standalone/`) is held to the recording; `setup` and `doctor` are recorded for
-the day Rust answers them.
+(`standalone/`) is held to the recording, `setup` and `doctor` too.
 
     npm run goldens:cli                 runs every scenario against Node, writes the files
     node tests/goldens/cli/record.mjs --check    records again, says which files differ, writes nothing
@@ -17,13 +16,13 @@ the day Rust answers them.
 is joined with its own separator and a stand-in for a harness's CLI is a script
 or a `.cmd`: the Windows file is recorded on Windows. `tests/cli-goldens.test.mjs`
 holds the checked-in files equal to a recording made now, and the Rust players
-(`crates/cf/tests/cli_goldens.rs`, `crates/cf-base/tests/args.rs`) hold Rust to them.
+(`crates/cf/tests/cli_goldens/`, `crates/cf-base/tests/args.rs`) hold Rust to them.
 
 ## What is in the files
 
 | Path | What | Read by |
 |---|---|---|
-| `crates/cf/tests/goldens/cli.<platform>.json` | every scenario played: `darwin` for macOS (and any system but Windows), `win32` for Windows | `crates/cf/tests/cli_goldens.rs` |
+| `crates/cf/tests/goldens/cli.<platform>.json` | every scenario played: `darwin` for macOS (and any system but Windows), `win32` for Windows | `crates/cf/tests/cli_goldens/` |
 | `crates/cf-base/tests/goldens/args.json` | what `util.parseArgs` answers for the words after each verb, for lists of up to three words from the ones people get wrong (`parse-args.mjs`); the same on every system | `crates/cf-base/tests/args.rs` |
 
 ## A scenario
@@ -64,9 +63,10 @@ recorded: `world.mjs` checks every case).
 |---|---|---|
 | `$ROOT` | any text: the folder the scenario was played in, as the system names it (`realpath`) | puts the folder of its own, as the platform writes a path, and writes its own back as `$ROOT` in what it reads |
 | `$VERSION` | any text: the version in `package.json` | writes the build's version as `$VERSION` in what it reads |
-| `$NODE`, `$REPO` | the files and output of `setup` and `doctor`: the runtime that ran the CLI, and this repository, which a launcher names | the lead's, when the launcher is Rust's |
-| `$HASH` | the folder an extension's bundle is published in (`extensions/pi/$HASH/…`) | the lead's |
-| `$PAYLOAD` | the text of every file of an extension: its bytes are the repository's own, which `pi-install.test.mjs` and `opencode-install.test.mjs` hold | the lead's |
+| `$NODE`, `$REPO` | the files and output of `setup` and `doctor`: the runtime that ran the CLI, and this repository, which a launcher names (`$REPO/bin/cf.mjs`) | makes a launcher that names them with a program that is there (its own) and the `cf.mjs` beside the binary under test, and writes what the binary says of them back as the names (`names.rs`) |
+| `$HASH` | the folder an extension's bundle is published in (`extensions/pi/$HASH/…`) | writes the 64 hex digits of the folder as `$HASH` |
+| `$PAYLOAD` | the text of every file of an extension: its bytes are the repository's own, which `pi-install.test.mjs` and `opencode-install.test.mjs` hold | writes `$PAYLOAD` for a file whose bytes are the repository's file's at the path after the hash, as they must be; OpenCode's `tui.json`, which is made where it is put, for one that is `{"plugin":["file:///…/consensflow-session.mjs"]}` and nothing else |
+| `$CF` | not in a recording: the player's own, for the binary under test | writes the path of the binary as `$CF` in what it reads: the launcher this build writes runs it |
 
 ## What the Rust player does with a recording
 
@@ -83,15 +83,30 @@ for byte.
   two is a difference. A stamp that was in the file before the run is not touched.
 - **`kept`.** The case is held to what `rust` says, and to the files as `before`
   where `after` says so.
-- **`setup` and `doctor`** are recorded and not played (`NOT_PORTED`): `cf` still
-  hands them to Node's sources, and Rust's launcher will not be the one Node's
-  was (its text is a kept difference, paired with Node's).
+- **`setup` and `doctor`** are played as every verb is, with the names above put
+  as this run's, and two differences that step 4 makes, stated once each with
+  its reason in `paired.rs` (the recording holds Node's answer and not Rust's, so
+  nothing is re-recorded for them, and the player asserts how many cases hold each):
+  - **The launcher's new shape.** What `setup` writes names only the native `cf`
+    (step 4's decision: the bundle after the deletion has no Node and no `cf.mjs`).
+    Node's text with the two lines that name what it runs replaced by ours is
+    what is held in the files after, for every case that leaves a launcher of
+    ours.
+  - **Whose a command is.** A native `cf` has no runtime of its own to compare a
+    command's with, so it tells whose a command is by the file the command runs.
+    The recording's launcher of another runtime runs `$REPO/bin/cf.mjs`, which
+    is this copy's own: `doctor` says no more of it than it says of this
+    copy's, where Node said it was another ConsensFlow (one case).
 
 ## What is not recorded
 
 - A home that no variable names (neither `CONSENSFLOW_HOME` nor `HOME`): Node asks
   the system for the user's home, which is the machine's own and the real
-  `~/.consensflow`. Rust refuses with the daemon's words (`crates/cf/src/standalone/tests.rs`).
+  `~/.consensflow`. Rust refuses with the daemon's words, `setup` and `doctor`
+  before they make or say anything (`crates/cf/src/standalone/tests.rs`).
+- What `doctor` says of a command in the new shape (`command:`, which Node cannot
+  read: it says nothing of such a command), and which copy a command is: the
+  process tests of `crates/cf/tests/standalone.rs` run copies of the binary.
 - A folder or a file the CLI is not allowed to write: the roster's write
   failures are recorded at the roster (`goldens:unwritable`), and the CLI says
   what the roster says.

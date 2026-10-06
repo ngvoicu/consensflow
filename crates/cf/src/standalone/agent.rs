@@ -10,10 +10,10 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::pad_end;
 use cf_base::time::SystemClock;
-use cf_catalog::{roster_path, validate_work_tier, AgentView, Catalog, Roster};
+use cf_catalog::{validate_work_tier, AgentView, Catalog, Roster};
 use serde_json::{json, Map, Value};
 
-use super::{bundled, to_json, Done, Stop};
+use super::{bundled, roster, to_json, Done, Stop};
 
 /// The options every action takes, for the first of them to be wrong to say so.
 const OPTIONS: [Opt; 7] = [
@@ -25,11 +25,6 @@ const OPTIONS: [Opt; 7] = [
     Opt::flag("designer"),
     Opt::flag("json"),
 ];
-
-/// Said when the environment names no folder to keep the roster in. Node
-/// asked the system for the user's home then; here it is not asked for.
-const NO_HOME: &str =
-    "ConsensFlow has no folder to keep its things in: set CONSENSFLOW_HOME, or HOME";
 
 /// What JavaScript says when a table reads the width of a field an agent of
 /// the file does not have (no id, no kind, no model): the table stops there.
@@ -78,12 +73,6 @@ pub(super) fn run(env: &Env, words: &[String], out: &mut dyn Write) -> Done {
         Action::Edit => edit(env, &catalog, name, &parsed, out),
         Action::Remove => remove(env, &catalog, name, out),
     }
-}
-
-/// The roster of the home `env` names, over `catalog`.
-fn roster<'a>(env: &Env, catalog: &'a Catalog) -> Result<Roster<'a>, Stop> {
-    let path = roster_path(env).ok_or_else(|| Stop::Said(NO_HOME.to_owned()))?;
-    Ok(Roster::new(catalog, path))
 }
 
 /// A text as a JavaScript template prints it: `undefined` for what is not there.

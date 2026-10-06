@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { cliEnv, cliRun, cliTarget } from './cli-target.mjs'
+import { cliEnv, cliTarget } from './cli-target.mjs'
 import { tempEnv } from './helpers.mjs'
 
 /**
@@ -42,8 +42,7 @@ const target = cliTarget()
 const outside = (() => {
   const t = tempEnv()
   try {
-    const { command, args } = cliRun(target, ['help'])
-    return execFileSync(command, args, {
+    return execFileSync(target.command, [...target.args, 'help'], {
       cwd: REPO,
       encoding: 'utf8',
       env: cliEnv(target, { ...process.env, ...t.env, CONSENSFLOW_TOKEN: '' }),

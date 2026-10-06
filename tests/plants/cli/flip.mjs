@@ -47,7 +47,7 @@ const VERBS_ASK = lines(
 /** What the app does: the daemon is Node's when the home has the file. */
 const APP_ASKS = '(command_for(node, cli, choice.node), choice)'
 /** What the door does: a verb is forwarded unless the file is there. */
-const DOOR_ASKS = '!(useNode(process.env) || NODE_ONLY.has(command))'
+const DOOR_ASKS = '!useNode(process.env)'
 /** What the decider does: the file is there when `stat` finds the name. */
 const DECIDER_FINDS = 'let node = file.as_deref().is_some_and(Path::exists);'
 /** What `native` asks of Node's place. */
@@ -82,7 +82,7 @@ export const PLANTS = [
   },
   {
     name: 'flip: cf.mjs forwards a verb though the home has the file',
-    edits: [[DOOR_FILE, DOOR_ASKS, '!NODE_ONLY.has(command)']],
+    edits: [[DOOR_FILE, DOOR_ASKS, 'true']],
     runs: [DOOR],
     meant: 'runs each verb on Node’s own CLI, in its process, when the home has taken the way back',
   },
@@ -185,12 +185,24 @@ export const PLANTS = [
     meant: 'the_old_switch_in_the_environment_changes_nothing_either_way',
   },
   {
-    name: 'flip: cf.mjs reads the old switch',
+    name: 'flip: cf.mjs reads the old switch for Node',
     edits: [
       [
         DOOR_FILE,
-        '!(useNode(process.env) || NODE_ONLY.has(command))',
-        "!(useNode(process.env) || process.env.CONSENSFLOW_DAEMON === 'node' || NODE_ONLY.has(command))",
+        DOOR_ASKS,
+        "!(useNode(process.env) || process.env.CONSENSFLOW_DAEMON === 'node')",
+      ],
+    ],
+    runs: [DOOR],
+    meant: 'has the old switch in the environment change nothing, in either home',
+  },
+  {
+    name: 'flip: cf.mjs reads the old switch for native',
+    edits: [
+      [
+        DOOR_FILE,
+        DOOR_ASKS,
+        "!(useNode(process.env) && process.env.CONSENSFLOW_DAEMON !== 'native')",
       ],
     ],
     runs: [DOOR],
@@ -237,11 +249,17 @@ export const PLANTS = [
       'forwards a window’s token to the native cf, which is then the board, whatever the home says',
   },
   {
-    name: 'flip: cf.mjs forwards setup and doctor, which the native cf hands back',
-    edits: [[DOOR_FILE, "new Set(['setup', 'doctor'])", 'new Set([])']],
+    name: 'flip: cf.mjs keeps setup and doctor on Node’s CLI without the file',
+    edits: [
+      [
+        DOOR_FILE,
+        DOOR_ASKS,
+        "(!useNode(process.env) && !['setup', 'doctor'].includes(process.argv[2]))",
+      ],
+    ],
     runs: [DOOR],
     meant:
-      'keeps setup and doctor on Node’s CLI, which the native cf hands them to, whatever the home says',
+      'hands setup and doctor to the native cf as it hands every verb: it makes the command, and says it',
   },
 
   // The repair.

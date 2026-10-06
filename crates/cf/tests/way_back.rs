@@ -2,8 +2,9 @@
 //! it sends every tokenless `cf` command to the CLI's Node sources, on the Node
 //! the bundle carries, which `cf` finds from its own place in the bundle (no
 //! `CONSENSFLOW_NODE`: a terminal has none). A window's token makes `cf` the
-//! board whatever the file says. Without the file nothing runs on Node but the
-//! verbs this binary does not answer yet, `setup` and `doctor`.
+//! board whatever the file says. Without the file nothing runs on Node: every
+//! verb is this binary's own, `setup` and `doctor` too (`standalone.rs` runs
+//! those two, in a user's home of their own, which this file's runs have not).
 //!
 //! The bundle is laid out as the app's is (`common::Bundle`), with a stand-in
 //! Node that says it ran, with what it was given: a shell script, which Windows
@@ -101,20 +102,19 @@ fn the_old_switch_in_the_environment_changes_nothing_either_way() {
 
 #[cfg(unix)]
 #[test]
-fn without_the_file_cf_answers_by_itself_and_only_setup_and_doctor_go_to_node() {
+fn without_the_file_cf_answers_every_verb_by_itself() {
     let bundle = Bundle::new(Some(STAND_IN));
     let home = Home::new(false);
-    for args in [&["help"][..], &["--version"], &["catalog"], &["frobnicate"]] {
-        let (_, out, _) = said(&bundle.cf(args, &home, &[]));
+    for args in [
+        &["help"][..],
+        &["--version"],
+        &["catalog"],
+        &["agent", "list"],
+        &["frobnicate"],
+    ] {
+        let (code, out, _) = said(&bundle.cf(args, &home, &[]));
         assert!(!out.starts_with("ran|"), "{args:?} ran on Node: {out}");
-    }
-    for verb in ["setup", "doctor"] {
-        let (code, out, _) = said(&bundle.cf(&[verb], &home, &[]));
-        assert_eq!(
-            (code, out),
-            (Some(3), ran_on_node(&bundle, &[verb])),
-            "{verb}"
-        );
+        assert_ne!(code, Some(3), "{args:?} ran on Node");
     }
 }
 

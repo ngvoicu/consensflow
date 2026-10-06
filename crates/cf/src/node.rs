@@ -1,8 +1,8 @@
-//! The commands not answered here: the CLI's Node sources, `cf.mjs` beside
-//! this binary, run on the Node the bundle carries. Two things reach it: a
-//! home that has taken the way back (the `use-node` file in it, which sends
-//! every command of a terminal to Node, as it sends the app's daemon), and the
-//! verbs this binary does not answer yet (`setup` and `doctor`).
+//! The way back to Node: the CLI's sources, `cf.mjs` beside this binary, run on
+//! the Node the bundle carries. A home that has taken it (the `use-node` file in
+//! it) sends every command of a terminal here, as it sends the app's daemon.
+//! Nothing else does: this binary answers every verb itself but `ui`, which is
+//! the daemon's (`native_ui`).
 //!
 //! The Node is found from this binary's own place in the bundle, and from
 //! nowhere else: a terminal has no `CONSENSFLOW_NODE` (the app names it to the

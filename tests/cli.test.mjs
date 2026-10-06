@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { rosterPath } from '../src/roster.js'
 import { noteRan } from './choice.mjs'
-import { cliEnv, cliRun, cliTarget } from './cli-target.mjs'
+import { cliEnv, cliTarget } from './cli-target.mjs'
 import { fakeExecutable, tempEnv } from './helpers.mjs'
 
 /** A launcher is `cf` on POSIX and `cf.cmd` on Windows. */
@@ -22,9 +22,8 @@ const NODE_SPY = join(FIXTURES, 'node-spy.mjs')
 /** The cf these tests run: the native one, or Node's (tests/cli-target.mjs, `npm run test:clis`). */
 const target = cliTarget()
 async function cf(args, env) {
-  const { command, args: words } = cliRun(target, args)
   try {
-    const { stdout, stderr } = await run(command, words, {
+    const { stdout, stderr } = await run(target.command, [...target.args, ...args], {
       env: cliEnv(target, env),
       timeout: 30_000,
     })
@@ -166,9 +165,8 @@ describe('cf manages the roster', () => {
     const { spawn } = await import('node:child_process')
     // `false` never reads: the pipe is closed before cf writes anything, so
     // every write EPIPEs. PIPESTATUS surfaces cf's own exit code.
-    const piped = cliRun(target, ['help'])
-    const command = [piped.command, ...piped.args].map((word) => `"${word}"`).join(' ')
-    const child = spawn('/bin/bash', ['-c', `${command} | false; exit \${PIPESTATUS[0]}`], {
+    const command = [target.command, ...target.args].map((word) => `"${word}"`).join(' ')
+    const child = spawn('/bin/bash', ['-c', `${command} help | false; exit \${PIPESTATUS[0]}`], {
       env: { ...cliEnv(target, t.env), PATH: `${t.env.PATH}:/usr/bin:/bin` },
       stdio: ['ignore', 'ignore', 'pipe'],
     })

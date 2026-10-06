@@ -1,8 +1,9 @@
 //! `cf`, ConsensFlow's command. Inside a window the daemon opened (its
 //! participant's token in `CONSENSFLOW_TOKEN`) it is the board's commands,
 //! answered here against the daemon's API; anywhere else it is the CLI's
-//! standalone commands, which `standalone` answers but for `setup` and
-//! `doctor`, which the CLI's Node sources beside this binary still answer.
+//! standalone commands, which `standalone` answers: all of them but `ui`,
+//! which is the daemon's. The CLI's Node sources beside this binary answer
+//! only in a home that has taken the way back (below).
 //! `cf hook <harness>` is what a harness's hooks run, in a window or
 //! not; it says only what its harness reads, and never fails.
 //! `cf codex-session <codex> <args…>` is what a Codex window runs in Codex's place.
@@ -83,6 +84,8 @@ pub fn run(
                 return node::run(args, &choice, err);
             }
             // The words as they came: a `--json` among them is the verb's own.
+            // Every verb is answered here but `ui`, the daemon's, which `main`
+            // ran before this (`native_ui`); the Node sources get what is left.
             match standalone::run(env, args, out, err)? {
                 Some(code) => Ok(code),
                 None => node::run(args, &choice, err),

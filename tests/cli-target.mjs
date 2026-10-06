@@ -1,28 +1,9 @@
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { stageBundle } from './bundle.mjs'
 import { assertBuilt, choose, chooseHome, DEFAULT_CLI, NATIVE_CF } from './choice.mjs'
 
 /** Node's CLI, the one `node` selects: the door, which runs Node's own CLI in a home that has taken the way back. */
 const CF_MJS = join(fileURLToPath(new URL('..', import.meta.url)), 'bin', 'cf.mjs')
-
-/**
- * The verbs the native cf still hands to Node's sources, which it runs on the
- * Node of the bundle it is in: a checkout's bin/ is none, so they are run from
- * a bundle staged for it (`bundle`). They leave this set when the native cf
- * answers them.
- */
-const HANDED_ON = new Set(['setup', 'doctor'])
-
-/** The bundle the verbs handed on are run from, staged once and removed when the process ends. */
-let staged = null
-function bundle() {
-  if (staged === null) {
-    staged = stageBundle()
-    process.on('exit', staged.cleanup)
-  }
-  return staged
-}
 
 /**
  * Which `cf` the suites of the CLI run (tests/cli.test.mjs,
@@ -36,9 +17,12 @@ function bundle() {
  * labelled with its leg (`CONSENSFLOW_TEST_LEG`) is refused a choice that is
  * not its own, and tests/cli.test.mjs holds the cf that runs to it by the
  * Node processes that start (Node's cf is one; the native cf starts none).
- * Either is run with the environment a test gives it and no other. `node
- * tests/clis.mjs` runs the suites against both. The options are what a test
- * sets to choose in its own words, not the environment's.
+ * Either is run with the environment a test gives it and no other, and the
+ * native cf is named no runtime for any verb, so that one that handed a verb
+ * to Node's sources would fail (none is, now that `setup` and `doctor` are
+ * answered too). `node tests/clis.mjs` runs the suites against both. The
+ * options are what a test sets to choose in its own words, not the
+ * environment's.
  */
 export function cliTarget({
   named = process.env.CONSENSFLOW_TEST_CLI,
@@ -53,7 +37,6 @@ export function cliTarget({
       name: "Node's bin/cf.mjs (use-node in the home)",
       command: process.execPath,
       args: [CF_MJS],
-      given: false,
     }
   }
   if (chosen.command === null) assertBuilt()
@@ -64,21 +47,7 @@ export function cliTarget({
     name: 'the native cf',
     command,
     args,
-    // A command a test names is its own to run, bundle and all.
-    given: chosen.command !== null,
   }
-}
-
-/**
- * The program and words a run of `args` is. The native cf's are those of the
- * target, but for a verb it hands on to Node's sources: that one is run by the
- * native cf of a bundle that has a Node (`HANDED_ON`).
- */
-export function cliRun(target, args) {
-  if (target.native && !target.given && HANDED_ON.has(args[0])) {
-    return { command: bundle().cf, args }
-  }
-  return { command: target.command, args: [...target.args, ...args] }
 }
 
 /**

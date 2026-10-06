@@ -1,9 +1,9 @@
 /**
- * Plants in which `cf` answers the standalone verbs: the verbs that wait, the
- * words as they came, and a reader that went away. The tests of the module and
- * of the process catch them; two are given to the suites of the CLI alone, run
- * against both CLIs, which must catch them too. Which implementation answers
- * (the home's file, a window's token) is `flip.mjs`'s.
+ * Plants in which `cf` answers the standalone verbs: the one verb left to the
+ * daemon, the words as they came, and a reader that went away. The tests of the
+ * module and of the process catch them; three are given to the suites of the
+ * CLI alone, run against both CLIs, which must catch them too. Which
+ * implementation answers (the home's file, a window's token) is `flip.mjs`'s.
  */
 import { BOTH, GOLDENS, lines, PROCESS, STANDALONE, UNITS } from './kit.mjs'
 
@@ -25,12 +25,27 @@ export const PLANTS = [
     edits: [
       [
         MOD,
-        'Some("setup" | "doctor" | "ui") => return Ok(None),',
-        'Some("ui") => return Ok(None),',
+        lines(
+          '        Some("setup") => setup::run(env, rest, out),',
+          '        // Whatever words follow it are no matter, as in Node.',
+          '        Some("doctor") => doctor::run(env, out),',
+          '',
+        ),
+        '',
       ],
     ],
     runs: [UNITS, PROCESS],
-    meant: 'the_verbs_that_wait_for_another_landing_go_on_to_node',
+    meant: 'ui_is_the_one_verb_left_to_the_daemon',
+  },
+  {
+    // As for the catalog: the suites give the native cf no Node beside it, so a
+    // setup handed back to Node's sources is a setup that fails.
+    name: 'dispatch: setup is handed to Node, seen by the suites of the CLI',
+    edits: [
+      [MOD, 'Some("setup") => setup::run(env, rest, out),', 'Some("setup") => return Ok(None),'],
+    ],
+    runs: [BOTH],
+    meant: 'roster edits, setup and diagnostic reads leave role files and old manifests alone',
   },
   {
     name: 'dispatch: the verbs are handed the words with --json taken out',

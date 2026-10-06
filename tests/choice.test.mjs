@@ -13,7 +13,7 @@ import {
   startLine,
   WAY_BACK,
 } from './choice.mjs'
-import { cliEnv, cliRun, cliTarget } from './cli-target.mjs'
+import { cliEnv, cliTarget } from './cli-target.mjs'
 import { daemonCommand } from './helpers.mjs'
 import { CLI_LEGS, DAEMON_LEGS, legEnv, ranProblem, runLeg } from './legs.mjs'
 
@@ -483,7 +483,10 @@ describe('which cf the suites of the CLI run, in the same words', () => {
     )
   })
 
-  it('makes the choice in the home of a run: the file for Node’s cf, none for the native one’s', () => {
+  it('makes the choice in the home of a run, and names no runtime to either cf', () => {
+    // A runtime named to the native cf would let it hand a verb on to Node and be
+    // none the worse for it: the environment of a run is the test's own, and the
+    // home in it the only thing that says which implementation answers.
     const native = cliTarget({ named: 'native', leg: '', fallback: 'node' })
     const node = cliTarget({ named: 'node', leg: '', fallback: 'node' })
     inAFolder((home) => {
@@ -493,23 +496,5 @@ describe('which cf the suites of the CLI run, in the same words', () => {
       assert.deepEqual(cliEnv(native, env), env)
       assert.equal(existsSync(join(home, WAY_BACK)), false)
     })
-  })
-
-  it('runs the verbs the native cf hands on from a bundle that has a Node, and no other', () => {
-    const native = cliTarget({ named: 'native', leg: '', fallback: 'node' })
-    const node = cliTarget({ named: 'node', leg: '', fallback: 'node' })
-    for (const verb of ['setup', 'doctor']) {
-      const { command, args } = cliRun(native, [verb])
-      assert.notEqual(command, NATIVE_CF, verb)
-      assert.match(command, /cf-bundle-/, verb)
-      assert.deepEqual(args, [verb])
-      assert.deepEqual(cliRun(node, [verb]), { command: process.execPath, args: [CF_MJS, verb] })
-    }
-    for (const verb of ['catalog', 'agent', 'help']) {
-      assert.deepEqual(cliRun(native, [verb, 'x']), { command: NATIVE_CF, args: [verb, 'x'] })
-    }
-    // A command a test names is its own, bundle and all.
-    const given = cliTarget({ named: '["/build/cf","--x"]', leg: '', fallback: 'node' })
-    assert.deepEqual(cliRun(given, ['setup']), { command: '/build/cf', args: ['--x', 'setup'] })
   })
 })
