@@ -72,10 +72,11 @@ jobs:
       # The workspace's other crates, the pane host's tests among them, from
       # its root, where the app's Windows runner does not apply: they link no
       # dialog code. The headless tests (cf-panes/tests/headless.rs) drive the
-      # helper; they are Unix-only and build empty on Windows. The same limit
-      # applies, for the same reason.
+      # helper; they are Unix-only and build empty on Windows. A limit for the
+      # same reason, with room for a slow runner: the ledger's replay alone has
+      # taken from 2 to 7 minutes on Windows' (2026-10-06), the step 9 to 15.
       - run: cargo test --workspace --exclude app
-        timeout-minutes: 15
+        timeout-minutes: 25
       # The ledger's parity while both implementations exist: the Node suite's
       # ledgers recorded afresh from src/ledger as it is now, and replayed
       # against cf-ledger. A change to the Node ledger that cf-ledger does not

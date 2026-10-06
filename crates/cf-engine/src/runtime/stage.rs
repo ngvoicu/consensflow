@@ -26,6 +26,11 @@ impl Log {
     pub(super) fn taken(&self) -> Vec<&'static str> {
         std::mem::take(&mut *self.0.borrow_mut())
     }
+
+    /// How many entries it holds, leaving them in it.
+    pub(super) fn count(&self) -> usize {
+        self.0.borrow().len()
+    }
 }
 
 /// A piece of work that says it started, waits on `gate`, and says it ended.

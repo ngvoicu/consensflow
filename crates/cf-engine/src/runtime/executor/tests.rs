@@ -266,9 +266,16 @@ fn a_timer_wakes_work_and_its_chain_ends_before_the_next_task_tokio_runs() {
         tokio::time::sleep(Duration::from_millis(5)).await;
         other.push("the other task");
     }));
-    stage
-        .local()
-        .block_on(async { tokio::time::sleep(Duration::from_millis(50)).await });
+    // Both timers are due 5 ms on; a loaded machine runs them later (a CI
+    // runner once ran neither within 50 ms), so the wait is for the three
+    // entries, not for a time.
+    let waited = log.clone();
+    stage.local().block_on(async move {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while waited.count() < 3 && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    });
     // Whichever of the two tokio woke first, the chain was not broken.
     let heard = log.taken();
     let slept = heard.iter().position(|what| *what == "slept");
