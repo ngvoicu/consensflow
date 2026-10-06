@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { START_WORDS } from '../choice.mjs'
 import { startIntegration } from '../integration/harness.mjs'
 
 /**
@@ -131,7 +132,12 @@ test('the daemon stays up, delivers every task and logs nothing wrong while seve
     const log = readFileSync(join(app.env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8')
       .split('\n')
       .filter(Boolean)
-    assert.match(log[0], /^\S+ info start pid \d+ node v/)
+    // Under the daemon the run chose (CONSENSFLOW_TEST_DAEMON), whichever it is.
+    assert.match(
+      log[0],
+      new RegExp(`^\\S+ info start pid \\d+ ${START_WORDS[app.daemon.kind]}`),
+      `the ${app.daemon.kind} daemon was under load`,
+    )
     assert.deepEqual(
       log.filter((line) => / (error|warn) /.test(line)),
       [],

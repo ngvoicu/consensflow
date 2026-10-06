@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { PassThrough } from 'node:stream'
 import { describe, it } from 'node:test'
 import { Bridge } from '../src/bridge.js'
+import { assertStarted } from './choice.mjs'
 import { daemonCommand, tempEnv } from './helpers.mjs'
 
 /** Two bridges talking to each other over in-process pipes, like Node and Rust. */
@@ -852,7 +854,8 @@ describe('cf ui --json --no-open speaks the bridge after its handle line', () =>
     const { join } = await import('node:path')
     const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
     // `cf ui` as the app runs it: through cf.mjs on Node, or the native `cf`
-    // that CONSENSFLOW_TEST_DAEMON names (`npm run test:daemons` runs both).
+    // that CONSENSFLOW_TEST_DAEMON names (`npm run test:daemons` runs both), and
+    // the daemon it starts is the one asked for: the start line in its log says so.
     const started = daemonCommand([cf, 'ui', '--json', '--no-open'])
     const child = spawn(started.command, started.args, {
       env: { ...t.env, ...started.env },
@@ -881,6 +884,11 @@ describe('cf ui --json --no-open speaks the bridge after its handle line', () =>
 
       const handleLine = await nextLine()
       const handle = JSON.parse(handleLine)
+      assertStarted(
+        started,
+        readFileSync(join(t.env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8'),
+        child.pid,
+      )
       assert.ok(handle.url.length > 0)
       assert.match(handle.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)
       assert.equal(typeof handle.token, 'string')

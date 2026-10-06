@@ -6,18 +6,23 @@
  * passed, else the checks that failed. The exit code is 1 when any run did
  * not pass.
  *
- *   npm run eval:windows -- --host <ssh host> [--build] \
+ *   npm run eval:windows -- --host <ssh host> [--build] [--env NAME=VALUE] \
  *     --scenario round-trip --scenario question-trip \
  *     --pair devin:devin --pair claude:devin [--claude-model claude-sonnet-5]
  *
  * --build builds the machine's copy before the first run; --claude-model is
- * a Claude chief's model (the eval's own default otherwise).
+ * a Claude chief's model (the eval's own default otherwise). --env NAME=VALUE
+ * goes to each run, as `npm run windows` takes it (tests/live/windows.mjs):
+ * `--env CONSENSFLOW_TEST_DAEMON=native` has every eval start the native daemon
+ * on the machine, where the rig reads it (tests/choice.mjs). Each eval says which
+ * daemon it ran against, and the line of its run here ends with it.
  */
 import { spawn } from 'node:child_process'
 import { createWriteStream, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import { parseEnv } from './windows-script.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const { values } = parseArgs({
@@ -27,13 +32,16 @@ const { values } = parseArgs({
     scenario: { type: 'string', multiple: true },
     pair: { type: 'string', multiple: true },
     'claude-model': { type: 'string' },
+    env: { type: 'string', multiple: true, default: [] },
   },
 })
 if (!values.host || !values.scenario || !values.pair) {
   throw new Error(
-    'usage: npm run eval:windows -- --host <ssh host> --scenario <name>… --pair <chief>:<staff>…',
+    'usage: npm run eval:windows -- --host <ssh host> [--env NAME=VALUE] --scenario <name>… --pair <chief>:<staff>…',
   )
 }
+// Named well before the first run, not by the first one that fails on it.
+parseEnv(values.env)
 const pairs = values.pair.map((pair) => {
   const [chief, staff] = pair.split(':')
   if (!chief || !staff) throw new Error(`a pair is chief:staff, not ${pair}`)
@@ -51,6 +59,7 @@ mkdirSync(folder, { recursive: true })
 /** One eval on the machine, its output kept in `log`; what its checks said. */
 async function run({ scenario, chief, staff }, build, log) {
   const args = ['run', 'windows', '--', '--host', values.host, ...(build ? ['--build'] : [])]
+  for (const entry of values.env) args.push('--env', entry)
   args.push('--', 'npm', 'run', 'eval', '--', '--scenario', scenario, '--chief', chief)
   args.push('--staff', staff, '--timeout-min', '30')
   // A chief switch goes to the staff's harness.
@@ -69,10 +78,13 @@ async function run({ scenario, chief, staff }, build, log) {
   out.end()
   const failed = [...text.matchAll(/^\s*FAIL (.+)$/gm)].map((match) => match[1])
   const checks = (text.match(/^\s*(PASS|FAIL) /gm) ?? []).length
-  if (checks === 0) return { ok: false, line: `no verdict (exit ${code}): see ${log}` }
+  // The eval says which daemon it ran against (`daemon: native (rust 3.0.0)`).
+  const daemon = /^daemon: (.+)$/m.exec(text)?.[1]
+  const on = daemon === undefined ? '' : ` · daemon ${daemon}`
+  if (checks === 0) return { ok: false, line: `no verdict (exit ${code}): see ${log}${on}` }
   return failed.length === 0
-    ? { ok: true, line: `PASS ${checks} checks` }
-    : { ok: false, line: `FAIL ${failed.join(' · ')}` }
+    ? { ok: true, line: `PASS ${checks} checks${on}` }
+    : { ok: false, line: `FAIL ${failed.join(' · ')}${on}` }
 }
 
 const results = []

@@ -1,8 +1,12 @@
 /**
  * The daemon cases that go through a process, run against both daemons: Node's,
  * then the native one (`cf ui`, built and put in bin/ as the app ships it, behind
- * `CONSENSFLOW_DAEMON=native`). The suites choose the daemon by
- * `CONSENSFLOW_TEST_DAEMON`, a JSON array of a command and its arguments; what
+ * `CONSENSFLOW_DAEMON=native`). Each leg names its daemon (`node`, `native`) and
+ * says which leg it is (tests/legs.mjs, tests/choice.mjs): the suites refuse a
+ * selection that is not the leg's own, and hold every daemon they start to it by
+ * the start line in its log, which says which ran (`node v…` or `rust …`). The
+ * suites say which they found to this runner, which fails a leg in which a
+ * daemon started that is not its own, or none was seen to. What
  * only Node's own modules can show, and what the native daemon does not serve
  * yet, they skip for the native one with the reason. The rig's seam and its
  * suites are run too: each daemon on the real headless bridge, which is built
@@ -12,9 +16,11 @@
  *
  *   node tests/daemons.mjs [--offline]
  */
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { buildCf } from '../app/scripts/build-cf.mjs'
+import { NATIVE_CF } from './choice.mjs'
+import { DAEMON_LEGS, runLeg } from './legs.mjs'
 
 const REPO = fileURLToPath(new URL('..', import.meta.url))
 const SUITES = [
@@ -26,16 +32,6 @@ const SUITES = [
   'tests/integration/core-questions.test.mjs',
 ]
 const offline = process.argv.includes('--offline')
-
-function run(label, daemon) {
-  process.stdout.write(`\n== ${label}\n`)
-  const ran = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...SUITES], {
-    cwd: REPO,
-    stdio: 'inherit',
-    env: { ...process.env, CONSENSFLOW_TEST_DAEMON: daemon },
-  })
-  return ran.status ?? 1
-}
 
 // What `npm run build:bridge` builds: the pane host's end of the bridge.
 execFileSync(
@@ -52,8 +48,11 @@ execFileSync(
   { cwd: REPO, stdio: 'inherit' },
 )
 const cf = buildCf({ offline })
-const node = run('the Node daemon', '')
-const native = run('the native daemon', JSON.stringify([cf, 'ui', '--json', '--no-open']))
+// The native leg runs the cf the suites find in bin/: the one just built.
+if (cf !== NATIVE_CF) throw new Error(`the native leg runs ${NATIVE_CF}, and ${cf} was built`)
+const [node, native] = DAEMON_LEGS.map((leg) =>
+  runLeg('CONSENSFLOW_TEST_DAEMON', leg, SUITES, { cwd: REPO }),
+)
 process.stdout.write(
   `\nNode: ${node === 0 ? 'passed' : 'FAILED'}; native: ${native === 0 ? 'passed' : 'FAILED'}\n`,
 )
