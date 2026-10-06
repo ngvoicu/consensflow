@@ -58,6 +58,7 @@
     "bench:records-memory": "node tests/bench/records-memory.mjs",
     "live:paste": "node tests/live/paste-submit.mjs",
     "live:interrupt": "node tests/live/interrupt-idle.mjs",
+    "live:codex-interrupt": "node tests/live/codex-interrupted-question.mjs",
     "live:asks": "node tests/live/claude-asks.mjs",
     "live:codex-resume": "node tests/live/codex-resume.mjs",
     "live:terminal": "node tests/live/devin-terminal.mjs",
