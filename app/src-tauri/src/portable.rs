@@ -20,6 +20,16 @@
 //! folder per build, which every later start reuses once the marker written
 //! last into it says it is complete. gzip's own CRC checks the payload as it
 //! is unpacked.
+//!
+//! `<root>` is [`RUNTIME_PARENT`] under the app's local data folder
+//! (`%LOCALAPPDATA%\<identifier>`). The apps before the flip release kept
+//! their runtimes in `runtime` there, and each start of theirs removed every
+//! runtime in it whose `node.exe` was not running, which a runtime whose
+//! daemon is the native `cf.exe` never is. A collector already out cannot be
+//! taught, so the runtimes of this app, and of those after it, live in a
+//! folder of their own, out of its reach, where every start keeps a runtime
+//! while its `node.exe` or its `cf.exe` runs. The old folder is left as it
+//! is.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom};
@@ -37,6 +47,16 @@ const FOOTER_BYTES: u64 = 16;
 const SMALLEST_GZIP: u64 = 18;
 /// Written last into a runtime folder: everything else is there.
 const MARKER: &str = ".unpacked";
+/// Where, under the app's local data folder, the runtimes are unpacked: not
+/// `runtime`, which is the apps before the flip release's, and which their
+/// collector empties of every runtime whose `node.exe` is not running.
+const RUNTIME_PARENT: &str = "portable-runtime";
+/// The programs of a runtime that run on their own, as the parts of their
+/// paths in it: Node, which is the daemon until the flip, and `cf.exe`, which
+/// is the native daemon and every window's `cf`. The release that drops Node
+/// from the payload keeps `node.exe` here: a runtime of the flip release shares
+/// this parent, and its daemon may be Node's.
+const PROGRAMS: [&[&str]; 2] = [&["node.exe"], &["cli", "bin", "cf.exe"]];
 
 /// Where an exe carries its runtime.
 #[derive(Debug, PartialEq)]
@@ -86,15 +106,16 @@ impl Payload {
     }
 }
 
-/// The runtime `exe` carries, unpacked under `root` by its first start and
-/// reused by every later one; `None` when it carries none. Every other
-/// runtime under `root` goes, best effort.
+/// The runtime `exe` carries, unpacked under `local_data`'s
+/// [`RUNTIME_PARENT`] by its first start and reused by every later one;
+/// `None` when it carries none. Every other runtime there goes, best effort,
+/// but one that runs.
 pub(crate) fn unpacked_runtime(
     exe: &Path,
-    root: &Path,
+    local_data: &Path,
     version: &str,
 ) -> Result<Option<PathBuf>, String> {
-    runtime(exe, root, version)
+    runtime(exe, &local_data.join(RUNTIME_PARENT), version)
         .map_err(|error| format!("the bundled runtime could not be unpacked: {error}"))
 }
 
@@ -192,31 +213,41 @@ fn extract(file: &mut File, payload: &Payload, into: &Path) -> io::Result<()> {
 }
 
 /// Every runtime under `root` but `keep` goes, best effort: an older one, and
-/// what an unpack that stopped left behind. One whose node.exe runs stays,
-/// whole, for its daemon: Windows does not let a running program be opened
-/// for writing.
+/// what an unpack that stopped left behind. One of which a program runs
+/// ([`runs`]) stays, whole, for its daemon and its windows.
 fn remove_other_runtimes(root: &Path, keep: &Path) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path != keep && !node_runs(&path) {
+        if path != keep && !runs(&path) {
             remove_aside(root, &path);
         }
     }
 }
 
-/// Whether `folder`'s node.exe cannot be opened for writing: on Windows,
-/// because it runs.
-fn node_runs(folder: &Path) -> bool {
-    let node = folder.join("node.exe");
-    node.is_file() && OpenOptions::new().append(true).open(node).is_err()
+/// Whether a program of `folder`'s runtime, its `node.exe` or its
+/// `cli/bin/cf.exe`, cannot be opened for writing: on Windows, because it
+/// runs. For writing, and not for appending: Windows refuses a program that
+/// runs the right to write its data (`FILE_WRITE_DATA`, which `write` asks
+/// for) and grants it the right to append (`FILE_APPEND_DATA`, which is all
+/// `append` asks for: std takes `FILE_WRITE_DATA` out of it). An open for
+/// appending succeeds on a program that runs, and so tells nothing of it.
+fn runs(folder: &Path) -> bool {
+    PROGRAMS.iter().any(|parts| {
+        let program = parts
+            .iter()
+            .fold(folder.to_path_buf(), |path, part| path.join(part));
+        program.is_file() && OpenOptions::new().write(true).open(program).is_err()
+    })
 }
 
 /// Moves `path` into a folder of its own under `root`, then removes that
 /// folder: what goes is never left half there, and what Windows holds on to
-/// stays where it was.
+/// stays where it was. A program that runs is not held so: its folder moves,
+/// and the removal deletes all of it but the program. [`runs`] is what keeps
+/// such a folder, not this.
 fn remove_aside(root: &Path, path: &Path) {
     let Ok(aside) = tempfile::Builder::new()
         .prefix(".removing-")
@@ -252,303 +283,4 @@ pub(crate) fn find_libraries_in(runtime: &Path) -> io::Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Arc;
-
-    use flate2::write::GzEncoder;
-    use flate2::Compression;
-
-    /// A runtime as the packer packs it: node.exe and the CLI, in a
-    /// gzip-compressed tar.
-    fn payload(node: &[u8]) -> Vec<u8> {
-        let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
-        let cli: &[(&str, &[u8])] = &[
-            ("node.exe", node),
-            ("cli/bin/cf.mjs", b"the cli"),
-            ("cli/src/core/daemon.js", b"the core"),
-        ];
-        for (path, body) in cli {
-            let mut header = tar::Header::new_ustar();
-            header.set_size(body.len() as u64);
-            header.set_mode(0o755);
-            tar.append_data(&mut header, path, *body)
-                .expect("add a file");
-        }
-        tar.into_inner()
-            .expect("end the tar")
-            .finish()
-            .expect("end the gzip stream")
-    }
-
-    /// An exe as the packer writes it: the app, its payload, the footer.
-    fn packed(dir: &Path, payload: &[u8]) -> PathBuf {
-        let exe = dir.join("ConsensFlow_9.9.9_x64-portable.exe");
-        let mut bytes = b"MZ the app".to_vec();
-        bytes.extend_from_slice(payload);
-        bytes.extend_from_slice(&(payload.len() as u64).to_le_bytes());
-        bytes.extend_from_slice(b"CFPAYLD1");
-        fs::write(&exe, bytes).expect("write the exe");
-        exe
-    }
-
-    fn crc_of(payload: &[u8]) -> u32 {
-        let mut tar = Vec::new();
-        GzDecoder::new(payload)
-            .read_to_end(&mut tar)
-            .expect("gunzip the payload");
-        let mut crc = flate2::Crc::new();
-        crc.update(&tar);
-        crc.sum()
-    }
-
-    fn entries(root: &Path) -> Vec<String> {
-        let mut names = fs::read_dir(root)
-            .expect("read the runtime root")
-            .map(|entry| {
-                entry
-                    .expect("an entry")
-                    .file_name()
-                    .into_string()
-                    .expect("a name")
-            })
-            .collect::<Vec<_>>();
-        names.sort();
-        names
-    }
-
-    #[test]
-    fn the_footer_finds_the_payload_and_names_its_folder_by_crc() {
-        let dir = tempfile::tempdir().expect("dir");
-        let payload = payload(b"node");
-        let exe = packed(dir.path(), &payload);
-        let found = Payload::find(&mut File::open(&exe).expect("open"))
-            .expect("read")
-            .expect("a payload");
-        assert_eq!(
-            found,
-            Payload {
-                offset: 10,
-                length: payload.len() as u64,
-                crc: crc_of(&payload),
-            }
-        );
-        assert_eq!(
-            found.folder("9.9.9"),
-            format!("9.9.9-{:08x}", crc_of(&payload))
-        );
-    }
-
-    /// The installed app, and the Mac's, carry nothing: they find their
-    /// runtime beside them, and nothing is unpacked.
-    #[test]
-    fn an_exe_without_the_footer_carries_no_runtime() {
-        let dir = tempfile::tempdir().expect("dir");
-        let root = dir.path().join("runtime");
-        for bytes in [
-            &b"MZ"[..],
-            &b"MZ an installed app, longer than a footer"[..],
-        ] {
-            let exe = dir.path().join("ConsensFlow.exe");
-            fs::write(&exe, bytes).expect("write");
-            assert_eq!(unpacked_runtime(&exe, &root, "9.9.9"), Ok(None));
-        }
-        assert!(!root.exists());
-    }
-
-    /// A footer naming more payload than the file holds, or less than any
-    /// gzip stream, is a damaged exe, not one that carries nothing.
-    #[test]
-    fn a_footer_that_cannot_be_right_is_an_error() {
-        let dir = tempfile::tempdir().expect("dir");
-        let exe = dir.path().join("ConsensFlow.exe");
-        for length in [5_u64, 1_000] {
-            let mut bytes = b"MZ the app and some".to_vec();
-            bytes.extend_from_slice(&length.to_le_bytes());
-            bytes.extend_from_slice(b"CFPAYLD1");
-            fs::write(&exe, bytes).expect("write");
-            let error = unpacked_runtime(&exe, &dir.path().join("runtime"), "9.9.9")
-                .expect_err("a damaged exe");
-            assert!(
-                error.starts_with("the bundled runtime could not be unpacked: its footer names"),
-                "{error}"
-            );
-        }
-    }
-
-    /// The first start unpacks node.exe and the CLI, marker last; a later
-    /// start reuses the folder without reading the payload at all.
-    #[test]
-    fn the_first_start_unpacks_the_runtime_and_later_ones_reuse_it() {
-        let dir = tempfile::tempdir().expect("dir");
-        let root = dir.path().join("runtime");
-        let mut payload = payload(b"node");
-        let exe = packed(dir.path(), &payload);
-
-        let folder = unpacked_runtime(&exe, &root, "9.9.9")
-            .expect("unpacked")
-            .expect("a runtime");
-        assert_eq!(folder, root.join(format!("9.9.9-{:08x}", crc_of(&payload))));
-        assert_eq!(fs::read(folder.join("node.exe")).expect("node"), b"node");
-        assert_eq!(
-            fs::read(folder.join("cli/bin/cf.mjs")).expect("cli"),
-            b"the cli"
-        );
-        assert!(folder.join(".unpacked").is_file());
-        assert_eq!(
-            entries(&root),
-            [folder.file_name().unwrap().to_str().unwrap()]
-        );
-
-        // Its compressed bytes damaged, its trailer kept: only a start that
-        // unpacked again would notice.
-        payload[12] ^= 0xff;
-        let exe = packed(dir.path(), &payload);
-        assert_eq!(unpacked_runtime(&exe, &root, "9.9.9"), Ok(Some(folder)));
-    }
-
-    /// gzip's CRC checks the payload: one whose tar does not match the CRC in
-    /// its trailer unpacks nothing and leaves nothing behind.
-    #[test]
-    fn a_payload_that_does_not_match_its_crc_unpacks_nothing() {
-        let dir = tempfile::tempdir().expect("dir");
-        let root = dir.path().join("runtime");
-        let mut payload = payload(b"node");
-        let trailer = payload.len() - 8;
-        payload[trailer] ^= 0xff;
-        let exe = packed(dir.path(), &payload);
-
-        let error = unpacked_runtime(&exe, &root, "9.9.9").expect_err("a damaged payload");
-        assert!(
-            error.starts_with("the bundled runtime could not be unpacked:"),
-            "{error}"
-        );
-        assert_eq!(entries(&root), Vec::<String>::new());
-    }
-
-    /// Copies of the app started at once each unpack, and the first to
-    /// finish names the folder; the others use it.
-    #[test]
-    fn copies_started_at_once_share_one_runtime() {
-        let dir = tempfile::tempdir().expect("dir");
-        let root = Arc::new(dir.path().join("runtime"));
-        let exe = Arc::new(packed(dir.path(), &payload(&vec![7; 512 * 1024])));
-        let copies = (0..4)
-            .map(|_| {
-                let (exe, root) = (Arc::clone(&exe), Arc::clone(&root));
-                thread::spawn(move || unpacked_runtime(&exe, &root, "9.9.9"))
-            })
-            .collect::<Vec<_>>();
-        let folders = copies
-            .into_iter()
-            .map(|copy| {
-                copy.join()
-                    .expect("a copy")
-                    .expect("unpacked")
-                    .expect("a runtime")
-            })
-            .collect::<Vec<_>>();
-
-        assert!(folders.iter().all(|folder| *folder == folders[0]));
-        assert!(folders[0].join(".unpacked").is_file());
-        assert_eq!(
-            fs::read(folders[0].join("node.exe")).expect("node").len(),
-            512 * 1024
-        );
-        assert_eq!(
-            entries(&root),
-            [folders[0].file_name().unwrap().to_str().unwrap()]
-        );
-    }
-
-    /// An unpacked runtime that cannot take its name for a moment (on
-    /// Windows, while an antivirus scans it) takes it once it can.
-    #[cfg(unix)]
-    #[test]
-    fn a_runtime_denied_its_name_for_a_moment_is_placed_once_it_can_be() {
-        use std::os::unix::fs::PermissionsExt;
-        use std::time::Instant;
-
-        let dir = tempfile::tempdir().expect("dir");
-        let root = dir.path().join("runtime");
-        fs::create_dir_all(root.join(".unpacking-done")).expect("an unpacked runtime");
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).expect("deny");
-        let allowed = {
-            let root = root.clone();
-            thread::spawn(move || {
-                thread::sleep(Duration::from_millis(200));
-                fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).expect("allow");
-            })
-        };
-        let started = Instant::now();
-        let placed = place(&root.join(".unpacking-done"), &root.join("9.9.9-00000001"));
-        allowed.join().expect("allowed");
-
-        placed.expect("placed");
-        assert!(started.elapsed() >= Duration::from_millis(200));
-        assert_eq!(entries(&root), ["9.9.9-00000001"]);
-    }
-
-    /// A folder under the runtime's name without its marker, which no start
-    /// of the app leaves, is unpacked again.
-    #[test]
-    fn a_runtime_folder_without_its_marker_is_unpacked_again() {
-        let dir = tempfile::tempdir().expect("dir");
-        let root = dir.path().join("runtime");
-        let payload = payload(b"node");
-        let exe = packed(dir.path(), &payload);
-        let damaged = root.join(format!("9.9.9-{:08x}", crc_of(&payload)));
-        fs::create_dir_all(damaged.join("cli")).expect("a damaged runtime");
-        fs::write(damaged.join("stray"), b"left").expect("a stray file");
-
-        let folder = unpacked_runtime(&exe, &root, "9.9.9")
-            .expect("unpacked")
-            .expect("a runtime");
-        assert_eq!(folder, damaged);
-        assert!(folder.join(".unpacked").is_file());
-        assert!(folder.join("node.exe").is_file());
-        assert!(!folder.join("stray").exists());
-        assert_eq!(
-            entries(&root),
-            [folder.file_name().unwrap().to_str().unwrap()]
-        );
-    }
-
-    /// Older runtimes, and what a stopped unpack left, go once this one is in
-    /// place; a runtime whose node.exe cannot be written, as a running one
-    /// cannot on Windows, stays whole.
-    #[test]
-    fn other_runtimes_go_but_one_whose_node_runs_stays() {
-        let dir = tempfile::tempdir().expect("dir");
-        let root = dir.path().join("runtime");
-        for old in ["9.9.8-00000001", "9.9.8-00000002", ".unpacking-stopped"] {
-            fs::create_dir_all(root.join(old).join("cli")).expect("an old runtime");
-            fs::write(root.join(old).join("node.exe"), b"old node").expect("its node");
-        }
-        let running = root.join("9.9.8-00000002").join("node.exe");
-        let mut permissions = fs::metadata(&running).expect("node").permissions();
-        permissions.set_readonly(true);
-        fs::set_permissions(&running, permissions.clone()).expect("read-only node");
-
-        let exe = packed(dir.path(), &payload(b"node"));
-        let folder = unpacked_runtime(&exe, &root, "9.9.9")
-            .expect("unpacked")
-            .expect("a runtime");
-        let kept = entries(&root);
-        #[allow(clippy::permissions_set_readonly_false)]
-        permissions.set_readonly(false);
-        fs::set_permissions(&running, permissions).expect("writable again");
-
-        assert_eq!(
-            kept,
-            [
-                "9.9.8-00000002",
-                folder.file_name().unwrap().to_str().unwrap()
-            ]
-        );
-        assert!(
-            root.join("9.9.8-00000002").join("cli").is_dir(),
-            "left whole"
-        );
-    }
-}
+mod tests;

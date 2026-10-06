@@ -90,6 +90,34 @@ describe('the portable Windows exe', () => {
       refusesWithout(piece)
     }
   })
+
+  // The app unpacks its runtime under a parent of its own (portable.rs), out of
+  // reach of the collector of the apps before the flip release, which empties
+  // `runtime`. What looks for the runtime by name has to name that parent.
+  it('is unpacked into the folder the workflows and the packer name', () => {
+    const rust = readFileSync(new URL('../app/src-tauri/src/portable.rs', import.meta.url), 'utf8')
+    const parent = /const RUNTIME_PARENT: &str = "([^"]+)";/.exec(rust)?.[1]
+    assert.ok(parent, 'portable.rs names no RUNTIME_PARENT')
+    assert.notEqual(parent, 'runtime', 'the old apps empty `runtime`')
+    // The release page tells where the portable exe unpacks; its text is the publisher's.
+    for (const file of [
+      '.github/workflows/windows-build.yml',
+      'app/scripts/publish.mjs',
+      'app/scripts/portable.mjs',
+    ]) {
+      const text = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
+      const folders = [...text.matchAll(/dev\.ngvoicu\.consensflow\\+([a-z-]*runtime)/g)].map(
+        (named) => named[1],
+      )
+      assert.ok(folders.includes(parent), `${file} does not name ${parent}`)
+      // The one mention of the old folder is the workflow's check that nothing went into it.
+      assert.deepEqual(
+        folders.filter((folder) => folder !== parent),
+        file.endsWith('windows-build.yml') ? ['runtime'] : [],
+        `${file} looks in a folder other than ${parent}`,
+      )
+    }
+  })
 })
 
 /** The portable build of a release folder without `piece`: refused, naming it. */

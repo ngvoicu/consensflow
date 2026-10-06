@@ -119,19 +119,18 @@ fn present(node: PathBuf, cli: PathBuf) -> Result<(PathBuf, PathBuf), String> {
 }
 
 /// The portable app's runtime (see `portable`), unpacked from its own exe by
-/// its first start into the app's local data folder: on Windows,
-/// `%LOCALAPPDATA%\<identifier>\runtime`. `None` for an app installed with its
-/// runtime beside it.
+/// its first start under the app's local data folder: on Windows,
+/// `%LOCALAPPDATA%\<identifier>\portable-runtime`. `None` for an app
+/// installed with its runtime beside it.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn portable_runtime(app: &AppHandle) -> Result<Option<PathBuf>, String> {
     let exe = std::env::current_exe()
         .map_err(|error| format!("the app could not find itself: {error}"))?;
-    let root = app
+    let local_data = app
         .path()
         .app_local_data_dir()
-        .map_err(|error| format!("the app could not find its local data folder: {error}"))?
-        .join("runtime");
-    crate::portable::unpacked_runtime(&exe, &root, &app.package_info().version.to_string())
+        .map_err(|error| format!("the app could not find its local data folder: {error}"))?;
+    crate::portable::unpacked_runtime(&exe, &local_data, &app.package_info().version.to_string())
 }
 
 /// A Windows path without the `\\?\` verbatim prefix; any other path as it is.

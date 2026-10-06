@@ -24,6 +24,7 @@ import { DAEMON_LEGS, runLeg } from './legs.mjs'
 
 const REPO = fileURLToPath(new URL('..', import.meta.url))
 const SUITES = [
+  'tests/agents-proof.test.mjs',
   'tests/core-daemon.test.mjs',
   'tests/bridge.test.mjs',
   'tests/integration/daemon-seam.test.mjs',
