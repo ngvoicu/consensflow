@@ -3,7 +3,9 @@
  * The portable Windows app: one exe to run from anywhere, without installing.
  * ConsensFlow.exe carries its own Node and CLI, and the terminals' console
  * host, after its own bytes, and its first start unpacks them into
- * %LOCALAPPDATA%\dev.ngvoicu.consensflow\runtime.
+ * %LOCALAPPDATA%\dev.ngvoicu.consensflow\portable-runtime (not `runtime`,
+ * which the apps before the flip release empty of every runtime whose node.exe
+ * is not running).
  * The file's layout, and how the app reads it, are written down once, in
  * app/src-tauri/src/portable.rs. Its data lives where the installed app's
  * does (%USERPROFILE%\.consensflow), and the app installs no update in place

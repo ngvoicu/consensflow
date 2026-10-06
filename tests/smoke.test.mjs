@@ -110,7 +110,23 @@ function locateApp() {
       }
     }
   }
-  return { app, binary, node, cli, why: null }
+  return { app, binary, node, cli, cf, why: null }
+}
+
+/**
+ * What the first line of a daemon's log says of the daemon that started: Node's
+ * names its runtime (`node v26…`), the native one says `rust`. Which of the two
+ * the app starts is the app's to choose (`CONSENSFLOW_DAEMON`, and its default),
+ * so the smoke reads which ran from the log, and holds it to the choice made.
+ */
+const START_LINES = {
+  node: / start pid \d+ node v\d+\.\d+\.\d+ home /,
+  native: / start pid \d+ rust \S+ home /,
+}
+
+/** `node`, `native`, or null where the line is neither's. */
+function daemonOf(line) {
+  return Object.entries(START_LINES).find(([, pattern]) => pattern.test(line))?.[0] ?? null
 }
 
 /** Skips only when nobody asked for the smoke; a requested one never skips. */
@@ -451,6 +467,37 @@ function alive(pid) {
   }
 }
 
+/**
+ * Runs the BUNDLE's own `cf` from outside this checkout, as a second
+ * ConsensFlow on the home the app is using, and says how it ended. Its input is
+ * closed, so a daemon that started would stop at once; one that is still going
+ * after 30 seconds is killed, and its signal says so.
+ */
+function withPackagedCf(cf, box, args, extraEnv = {}) {
+  return new Promise((done) => {
+    const child = spawn(cf, args, {
+      cwd: box.probe,
+      env: { ...box.env, ...extraEnv },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let out = ''
+    let err = ''
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (chunk) => {
+      out += chunk
+    })
+    child.stderr.on('data', (chunk) => {
+      err += chunk
+    })
+    const timer = setTimeout(() => child.kill('SIGKILL'), 30_000)
+    child.on('exit', (code, signal) => {
+      clearTimeout(timer)
+      done({ code, signal, out, err })
+    })
+  })
+}
+
 /** Runs a script with the BUNDLE's node, outside this checkout. */
 function withBundledNode(node, box, script, extraEnv = {}) {
   const file = join(box.probe, `probe-${Math.random().toString(36).slice(2)}.mjs`)
@@ -506,10 +553,24 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   //    `project.open`, the production operation.
   const opened = await app.waitFor('project')
   assert.equal(opened.data.ok, true, `project.open refused: ${JSON.stringify(opened.data)}`)
-  // The daemon the app chose: Node's, or the native one behind its switch.
+  // The daemon the app chose, Node's or the native one: its own log says which
+  // started, and a choice made by name (`CONSENSFLOW_DAEMON`) is the one that ran.
   const [started] = readFileSync(join(box.env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8').split('\n')
-  const runtime = box.env.CONSENSFLOW_DAEMON === 'native' ? / start pid \d+ rust / : / node v/
-  assert.match(started, runtime, `the daemon's first line: ${started}`)
+  const ran = daemonOf(started)
+  assert.notEqual(
+    ran,
+    null,
+    `the daemon's first line is neither Node's nor the native one's: ${started}`,
+  )
+  const asked = box.env.CONSENSFLOW_DAEMON
+  if (asked !== undefined) {
+    assert.ok(
+      asked in START_LINES,
+      `CONSENSFLOW_DAEMON is ${asked}: the smoke knows node and native`,
+    )
+    assert.equal(ran, asked, `asked for the ${asked} daemon, the ${ran} one started: ${started}`)
+  }
+  t.diagnostic(`the daemon that ran: ${ran} (${asked ? 'asked for' : "the app's default"})`)
 
   const rendered = await app.waitFor('rendered')
   assert.match(rendered.data.banner, new RegExp(`CFSMOKE-READY ${box.tag}`))
@@ -675,6 +736,25 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     /^REFUSED ledger-locked another ConsensFlow has .*consensflow\.db open/m,
     `the bundled node opened the running app's ledger: ${lock.out}`,
   )
+
+  // 6b. A second packaged `cf ui` on the app's home is a second ConsensFlow,
+  //     and the same lock refuses it, whichever daemon holds the ledger. Exit 1
+  //     alone could be a dependency the bundle lacks, so it is the ledger's own
+  //     words that must be on stderr, and no handle line on stdout. It asks for
+  //     the daemon that is running, and Node's runs on the bundle's Node, as a
+  //     window's cf is given it.
+  const second = await withPackagedCf(found.cf, box, ['ui', '--json', '--no-open'], {
+    CONSENSFLOW_DAEMON: ran,
+    CONSENSFLOW_NODE: found.node,
+  })
+  assert.equal(second.signal, null, `the second cf ui never ended: ${second.out}${second.err}`)
+  assert.equal(second.code, 1, `the second cf ui ended ${second.code}: ${second.out}${second.err}`)
+  assert.match(
+    second.err,
+    /^cf: another ConsensFlow has .*consensflow\.db open$/m,
+    `the second cf ui was refused, but not for the ledger's lock: ${second.err}`,
+  )
+  assert.equal(second.out, '', `the second cf ui printed a handle line: ${second.out}`)
 
   // 7. The app's own exit: stdin EOF, `RunEvent::Exit`, and nothing left.
   const settled = await app.waitFor('settled')

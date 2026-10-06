@@ -15,11 +15,17 @@ pub enum Channel {
 }
 
 impl Channel {
+    /// The feed this channel's apps read: the `latest.json` of a rolling
+    /// GitHub release, which the macOS updater and the Windows page both read
+    /// here. `app/feeds.json` names the feeds and `app/scripts/feeds.mjs`
+    /// moves them. The apps before the flip release read `update-alpha` and
+    /// `update-stable`; those stay pinned to the flip release, with its assets,
+    /// for the apps that read them still.
     fn endpoint(self) -> url::Url {
         let tag = if self == Self::Alpha {
-            "update-alpha"
+            "feed-alpha"
         } else {
-            "update-stable"
+            "feed-stable"
         };
         format!("https://github.com/ngvoicu/consensflow/releases/download/{tag}/latest.json")
             .parse()
@@ -667,6 +673,36 @@ mod tests {
             preferences_directory(&home, Some(PathBuf::from("/isolated/state"))),
             PathBuf::from("/isolated/state/app")
         );
+    }
+
+    /// What an installed app reads is a promise to it for as long as it is
+    /// installed: the two feeds, pinned here, and the same two the release
+    /// workflow moves (`app/feeds.json`, which `app/scripts/feeds.mjs` reads).
+    /// The macOS updater and the Windows page both take their address from
+    /// `Channel::endpoint`. The feeds of the apps before the flip release are
+    /// not among them.
+    #[test]
+    fn each_channel_reads_its_own_feed_and_the_manifest_the_workflow_moves_names_the_same() {
+        let download = "https://github.com/ngvoicu/consensflow/releases/download";
+        assert_eq!(
+            Channel::Alpha.endpoint().as_str(),
+            format!("{download}/feed-alpha/latest.json")
+        );
+        assert_eq!(
+            Channel::Stable.endpoint().as_str(),
+            format!("{download}/feed-stable/latest.json")
+        );
+        let manifest: Value = serde_json::from_str(include_str!("../../feeds.json")).unwrap();
+        for (channel, name) in [(Channel::Alpha, "alpha"), (Channel::Stable, "stable")] {
+            let feed = manifest["feeds"][name].as_str().unwrap();
+            let legacy = manifest["legacy"][name].as_str().unwrap();
+            assert_eq!(
+                channel.endpoint().as_str(),
+                format!("{download}/{feed}/latest.json"),
+                "{name}"
+            );
+            assert_ne!(feed, legacy, "{name}: the new feed is not the old one");
+        }
     }
 
     #[test]
