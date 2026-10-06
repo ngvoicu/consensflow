@@ -26,8 +26,11 @@
 # that from the feeds, not from the tags, since a bridge whose release failed
 # leaves its tag behind and the old apps where they were. It fails before it
 # moves anything when they do not. Nothing deletes the release the old feeds
-# name. The rule and its checks are app/scripts/feeds.mjs's, the moving is
-# app/scripts/publish.mjs's, which a run that died is finished by running again.
+# name. No run moves a feed backward: the job of a release that is run again
+# from the Actions page after a later one went out does what is left of it and
+# leaves a feed that names the later release as it is, and says so. The rule and
+# its checks are app/scripts/feeds.mjs's, the moving is app/scripts/publish.mjs's,
+# which a run that died is finished by running again.
 name: Release
 
 on:
@@ -216,8 +219,10 @@ jobs:
       # bridge with its files), the versioned release, whose files are held to
       # the ones built here (a release made by a run that died is finished, not
       # refused for existing), then each feed the rule names, its latest.json
-      # swapped in without a moment spent deleted. Run again after a failure, it
-      # finishes the work.
+      # swapped in without a moment spent deleted, and left alone where it
+      # already names a later release. Run again after a failure, it finishes
+      # the work; it leaves feeds-before.json in this folder, what each new feed
+      # named before it changed any, for the check below.
       - name: Publish the release, then its update feeds
         working-directory: ${{ runner.temp }}/dist
         run: |
@@ -226,9 +231,10 @@ jobs:
             --base "https://github.com/$GITHUB_REPOSITORY/releases/download"
       # What the rule says, read back from where installed apps read it: every
       # file of the release downloads as the one built, every new feed of its
-      # channels serves its latest.json, and the old feeds in use serve the
-      # bridge, with the archive, installer and portable the old apps need
-      # (app/scripts/feeds.mjs).
+      # channels serves its latest.json (or names a later release, which the
+      # publisher left it at, and never one that went back), and the old feeds
+      # in use serve the bridge, with the archive, installer and portable the
+      # old apps need (app/scripts/feeds.mjs).
       - name: The feeds serve this release, and its archive downloads
         working-directory: ${{ runner.temp }}/dist
         run: |

@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { checkFeeds, checkManifest } from '../app/scripts/feeds.mjs'
+import { checkFeeds, checkManifest, FEEDS_BEFORE } from '../app/scripts/feeds.mjs'
 import { publishRelease } from '../app/scripts/publish.mjs'
 import { builtFiles, folderOf, githubSim, latestJson, publishedAssets } from './github-sim.mjs'
 
@@ -21,7 +21,8 @@ import { builtFiles, folderOf, githubSim, latestJson, publishedAssets } from './
  * The publisher (app/scripts/publish.mjs), run against GitHub as
  * tests/github-sim.mjs has it: every half-done state a run can be cut short
  * in, finished by running it again; no file of a feed ever deleted for its
- * replacement; and the rule's refusals, which move nothing.
+ * replacement; no feed ever moved backward, by a run that is run again after a
+ * later release went out; and the rule's refusals, which move nothing.
  */
 
 const SCRIPT = fileURLToPath(new URL('../app/scripts/publish.mjs', import.meta.url))
@@ -29,6 +30,7 @@ const SCRIPT = fileURLToPath(new URL('../app/scripts/publish.mjs', import.meta.u
 const BRIDGE = '3.0.0-alpha.81'
 const OLDER = '3.0.0-alpha.80'
 const LATER = '3.0.0-alpha.82'
+const NEWER = '3.0.0-alpha.83'
 const RULE = checkManifest({
   feeds: { alpha: 'feed-alpha', stable: 'feed-stable' },
   legacy: { alpha: 'update-alpha', stable: 'update-stable' },
@@ -379,6 +381,343 @@ describe('the bridge that failed before it moved update-alpha, and the release a
       for (const dir of dirs) rmSync(dir, { recursive: true, force: true })
       await github.close()
     }
+  })
+})
+
+/**
+ * A world in which several releases are published one after another, each built
+ * once into a folder of its own, so that running one again has its original
+ * artifacts: update-alpha serves the release before the bridge, as it does until
+ * the bridge is published. `publish(version)` is the publisher on that folder,
+ * with the lines it logged in `log`; `check(version)` is what the feeds are
+ * asked afterwards, and `recorded(version)` what the publisher left it to hold
+ * them to.
+ */
+async function releasing() {
+  const github = await githubSim()
+  github.release('update-alpha', {
+    prerelease: true,
+    assets: { [LATEST]: latestJson(github.base, OLDER) },
+  })
+  const built = new Map()
+  const log = []
+  const folder = (version) => {
+    if (!built.has(version)) {
+      const files = builtFiles(github.base, version)
+      built.set(version, { files, dir: folderOf(files) })
+    }
+    return built.get(version)
+  }
+  return {
+    github,
+    log,
+    /** What release `version` is built as: its files by path, and the latest.json it publishes. */
+    latest: (version) => folder(version).files[LATEST],
+    publish(version, extra = {}) {
+      log.length = 0
+      return publishRelease({
+        dir: folder(version).dir,
+        tag: `v${version}`,
+        base: github.base,
+        repo: github.repo,
+        gh: github.gh,
+        manifest: RULE,
+        members: () => OLD_LAYOUT,
+        patience: QUICK,
+        log: (line) => log.push(line),
+        ...extra,
+      })
+    },
+    check: (version) =>
+      checkFeeds({
+        dir: folder(version).dir,
+        version,
+        base: github.base,
+        manifest: RULE,
+        ...QUICK,
+      }),
+    recorded: (version) =>
+      JSON.parse(readFileSync(join(folder(version).dir, FEEDS_BEFORE), 'utf8')),
+    done: async () => {
+      for (const { dir } of built.values()) rmSync(dir, { recursive: true, force: true })
+      await github.close()
+    },
+  }
+}
+
+describe('a run that is run again after a later release was published', () => {
+  it("leaves feed-alpha at alpha.82 when alpha.81's failed publish is run again, and finishes what is left", async () => {
+    const world = await releasing()
+    try {
+      const { github } = world
+      const bridge = world.latest(BRIDGE)
+      // 1. alpha.81 reaches both feeds, and the edit that marks update-alpha as pinned fails.
+      github.fail((args) => args[1] === 'edit' && args[2] === 'update-alpha' && 'the edit failed')
+      await assert.rejects(world.publish(BRIDGE), /marking update-alpha as pinned: the edit failed/)
+      assert.equal(github.asset('feed-alpha', LATEST).toString(), bridge)
+      assert.equal(github.asset('update-alpha', LATEST).toString(), bridge)
+      assert.equal(github.title('update-alpha'), 'update-alpha', 'not marked as pinned')
+
+      // 2. alpha.82 finds the bridge delivered, and moves feed-alpha.
+      github.fail(() => undefined)
+      const next = await world.publish(LATER)
+      assert.deepEqual(next.feeds, { 'feed-alpha': 'replaced' })
+      assert.equal(github.asset('feed-alpha', LATEST).toString(), world.latest(LATER))
+
+      // 3. alpha.81's publish is run again with its original artifacts.
+      const asked = github.calls.length
+      const again = await world.publish(BRIDGE)
+      assert.equal(
+        github.asset('feed-alpha', LATEST).toString(),
+        world.latest(LATER),
+        'feed-alpha still names alpha.82',
+      )
+      assert.deepEqual(again, {
+        version: BRIDGE,
+        release: 'kept',
+        feeds: { 'feed-alpha': `superseded by ${LATER}`, 'update-alpha': 'kept' },
+      })
+      assert.ok(
+        world.log.includes(
+          `feed-alpha names ${LATER}, which comes after ${BRIDGE}: it is left alone, and nothing is moved backward`,
+        ),
+        world.log.join('\n'),
+      )
+      assert.deepEqual(
+        changes({ calls: github.calls.slice(asked) }).map((args) => args.slice(0, 3)),
+        [['release', 'edit', 'update-alpha']],
+        'the only change is the pin that was left to finish',
+      )
+      assert.equal(github.title('update-alpha'), 'Alpha update feed, pinned')
+      assert.equal(github.asset('update-alpha', LATEST).toString(), bridge, 'still the bridge')
+
+      // The check holds both to the rule: alpha.81 finds feed-alpha at a later release, alpha.82 finds it serving itself.
+      assert.deepEqual(await world.check(BRIDGE), [])
+      assert.deepEqual(await world.check(LATER), [])
+      assert.deepEqual(world.recorded(BRIDGE), { 'feed-alpha': LATER }, 'what it read before')
+
+      // What a publisher that moved feed-alpha back would leave: it serves what alpha.81 published, so only what the
+      // feed named before says it went backward. The check does not approve it, and neither does the later release's.
+      github.put('feed-alpha', LATEST, bridge)
+      assert.deepEqual(await world.check(BRIDGE), [
+        `feed-alpha went backward: it named ${LATER} when this release was published, and names ${BRIDGE} now`,
+      ])
+      assert.deepEqual(await world.check(LATER), [
+        "feed-alpha does not serve this release's latest.json",
+      ])
+    } finally {
+      await world.done()
+    }
+  })
+
+  it('leaves the check a record of what each new feed named before the run changed it, and none of the old feed', async () => {
+    const world = await releasing()
+    try {
+      await world.publish(BRIDGE)
+      assert.deepEqual(world.recorded(BRIDGE), { 'feed-alpha': null }, 'no feed yet')
+      await world.publish(LATER)
+      assert.deepEqual(world.recorded(LATER), { 'feed-alpha': BRIDGE })
+      await world.publish(NEWER)
+      assert.deepEqual(world.recorded(NEWER), { 'feed-alpha': LATER })
+      await world.publish(LATER)
+      assert.deepEqual(world.recorded(LATER), { 'feed-alpha': NEWER }, 'as of the run again')
+      await world.publish('3.0.1')
+      assert.deepEqual(world.recorded('3.0.1'), { 'feed-alpha': NEWER, 'feed-stable': null })
+    } finally {
+      await world.done()
+    }
+  })
+
+  it('leaves feed-alpha at alpha.83 when alpha.82 is run again, which has nothing left to do', async () => {
+    const world = await releasing()
+    try {
+      const { github } = world
+      await world.publish(BRIDGE)
+      await world.publish(LATER)
+      assert.deepEqual(await world.check(LATER), [], 'the job that published it was right')
+      await world.publish(NEWER)
+      const asked = github.calls.length
+      const again = await world.publish(LATER)
+      assert.deepEqual(again, {
+        version: LATER,
+        release: 'kept',
+        feeds: { 'feed-alpha': `superseded by ${NEWER}` },
+      })
+      assert.equal(github.asset('feed-alpha', LATEST).toString(), world.latest(NEWER))
+      assert.deepEqual(changes({ calls: github.calls.slice(asked) }), [], 'nothing was changed')
+      assert.ok(
+        world.log.includes(
+          `feed-alpha names ${NEWER}, which comes after ${LATER}: it is left alone, and nothing is moved backward`,
+        ),
+        world.log.join('\n'),
+      )
+      assert.deepEqual(await world.check(LATER), [])
+      assert.deepEqual(await world.check(NEWER), [])
+    } finally {
+      await world.done()
+    }
+  })
+
+  it('leaves both feeds of a stable release that two later ones are past, and changes nothing', async () => {
+    const world = await releasing()
+    try {
+      const { github } = world
+      await world.publish(BRIDGE)
+      const first = await world.publish('3.0.1')
+      assert.deepEqual(first.feeds, { 'feed-alpha': 'replaced', 'feed-stable': 'created' })
+      await world.publish('3.0.2')
+      const asked = github.calls.length
+      const again = await world.publish('3.0.1')
+      assert.deepEqual(again.feeds, {
+        'feed-alpha': 'superseded by 3.0.2',
+        'feed-stable': 'superseded by 3.0.2',
+      })
+      for (const feed of ['feed-alpha', 'feed-stable']) {
+        assert.equal(github.asset(feed, LATEST).toString(), world.latest('3.0.2'), feed)
+      }
+      assert.deepEqual(changes({ calls: github.calls.slice(asked) }), [])
+      assert.deepEqual(await world.check('3.0.1'), [])
+    } finally {
+      await world.done()
+    }
+  })
+
+  it('moves the stable feed of a stable fix, and leaves the alpha feed alone while the alpha line is ahead', async () => {
+    const world = await releasing()
+    try {
+      const { github } = world
+      await world.publish(BRIDGE)
+      await world.publish('3.0.0')
+      await world.publish('3.1.0-alpha.1')
+      assert.equal(github.asset('feed-stable', LATEST).toString(), world.latest('3.0.0'))
+      const fix = await world.publish('3.0.1')
+      assert.deepEqual(fix.feeds, {
+        'feed-alpha': 'superseded by 3.1.0-alpha.1',
+        'feed-stable': 'replaced',
+      })
+      assert.equal(github.asset('feed-alpha', LATEST).toString(), world.latest('3.1.0-alpha.1'))
+      assert.equal(github.asset('feed-stable', LATEST).toString(), world.latest('3.0.1'))
+      assert.deepEqual(await world.check('3.0.1'), [])
+    } finally {
+      await world.done()
+    }
+  })
+
+  it('leaves the old feed alone where it is past the bridge, and the check says what it is: only a person moves a pinned feed', async () => {
+    const world = await releasing()
+    try {
+      const { github } = world
+      const past = latestJson(github.base, '3.0.0-alpha.85')
+      github.release('update-alpha', { prerelease: true, assets: { [LATEST]: past } })
+      const done = await world.publish(BRIDGE)
+      assert.deepEqual(done.feeds, {
+        'feed-alpha': 'created',
+        'update-alpha': 'superseded by 3.0.0-alpha.85',
+      })
+      assert.equal(github.asset('update-alpha', LATEST).toString(), past, 'not moved back')
+      assert.deepEqual(
+        changes(github).filter((args) => args.includes('update-alpha') && args[1] !== 'edit'),
+        [],
+      )
+      assert.deepEqual(await world.check(BRIDGE), [
+        `update-alpha serves 3.0.0-alpha.85, not the bridge ${BRIDGE}: the apps that read it do not reach the bridge`,
+      ])
+    } finally {
+      await world.done()
+    }
+  })
+
+  it('moves a feed that names this very release with other bytes, for equal is not later', async () => {
+    await within(BRIDGE, {}, async ({ github, files, publish }) => {
+      github.release('feed-alpha', {
+        prerelease: true,
+        assets: { [LATEST]: latestJson(github.base, BRIDGE, 'other notes') },
+      })
+      const done = await publish()
+      assert.equal(done.feeds['feed-alpha'], 'replaced')
+      assert.equal(github.asset('feed-alpha', LATEST).toString(), files[LATEST])
+    })
+  })
+
+  for (const [what, body] of [
+    ['is not a latest.json', '<html>an error page</html>'],
+    ['is JSON of no release', 'null'],
+    ['has no version', '{"notes":"no version"}'],
+    ['names a version that is not a semantic one', '{"version":"banana"}'],
+    ['names a version that is not a string', '{"version":7}'],
+  ]) {
+    it(`moves a feed whose latest.json ${what}: it names no release`, async () => {
+      await within(LATER, {}, async ({ github, files, dir, publish, check }) => {
+        github.release('feed-alpha', { prerelease: true, assets: { [LATEST]: body } })
+        const done = await publish()
+        assert.deepEqual(done.feeds, { 'feed-alpha': 'replaced' })
+        assert.equal(github.asset('feed-alpha', LATEST).toString(), files[LATEST])
+        assert.deepEqual(
+          JSON.parse(readFileSync(join(dir, FEEDS_BEFORE), 'utf8')),
+          { 'feed-alpha': null },
+          'it named none',
+        )
+        assert.deepEqual(await check(), [])
+      })
+    })
+  }
+
+  it('changes no feed it cannot read, which may name a later release, and says so; run again it finishes', async () => {
+    for (const [instead, says] of [
+      [
+        503,
+        new RegExp(
+          `feed-alpha cannot be read \\(HTTP 503\\): it is not known whether it names a release after ${LATER.replaceAll('.', '\\.')}, and no feed is moved backward`,
+        ),
+      ],
+      ['reset', /feed-alpha cannot be read \(unreachable: /],
+    ]) {
+      await within(LATER, {}, async ({ github, files, publish, check }) => {
+        github.release('feed-alpha', {
+          prerelease: true,
+          assets: { [LATEST]: latestJson(github.base, BRIDGE) },
+        })
+        github.override('/feed-alpha/latest.json', instead)
+        await assert.rejects(publish(), says)
+        assert.deepEqual(
+          changes(github).filter((args) => args.includes('feed-alpha')),
+          [],
+          'feed-alpha was not touched',
+        )
+        github.override('/feed-alpha/latest.json', undefined)
+        const done = await publish()
+        assert.equal(done.feeds['feed-alpha'], 'replaced')
+        assert.equal(github.asset('feed-alpha', LATEST).toString(), files[LATEST])
+        assert.deepEqual(await check(), [])
+      })
+    }
+  })
+
+  it('reads a feed again past a blip, and swaps a latest.json that is listed and not served at all', async () => {
+    await within(LATER, {}, async ({ github, publish }) => {
+      github.release('feed-alpha', {
+        prerelease: true,
+        assets: { [LATEST]: latestJson(github.base, BRIDGE) },
+      })
+      let asked = 0
+      github.override('/feed-alpha/latest.json', () => {
+        asked += 1
+        return asked < 2 ? 503 : undefined
+      })
+      const done = await publish()
+      assert.equal(done.feeds['feed-alpha'], 'replaced')
+      assert.equal(asked, 2, 'read again after the blip')
+    })
+    await within(LATER, {}, async ({ github, files, publish }) => {
+      github.release('feed-alpha', {
+        prerelease: true,
+        assets: { [LATEST]: latestJson(github.base, BRIDGE) },
+      })
+      github.override('/feed-alpha/latest.json', 404)
+      const done = await publish()
+      assert.equal(done.feeds['feed-alpha'], 'replaced', 'a broken one is mended')
+      assert.equal(github.asset('feed-alpha', LATEST).toString(), files[LATEST])
+    })
   })
 })
 

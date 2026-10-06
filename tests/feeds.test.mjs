@@ -11,7 +11,9 @@ import {
   checkManifest,
   checkPrerequisites,
   compareVersions,
+  FEEDS_BEFORE,
   feedsMoved,
+  laterRelease,
   MANIFEST,
   membersOf,
   missingForOldApps,
@@ -123,6 +125,35 @@ describe('which release comes before which', () => {
     assert.equal(compareVersions(OLDER, BRIDGE), -1, 'the release before the bridge')
     assert.equal(compareVersions(LATER, BRIDGE), 1, 'the release after it')
     assert.throws(() => compareVersions('3.0', '3.0.0'), /not a semantic version/)
+  })
+
+  it('says which release a feed names where that one is after a given release, and none where it is not', () => {
+    const feed = (version) => latestJson('http://example.test', version)
+    assert.equal(laterRelease(feed(LATER), BRIDGE), LATER)
+    assert.equal(laterRelease(Buffer.from(feed(LATER)), BRIDGE), LATER, 'bytes, as a feed is read')
+    assert.equal(laterRelease(feed('3.0.0-alpha.10'), '3.0.0-alpha.9'), '3.0.0-alpha.10')
+    assert.equal(
+      laterRelease(feed('3.0.0'), '3.0.0-alpha.99'),
+      '3.0.0',
+      'a release is after its alphas',
+    )
+    assert.equal(laterRelease(feed('3.1.0-alpha.1'), '3.0.1'), '3.1.0-alpha.1')
+    for (const [name, body, version] of [
+      ['the same release', feed(BRIDGE), BRIDGE],
+      ['an earlier one', feed(OLDER), BRIDGE],
+      ['an alpha, for the release it leads to', feed('3.0.0-alpha.99'), '3.0.0'],
+      ['an earlier alpha number', feed('3.0.0-alpha.9'), '3.0.0-alpha.10'],
+      ['something that is not JSON', '<html>an error page</html>', BRIDGE],
+      ['an empty body', '', BRIDGE],
+      ['JSON of nothing', 'null', BRIDGE],
+      ['JSON of a list', '[]', BRIDGE],
+      ['JSON with no version', '{"notes":"none"}', BRIDGE],
+      ['a version that is not a string', '{"version":9}', BRIDGE],
+      ['a version that is not a semantic one', '{"version":"99"}', BRIDGE],
+      ['a version with a prefix', '{"version":"v99.0.0"}', BRIDGE],
+    ]) {
+      assert.equal(laterRelease(body, version), null, name)
+    }
   })
 })
 
@@ -672,6 +703,120 @@ describe('after a release is published: the files and the feeds serve what the r
     )
   })
 
+  it('accepts a new feed that names a later release, which a run of this release left alone, and does not wait for it', async () => {
+    const world = await afterPublishing(LATER)
+    try {
+      world.github.release('feed-alpha', {
+        prerelease: true,
+        assets: { 'latest.json': latestJson(world.github.base, '3.0.0-alpha.83') },
+      })
+      assert.deepEqual(await world.check(), [])
+      assert.equal(
+        world.github.requests.filter((path) => path === '/feed-alpha/latest.json').length,
+        1,
+        'read once: no wait turns a later release into this one',
+      )
+    } finally {
+      await world.done()
+    }
+  })
+
+  it('does not approve a feed that names an earlier release, this one with other bytes, or none', async () => {
+    for (const [what, body] of [
+      ['an earlier release', (base) => latestJson(base, BRIDGE)],
+      ['this release with other bytes', (base) => latestJson(base, LATER, 'other notes')],
+      ['not a latest.json', () => '<html>an error page</html>'],
+      ['a version that is not a semantic one', () => '{"version":"banana"}'],
+      ['no version', () => '{"notes":"none"}'],
+    ]) {
+      const problems = await found(LATER, (github) =>
+        github.release('feed-alpha', {
+          prerelease: true,
+          assets: { 'latest.json': body(github.base) },
+        }),
+      )
+      assert.deepEqual(problems, ["feed-alpha does not serve this release's latest.json"], what)
+    }
+  })
+
+  it('holds each feed of a stable release alone: the later one is accepted, the earlier is not', async () => {
+    const stable = '3.0.1'
+    const world = await afterPublishing(stable)
+    try {
+      const { github, files } = world
+      github.release('feed-stable', {
+        prerelease: true,
+        assets: { 'latest.json': files['latest.json'] },
+      })
+      assert.deepEqual(await world.check(), [], 'both serve it')
+      github.release('feed-alpha', {
+        prerelease: true,
+        assets: { 'latest.json': latestJson(github.base, '3.1.0-alpha.1') },
+      })
+      assert.deepEqual(await world.check(), [], 'the alpha line is ahead: that feed is left alone')
+      github.release('feed-stable', {
+        prerelease: true,
+        assets: { 'latest.json': latestJson(github.base, '3.0.0') },
+      })
+      assert.deepEqual(await world.check(), [
+        "feed-stable does not serve this release's latest.json",
+      ])
+    } finally {
+      await world.done()
+    }
+  })
+
+  it('does not approve a feed that names an earlier release than it did when the publisher read it', async () => {
+    const world = await afterPublishing(LATER)
+    try {
+      const record = (feeds) => writeFileSync(join(world.dir, FEEDS_BEFORE), JSON.stringify(feeds))
+      record({ 'feed-alpha': '3.0.0-alpha.83' })
+      assert.deepEqual(await world.check(), [
+        `feed-alpha went backward: it named 3.0.0-alpha.83 when this release was published, and names ${LATER} now`,
+      ])
+      for (const named of [LATER, BRIDGE, null, 'banana']) {
+        record({ 'feed-alpha': named })
+        assert.deepEqual(await world.check(), [], `it named ${named}: it did not go back`)
+      }
+      record({})
+      assert.deepEqual(await world.check(), [], 'no record of this feed')
+      rmSync(join(world.dir, FEEDS_BEFORE))
+      assert.deepEqual(await world.check(), [], 'no record at all: a check run by hand')
+
+      // A feed that does not serve this release is told once, as it was.
+      record({ 'feed-alpha': '3.0.0-alpha.83' })
+      world.github.release('feed-alpha', {
+        prerelease: true,
+        assets: { 'latest.json': latestJson(world.github.base, BRIDGE) },
+      })
+      assert.deepEqual(await world.check(), [
+        "feed-alpha does not serve this release's latest.json",
+      ])
+    } finally {
+      await world.done()
+    }
+  })
+
+  it('holds each new feed to what it named before: the stable feed went backward, the alpha feed did not', async () => {
+    const world = await afterPublishing('3.0.1')
+    try {
+      const { github, files } = world
+      github.release('feed-stable', {
+        prerelease: true,
+        assets: { 'latest.json': files['latest.json'] },
+      })
+      writeFileSync(
+        join(world.dir, FEEDS_BEFORE),
+        JSON.stringify({ 'feed-alpha': '3.0.0', 'feed-stable': '3.0.2' }),
+      )
+      assert.deepEqual(await world.check(), [
+        'feed-stable went backward: it named 3.0.2 when this release was published, and names 3.0.1 now',
+      ])
+    } finally {
+      await world.done()
+    }
+  })
+
   it('finds a latest.json that names no archive of this release', async () => {
     const world = await afterPublishing(LATER, (files) => ({
       ...files,
@@ -826,6 +971,31 @@ describe('the checks, from the command line', () => {
       const failed = await run(['check', ...base])
       assert.equal(failed.status, 1)
       assert.match(failed.stderr, /does not download from v99\.0\.0-alpha\.1 as the one built/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+      await github.close()
+    }
+  })
+
+  it('says the feeds are right for a release that a later one has gone past, and not for one that names an earlier', async () => {
+    const { github, dir } = await world()
+    try {
+      const base = ['--dir', dir, '--version', after, '--base', github.base, '--attempts', '1']
+      github.release('feed-alpha', {
+        prerelease: true,
+        assets: { 'latest.json': latestJson(github.base, '99.0.0-alpha.2') },
+      })
+      const passed = await run(['check', ...base, '--wait', '1'])
+      assert.equal(passed.status, 0, passed.stderr)
+      assert.match(passed.stdout, /serve this release as the rule says/)
+
+      github.release('feed-alpha', {
+        prerelease: true,
+        assets: { 'latest.json': latestJson(github.base, '3.0.0-alpha.1') },
+      })
+      const failed = await run(['check', ...base, '--wait', '1'])
+      assert.equal(failed.status, 1)
+      assert.match(failed.stderr, /^feeds: feed-alpha does not serve this release's latest\.json$/m)
     } finally {
       rmSync(dir, { recursive: true, force: true })
       await github.close()

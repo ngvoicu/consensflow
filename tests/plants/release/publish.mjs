@@ -7,7 +7,7 @@
  * catch each.
  */
 // biome-ignore-all lint/suspicious/noTemplateCurlyInString: a plant's text is the source it replaces, `${...}` and all, not a template
-import { PUBLISH, PUBLISH_JS } from './kit.mjs'
+import { PUBLISH, PUBLISH_JS, RERUN } from './kit.mjs'
 
 const plant = (name, from, to, meant) => ({
   name: `publish: ${name}`,
@@ -124,5 +124,73 @@ export const PLANTS = [
     'if (env.GITHUB_REF_NAME !== values.tag) {',
     'if (false) {',
     'refuses a push of a branch, a run outside a workflow',
+  ),
+  // No feed is moved backward: a run again after a later release went out leaves its feed at that release.
+  plant(
+    'a feed is swapped whatever release it names: the feed is not asked',
+    'if (later !== null) {',
+    'if (false) {',
+    RERUN,
+  ),
+  plant(
+    'a feed that names a later release fails the run instead of being left alone',
+    'did = `superseded by ${later}`',
+    "fail('superseded')",
+    RERUN,
+  ),
+  plant(
+    'a feed that was left alone is said to be kept',
+    'did = `superseded by ${later}`',
+    "did = 'kept'",
+    RERUN,
+  ),
+  plant(
+    'a feed that is left alone is not said to be, in the log',
+    'log(\n        `${feed} names ${later}, which comes after ${version}: it is left alone, and nothing is moved backward`,\n      )',
+    'void log',
+    RERUN,
+  ),
+  plant(
+    'a feed that cannot be read is swapped all the same',
+    'if (!served.ok && served.status !== 404) {',
+    'if (false) {',
+    'changes no feed it cannot read',
+  ),
+  plant(
+    'a feed that is listed and not served is left as it is, not mended',
+    'if (!served.ok && served.status !== 404) {',
+    'if (!served.ok) {',
+    'swaps a latest.json that is listed and not served at all',
+  ),
+  plant(
+    'a feed that is listed and not served is taken for one that names a later release',
+    'const later = served.ok ? laterRelease(served.body, version) : null',
+    "const later = served.ok ? laterRelease(served.body, version) : 'unknown'",
+    'swaps a latest.json that is listed and not served at all',
+  ),
+  plant(
+    'a feed is read once, not again past a blip',
+    'const served = await reads.file(`${base}/${feed}/${LATEST}`)',
+    'const served = await reads.once(`${base}/${feed}/${LATEST}`)',
+    'reads a feed again past a blip',
+  ),
+  // What the check that follows is left to hold the new feeds to.
+  plant(
+    'the check is left no record of what the feeds named',
+    'writeFileSync(join(dir, FEEDS_BEFORE), `${JSON.stringify(before)}\\n`)',
+    'void before',
+    'leaves the check a record of what each new feed named',
+  ),
+  plant(
+    'the record says what the run publishes, not what the feed named',
+    'named = served.ok ? namedRelease(served.body) : null',
+    'named = version',
+    'leaves the check a record of what each new feed named',
+  ),
+  plant(
+    'the record holds the old feed too',
+    'if (!pinned) before[feed] = named',
+    'before[feed] = named',
+    'leaves the check a record of what each new feed named',
   ),
 ]

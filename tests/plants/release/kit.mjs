@@ -22,6 +22,9 @@ export const BOTH = node('tests/agents-daemons.mjs', '--offline')
 /** The app crate's tests of the portable app's collector, built as a worktree can build it. */
 export const PORTABLE = node('tests/app-tests.mjs', 'portable::')
 
+/** The test of a release run again after a later one went out: the feed it left alone must stay. */
+export const RERUN = 'leaves feed-alpha at alpha.82 when alpha.81'
+
 export const FEEDS_JS = 'app/scripts/feeds.mjs'
 export const PUBLISH_JS = 'app/scripts/publish.mjs'
 export const RELEASE_YML = '.github/workflows/release.yml'

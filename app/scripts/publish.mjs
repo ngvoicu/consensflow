@@ -26,10 +26,17 @@
  *      and the two names swapped by renames (so the feed lacks the file for one
  *      API call, not for an upload), the previous one kept until the swap is
  *      done and put back if it fails. A feed that already serves this latest.json
- *      is left alone. What a run that died left beside latest.json
- *      (latest.next.json, latest.previous.json) is settled first.
+ *      is left alone. So is one that already names a later release, for no feed
+ *      is moved backward: a job run again after a later release went out does
+ *      what is left of it (the release, the feeds that are not past it, the pin)
+ *      and leaves that feed where the later release put it. What a run that
+ *      died left beside latest.json (latest.next.json, latest.previous.json) is
+ *      settled first.
  *
- * What the feeds serve afterwards is `feeds.mjs check`'s to say.
+ * What the feeds serve afterwards is `feeds.mjs check`'s to say. A run that
+ * finished leaves `dist` a record (feeds.mjs `FEEDS_BEFORE`) of what each new
+ * feed named when it read it, before it changed any, so that the check can tell
+ * a feed that went back to this release from one that never left it.
  */
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -39,9 +46,12 @@ import { parseArgs } from 'node:util'
 import {
   assetProblems,
   checkPrerequisites,
+  FEEDS_BEFORE,
+  laterRelease,
   MANIFEST,
   membersOf,
   missingForOldApps,
+  namedRelease,
   planFeeds,
   reader,
   releaseAssets,
@@ -226,8 +236,13 @@ async function swap({ gh, dir, repo, feed, log }) {
 /**
  * One feed made to serve `dir/latest.json`: the release made if there is none,
  * what a cut-short swap left settled, and latest.json uploaded, left, or swapped.
- * 'created', 'uploaded', 'replaced' or 'kept'. A feed of the old generation is
- * marked as pinned.
+ * Resolves to `did`: 'created', 'uploaded', 'replaced', 'kept', or `superseded by
+ * <version>`, where the feed already names a later release, which it is left at
+ * (no feed is moved backward); and to `named`, the release the feed named before
+ * it was changed, or null. What a feed names is read before it is changed: one
+ * that cannot be read fails the run with the feed as it was, but a latest.json
+ * that is listed and not served at all is a broken one, which is swapped. A feed
+ * of the old generation is marked as pinned.
  */
 async function moveFeed({ gh, dir, repo, feed, version, base, reads, pinned, log }) {
   const name = feed.slice(feed.indexOf('-') + 1)
@@ -246,12 +261,27 @@ async function moveFeed({ gh, dir, repo, feed, version, base, reads, pinned, log
   }
   state = await settle({ gh, repo, feed }, state)
   let did = 'kept'
+  let named = null
   if (!state.assets.some((asset) => asset.name === LATEST)) {
     await gh.must(['release', 'upload', feed, LATEST], `uploading ${LATEST} to ${feed}`)
     did = made ? 'created' : 'uploaded'
   } else {
-    const served = await reads.once(`${base}/${feed}/${LATEST}`)
-    if (!served.ok || !served.body.equals(readFileSync(join(dir, LATEST)))) {
+    // A listed latest.json that is not served is a broken one, which a swap mends;
+    // any other failure to read it leaves it unknown whether it names a later release.
+    const served = await reads.file(`${base}/${feed}/${LATEST}`)
+    if (!served.ok && served.status !== 404) {
+      fail(
+        `${feed} cannot be read (${served.why}): it is not known whether it names a release after ${version}, and no feed is moved backward`,
+      )
+    }
+    named = served.ok ? namedRelease(served.body) : null
+    const later = served.ok ? laterRelease(served.body, version) : null
+    if (later !== null) {
+      log(
+        `${feed} names ${later}, which comes after ${version}: it is left alone, and nothing is moved backward`,
+      )
+      did = `superseded by ${later}`
+    } else if (!served.ok || !served.body.equals(readFileSync(join(dir, LATEST)))) {
       await swap({ gh, dir, repo, feed, log })
       did = 'replaced'
     }
@@ -268,7 +298,7 @@ async function moveFeed({ gh, dir, repo, feed, version, base, reads, pinned, log
       `marking ${feed} as pinned`,
     )
   }
-  return did
+  return { did, named }
 }
 
 /**
@@ -328,8 +358,10 @@ export async function publishRelease({
     )
   }
   const moved = {}
+  const before = {}
   for (const feed of feeds) {
-    moved[feed] = await moveFeed({
+    const pinned = Object.values(manifest.legacy).includes(feed)
+    const { did, named } = await moveFeed({
       gh,
       dir,
       repo,
@@ -337,11 +369,15 @@ export async function publishRelease({
       version,
       base,
       reads,
-      pinned: Object.values(manifest.legacy).includes(feed),
+      pinned,
       log,
     })
-    log(`${feed}: ${moved[feed]}`)
+    moved[feed] = did
+    if (!pinned) before[feed] = named
+    log(`${feed}: ${did}`)
   }
+  // What the check that follows holds the new feeds to: none went back to this release.
+  writeFileSync(join(dir, FEEDS_BEFORE), `${JSON.stringify(before)}\n`)
   return { version, release: versioned, feeds: moved }
 }
 

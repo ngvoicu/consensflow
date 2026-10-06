@@ -32,7 +32,17 @@
  *     nothing moves. The old feeds stay pinned to the bridge, and its files stay:
  *     nothing here deletes a release;
  *   - a release before the bridge is refused: it would read feeds no installed
- *     app reads, and name a bridge that is not the first.
+ *     app reads, and name a bridge that is not the first;
+ *   - no run moves a feed backward. A feed that already names a later release
+ *     than the run's own (by the precedence `compareVersions` gives) is left as
+ *     it is, each feed judged alone: the job of a release run again after a later
+ *     one went out finishes what is left of it and leaves that feed at the later
+ *     release, and a stable release leaves the alpha feed alone while the alpha
+ *     line is ahead and still moves the stable one. The check afterwards accepts
+ *     such a feed, and no other that does not serve the release; and since a feed
+ *     that went back to the release checked would serve it, the publisher leaves
+ *     the check a record of what each new feed named before it changed any, which
+ *     a feed that now names an earlier release than that is a problem against.
  *
  * Applied by .github/workflows/release.yml (and, for the moving, by
  * app/scripts/publish.mjs):
@@ -113,6 +123,49 @@ export function compareVersions(a, b) {
     return id < other ? -1 : 1
   }
   return aPre.length === bPre.length ? 0 : -1
+}
+
+/** The version a latest.json (`body`) names, or null where it is not one, or names no semantic version. */
+export function namedRelease(body) {
+  try {
+    const { version } = JSON.parse(body)
+    return typeof version === 'string' && SEMVER.test(version) ? version : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The version a feed's latest.json (`body`) names where that release comes after
+ * `version` by precedence, and null otherwise: it names `version` itself or an
+ * earlier release, or none (what is not a latest.json names no release). A feed
+ * is never moved to a release before the one it names, so this is what a run for
+ * `version` asks of a feed before it changes it, and what the check afterwards
+ * accepts of one it left alone.
+ */
+export function laterRelease(body, version) {
+  const named = namedRelease(body)
+  return named !== null && compareVersions(named, version) > 0 ? named : null
+}
+
+/**
+ * The file the publisher leaves in the release's folder, beside its SHA256SUMS,
+ * for the check that follows: the release each new feed named, or null, when the
+ * publisher read it before changing any. The check cannot tell, from the feed
+ * alone, that it went back to the release it is asked about; this is what lets it.
+ */
+export const FEEDS_BEFORE = 'feeds-before.json'
+
+/** What `dir`'s FEEDS_BEFORE says each feed named: a map of the ones that named a release, and none where there is no such file (a check run by hand). */
+function namedBefore(dir) {
+  try {
+    const record = JSON.parse(readFileSync(join(dir, FEEDS_BEFORE), 'utf8'))
+    return new Map(
+      Object.entries(record).filter(([, named]) => typeof named === 'string' && SEMVER.test(named)),
+    )
+  } catch {
+    return new Map()
+  }
 }
 
 /** `manifest` itself, once it says what the rule needs of it: the feeds of both generations, and a bridge. */
@@ -275,13 +328,22 @@ export function reader({ attempts = 12, wait = 5000 } = {}) {
   const blips = { attempts: Math.min(attempts, 3), wait }
   const hashes = new Map()
   return {
-    /** A feed's latest.json, read again while it is not `expected`: a replaced asset can be served stale for a moment. */
-    feed: (url, expected) =>
-      until(
+    /**
+     * A feed's latest.json, read again while it is not `expected` and names no
+     * later release: a replaced asset can be served stale for a moment, and no
+     * wait turns a later release into `expected`.
+     */
+    feed(url, expected) {
+      const own = namedRelease(expected)
+      return until(
         () => fetchBody(url),
-        (found) => found.ok && found.body.equals(expected),
+        (found) =>
+          found.ok &&
+          (found.body.equals(expected) ||
+            (own !== null && laterRelease(found.body, own) !== null)),
         { attempts, wait },
-      ),
+      )
+    },
     /** A published file's body. */
     file: (url) =>
       until(
@@ -464,10 +526,17 @@ export async function checkPrerequisites({
  * rule says: every file of the release downloads as the one built and its
  * latest.json names its archive, each new feed of its channels serves that
  * latest.json, and the old channels in use serve the bridge with its files
- * (`bridgeProblems`), this release being that bridge or a later one. An old
- * feed of a channel not in use may be absent, and when it is there does not
- * serve this release, which the rule does not move it to. Resolves to the
- * problems found.
+ * (`bridgeProblems`), this release being that bridge or a later one. A new feed
+ * may name a later release instead: that is what a run of this release leaves
+ * when it is run again after the later one went out, since a feed is never moved
+ * backward (`laterRelease`). It is the only other thing a new feed may serve: one
+ * that names an earlier release, or this one with other bytes, or cannot be
+ * read, is a problem. So is one that names an earlier release than it did when
+ * the publisher read it (`FEEDS_BEFORE`, where the folder holds one): a feed that
+ * serves this release having gone back to it is told by that alone. An old feed
+ * of a channel not in use may be absent, and when it is there does not serve
+ * this release, which the rule does not move it to. Resolves to the problems
+ * found.
  */
 export async function checkFeeds({
   dir,
@@ -488,12 +557,22 @@ export async function checkFeeds({
     ...(await assetProblems({ dir, version, base, reads })),
     ...metadataProblems({ latest, version, base }),
   ]
+  const before = namedBefore(dir)
   for (const channel of channelsOf(version)) {
     const feed = manifest.feeds[channel]
     const found = await reads.feed(`${base}/${feed}/latest.json`, latest)
-    if (!found.ok || !found.body.equals(latest)) {
+    const right =
+      found.ok && (found.body.equals(latest) || laterRelease(found.body, version) !== null)
+    if (!right) {
       problems.push(
         `${feed} does not serve this release's latest.json${found.ok ? '' : ` (${found.why})`}`,
+      )
+      continue
+    }
+    const now = namedRelease(found.body)
+    if (now !== null && before.has(feed) && compareVersions(now, before.get(feed)) < 0) {
+      problems.push(
+        `${feed} went backward: it named ${before.get(feed)} when this release was published, and names ${now} now`,
       )
     }
   }

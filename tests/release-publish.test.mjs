@@ -198,21 +198,27 @@ describe('the publish job, run as written', { skip }, () => {
       prerelease: true,
       assets: { 'latest.json': latestJson(github.base, '3.0.0-alpha.1') },
     })
-    const files = builtFiles(github.base, version)
-    files[`ConsensFlow_${version}_aarch64.app.tar.gz`] = archiveOf(OLD_LAYOUT)
-    const dist = folderOf(files)
+    const folders = []
+    /** What the jobs built `release` into: a folder, its archive laid out as the old apps check for. */
+    const built = (release) => {
+      const files = builtFiles(github.base, release)
+      files[`ConsensFlow_${release}_aarch64.app.tar.gz`] = archiveOf(OLD_LAYOUT)
+      folders.push(folderOf(files))
+      return { release, dir: folders.at(-1), latest: files['latest.json'] }
+    }
+    const dist = built(version)
     const root = mkdtempSync(join(tmpdir(), 'cf-gh-'))
     mkdirSync(join(root, 'bin'))
     writeFileSync(join(root, 'bin', 'gh'), GH)
     chmodSync(join(root, 'bin', 'gh'), 0o755)
-    /** Runs a step of the publish job, in the folder the jobs built into. */
-    const step = (name, env = {}) =>
+    /** Runs a step of the publish job for a release (the bridge unless one is given), in the folder the jobs built it into. */
+    const step = (name, env = {}, { release, dir } = dist) =>
       bash(stepScript(name).replaceAll(DOWNLOADS, github.base), {
-        cwd: dist,
+        cwd: dir,
         path: [join(root, 'bin')],
         env: {
           GITHUB_WORKSPACE: REPO,
-          GITHUB_REF_NAME: `v${version}`,
+          GITHUB_REF_NAME: `v${release}`,
           GITHUB_REPOSITORY: github.repo,
           GH_REPO: github.repo,
           GITHUB_EVENT_NAME: 'push',
@@ -225,8 +231,9 @@ describe('the publish job, run as written', { skip }, () => {
       github,
       version,
       step,
+      built,
       done: async () => {
-        rmSync(dist, { recursive: true, force: true })
+        for (const folder of folders) rmSync(folder, { recursive: true, force: true })
         rmSync(root, { recursive: true, force: true })
         await github.close()
       },
@@ -271,6 +278,55 @@ describe('the publish job, run as written', { skip }, () => {
       assert.equal(
         github.calls.filter((args) => args[1] === 'create' && args[2] === `v${version}`).length,
         1,
+      )
+    } finally {
+      await done()
+    }
+  })
+
+  it('is run again after a later release went out, leaves the feed at that release, and says so', async () => {
+    const { github, version, built, step, done } = await world()
+    try {
+      const later = built('99.0.0-alpha.1')
+      // The bridge reaches both feeds, and the edit that marks update-alpha as pinned fails.
+      github.fail(
+        (args) => args[1] === 'edit' && args[2] === MANIFEST.legacy.alpha && 'the edit failed',
+      )
+      const cut = await step(PUBLISH)
+      assert.equal(cut.status, 1)
+      assert.match(cut.stderr, /marking update-alpha as pinned: the edit failed/)
+      github.fail(() => undefined)
+      // The later release finds the bridge delivered, and moves feed-alpha.
+      const next = await step(PUBLISH, {}, later)
+      assert.equal(next.status, 0, `${next.stdout}${next.stderr}`)
+      assert.equal(github.asset('feed-alpha', 'latest.json').toString(), later.latest)
+      // The bridge's failed job is run again from the Actions page.
+      const again = await step(PUBLISH)
+      assert.equal(again.status, 0, `${again.stdout}${again.stderr}`)
+      assert.match(
+        again.stdout,
+        /^publish: feed-alpha names 99\.0\.0-alpha\.1, which comes after 3\.0\.0-alpha\.81: it is left alone, and nothing is moved backward$/m,
+      )
+      assert.match(
+        again.stdout,
+        /^publish: 3\.0\.0-alpha\.81: the release was kept; feed-alpha superseded by 99\.0\.0-alpha\.1, update-alpha kept$/m,
+      )
+      assert.equal(github.asset('feed-alpha', 'latest.json').toString(), later.latest)
+      assert.equal(github.title(MANIFEST.legacy.alpha), 'Alpha update feed, pinned')
+      // The step after each finds the feeds right.
+      for (const release of [undefined, later]) {
+        const checked = await step(CHECK, {}, release)
+        assert.equal(checked.status, 0, `${checked.stdout}${checked.stderr}`)
+        assert.match(checked.stdout, /feeds: serve this release as the rule says/)
+      }
+      // A feed that went back to the bridge would serve what the bridge published: the record the publish step left
+      // in the folder, of what feed-alpha named, is what tells the check step it went backward.
+      github.put('feed-alpha', 'latest.json', latestJson(github.base, version))
+      const back = await step(CHECK)
+      assert.equal(back.status, 1, `${back.stdout}${back.stderr}`)
+      assert.match(
+        back.stderr,
+        /^feeds: feed-alpha went backward: it named 99\.0\.0-alpha\.1 when this release was published, and names 3\.0\.0-alpha\.81 now$/m,
       )
     } finally {
       await done()
