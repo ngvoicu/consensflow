@@ -407,9 +407,11 @@ fn a_server_that_does_not_come_up_in_time_is_ended_and_said_with_what_it_wrote()
         "echo $$ > '{}'\necho 'still loading' >&2\nexec sleep 60",
         pid.display()
     ));
+    // Time enough for the stand-in's shell to start and say it on a loaded
+    // machine: 600 ms was not, once in six runs at a load of 13 to 24.
     let started = Instant::now();
     let failed = home
-        .supervise(codex, &[], Duration::from_millis(600))
+        .supervise(codex, &[], Duration::from_secs(2))
         .unwrap_err();
     let took = started.elapsed();
     assert_eq!(
@@ -417,7 +419,7 @@ fn a_server_that_does_not_come_up_in_time_is_ended_and_said_with_what_it_wrote()
         "Codex server could not start: still loading\n"
     );
     assert!(
-        took >= Duration::from_millis(600) && took < Duration::from_secs(10),
+        took >= Duration::from_secs(2) && took < Duration::from_secs(12),
         "{took:?}"
     );
     assert!(home.left_behind().is_empty());
