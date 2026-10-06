@@ -5,6 +5,7 @@
  * writes nothing), and what it keeps of a file that has more than agents.
  */
 
+import { sep } from 'node:path'
 import { UNREADABLE } from './agent-list.mjs'
 import { file, handwritten, OWN, roster, row, STAMP, withOwn } from './fixtures.mjs'
 
@@ -320,8 +321,8 @@ export function addScenarios() {
           why: 'A row of the wrong shape refuses the file in Rust, as one that is no agents file (the roster holds it so: stricter than Node, which wrote it back as it was and went on)',
           rust: {
             stdout: '',
-            stderr:
-              'cf: Your agents file $ROOT/consensflow/agents.json is not an agents file: fix it or move it away. ConsensFlow left it as it is.\n',
+            // The roster names the file as the system spells its path.
+            stderr: `cf: Your agents file ${['$ROOT', 'consensflow', 'agents.json'].join(sep)} is not an agents file: fix it or move it away. ConsensFlow left it as it is.\n`,
             code: 1,
             after: 'before',
           },
