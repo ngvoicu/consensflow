@@ -25,6 +25,19 @@ impl Home {
         home
     }
 
+    /// A throwaway home on the drive the tests run from, in cargo's own
+    /// scratch (`CARGO_TARGET_TMPDIR`), for a test that names it by a path
+    /// relative to the working folder: Windows' CI runners keep the system's
+    /// temp folder on another drive than the checkout, and no relative path
+    /// crosses drives.
+    pub fn near() -> Self {
+        let home = Self {
+            dir: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
+        };
+        fs::create_dir_all(home.path_dir()).unwrap();
+        home
+    }
+
     pub fn root(&self) -> &Path {
         self.dir.path()
     }

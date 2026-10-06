@@ -82,7 +82,7 @@ fn resolves_a_relative_path_entry_before_handing_it_to_the_pane_host() {
     // PATH carrying a relative entry is ordinary: `PATH=.:...` or a `bin` a
     // launcher exported from wherever it happened to be. Joining that with the
     // command name produces a relative candidate, and the pane never opens.
-    let home = Home::new();
+    let home = Home::near();
     let shim = home.stub_cli("claude");
     let relative = relative_to(&home.path_dir(), &std::env::current_dir().unwrap());
     assert!(relative.is_relative(), "{}", relative.display());
