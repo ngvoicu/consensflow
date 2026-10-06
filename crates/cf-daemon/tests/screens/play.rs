@@ -5,16 +5,15 @@
 //! change told as often as it should be, and the ledger left as Node left it.
 
 use std::collections::BTreeSet;
-use std::io::Read;
-use std::path::Path;
 
-use cf_base::env::Env;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
-use crate::client::{send, Ask, Reply};
-use crate::ledger::dump;
+use crate::front::{address, send, Reply, Request};
 use crate::rig::{start, Rig};
-use crate::world::{changes, is, File, Root};
+use crate::support::compare::{differs, left};
+use crate::support::trace::{self, Tally};
+use crate::world::World;
+use crate::wrote::{changes, is, snapshot, File, Snapshot};
 
 /// The pages as Node's generator wrote them, `$TOKEN` and `$VERSION` for what goes in.
 const AGENTS_PAGE: &str = include_str!("../goldens/pages/agents.html");
@@ -56,31 +55,19 @@ pub fn v8_json_words(words: &str) -> bool {
         || (words.starts_with("Unexpected token ") && words.ends_with(" is not valid JSON"))
 }
 
-/// A trace by its name, as the file under `tests/goldens/` holds it.
-pub fn load(name: &str) -> Value {
-    let file = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("goldens")
-        .join(format!("{name}.json.gz"));
-    let mut text = String::new();
-    flate2::read::GzDecoder::new(std::fs::File::open(&file).unwrap())
-        .read_to_string(&mut text)
-        .unwrap();
-    serde_json::from_str(&text).unwrap()
-}
-
-/// Plays the trace `name` to its end.
-pub async fn play(name: &str) {
-    let trace = load(name);
+/// Plays the trace `name` to its end: what it held of it.
+pub async fn play(name: &str) -> Tally {
+    let trace = trace::load(name);
     assert_eq!(trace["format"], 1, "{name}: the format of a trace");
     assert_eq!(trace["surface"], "screens", "{name}");
     let mut game = Game {
         name,
         token: trace["ui"]["token"].as_str().unwrap().to_owned(),
-        root: Root::new(),
+        world: World::new(),
         ledgers: tempfile::tempdir().unwrap(),
         rig: None,
         closed: false,
+        tally: Tally::default(),
     };
     for (at, step) in trace["steps"].as_array().unwrap().iter().enumerate() {
         match step["kind"].as_str().unwrap() {
@@ -91,16 +78,18 @@ pub async fn play(name: &str) {
             other => panic!("{name} step {at}: no screens trace has a {other} step"),
         }
     }
-    game.finish().await;
+    game.finish().await
 }
 
 struct Game<'a> {
     name: &'a str,
     token: String,
-    root: Root,
+    world: World,
     ledgers: tempfile::TempDir,
     rig: Option<Rig>,
     closed: bool,
+    /// What has been compared so far.
+    tally: Tally,
 }
 
 impl Game<'_> {
@@ -111,43 +100,17 @@ impl Game<'_> {
     /// The first world is whole and starts the daemon's front over it; the
     /// later ones hold the files that changed since.
     async fn world(&mut self, at: usize, step: &Value) {
-        let files = step.get("files").and_then(Value::as_object);
-        self.root.put(files.unwrap_or(&Map::new()));
-        let Some(variables) = step.get("env").and_then(Value::as_object) else {
+        self.world.put(step);
+        if step.get("env").and_then(Value::as_object).is_none() {
             return;
-        };
+        }
         assert!(
             self.rig.is_none(),
             "{} step {at}: a variable changes after the daemon started",
             self.name
         );
         let ledger = self.ledgers.path().join("consensflow.db");
-        self.rig = Some(start(&self.token, self.environment(variables), &ledger).await);
-    }
-
-    /// The variables a world names, the paths as this machine writes them, and on
-    /// Windows what finds and starts a `.cmd` there.
-    fn environment(&self, variables: &Map<String, Value>) -> Env {
-        let process = Env::from_process();
-        let windows = ["SystemRoot", "ComSpec", "PATHEXT"]
-            .into_iter()
-            .filter(|_| cfg!(windows))
-            .filter_map(|name| Some((name.to_owned(), process.text(name)?.to_owned())));
-        let home = variables
-            .get("HOME")
-            .and_then(Value::as_str)
-            .map(|home| self.root.expand(home, false));
-        let given = variables.iter().map(|(name, value)| {
-            (
-                name.clone(),
-                self.root.expand(value.as_str().unwrap(), false),
-            )
-        });
-        Env::from_vars(
-            given
-                .chain(windows)
-                .chain(home.map(|home| ("USERPROFILE".to_owned(), home))),
-        )
+        self.rig = Some(start(&self.token, self.world.env(), &ledger).await);
     }
 
     async fn exchange(&mut self, at: usize, step: &Value) {
@@ -178,14 +141,13 @@ impl Game<'_> {
             "{label}: a token of a window is none of a screen's"
         );
 
-        let (before, told, kicked) = (
-            self.root.snapshot(),
-            self.rig().told.get(),
-            self.rig().kicks.get(),
-        );
+        // What was told and woken before this exchange is no part of it.
+        self.rig().take_told();
+        self.rig().take_kicks();
+        let before = snapshot(&self.world);
         let reply = send(
-            &self.rig().address(),
-            &Ask {
+            &address(&self.rig().api),
+            Request {
                 method,
                 target,
                 authorization: request["authorization"].as_str(),
@@ -193,54 +155,45 @@ impl Game<'_> {
                 body: request["body"].as_str().map(str::as_bytes),
             },
         )
-        .await;
-        let after = self.root.snapshot();
+        .await
+        .unwrap_or_else(|why| panic!("{label}: no answer: {why}"));
+        let after = snapshot(&self.world);
 
         self.holds_the_answer(&label, step, &reply);
         self.holds_the_files(&label, step, &before, &after);
         assert_eq!(
-            self.rig().told.get() - told,
-            u32::from(tells(method, target, reply.status)),
+            self.rig().take_told(),
+            usize::from(tells(method, target, reply.status)),
             "{label}: the roster's change is told once for a write that was made, else never"
         );
         assert_eq!(
-            self.rig().kicks.get(),
-            kicked,
+            self.rig().take_kicks(),
+            0,
             "{label}: no screen wakes the dispatcher"
         );
+        self.tally.exchanges += 1;
     }
 
     /// The status, the type and the bytes of the answer.
     fn holds_the_answer(&self, label: &str, step: &Value, reply: &Reply) {
         let response = &step["response"];
-        assert_eq!(
-            u64::from(reply.status),
-            response["status"].as_u64().unwrap(),
-            "{label}: the status ({})",
-            String::from_utf8_lossy(&reply.body)
-        );
-        assert_eq!(
-            reply.content_type.as_deref(),
-            response["contentType"].as_str(),
-            "{label}: the type"
-        );
+        if let Some(why) = reply.head_differs(response) {
+            panic!("{label}: {why}");
+        }
         let expected = match (response["page"].as_str(), response["body"].as_str()) {
             (Some(page), _) => self.page(page),
-            (None, Some(body)) => self.root.expand(body, true),
+            (None, Some(body)) => self.world.expand(body, true),
             (None, None) => String::new(),
         };
-        let actual = String::from_utf8_lossy(&reply.body);
         let id = step["id"].as_u64().unwrap();
         if DEPARTURES.contains(&(self.name, id)) {
             assert!(
                 says_it_in_its_own_words(&expected, &reply.body),
-                "{label}: Node said {expected}, which the daemon says in its own words, not {actual}"
+                "{label}: Node said {expected}, which the daemon says in its own words, not {}",
+                String::from_utf8_lossy(&reply.body)
             );
-        } else {
-            assert!(
-                reply.body == expected.as_bytes(),
-                "{label}: the bytes\n   Node: {expected:.300}\n  daemon: {actual:.300}"
-            );
+        } else if let Some(why) = differs("the answer", &reply.body, &expected) {
+            panic!("{label}: {why}");
         }
     }
 
@@ -258,13 +211,7 @@ impl Game<'_> {
 
     /// The files the exchange changed are the ones the trace says, each as it was
     /// and as it became.
-    fn holds_the_files(
-        &self,
-        label: &str,
-        step: &Value,
-        before: &crate::world::Snapshot,
-        after: &crate::world::Snapshot,
-    ) {
+    fn holds_the_files(&self, label: &str, step: &Value, before: &Snapshot, after: &Snapshot) {
         let recorded = step.get("wrote").and_then(Value::as_object);
         let actual = changes(before, after);
         let (recorded_paths, actual_paths): (BTreeSet<&str>, BTreeSet<&str>) = (
@@ -282,13 +229,13 @@ impl Game<'_> {
         for (path, (was, now)) in &actual {
             let sides = &recorded.unwrap()[path];
             assert!(
-                is(was.as_ref(), &sides["before"], &self.root),
+                is(was.as_ref(), &sides["before"], &self.world),
                 "{label}: {path} before\n  Node: {}\n  here: {}",
                 sides["before"],
                 shown(was.as_ref())
             );
             assert!(
-                is(now.as_ref(), &sides["after"], &self.root),
+                is(now.as_ref(), &sides["after"], &self.world),
                 "{label}: {path} after\n  Node: {}\n  here: {}",
                 sides["after"],
                 shown(now.as_ref())
@@ -307,19 +254,20 @@ impl Game<'_> {
         assert_eq!(step["method"], "close", "{} step {at}", self.name);
         self.rig().ledger.borrow_mut().close_in_place().unwrap();
         if let Some(recorded) = ledger.get("final").filter(|recorded| !recorded.is_null()) {
-            assert_eq!(
-                &dump(&self.rig().ledger_file),
-                recorded,
-                "{} step {at}: the database the ledger left",
-                self.name
-            );
+            if let Some(why) = left(&self.rig().ledger_file, recorded) {
+                panic!("{} step {at}: {why}", self.name);
+            }
+            self.tally.databases += 1;
         }
     }
 
-    async fn finish(mut self) {
+    /// The API closed, if no step did, and what the trace held.
+    async fn finish(mut self) -> Tally {
         if !self.closed {
             self.close().await;
         }
+        self.tally.traces += 1;
+        self.tally
     }
 }
 

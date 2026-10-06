@@ -13,11 +13,9 @@
 //!   gone).
 //! - `cf-board-*`: `cf` against the API.
 //!
-//! The ledger's calls the traces make are replayed here from step 3.1's replay
-//! (`crates/cf-ledger/tests/replay.rs`): that is a copy, because a test of one
-//! crate cannot be used by another's. The traces of the other two surfaces of
-//! the daemon (the page operations, the screens) read the same files and need
-//! the same.
+//! The traces are read, the ledger's calls made again, the database compared
+//! and the front reached as the other two surfaces of the daemon (the page
+//! operations, the screens) do: that is `tests/support/`, shared.
 
 // The player's own scaffolding: a failure in it is the test's, and so is what
 // it says of how many traces it played. The tests start `cf` themselves, and
@@ -30,15 +28,22 @@
 )]
 
 mod checks;
-mod dump;
+mod names;
 mod player;
-mod replay;
 mod rig;
 mod runs;
-mod trace;
-mod wire;
+
+// What the three players share, taken whole.
+#[path = "../support/front.rs"]
+mod front;
+#[path = "../support/ledger.rs"]
+mod ledger;
+#[path = "../support/mod.rs"]
+mod support;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
+
+use support::trace::{self, Tally};
 
 /// Plays every trace of `suites`, each against an API of its own: what each
 /// that was not answered as Node answered it said.
@@ -50,17 +55,11 @@ fn play_all(suites: &[&str], expected: usize) {
         "the traces of {suites:?}: npm run goldens:daemon"
     );
     let mut failures = Vec::new();
+    let mut held = Tally::default();
     for name in &names {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("a runtime");
-        let local = tokio::task::LocalSet::new();
-        let played = catch_unwind(AssertUnwindSafe(|| {
-            local.block_on(&runtime, player::play(name))
-        }));
+        let played = catch_unwind(AssertUnwindSafe(|| trace::locally(player::play(name))));
         match played {
-            Ok(Ok(())) => {}
+            Ok(Ok(tally)) => held += tally,
             Ok(Err(why)) => failures.push(why),
             Err(_) => failures.push(format!("{name}: the player panicked")),
         }
@@ -71,6 +70,7 @@ fn play_all(suites: &[&str], expected: usize) {
         failures.len(),
         names.len()
     );
+    println!("held: {held}");
     assert!(
         failures.is_empty(),
         "{} traces were not answered as Node answered them:\n{}",

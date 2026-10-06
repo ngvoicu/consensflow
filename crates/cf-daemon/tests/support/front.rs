@@ -1,20 +1,76 @@
-//! One HTTP exchange over a socket of our own, the request line as a trace
-//! has it: a client that normalized the target (`/api\whoami`,
-//! `//host/api/whoami`, a fragment) or the header (`Bearer` with nothing after
-//! it) would not send what Node was sent.
+//! The daemon's front over real sockets: what the API under test and the
+//! screens are served from ([`Front`]), and a client of it ([`send`]) that
+//! writes one request as the trace has it. A client that normalized the target
+//! (`/api\whoami`, `//host/api/whoami`, a fragment) or the header (`Bearer`
+//! with nothing after it) would not send what Node was sent.
 //!
 //! The request is written while the answer is read. A server that refuses a
 //! request before it has read its body (a body over 2 MiB, a route that is the
 //! chief's alone) answers and closes while the client is still writing, and a
 //! client that wrote first and read after could lose the answer to the reset.
 
+use std::cell::RefCell;
 use std::io;
+use std::path::Path;
+use std::rc::Rc;
 use std::time::Duration;
 
+use cf_daemon::api::context::{AgentRows, Closing, Context};
+use cf_daemon::api::credentials::Credentials;
+use cf_daemon::api::Api;
+use cf_daemon::seams::DaemonSpawn;
+use cf_ledger::Ledger;
+use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-/// How long an exchange may take before it is a failure of the API under
+use crate::support::daemon::{executor, Kicks};
+
+/// What a handler of the API is given, over `ledger` and a roster, with the
+/// executor its requests run on, and the wake-ups it asked for counted.
+pub struct Front {
+    pub context: Rc<Context>,
+    pub spawn: Rc<DaemonSpawn>,
+    kicks: Kicks,
+}
+
+impl Front {
+    /// The front's parts, with the daemon's log and trace in `folder`.
+    pub fn new(folder: &Path, ledger: Rc<RefCell<Ledger>>, roster: Rc<dyn AgentRows>) -> Self {
+        let (spawn, log, trace) = executor(folder);
+        let kicks = Kicks::new();
+        let context = Rc::new(Context {
+            ledger,
+            credentials: Rc::new(Credentials::new()),
+            kick: kicks.waker(),
+            closing: Closing::new(),
+            roster,
+            log,
+            trace,
+        });
+        Self {
+            context,
+            spawn,
+            kicks,
+        }
+    }
+
+    /// How many times the dispatcher was woken since this was last asked.
+    pub fn take_kicks(&self) -> usize {
+        self.kicks.take()
+    }
+}
+
+/// `127.0.0.1:<port>`, where `api` listens: what a client connects to, and what
+/// a trace names «api».
+pub fn address(api: &Api) -> String {
+    api.url()
+        .strip_prefix("http://")
+        .unwrap_or_else(|| panic!("an address: {}", api.url()))
+        .to_owned()
+}
+
+/// How long an exchange may take before it is a failure of the front under
 /// test: no trace waits for anything for long.
 const WAIT: Duration = Duration::from_secs(60);
 
@@ -34,6 +90,23 @@ pub struct Reply {
     pub body: Vec<u8>,
 }
 
+impl Reply {
+    /// Why the answer is not the status and the type of Node's `response`.
+    pub fn head_differs(&self, response: &Value) -> Option<String> {
+        let status = response["status"].as_u64().expect("a status");
+        if u64::from(self.status) != status {
+            return Some(format!(
+                "answered {}, Node {status}: {}",
+                self.status,
+                String::from_utf8_lossy(&self.body)
+            ));
+        }
+        let kind = response["contentType"].as_str();
+        (self.content_type.as_deref() != kind)
+            .then(|| format!("answered as {:?}, Node as {kind:?}", self.content_type))
+    }
+}
+
 /// Sends `request` to `address` (`127.0.0.1:<port>`) on a connection of its
 /// own, and reads the answer to its end.
 pub async fn send(address: &str, request: Request<'_>) -> io::Result<Reply> {
@@ -50,8 +123,12 @@ pub async fn send(address: &str, request: Request<'_>) -> io::Result<Reply> {
     if let Some(content_type) = request.content_type {
         head.push_str(&format!("Content-Type: {content_type}\r\n"));
     }
-    if let Some(body) = request.body {
-        head.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    // As `fetch` writes a request: a body has its length, and a verb that takes
+    // one says it has none.
+    match (request.body, request.method) {
+        (Some(body), _) => head.push_str(&format!("Content-Length: {}\r\n", body.len())),
+        (None, "POST" | "PUT" | "PATCH") => head.push_str("Content-Length: 0\r\n"),
+        (None, _) => {}
     }
     head.push_str("Connection: close\r\n\r\n");
     let body = request.body.map(<[u8]>::to_vec).unwrap_or_default();

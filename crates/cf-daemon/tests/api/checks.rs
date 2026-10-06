@@ -5,10 +5,10 @@
 
 use serde_json::{json, Value};
 
-use crate::replay::{compare, differs};
+use crate::front::Reply;
+use crate::names::Names;
 use crate::rig::Rig;
-use crate::trace::Names;
-use crate::wire::Reply;
+use crate::support::compare::{compare, differs};
 
 /// The answer to an exchange of the test's own against Node's: its status, the
 /// type it carried and its bytes; and then what the API did to give it.
@@ -20,28 +20,12 @@ pub fn exchange(
     kicks: usize,
 ) -> Result<(), String> {
     let response = &step["response"];
-    let status = response["status"].as_u64().expect("a status");
-    if u64::from(reply.status) != status {
-        return Err(format!(
-            "answered {}, Node {status}: {}",
-            reply.status,
-            String::from_utf8_lossy(&reply.body)
-        ));
-    }
-    let kind = response["contentType"].as_str();
-    if reply.content_type.as_deref() != kind {
-        return Err(format!(
-            "answered as {:?}, Node as {kind:?}",
-            reply.content_type
-        ));
+    if let Some(why) = reply.head_differs(response) {
+        return Err(why);
     }
     let expected = response["body"].as_str().unwrap_or_default();
-    if reply.body != expected.as_bytes() {
-        return Err(differs(
-            "the answer",
-            &String::from_utf8_lossy(&reply.body),
-            expected,
-        ));
+    if let Some(why) = differs("the answer", &reply.body, expected) {
+        return Err(why);
     }
     effects(rig, &[step], events, kicks)
 }
@@ -66,7 +50,7 @@ pub fn effects(rig: &Rig, steps: &[&Value], events: &[Value], kicks: usize) -> R
     if let Some(why) = compare("the events it logged", &json!(events), &json!(recorded)) {
         return Err(why);
     }
-    if let Some(why) = rig.queues.settle(steps) {
+    if let Some(why) = rig.ledger.settle(steps) {
         return Err(why);
     }
     let agents: Vec<Value> = steps
@@ -115,12 +99,5 @@ pub fn made(rig: &Rig, names: &Names, step: &Value) -> Result<(), String> {
             answered.status, answered.content_type, response["status"]
         ));
     }
-    if answered.body != body {
-        return Err(differs(
-            &format!("exchange {id}'s answer"),
-            &answered.body,
-            body,
-        ));
-    }
-    Ok(())
+    differs(&format!("exchange {id}'s answer"), &answered.body, body).map_or(Ok(()), Err)
 }

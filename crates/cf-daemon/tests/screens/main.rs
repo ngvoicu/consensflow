@@ -18,25 +18,25 @@
 // The goldens' own reading and the folder a test makes: a failure in either is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod client;
-mod ledger;
 mod play;
 mod rig;
+mod wrote;
+
+// What the three players share, taken whole.
+#[path = "../support/front.rs"]
+mod front;
+#[path = "../support/mod.rs"]
+mod support;
+#[path = "../support/world.rs"]
 mod world;
 
 use std::collections::BTreeSet;
-use std::path::Path;
 
 use serde_json::Value;
+use support::trace;
 
-/// Plays `name` on a runtime of its own, as the daemon runs: one thread, a local set.
-fn run(name: &str) {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    tokio::task::LocalSet::new().block_on(&runtime, play::play(name));
-}
+/// The suites of the screens' traces.
+const SUITES: [&str; 2] = ["core-agents-server", "corners-screens"];
 
 /// A test for each trace, and the list of them all.
 macro_rules! traces {
@@ -44,7 +44,7 @@ macro_rules! traces {
         $(
             #[test]
             fn $test() {
-                run($trace);
+                println!("{}: {}", $trace, trace::locally(play::play($trace)));
             }
         )*
 
@@ -77,18 +77,7 @@ traces! {
 
 /// The traces of the screens the recorder made, by name.
 fn recorded() -> BTreeSet<String> {
-    let folder = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("goldens");
-    std::fs::read_dir(folder)
-        .unwrap()
-        .filter_map(|entry| {
-            let name = entry.unwrap().file_name().to_string_lossy().into_owned();
-            let name = name.strip_suffix(".json.gz")?.to_owned();
-            (name.starts_with("core-agents-server-") || name.starts_with("corners-screens-"))
-                .then_some(name)
-        })
-        .collect()
+    trace::names(&SUITES).into_iter().collect()
 }
 
 #[test]
@@ -103,7 +92,7 @@ fn every_trace_of_the_screens_there_is_has_a_test_and_no_test_is_for_none() {
 fn the_exchanges_that_answer_in_other_words_are_exactly_those_that_carry_v8_s() {
     let mut carrying = BTreeSet::new();
     for name in recorded() {
-        for step in play::load(&name)["steps"].as_array().unwrap() {
+        for step in trace::load(&name)["steps"].as_array().unwrap() {
             let words = step["response"]["body"]
                 .as_str()
                 .and_then(|body| serde_json::from_str::<Value>(body).ok())
