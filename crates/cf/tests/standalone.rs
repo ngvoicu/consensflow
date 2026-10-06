@@ -17,7 +17,7 @@ mod common;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use common::{cf, cf_at, own_cf};
+use common::{cf, cf_at, own_cf, plain};
 
 const NODE_NEEDED: &str = "cf: CONSENSFLOW_NODE is not set:";
 
@@ -81,7 +81,8 @@ struct User {
 impl User {
     fn new() -> Self {
         let folder = tempfile::tempdir().expect("a folder");
-        let root = fs::canonicalize(folder.path()).expect("its place");
+        // As `cf` reports the places under it, so a copy is named as it says.
+        let root = plain(fs::canonicalize(folder.path()).expect("its place"));
         Self {
             _folder: folder,
             root,

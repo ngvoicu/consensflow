@@ -19,9 +19,14 @@ pub fn cf<S: AsRef<str>>(args: &[S], env: &[(&str, &str)], input: &str) -> Outpu
 /// second install of ConsensFlow is.
 #[allow(dead_code)] // Not every test that runs `cf` asks where it is.
 pub fn own_cf() -> PathBuf {
-    let path = std::fs::canonicalize(env!("CARGO_BIN_EXE_cf")).expect("cf is there");
-    // Windows resolves a path to its verbatim form, which neither starts a
-    // program nor is what it reports.
+    plain(std::fs::canonicalize(env!("CARGO_BIN_EXE_cf")).expect("cf is there"))
+}
+
+/// A resolved `path` as a program reports it: Windows resolves a path to its
+/// verbatim form (`\\?\C:\…`), which is not what a program says of where it
+/// runs, so that prefix goes (but not a share's, `\\?\UNC\…`).
+#[allow(dead_code)] // Not every test that runs `cf` resolves a place.
+pub fn plain(path: PathBuf) -> PathBuf {
     path.to_string_lossy()
         .strip_prefix(r"\\?\")
         .filter(|plain| !plain.starts_with(r"UNC\"))
