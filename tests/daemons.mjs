@@ -4,8 +4,11 @@
  * `CONSENSFLOW_DAEMON=native`). The suites choose the daemon by
  * `CONSENSFLOW_TEST_DAEMON`, a JSON array of a command and its arguments; what
  * only Node's own modules can show, and what the native daemon does not serve
- * yet, they skip for the native one with the reason. The rig's seam is run too:
- * it connects each daemon to the real headless bridge, which is built here.
+ * yet, they skip for the native one with the reason. The rig's seam and its
+ * suites are run too: each daemon on the real headless bridge, which is built
+ * here, with a stand-in harness in real windows (a task handed out and its
+ * result back, a question and its answer, a chief switched, sessions, a
+ * refusal, the human's approval).
  *
  *   node tests/daemons.mjs [--offline]
  */
@@ -18,6 +21,9 @@ const SUITES = [
   'tests/core-daemon.test.mjs',
   'tests/bridge.test.mjs',
   'tests/integration/daemon-seam.test.mjs',
+  'tests/integration/core-slice.test.mjs',
+  'tests/integration/core-tiered.test.mjs',
+  'tests/integration/core-questions.test.mjs',
 ]
 const offline = process.argv.includes('--offline')
 
