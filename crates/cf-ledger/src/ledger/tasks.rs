@@ -140,7 +140,9 @@ impl Ledger {
         tasks::resume_task(&mut self.store, project_id, number, by, body)
     }
 
-    /// A follow-up on a finished or failed task, back to its assignee.
+    /// A follow-up on a finished or failed task, back to its assignee. A
+    /// question of the window's whose answer did not stand is still to be
+    /// answered, and the one who was asked is told so.
     pub fn reopen_task(
         &mut self,
         project_id: i64,

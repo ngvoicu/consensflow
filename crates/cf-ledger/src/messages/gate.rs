@@ -6,6 +6,7 @@ use cf_proto::ledger::MessageView;
 use rusqlite::params;
 use serde_json::json;
 
+use super::again::answer_again;
 use super::{adopt, known_message, message_task, require_message};
 use crate::model::LedgerError;
 use crate::queue::{send, withdraw, Sent};
@@ -101,13 +102,17 @@ pub(crate) fn decline_message(
             .map_or_else(|| "null".to_string(), |id| id.to_string());
         let mut told = message.sender.clone();
         let mut word = format!(
-            "@{by} declined your answer to m-{reply_to}. Answer it again: cf answer m-{reply_to} \"…\""
+            "@{by} declined your answer to m-{reply_to}. {}",
+            answer_again(&reply_to)
         );
         if message.kind == "task" {
             if let Some(task) = &task {
                 told = Some(store.participant_row(task.requester_id)?.handle);
                 call_off(store, message.project_id, task.number, by)?;
-                word = format!("@{by} declined T-{} ({}). It is cancelled.", task.number, task.title);
+                word = format!(
+                    "@{by} declined T-{} ({}). It is cancelled.",
+                    task.number, task.title
+                );
             }
         }
         if told.as_deref() != Some(by) {

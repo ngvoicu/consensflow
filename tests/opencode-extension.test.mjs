@@ -258,6 +258,8 @@ async function fakeBoard(t) {
     /** How many polls were asked, and how many of them lose their reply: the connection is cut. */
     polls: 0,
     dropPolls: 0,
+    /** How many receipts lose their reply: the board took them, and the connection is cut. */
+    dropReceipts: 0,
   }
   const server = createHttpServer(async (request, response) => {
     state.tokens.push(request.headers.authorization)
@@ -287,6 +289,11 @@ async function fakeBoard(t) {
     }
     if (request.method === 'POST' && /^\/api\/answers\/\d+\/receipt$/.test(request.url)) {
       state.receipts.push({ at: request.url, ...body })
+      if (state.dropReceipts > 0) {
+        state.dropReceipts--
+        request.socket.destroy()
+        return
+      }
       return json(200, { message: null })
     }
     if (request.method === 'POST' && request.url === '/api/answers') {
@@ -541,6 +548,59 @@ test('OpenCode: a poll whose reply was lost is asked again and the answer is han
   assert.equal(board.state.posted.length, 1, 'the question was put once')
   assert.deepEqual(f.replies, [{ requestID: 'q-1', answers: [['blue']] }], 'handed over once')
   assert.deepEqual(board.state.receipts, [{ at: '/api/answers/50/receipt', received: true }])
+})
+
+test('OpenCode: a receipt whose reply was lost is said again, and the answer is handed over once', async (t) => {
+  const board = await fakeBoard(t)
+  board.state.answer = { id: 50, from: 'chief', body: 'Colour: blue', choices: [['blue']] }
+  board.state.dropReceipts = 1
+  const f = await fixture(t, false, board.url)
+  f.emit('question.asked', ASKED)
+  for (let i = 0; i < 300 && board.state.receipts.length < 2; i++)
+    await new Promise((r) => setTimeout(r, 10))
+  assert.deepEqual(f.replies, [{ requestID: 'q-1', answers: [['blue']] }], 'handed over once')
+  assert.deepEqual(
+    board.state.receipts,
+    [
+      { at: '/api/answers/50/receipt', received: true },
+      { at: '/api/answers/50/receipt', received: true },
+    ],
+    'said again: the board took the first and its reply was lost',
+  )
+})
+
+test('OpenCode: a receipt is said again while the board cannot be reached, then let be; a refusal is final', async () => {
+  const { acknowledge } = await import('../hosts/lib/question-door.js')
+  const retries = [1, 1, 1, 1]
+  // Lost twice, then taken: three times in all, whichever it says.
+  for (const received of [true, false]) {
+    const calls = []
+    const patchy = async (method, path, body) => {
+      calls.push(`${method} ${path} ${JSON.stringify(body)}`)
+      if (calls.length < 3) throw new TypeError('fetch failed')
+      return { message: { id: 50, state: 'read' } }
+    }
+    await acknowledge(patchy, { id: 50 }, received, { retries })
+    assert.deepEqual(calls, Array(3).fill(`POST /api/answers/50/receipt {"received":${received}}`))
+  }
+  // Never reached: the receipt and four more, and nothing is raised.
+  let tries = 0
+  const gone = async () => {
+    tries++
+    throw new TypeError('fetch failed')
+  }
+  await acknowledge(gone, { id: 50 }, true, { retries })
+  assert.equal(tries, 5)
+  // Refused (the door was shut meanwhile, or a board of Node's has no such route): final.
+  for (const refusal of [{ code: 'door-closed' }, { code: 'unknown-route' }]) {
+    tries = 0
+    const refused = async () => {
+      tries++
+      throw Object.assign(new Error('refused'), { refused: true, ...refusal })
+    }
+    await acknowledge(refused, { id: 50 }, true, { retries })
+    assert.equal(tries, 1, refusal.code)
+  }
 })
 
 test('OpenCode: a door asks a lost poll again a few times and then lets its error through; a refusal is final', async () => {

@@ -49,11 +49,28 @@ struct Ran {
     code: Option<i32>,
 }
 
+/// What a hook says of an answer it handed over (`POST /api/answers/<n>/receipt`)
+/// is a route Node's board never had. A daemon of Node's answers 404 to any
+/// route it lacks, and so does this one, once what was recorded has been
+/// served: a receipt nobody answered would be said again, and the case would
+/// wait for it. What the hook asks of a board that knows no such route is not
+/// among the requests Node's recording holds.
+fn is_receipt(request: &cf_board::scripted::Received) -> bool {
+    request.method == "POST"
+        && request.path.starts_with("/api/answers/")
+        && request.path.ends_with("/receipt")
+}
+
 fn run(golden: &Golden) -> Ran {
+    let node_has_no_receipt = reply_text(
+        404,
+        r#"{"error":"unknown-route","message":"no such command: POST /api/answers/receipt"}"#,
+    );
     let replies = golden
         .replies
         .iter()
-        .map(|reply| reply_text(reply.status, reply.text.clone()));
+        .map(|reply| reply_text(reply.status, reply.text.clone()))
+        .chain([node_has_no_receipt]);
     let api = scripted(replies.collect());
     let mut env: Vec<(&str, &str)> = vec![
         ("CONSENSFLOW_URL", &api.url),
@@ -77,6 +94,7 @@ fn run(golden: &Golden) -> Ran {
         requests: api
             .received()
             .into_iter()
+            .filter(|received| !is_receipt(received))
             .map(|received| Request {
                 method: received.method,
                 path: received.path,

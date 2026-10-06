@@ -18,7 +18,7 @@ use crate::model::{
 use crate::queue::{queue, send, Queued, Sent};
 use crate::staff::{
     continuable_session, has_members_of_tier, nearest_tier, require_free, require_member_row,
-    start_session,
+    start_session, Giving,
 };
 use crate::store::Store;
 use crate::views::TaskRow;
@@ -186,7 +186,7 @@ pub(crate) fn create_task(
             (Some(after), _) => Some(continuable_session(store, project_id, after)?),
             (None, Some(to)) => {
                 let named = store.participant_by_handle(project_id, to)?;
-                require_free(store, &named)?;
+                require_free(store, &named, Giving::Task)?;
                 Some(named)
             }
             (None, None) => None,

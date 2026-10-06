@@ -7,13 +7,13 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::{carrier_body, delivery_body, require_on_board, require_task_state, task_by_id};
-use crate::messages::fold;
+use crate::messages::{fold, tell_sent_back};
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES,
     MAX_BODY, MEMBER_ROLES,
 };
 use crate::queue::{drop_queued, queue, send, withdraw_gated, Queued, Sent};
-use crate::staff::{bring_back, can_continue, has_task_in_hand, require_free};
+use crate::staff::{bring_back, can_continue, has_task_in_hand, require_free, Giving};
 use crate::store::Store;
 use crate::views::{ParticipantRow, TaskRow};
 
@@ -162,10 +162,12 @@ pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), Le
 /// queue, and a session the human deleted is brought back to the board for it.
 /// A session that is spoken for (`holds_work`: on another task, or with a
 /// follow-up waiting for what it needs) takes none, and is refused as a
-/// follow-up is, `session-busy`: its window has one task to work on. The
-/// follow-up is a task message that carries what the window kept for the task
-/// (which is what delivers what a delivery that failed let go of), and the
-/// brief before it when none is received or on its way.
+/// follow-up is, `session-busy`, in the words of a task sent back (it is not
+/// opened for a tier; what it needs can be given as a new task): its window
+/// has one task to work on. The follow-up is a task message that carries what
+/// the window kept for the task (which is what delivers what a delivery that
+/// failed let go of), and the brief before it when none is received or on its
+/// way.
 pub(crate) fn reopen_task(
     store: &mut Store,
     project_id: i64,
@@ -190,7 +192,7 @@ pub(crate) fn reopen_task(
                 409,
             ));
         }
-        require_free(store, &found)?;
+        require_free(store, &found, Giving::SentBack(number))?;
         let assignee = match found.member_id {
             Some(_) => bring_back(store, found)?,
             None => found,
@@ -212,6 +214,7 @@ pub(crate) fn reopen_task(
         )?;
         fold(store, &task, assignee.id, message_id)?;
         store.move_task(&task, "queued", json!({ "by": by, "message": message_id }))?;
+        tell_sent_back(store, &task, assignee.id, by)?;
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,
             message: store.message(message_id)?,

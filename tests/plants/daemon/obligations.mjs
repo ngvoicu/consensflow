@@ -61,7 +61,7 @@ export const PLANTS = [
       [
         `${LEDGER}/tasks/finishing.rs`,
         lines(
-          '        require_free(store, &found)?;',
+          '        require_free(store, &found, Giving::SentBack(number))?;',
           '        let assignee = match found.member_id {',
         ),
         '        let assignee = match found.member_id {',
@@ -69,7 +69,7 @@ export const PLANTS = [
     ],
     runs: [receipt],
     meant:
-      'a_task_is_not_reopened_onto_a_session_that_has_another_and_it_is_told_what_a_follow_up_is',
+      'a_task_is_not_reopened_onto_a_session_that_has_another_and_is_told_what_a_reopen_can_do',
   },
   {
     name: 'pause: a window is stopped for the paused task it holds before the one it works on',

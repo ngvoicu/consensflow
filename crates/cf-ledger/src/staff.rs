@@ -23,7 +23,7 @@ pub(crate) use quota::{mark_back, mark_out};
 use sessions::close_session;
 pub(crate) use sessions::{
     bring_back, can_continue, continuable_session, end_session, has_task_in_hand, require_free,
-    start_session,
+    start_session, Giving,
 };
 
 /// A participant joining a project: its handle, its role or its roles (the

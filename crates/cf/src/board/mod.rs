@@ -4,6 +4,7 @@
 //! A command written wrong exits 2, one the board refused or could not take
 //! exits 1.
 
+mod cut;
 mod lines;
 mod task;
 mod usage;
@@ -88,7 +89,9 @@ impl Wrote {
 /// `input`, answering with the API's JSON when `json` asks: the exit code.
 /// Only a failure to write `out` or `err` is an error. The answers an output
 /// carried whole are acknowledged to the board once all of it is written, and
-/// not when it was not: a read is not a receipt.
+/// not when it was not: a read is not a receipt. Nor when the output is one
+/// that a harness may cut before its model reads it (`cut`): what was
+/// printed is measured, the text or the JSON, whichever it was.
 pub fn run(
     words: &[String],
     json: bool,
@@ -99,14 +102,15 @@ pub fn run(
 ) -> io::Result<u8> {
     match command(words, board, input) {
         Ok(Said { data, text, wrote }) => {
-            if json {
+            let printed = if json {
                 let data = cf_base::json::js_order(data);
-                writeln!(out, "{}", serde_json::to_string_pretty(&data)?)?;
+                format!("{}\n", serde_json::to_string_pretty(&data)?)
             } else {
-                writeln!(out, "{text}")?;
-            }
+                format!("{text}\n")
+            };
+            out.write_all(printed.as_bytes())?;
             out.flush()?;
-            if let Some(wrote) = wrote {
+            if let Some(wrote) = wrote.filter(|_| cut::seen_whole(&printed)) {
                 wrote.acknowledge(board);
             }
             Ok(0)

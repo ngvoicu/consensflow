@@ -1,7 +1,8 @@
 //! What the board commands that print answers say they wrote: `cf` tells the
 //! board which answers it carried whole, once its output is complete, and the
 //! board receives those. A read by itself is no receipt, so a command that
-//! failed, was refused, was cut off, or printed no body in full says nothing.
+//! failed, was refused, was cut off, printed no body in full, or printed more
+//! than a harness shows its model (`cut`) says nothing.
 
 use std::cell::Cell;
 use std::io::{self, Write};
@@ -322,6 +323,102 @@ fn an_answer_cf_inbox_read_printed_whole_is_acknowledged_and_nothing_else_is() {
     let ran = cf(&["inbox", "read", "T-3"], vec![reply(200, json!({}))]);
     assert_eq!(ran.code.unwrap(), 2);
     assert!(ran.asked.is_empty());
+}
+
+/// The thread of task 3 with the note in it (the fourth message) as long as `body`.
+fn thread_with_a_note(body: &str) -> Value {
+    let mut task = thread();
+    task["task"]["messages"][3]["body"] = json!(body);
+    task
+}
+
+/// What `cf task get T-3` asks the board and says of it, with `body` in its thread.
+fn get_with_a_note(body: &str, json: bool) -> Vec<(String, String)> {
+    let ran = cf_with(
+        &["task", "get", "T-3"],
+        json,
+        vec![reply(200, thread_with_a_note(body)), reply(200, json!({}))],
+        None,
+    );
+    assert_eq!(ran.code.unwrap(), 0);
+    ran.asked
+        .into_iter()
+        .map(|(method, path, _)| (method, path))
+        .collect()
+}
+
+fn only_the_thread() -> Vec<(String, String)> {
+    vec![("GET".to_owned(), "/api/tasks/3".to_owned())]
+}
+
+fn the_thread_and_what_it_carried_whole() -> Vec<(String, String)> {
+    vec![
+        ("GET".to_owned(), "/api/tasks/3".to_owned()),
+        ("POST".to_owned(), "/api/answers/read".to_owned()),
+    ]
+}
+
+#[test]
+fn a_thread_a_harness_may_cut_says_nothing_of_the_answers_in_it_and_they_come_as_text() {
+    for json in [false, true] {
+        for (what, note) in [
+            ("a note of 30,000 characters", "x".repeat(30_000)),
+            (
+                "a note of 20,000, past Codex's cut though under Claude's",
+                "x".repeat(20_000),
+            ),
+            (
+                "one of 6,000 two-byte characters: bytes, not characters",
+                "é".repeat(6_000),
+            ),
+        ] {
+            assert_eq!(
+                get_with_a_note(&note, json),
+                only_the_thread(),
+                "json: {json}: {what}: printed past what a harness shows"
+            );
+        }
+        assert_eq!(
+            get_with_a_note(&"x".repeat(8_000), json),
+            the_thread_and_what_it_carried_whole(),
+            "json: {json}: a long thread that a harness still shows whole"
+        );
+    }
+}
+
+#[test]
+fn what_is_measured_is_what_was_printed_so_lines_count_in_the_text_and_not_in_the_json() {
+    // 2,100 lines of nothing: a few bytes, and more lines than a harness shows.
+    let lines = "\n".repeat(2_100);
+    assert_eq!(get_with_a_note(&lines, false), only_the_thread());
+    assert_eq!(
+        get_with_a_note(&lines, true),
+        the_thread_and_what_it_carried_whole(),
+        "the JSON writes them in one line of escapes"
+    );
+}
+
+#[test]
+fn an_answer_cf_inbox_read_printed_past_what_a_harness_shows_is_not_acknowledged() {
+    for json in [false, true] {
+        for (body, acknowledged) in [("x".repeat(20_000), false), ("x".repeat(8_000), true)] {
+            let mut answer = message("answer", "queued");
+            answer["message"]["body"] = json!(body);
+            let ran = cf_with(
+                &["inbox", "read", "m-12"],
+                json,
+                vec![reply(200, answer), reply(200, json!({}))],
+                None,
+            );
+            assert_eq!(ran.code.unwrap(), 0);
+            assert_eq!(
+                asked(&ran).len(),
+                if acknowledged { 2 } else { 1 },
+                "json: {json}: {} characters",
+                body.len()
+            );
+        }
+    }
 }
 
 #[test]

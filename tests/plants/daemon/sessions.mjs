@@ -24,7 +24,10 @@ export const PLANTS = [
     edits: [
       [
         `${LEDGER}/staff/sessions.rs`,
-        lines('    require_free(store, &session)?;', '    bring_back(store, session)'),
+        lines(
+          '    require_free(store, &session, Giving::Task)?;',
+          '    bring_back(store, session)',
+        ),
         '    bring_back(store, session)',
       ],
     ],
@@ -38,7 +41,7 @@ export const PLANTS = [
         `${LEDGER}/tasks/giving.rs`,
         lines(
           '                let named = store.participant_by_handle(project_id, to)?;',
-          '                require_free(store, &named)?;',
+          '                require_free(store, &named, Giving::Task)?;',
         ),
         '                let named = store.participant_by_handle(project_id, to)?;',
       ],

@@ -4,8 +4,10 @@
 //! keeps, which rides in the paste of the words that send it on
 //! (`carrying`); what makes a message received, and what that does to its
 //! task (`receipt`); and the human's gate, which holds one agent's word to
-//! another until the human passes it on or declines it (`gate`).
+//! another until the human passes it on or declines it (`gate`); and the
+//! one asked, told to answer again when an answer did not stand (`again`).
 
+mod again;
 mod carrying;
 mod delivery;
 mod gate;
@@ -22,6 +24,7 @@ use crate::store::Store;
 use crate::tasks::pause_task;
 use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
 
+pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{adopt, fold, release_carried, release_stranded, transfer};
 pub(crate) use delivery::{
     begin_delivery, cancel_message, confirm_delivery, fail_delivery, first_received, in_flight,

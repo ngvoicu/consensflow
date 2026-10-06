@@ -9,6 +9,7 @@ use cf_proto::ledger::{Begun, MessageView};
 use rusqlite::params;
 use serde_json::{json, Value};
 
+use super::again::tell_failed_answer;
 use super::carrying::{adopt, carried, release_carried};
 use super::receipt::reconcile;
 use super::{known_message, message_task, messages, require_message};
@@ -290,7 +291,11 @@ pub(crate) fn cancel_message(
 
 /// Queued again; `refund` gives back the attempt when the window went before
 /// it could land. It joins the task message that waits for its window, if one
-/// does: a resume that came while it was on its way.
+/// does: a resume that came while it was on its way. A row that was left
+/// under a carrier that cannot carry it any more (the Node daemon was pasting
+/// it on its own when it stopped, which `release_stranded` leaves to the
+/// delivery that settles it) is let go of that carrier first: carried, it
+/// would be skipped as one and never delivered.
 pub(crate) fn retry_delivery(
     store: &mut Store,
     message_id: i64,
@@ -309,6 +314,12 @@ pub(crate) fn retry_delivery(
             message.project_id,
             "delivery.retried",
             json!({ "message": message_id, "reason": reason }),
+        )?;
+        store.db.execute(
+            "UPDATE message SET carried_by = NULL
+             WHERE id = ?1
+               AND carried_by IN (SELECT id FROM message WHERE state NOT IN ('queued', 'gated'))",
+            [message_id],
         )?;
         adopt(store, message_id)?;
         known_message(store, message_id)
@@ -339,6 +350,9 @@ pub(crate) fn fail_delivery(
             if message.kind == "task" && task.state == "queued" {
                 store.move_task(&task, "failed", json!({}))?;
                 release_ready(store, task.project_id)?;
+            }
+            if message.kind == "answer" {
+                tell_failed_answer(store, &message, &task, reason)?;
             }
         }
         known_message(store, message_id)

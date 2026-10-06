@@ -9,6 +9,7 @@
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+mod answered_again;
 mod carrying;
 mod doors;
 mod fixture;

@@ -197,7 +197,9 @@ pub(crate) fn release_carried(store: &Store, task_id: i64) -> Result<(), LedgerE
 /// opened, the start of this daemon, each is an ordinary queued message again,
 /// delivered in the order of its id. The tasks they are about are reconciled
 /// (`receipt`), once each: Node moved one on when it counted a queued answer
-/// as received, and that answer is still to be.
+/// as received, and that answer is still to be. A row Node was pasting on its
+/// own when it stopped is `delivering`, not `queued`: it is left to the
+/// delivery that settles it, and `retry_delivery` lets it go of its carrier then.
 pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
     store.write(|store| {
         let carriers: Vec<(i64, i64)> = store

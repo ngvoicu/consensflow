@@ -30,15 +30,23 @@ fn at_work_on_a_follow_up(w: &mut World, after: i64, body: &str) -> i64 {
     given.task.number
 }
 
-/// A door's refusal of a session that is spoken for: always the same code and
-/// words, whichever door.
-fn assert_busy(refused: LedgerError, session: &str) {
+/// What a follow-up, or a task named for the session, is told it can do
+/// instead of waiting: it can be opened for a tier.
+const OPEN_FOR_ITS_TIER: &str = ", or open the task for its tier";
+
+/// What a task sent back is told: it is that task and cannot be opened for a
+/// tier, but what it needs can be given as a new one.
+fn sent_back(number: i64) -> String {
+    format!(" before sending T-{number} back, or open a new task for its tier")
+}
+
+/// A door's refusal of a session that is spoken for: always `session-busy`,
+/// and what the door can do instead of waiting (`instead`).
+fn assert_busy(refused: LedgerError, session: &str, instead: &str) {
     assert_eq!(refused.code(), Some("session-busy"));
     assert_eq!(
         refused.to_string(),
-        format!(
-            "@{session} is still on its work: wait for its result, or open the task for its tier"
-        )
+        format!("@{session} is still on its work: wait for its result{instead}")
     );
 }
 
@@ -70,7 +78,7 @@ fn a_follow_up_is_refused_while_its_session_is_on_its_work_and_goes_once_it_is_f
     let refused = w
         .follow_up(a, "More tests", &[])
         .expect_err("the session is on its work");
-    assert_busy(refused, &session);
+    assert_busy(refused, &session, OPEN_FOR_ITS_TIER);
     assert!(
         w.ledger.task(w.project, b + 1).expect("a read").is_none(),
         "nothing of the refused task is left"
@@ -87,13 +95,14 @@ fn a_follow_up_is_refused_while_its_session_is_on_its_work_and_goes_once_it_is_f
 }
 
 #[test]
-fn a_task_is_not_reopened_onto_a_session_that_has_another_and_it_is_told_what_a_follow_up_is() {
+fn a_task_is_not_reopened_onto_a_session_that_has_another_and_is_told_what_a_reopen_can_do() {
     let mut w = world();
     let (session, a) = done_by_a_session(&mut w);
     // B goes to the session that did A, and is at work.
     let b = at_work_on_a_follow_up(&mut w, a, "Tests");
 
-    // A is sent back to the session that is on B: refused, in the words a follow-up gets.
+    // A is sent back to the session that is on B: refused as a follow-up is, in
+    // the words of a task sent back, which cannot be opened for a tier.
     let reopened = w
         .ledger
         .reopen_task(w.project, a, "chief", "More")
@@ -101,8 +110,8 @@ fn a_task_is_not_reopened_onto_a_session_that_has_another_and_it_is_told_what_a_
     let followed = w
         .follow_up(a, "More tests", &[])
         .expect_err("the session is on its work");
-    assert_eq!(reopened.to_string(), followed.to_string());
-    assert_busy(reopened, &session);
+    assert_busy(reopened, &session, &sent_back(a));
+    assert_busy(followed, &session, OPEN_FOR_ITS_TIER);
     assert_eq!(
         w.state(a),
         "done",
@@ -145,7 +154,7 @@ fn a_task_named_for_a_session_is_refused_while_it_is_on_its_work_and_goes_once_i
         let refused = w
             .give_to(&session, needs, "More")
             .expect_err("the session has a task");
-        assert_busy(refused, &session);
+        assert_busy(refused, &session, OPEN_FOR_ITS_TIER);
     }
     assert!(
         w.ledger
@@ -211,14 +220,33 @@ fn a_follow_up_waiting_for_what_it_needs_makes_its_session_busy_to_every_door_th
     // for the window at once or waiting on the board as well, a task sent back
     // to it, and one named for it, in either way.
     let refusals = [
-        w.follow_up(a, "Tests", &[]).err(),
-        w.follow_up(a, "Tests, waiting", &[a]).err(),
-        w.ledger.reopen_task(w.project, a, "chief", "More").err(),
-        w.give_to(&session, &[], "By name").err(),
-        w.give_to(&session, &[a], "By name, waiting").err(),
+        (
+            w.follow_up(a, "Tests", &[]).err(),
+            OPEN_FOR_ITS_TIER.to_owned(),
+        ),
+        (
+            w.follow_up(a, "Tests, waiting", &[a]).err(),
+            OPEN_FOR_ITS_TIER.to_owned(),
+        ),
+        (
+            w.ledger.reopen_task(w.project, a, "chief", "More").err(),
+            sent_back(a),
+        ),
+        (
+            w.give_to(&session, &[], "By name").err(),
+            OPEN_FOR_ITS_TIER.to_owned(),
+        ),
+        (
+            w.give_to(&session, &[a], "By name, waiting").err(),
+            OPEN_FOR_ITS_TIER.to_owned(),
+        ),
     ];
-    for refusal in refusals {
-        assert_busy(refusal.expect("the session is spoken for"), &session);
+    for (refusal, instead) in refusals {
+        assert_busy(
+            refusal.expect("the session is spoken for"),
+            &session,
+            &instead,
+        );
     }
 
     // A is accepted: the follow-up goes to the window, which takes it.

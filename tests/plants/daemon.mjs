@@ -30,6 +30,7 @@ import { PLANTS as PARTS } from './daemon/parts.mjs'
 import { PLANTS as PAUSE } from './daemon/pause.mjs'
 import { PLANTS as PLAYERS } from './daemon/players.mjs'
 import { PLANTS as RECEIPT_A } from './daemon/receipt-a.mjs'
+import { PLANTS as REVIEW } from './daemon/review.mjs'
 import { PLANTS as RUN } from './daemon/run.mjs'
 import { PLANTS as SCREENS } from './daemon/screens.mjs'
 import { PLANTS as SESSIONS } from './daemon/sessions.mjs'
@@ -53,6 +54,7 @@ const PLANTS = [
   ...RECEIPT_A,
   ...OBLIGATIONS,
   ...SESSIONS,
+  ...REVIEW,
 ]
 
 const args = process.argv.slice(2)

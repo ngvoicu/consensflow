@@ -142,7 +142,9 @@ impl Ledger {
         messages::retry_delivery(&mut self.store, message_id, reason, refund)
     }
 
-    /// A delivery given up.
+    /// A delivery given up. A task message that fails takes its task with it;
+    /// an answer that fails leaves its question to be answered again, and the
+    /// one who was asked is told so.
     pub fn fail_delivery(
         &mut self,
         message_id: i64,

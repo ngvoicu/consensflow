@@ -223,6 +223,12 @@ fn a_gated_question_node_withdrew_whose_answer_node_then_cancelled_obliges_until
 /// Each of the states a carrier that cannot carry any more can be left in
 /// frees what it carried, and the one that waits does not.
 fn after_node_left_the_carrier(state: &str) -> (World, i64, i64) {
+    after_node_left(state, "queued")
+}
+
+/// The same, with the row that rode in the carrier left in `row` as well:
+/// `queued`, or `delivering` where Node was pasting it on its own.
+fn after_node_left(state: &str, row: &str) -> (World, i64, i64) {
     let mut w = world();
     let created = w.give("zeus", "Parser");
     let (task, brief) = (created.task.number, created.message.expect("a brief").id);
@@ -246,6 +252,8 @@ fn after_node_left_the_carrier(state: &str) -> (World, i64, i64) {
             db.execute("UPDATE task SET state = 'working' WHERE id = 1", [])
                 .unwrap();
         }
+        db.execute("UPDATE message SET state = ? WHERE id = ?", (row, answer))
+            .unwrap();
     });
     (w, carrier, answer)
 }
@@ -295,6 +303,60 @@ fn a_row_under_a_carrier_that_still_waits_stays_in_its_paste() {
     assert_eq!(w.next("zeus"), Some(carrier));
     let begun = w.deliver(carrier);
     assert_eq!(ids(&begun.carried), [answer]);
+    assert_eq!(w.states(&[carrier, answer]), ["delivered", "delivered"]);
+}
+
+/// What Node left when it was pasting an answer on its own, under a carrier it
+/// had delivered: the answer is `delivering`, so the start of this daemon
+/// leaves it as it is, and its delivery is settled after.
+fn after_node_stopped_pasting_a_row_of_its_own() -> (World, i64, i64) {
+    let (w, carrier, answer) = after_node_left("delivered", "delivering");
+    assert_eq!(
+        ids(&w.ledger.in_flight().unwrap()),
+        [answer],
+        "in flight, not queued: the start does not release it"
+    );
+    assert_eq!(
+        w.ledger.next_delivery(w.id("zeus")).unwrap(),
+        None,
+        "and the carrier it rode in is over: the row is nobody's to deliver yet ({carrier})"
+    );
+    (w, carrier, answer)
+}
+
+#[test]
+fn a_row_node_was_pasting_on_its_own_under_a_carrier_that_is_over_goes_again_as_a_row_of_its_own() {
+    let (mut w, _, answer) = after_node_stopped_pasting_a_row_of_its_own();
+    w.ledger
+        .retry_delivery(answer, "the daemon stopped before it arrived", false)
+        .unwrap();
+    assert_eq!(
+        w.next("zeus"),
+        Some(answer),
+        "it rides in nothing: carried, it would be skipped and never delivered"
+    );
+    let begun = w.deliver(answer);
+    assert!(begun.carried.is_empty());
+    assert_eq!(w.states(&[answer]), ["delivered"]);
+    assert_eq!(w.state(1), "working");
+}
+
+#[test]
+fn a_row_node_was_pasting_on_its_own_joins_the_carrier_that_waits_when_it_goes_again() {
+    let (mut w, _, answer) = after_node_stopped_pasting_a_row_of_its_own();
+    // The task is paused and resumed meanwhile: the carrier that waits is new.
+    w.pause(1);
+    let carrier = w.resume(1, "Go on").message.expect("its words").id;
+    w.ledger
+        .retry_delivery(answer, "the daemon stopped before it arrived", false)
+        .unwrap();
+    assert_eq!(w.next("zeus"), Some(carrier), "the words go first, with it");
+    let begun = w.deliver(carrier);
+    assert_eq!(
+        ids(&begun.carried),
+        [answer],
+        "it rides in the paste of the words that wait for the window"
+    );
     assert_eq!(w.states(&[carrier, answer]), ["delivered", "delivered"]);
 }
 

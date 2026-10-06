@@ -11,9 +11,10 @@
  * The answer a poll finds is claimed for the door, and is received only once
  * the door says it handed it over (`acknowledge`): a door that never says so
  * leaves the answer to arrive a second time as text, and loses none. A poll
- * whose reply was lost is asked again, and gets the same claimed answer. A door
- * the board shut (the task was stopped) is refused with the words its model
- * is to hear, which are handed over as they are.
+ * whose reply was lost is asked again, and gets the same claimed answer; a
+ * receipt whose reply was lost is said again. A door the board shut (the task
+ * was stopped) is refused with the words its model is to hear, which are
+ * handed over as they are.
  */
 
 /** How long a door waits for the board before the harness's own dialog takes over. */
@@ -99,10 +100,25 @@ export async function askTheBoard(client, questions, { signal, retries = POLL_RE
  * is told so, which makes the answer received, or gives the claim back. What
  * the board says to it is of no use to a door that has done what it was for,
  * so a failure (a board of Node's, which knows no such route, included) is
- * not raised.
+ * not raised. A receipt that gets no answer at all (the board cannot be
+ * reached) is said again, as a poll is (`retries`, the pauses between them):
+ * the answer is in the harness's hands already, and one never received would
+ * be pasted a second time and taken for the result. Said twice it does no
+ * harm: the board takes an answer already read as read, and a claim already
+ * given back as given back. An answer the board refused (the door was shut
+ * meanwhile) is final.
  */
-export const acknowledge = (client, answer, received) =>
-  client('POST', `/api/answers/${answer.id}/receipt`, { received }).catch(() => {})
+export async function acknowledge(client, answer, received, { retries = POLL_RETRIES_MS } = {}) {
+  for (let lost = 0; ; lost += 1) {
+    try {
+      await client('POST', `/api/answers/${answer.id}/receipt`, { received })
+      return
+    } catch (cause) {
+      if (cause?.refused || lost >= retries.length) return
+      await new Promise((resolve) => setTimeout(resolve, retries[lost]))
+    }
+  }
+}
 
 /** The window answered first: the board's copy of the question takes that answer, from the asker. */
 export const answerFromWindow = (client, id, choices) =>

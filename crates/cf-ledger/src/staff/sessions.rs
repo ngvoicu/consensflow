@@ -147,25 +147,48 @@ pub(crate) fn continuable_session(
             ))
         }
     };
-    require_free(store, &session)?;
+    require_free(store, &session, Giving::Task)?;
     bring_back(store, session)
 }
 
-/// A member session takes one task at a time, and this is the one rule, in
-/// the one set of words, that every door giving a session a task holds it to:
-/// a follow-up (`--after`), a task sent back to it (a reopen) and a task named
-/// for it are refused `session-busy` while it [`holds_work`], so that its
-/// window is never at work on one task while the board speaks of another.
-/// What waits on the board for its needs is not refused: that release
-/// (`release_ready`) is the ledger's own, and waits for the session to be
-/// free. The chief, the human and a member's own lane are no sessions, and
-/// are held to nothing.
-pub(crate) fn require_free(store: &Store, taker: &ParticipantRow) -> Result<(), LedgerError> {
+/// How a task comes to a session, which is what a refusal can tell it to do
+/// instead of waiting.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Giving {
+    /// A follow-up, or a task named for the session: it can be opened for a
+    /// tier instead.
+    Task,
+    /// Task `number`, finished, sent back to the session that did it: it is
+    /// that task, and cannot be opened for a tier; what it still needs can be
+    /// given as a new one.
+    SentBack(i64),
+}
+
+/// A member session takes one task at a time, and this is the one rule that
+/// every door giving a session a task holds it to: a follow-up (`--after`), a
+/// task sent back to it (a reopen) and a task named for it are refused
+/// `session-busy` while it [`holds_work`], so that its window is never at work
+/// on one task while the board speaks of another. The refusal says what the
+/// door can do instead (`giving`). What waits on the board for its needs is
+/// not refused: that release (`release_ready`) is the ledger's own, and waits
+/// for the session to be free. The chief, the human and a member's own lane
+/// are no sessions, and are held to nothing.
+pub(crate) fn require_free(
+    store: &Store,
+    taker: &ParticipantRow,
+    giving: Giving,
+) -> Result<(), LedgerError> {
     if taker.member_id.is_some() && holds_work(store, taker.id)? {
+        let instead = match giving {
+            Giving::Task => ", or open the task for its tier".to_owned(),
+            Giving::SentBack(number) => {
+                format!(" before sending T-{number} back, or open a new task for its tier")
+            }
+        };
         return Err(LedgerError::refused_with(
             "session-busy",
             format!(
-                "@{} is still on its work: wait for its result, or open the task for its tier",
+                "@{} is still on its work: wait for its result{instead}",
                 taker.handle
             ),
             409,

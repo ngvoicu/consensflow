@@ -105,13 +105,13 @@ export const PLANTS = [
     edits: [
       [
         `${CF}/board/mod.rs`,
-        lines('        Ok(Said { data, text, wrote }) => {', '            if json {'),
+        lines('        Ok(Said { data, text, wrote }) => {', '            let printed = if json {'),
         lines(
           '        Ok(Said { data, text, wrote }) => {',
           '            if let Some(wrote) = &wrote {',
           '                wrote.acknowledge(board);',
           '            }',
-          '            if json {',
+          '            let printed = if json {',
         ),
       ],
     ],

@@ -150,7 +150,7 @@ fn a_question_answered_while_it_waits_at_the_gate_obliges_while_the_answer_is_on
 /// received, and a question of zeus's answered while it still waited for the
 /// human, which withdrew it: the task, the question and its answer, which the
 /// human has not yet decided on.
-fn answered_at_the_gate(w: &mut World) -> (i64, i64, i64) {
+pub(crate) fn answered_at_the_gate(w: &mut World) -> (i64, i64, i64) {
     let created = w.give("zeus", "Parser");
     let (task, brief) = (created.task.number, created.message.expect("a brief").id);
     w.ledger.approve_message(brief, "human").expect("passed on");
@@ -170,7 +170,7 @@ fn an_unrelated_receipt(w: &mut World, task: i64) {
 }
 
 /// The chief answers the question again, the human passes it on, it is received.
-fn answered_again_and_received(w: &mut World, question: i64) {
+pub(crate) fn answered_again_and_received(w: &mut World, question: i64) {
     let again = w.answer(question, "JSON, then");
     w.ledger
         .approve_message(again.id, "human")
