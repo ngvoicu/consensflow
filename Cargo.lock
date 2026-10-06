@@ -337,6 +337,7 @@ version = "3.0.0-alpha.78"
 dependencies = [
  "cf-base",
  "cf-board",
+ "cf-catalog",
  "cf-codex-session",
  "cf-daemon",
  "cf-harness",

@@ -13,6 +13,7 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use cf_base::args::{Opt, Positionals};
 use cf_base::env::Env;
 use cf_process::{execute, on_path, runnable, Limits};
 use cf_proto::page::HandleLine;
@@ -83,53 +84,16 @@ fn fail(words: &str) -> i32 {
     1
 }
 
-/// The verb's options as `parseArgs` of Node reads them, strictly, positionals
-/// allowed: `--json` and `--no-open`, a `--` that ends the options, and every
-/// other word a positional that is ignored. What else Node refuses it refuses
-/// in the words Node 26.8.1 used.
+/// The verb's options as `parseArgs` of Node reads them (`cf_base::args`):
+/// `--json` and `--no-open`, and every other word a positional that is
+/// ignored. What Node refuses it refuses in its own words.
 fn parse(args: &[String]) -> Result<Flags, String> {
-    let mut flags = Flags::default();
-    for arg in args {
-        if arg == "--" {
-            break;
-        }
-        if arg == "-" || !arg.starts_with('-') {
-            continue;
-        }
-        if let Some(long) = arg.strip_prefix("--") {
-            let (name, value) = match long.split_once('=') {
-                Some((name, value)) => (name, Some(value)),
-                None => (long, None),
-            };
-            match name {
-                "json" | "no-open" => {
-                    if value.is_some() {
-                        return Err(format!("Option '--{name}' does not take an argument"));
-                    }
-                    if name == "json" {
-                        flags.json = true;
-                    } else {
-                        flags.no_open = true;
-                    }
-                }
-                "" => return Err(unknown(arg)),
-                _ => return Err(unknown(&format!("--{name}"))),
-            }
-        } else {
-            // A short option: none is known, and the first letter is named.
-            let letter: String = arg.chars().skip(1).take(1).collect();
-            return Err(unknown(&format!("-{letter}")));
-        }
-    }
-    Ok(flags)
-}
-
-/// Node's words for an option it does not know. Node's own sentence has no
-/// closing quote after the option, and so has this.
-fn unknown(option: &str) -> String {
-    format!(
-        "Unknown option '{option}'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- \"{option}\""
-    )
+    const OPTIONS: [Opt; 2] = [Opt::flag("json"), Opt::flag("no-open")];
+    let parsed = cf_base::args::parse(args, &OPTIONS, Positionals::Allowed)?;
+    Ok(Flags {
+        json: parsed.flag("json"),
+        no_open: parsed.flag("no-open"),
+    })
 }
 
 /// What the verb prints for the handle line: the app's JSON, or a person's

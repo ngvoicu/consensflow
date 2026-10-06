@@ -2,7 +2,8 @@
 //! participant's token in `CONSENSFLOW_TOKEN`) it is the board's commands,
 //! answered here against the daemon's API; anywhere else it is the CLI's
 //! standalone commands, which its Node sources beside this binary still
-//! answer. `cf hook <harness>` is what a harness's hooks run, in a window or
+//! answer, but for the ones `standalone` answers once the switch is on.
+//! `cf hook <harness>` is what a harness's hooks run, in a window or
 //! not; it says only what its harness reads, and never fails.
 //! `cf codex-session <codex> <args…>` is what a Codex window runs in Codex's place.
 //! `cf ui` is the app's daemon: the Node one while the switch is off, the one
@@ -13,6 +14,7 @@
 mod board;
 mod hook;
 mod node;
+mod standalone;
 
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
@@ -70,6 +72,10 @@ pub fn run(
     }
     match Board::from_env(env) {
         Some(board) => board::run(&words, json, &board, input, out, err),
-        None => node::run(env, args, err),
+        // The words as they came: a `--json` among them is the verb's own.
+        None => match standalone::run(env, args, out, err)? {
+            Some(code) => Ok(code),
+            None => node::run(env, args, err),
+        },
     }
 }

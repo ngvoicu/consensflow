@@ -1,0 +1,19 @@
+consensflow {version}
+
+Usage: cf <command> [options]
+
+  setup                                     Prepare private launcher and integrations
+  catalog [--harness <h>] [--json]            List available agent presets
+  agent add <name>                           Add an agent of your own
+    [--harness <h>] [--model <m>] [--effort <e>] [--description <d>]
+    [--designer]                            An image agent (Codex only): an image designer
+  agent list [--json]
+  agent edit <name> [--model <m>] [--effort <e>] [--description <d>]
+    [--work-tier critical|complex|standard|light|auto]
+  agent remove <name>
+  ui [--json] [--no-open]                     Run the app's daemon; open the agents screens
+  doctor                                    Inspect runtime, roster and bundled roles
+
+Inside a window ConsensFlow opened, cf is the board: task add --tier <t> "…",
+task list|get|done|accept|reopen|cancel|pause|resume, tell, inbox, ask, note,
+answer, staff, whoami, history (cf help there says more).
