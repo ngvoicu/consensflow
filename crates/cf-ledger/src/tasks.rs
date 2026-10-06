@@ -17,7 +17,8 @@ use crate::store::Store;
 use crate::views::{message_view, task_view, TaskRow, MESSAGE_SELECT, TASK_SELECT};
 
 pub(crate) use finishing::{
-    accept_task, call_off, cancel_task, delete_tasks, fail_task, record_result, reopen_task,
+    accept_task, call_off, cancel_task, delete_tasks, fail_task, record_result, release_ready,
+    reopen_task,
 };
 pub use giving::NewTask;
 pub(crate) use giving::{assign_task, check_release, create_task, release_task};

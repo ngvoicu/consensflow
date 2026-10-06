@@ -553,7 +553,7 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
             .and_then(|roles| encode(ledger.set_roles(id(), text(arg(args, 1)), &roles))),
         "removeMember" => encode(ledger.remove_member(id(), text(arg(args, 1)))),
         "lastStaff" => encode(ledger.last_staff()),
-        "holdsWork" => encode(ledger.holds_work(id())),
+        "holdsWork" => encode(ledger.has_task_in_hand(id())),
         "candidates" => encode(ledger.candidates(id(), integer(arg(args, 1)))),
         "members" => encode(ledger.members(id(), text(arg(args, 1)))),
         "endSession" => {

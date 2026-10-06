@@ -22,7 +22,7 @@ pub(crate) use pools::{candidates, has_members_of_tier, members, nearest_tier};
 pub(crate) use quota::{mark_back, mark_out};
 use sessions::close_session;
 pub(crate) use sessions::{
-    bring_back, can_continue, continuable_session, end_session, holds_work, require_free,
+    bring_back, can_continue, continuable_session, end_session, has_task_in_hand, require_free,
     start_session,
 };
 

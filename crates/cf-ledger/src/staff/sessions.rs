@@ -1,6 +1,6 @@
 //! A member's sessions, each a named window from its first task until the
-//! human deletes it, and after that for a follow-up, and whether one has
-//! work on its hands.
+//! human deletes it, and after that for a follow-up, and what makes one
+//! busy: the task it has in hand, or the follow-up that waits for it.
 
 use cf_proto::ledger::ProjectView;
 use rusqlite::{params, OptionalExtension};
@@ -121,8 +121,9 @@ pub(crate) fn bring_back(
     store.participant_row(session.id)
 }
 
-/// The session that did T-`after`, with nothing on its hands: on the board,
-/// or brought back to it if the human had deleted it.
+/// The session that did T-`after`, free to take another task
+/// (`require_free`): on the board, or brought back to it if the human had
+/// deleted it.
 pub(crate) fn continuable_session(
     store: &mut Store,
     project_id: i64,
@@ -150,16 +151,22 @@ pub(crate) fn continuable_session(
     bring_back(store, session)
 }
 
-/// A member session takes one task at a time: one with a task on its hands
-/// is refused another, a follow-up or a task sent back to it alike, so that
-/// its window is never at work on one task while the board speaks of another.
-pub(crate) fn require_free(store: &Store, session: &ParticipantRow) -> Result<(), LedgerError> {
-    if holds_work(store, session.id)? {
+/// A member session takes one task at a time, and this is the one rule, in
+/// the one set of words, that every door giving a session a task holds it to:
+/// a follow-up (`--after`), a task sent back to it (a reopen) and a task named
+/// for it are refused `session-busy` while it [`holds_work`], so that its
+/// window is never at work on one task while the board speaks of another.
+/// What waits on the board for its needs is not refused: that release
+/// (`release_ready`) is the ledger's own, and waits for the session to be
+/// free. The chief, the human and a member's own lane are no sessions, and
+/// are held to nothing.
+pub(crate) fn require_free(store: &Store, taker: &ParticipantRow) -> Result<(), LedgerError> {
+    if taker.member_id.is_some() && holds_work(store, taker.id)? {
         return Err(LedgerError::refused_with(
             "session-busy",
             format!(
                 "@{} is still on its work: wait for its result, or open the task for its tier",
-                session.handle
+                taker.handle
             ),
             409,
         ));
@@ -167,10 +174,29 @@ pub(crate) fn require_free(store: &Store, session: &ParticipantRow) -> Result<()
     Ok(())
 }
 
-/// Whether a member has a task on its hands: one task per member session
-/// ends when this is false. Paused work counts: its window stays for the
-/// resumption.
-pub(crate) fn holds_work(store: &Store, participant_id: i64) -> Result<bool, LedgerError> {
+/// Whether a session is spoken for, so that no door gives it another task: it
+/// has a task in hand ([`has_task_in_hand`]), or a follow-up that waits on the
+/// board for what it needs (`open`: given with `--after … --needs`). The
+/// waiting one counts though nothing of it has reached the window, because it
+/// is the session's already and goes to its window the moment its needs are
+/// accepted: a task given to the session meanwhile would find the window at
+/// work on one when the other arrived, and the board and the window would
+/// speak of two.
+fn holds_work(store: &Store, participant_id: i64) -> Result<bool, LedgerError> {
+    has_task_in(
+        store,
+        participant_id,
+        &[&HELD_TASK_STATES[..], &["paused", "open"]].concat(),
+    )
+}
+
+/// Whether a participant's window has a task in hand: queued, working or
+/// waiting, or paused, whose window stays for the resumption. A follow-up that
+/// waits on the board for what it needs is not: nothing of it has reached the
+/// window, which closes when it has no task in hand (`holds_work` is what
+/// keeps the session from being given another), and the follow-up goes, once
+/// its needs are accepted, to a session with none in hand.
+pub(crate) fn has_task_in_hand(store: &Store, participant_id: i64) -> Result<bool, LedgerError> {
     has_task_in(
         store,
         participant_id,

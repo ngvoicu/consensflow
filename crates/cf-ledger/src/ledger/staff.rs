@@ -50,9 +50,13 @@ impl Ledger {
         staff::last_staff(&self.store)
     }
 
-    /// Whether a participant has a task on its hands, paused work included.
-    pub fn holds_work(&self, participant_id: i64) -> Result<bool, LedgerError> {
-        staff::holds_work(&self.store, participant_id)
+    /// Whether a participant's window has a task in hand (queued, working or
+    /// waiting, or paused, whose window stays for the resumption): what keeps
+    /// a member's window open. A follow-up waiting on the board for what it
+    /// needs is not in hand; it keeps the session from being given another
+    /// task, which is not the window's question.
+    pub fn has_task_in_hand(&self, participant_id: i64) -> Result<bool, LedgerError> {
+        staff::has_task_in_hand(&self.store, participant_id)
     }
 
     /// The active members an open task may go to, with what the daemon ranks them by.

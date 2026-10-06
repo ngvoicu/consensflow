@@ -216,6 +216,15 @@ pub(crate) fn held_tasks_due(store: &Store, now: &str) -> Result<Vec<HeldTask>, 
 /// stop the window paid for one task never stands in for another's. A window
 /// that holds none is asked for none. What a window owes is what this counts
 /// past the last stop it paid for that task.
+///
+/// A member session holds at most one task at a time: every door that gives
+/// it one is held to that (`require_free`). So the task it works on is the
+/// one it holds, and the newest words only tell that task from none: its
+/// brief still queued, or the task paused before any words of it came, while
+/// the last words the window had were of a task that is over. Only a
+/// participant that holds several (a member's own lane, given tasks by name,
+/// or a ledger written before the rule) has the newest words choose between
+/// them.
 pub(crate) fn stop_of(store: &Store, participant_id: i64) -> Result<Option<Stop>, LedgerError> {
     Ok(store
         .db
@@ -242,6 +251,13 @@ pub(crate) fn stop_of(store: &Store, participant_id: i64) -> Result<Option<Stop>
 /// sends goes: the one it holds (queued, working or waiting), else the paused
 /// one. A question asked in a window that the pause has not yet stopped is
 /// still about its task.
+///
+/// A member session holds at most one task at a time: every door that gives
+/// it one is held to that (`require_free`). So the task found is its only
+/// one, and nothing is chosen between two. A participant that holds several
+/// (a member's own lane, given tasks by name, or a ledger written before the
+/// rule) has the oldest found, a paused one last, and a question about
+/// another of them would be attached to the wrong task.
 pub(crate) fn task_in_hand(
     store: &Store,
     participant_id: i64,

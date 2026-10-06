@@ -17,6 +17,7 @@ mod deleted_sessions;
 mod deliveries;
 mod exit_unsettled;
 mod fixtures;
+mod follow_ups;
 mod interrupts;
 mod lanes;
 mod launch_stops;

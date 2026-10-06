@@ -101,13 +101,16 @@ impl Ledger {
     }
 
     /// The stops asked of a participant's window: the task it works on, and
-    /// how many its pauses asked. None for a window that works on none.
+    /// how many its pauses asked. None for a window that works on none. A
+    /// member session holds one task at a time (`require_free`), and is asked
+    /// for the stops of that one.
     pub fn stop_of(&self, participant_id: i64) -> Result<Option<Stop>, LedgerError> {
         tasks::stop_of(&self.store, participant_id)
     }
 
     /// The task a participant's window is on as far as what it sends goes: the
-    /// one it holds, else its paused one.
+    /// one it holds, else its paused one. A member session holds one task at
+    /// a time (`require_free`): this is it.
     pub fn task_in_hand(&self, participant_id: i64) -> Result<Option<TaskThread>, LedgerError> {
         tasks::task_in_hand(&self.store, participant_id)
     }

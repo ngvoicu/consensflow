@@ -14,6 +14,7 @@ use super::receipt::reconcile;
 use super::{known_message, message_task, messages, require_message};
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::store::Store;
+use crate::tasks::release_ready;
 use crate::views::MESSAGE_SELECT;
 
 /// The participants something waits on: a message on its way to them, or a
@@ -337,6 +338,7 @@ pub(crate) fn fail_delivery(
             release_carried(store, task.id)?;
             if message.kind == "task" && task.state == "queued" {
                 store.move_task(&task, "failed", json!({}))?;
+                release_ready(store, task.project_id)?;
             }
         }
         known_message(store, message_id)

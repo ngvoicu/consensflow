@@ -130,6 +130,14 @@ pub(crate) struct WindowPart {
     /// The last stop this window process paid: its task and the sequence. It
     /// dies with the window, and a window opened later owes nothing for the
     /// stops asked before it opened.
+    ///
+    /// One pair is enough because a member session holds at most one task at
+    /// a time (`require_free` in the ledger): the stops a window pays are its
+    /// task's, and a task that follows (a follow-up, in a window the human
+    /// keeps open) has its own, which a pair of the one before never stands
+    /// in for. A window that held two and paid a stop for each in turn would
+    /// forget the first's, and be interrupted for it again on going back to
+    /// it: only a member's own lane, given tasks by name, can.
     pub(crate) stopped: Option<(i64, i64)>,
     /// The rounds the stop it owes has had.
     pub(crate) interrupted: Option<Interrupted>,
@@ -874,10 +882,13 @@ impl Dispatcher {
         Ok(false)
     }
 
-    /// A member's window closes once it holds no task, unless the human
-    /// opened it or a message is still on its way in. One the human opened
-    /// and has hidden since waits for its agent's turn to end first. Says
-    /// whether it closed; one gone already has nothing to close.
+    /// A member's window closes once it has no task in hand, unless the human
+    /// opened it or a message is still on its way in. A follow-up that waits
+    /// on the board for what it needs is not in hand: the session is its
+    /// already, but its window opens again, on its conversation, when the
+    /// follow-up goes, and stays closed meanwhile. One the human opened and
+    /// has hidden since waits for its agent's turn to end first. Says whether
+    /// it closed; one gone already has nothing to close.
     pub(crate) async fn close_if_free(
         self: &Rc<Self>,
         record: &Rc<Record>,
@@ -886,7 +897,7 @@ impl Dispatcher {
             let part = record.window.borrow();
             part.pane.is_none() || part.pinned || (part.hidden && !part.settled)
         } || record.delivery.borrow().delivering.is_some()
-            || self.seams.ledger.borrow().holds_work(record.id)?;
+            || self.seams.ledger.borrow().has_task_in_hand(record.id)?;
         if kept {
             return Ok(false);
         }

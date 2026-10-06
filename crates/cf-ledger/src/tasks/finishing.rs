@@ -13,7 +13,7 @@ use crate::model::{
     MAX_BODY, MEMBER_ROLES,
 };
 use crate::queue::{drop_queued, queue, send, withdraw_gated, Queued, Sent};
-use crate::staff::{bring_back, can_continue, require_free};
+use crate::staff::{bring_back, can_continue, has_task_in_hand, require_free};
 use crate::store::Store;
 use crate::views::{ParticipantRow, TaskRow};
 
@@ -41,6 +41,7 @@ pub(crate) fn record_result(
             },
         )?;
         store.move_task(&task, "done", json!({ "result": message_id }))?;
+        release_ready(store, project_id)?;
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,
             message: store.message(message_id)?,
@@ -80,7 +81,7 @@ pub(crate) fn accept_task(
             )?;
         }
         store.move_task(&task, "accepted", json!({ "by": by }))?;
-        release_waiting(store, project_id, task.id)?;
+        release_ready(store, project_id)?;
         task_by_id(store, task.id)
     })
 }
@@ -108,30 +109,35 @@ fn require_result_received(store: &Store, task: &TaskRow, by: &str) -> Result<()
     Ok(())
 }
 
-/// The tasks given by name that waited on the board for the one just
-/// accepted: each with nothing left to wait for goes to its window now.
-fn release_waiting(
-    store: &mut Store,
-    project_id: i64,
-    accepted_id: i64,
-) -> Result<(), LedgerError> {
+/// The tasks given to a participant (by name, or as a follow-up) that wait on
+/// the board for what they need go to their windows now: each with every task
+/// it needs accepted, oldest first, unless its assignee is a member session
+/// with a task in hand. That one waits for the session to be free, as it
+/// waited for what it needs, and goes when the task in hand is over; of two
+/// waiting for one session the first goes and the second waits behind it.
+/// Called in the step of whatever made a release possible: an acceptance, or
+/// the end of a session's task in hand: its result, its calling off, its
+/// failing (`fail_task`, and a delivery that fails for good), and its being
+/// taken back for its tier. It refuses nothing of its own, which would fail
+/// that step for something else's sake. Every door gives a session one waiting
+/// task at a time (`holds_work`), so a session is busy here only in a ledger
+/// written before they did.
+pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), LedgerError> {
     let waiting = store
         .db
         .prepare(
-            "SELECT t.* FROM task t JOIN task_need n ON n.task_id = t.id
-       WHERE n.needs_id = ? AND t.state = 'open' AND t.assignee_id IS NOT NULL ORDER BY t.id",
+            "SELECT t.* FROM task t
+       WHERE t.project_id = ? AND t.state = 'open' AND t.assignee_id IS NOT NULL
+         AND EXISTS (SELECT 1 FROM task_need n WHERE n.task_id = t.id)
+         AND NOT EXISTS (SELECT 1 FROM task_need n JOIN task d ON d.id = n.needs_id
+                         WHERE n.task_id = t.id AND d.state != 'accepted')
+       ORDER BY t.id",
         )?
-        .query_map([accepted_id], TaskRow::read)?
+        .query_map([project_id], TaskRow::read)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for task in waiting {
-        let still = store
-            .db
-            .prepare(
-                "SELECT 1 FROM task_need n JOIN task d ON d.id = n.needs_id
-         WHERE n.task_id = ? AND d.state != 'accepted'",
-            )?
-            .exists([task.id])?;
-        if still {
+        let assignee = store.participant_of(task.assignee_id)?;
+        if assignee.member_id.is_some() && has_task_in_hand(store, assignee.id)? {
             continue;
         }
         let body = delivery_body(&task);
@@ -139,7 +145,7 @@ fn release_waiting(
             store,
             project_id,
             &Queued {
-                to: task.assignee_id.unwrap_or_default(),
+                to: assignee.id,
                 from: Some(task.requester_id),
                 kind: "task",
                 task_id: Some(task.id),
@@ -154,11 +160,12 @@ fn release_waiting(
 
 /// A follow-up on a finished or failed task: it goes back to its assignee's
 /// queue, and a session the human deleted is brought back to the board for it.
-/// A session that is on another task takes none (as for a follow-up, it is
-/// refused `session-busy`): its window has one task to work on. The follow-up
-/// is a task message that carries what the window kept for the task (which is
-/// what delivers what a delivery that failed let go of), and the brief before
-/// it when none is received or on its way.
+/// A session that is spoken for (`holds_work`: on another task, or with a
+/// follow-up waiting for what it needs) takes none, and is refused as a
+/// follow-up is, `session-busy`: its window has one task to work on. The
+/// follow-up is a task message that carries what the window kept for the task
+/// (which is what delivers what a delivery that failed let go of), and the
+/// brief before it when none is received or on its way.
 pub(crate) fn reopen_task(
     store: &mut Store,
     project_id: i64,
@@ -183,9 +190,7 @@ pub(crate) fn reopen_task(
                 409,
             ));
         }
-        if found.member_id.is_some() {
-            require_free(store, &found)?;
-        }
+        require_free(store, &found)?;
         let assignee = match found.member_id {
             Some(_) => bring_back(store, found)?,
             None => found,
@@ -283,6 +288,7 @@ pub(crate) fn call_off(
         params![format!("cancelled by @{by}"), task.id],
     )?;
     store.move_task(&task, "cancelled", json!({ "by": by }))?;
+    release_ready(store, project_id)?;
     Ok((task, assignee.filter(|_| began)))
 }
 
@@ -300,6 +306,7 @@ pub(crate) fn fail_task(
         require_task_state(&task, &failable, "fail")?;
         drop_queued(store, task.id)?;
         store.move_task(&task, "failed", json!({ "reason": reason }))?;
+        release_ready(store, project_id)?;
         task_by_id(store, task.id)
     })
 }

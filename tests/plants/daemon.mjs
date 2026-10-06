@@ -32,6 +32,7 @@ import { PLANTS as PLAYERS } from './daemon/players.mjs'
 import { PLANTS as RECEIPT_A } from './daemon/receipt-a.mjs'
 import { PLANTS as RUN } from './daemon/run.mjs'
 import { PLANTS as SCREENS } from './daemon/screens.mjs'
+import { PLANTS as SESSIONS } from './daemon/sessions.mjs'
 import { PLANTS as SUPPORT } from './daemon/support.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -51,6 +52,7 @@ const PLANTS = [
   ...PAUSE,
   ...RECEIPT_A,
   ...OBLIGATIONS,
+  ...SESSIONS,
 ]
 
 const args = process.argv.slice(2)

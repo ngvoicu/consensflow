@@ -61,13 +61,10 @@ export const PLANTS = [
       [
         `${LEDGER}/tasks/finishing.rs`,
         lines(
-          '        if found.member_id.is_some() {',
-          '            require_free(store, &found)?;',
+          '        require_free(store, &found)?;',
+          '        let assignee = match found.member_id {',
         ),
-        lines(
-          '        if found.member_id.is_some() && false {',
-          '            require_free(store, &found)?;',
-        ),
+        '        let assignee = match found.member_id {',
       ],
     ],
     runs: [receipt],
@@ -78,7 +75,7 @@ export const PLANTS = [
     name: 'pause: a window is stopped for the paused task it holds before the one it works on',
     edits: [PAUSED_FIRST],
     runs: [receipt],
-    meant: 'a_pause_of_a_task_the_session_holds_but_does_not_work_on_is_not_a_stop_of_its_window',
+    meant: 'a_pause_of_a_task_the_window_was_never_given_is_not_a_stop_of_its_window',
   },
   {
     name: 'pause: a window at work is pressed for a paused task it holds and does not work on',

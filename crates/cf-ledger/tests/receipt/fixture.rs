@@ -133,22 +133,37 @@ impl World {
 
     /// The chief gives a task to a member by name: its brief is queued for it.
     pub fn give(&mut self, to: &str, body: &str) -> TaskCreated {
-        self.ledger
-            .create_task(
-                self.project,
-                &NewTask {
-                    from: "chief".into(),
-                    to: Some(to.into()),
-                    body: body.into(),
-                    ..NewTask::default()
-                },
-            )
-            .expect("a task")
+        self.give_to(to, &[], body).expect("a task")
+    }
+
+    /// The chief gives a task to a participant by name, to wait on the board
+    /// for the tasks it `needs`; the ledger may refuse it.
+    pub fn give_to(
+        &mut self,
+        to: &str,
+        needs: &[i64],
+        body: &str,
+    ) -> Result<TaskCreated, LedgerError> {
+        self.ledger.create_task(
+            self.project,
+            &NewTask {
+                from: "chief".into(),
+                to: Some(to.into()),
+                needs: numbers(needs),
+                body: body.into(),
+                ..NewTask::default()
+            },
+        )
     }
 
     /// The chief opens a task for the standard workers; the daemon gives it a
     /// session of `member` with `assign`.
     pub fn open(&mut self, body: &str) -> TaskCreated {
+        self.open_needing(body, &[])
+    }
+
+    /// The same, waiting on the board for the tasks it `needs`.
+    pub fn open_needing(&mut self, body: &str, needs: &[i64]) -> TaskCreated {
         self.ledger
             .create_task(
                 self.project,
@@ -156,11 +171,27 @@ impl World {
                     from: "chief".into(),
                     pool: Some("worker".into()),
                     tier: Some("standard".into()),
+                    needs: numbers(needs),
                     body: body.into(),
                     ..NewTask::default()
                 },
             )
             .expect("a task for the tier")
+    }
+
+    /// Hands open task `number` to `session` as a ledger written before one
+    /// task per session could have: a follow-up waiting on the board for what
+    /// it needs, given to a session that has another waiting or at work. No
+    /// door of this ledger gives one.
+    pub fn hand_to(&mut self, number: i64, session: &str) {
+        let session = self.id(session);
+        self.edit(|db| {
+            db.execute(
+                "UPDATE task SET assignee_id = ?, pool = NULL, tier = NULL WHERE number = ?",
+                rusqlite::params![session, number],
+            )
+            .expect("the task is handed over");
+        });
     }
 
     /// The daemon gives open task `number` to a new session of `member`.
@@ -171,9 +202,8 @@ impl World {
             .expect("assigned")
     }
 
-    /// The chief gives a follow-up to the session that did task `after`, and
-    /// has it wait on the board for the tasks it `needs`, which is how a session
-    /// is given a second task while one waits for it.
+    /// The chief gives a follow-up to the session that did task `after`, to
+    /// wait on the board for the tasks it `needs`; the ledger may refuse it.
     pub fn follow_up(
         &mut self,
         after: i64,
@@ -185,10 +215,7 @@ impl World {
             &NewTask {
                 from: "chief".into(),
                 after: Some(after),
-                needs: needs
-                    .iter()
-                    .map(|number| u64::try_from(*number).expect("a task number"))
-                    .collect(),
+                needs: numbers(needs),
                 body: body.into(),
                 ..NewTask::default()
             },
@@ -371,4 +398,12 @@ impl World {
 /// The ids of messages, in order.
 pub fn ids(messages: &[MessageView]) -> Vec<i64> {
     messages.iter().map(|message| message.id).collect()
+}
+
+/// Task numbers as a task is given the ones it needs.
+fn numbers(tasks: &[i64]) -> Vec<u64> {
+    tasks
+        .iter()
+        .map(|number| u64::try_from(*number).expect("a task number"))
+        .collect()
 }

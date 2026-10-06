@@ -8,7 +8,8 @@ use rusqlite::params;
 use serde_json::{json, Map, Value};
 
 use super::{
-    a_pool, delivery_body, m_list, pool_name, require_task_state, task_by_id, task_row_by_id,
+    a_pool, delivery_body, m_list, pool_name, release_ready, require_task_state, task_by_id,
+    task_row_by_id,
 };
 use crate::messages::transfer;
 use crate::model::{
@@ -16,7 +17,8 @@ use crate::model::{
 };
 use crate::queue::{queue, send, Queued, Sent};
 use crate::staff::{
-    continuable_session, has_members_of_tier, nearest_tier, require_member_row, start_session,
+    continuable_session, has_members_of_tier, nearest_tier, require_free, require_member_row,
+    start_session,
 };
 use crate::store::Store;
 use crate::views::TaskRow;
@@ -178,9 +180,15 @@ pub(crate) fn create_task(
         }
         // A follow-up on a finished task goes to the session that did it, while
         // it is still there and free: the one case a coordinator names a window.
+        // A task named for a session is held to the same rule, whether it goes
+        // to the window now or waits on the board for what it needs.
         let assignee = match (request.after, &request.to) {
             (Some(after), _) => Some(continuable_session(store, project_id, after)?),
-            (None, Some(to)) => Some(store.participant_by_handle(project_id, to)?),
+            (None, Some(to)) => {
+                let named = store.participant_by_handle(project_id, to)?;
+                require_free(store, &named)?;
+                Some(named)
+            }
             (None, None) => None,
         };
         // A tier nobody on the staff holds goes to the nearest one somebody does,
@@ -503,6 +511,7 @@ pub(crate) fn release_task(
                 ..Sent::default()
             },
         )?;
+        release_ready(store, project_id)?;
         Ok(TaskReleased {
             task: task_by_id(store, task.id)?,
         })
