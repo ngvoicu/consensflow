@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { codexAdapter } from '../src/adapters/codex.js'
+import { codexAdapter, mcpIsolation } from '../src/adapters/codex.js'
 import { BUNDLE_CF } from '../src/core/pane-cf.js'
 import { fakeNodeExecutable } from './helpers.mjs'
 
@@ -208,6 +208,95 @@ describe('the Codex adapter', () => {
       const odd = codexAdapter({ env, mcpServers: async () => [{ name: 'a.b' }] })
       await assert.rejects(odd.prepare(request()), /cannot switch off the Codex MCP server "a\.b"/)
     })
+  })
+
+  it('switches off a server Codex reaches by URL as a URL, never with a command, which Codex refuses on one', async () => {
+    await withHome(async ({ env }) => {
+      // As Codex 0.160.1 lists them: by command, by URL, and (an older Codex) with no transport.
+      const adapter = codexAdapter({
+        env,
+        mcpServers: async () => [
+          { name: 'cua_repl', transport: { type: 'stdio', command: 'cua', args: [] } },
+          {
+            name: 'idea',
+            transport: { type: 'streamable_http', url: 'http://127.0.0.1:64342/stream' },
+          },
+          { name: 'computer-history' },
+        ],
+      })
+      const member = await adapter.prepare(request())
+      const flags = [
+        '-c',
+        'mcp_servers.cua_repl.command="/usr/bin/true"',
+        '-c',
+        'mcp_servers.cua_repl.enabled=false',
+        '-c',
+        'mcp_servers.idea.url="http://127.0.0.1:9/disabled"',
+        '-c',
+        'mcp_servers.idea.enabled=false',
+        '-c',
+        'mcp_servers.computer-history.command="/usr/bin/true"',
+        '-c',
+        'mcp_servers.computer-history.enabled=false',
+      ]
+      const at = member.argv.indexOf(flags[1])
+      assert.deepEqual(member.argv.slice(at - 1, at - 1 + flags.length), flags)
+      assert.ok(!member.argv.some((arg) => arg.startsWith('mcp_servers.idea.command')))
+      const chief = await adapter.prepare(request({ role: 'chief', agent: null, message: null }))
+      assert.ok(!chief.argv.some((arg) => arg.startsWith('mcp_servers.')))
+      const odd = codexAdapter({
+        env,
+        mcpServers: async () => [{ name: 'a.b', transport: { type: 'streamable_http' } }],
+      })
+      await assert.rejects(odd.prepare(request()), /cannot switch off the Codex MCP server "a\.b"/)
+    })
+  })
+
+  it('takes a server for one reached by URL when its transport names a type other than stdio, whatever else it holds', () => {
+    const command = (name) => [
+      '-c',
+      `mcp_servers.${name}.command="/usr/bin/true"`,
+      '-c',
+      `mcp_servers.${name}.enabled=false`,
+    ]
+    const url = (name) => [
+      '-c',
+      `mcp_servers.${name}.url="http://127.0.0.1:9/disabled"`,
+      '-c',
+      `mcp_servers.${name}.enabled=false`,
+    ]
+    for (const [transport, expected] of [
+      [{ type: 'stdio', command: 'cua', args: [], env: null, env_vars: [], cwd: null }, command],
+      [
+        {
+          type: 'streamable_http',
+          url: 'http://127.0.0.1:64342/stream',
+          bearer_token_env_var: 'IDEA_TOKEN',
+          http_headers: { 'X-A': 'b' },
+          env_http_headers: null,
+          http_headers_helper: null,
+        },
+        url,
+      ],
+      // A type Codex has not listed so far.
+      [{ type: 'sse', url: 'http://127.0.0.1:64342/sse' }, url],
+      // No type, or none that is text: what an older Codex lists, and nothing a URL server says.
+      [undefined, command],
+      [null, command],
+      [{}, command],
+      [{ type: null }, command],
+      [{ type: 5 }, command],
+      [{ type: ['streamable_http'] }, command],
+      [{ url: 'http://127.0.0.1:64342/stream' }, command],
+      ['streamable_http', command],
+      [['streamable_http'], command],
+    ]) {
+      assert.deepEqual(
+        mcpIsolation([{ name: 'srv', transport }]),
+        expected('srv'),
+        JSON.stringify(transport) ?? 'no transport',
+      )
+    }
   })
 
   it('gives the chief no question tool: it asks the human in plain words in its window', async () => {

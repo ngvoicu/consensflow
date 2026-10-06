@@ -5,7 +5,12 @@
 //! browser and the screen through them (the ChatGPT app's, since 2026-09-26).
 //! Each gets a harmless, disabled definition; a bare `enabled=false` is refused
 //! for servers defined outside config.toml, and a name that needs quotes would
-//! define a new server instead, so such a name stops the launch.
+//! define a new server instead, so such a name stops the launch. The definition
+//! is in the form of the server's own transport: Codex refuses a command on a
+//! server reached by URL ("url is not supported for stdio"), and every Codex
+//! window of a Mac that had one closed at once (2026-10-06). Codex lists
+//! `stdio` and `streamable_http`: a transport of another type is taken for a
+//! URL's, and a server with none (an older Codex) for a command's.
 
 use std::borrow::Cow;
 use std::path::PathBuf;
@@ -67,6 +72,20 @@ fn name_of(server: &Value) -> Result<Option<&Value>, String> {
     }
 }
 
+/// Where a switched-off server reached by URL points: the discard port on
+/// loopback, which nothing answers.
+const DISABLED_URL: &str = "http://127.0.0.1:9/disabled";
+
+/// Whether Codex lists a server as reached by URL: its transport names a type
+/// that is text and is not `stdio`. A server with no transport, or one that
+/// is no object or names no such type, is a command's.
+fn by_url(server: &Value) -> bool {
+    matches!(
+        server.get("transport").and_then(|transport| transport.get("type")),
+        Some(Value::String(kind)) if kind != "stdio"
+    )
+}
+
 /// The flags that give each of `servers` a disabled definition. A name is
 /// taken as JavaScript's pattern test and its template take it: whatever text
 /// it makes, a number and a flag too.
@@ -90,9 +109,14 @@ pub(super) fn isolation(servers: &[Value]) -> Result<Vec<String>, String> {
                 "cannot switch off the Codex MCP server {shown} for a member"
             ));
         }
+        let definition = if by_url(server) {
+            format!("url=\"{DISABLED_URL}\"")
+        } else {
+            "command=\"/usr/bin/true\"".to_owned()
+        };
         flags.extend([
             "-c".to_owned(),
-            format!("mcp_servers.{text}.command=\"/usr/bin/true\""),
+            format!("mcp_servers.{text}.{definition}"),
             "-c".to_owned(),
             format!("mcp_servers.{text}.enabled=false"),
         ]);

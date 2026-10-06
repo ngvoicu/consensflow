@@ -142,6 +142,33 @@ describe('an eval run’s plan', () => {
     assert.throws(() => codexIsolation([{ name: 'a.b' }]), /cannot switch off/)
   })
 
+  it('switches off a Codex MCP server reached by URL as a URL, and one reached by command as a command', () => {
+    assert.deepEqual(
+      codexIsolation([
+        { name: 'cua_repl', transport: { type: 'stdio', command: 'cua' } },
+        {
+          name: 'idea',
+          transport: { type: 'streamable_http', url: 'http://127.0.0.1:64342/stream' },
+        },
+        { name: 'computer-history' },
+      ]),
+      [
+        '-c',
+        'mcp_servers.cua_repl.command="/usr/bin/true"',
+        '-c',
+        'mcp_servers.cua_repl.enabled=false',
+        '-c',
+        'mcp_servers.idea.url="http://127.0.0.1:9/disabled"',
+        '-c',
+        'mcp_servers.idea.enabled=false',
+        '-c',
+        'mcp_servers.computer-history.command="/usr/bin/true"',
+        '-c',
+        'mcp_servers.computer-history.enabled=false',
+      ],
+    )
+  })
+
   it('keeps the last non-empty lines a window printed, whatever the line ending', () => {
     assert.deepEqual(lastLines('a\r\n\r\nb  \rc\n\n  \nd\n', 3), ['b', 'c', 'd'])
     assert.deepEqual(lastLines(''), [])

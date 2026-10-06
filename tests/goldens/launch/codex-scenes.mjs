@@ -74,6 +74,28 @@ export const codex = (says = {}) => ({
 export const lists = (...servers) => ({
   'mcp list --json': { stdout: `${JSON.stringify(servers)}\n` },
 })
+/** A server Codex 0.160.1 lists as reached by command. */
+export const byCommand = (name, command = 'cua') => ({
+  name,
+  enabled: true,
+  disabled_reason: null,
+  transport: { type: 'stdio', command, args: [], env: null, env_vars: [], cwd: null },
+})
+/** A server Codex 0.160.1 lists as reached by URL, `more` of its transport beside the URL. */
+export const byUrl = (name, url = 'http://127.0.0.1:64342/stream', more = {}) => ({
+  name,
+  enabled: true,
+  disabled_reason: null,
+  transport: {
+    type: 'streamable_http',
+    url,
+    bearer_token_env_var: null,
+    http_headers: null,
+    env_http_headers: null,
+    http_headers_helper: null,
+    ...more,
+  },
+})
 
 /**
  * Codex's app-server as it answers the role's dialogue: initialized, and its

@@ -60,6 +60,7 @@
     "live:interrupt": "node tests/live/interrupt-idle.mjs",
     "live:asks": "node tests/live/claude-asks.mjs",
     "live:codex-resume": "node tests/live/codex-resume.mjs",
+    "live:codex-mcp": "node tests/live/codex-mcp-switch-off.mjs",
     "live:terminal": "node tests/live/devin-terminal.mjs",
     "live:home-parity": "node tests/live/home-parity.mjs",
     "windows": "node tests/live/windows.mjs",
