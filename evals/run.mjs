@@ -295,6 +295,9 @@ async function run(index) {
   const started = Date.now()
   freshWorkspace()
   const app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV })
+  // Which daemon the run is on (CONSENSFLOW_TEST_DAEMON, tests/choice.mjs): what
+  // the Windows matrix reads back to say what it ran against.
+  process.stdout.write(`daemon: ${app.daemon.kind} (${app.daemon.runtime})\n`)
   await trustWorkspace(app)
   const log = []
   const note = (line) => {
@@ -633,6 +636,9 @@ async function runBare(index) {
   const started = Date.now()
   freshWorkspace()
   const app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV })
+  // Which daemon the run is on (CONSENSFLOW_TEST_DAEMON, tests/choice.mjs): what
+  // the Windows matrix reads back to say what it ran against.
+  process.stdout.write(`daemon: ${app.daemon.kind} (${app.daemon.runtime})\n`)
   await trustWorkspace(app)
   const log = []
   const note = (line) => {

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { roleConfiguration } from '../src/role-skills.js'
+import { choose, DEFAULT_DAEMON, NATIVE_CF } from './choice.mjs'
 
 /**
  * Every test runs against a throwaway CONSENSFLOW_HOME and throwaway harness
@@ -27,27 +28,48 @@ export function tempEnv() {
 }
 
 /**
- * How a test starts a daemon: Node's by default, `node <nodeArgs>`; with
- * `CONSENSFLOW_TEST_DAEMON` set to a JSON array, a command and its arguments,
- * the native one (`cf ui --json --no-open` of the build under test), with the
- * switch it runs behind (`CONSENSFLOW_DAEMON=native`) in its environment. Either
+ * How a test starts a daemon, as `CONSENSFLOW_TEST_DAEMON` names it (the words
+ * are tests/choice.mjs's): `node`, Node's, `node <nodeArgs>`; `native` or a JSON
+ * array, a command and its arguments, the native one (`cf ui --json --no-open`
+ * of the build under test); nothing, the tests' default. Each has the switch
+ * the product reads (`CONSENSFLOW_DAEMON`) said in its environment, Node's too,
+ * so that no start leaves to the product's own default which one it is. Either
  * is told the runtime to name to the windows it opens (`CONSENSFLOW_NODE`): the
  * Node daemon names its own whatever this says, the native one names what it is
- * given. `env` is what to add to the environment the test gives the daemon.
+ * given. `env` is what to add to the environment the test gives the daemon, and
+ * `kind` is the one chosen, `node` or `native`: what `assertStarted` holds the
+ * daemon that starts to. A run labelled with its leg (`CONSENSFLOW_TEST_LEG`)
+ * is refused a choice that is not its own. The options are what a test sets to
+ * choose in its own words, not the environment's: the selection, the leg, and
+ * the default.
  */
-export function daemonCommand(nodeArgs) {
-  const named = process.env.CONSENSFLOW_TEST_DAEMON
+export function daemonCommand(
+  nodeArgs,
+  {
+    named = process.env.CONSENSFLOW_TEST_DAEMON,
+    leg = process.env.CONSENSFLOW_TEST_LEG,
+    fallback = DEFAULT_DAEMON,
+  } = {},
+) {
+  const chosen = choose('CONSENSFLOW_TEST_DAEMON', { named, leg, fallback })
   const env = { CONSENSFLOW_NODE: process.execPath }
-  if (named === undefined || named === '') {
-    return { command: process.execPath, args: nodeArgs, env, native: false }
+  if (chosen.kind === 'node') {
+    return {
+      command: process.execPath,
+      args: nodeArgs,
+      env: { ...env, CONSENSFLOW_DAEMON: 'node' },
+      native: false,
+      kind: 'node',
+    }
   }
-  const [command, ...args] = JSON.parse(named)
-  if (typeof command !== 'string' || args.some((arg) => typeof arg !== 'string')) {
-    throw new Error(
-      'CONSENSFLOW_TEST_DAEMON is a JSON array of strings: a command and its arguments',
-    )
+  const [command, ...args] = chosen.command ?? [NATIVE_CF, 'ui', '--json', '--no-open']
+  return {
+    command,
+    args,
+    env: { ...env, CONSENSFLOW_DAEMON: 'native' },
+    native: true,
+    kind: 'native',
   }
-  return { command, args, env: { ...env, CONSENSFLOW_DAEMON: 'native' }, native: true }
 }
 
 /** Native config resolution is a subprocess boundary, covered in role-skills.test. */
