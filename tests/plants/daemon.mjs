@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url'
 import { PLANTS as CONSTANTS } from './daemon/constants.mjs'
 import { PLANTS as FRONT } from './daemon/front.mjs'
 import { PLANTS as PARTS } from './daemon/parts.mjs'
+import { PLANTS as PLAYERS } from './daemon/players.mjs'
 import { PLANTS as RUN } from './daemon/run.mjs'
 import { PLANTS as SCREENS } from './daemon/screens.mjs'
 import { PLANTS as SUPPORT } from './daemon/support.mjs'
@@ -34,7 +35,7 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const RUN_LIMIT = 5 * 60 * 1000
 
 /** Every plant, by area; what a plant is, is told in `daemon/kit.mjs`. */
-const PLANTS = [...RUN, ...FRONT, ...PARTS, ...CONSTANTS, ...SCREENS, ...SUPPORT]
+const PLANTS = [...RUN, ...FRONT, ...PARTS, ...CONSTANTS, ...SCREENS, ...SUPPORT, ...PLAYERS]
 
 const args = process.argv.slice(2)
 const checkOnly = args.includes('--check')

@@ -17,11 +17,18 @@
 //!   and a client of it that writes a request as the trace has it;
 //! - `world.rs` (page, screens): the folder and the environment a trace starts
 //!   from, the programs on its `PATH` included;
+//! - `wrote.rs` (page, screens): the files that folder holds before and after an
+//!   exchange or an operation, held to the `wrote` of the trace, and the one
+//!   masking the recorder does there;
 //! - `ledger.rs` (API, page): the ledger the trace's own calls are made again
 //!   on, with the clock and the names Node's drew.
 //!
-//! What only the API's windows have (`«api»`, `«token:T1»`) is the API's own
-//! (`tests/api/names.rs`): nothing else reads those names.
+//! What a trace names that varies is put where it is used, by whoever owns the
+//! thing that varies, and no player puts them all: `«root»` by the world, the
+//! stamps of a roster (`«now»`) by the world that writes one and by `wrote.rs`
+//! that reads one, and what only the API's windows have (`«api»`, `«token:T1»`)
+//! by the API's own player (`tests/api/names.rs`). `«ledger»` is in
+//! `ledger.file` only, which no player reads: each opens a ledger of its own.
 
 pub mod compare;
 pub mod daemon;

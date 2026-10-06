@@ -20,7 +20,6 @@
 
 mod play;
 mod rig;
-mod wrote;
 
 // What the three players share, taken whole.
 #[path = "../support/front.rs"]
@@ -29,6 +28,8 @@ mod front;
 mod support;
 #[path = "../support/world.rs"]
 mod world;
+#[path = "../support/wrote.rs"]
+mod wrote;
 
 use std::collections::BTreeSet;
 
@@ -85,6 +86,36 @@ fn every_trace_of_the_screens_there_is_has_a_test_and_no_test_is_for_none() {
     let tested: BTreeSet<String> = TRACES.iter().map(|name| (*name).to_owned()).collect();
     assert_eq!(recorded(), tested);
     assert_eq!(TRACES.len(), 19);
+}
+
+/// The world is read as the recorder reads it: a roster's `createdAt` and
+/// `updatedAt` are the clock's and are masked, and a time anywhere else, in the
+/// roster or in any other file, is held to what Node recorded.
+#[test]
+fn the_world_masks_what_the_recorder_masks_and_nothing_else() {
+    let time = "2026-10-05T10:00:00.123Z";
+    let roster = format!(
+        "{{\n  \"agents\": [\n    {{\n      \"name\": \"{time}\",\n      \"createdAt\": \"{time}\",\n      \"updatedAt\": \"{time}\"\n    }}\n  ],\n  \"checkedAt\": \"{time}\"\n}}\n"
+    );
+    let masked = roster
+        .replace(
+            r#""createdAt": "2026-10-05T10:00:00.123Z""#,
+            r#""createdAt": "«now»""#,
+        )
+        .replace(
+            r#""updatedAt": "2026-10-05T10:00:00.123Z""#,
+            r#""updatedAt": "«now»""#,
+        );
+    assert_ne!(masked, roster);
+    for path in ["consensflow/agents.json", "agents.json", "home/agents.json"] {
+        assert_eq!(wrote::masked(path, &roster), masked, "{path}");
+    }
+    for path in ["bin/claude", "consensflow/agents.json.bak", "agents.jsonl"] {
+        assert_eq!(wrote::masked(path, &roster), roster, "{path}");
+    }
+    // The clock's stamp is a time: any other text there is not the clock's.
+    let corrupt = roster.replace(time, "garbage");
+    assert_eq!(wrote::masked("agents.json", &corrupt), corrupt);
 }
 
 /// Every exchange the traces record whose answer is Node's V8 words for a body that is no JSON.

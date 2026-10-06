@@ -2,7 +2,8 @@
 //! `tests/goldens/` (`core-page-*` and `corners-page-*`) played as
 //! `tests/goldens/daemon/FORMAT.md` says. Each operation is asked over a bridge
 //! as the app asks it, with the dispatcher of Node's tests as the engine; its
-//! reply is compared as bytes, its kicks, the events its ledger calls logged
+//! reply is compared as the bytes the bridge carried, its kicks, the files it
+//! wrote (none, where the trace says none), the events its ledger calls logged
 //! and every call it made on a stand-in, with its arguments, in its place
 //! among the ledger's own; and the ledger is left as Node left it.
 
@@ -12,6 +13,7 @@
 mod notes;
 mod player;
 mod standin;
+mod wire;
 
 // What the three players share, taken whole.
 #[path = "../support/ledger.rs"]
@@ -20,6 +22,8 @@ mod ledger;
 mod support;
 #[path = "../support/world.rs"]
 mod world;
+#[path = "../support/wrote.rs"]
+mod wrote;
 
 use cf_proto::page::PageOperation;
 use support::trace::{self, Tally};

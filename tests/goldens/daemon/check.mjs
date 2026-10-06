@@ -2,11 +2,55 @@
  * What every trace must be, whatever it recorded: the shape `FORMAT.md`
  * describes. The recorder checks each trace as it makes it, and the tests
  * check what is checked in, so a player can rely on these and not re-check
- * them: no step of a kind it does not know, no token used before it was
- * issued, no exchange left waiting for an end, nothing that varies from run
- * to run left in the text.
+ * them: no step of a kind it does not know, no name of what varies where no
+ * player puts it, no token used before it was issued, no exchange left waiting
+ * for an end, a ledger that left a database ended by the `close` that compares
+ * it, nothing that varies from run to run left in the text.
  */
 import { validate } from './mask.mjs'
+
+/**
+ * Where each name of what varies stands in a trace, as the table of `FORMAT.md`
+ * says: a player puts it in these fields and no others. A field is its keys
+ * from the trace, an index as `#` and the name of a variable or of a file, in
+ * an `env`, a `files` and a `wrote`, as `*`.
+ */
+const PLACES = {
+  ledger: ['ledger.file'],
+  root: ['steps.#.env.*', 'steps.#.response.body'],
+  api: ['steps.#.env.*'],
+  token: ['steps.#.env.*', 'steps.#.request.authorization', 'steps.#.request.target'],
+  now: [
+    'steps.#.files.*',
+    'steps.#.files.*.text',
+    'steps.#.wrote.*.before.text',
+    'steps.#.wrote.*.after.text',
+  ],
+  frame: ['steps.#.files.*', 'steps.#.error.text'],
+}
+const MAPS = new Set(['env', 'files', 'wrote'])
+const NAME = /«(ledger|root|api|token:T\d+|now|frame)»/g
+
+/** The field `path` is, as `PLACES` writes one. */
+const field = (path) =>
+  path
+    .map((key, at) => (typeof key === 'number' ? '#' : MAPS.has(path[at - 1]) ? '*' : key))
+    .join('.')
+
+/** Each name in `value` and the field it stands in; one in a key stands in no field. */
+function* named(value, path = []) {
+  if (typeof value === 'string') {
+    for (const [, name] of value.matchAll(NAME)) yield [name.replace(/:T\d+$/, ''), field(path)]
+  } else if (Array.isArray(value)) {
+    for (const [at, item] of value.entries()) yield* named(item, [...path, at])
+  } else if (value !== null && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) {
+      for (const [, name] of key.matchAll(NAME))
+        yield [name.replace(/:T\d+$/, ''), `${field(path)} (a key)`]
+      yield* named(item, [...path, key])
+    }
+  }
+}
 
 const SURFACES = new Set(['api', 'cf', 'page', 'screens', 'trace', 'log'])
 const KINDS = new Set([
@@ -41,6 +85,11 @@ export function check(name, trace) {
     validate(JSON.stringify(trace))
   } catch (cause) {
     fail(cause.message)
+  }
+  for (const [placeholder, where] of named(trace)) {
+    if (!PLACES[placeholder].includes(where)) {
+      fail(`«${placeholder}» is in ${where}, where no player puts it`)
+    }
   }
   const issued = new Set()
   /** Intervals that others overlapped, until their `settle`: `exchange 3`, `run 1`, `close 1`. */
@@ -100,5 +149,13 @@ export function check(name, trace) {
   if (waiting.size > 0) fail(`${[...waiting].join(', ')} never settled`)
   if (trace.ledger !== null && trace.ledger?.unclosed !== true && trace.ledger?.final === null) {
     fail('its ledger has no database at the close')
+  }
+  if (trace.ledger && trace.ledger.final !== null) {
+    // The database is compared where the trace closes the ledger: a player that has not
+    // reached that step has compared none, so it is the last.
+    const last = trace.steps.at(-1)
+    if (last.kind !== 'ledger' || last.method !== 'close') {
+      fail('its ledger left a database, and the trace does not end with the close that compares it')
+    }
   }
 }

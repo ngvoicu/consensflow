@@ -1,14 +1,13 @@
 //! A trace of the page's operations, played as `FORMAT.md` says: the world put
 //! in place, the stand-ins set up from what each operation's `seams` say, the
-//! operation asked over a bridge as the app asks it, and its reply (bytes), its
-//! kicks and the events its own ledger calls logged compared with Node's; the
-//! ledger left as Node left it.
+//! operation asked over a bridge as the app asks it, and its reply (the bytes
+//! the bridge carried), its kicks, the files it wrote and the events its own
+//! ledger calls logged compared with Node's; the ledger left as Node left it.
 
 use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
 
-use cf_bridge::local::Bridge;
 use cf_daemon::host::daemon_bridge;
 use cf_daemon::page::{self, Engine, Page};
 use cf_daemon::seams::DaemonSpawn;
@@ -23,20 +22,20 @@ use crate::standin::Standin;
 use crate::support::compare::{compare, differs};
 use crate::support::daemon::{executor, Kicks};
 use crate::support::trace::{self, Tally};
+use crate::wire::Wire;
 use crate::world::World;
+use crate::wrote::{held, snapshot};
 
 /// The daemon's end of a bridge with the page's operations on it, and the
 /// app's end that asks them.
 struct Connected {
-    app: Bridge,
-    tasks: [JoinHandle<()>; 2],
+    wire: Wire,
+    daemon: JoinHandle<()>,
 }
 
 impl Drop for Connected {
     fn drop(&mut self) {
-        for task in &self.tasks {
-            task.abort();
-        }
+        self.daemon.abort();
     }
 }
 
@@ -132,8 +131,9 @@ async fn replay(name: &str) -> Result<Tally, Vec<String>> {
 }
 
 impl Player {
-    /// The page, over the environment the world has now.
-    fn connect(&mut self) -> &Bridge {
+    /// The page, over the environment the world has now, asked on a bridge of
+    /// its own.
+    fn connect(&mut self) -> Connected {
         let engine: Rc<dyn Engine> = Rc::clone(&self.standin) as _;
         let page = Rc::new(Page {
             ledger: Rc::clone(&self.page_ledger.ledger),
@@ -144,19 +144,22 @@ impl Player {
         let (daemon_end, app_end) = duplex(256 * 1024);
         let (daemon_input, daemon_output) = split(daemon_end);
         let (app_input, app_output) = split(app_end);
-        let (daemon, daemon_connection) =
-            daemon_bridge(&self.spawn).connect(daemon_input, daemon_output);
-        let (app, app_connection) =
-            cf_bridge::local::BridgeBuilder::new(cf_proto::bridge::Role::Host)
-                .connect(app_input, app_output);
+        let (daemon, connection) = daemon_bridge(&self.spawn).connect(daemon_input, daemon_output);
         page::register(&daemon, &page, &self.spawn);
-        let tasks = [
-            tokio::task::spawn_local(daemon_connection),
-            tokio::task::spawn_local(app_connection),
-        ];
         // The daemon's end is kept alive by its connection.
         drop(daemon);
-        &self.connected.insert(Connected { app, tasks }).app
+        Connected {
+            wire: Wire::new(app_input, app_output),
+            daemon: tokio::task::spawn_local(connection),
+        }
+    }
+
+    /// The app's end of the bridge to the page.
+    fn wire(&mut self) -> &mut Wire {
+        if self.connected.is_none() {
+            self.connected = Some(self.connect());
+        }
+        &mut self.connected.as_mut().expect("connected just now").wire
     }
 
     /// One operation, asked as the app asks it.
@@ -176,20 +179,15 @@ impl Player {
                 .collect(),
         );
         self.kicks.take();
-        let app = match &self.connected {
-            Some(connected) => connected.app.clone(),
-            None => self.connect().clone(),
-        };
-        let answered = tokio::time::timeout(
-            Duration::from_secs(10),
-            app.request(&name, step["body"].clone(), Some(Duration::from_secs(10))),
-        )
-        .await;
+        let body = step["body"].clone();
+        let before = snapshot(&self.world);
+        let answered =
+            tokio::time::timeout(Duration::from_secs(10), self.wire().ask(&name, &body)).await;
+        let after = snapshot(&self.world);
         match answered {
             Ok(Ok(reply)) => {
                 let recorded = step["reply"].as_str().unwrap_or_default();
-                if let Some(why) = differs(&format!("{what}'s reply"), reply.to_string(), recorded)
-                {
+                if let Some(why) = differs(&format!("{what}'s reply"), reply, recorded) {
                     self.problems.push(why);
                 }
             }
@@ -200,6 +198,11 @@ impl Player {
                 .problems
                 .push(format!("{what} was not answered in time")),
         }
+        self.problems.extend(
+            held(step, &before, &after)
+                .into_iter()
+                .map(|why| format!("{what}: {why}")),
+        );
         let kicks = self.kicks.take();
         if step["kicks"] != kicks {
             self.problems.push(format!(
