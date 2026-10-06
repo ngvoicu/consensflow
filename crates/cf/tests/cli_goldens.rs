@@ -122,15 +122,24 @@ fn listing(root: &Path, at: &Path, found: &mut Vec<Value>) {
             "path": named(&path),
             "text": normalize(&text, &plain(&root.to_string_lossy())),
         });
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if fs::metadata(&path).unwrap().permissions().mode() & 0o111 != 0 {
-                entry["executable"] = Value::Bool(true);
-            }
+        if is_executable(&path) {
+            entry["executable"] = Value::Bool(true);
         }
         found.push(entry);
     }
+}
+
+/// Whether the file at `path` is a program: a POSIX matter, which Windows
+/// has no bit for.
+#[cfg(unix)]
+fn is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(path).unwrap().permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn is_executable(_path: &Path) -> bool {
+    false
 }
 
 /// `text` with each `createdAt` and `updatedAt` that holds an instant of the
