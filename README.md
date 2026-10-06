@@ -109,6 +109,12 @@ its download page.
   ran them yourself. Your protection is the review, the chief's acceptance
   and, if you turn it on, your approval. Use ConsensFlow on projects kept in
   version control.
+- Only the chief uses your MCP servers and connectors (your browser, your
+  accounts, your IDE). Workers, reviewers and advisors on Claude Code and
+  Codex start with none of them. They work with full permissions and act on
+  what other agents wrote, so they get no tool that reaches beyond the
+  project. Your own Claude Code and Codex sessions keep them all, since
+  ConsensFlow changes no configuration of yours.
 
 ## License
 
