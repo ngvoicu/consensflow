@@ -142,7 +142,7 @@ export function claudeScenarios() {
       installed,
     ]),
     prepared(
-      'the chief keeps its connectors, asks the human in its own window, and has no model of its own',
+      'the chief asks the human in its own window, and has no model of its own',
       { role: 'chief', participant: chief, agent: null, message: null },
       [installed],
     ),

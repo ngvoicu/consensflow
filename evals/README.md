@@ -28,9 +28,9 @@ Codex its cheap model, and Pi and OpenCode DeepSeek V4 Pro
 (`evals/plan.mjs`). Devin runs its staff's model, SWE-1.6 Slow.
 Claude and Codex windows start through wrappers the runner writes
 (`~/.consensflow-candidate/evals/bin`) that shut out MCP servers,
-connectors and the browser for the chief too (ConsensFlow already does it
-for members) and give Codex the chief's model; a Pi wrapper gives Pi its
-model and thinking level. `--effort` (default `high`) is the chief's
+connectors and the browser for every window, the chief's and the staff's
+(ConsensFlow itself leaves them on for every agent), and give Codex the
+chief's model; a Pi wrapper gives Pi its model and thinking level. `--effort` (default `high`) is the chief's
 reasoning level, through those wrappers; OpenCode's window and Devin have no
 switch for it, and the report says so (`effort: null`). `--staff-effort` (default
 `medium`) is every member's, on its roster agent. Before 2026-09-27 no run

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { codexAdapter, mcpIsolation } from '../src/adapters/codex.js'
+import { codexAdapter } from '../src/adapters/codex.js'
 import { BUNDLE_CF } from '../src/core/pane-cf.js'
 import { fakeNodeExecutable } from './helpers.mjs'
 
@@ -24,16 +24,18 @@ async function withHome(fn, { queue = true } = {}) {
     PATH: path.join(root, 'bin'),
   }
   await mkdir(env.PATH, { recursive: true })
-  // A Codex that answers the four things a launch asks of it: its version,
-  // whether it has the native queue, its effective instructions over the
-  // app-server, and the MCP servers a member's window switches off (none here).
+  // A Codex that answers the three things a launch asks of it: its version,
+  // whether it has the native queue, and its effective instructions over the
+  // app-server. It writes down what it is asked, a line of arguments each
+  // (`asked`).
+  const asking = path.join(root, 'asked.log')
   const executable = fakeNodeExecutable(
     path.join(env.PATH, 'codex'),
     `#!${process.execPath}
+import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
-if (process.argv[2] === 'mcp' && process.argv[3] === 'list') {
-  console.log('[]')
-} else if (process.argv[2] === '--version') {
+appendFileSync(${JSON.stringify(asking)}, process.argv.slice(2).join(' ') + '\\n')
+if (process.argv[2] === '--version') {
   console.log('codex-cli 0.150.0')
 } else if (process.argv[2] === 'queue') {
   ${queue ? "console.log('Usage: codex queue --thread <id> --message <text>')" : 'process.exit(2)'}
@@ -48,8 +50,10 @@ if (process.argv[2] === 'mcp' && process.argv[3] === 'list') {
 }
 `,
   )
+  const asked = async () =>
+    (await readFile(asking, 'utf8').catch(() => '')).split('\n').filter(Boolean)
   try {
-    await fn({ env, executable })
+    await fn({ env, executable, asked })
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -184,119 +188,31 @@ describe('the Codex adapter', () => {
     })
   })
 
-  it('switches off every MCP server Codex would start for a member; the chief keeps them', async () => {
+  it("starts a member with Codex's MCP servers as it starts the chief: neither command line switches them off", async () => {
     await withHome(async ({ env }) => {
-      const adapter = codexAdapter({
-        env,
-        mcpServers: async () => [{ name: 'cua_repl' }, { name: 'computer-history' }],
-      })
+      const adapter = codexAdapter({ env })
       const member = await adapter.prepare(request())
-      const flags = [
-        '-c',
-        'mcp_servers.cua_repl.command="/usr/bin/true"',
-        '-c',
-        'mcp_servers.cua_repl.enabled=false',
-        '-c',
-        'mcp_servers.computer-history.command="/usr/bin/true"',
-        '-c',
-        'mcp_servers.computer-history.enabled=false',
-      ]
-      const at = member.argv.indexOf(flags[1])
-      assert.deepEqual(member.argv.slice(at - 1, at - 1 + flags.length), flags)
       const chief = await adapter.prepare(request({ role: 'chief', agent: null, message: null }))
-      assert.ok(!chief.argv.some((arg) => arg.startsWith('mcp_servers.')))
-      const odd = codexAdapter({ env, mcpServers: async () => [{ name: 'a.b' }] })
-      await assert.rejects(odd.prepare(request()), /cannot switch off the Codex MCP server "a\.b"/)
+      // What a command line could say of them: a flag, or a `-c` setting, that names MCP.
+      const switches = (plan) =>
+        withoutRole(plan.argv).filter(
+          (arg, at, argv) => (arg.startsWith('-') || argv[at - 1] === '-c') && /mcp/i.test(arg),
+        )
+      assert.deepEqual(switches(chief), [])
+      assert.deepEqual(switches(member), switches(chief))
     })
   })
 
-  it('switches off a server Codex reaches by URL as a URL, never with a command, which Codex refuses on one', async () => {
-    await withHome(async ({ env }) => {
-      // As Codex 0.160.1 lists them: by command, by URL, and (an older Codex) with no transport.
-      const adapter = codexAdapter({
-        env,
-        mcpServers: async () => [
-          { name: 'cua_repl', transport: { type: 'stdio', command: 'cua', args: [] } },
-          {
-            name: 'idea',
-            transport: { type: 'streamable_http', url: 'http://127.0.0.1:64342/stream' },
-          },
-          { name: 'computer-history' },
-        ],
-      })
-      const member = await adapter.prepare(request())
-      const flags = [
-        '-c',
-        'mcp_servers.cua_repl.command="/usr/bin/true"',
-        '-c',
-        'mcp_servers.cua_repl.enabled=false',
-        '-c',
-        'mcp_servers.idea.url="http://127.0.0.1:9/disabled"',
-        '-c',
-        'mcp_servers.idea.enabled=false',
-        '-c',
-        'mcp_servers.computer-history.command="/usr/bin/true"',
-        '-c',
-        'mcp_servers.computer-history.enabled=false',
-      ]
-      const at = member.argv.indexOf(flags[1])
-      assert.deepEqual(member.argv.slice(at - 1, at - 1 + flags.length), flags)
-      assert.ok(!member.argv.some((arg) => arg.startsWith('mcp_servers.idea.command')))
-      const chief = await adapter.prepare(request({ role: 'chief', agent: null, message: null }))
-      assert.ok(!chief.argv.some((arg) => arg.startsWith('mcp_servers.')))
-      const odd = codexAdapter({
-        env,
-        mcpServers: async () => [{ name: 'a.b', transport: { type: 'streamable_http' } }],
-      })
-      await assert.rejects(odd.prepare(request()), /cannot switch off the Codex MCP server "a\.b"/)
-    })
-  })
-
-  it('takes a server for one reached by URL when its transport names a type other than stdio, whatever else it holds', () => {
-    const command = (name) => [
-      '-c',
-      `mcp_servers.${name}.command="/usr/bin/true"`,
-      '-c',
-      `mcp_servers.${name}.enabled=false`,
-    ]
-    const url = (name) => [
-      '-c',
-      `mcp_servers.${name}.url="http://127.0.0.1:9/disabled"`,
-      '-c',
-      `mcp_servers.${name}.enabled=false`,
-    ]
-    for (const [transport, expected] of [
-      [{ type: 'stdio', command: 'cua', args: [], env: null, env_vars: [], cwd: null }, command],
-      [
-        {
-          type: 'streamable_http',
-          url: 'http://127.0.0.1:64342/stream',
-          bearer_token_env_var: 'IDEA_TOKEN',
-          http_headers: { 'X-A': 'b' },
-          env_http_headers: null,
-          http_headers_helper: null,
-        },
-        url,
-      ],
-      // A type Codex has not listed so far.
-      [{ type: 'sse', url: 'http://127.0.0.1:64342/sse' }, url],
-      // No type, or none that is text: what an older Codex lists, and nothing a URL server says.
-      [undefined, command],
-      [null, command],
-      [{}, command],
-      [{ type: null }, command],
-      [{ type: 5 }, command],
-      [{ type: ['streamable_http'] }, command],
-      [{ url: 'http://127.0.0.1:64342/stream' }, command],
-      ['streamable_http', command],
-      [['streamable_http'], command],
-    ]) {
+  it("lists no MCP server of Codex's for a member's launch: there is none to switch off", async () => {
+    await withHome(async ({ env, asked }) => {
+      await codexAdapter({ env }).prepare(request())
+      const asks = await asked()
+      assert.ok(asks.includes('queue --help'), 'the stand-in tells what a launch asks of Codex')
       assert.deepEqual(
-        mcpIsolation([{ name: 'srv', transport }]),
-        expected('srv'),
-        JSON.stringify(transport) ?? 'no transport',
+        asks.filter((ask) => /^mcp\b/.test(ask)),
+        [],
       )
-    }
+    })
   })
 
   it('gives the chief no question tool: it asks the human in plain words in its window', async () => {

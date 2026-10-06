@@ -5,7 +5,9 @@
 //! names the thread once Codex starts it, and again whenever the human starts
 //! or resumes another one in the window (/new, /resume), so the window is
 //! followed to it. A Codex too old for the native queue is refused: nothing
-//! could reach its window.
+//! could reach its window. Every window starts with the MCP servers Codex
+//! has, the chief's and a member's alike (the owner's choice, 2026-10-06): a
+//! launch never lists them, and its command line switches none off.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -15,7 +17,7 @@ use cf_base::text::window_text;
 use cf_proto::agents::Harness;
 
 use super::channel::{send, Channel, Session, Shown, Target};
-use super::{launch, mcp, role};
+use super::{launch, role};
 use crate::contract::{
     Adapter, Admission, Agent, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
     Records, Window, Work,
@@ -91,14 +93,6 @@ impl Adapter for CodexAdapter {
                 launch.instructions,
             )
             .await?;
-            // The chief works with the human and keeps the human's connectors.
-            let chief = launch.role == "chief";
-            let isolation = if chief {
-                Vec::new()
-            } else {
-                let servers = mcp::listed(&*services.processes, &services.env, &executable).await?;
-                mcp::isolation(&servers)?
-            };
             // An image agent's window is Codex on its own default model, whose
             // image tool draws: it names no model or effort of its own.
             let agent = match launch.agent {
@@ -115,11 +109,10 @@ impl Adapter for CodexAdapter {
             let invocation = open(Harness::Codex, agent, launch.resume, message.as_deref())
                 .ok_or_else(|| "a Codex window resumes a thread by its id".to_owned())?;
             let mut args = role;
-            if !chief {
+            if launch.role != "chief" {
                 args.extend(QUESTION_TOOL.map(str::to_owned));
             }
             args.extend(WINDOW.map(str::to_owned));
-            args.extend(isolation);
             args.extend(invocation.args);
             Ok(Prepared {
                 argv: launch::with_native_bridge(&services.bundle, &executable, args),

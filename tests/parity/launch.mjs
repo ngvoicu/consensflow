@@ -14,18 +14,18 @@
  * `~/.consensflow` is read or written.
  *
  * The CLIs run only as a plan runs them: their version and help questions,
- * Codex's `mcp list` and app-server, OpenCode's throwaway `serve`. One at a
- * time, case after case, never two at once: they hang when run together here.
- * A harness whose CLI is not installed is left out and said so.
+ * Codex's app-server, OpenCode's throwaway `serve`. One at a time, case after
+ * case, never two at once: they hang when run together here. A harness whose
+ * CLI is not installed is left out and said so.
  *
  * Each harness is planned for the launches a daemon makes: a fresh member
  * window with a first message, a resumed one, the chief's, a member on a
- * catalog agent with a model and an effort, and its own: Codex's MCP list
- * with no servers, and with two beside instructions of the owner's, and an
- * image agent; OpenCode's fresh conversation,
- * made on its throwaway server; Pi's private bundle, and one that differs
- * from this build; Devin's owner config absent, present and unreadable; and a
- * chief with no role text, which each refuses after writing what it had.
+ * catalog agent with a model and an effort, and its own: Codex's own config
+ * with instructions of the owner's, and an image agent; OpenCode's fresh
+ * conversation, made on its throwaway server; Pi's private bundle, and one
+ * that differs from this build; Devin's owner config absent, present and
+ * unreadable; and a chief with no role text, which each refuses after writing
+ * what it had.
  * Claude's resumed window is planned with its transcript there and without.
  *
  * Node writes what it found, one case a line, raw: its root, its values, no
@@ -70,7 +70,7 @@ const KINDS = ['claude-code', 'codex', 'pi', 'opencode', 'devin']
  */
 const OWNED = [
   'codex',
-  'codex-servers',
+  'codex-owner',
   'xdg/cache/opencode',
   'xdg/config/opencode',
   'xdg/data/opencode',
@@ -143,18 +143,8 @@ const OWNER_CONFIG = `{
 }
 `
 
-/**
- * Codex's own config with instructions of the owner's, which a window's role
- * text follows, and two MCP servers, so that its list has some.
- */
-const SERVERS_CONFIG = `developer_instructions = "The owner's own note."
-
-[mcp_servers.alpha]
-command = "/nonexistent/consensflow-parity-alpha"
-
-[mcp_servers.beta-2]
-command = "/nonexistent/consensflow-parity-beta"
-args = ["--flag"]
+/** Codex's own config with instructions of the owner's, which a window's role text follows. */
+const OWNER_CODEX_CONFIG = `developer_instructions = "The owner's own note."
 `
 
 /** The participant every launch is for. */
@@ -197,7 +187,7 @@ const CASES = {
     ['chief', { role: 'chief', message: null }],
     ['member-agent', { role: 'advisor', agent: 'hemera' }],
     ['member-designer', { role: 'designer', agent: 'pygmalion' }],
-    ['member-servers', { env: (at) => ({ CODEX_HOME: at('codex-servers') }) }],
+    ['member-owner-config', { env: (at) => ({ CODEX_HOME: at('codex-owner') }) }],
     ['chief-without-role-text', NO_ROLE_TEXT],
   ],
   pi: [
@@ -334,7 +324,7 @@ function seed(root) {
     'work',
     'tmp',
     'codex',
-    'codex-servers',
+    'codex-owner',
     'xdg/config',
     'xdg/data',
     'xdg/cache',
@@ -345,7 +335,7 @@ function seed(root) {
     fs.mkdirSync(at(...folder.split('/')), { recursive: true })
   }
   write(at('claude', 'projects', '-work', `${RESUME.recorded}.jsonl`), TRANSCRIPT)
-  write(at('codex-servers', 'config.toml'), SERVERS_CONFIG)
+  write(at('codex-owner', 'config.toml'), OWNER_CODEX_CONFIG)
   for (const [name, text] of [
     ['owner', OWNER_CONFIG],
     ['broken', '{ "hooks": '],

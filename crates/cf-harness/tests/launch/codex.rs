@@ -5,8 +5,9 @@
 //! supervisor (here), how it is followed (`windows`), how a message reaches it
 //! through the supervisor's broker (`channel`), and the role it is given
 //! (`roles`). Each test gets a throwaway home and a stand-in `codex` on PATH,
-//! whose answers (its native queue, its version, its MCP servers) and whose
-//! app-server are scripted.
+//! whose answers (its native queue, its version) and whose app-server are
+//! scripted. Asked anything else, the stand-in is not there: a launch that asks
+//! it more fails.
 //!
 //! A window comes only from a prepare here, where Node's tests made up a
 //! launch bag: a test of a window on a known thread prepares it as that
@@ -149,9 +150,10 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
 }
 
 /// An adapter whose records are `records`, its clock, randomness and programs
-/// the fakes' of `home`: a Codex that has the native queue and no MCP servers,
-/// and an app-server that gives `instructions`. One launch's worth of each,
-/// and more of the stand-in's answers, for a test that prepares again.
+/// the fakes' of `home`: a Codex that has the native queue (or not, as
+/// `queue` says), and an app-server that gives `instructions`. One launch's
+/// worth of the stand-in's answers, and more app-servers, for a test that
+/// prepares again: a probe's answer is kept.
 fn adapter_with(
     home: &Home,
     records: Option<Rc<dyn Records>>,
@@ -180,7 +182,6 @@ fn adapter_with(
         },
     );
     processes.run_answer("codex --version", answer("codex-cli 0.150.0\n"));
-    processes.every_answer("codex", answer("[]\n"));
     for _ in 0..8 {
         app_server(&fakes, instructions);
     }
@@ -376,48 +377,33 @@ fn opens_an_image_agent_s_window_on_codex_s_own_model_whose_image_tool_draws_no_
 }
 
 #[test]
-fn switches_off_every_mcp_server_codex_would_start_for_a_member_the_chief_keeps_them() {
+fn starts_a_member_with_codex_s_mcp_servers_as_it_starts_the_chief_neither_command_line_switches_them_off(
+) {
     let home = Home::new();
-    let (adapter, fakes) = adapter(&home);
-    let listing = r#"[{"name":"cua_repl"},{"name":"computer-history"}]"#;
-    fakes
-        .processes
-        .run_answer("codex mcp list --json", Ok(listing.to_owned()));
+    let (adapter, _fakes) = adapter(&home);
     let member = prepare(&adapter, &Request::default()).unwrap();
-    let flags = words(&[
-        "-c",
-        "mcp_servers.cua_repl.command=\"/usr/bin/true\"",
-        "-c",
-        "mcp_servers.cua_repl.enabled=false",
-        "-c",
-        "mcp_servers.computer-history.command=\"/usr/bin/true\"",
-        "-c",
-        "mcp_servers.computer-history.enabled=false",
-    ]);
-    let at = member
-        .argv
-        .iter()
-        .position(|arg| arg == "mcp_servers.cua_repl.enabled=false")
-        .unwrap();
-    assert_eq!(member.argv[at - 3..at - 3 + flags.len()], flags[..]);
     let chief = prepare(&adapter, &Request::chief()).unwrap();
-    assert!(!chief.argv.iter().any(|arg| arg.starts_with("mcp_servers.")));
-    fakes.processes.run_answer(
-        "codex mcp list --json",
-        Ok(r#"[{"name":"a.b"}]"#.to_owned()),
-    );
-    assert_eq!(
-        prepare(&adapter, &Request::default()).err().as_deref(),
-        Some("cannot switch off the Codex MCP server \"a.b\" for a member")
-    );
+    // What a command line could say of them: a flag, or a `-c` setting, that names MCP.
+    let switches = |plan: &Prepared| -> Vec<String> {
+        let argv = without_role(&plan.argv);
+        let settings = argv
+            .iter()
+            .enumerate()
+            .filter(|&(at, arg)| arg.starts_with('-') || (at > 0 && argv[at - 1] == "-c"));
+        settings
+            .map(|(_, setting)| setting.clone())
+            .filter(|setting| setting.to_ascii_lowercase().contains("mcp"))
+            .collect()
+    };
+    assert_eq!(switches(&chief), Vec::<String>::new());
+    assert_eq!(switches(&member), switches(&chief));
 }
 
 #[test]
-fn switches_off_a_server_codex_reaches_by_url_as_a_url_never_with_a_command_which_codex_refuses_on_one(
-) {
+fn lists_no_mcp_server_of_codex_s_for_a_member_s_launch_there_is_none_to_switch_off() {
     let home = Home::new();
     let (adapter, fakes) = adapter(&home);
-    // As Codex 0.160.1 lists them: by command, by URL, and (an older Codex) with no transport.
+    // A Codex that has servers and would list them if it were asked.
     let listing = json!([
         { "name": "cua_repl", "transport": { "type": "stdio", "command": "cua", "args": [] } },
         {
@@ -428,42 +414,15 @@ fn switches_off_a_server_codex_reaches_by_url_as_a_url_never_with_a_command_whic
     ]);
     fakes
         .processes
-        .run_answer("codex mcp list --json", Ok(listing.to_string()));
-    let member = prepare(&adapter, &Request::default()).unwrap();
-    let flags = words(&[
-        "-c",
-        "mcp_servers.cua_repl.command=\"/usr/bin/true\"",
-        "-c",
-        "mcp_servers.cua_repl.enabled=false",
-        "-c",
-        "mcp_servers.idea.url=\"http://127.0.0.1:9/disabled\"",
-        "-c",
-        "mcp_servers.idea.enabled=false",
-        "-c",
-        "mcp_servers.computer-history.command=\"/usr/bin/true\"",
-        "-c",
-        "mcp_servers.computer-history.enabled=false",
-    ]);
-    let at = member
-        .argv
+        .always_answer("codex mcp list --json", Ok(listing.to_string()));
+    prepare(&adapter, &Request::default()).unwrap();
+    let ran: Vec<String> = fakes
+        .processes
+        .take_ran()
         .iter()
-        .position(|arg| arg == "mcp_servers.cua_repl.enabled=false")
-        .unwrap();
-    assert_eq!(member.argv[at - 3..at - 3 + flags.len()], flags[..]);
-    assert!(!member
-        .argv
-        .iter()
-        .any(|arg| arg.starts_with("mcp_servers.idea.command")));
-    let chief = prepare(&adapter, &Request::chief()).unwrap();
-    assert!(!chief.argv.iter().any(|arg| arg.starts_with("mcp_servers.")));
-    fakes.processes.run_answer(
-        "codex mcp list --json",
-        Ok(r#"[{"name":"a.b","transport":{"type":"streamable_http"}}]"#.to_owned()),
-    );
-    assert_eq!(
-        prepare(&adapter, &Request::default()).err().as_deref(),
-        Some("cannot switch off the Codex MCP server \"a.b\" for a member")
-    );
+        .map(|(program, _)| named(program))
+        .collect();
+    assert_eq!(ran, ["codex queue --help"], "all it is asked is its queue");
 }
 
 #[test]

@@ -54,9 +54,9 @@ export const ofChief = (fields = {}) =>
 export const QUEUE_HELP = 'Usage: codex queue --thread <id> --message <text>\n'
 
 /**
- * Codex installed: a stand-in that answers the three things a launch runs of
- * it (its native queue, its version, and the MCP servers a member's window
- * switches off: none), `says` over them. The app-server is the scenario's
+ * Codex installed: a stand-in that answers the two things a launch runs of
+ * it (its native queue and its version), `says` over them. It fails, saying
+ * so, when asked anything else. The app-server is the scenario's
  * (`appServer`): it is spawned, not run.
  */
 export const codex = (says = {}) => ({
@@ -65,35 +65,8 @@ export const codex = (says = {}) => ({
     answers: {
       'queue --help': { stdout: QUEUE_HELP },
       '--version': { stdout: 'codex-cli 0.150.0\n' },
-      'mcp list --json': { stdout: '[]\n' },
       ...says,
     },
-  },
-})
-/** The MCP servers the stand-in lists, as `codex mcp list --json` writes them. */
-export const lists = (...servers) => ({
-  'mcp list --json': { stdout: `${JSON.stringify(servers)}\n` },
-})
-/** A server Codex 0.160.1 lists as reached by command. */
-export const byCommand = (name, command = 'cua') => ({
-  name,
-  enabled: true,
-  disabled_reason: null,
-  transport: { type: 'stdio', command, args: [], env: null, env_vars: [], cwd: null },
-})
-/** A server Codex 0.160.1 lists as reached by URL, `more` of its transport beside the URL. */
-export const byUrl = (name, url = 'http://127.0.0.1:64342/stream', more = {}) => ({
-  name,
-  enabled: true,
-  disabled_reason: null,
-  transport: {
-    type: 'streamable_http',
-    url,
-    bearer_token_env_var: null,
-    http_headers: null,
-    env_http_headers: null,
-    http_headers_helper: null,
-    ...more,
   },
 })
 

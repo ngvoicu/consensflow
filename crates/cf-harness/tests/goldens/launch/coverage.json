@@ -12,7 +12,7 @@
   },
   "scenarios": {
     "claude-code": { "darwin": 44, "win32": 44, "held": "tests/launch/scenarios.rs" },
-    "codex": { "darwin": 132, "win32": 132, "held": "tests/launch/scenarios.rs" },
+    "codex": { "darwin": 109, "win32": 132, "held": "tests/launch/scenarios.rs" },
     "opencode": { "darwin": 158, "win32": 158, "held": "tests/launch/scenarios.rs" },
     "pi": { "darwin": 62, "win32": 62, "held": "tests/launch/scenarios.rs" },
     "devin": { "darwin": 136, "win32": 136, "held": "tests/launch/scenarios.rs" }
