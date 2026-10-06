@@ -19,12 +19,9 @@ import { lookScenarios, readyScenarios, startedScenarios } from './codex-looks.m
 import { roleScenarios } from './codex-roles.mjs'
 import {
   appServer,
-  byCommand,
-  byUrl,
   chief,
   codex,
   ENV,
-  lists,
   ofChief,
   prepares,
   SECOND,
@@ -32,14 +29,19 @@ import {
   THREAD,
 } from './codex-scenes.mjs'
 
-/** What a refusal to list the MCP servers says in Rust's words, where V8 gave its own. */
-const unreadable = (why) => ({
-  why,
-  answer: {
-    throws:
-      "could not list Codex's MCP servers to switch them off: its answer cannot be read as JSON",
+/**
+ * What a Codex that has MCP servers would list if it were asked: one reached
+ * by command, one by URL, and one (an older Codex) with no transport.
+ */
+const SERVERS = [
+  { name: 'cua_repl', enabled: true, transport: { type: 'stdio', command: 'cua', args: [] } },
+  {
+    name: 'idea',
+    enabled: true,
+    transport: { type: 'streamable_http', url: 'http://127.0.0.1:64342/stream' },
   },
-})
+  { name: 'computer-history' },
+]
 
 export function codexScenarios() {
   const prepared = (
@@ -72,10 +74,12 @@ export function codexScenarios() {
         ],
       },
     ),
-    prepared(
-      'the chief keeps its connectors, asks the human in its own window, and has no model of its own',
-      { role: 'chief', participant: chief, agent: null, message: null },
-    ),
+    prepared('the chief asks the human in its own window, and has no model of its own', {
+      role: 'chief',
+      participant: chief,
+      agent: null,
+      message: null,
+    }),
     prepared(
       'a reviewer is given its task as a window takes text',
       {
@@ -86,89 +90,13 @@ export function codexScenarios() {
       [codex()],
     ),
     {
-      name: 'codex: a member has every MCP server Codex would start switched off, and the chief keeps them',
+      name: 'codex: a member whose Codex has MCP servers is launched as the chief is: Codex is never asked to list them, and none is switched off',
       harness: 'codex',
       env: ENV,
       steps: [
-        codex(
-          lists(
-            { name: 'cua_repl', enabled: true, transport: { type: 'stdio', command: 'cua' } },
-            { name: 'computer-history' },
-          ),
-        ),
+        codex({ 'mcp list --json': { stdout: `${JSON.stringify(SERVERS)}\n` } }),
         prepares({}, appServer()),
         prepares({ ...ofChief(), launchId: SECOND }, appServer()),
-      ],
-    },
-    {
-      name: 'codex: a member whose MCP server Codex reaches by URL has it switched off as a URL, with no command, and the chief keeps it',
-      harness: 'codex',
-      env: ENV,
-      steps: [
-        codex(lists(byUrl('idea'))),
-        prepares({}, appServer()),
-        prepares({ ...ofChief(), launchId: SECOND }, appServer()),
-      ],
-    },
-    {
-      name: 'codex: a member whose servers Codex reaches by command, by URL and by neither said has each switched off in its own form, in the order listed',
-      harness: 'codex',
-      env: ENV,
-      steps: [
-        codex(
-          lists(
-            byCommand('cua_repl'),
-            byUrl('idea'),
-            { name: 'computer-history' },
-            byUrl('authd', 'http://127.0.0.1:9/mcp', {
-              bearer_token_env_var: 'AUTHD_TOKEN',
-              http_headers: { 'X-A': 'b' },
-              env_http_headers: { 'X-B': 'B_ENV' },
-            }),
-            byCommand('node_repl', '/usr/bin/node'),
-          ),
-        ),
-        prepares({}, appServer()),
-      ],
-    },
-    {
-      name: 'codex: a transport of a type other than stdio is taken for a URL one, and a transport that names no such type for a command one',
-      harness: 'codex',
-      env: ENV,
-      steps: [
-        codex(
-          lists(
-            { name: 'sse', transport: { type: 'sse', url: 'http://127.0.0.1:64342/sse' } },
-            { name: 'null', transport: null },
-            { name: 'empty', transport: {} },
-            { name: 'untyped', transport: { url: 'http://127.0.0.1:64342/stream' } },
-            { name: 'nulled', transport: { type: null } },
-            { name: 'number', transport: { type: 5 } },
-            { name: 'list-type', transport: { type: ['streamable_http'] } },
-            { name: 'text', transport: 'streamable_http' },
-            { name: 'list', transport: ['streamable_http'] },
-            { name: 'stdio', transport: { type: 'stdio', url: 'http://127.0.0.1:64342/stream' } },
-          ),
-        ),
-        prepares({}, appServer()),
-      ],
-    },
-    {
-      name: 'codex: a member whose list holds no server switches nothing off',
-      harness: 'codex',
-      env: ENV,
-      steps: [
-        codex({ 'mcp list --json': { stdout: '{"servers":[]}\n' } }),
-        prepares({}, appServer()),
-      ],
-    },
-    {
-      name: 'codex: a list that holds names JavaScript reads as text switches them off as that text',
-      harness: 'codex',
-      env: ENV,
-      steps: [
-        codex(lists({ name: 5 }, { name: true }, { name: ['x'] }, { name: 1e-7 }, { name: -0 })),
-        prepares({}, appServer()),
       ],
     },
     {
@@ -243,7 +171,7 @@ export function codexScenarios() {
       { children: [] },
     ),
     prepared(
-      'a conversation of an empty id is refused, after the role and the MCP servers',
+      'a conversation of an empty id is refused, after the role',
       { resume: '', message: null },
       [codex()],
       {
@@ -318,75 +246,10 @@ export function codexScenarios() {
     accepted('flags at the very end of the help are flags', 'Usage:\n  --message\n  --thread'),
   ]
 
-  const named = (what, servers) =>
-    prepared(`a member's MCP server that ${what} stops the launch`, {}, [codex(lists(...servers))])
-  const unswitchable = [
-    named('has no name', [{}]),
-    named('is no object', [7]),
-    named('is named null', [{ name: null }]),
-    named('is named by an object', [{ name: {} }]),
-    named('is named by a list of two', [{ name: ['a', 'b'] }]),
-    named('has a name that needs quotes', [{ name: 'a.b' }]),
-    named('is reached by URL and has a name that needs quotes', [byUrl('idea'), byUrl('a.b')]),
-    named('has a name with a space', [{ name: 'a b' }]),
-    named('has an empty name', [{ name: '' }]),
-    named('has a name of letters Codex’s keys do not hold', [{ name: 'serveur-é' }]),
-    named('comes after one that could be switched off', [{ name: 'fine' }, { name: 'a=b' }]),
-    prepared("a member's MCP server listed as null stops the launch", {}, [codex(lists(null))], {
-      kept: {
-        why: "a sentence of Rust's own where V8 threw its TypeError reading the name of null",
-        answer: { throws: 'cannot switch off a Codex MCP server listed as null for a member' },
-      },
-    }),
-    prepared(
-      "a member's MCP server named by an object with a toString of its own stops the launch",
-      {},
-      [codex({ 'mcp list --json': { stdout: '[{"name":{"toString":1}}]\n' } })],
-      {
-        kept: {
-          why: "a sentence of Rust's own where V8 threw its TypeError making the name text",
-          answer: { throws: 'an object with a toString of its own cannot be made text' },
-        },
-      },
-    ),
-  ]
-  const unlisted = [
-    prepared(
-      'a list that is no JSON stops the launch',
-      {},
-      [codex({ 'mcp list --json': { stdout: 'not json\n' } })],
-      {
-        kept: unreadable('V8 gave its JSON.parse message; Rust says the answer cannot be read'),
-      },
-    ),
-    prepared(
-      'a list that says nothing is no JSON either',
-      {},
-      [codex({ 'mcp list --json': { stdout: '' } })],
-      {
-        kept: unreadable('V8 gave its JSON.parse message; Rust says the answer cannot be read'),
-      },
-    ),
-    prepared(
-      'a list that begins with a byte order mark is no JSON',
-      {},
-      [codex({ 'mcp list --json': { stdout: '﻿[]\n' } })],
-      { kept: unreadable('V8 gave its JSON.parse message; Rust says the answer cannot be read') },
-    ),
-    prepared('a list too long for the buffer stops the launch in execFile’s words', {}, [
-      codex({ 'mcp list --json': { overflows: true } }),
-    ]),
-    prepared('a list that fails stops the launch in execFile’s words, the command named', {}, [
-      codex({ 'mcp list --json': { stdout: '', exit: 3, stderr: 'boom\n' } }),
-    ]),
-  ]
-
   return [
     ...plans,
     ...noQueue,
     ...queued,
-    ...unswitchable,
-    ...unlisted,
     ...roleScenarios(),
     ...lookScenarios(),
     ...readyScenarios(),

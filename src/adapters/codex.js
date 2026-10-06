@@ -1,11 +1,8 @@
-import { execFile } from 'node:child_process'
 import { setTimeout as wait } from 'node:timers/promises'
-import { promisify } from 'node:util'
 import { cachedAnswers } from '../../hosts/lib/completion.js'
 import { interactiveResume, interactiveStart } from '../../hosts/lib/windows.js'
 import { sessionState as brokerState, send as sendCodex } from '../channels/codex.js'
 import { launchConfiguration, withNativeBridge } from '../channels.js'
-import { runnable } from '../harnesses.js'
 import { roleConfiguration } from '../role-skills.js'
 import {
   admission,
@@ -25,7 +22,9 @@ import {
  * thread once Codex starts it, and again whenever the human starts or resumes
  * another one in the window (/new, /resume), so the window is followed to
  * it. A Codex too old for the native queue is refused: nothing could reach
- * its window.
+ * its window. Every window starts with the MCP servers Codex has, the chief's
+ * and a member's alike (the owner's choice, 2026-10-06): a launch never lists
+ * them, and its command line switches none off.
  */
 const QUESTION_TOOL = [
   '--enable',
@@ -52,63 +51,10 @@ const WINDOW = ['-c', 'check_for_update_on_startup=false', '-c', 'allow_login_sh
 const HOLD =
   'the Codex window cannot take a message yet: starting, switching conversations or reconnecting'
 
-/** The MCP servers Codex would start, as `codex mcp list --json` names them. */
-async function codexMcpServers(executable, env) {
-  const run = runnable(executable, ['mcp', 'list', '--json'], env)
-  try {
-    const { stdout } = await promisify(execFile)(run.file, run.args, {
-      ...run.options,
-      env,
-      timeout: 15_000,
-      maxBuffer: 1024 * 1024,
-    })
-    const servers = JSON.parse(stdout)
-    return Array.isArray(servers) ? servers : []
-  } catch (cause) {
-    throw new Error(`could not list Codex's MCP servers to switch them off: ${cause.message}`)
-  }
-}
-
-/**
- * Where a switched-off server reached by URL points: the discard port on
- * loopback, which nothing answers.
- */
-const DISABLED_URL = 'http://127.0.0.1:9/disabled'
-
-/**
- * A member runs in full-permission mode and reads what others wrote, so every
- * MCP server Codex would start is switched off: this Mac's Codex drives the
- * browser and the screen through them (the ChatGPT app's, since 2026-09-26).
- * Each gets a harmless, disabled definition; a bare `enabled=false` is refused
- * for servers defined outside config.toml, and a name that needs quotes would
- * define a new server instead, so such a name stops the launch. The definition
- * is in the form of the server's own transport: Codex refuses a command on a
- * server reached by URL ("url is not supported for stdio"), and every Codex
- * window of a Mac that had one closed at once (2026-10-06). Codex lists
- * `stdio` and `streamable_http`: a transport of another type is taken for a
- * URL's, and a server with none (an older Codex) for a command's.
- * Exported for `tests/live/codex-mcp-switch-off.mjs`, which hands its flags
- * to the real Codex.
- */
-export function mcpIsolation(servers) {
-  return servers.flatMap(({ name, transport }) => {
-    if (!/^[A-Za-z0-9_-]+$/.test(name ?? '')) {
-      throw new Error(`cannot switch off the Codex MCP server ${JSON.stringify(name)} for a member`)
-    }
-    const kind = transport?.type
-    const definition =
-      typeof kind === 'string' && kind !== 'stdio'
-        ? `url="${DISABLED_URL}"`
-        : 'command="/usr/bin/true"'
-    return ['-c', `mcp_servers.${name}.${definition}`, '-c', `mcp_servers.${name}.enabled=false`]
-  })
-}
-
 export function codexAdapter({
   env,
   send = sendCodex,
   sessionState = brokerState,
-  mcpServers = codexMcpServers,
   answers = cachedAnswers(),
   discoverEveryMs = 250,
   discoverForMs = 60_000,
@@ -132,8 +78,6 @@ export function codexAdapter({
         executable,
         content: instructions,
       })
-      // The chief works with the human and keeps the human's connectors.
-      const isolation = role === 'chief' ? [] : mcpIsolation(await mcpServers(executable, env))
       // An image agent's window is Codex on its own default model, whose
       // image tool draws: it names no model or effort of its own.
       const identity =
@@ -151,7 +95,7 @@ export function codexAdapter({
       const invocation = withNativeBridge(
         {
           command: executable,
-          args: [...roleSetup.args, ...questions, ...WINDOW, ...isolation, ...runner.args],
+          args: [...roleSetup.args, ...questions, ...WINDOW, ...runner.args],
         },
         configuration,
       )

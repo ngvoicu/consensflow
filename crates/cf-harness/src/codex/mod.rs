@@ -7,7 +7,6 @@ mod channel;
 #[cfg(test)]
 mod fakes;
 mod launch;
-mod mcp;
 pub(crate) mod paths;
 mod quota;
 pub mod record;

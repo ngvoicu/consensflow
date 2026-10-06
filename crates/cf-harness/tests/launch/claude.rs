@@ -272,13 +272,7 @@ fn launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_with_th
     ];
     argv.extend(["--add-dir".to_owned(), roles]);
     argv.extend(["--append-system-prompt-file".to_owned(), skill]);
-    argv.extend(words(&[
-        "--system-prompt-snapshot",
-        "off",
-        "--strict-mcp-config",
-        "--no-chrome",
-        "--session-id",
-    ]));
+    argv.extend(words(&["--system-prompt-snapshot", "off", "--session-id"]));
     argv.push(session);
     argv.extend(words(&[
         "--model",
@@ -313,16 +307,32 @@ fn launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_with_th
 }
 
 #[test]
-fn keeps_a_member_away_from_the_humans_connectors_and_browser_the_chief_keeps_them() {
+fn starts_a_member_with_the_humans_mcp_servers_connectors_and_browser_as_it_starts_the_chief_neither_command_line_switches_them_off(
+) {
     let home = Home::new();
     let adapter = home.adapter();
     let member = prepare(&adapter, &Request::default()).unwrap();
-    let has = |plan: &Prepared, flag: &str| plan.argv.iter().any(|arg| arg == flag);
-    assert!(has(&member, "--strict-mcp-config") && has(&member, "--no-chrome"));
     let chief = prepare(&adapter, &Request::chief()).unwrap();
-    assert!(!has(&chief, "--strict-mcp-config") && !has(&chief, "--no-chrome"));
-    // The chief asks the human in its own window: Claude's own question
-    // dialog, no hook putting it on the board.
+    // What a command line could say of them: a flag that names MCP or the browser.
+    let switches = |plan: &Prepared| -> Vec<String> {
+        plan.argv
+            .iter()
+            .filter(|arg| arg.starts_with('-'))
+            .filter(|flag| {
+                let flag = flag.to_ascii_lowercase();
+                flag.contains("mcp") || flag.contains("chrome")
+            })
+            .cloned()
+            .collect()
+    };
+    assert_eq!(switches(&chief), Vec::<String>::new());
+    assert_eq!(switches(&member), switches(&chief));
+}
+
+#[test]
+fn gives_the_chief_claude_s_own_question_dialog_no_hook_puts_its_questions_on_the_board() {
+    let home = Home::new();
+    let chief = prepare(&home.adapter(), &Request::chief()).unwrap();
     let at = chief
         .argv
         .iter()
@@ -341,7 +351,7 @@ fn resumes_a_conversation_on_the_session_it_already_has() {
     let plan = prepare(&home.adapter(), &Request::resumed(session)).unwrap();
     assert_eq!(plan.native_session.as_deref(), Some(session));
     assert_eq!(
-        plan.argv[11..],
+        plan.argv[9..],
         words(&[
             "--resume",
             session,

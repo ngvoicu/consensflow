@@ -758,7 +758,7 @@ fn the_window_kept_is_the_one_prepared_last_and_records_go_in_the_order_begun() 
 #[test]
 fn a_stand_in_prints_what_it_says_and_fails_in_the_words_execfile_fails_in() {
     let file = "/root/bin/codex";
-    let answer = |said: Value| stand_in_answer(file, "mcp list --json", &said);
+    let answer = |said: Value| stand_in_answer(file, "login status", &said);
     assert_eq!(answer(json!("[]\n")), Ok("[]\n".to_owned()));
     assert_eq!(answer(json!({"stdout": "[]\n"})), Ok("[]\n".to_owned()));
     assert_eq!(
@@ -773,7 +773,7 @@ fn a_stand_in_prints_what_it_says_and_fails_in_the_words_execfile_fails_in() {
     assert_eq!(
         answer(json!({"stdout": "half", "stderr": "boom\n", "exit": 3})),
         Err(Failed {
-            message: format!("Command failed: {program} mcp list --json\nboom\n"),
+            message: format!("Command failed: {program} login status\nboom\n"),
             code: Some(3),
             killed: false,
             stdout: "half".to_owned(),

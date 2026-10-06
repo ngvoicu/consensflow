@@ -271,9 +271,13 @@ export function realOnPath(
  * The `-c` overrides that switch off every MCP server Codex would start
  * (`codex mcp list --json`): each gets a harmless, disabled definition,
  * which also covers servers a plugin or the ChatGPT app adds outside
- * config.toml (a bare `enabled=false` is refused for those). A server Codex
- * reaches by URL gets a URL, never a command, as the product's own
- * (`mcpIsolation`, src/adapters/codex.js): Codex refuses both on one server.
+ * config.toml (a bare `enabled=false` is refused for those). The definition
+ * is in the form of the server's own transport: Codex refuses a command on a
+ * server it reaches by URL ("url is not supported for stdio"), its app-server
+ * exits and the window closes at once (Codex 0.160.1, 2026-10-06), so such a
+ * server gets a URL, the discard port on loopback, which nothing answers.
+ * Codex lists `stdio` and `streamable_http`: a transport of another type is
+ * taken for a URL's, and a server with none (an older Codex) for a command's.
  */
 export function codexIsolation(servers) {
   return servers.flatMap(({ name, transport }) => {

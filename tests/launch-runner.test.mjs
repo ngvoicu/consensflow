@@ -654,7 +654,7 @@ describe("the launch recorder's stand-ins", () => {
           name: 'codex',
           answers: {
             '--version': 'codex-cli 0.159.2\n',
-            'mcp list --json': { stdout: 'partial', stderr: 'no config\n', exit: 3 },
+            'queue --help': { stdout: 'partial', stderr: 'no queue\n', exit: 3 },
           },
         },
       },
@@ -681,7 +681,7 @@ describe("the launch recorder's stand-ins", () => {
           const { PATH: _path, ...pathless } = env
           return [
             await ask(['--version'], { env: { ...env, CODEX_HOME: `${env.HOME}/.codex` } }),
-            await ask(['mcp', 'list', '--json'], {
+            await ask(['queue', '--help'], {
               env,
               cwd: env.HOME,
               timeout: 15_000,
@@ -696,7 +696,7 @@ describe("the launch recorder's stand-ins", () => {
     )
     assert.deepEqual(records[0].settled[0].answer, [
       { stdout: 'codex-cli 0.159.2\n' },
-      { code: 3, stdout: 'partial', stderr: 'no config\n' },
+      { code: 3, stdout: 'partial', stderr: 'no queue\n' },
       { stdout: 'codex-cli 0.159.2\n' },
       { stdout: 'codex-cli 0.159.2\n' },
     ])
@@ -713,7 +713,7 @@ describe("the launch recorder's stand-ins", () => {
       {
         program: 'codex',
         path: '$ROOT/bin/codex',
-        args: ['mcp', 'list', '--json'],
+        args: ['queue', '--help'],
         cwd: '$ROOT/home',
         env: [],
         limits: { timeout: 15_000, maxBuffer: 1024 },
@@ -788,13 +788,13 @@ describe("the launch recorder's stand-ins and bundle", () => {
   it('answers a run by its arguments: what it prints, what it says apart and how it exits', async () => {
     const says = {
       'queue --help': { stdout: 'usage\n' },
-      'mcp list --json': { stdout: 'half', stderr: 'boom\n', exit: 3 },
+      'login status': { stdout: 'half', stderr: 'boom\n', exit: 3 },
     }
     const steps = [{ standIn: { name: 'codex', answers: says } }, { observe: true }]
     const { records } = await played(steps, (env) => ({
       observe: async () => [
         await ask(env, 'codex', ['queue', '--help']),
-        await ask(env, 'codex', ['mcp', 'list', '--json']),
+        await ask(env, 'codex', ['login', 'status']),
         await ask(env, 'codex', ['--version']),
       ],
     }))
