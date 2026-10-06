@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll, Wake, Waker};
 
+use super::poll_unconstrained;
 use super::{LocalWork, Spawn};
 
 /// Runs every piece of work spawned onto it, the engine's and a request's
@@ -25,6 +26,13 @@ use super::{LocalWork, Spawn};
 /// and a wake of work that ended does nothing; work woken while it runs goes
 /// behind what was woken before it, as a promise's continuation did.
 ///
+/// Work is polled outside tokio's cooperative budget, which belongs to the
+/// task that polls it (the driver, or whichever task calls `drain`): a ready
+/// channel's answer, an elapsed timer, is taken however many were taken
+/// before, so a drain never stops with an answer unread and its queue empty.
+/// The work spends none of that task's budget either. [`super::begin`]'s
+/// first poll is made the same way.
+///
 /// # The daemon's part
 ///
 /// - The engine's work is spawned onto the executor ([`Spawn`], which the
@@ -38,8 +46,17 @@ use super::{LocalWork, Spawn};
 ///   work, which is spawned onto the executor.
 /// - [`Executor::drain`] is called at each boundary where Node's event loop
 ///   went on to the next callback: after the frames of one read of the pane
-///   host's bridge, after the first part of an HTTP request, and after a
+///   host's bridge, after the first part of an HTTP request and each poll of
+///   an HTTP connection (a body's last piece is a callback), and after a
 ///   timer fired. Work woken before the call is run by it, to the end.
+/// - What comes from outside the executor (a timer that elapses, a worker
+///   thread's answer) wakes the work that waits for it directly, from tokio's
+///   timers or from the thread, where no drain is: two that come at once would
+///   run their chains a turn each, and one from a thread would join a drain
+///   that is running. The daemon makes each such wait a callback of its own: a
+///   task of tokio's wakes the work and drains what that woke, before the next
+///   task runs. The executor cannot tell, and the driver gives liveness, not
+///   that order.
 /// - Spawn [`Executor::driver`] once, as a task on the `LocalSet`. It drains
 ///   whatever was woken from outside a drain (an answer from the bridge, a
 ///   timer, a blocking task's result from another thread) that no call of
@@ -229,13 +246,17 @@ impl Executor {
     }
 
     /// Polls piece of work `task` once, if it has not ended: whether it ran.
+    /// Every poll the executor makes is this one, made outside the cooperative
+    /// budget of the tokio task the drain is called in ([`super::budget`]).
     pub(crate) fn poll(&self, task: u64) -> bool {
         let Some(mut running) = self.tasks.borrow_mut().remove(&task) else {
             return false;
         };
         let Task { work, waker } = &mut running;
         let mut context = Context::from_waker(waker);
-        match catch_unwind(AssertUnwindSafe(|| work.as_mut().poll(&mut context))) {
+        match catch_unwind(AssertUnwindSafe(|| {
+            poll_unconstrained(work.as_mut(), &mut context)
+        })) {
             Ok(Poll::Pending) => {
                 self.tasks.borrow_mut().insert(task, running);
             }

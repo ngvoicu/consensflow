@@ -33,7 +33,6 @@ use cf_engine::Dispatcher;
 use cf_harness::records::Thread;
 use cf_harness::seams::{
     Bundle, LoopbackPorts, Probes, Services, SystemEntropy, SystemLoopback, SystemProcesses,
-    SystemTime,
 };
 use cf_ledger::{open_ledger, LedgerError, Options as LedgerOptions};
 use cf_proto::page::HandleLine;
@@ -54,7 +53,8 @@ use crate::pass::{throttle, PassLoop};
 use crate::roster::Agents;
 use crate::screens::Screens;
 use crate::seams::{
-    DaemonSpawn, HarnessAdapters, LaunchFolders, RandomLaunchIds, RoleTexts, WindowEnv,
+    DaemonRecords, DaemonSpawn, DaemonTime, HarnessAdapters, LaunchFolders, RandomLaunchIds,
+    RoleTexts, WindowEnv,
 };
 use crate::stop::{arm, Latch, Stopping};
 
@@ -280,14 +280,19 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
             .map_err(|failed| StartError::System(failed.to_string()))?,
     );
 
-    // What the engine runs windows with.
+    // What the engine runs windows with. What waits on a timer or on the
+    // records' worker ends as a callback of its own, which the executor is
+    // drained after (`seams::boundary`).
     let processes = Rc::new(SystemProcesses::new(env.clone()));
-    let time = Rc::new(SystemTime);
+    let time = Rc::new(DaemonTime::new(Rc::clone(&spawn)));
     let zone = machine::zone();
-    let records = Rc::new(
-        Thread::new(env.clone(), zone.clone(), Rc::clone(&time) as _)
-            .map_err(|failed| StartError::System(failed.to_string()))?,
-    );
+    let records = Rc::new(DaemonRecords::new(
+        Rc::new(
+            Thread::new(env.clone(), zone.clone(), Rc::clone(&time) as _)
+                .map_err(|failed| StartError::System(failed.to_string()))?,
+        ),
+        Rc::clone(&spawn),
+    ));
     let services = Services {
         env: env.clone(),
         records: Rc::clone(&records) as _,
@@ -304,8 +309,8 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
         ledger: Rc::clone(&ledger),
         host: Rc::new(BridgeHost::new(bridge.clone(), env.clone())),
         adapters: Rc::new(HarnessAdapters::new(&services)),
-        records,
-        time,
+        records: Rc::clone(&records) as _,
+        time: Rc::clone(&time) as _,
         launch_ids: Rc::new(RandomLaunchIds),
         credentials: Rc::clone(&credentials) as _,
         pane_env: Rc::new(WindowEnv::new(

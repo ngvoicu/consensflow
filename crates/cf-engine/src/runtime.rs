@@ -46,6 +46,10 @@
 //!   and whoever waits for its answer ends with an error, not for ever. The
 //!   panic itself goes on unwinding where the work runs: the executor ends
 //!   that work and nothing else, and whatever spawned it writes it down.
+//! - Every poll of the work, the executor's and [`begin`]'s first, is made
+//!   outside tokio's cooperative budget (`budget`): the work runs to its
+//!   wait whatever the tokio task that polls it has spent, and spends none of
+//!   it.
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -59,8 +63,10 @@ use std::task::{Context, Poll, Waker};
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use futures_util::FutureExt;
 
+mod budget;
 mod executor;
 
+use budget::poll_unconstrained;
 pub use executor::Executor;
 
 /// A piece of work on the engine's thread.
@@ -100,8 +106,10 @@ pub async fn begin<T: 'static>(
         }
     });
     // Polled with the caller's waker: whatever it waits on now is waited on
-    // again, with the work's own waker, at the work's first poll there.
-    let waits = poll_fn(|cx| Poll::Ready(whole.as_mut().poll(cx).is_pending())).await;
+    // again, with the work's own waker, at the work's first poll there. Outside
+    // the budget of the tokio task that is the caller: a ready answer is taken.
+    let waits =
+        poll_fn(|cx| Poll::Ready(poll_unconstrained(whole.as_mut(), cx).is_pending())).await;
     if waits {
         spawn.spawn(whole);
     }

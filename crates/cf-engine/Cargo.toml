@@ -20,6 +20,10 @@ serde_json.workspace = true
 thiserror.workspace = true
 # The kit's temporary ledger.
 tempfile = { workspace = true, optional = true }
+# Only `task::coop::unconstrained`: the executor polls the engine's work outside
+# the cooperative budget of the tokio task that calls it. No runtime is started
+# here.
+tokio = { workspace = true, features = ["rt"] }
 
 [features]
 # The kit the engine's tests and the daemon's run it with: what a test does
@@ -35,8 +39,9 @@ rusqlite.workspace = true
 # The ported tests keep the patterns they matched with.
 regex.workspace = true
 tempfile.workspace = true
-# The executor's tests run it on a real `LocalSet`, as the daemon does.
-tokio = { workspace = true, features = ["macros", "rt", "time"] }
+# The executor's tests run it on a real `LocalSet`, as the daemon does, with
+# channels whose answers are ready.
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 
 [lints]
 workspace = true

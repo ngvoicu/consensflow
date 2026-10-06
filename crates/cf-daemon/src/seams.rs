@@ -20,6 +20,10 @@ use cf_proto::agents::Harness;
 
 use crate::errors::{contain, Errors};
 
+mod boundary;
+
+pub use boundary::{DaemonRecords, DaemonTime};
+
 /// The environment a window's pane starts with before its harness's own
 /// (`paneEnv`, `daemon.js:148-154`): where the API is, which project and
 /// participant the window is, the runtime the daemon was given to name
@@ -176,10 +180,13 @@ impl Adapters for HarnessAdapters {
 /// with, and [`DaemonSpawn::apart`]); a request's work is begun with
 /// [`cf_engine::runtime::begin`]; [`DaemonSpawn::drain`] is called where Node's
 /// event loop went on to its next callback (after the frames of one read of
-/// the bridge, the first part of an HTTP request, a timer of the pass loop);
-/// and [`DaemonSpawn::drive`] is called once. A panic in work is what it
-/// was in Node, written down and gone past: the executor ends that work and
-/// nothing else.
+/// the bridge, the first part of an HTTP request and each poll of a connection,
+/// a timer of the pass loop); what comes from outside the executor, a timer's
+/// expiry or a worker thread's answer, is made such a callback
+/// ([`DaemonSpawn::arrival`]); and [`DaemonSpawn::drive`] is called once, the
+/// driver being a backstop for what no call of `drain` has run. A panic in work
+/// is what it was in Node, written down and gone past: the executor ends that
+/// work and nothing else.
 pub struct DaemonSpawn {
     errors: Rc<Errors>,
     executor: Rc<Executor>,
