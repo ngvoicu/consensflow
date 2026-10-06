@@ -383,11 +383,45 @@ async fn a_second_daemon_on_the_same_home_is_refused_and_touches_no_window_of_th
                 "the running daemon's window keeps its files"
             );
             assert!(exited.borrow().is_empty());
+            // The log says how the second ended, as Node's exit logger did:
+            // its start line and, under it, `exit 1`.
+            let lines = log_lines(&rig.home);
+            assert_eq!(lines.len(), 3, "{lines:?}");
+            assert_eq!(said_of(&lines[1]), said_of(&lines[0]));
+            assert_eq!(said_of(&lines[2]), "info exit 1");
             // Nothing of the first was touched: it still answers.
             assert_eq!(
                 ask(&rig.app, "ping", json!({})).await,
                 json!({ "ok": true })
             );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_ledger_that_cannot_be_opened_fails_the_start_and_the_log_ends_with_exit_1() {
+    LocalSet::new()
+        .run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let home = root.path().join("consensflow");
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(
+                home.join("consensflow.db"),
+                "this is no ledger\n".repeat(200),
+            )
+            .unwrap();
+            let (said, exited, handles) = (Said::default(), Rc::default(), Rc::default());
+            let (options, _app) = options(root.path(), &said, &exited, &handles);
+            let refused = start(environment(root.path()), options).await;
+            assert!(refused.is_err(), "no daemon on a corrupt ledger");
+            assert!(handles.borrow().is_empty(), "no handle line");
+            let lines = log_lines(&home);
+            assert_eq!(lines.len(), 2, "{lines:?}");
+            assert!(
+                said_of(&lines[0]).starts_with("info start pid "),
+                "{lines:?}"
+            );
+            assert_eq!(said_of(&lines[1]), "info exit 1");
         })
         .await;
 }

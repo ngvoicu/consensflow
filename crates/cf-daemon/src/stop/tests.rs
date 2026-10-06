@@ -9,7 +9,8 @@ use std::future::pending;
 use std::time::Instant;
 
 use cf_base::env::Env;
-use cf_harness::seams::processes::{Processes, Program, Streams};
+use cf_harness::admin::Capture;
+use cf_harness::seams::processes::{Limits, Processes, Program, Streams};
 use cf_harness::seams::SystemProcesses;
 use cf_ledger::{open_ledger, Options as LedgerOptions};
 use serde_json::json;
@@ -338,42 +339,80 @@ async fn children_that_cannot_be_ended_are_written_down_and_the_ledger_is_still_
         .await;
 }
 
+/// A program that runs for a minute: `sleep`, or on Windows `ping`.
+#[cfg(any(unix, windows))]
+fn for_a_minute() -> Program {
+    let (executable, args) = if cfg!(windows) {
+        (
+            "C:\\Windows\\System32\\ping.exe",
+            vec!["-n", "60", "127.0.0.1"],
+        )
+    } else {
+        ("/bin/sleep", vec!["60"])
+    };
+    Program {
+        executable: executable.into(),
+        args: args.into_iter().map(str::to_owned).collect(),
+        cwd: None,
+        env: Env::from_vars(if cfg!(windows) {
+            vec![("SystemRoot", "C:\\Windows")]
+        } else {
+            vec![("PATH", "/usr/bin:/bin")]
+        }),
+    }
+}
+
 #[cfg(any(unix, windows))]
 #[tokio::test]
 async fn the_children_still_running_are_ended_on_the_way_out() {
     LocalSet::new()
         .run_until(async {
             let rig = rig(idle_pass()).await;
-            let (executable, args) = if cfg!(windows) {
-                (
-                    "C:\\Windows\\System32\\ping.exe",
-                    vec!["-n", "60", "127.0.0.1"],
-                )
-            } else {
-                ("/bin/sleep", vec!["60"])
-            };
-            let child = rig
-                .processes
-                .spawn(
-                    Program {
-                        executable: executable.into(),
-                        args: args.into_iter().map(str::to_owned).collect(),
-                        cwd: None,
-                        env: Env::from_vars(if cfg!(windows) {
-                            vec![("SystemRoot", "C:\\Windows")]
-                        } else {
-                            vec![("PATH", "/usr/bin:/bin")]
-                        }),
-                    },
-                    Streams::Quiet,
-                )
-                .unwrap();
+            let child = rig.processes.spawn(for_a_minute(), Streams::Quiet).unwrap();
             assert!(!child.exited());
             rig.stopping.run("SIGTERM").await;
             tokio::time::timeout(Duration::from_secs(10), child.closed())
                 .await
                 .expect("it was ended with the daemon");
             assert!(child.exited());
+        })
+        .await;
+}
+
+#[cfg(any(unix, windows))]
+#[tokio::test]
+async fn the_programs_run_to_their_end_that_are_still_running_are_ended_on_the_way_out_too() {
+    LocalSet::new()
+        .run_until(async {
+            let rig = rig(idle_pass()).await;
+            // Run to their end and waited for, as the engine's probes of a CLI
+            // and the harness admin's update are: `run` and `capture`.
+            let limits = Limits {
+                timeout: Duration::ZERO,
+                max_buffer: 1024 * 1024,
+            };
+            let (running, capturing) = (Rc::clone(&rig.processes), Rc::clone(&rig.processes));
+            let run =
+                tokio::task::spawn_local(async move { running.run(for_a_minute(), limits).await });
+            let capture =
+                tokio::task::spawn_local(
+                    async move { capturing.capture(for_a_minute(), limits).await },
+                );
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            assert!(
+                !run.is_finished() && !capture.is_finished(),
+                "both are running"
+            );
+            rig.stopping.run("SIGTERM").await;
+            // Left running, they would answer in a minute: ended with the
+            // daemon, they answer now, as failures.
+            let (run, capture) = tokio::time::timeout(Duration::from_secs(10), async {
+                (run.await, capture.await)
+            })
+            .await
+            .expect("both were ended with the daemon");
+            assert!(run.expect("the run was polled").is_err(), "run");
+            assert!(capture.expect("the capture was polled").is_err(), "capture");
         })
         .await;
 }

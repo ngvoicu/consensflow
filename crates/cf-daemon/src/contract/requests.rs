@@ -8,7 +8,9 @@
 //! connection, and a client that leaves once the work began are all the same
 //! work, and the events it logs are the kit's run of the same operations
 //! ([`super::reference`]). Two requests whose bodies end at once are two
-//! callbacks, each of whose chains is whole.
+//! callbacks, each of whose chains is whole; and a body that ends is a callback
+//! of its own, which its handler goes on from before a window's exit that is
+//! runnable already (an agent's `done` as its pane exits).
 //!
 //! hyper serves the requests of one connection one at a time, so requests
 //! written together are answered in order, the second's work begun once the
@@ -19,17 +21,25 @@
 use std::rc::Rc;
 use std::time::Duration;
 
+use cf_engine::runtime::begin;
 use cf_engine::Dispatcher;
+use hyper::Method;
 use serde_json::{json, Value};
 
 use super::client::{head, request, Client};
-use super::reference::closed_then_resumed;
+use super::host::{answer, pane_of};
+use super::reference::{closed_then_resumed, exit_then_result, result_then_exit};
 use super::rig::{Pieces, Rig, Transport};
 use super::{assert_whole, chain, scene, settle, Order, TURNS};
 use crate::api::answer::{Answer, Failure};
-use crate::api::context::Closing;
+use crate::api::body::Body;
+use crate::api::callers::caller_of;
+use crate::api::context::{Closing, Context};
+use crate::api::credentials::Credentials;
 use crate::api::request::Request;
-use crate::api::{Api, Handler};
+use crate::api::{routes, Api, Handler};
+use crate::files::{Log, Trace};
+use crate::testing::{sent_body, NoRows};
 
 /// A handler that closes or resumes the project its body names: the engine's
 /// work, begun in the request's first part.
@@ -253,6 +263,115 @@ async fn two_requests_whose_bodies_end_at_once_are_two_callbacks_each_chain_whol
             assert_eq!(client.reply().await.0, 200);
         }
         api.close().await;
+    })
+    .await;
+}
+
+#[test]
+fn the_kit_tells_a_result_before_an_exit_from_an_exit_before_a_result_by_what_the_ledger_took() {
+    let (recorded, before) = result_then_exit();
+    let (refused, after) = exit_then_result();
+    assert!(recorded, "the result came while the task worked");
+    assert!(!refused, "the result came to a paused task");
+    assert_eq!(before.task, "done");
+    assert_eq!(after.task, "paused");
+}
+
+/// Zeus is at work on a task, in a window whose pane the host opened; and what
+/// a handler of the agents' API is given is over his rig's ledger, with his
+/// window's token in it.
+async fn zeus_at_work() -> (Rig, Rc<Context>, String, Value) {
+    let mut rig = Rig::new().await;
+    let project = rig.open_project(&["zeus"]).await;
+    rig.give(project.id, "zeus", "Parser");
+    // Everything the pass asks of the host is answered but zeus's open, whose
+    // pane is what his exit will name.
+    let pass = rig.pass().await;
+    let mut opens = Vec::new();
+    for _ in 0..4 {
+        opens.extend(rig.pieces.host.serve(|frame| frame.op == "pane.open").await);
+    }
+    let [open] = &opens[..] else {
+        panic!("zeus's window is asked for: {opens:?}");
+    };
+    let pane = pane_of(open);
+    rig.pieces.host.write(&answer(open)).await;
+    rig.serve_until(|| pass.ended()).await;
+    pass.await.expect("a pass");
+    rig.quiet().await;
+    rig.passes(1).await;
+    assert_eq!(rig.task_state(project.id, 1), "working");
+    rig.mark();
+    let zeus = rig
+        .ledger
+        .borrow()
+        .project(project.id)
+        .expect("the ledger read")
+        .expect("the project")
+        .participants
+        .into_iter()
+        .find(|participant| participant.handle == "zeus")
+        .expect("zeus")
+        .id;
+    let credentials = Credentials::new();
+    let token = credentials.issue(project.id, zeus);
+    let home = rig.pieces.home.path();
+    let context = Rc::new(Context {
+        ledger: Rc::clone(&rig.ledger),
+        credentials: Rc::new(credentials),
+        kick: Rc::new(|| {}),
+        closing: Closing::new(),
+        roster: Rc::new(NoRows),
+        log: Rc::new(Log::new(home)),
+        trace: Rc::new(Trace::new(home)),
+    });
+    (rig, context, token, pane)
+}
+
+#[tokio::test]
+async fn a_result_whose_body_ends_as_its_window_exits_is_recorded_before_the_exit() {
+    let (recorded, reference) = result_then_exit();
+    assert!(recorded);
+    scene(async {
+        let (mut rig, context, token, pane) = zeus_at_work().await;
+        // `POST /api/tasks/1/done` as zeus's window sends it: the caller by
+        // its token, then the route (`handle`, `api.js:79-86`), whose body
+        // comes through the daemon's own pump as the test sends it.
+        let (sending, incoming) = sent_body();
+        let draining = Rc::clone(&rig.pieces.spawn);
+        let (body, pump) = Body::pumped(incoming, move || draining.drain());
+        tokio::task::spawn_local(pump);
+        let request = Request::new(
+            Method::POST,
+            "/api/tasks/1/done",
+            Some(format!("Bearer {token}")),
+            body,
+        )
+        .expect("a request");
+        let handling = Rc::clone(&context);
+        let begun = begin(&*rig.pieces.spawn, async move {
+            let caller = caller_of(&handling, &request)?;
+            let route = routes::recognize(&request.method, &request.path)
+                .ok_or_else(|| request.unknown_route())?;
+            routes::dispatch(&handling, &caller, route, request).await
+        })
+        .await;
+        rig.pieces.spawn.drain();
+        settle().await;
+        assert!(!begun.ended(), "the handler waits for its body");
+        // The last of the body and its end come in one wake of the pump, and
+        // zeus's window exits right behind them: the bridge's reader is
+        // runnable when the body ends.
+        sending.chunk(br#"{"body":"Parser done"}"#);
+        drop(sending);
+        let exit = rig.pieces.host.exit(&pane);
+        rig.pieces.host.write(&exit).await;
+        rig.quiet().await;
+        let answered = begun.await.expect("the result was recorded");
+        assert_eq!(answered.status, 200);
+        assert_eq!(rig.task_state(1, 1), reference.task);
+        assert_eq!(rig.events(), reference.events);
+        assert_eq!(rig.calls("started"), reference.started);
     })
     .await;
 }

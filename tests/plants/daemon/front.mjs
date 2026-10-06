@@ -96,6 +96,42 @@ export const PLANTS = [
     meant: 'a_screens_body_is_counted_in_utf16_units_not_in_bytes',
   },
   {
+    name: 'body: the end of a body is not a callback of its own',
+    edits: [
+      [
+        `${DAEMON}/api/body.rs`,
+        lines('            drop(sender);', '            arrived();'),
+        '            drop(sender);',
+      ],
+    ],
+    runs: [daemon('body::')],
+    meant: 'a_handler_goes_on_from_the_end_of_its_body_before_a_task_that_was_runnable_already',
+  },
+  {
+    name: 'body: a result whose body ends as its window exits is refused',
+    edits: [
+      [
+        `${DAEMON}/api/body.rs`,
+        lines('            drop(sender);', '            arrived();'),
+        '            drop(sender);',
+      ],
+    ],
+    runs: [daemon('contract::requests')],
+    meant: 'a_result_whose_body_ends_as_its_window_exits_is_recorded_before_the_exit',
+  },
+  {
+    name: 'body: a body that broke is not closed and drained',
+    edits: [
+      [
+        `${DAEMON}/api/body.rs`,
+        lines('                if broke {', '                    break;'),
+        lines('                if broke {', '                    return;'),
+      ],
+    ],
+    runs: [daemon('body::')],
+    meant: 'a_handler_goes_on_from_the_end_of_its_body_before_a_task_that_was_runnable_already',
+  },
+  {
     name: 'server: a panic in a request is not contained',
     edits: [
       [

@@ -11,10 +11,13 @@
 //!   answers only, frames in pieces;
 //! - [`requests`]: real hyper requests, a body at once and in pieces, two
 //!   requests on one connection, a client that leaves after the work began;
+//!   and a body, sent as the test chooses through the daemon's own pump, that
+//!   ends with a window's exit already runnable behind it;
 //! - [`callbacks`]: timers and the records' answers, which come from outside
 //!   the executor, two at once, a timer with an exit or a request, an answer
-//!   in the middle of a drain, a chain of continuations whole between them;
-//!   [`looks`] hangs the engine's own chains on them;
+//!   in the middle of a drain, two that came before the executor's first poll
+//!   of the work that waits for them, a chain of continuations whole between
+//!   them; [`looks`] hangs the engine's own chains on them;
 //! - [`liveness`]: the driver, for what comes from another thread with
 //!   nothing after it;
 //! - [`kicks`]: the pass loop, a kick that is `setImmediate` and never a pass

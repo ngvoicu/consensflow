@@ -6,14 +6,16 @@
 //! two together, which Node's `execFile` hands over whole and `execute` has
 //! no use for, and so no field for.
 
+use std::cell::Cell;
 use std::path::Path;
 use std::process::Stdio;
+use std::rc::Rc;
 
 use cf_base::env::Env;
 use cf_base::file::error_code;
 
 use crate::execute::{command_line, end, hide_window, read_both, Read, FORCE_AFTER};
-use crate::{terminate, Ending, Limits, Run};
+use crate::{terminate, Ender, Ending, Limits, Run};
 
 /// What a program that ended with 0 wrote: `execFile`'s `{ stdout, stderr }`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,11 +47,17 @@ pub struct CaptureFailed {
 /// streams and its exit, ended at its timeout or when a stream says more
 /// than its limit) and answers what it wrote to both streams, or how it
 /// failed with what it wrote.
+///
+/// `started` is given the program's [`Ender`] once it has started, for
+/// whoever ends this process's children on its way out: the program is its to
+/// end until it has been waited for or this future is dropped (which ends it
+/// too), and no longer after.
 pub async fn capture(
     run: &Run,
     cwd: Option<&Path>,
     env: &Env,
     limits: Limits,
+    started: impl FnOnce(Ender),
 ) -> Result<Captured, CaptureFailed> {
     let unstarted = |message: String| CaptureFailed {
         message,
@@ -79,6 +87,8 @@ pub async fn capture(
     })?;
     crate::job::adopt(&child);
     let pid = child.id();
+    let exited = Rc::new(Cell::new(false));
+    started(Ender::new(pid, &exited));
     let _input = child.stdin.take();
     let (Some(mut stdout), Some(mut stderr)) = (child.stdout.take(), child.stderr.take()) else {
         return Err(unstarted(
@@ -131,6 +141,9 @@ pub async fn capture(
             }
         }
     };
+
+    // Waited for: its pid is no longer its to end.
+    exited.set(true);
 
     let stdout = String::from_utf8_lossy(&out.bytes).into_owned();
     let stderr = String::from_utf8_lossy(&err.bytes).into_owned();

@@ -20,6 +20,7 @@
 
 use std::cell::{OnceCell, RefCell};
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -165,7 +166,10 @@ impl Daemon {
 }
 
 /// Starts a daemon on the local set the caller is in, over the home `env`
-/// names.
+/// names. A start that fails after its first line is in the log (the ledger
+/// is held by another daemon, say) is a process that ends with 1, and the log
+/// says so under that line, as Node's exit logger did: it was installed right
+/// after it.
 pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
     // The home, and the files in it: every event and every change of a window
     // goes to events.jsonl as it happens, and what is worth knowing afterwards
@@ -181,7 +185,22 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
         std::process::id(),
         home.display()
     ));
+    let started = run(env, options, home, trace, Rc::clone(&log), errors).await;
+    if started.is_err() {
+        log.info("exit 1");
+    }
+    started
+}
 
+/// The rest of the start, in Node's order, from the ledger on.
+async fn run(
+    env: Env,
+    options: Options,
+    home: PathBuf,
+    trace: Rc<Trace>,
+    log: Rc<Log>,
+    errors: Rc<Errors>,
+) -> Result<Daemon, StartError> {
     // The ledger, whose lock refuses a second daemon: nothing of the running
     // one is touched before it is held.
     let told = Rc::clone(&trace);

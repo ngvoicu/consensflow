@@ -45,6 +45,22 @@ impl Root {
         std::fs::read_to_string(self.home().join("daemon.log")).unwrap_or_default()
     }
 
+    /// A `claude` that never answers: it writes its pid to a file beside it
+    /// (the file is what this gives) and sleeps, two minutes at most. The
+    /// daemon runs a CLI in the environment's `HOME`, which is made here: a
+    /// program whose folder is not there does not start. And a run that never
+    /// gets its version never asks a release feed.
+    #[cfg(unix)]
+    pub fn claude_that_never_answers(&self) -> PathBuf {
+        std::fs::create_dir_all(self.dir.path().join("home")).expect("a home folder");
+        std::fs::write(
+            self.bin().join("claude"),
+            "#!/bin/sh\necho $$ > \"${0%/*}/asked\"\nexec /bin/sleep 120\n",
+        )
+        .expect("a stand-in claude");
+        self.bin().join("asked")
+    }
+
     /// A project that was open when the last daemon ended, with its chief on
     /// a saved agent, a worker `zeus`, and a question the chief put to zeus:
     /// a door's wait. The question's number.

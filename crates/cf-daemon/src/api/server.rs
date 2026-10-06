@@ -11,10 +11,11 @@
 //! 500 `internal`. A connection that waits for its next request is held to
 //! five seconds, as Node's keep-alive held it.
 //!
-//! Each poll of a connection is a callback of its own ([`Drained`]): a body's
-//! last piece, which the connection reads, wakes the handler that waits for it
-//! directly, and what that woke is run to its end before another task runs, as
-//! Node ran its microtasks after each `data` event of a socket. A handler's
+//! Each poll of a connection is a callback of its own ([`Drained`]): what it
+//! woke is run to its end before another task runs, as Node ran its microtasks
+//! after each `data` event of a socket. A request's body reaches its handler
+//! through a pump beside the request ([`Body::pumped`]), which does the same
+//! after each piece it hands over and when the body ends. A handler's
 //! answer is written when its connection is next polled, a turn after the
 //! drain that ended its work; hyper serves a connection's requests one at a
 //! time, so a request written behind another waits for its answer.
@@ -242,12 +243,13 @@ async fn serve(server: &Rc<Server>, stream: TcpStream) {
 }
 
 /// A connection each poll of which is a callback of its own. What a poll
-/// reads (the last piece of a request's body, say) wakes the handler that
-/// waits for it directly, where no drain is, and tokio would run the tasks
-/// queued ahead of the driver first: another connection's, the bridge's
-/// reader. The poll is followed by a drain, so that what it woke runs to its
-/// end before any other task, as Node's microtasks ran after each `data` event
-/// of a socket and before the next.
+/// reads wakes the work that waits for it directly, where no drain is, and
+/// tokio would run the tasks queued ahead of the driver first: another
+/// connection's, the bridge's reader. The poll is followed by a drain, so that
+/// what it woke runs to its end before any other task, as Node's microtasks
+/// ran after each `data` event of a socket and before the next. (A request's
+/// body is not read by the handler's work: it comes through the pump of
+/// [`Body::pumped`], a task of its own, which drains as the poll does.)
 struct Drained<F> {
     connection: Pin<Box<F>>,
     spawn: Rc<DaemonSpawn>,

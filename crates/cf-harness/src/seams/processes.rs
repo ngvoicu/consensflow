@@ -60,7 +60,10 @@ pub trait Child {
 
 /// The system's programs, started as this process's children: on Windows
 /// given what Windows needs of this process's environment where theirs
-/// lacks it, and in a job that ends them with this process.
+/// lacks it, and in a job that ends them with this process. Every one it
+/// starts, run to its end (`run`, and the admin's `capture`) or beside the
+/// caller (`spawn`), is kept while it runs, for [`SystemProcesses::end_all`]:
+/// a process that exits without running destructors would leave them running.
 pub struct SystemProcesses {
     this: Env,
     started: RefCell<Vec<Ender>>,
@@ -83,6 +86,15 @@ impl SystemProcesses {
         }
     }
 
+    /// Keeps `ender`, a child that has started, until it has ended: the ones
+    /// that have are let go of as one comes in, so that what is kept is what is
+    /// running now, and a pid that is another's by then is never sent a signal.
+    fn keep(&self, ender: Ender) {
+        let mut started = self.started.borrow_mut();
+        started.retain(Ender::running);
+        started.push(ender);
+    }
+
     fn start(&self, program: &Program) -> (cf_process::Run, Env) {
         let env = with_required(&program.env, &self.this);
         let args: Vec<OsString> = program.args.iter().map(OsString::from).collect();
@@ -93,17 +105,16 @@ impl SystemProcesses {
 impl Processes for SystemProcesses {
     fn run(&self, program: Program, limits: Limits) -> Work<'_, Result<String, Failed>> {
         let (run, env) = self.start(&program);
-        Box::pin(
-            async move { cf_process::execute(&run, program.cwd.as_deref(), &env, limits).await },
-        )
+        Box::pin(async move {
+            let kept = |ender| self.keep(ender);
+            cf_process::execute(&run, program.cwd.as_deref(), &env, limits, kept).await
+        })
     }
 
     fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, String> {
         let (run, env) = self.start(&program);
         let child = cf_process::spawn(&run, program.cwd.as_deref(), &env, streams)?;
-        let mut started = self.started.borrow_mut();
-        started.retain(Ender::running);
-        started.push(child.ender());
+        self.keep(child.ender());
         Ok(Box::new(child))
     }
 }
@@ -117,9 +128,10 @@ impl Capture for SystemProcesses {
         limits: Limits,
     ) -> Work<'_, Result<Captured, CaptureFailed>> {
         let (run, env) = self.start(&program);
-        Box::pin(
-            async move { cf_process::capture(&run, program.cwd.as_deref(), &env, limits).await },
-        )
+        Box::pin(async move {
+            let kept = |ender| self.keep(ender);
+            cf_process::capture(&run, program.cwd.as_deref(), &env, limits, kept).await
+        })
     }
 }
 
@@ -358,6 +370,80 @@ mod tests {
             2,
             "the failure asked again, the answer kept"
         );
+    }
+
+    /// A program of the system's own: `/bin/sh` and `sleep`, or on Windows
+    /// `cmd` and `ping`, which `quick` ends at once and `long` far later than
+    /// any test.
+    fn system(quick: bool) -> Program {
+        let (executable, args) = match (cfg!(windows), quick) {
+            (false, true) => ("/bin/sh", vec!["-c", "exit 0"]),
+            (false, false) => ("/bin/sleep", vec!["30"]),
+            (true, true) => (r"C:\Windows\System32\cmd.exe", vec!["/d", "/c", "exit 0"]),
+            (true, false) => (
+                r"C:\Windows\System32\ping.exe",
+                vec!["-n", "30", "127.0.0.1"],
+            ),
+        };
+        Program {
+            executable: executable.into(),
+            args: args.into_iter().map(str::to_owned).collect(),
+            cwd: None,
+            env: Env::from_vars(if cfg!(windows) {
+                vec![("SystemRoot", r"C:\Windows")]
+            } else {
+                vec![("PATH", "/usr/bin:/bin")]
+            }),
+        }
+    }
+
+    const LIMITS: Limits = Limits {
+        timeout: Duration::ZERO,
+        max_buffer: 1024 * 1024,
+    };
+
+    /// How many of the programs kept are running.
+    fn running(processes: &SystemProcesses) -> usize {
+        let kept = processes.started.borrow();
+        kept.iter().filter(|ender| ender.running()).count()
+    }
+
+    #[test]
+    fn programs_run_to_their_end_are_kept_while_they_run_and_let_go_of_once_they_have_ended() {
+        let processes = SystemProcesses::new(Env::default());
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                // Programs that end: none is kept running, and what is kept is
+                // no more than the last, which the next one lets go of.
+                for _ in 0..3 {
+                    processes.run(system(true), LIMITS).await.unwrap();
+                    processes.capture(system(true), LIMITS).await.unwrap();
+                }
+                assert_eq!(running(&processes), 0);
+                assert!(processes.started.borrow().len() <= 1);
+
+                // One that runs is kept, a `run` and a `capture` alike, and the
+                // way out ends both.
+                let running_run = processes.run(system(false), LIMITS);
+                let running_capture = processes.capture(system(false), LIMITS);
+                tokio::pin!(running_run, running_capture);
+                let waiting = async {
+                    let _ = tokio::join!(&mut running_run, &mut running_capture);
+                };
+                let _ = tokio::time::timeout(Duration::from_millis(300), waiting).await;
+                assert_eq!(running(&processes), 2);
+                processes.end_all();
+                let ended = tokio::time::timeout(Duration::from_secs(20), async {
+                    (running_run.await, running_capture.await)
+                })
+                .await
+                .expect("both programs were ended");
+                assert!(ended.0.is_err() && ended.1.is_err(), "ended, not answered");
+                assert_eq!(running(&processes), 0);
+            });
     }
 
     #[test]

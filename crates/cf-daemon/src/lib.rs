@@ -12,9 +12,10 @@
 //! ([`seams::DaemonSpawn`]), in the order Node's microtasks ran, and is drained
 //! where Node's event loop went on to its next callback: after the frames of
 //! one read of the bridge ([`host::daemon_bridge`]), the first part of an HTTP
-//! request and each poll of a connection ([`api`]), a timer of the pass loop
-//! ([`pass`]), and a timer or a records' answer the engine waits on, each of
-//! which is a callback of its own ([`seams::DaemonSpawn::arrival`]). A panic
+//! request, each poll of a connection and each piece of a request's body, its
+//! end included ([`api`]), a timer of the pass loop ([`pass`]), and a timer or
+//! a records' answer the engine waits on, each of which is a callback of its
+//! own ([`seams::DaemonSpawn::arrival`]). A panic
 //! is what an exception was: caught where work runs, written down, and gone
 //! past ([`errors`]).
 //!

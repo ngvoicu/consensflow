@@ -3,8 +3,11 @@
 //! runs: on the executor, drained and driven, a panic in it written down.
 
 use std::cell::{Cell, RefCell};
+use std::future::poll_fn;
+use std::task::{Context, Poll, Waker};
 
 use cf_engine::runtime::next_turn;
+use cf_harness::contract::Work;
 use cf_harness::testing::Fakes;
 use cf_proto::agents::Harness;
 use tokio::sync::Notify;
@@ -12,7 +15,7 @@ use tokio::task::LocalSet;
 
 use super::*;
 use crate::files::{Log, Trace};
-use crate::testing::{scene, worked};
+use crate::testing::{scene, worked, Worked};
 
 fn participant<'a>(project: &'a ProjectView, handle: &str) -> &'a ParticipantView {
     project
@@ -246,6 +249,74 @@ async fn a_panic_in_work_apart_is_written_down_and_the_work_after_it_runs() {
         trace.contains(r#""reason":"a task failed: a launch went wrong""#),
         "{trace}"
     );
+}
+
+/// A wait the test ends by hand: it keeps the waker it was polled with, and is
+/// ready once it has been ended.
+#[derive(Default)]
+struct Hand {
+    ended: Cell<bool>,
+    waker: RefCell<Option<Waker>>,
+}
+
+impl Hand {
+    fn wait(self: &Rc<Self>) -> Work<'static, ()> {
+        let this = Rc::clone(self);
+        Box::pin(poll_fn(move |context| {
+            if this.ended.get() {
+                return Poll::Ready(());
+            }
+            *this.waker.borrow_mut() = Some(context.waker().clone());
+            Poll::Pending
+        }))
+    }
+
+    /// Wakes whoever waits, with nothing to say yet.
+    fn wake(&self) {
+        let waker = self.waker.borrow_mut().take();
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    }
+
+    /// The wait is over, and whoever waits is woken.
+    fn end(&self) {
+        self.ended.set(true);
+        self.wake();
+    }
+}
+
+#[tokio::test]
+async fn a_wait_its_relay_woke_with_nothing_to_say_has_its_answer_from_its_relay_again() {
+    LocalSet::new()
+        .run_until(async {
+            let Worked { spawn, .. } = worked();
+            let hand = Rc::new(Hand::default());
+            let mut waiting = spawn.arrival(hand.wait());
+            // The test is the work that awaits it, and polls it by hand.
+            let poll = |waiting: &mut Work<'static, ()>| {
+                waiting
+                    .as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop()))
+            };
+            assert!(poll(&mut waiting).is_pending());
+            // It wakes with nothing to say: its relay tells the work, which
+            // polls it and finds it waits still.
+            hand.wake();
+            for _ in 0..5 {
+                tokio::task::yield_now().await;
+            }
+            assert!(poll(&mut waiting).is_pending());
+            // Now it ends. A poll that is not its relay's, made before the
+            // relay ran, does not take the answer: the relay's wake does.
+            hand.end();
+            assert!(poll(&mut waiting).is_pending(), "not before its relay");
+            for _ in 0..5 {
+                tokio::task::yield_now().await;
+            }
+            assert!(poll(&mut waiting).is_ready());
+        })
+        .await;
 }
 
 #[tokio::test]

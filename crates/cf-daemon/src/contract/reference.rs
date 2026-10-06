@@ -47,6 +47,46 @@ pub fn exit_after_the_answer() -> Outcome {
     outcome(context, project.id, opened, started)
 }
 
+/// A worker's result is recorded by the request that carries it, in the
+/// callback its body ended in, and its window's exit comes in the callback
+/// after: Node's handler went on from the end of its body before the next
+/// callback, which was the exit. Whether the ledger took the result, and what
+/// the engine did.
+pub fn result_then_exit() -> (bool, Outcome) {
+    result_and_exit(false)
+}
+
+/// The same, the exit first: the task is paused when the result comes, and the
+/// ledger refuses it.
+pub fn exit_then_result() -> (bool, Outcome) {
+    result_and_exit(true)
+}
+
+fn result_and_exit(exit_first: bool) -> (bool, Outcome) {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().expect("a pass");
+    context.pass().expect("a pass");
+    let (opened, started) = (events(&context).len(), asked_started(&context));
+    let record = |context: &Context| {
+        context
+            .ledger
+            .borrow_mut()
+            .record_result(project.id, 1, "Parser done")
+            .is_ok()
+    };
+    let recorded = if exit_first {
+        context.exit("zeus");
+        record(&context)
+    } else {
+        let recorded = record(&context);
+        context.exit("zeus");
+        recorded
+    };
+    (recorded, outcome(context, project.id, opened, started))
+}
+
 /// Two workers' looks, answered in callbacks of their own, `zeus`'s first.
 /// His finds his answer (his task is collected and his window killed) and
 /// hera's confirms the delivery of her task's message: one chain is longer

@@ -32,6 +32,18 @@ function startDaemon(env, nodeFlags = []) {
   })
 }
 
+/**
+ * The verb that runs the daemon, `cf ui`, as a shell runs it: Node's `bin/cf.mjs`, or
+ * the native `cf`. It is the process a start that fails ends, with what that says.
+ */
+function startCli(env) {
+  const named = daemonCommand([])
+  const [command, args] = named.native
+    ? [named.command, named.args]
+    : [process.execPath, [path.join(BUNDLE_BIN, 'cf.mjs'), 'ui', '--json', '--no-open']]
+  return spawn(command, args, { env: { ...env, ...named.env }, stdio: ['pipe', 'pipe', 'pipe'] })
+}
+
 /** How long `work` took, failing past `limit` ms rather than waiting on it for good. */
 async function timed(work, limit) {
   const started = Date.now()
@@ -247,6 +259,35 @@ describe('the daemon and its log', () => {
         await readFile(path.join(launch, 'settings.json'), 'utf8'),
         '{}\n',
         "the running daemon's window keeps its files",
+      )
+    } finally {
+      running.close()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('ends `cf ui` with 1 when a second start is refused its ledger, and its log says so', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cf-daemon-'))
+    const running = openLedger(path.join(home, 'consensflow.db'))
+    try {
+      const child = startCli({
+        ...process.env,
+        HOME: home,
+        CONSENSFLOW_HOME: home,
+        CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
+      })
+      let errors = ''
+      child.stderr.on('data', (chunk) => {
+        errors += chunk
+      })
+      const code = await new Promise((resolve) => child.once('exit', resolve))
+      assert.equal(code, 1, errors)
+      assert.match(errors, /^cf: another ConsensFlow has .*consensflow\.db open\n$/)
+      // The exit logger Node installs right after the start line writes the code
+      // the process ends with, which the native daemon writes too.
+      assert.match(
+        await readFile(path.join(home, 'daemon.log'), 'utf8'),
+        /^\S+ info start pid \d+ (?:node v|rust )\S+ home \S+\n\S+ info exit 1\n$/,
       )
     } finally {
       running.close()

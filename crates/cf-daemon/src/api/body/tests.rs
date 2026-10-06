@@ -1,15 +1,17 @@
 //! The two readers, held to Node's: what is counted, when a body is refused,
 //! and what is made of what came.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::rc::Rc;
 use std::time::Duration;
 
 use futures_util::stream;
 use serde_json::json;
+use tokio::task::LocalSet;
 
 use super::*;
+use crate::testing::{sent_body, worked, Worked};
 
 /// What Node's readers hold, as numbers: the limits are not the constants
 /// they are held to.
@@ -218,4 +220,56 @@ async fn a_connection_that_failed_in_a_screens_body_says_what_it_said() {
     let unread = read_text(&mut broken).await.unwrap_err();
     assert_eq!(unread, Unread::Broke("aborted".to_owned()));
     assert_eq!(unread.message(), "aborted");
+}
+
+/// Lets what is ready run, the clock not moving.
+async fn settle() {
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+}
+
+#[tokio::test]
+async fn a_handler_goes_on_from_the_end_of_its_body_before_a_task_that_was_runnable_already() {
+    // A body that ends, and one the connection fails in: the end of either is
+    // the callback the handler that waits for it goes on in, as Node's went on
+    // from `end`, and a task that was runnable already waits for it.
+    for failing in [false, true] {
+        LocalSet::new()
+            .run_until(async {
+                let Worked { spawn, .. } = worked();
+                let (sending, incoming) = sent_body();
+                let draining = Rc::clone(&spawn);
+                let (mut body, pump) = Body::pumped(incoming, move || draining.drain());
+                tokio::task::spawn_local(pump);
+                let ran: Rc<RefCell<Vec<&str>>> = Rc::default();
+                // The handler reads its body to its end, a failure being a
+                // chunk that is an error, and then goes on.
+                let handled = Rc::clone(&ran);
+                spawn.apart("a handler failed", async move {
+                    while body.next().await.is_some() {}
+                    handled.borrow_mut().push("the handler goes on");
+                });
+                spawn.drain();
+                settle().await;
+                // The last of the body, and its end, come in one wake of the
+                // pump; a task is runnable behind it.
+                sending.chunk(b"{}");
+                let rival = Rc::clone(&ran);
+                tokio::task::spawn_local(async move {
+                    rival.borrow_mut().push("a task that was runnable");
+                });
+                if failing {
+                    sending.fail("connection reset");
+                }
+                drop(sending);
+                settle().await;
+                assert_eq!(
+                    *ran.borrow(),
+                    ["the handler goes on", "a task that was runnable"],
+                    "failing: {failing}"
+                );
+            })
+            .await;
+    }
 }
