@@ -697,6 +697,57 @@ describe('a task held with its window while its member is out of quota', () => {
       assert.deepEqual(ledger.heldTasksDue(until), [])
     })
   })
+
+  it('stays paused with its words when its hold is cleared, is not due again, and is resumed or called off as any paused task', async () => {
+    await withLedger((ledger) => {
+      const { project } = staff(ledger)
+      for (const to of ['zeus', 'diana']) {
+        deliver(
+          ledger,
+          ledger.createTask(project.id, { from: 'chief', to, body: `For ${to}` }).message,
+        )
+      }
+      const because = 'the window that had T-1 has ended'
+      assert.throws(() => ledger.clearHold(project.id, 1, { because }), {
+        code: 'invalid-transition',
+      })
+      const until = '2026-09-24T14:58:35.479Z'
+      const held = ledger.holdTask(project.id, 1, { until, because: 'out of quota' })
+      ledger.holdTask(project.id, 2, { until, because: 'out of quota' })
+      assert.throws(() => ledger.clearHold(project.id, 1, { because: '  ' }), {
+        code: 'invalid-text',
+      })
+      const events = ledger.events(project.id).length
+      const cleared = ledger.clearHold(project.id, 1, { because })
+      assert.deepEqual(
+        [cleared.state, cleared.heldUntil, cleared.assignee, cleared.body, cleared.pausedAt],
+        ['paused', null, held.assignee, held.body, held.pausedAt],
+        'paused as the chief pauses a task: its window, its words, its pause',
+      )
+      assert.notEqual(cleared.updatedAt, held.updatedAt)
+      assert.deepEqual(
+        ledger
+          .events(project.id)
+          .slice(events)
+          .map(({ kind, data }) => [kind, data]),
+        [['task.hold-cleared', { task: 1, because }]],
+        'one event, and nothing else written',
+      )
+      const due = () => ledger.heldTasksDue('2099-01-01T00:00:00.000Z').map((task) => task.number)
+      assert.deepEqual(due(), [2], 'T-1 is not due again; T-2, held with it, is')
+      ledger.clearHold(project.id, 2, { because })
+      assert.deepEqual(due(), [])
+      assert.equal(
+        ledger.resumeTask(project.id, 1, { by: 'chief', body: 'Go on' }).task.state,
+        'queued',
+        'resumed as any paused task',
+      )
+      assert.equal(ledger.cancelTask(project.id, 2, { by: 'human' }).state, 'cancelled')
+      assert.throws(() => ledger.clearHold(project.id, 1, { because }), {
+        code: 'invalid-transition',
+      })
+    })
+  })
 })
 
 describe('a finished task the human deletes from the board', () => {

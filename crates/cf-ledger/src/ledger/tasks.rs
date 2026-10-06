@@ -85,6 +85,16 @@ impl Ledger {
         tasks::hold_task(&mut self.store, project_id, number, until, because)
     }
 
+    /// The daemon ends a held task's hold without resuming it: the task stays paused.
+    pub fn clear_hold(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        because: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::clear_hold(&mut self.store, project_id, number, because)
+    }
+
     /// The held tasks whose time has come at `now`, an ISO time.
     pub fn held_tasks_due(&self, now: &str) -> Result<Vec<HeldTask>, LedgerError> {
         tasks::held_tasks_due(&self.store, now)

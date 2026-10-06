@@ -2457,6 +2457,136 @@ describe('a member out of quota mid-task', () => {
       assert.throws(() => context.dispatcher.backFromQuota(project.id, 'human'), /no @human/)
     })
   })
+
+  it('keeps a held task paused, its hold cleared, when its session was deleted before the hold ended, and tells its requester once while every other task goes on', async () => {
+    // A follow-up (--after) is given to no tier: it is its session's own, and
+    // only another follow-up brings a deleted session back. The hold's end
+    // failed every pass at its start, so nothing was delivered, launched or
+    // collected for anyone (calliope, 2026-10-06).
+    await setup(async (context) => {
+      const { project, open, task, notes, id } = await withTiers(context)
+      open({ body: 'Parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      context.adapter.answer('zeus', 'Parser done')
+      await context.dispatcher.pass()
+      assert.equal(task(1).state, 'done')
+      context.ledger.createTask(project.id, { from: 'chief', after: 1, body: 'Now the lexer' })
+      open({ body: 'Docs' })
+      open({ tier: 'light', body: 'Rename a file' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        [2, 3, 4].map((number) => [task(number).state, task(number).assignee]),
+        [
+          ['working', 'zeus-amber-pine'],
+          ['working', 'diana-brisk-birch'],
+          ['working', 'hera-calm-brook'],
+        ],
+        'the lexer in the session that wrote the parser; the docs and the rename given to their tiers',
+      )
+      const resetsAt = new Date(context.clock.now().getTime() + 20 * 60_000).toISOString()
+      context.adapter.quota('zeus', { state: 'exhausted', resetsAt })
+      context.adapter.quota('diana', { state: 'exhausted', resetsAt })
+      await context.dispatcher.pass()
+      assert.deepEqual(
+        [2, 3].map((number) => [task(number).state, task(number).heldUntil]),
+        [
+          ['paused', resetsAt],
+          ['paused', resetsAt],
+        ],
+        'both held with their windows: the lexer has no tier to go back to',
+      )
+      // The agent, stopped, says where it was; that is not a result while the task is held.
+      context.adapter.answer('diana', 'Stopped at the docs.')
+      await context.dispatcher.endSession(project.id, 'zeus-amber-pine')
+      const sessionOnBoard = () =>
+        context.ledger.project(project.id).participants.some((p) => p.handle === 'zeus-amber-pine')
+      assert.equal(sessionOnBoard(), false, 'the human deleted the session that had T-2')
+      const launches = () =>
+        context.adapter.prepared.filter(
+          (request) => request.participant.handle === 'zeus-amber-pine',
+        )
+      const [launched, told] = [launches().length, notes('chief').length]
+
+      context.clock.advance(21 * 60_000)
+      open({ body: 'Tests' })
+      let passes = 0
+      const pass = async () => {
+        passes += 1
+        await assert.doesNotReject(
+          context.dispatcher.pass(),
+          `pass ${passes}, after the hold ended`,
+        )
+        assert.deepEqual(
+          [task(2).state, task(2).heldUntil, task(2).assignee, task(2).body],
+          ['paused', null, 'zeus-amber-pine', 'Now the lexer'],
+          'it stays paused with its words, and is not due again',
+        )
+      }
+      await pass()
+      assert.equal(
+        task(3).state,
+        'queued',
+        'T-3, held with it and due after it, goes on in the pass that cannot resume T-2',
+      )
+      context.adapter.answer('hera', 'Renamed')
+      await pass()
+      await pass()
+      assert.deepEqual(
+        notes('chief').slice(told),
+        [
+          'T-2 stays paused: @zeus-amber-pine, the session it was given to, was deleted. It waits for your decision: cancel it, or give the work again.',
+        ],
+        'the requester hears once, not in every pass',
+      )
+      assert.deepEqual(
+        [task(3).state, context.ledger.inbox(id('diana-brisk-birch'))[0].body],
+        ['working', 'Resumed: Go on where you stopped.'],
+        'T-3, held at the same time and after it in the pass, went on in its own window',
+      )
+      assert.equal(task(4).state, 'done', "the rename's answer was collected")
+      assert.deepEqual(
+        [task(5).state, task(5).assignee.startsWith('diana-')],
+        ['working', true],
+        'the new task was given out, launched and delivered',
+      )
+      assert.equal(sessionOnBoard(), false, 'nothing brings the deleted session back')
+      assert.equal(launches().length, launched, 'nor opens a window for it')
+      assert.deepEqual(context.ledger.heldTasksDue('2099-01-01T00:00:00.000Z'), [], 'none is due')
+      context.ledger.cancelTask(project.id, 2, { by: 'chief' })
+      assert.equal(task(2).state, 'cancelled', 'the requester can decide')
+    })
+  })
+
+  it('keeps a held task paused, its hold cleared, when the member it was given to by name left the staff, and says what the ledger refused', async () => {
+    await setup(async (context) => {
+      const { project, task, notes } = await withTiers(context, { workers: ['zeus'] })
+      context.ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Write the parser' })
+      await context.dispatcher.pass()
+      await context.dispatcher.pass()
+      const resetsAt = new Date(context.clock.now().getTime() + 20 * 60_000).toISOString()
+      context.adapter.quota('zeus', { state: 'exhausted', resetsAt })
+      await context.dispatcher.pass()
+      assert.deepEqual([task(1).state, task(1).heldUntil], ['paused', resetsAt])
+      // A member that leaves takes back what is in its hands, but not what is paused.
+      await context.dispatcher.removeMember(project.id, 'zeus')
+      assert.equal(task(1).state, 'paused')
+      const told = notes('chief').length
+
+      context.clock.advance(21 * 60_000)
+      for (let pass = 1; pass <= 2; pass += 1) {
+        await assert.doesNotReject(context.dispatcher.pass(), `pass ${pass}, after the hold ended`)
+        assert.deepEqual(
+          [task(1).state, task(1).heldUntil, task(1).assignee],
+          ['paused', null, 'zeus'],
+        )
+      }
+      assert.deepEqual(notes('chief').slice(told), [
+        'T-1 stays paused: it could not go on when its hold ended (the window that had T-1 has ended: cancel it and open the work for its tier). It waits for your decision: cancel it, or give the work again.',
+      ])
+    })
+  })
 })
 
 describe('a member with several roles', () => {
