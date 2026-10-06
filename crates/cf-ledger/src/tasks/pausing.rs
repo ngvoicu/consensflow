@@ -209,16 +209,23 @@ pub(crate) fn held_tasks_due(store: &Store, now: &str) -> Result<Vec<HeldTask>, 
 }
 
 /// The stops asked of a window's task: its task, and how many stops its
-/// pauses asked of it. The task is the one it holds, a paused one first; a
-/// window that holds none is asked for none. What a window owes is what this
-/// counts past the last stop it paid for that task.
+/// pauses asked of it. The task is the one the window works on: the one the
+/// newest task message begun for it (being pasted, pasted or read) was about,
+/// if it still holds it. A task none of whose words was ever given it is not
+/// one it works on, paused or not, so a pause of it stops nothing; and a
+/// stop the window paid for one task never stands in for another's. A window
+/// that holds none is asked for none. What a window owes is what this counts
+/// past the last stop it paid for that task.
 pub(crate) fn stop_of(store: &Store, participant_id: i64) -> Result<Option<Stop>, LedgerError> {
     Ok(store
         .db
         .query_row(
-            "SELECT id, number, stop_seq FROM task
-             WHERE assignee_id = ? AND state IN ('queued', 'working', 'waiting', 'paused')
-             ORDER BY state = 'paused' DESC, stop_seq DESC, id LIMIT 1",
+            "SELECT t.id, t.number, t.stop_seq FROM task t
+             WHERE t.assignee_id = ?1 AND t.state IN ('queued', 'working', 'waiting', 'paused')
+               AND t.id = (SELECT m.task_id FROM message m
+                           WHERE m.recipient_id = ?1 AND m.kind = 'task' AND m.task_id IS NOT NULL
+                             AND m.state IN ('delivering', 'delivered', 'read')
+                           ORDER BY m.id DESC LIMIT 1)",
             [participant_id],
             |row| {
                 Ok(Stop {

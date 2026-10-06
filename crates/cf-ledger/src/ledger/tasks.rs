@@ -100,8 +100,8 @@ impl Ledger {
         tasks::held_tasks_due(&self.store, now)
     }
 
-    /// The stops asked of a participant's window: its task, and how many its
-    /// pauses asked. None for a window that holds no task.
+    /// The stops asked of a participant's window: the task it works on, and
+    /// how many its pauses asked. None for a window that works on none.
     pub fn stop_of(&self, participant_id: i64) -> Result<Option<Stop>, LedgerError> {
         tasks::stop_of(&self.store, participant_id)
     }

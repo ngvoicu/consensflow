@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url'
 import { PLANTS as CONSTANTS } from './daemon/constants.mjs'
 import { PLANTS as FRONT } from './daemon/front.mjs'
 import { PLANTS as LAUNCHER } from './daemon/launcher.mjs'
+import { PLANTS as OBLIGATIONS } from './daemon/obligations.mjs'
 import { PLANTS as PARTS } from './daemon/parts.mjs'
 import { PLANTS as PAUSE } from './daemon/pause.mjs'
 import { PLANTS as PLAYERS } from './daemon/players.mjs'
@@ -47,6 +48,7 @@ const PLANTS = [
   ...PLAYERS,
   ...LAUNCHER,
   ...PAUSE,
+  ...OBLIGATIONS,
 ]
 
 const args = process.argv.slice(2)

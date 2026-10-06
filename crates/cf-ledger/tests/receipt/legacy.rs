@@ -185,6 +185,120 @@ fn a_gated_question_node_withdrew_when_it_was_answered_obliges_while_its_answer_
 }
 
 #[test]
+fn a_gated_question_node_withdrew_whose_answer_node_then_cancelled_obliges_until_it_is_answered_again(
+) {
+    let mut w = world();
+    let (task, question) = working_and_asking(&mut w);
+    let answer = w.choose(question, "blue");
+    // Node's pause or hold: the question answered at the gate was withdrawn,
+    // and the answer, passed on, was cancelled with what else waited.
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET state = 'cancelled', reason = 'answered by @chief' WHERE id = ?",
+            [question],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE message SET state = 'cancelled' WHERE id = ?",
+            [answer.id],
+        )
+        .unwrap();
+    });
+    let note = w.note("chief", "zeus", task, "Mind the tests");
+    w.deliver(note.id);
+    assert_eq!(
+        w.state(task),
+        "waiting",
+        "nobody received an answer to it: it is not left to work on its own"
+    );
+    let again = w.choose(question, "red");
+    w.deliver(again.id);
+    assert_eq!(w.state(task), "working");
+}
+
+/// What a row Rust folded into a carrier, that came after the carrier, is
+/// when the Node daemon had the carrier last and left it in `state`: the
+/// ledger is opened again (this daemon starts) with the carrier so, and the
+/// task going on, as Node's confirm moves it, unless the carrier still waits.
+/// Each of the states a carrier that cannot carry any more can be left in
+/// frees what it carried, and the one that waits does not.
+fn after_node_left_the_carrier(state: &str) -> (World, i64, i64) {
+    let mut w = world();
+    let created = w.give("zeus", "Parser");
+    let (task, brief) = (created.task.number, created.message.expect("a brief").id);
+    w.deliver(brief);
+    let question = w.ask("zeus", task, "Which format?");
+    w.hold(task);
+    let carrier = w.daemon_resumes(task).message.expect("its words").id;
+    let answer = w.answer(question.id, "JSON").id;
+    assert_eq!(
+        w.next("zeus"),
+        Some(carrier),
+        "the answer rides in the carrier"
+    );
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET state = ? WHERE id = ?",
+            (state, carrier),
+        )
+        .unwrap();
+        if state != "queued" {
+            db.execute("UPDATE task SET state = 'working' WHERE id = 1", [])
+                .unwrap();
+        }
+    });
+    (w, carrier, answer)
+}
+
+#[test]
+fn a_row_left_under_a_carrier_node_delivered_cancelled_or_failed_is_a_queued_message_of_its_own() {
+    for state in ["delivered", "cancelled", "failed"] {
+        let (mut w, carrier, answer) = after_node_left_the_carrier(state);
+        assert_eq!(
+            w.next("zeus"),
+            Some(answer),
+            "a carrier {state} carries nothing: the answer is the next the window is given ({carrier} is not)"
+        );
+        assert_eq!(
+            w.state(1),
+            "waiting",
+            "and the question it answers has no answer received yet"
+        );
+        let begun = w.deliver(answer);
+        assert!(begun.carried.is_empty(), "it rides in nothing");
+        assert_eq!(w.states(&[answer]), ["delivered"]);
+        assert_eq!(w.state(1), "working");
+        assert_eq!(w.next("zeus"), None, "and nothing is left queued");
+    }
+}
+
+#[test]
+fn a_row_left_under_a_carrier_node_began_to_paste_is_not_taken_for_received_with_it() {
+    let (mut w, carrier, answer) = after_node_left_the_carrier("delivering");
+    // This daemon's start settles what was on its way: the record showed the
+    // carrier, so it is confirmed. What Node pasted was the carrier's own
+    // words: the answer was never in the paste, and is not marked received by
+    // it. A carrier this daemon began when it stopped looks the same, and its
+    // rows go again: pasted twice, never lost.
+    let in_flight = w.ledger.in_flight().unwrap();
+    assert_eq!(ids(&in_flight), [carrier]);
+    w.confirm(carrier);
+    assert_eq!(w.states(&[carrier, answer]), ["delivered", "queued"]);
+    assert_eq!(w.next("zeus"), Some(answer));
+    w.deliver(answer);
+    assert_eq!(w.states(&[answer]), ["delivered"]);
+}
+
+#[test]
+fn a_row_under_a_carrier_that_still_waits_stays_in_its_paste() {
+    let (mut w, carrier, answer) = after_node_left_the_carrier("queued");
+    assert_eq!(w.next("zeus"), Some(carrier));
+    let begun = w.deliver(carrier);
+    assert_eq!(ids(&begun.carried), [answer]);
+    assert_eq!(w.states(&[carrier, answer]), ["delivered", "delivered"]);
+}
+
+#[test]
 fn a_populated_version_10_ledger_is_migrated_to_11_and_again_with_every_row_as_it_was() {
     let db = Connection::open_in_memory().unwrap();
     db.execute_batch("PRAGMA foreign_keys = ON").unwrap();

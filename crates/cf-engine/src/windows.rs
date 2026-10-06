@@ -212,7 +212,8 @@ fn assign(env: &mut Vec<(String, String)>, key: &str, value: &str) {
 }
 
 /// What a launch was prepared with: the window, the keys that interrupt it,
-/// and how its pane opens.
+/// how its pane opens, and the stop its task had asked when the first message
+/// was begun, which the new window owes nothing for.
 struct Planned {
     window: Rc<dyn Window>,
     keys: Interrupt,
@@ -220,6 +221,7 @@ struct Planned {
     env: Vec<(String, String)>,
     drop_env: Vec<String>,
     native_session: Option<String>,
+    stop: Option<Stop>,
 }
 
 impl Dispatcher {
@@ -336,9 +338,6 @@ impl Dispatcher {
             queued: false,
             entered_again: false,
         });
-        // The stops this window owes are those asked before this look: a pause
-        // that comes while it is prepared or opened is asked after it, and is owed.
-        let captured = self.seams.ledger.borrow().stop_of(participant.id)?;
         let planned = match self
             .plan(
                 record,
@@ -376,7 +375,7 @@ impl Dispatcher {
         // message was to go in on: no window opens for it, and it waits for the
         // words that resume the task.
         if participant.role != "chief"
-            && !self.launch_holds(participant, delivering.as_ref(), captured)?
+            && !self.launch_holds(participant, delivering.as_ref(), planned.stop)?
         {
             self.seams.launch_files.forget(&launch_id);
             if let Some(delivering) = delivering {
@@ -483,7 +482,7 @@ impl Dispatcher {
             part.activity = Activity::of(ActivityState::Starting);
             part.drawn = false;
             part.named = false;
-            part.stopped = captured.map(|stop| (stop.task_id, stop.seq));
+            part.stopped = planned.stop.map(|stop| (stop.task_id, stop.seq));
         }
         record.delivery.borrow_mut().delivering = delivering.clone();
         // A window that exited before its open was answered goes as any exit does.
@@ -549,6 +548,11 @@ impl Dispatcher {
         let begun = first
             .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
             .transpose()?;
+        // The stops this window owes are those asked before this look: a pause
+        // that comes while it is prepared or opened is asked after it, and is
+        // owed. Read in this turn, with the first message begun: the window
+        // works on the task that message is about.
+        let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
         // A harness that lost its adapter fails what came for it, and says why.
         let harness = participant.harness.as_deref().unwrap_or_default();
         self.require_adapter(harness)?;
@@ -601,6 +605,7 @@ impl Dispatcher {
             env: prepared.env,
             drop_env: prepared.drop_env,
             native_session: prepared.native_session,
+            stop,
         }))
     }
 

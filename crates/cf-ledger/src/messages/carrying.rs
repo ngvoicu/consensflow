@@ -6,7 +6,9 @@
 //! message (`carried_by IS NULL`) that other rows point at; what it carries
 //! is flat (a constituent is never a carrier), and is told only when its
 //! delivery begins, from the rows still `queued`: the set is frozen from
-//! begin to confirm, and a row that comes later is pasted on its own.
+//! begin to confirm, and a row that comes later is pasted on its own. A set
+//! that the Node daemon, which knows no carriers, left behind is released when
+//! the ledger is opened (`release_stranded`).
 
 use cf_base::text::utf16_prefix;
 use cf_proto::ledger::MessageView;
@@ -15,6 +17,7 @@ use serde_json::json;
 
 use super::delivery::cancel_message;
 use super::messages;
+use super::receipt::reconcile;
 use crate::model::LedgerError;
 use crate::store::Store;
 use crate::tasks::RESUME_WORDS;
@@ -179,6 +182,66 @@ pub(crate) fn release_carried(store: &Store, task_id: i64) -> Result<(), LedgerE
         [task_id],
     )?;
     Ok(())
+}
+
+/// What a daemon that knows no carriers left riding in one. A row is in the
+/// paste of a carrier only while the carrier waits for it (`queued` or
+/// `gated`), and this ledger settles a carrier's set in the step that
+/// delivers, cancels or fails the carrier. The Node daemon pastes each row as
+/// a message of its own and never reads `carried_by`, so it can leave a row
+/// `queued` under a carrier it delivered, cancelled or failed, or began to
+/// paste when it stopped: what that paste held is not known, so the row goes
+/// again rather than be taken for received with it (a carrier this daemon
+/// began when it stopped has its rows pasted twice, never lost). Skipped as
+/// carried, such a row would never be delivered here: when the ledger is
+/// opened, the start of this daemon, each is an ordinary queued message again,
+/// delivered in the order of its id. The tasks they are about are reconciled
+/// (`receipt`), once each: Node moved one on when it counted a queued answer
+/// as received, and that answer is still to be.
+pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
+    store.write(|store| {
+        let carriers: Vec<(i64, i64)> = store
+            .db
+            .prepare(
+                "SELECT DISTINCT m.carried_by, m.project_id FROM message m
+                 JOIN message c ON c.id = m.carried_by
+                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')
+                 ORDER BY m.carried_by",
+            )?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut tasks = Vec::new();
+        for (carrier, project) in carriers {
+            let released = ids(
+                store,
+                "SELECT id FROM message WHERE carried_by = ? AND state = 'queued' ORDER BY id",
+                [carrier],
+            )?;
+            for task in ids(
+                store,
+                "SELECT DISTINCT task_id FROM message
+                 WHERE carried_by = ? AND state = 'queued' AND task_id IS NOT NULL",
+                [carrier],
+            )? {
+                if !tasks.contains(&task) {
+                    tasks.push(task);
+                }
+            }
+            store.db.execute(
+                "UPDATE message SET carried_by = NULL WHERE carried_by = ? AND state = 'queued'",
+                [carrier],
+            )?;
+            store.log(
+                project,
+                "message.uncarried",
+                json!({ "carrier": carrier, "released": released }),
+            )?;
+        }
+        for task in tasks {
+            reconcile(store, task)?;
+        }
+        Ok(())
+    })
 }
 
 /// What a task takes on from a window that is gone: the words kept for it,

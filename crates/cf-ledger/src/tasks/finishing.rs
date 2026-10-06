@@ -13,7 +13,7 @@ use crate::model::{
     MAX_BODY, MEMBER_ROLES,
 };
 use crate::queue::{drop_queued, queue, send, withdraw_gated, Queued, Sent};
-use crate::staff::{bring_back, can_continue};
+use crate::staff::{bring_back, can_continue, require_free};
 use crate::store::Store;
 use crate::views::{ParticipantRow, TaskRow};
 
@@ -154,9 +154,11 @@ fn release_waiting(
 
 /// A follow-up on a finished or failed task: it goes back to its assignee's
 /// queue, and a session the human deleted is brought back to the board for it.
-/// The follow-up is a task message that carries what the window kept for the
-/// task (which is what delivers what a delivery that failed let go of), and
-/// the brief before it when none is received or on its way.
+/// A session that is on another task takes none (as for a follow-up, it is
+/// refused `session-busy`): its window has one task to work on. The follow-up
+/// is a task message that carries what the window kept for the task (which is
+/// what delivers what a delivery that failed let go of), and the brief before
+/// it when none is received or on its way.
 pub(crate) fn reopen_task(
     store: &mut Store,
     project_id: i64,
@@ -180,6 +182,9 @@ pub(crate) fn reopen_task(
                 ),
                 409,
             ));
+        }
+        if found.member_id.is_some() {
+            require_free(store, &found)?;
         }
         let assignee = match found.member_id {
             Some(_) => bring_back(store, found)?,

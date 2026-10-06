@@ -63,8 +63,11 @@ fn arrived(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
 }
 
 /// Whether the window asked a question on the task that no received answer
-/// resolves. A question the ledger withdrew still obliges while an answer to
-/// it is on its way: its transport was taken back, not its obligation.
+/// resolves. A question the ledger withdrew still obliges once it has an
+/// answer, whatever became of that answer: only its transport was taken back,
+/// and an answer that failed, was cancelled or declined was not received. One
+/// withdrawn with no answer at all (its asker's window ended first, its task
+/// was failed) obliges no more: nobody has anything to answer.
 fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
     Ok(store
         .db
@@ -75,8 +78,7 @@ fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerErro
                                AND a.kind = 'answer' AND a.state IN ('delivered', 'read'))
                AND (q.state != 'cancelled'
                     OR EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id
-                               AND a.kind = 'answer'
-                               AND a.state IN ('gated', 'queued', 'delivering')))
+                               AND a.kind = 'answer'))
              LIMIT 1",
         )?
         .exists(params![task, window])?)

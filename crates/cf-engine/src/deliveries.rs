@@ -115,6 +115,9 @@ impl Dispatcher {
         // What is pasted is what the ledger says it is when delivery begins: the
         // message, and the rows it carries still waiting, which are the set from now.
         let begun = self.seams.ledger.borrow_mut().begin_delivery(message.id)?;
+        if begun.message.kind == "task" {
+            self.pay_with_words(record)?;
+        }
         let text = delivery_text(&begun.message, &begun.carried);
         let outcome = match returning(window.deliver(host, &pane, &text)).await {
             Ok(admission) => admission,

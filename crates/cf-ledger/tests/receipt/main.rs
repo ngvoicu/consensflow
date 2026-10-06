@@ -15,4 +15,5 @@ mod fixture;
 mod gate;
 mod legacy;
 mod questions;
+mod sessions;
 mod transfers;
