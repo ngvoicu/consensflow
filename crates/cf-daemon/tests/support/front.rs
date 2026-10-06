@@ -114,6 +114,7 @@ pub struct Request<'a> {
 }
 
 /// What came back: its status, the type it carried, and its bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reply {
     pub status: u16,
     pub content_type: Option<String>,

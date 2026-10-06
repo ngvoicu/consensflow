@@ -1,13 +1,15 @@
 //! What the player compares, once a step has been made: the answer to an
 //! exchange of the test's own, as bytes; what the API did on the way (the
 //! wake-ups, the events, the clock, the roster); and the requests `cf` made,
-//! each whole, and how they were answered.
+//! each whole, and how they were answered: as the answer passed the relay, its
+//! status, its type and its bytes, as the test's own exchanges' are held.
 
 use serde_json::{json, Value};
 
+use crate::frames::Sent;
 use crate::front::Reply;
 use crate::names::Names;
-use crate::relay::{Relay, Sent};
+use crate::relay::Relay;
 use crate::rig::Rig;
 use crate::support::compare::{compare, differs};
 
@@ -72,7 +74,9 @@ pub fn effects(rig: &Rig, steps: &[&Value], events: &[Value], kicks: usize) -> R
 pub fn sent(relay: &Relay, names: &Names, run: &[Value]) -> Result<(), String> {
     let (written, unread) = relay.taken();
     if let Some(why) = unread.first() {
-        return Err(format!("a request of the run could not be read: {why}"));
+        return Err(format!(
+            "the relay could not read what the run sent or was given: {why}"
+        ));
     }
     if written.len() != run.len() {
         let targets: Vec<&str> = written.iter().map(|sent| sent.target.as_str()).collect();
@@ -130,8 +134,16 @@ pub fn sent(relay: &Relay, names: &Names, run: &[Value]) -> Result<(), String> {
 
 /// An exchange `cf` made: the request the API took (what it was, whose window
 /// it came from), and how it was answered, against `response`: the one Node
-/// recorded, or the screens' where the exchange is theirs.
-pub fn made(rig: &Rig, names: &Names, step: &Value, response: &Value) -> Result<(), String> {
+/// recorded, or the screens' where the exchange is theirs. `reply` is the
+/// answer as it passed the relay, which is what `cf` was given: none if no
+/// whole answer passed.
+pub fn made(
+    rig: &Rig,
+    names: &Names,
+    step: &Value,
+    response: &Value,
+    reply: Option<&Reply>,
+) -> Result<(), String> {
     let id = usize::try_from(step["id"].as_u64().expect("an id")).expect("a small id");
     let seen = rig.seen.borrow();
     let Some(seen) = seen.get(id - 1) else {
@@ -151,21 +163,20 @@ pub fn made(rig: &Rig, names: &Names, step: &Value, response: &Value) -> Result<
             seen.method, seen.path, seen.bearer, wanted.0, wanted.1, bearer
         ));
     }
-    let kind = response["contentType"].as_str();
-    let body = response["body"].as_str().unwrap_or_default();
-    let answered = seen
-        .answered
-        .as_ref()
-        .ok_or(format!("exchange {id}: never answered"))?;
-    if u64::from(answered.status) != response["status"].as_u64().unwrap_or(0)
-        || answered.content_type != kind
-    {
-        return Err(format!(
-            "exchange {id}: answered {} as {:?}, Node {} as {kind:?}",
-            answered.status, answered.content_type, response["status"]
-        ));
+    answered(id, reply, response)
+}
+
+/// Why the answer `cf` was given to exchange `id` is not `response`: its
+/// status, the type it carried and its bytes, held as the test's own exchanges
+/// are (`exchange`). `cf` takes any 2xx and reads any type as JSON, so a
+/// status or a type the server got wrong is seen here and nowhere else.
+fn answered(id: usize, reply: Option<&Reply>, response: &Value) -> Result<(), String> {
+    let reply = reply.ok_or_else(|| format!("exchange {id}: no whole answer passed the relay"))?;
+    if let Some(why) = reply.head_differs(response) {
+        return Err(format!("exchange {id}: {why}"));
     }
-    differs(&format!("exchange {id}'s answer"), &answered.body, body).map_or(Ok(()), Err)
+    let body = response["body"].as_str().unwrap_or_default();
+    differs(&format!("exchange {id}'s answer"), &reply.body, body).map_or(Ok(()), Err)
 }
 
 #[cfg(test)]
@@ -317,6 +328,63 @@ mod tests {
                 "{why}"
             );
         }
+    }
+
+    /// What Node recorded of an answer to a run of `cf`.
+    fn recorded_answer() -> Value {
+        json!({ "status": 200, "contentType": "application/json", "body": "{\"a\":1}" })
+    }
+
+    /// An answer as it passed the relay.
+    fn passed(status: u16, kind: Option<&str>, body: &str) -> Reply {
+        Reply {
+            status,
+            content_type: kind.map(str::to_owned),
+            body: body.as_bytes().to_vec(),
+        }
+    }
+
+    #[test]
+    fn an_answer_is_nodes_when_its_status_its_type_and_its_bytes_are() {
+        let same = passed(200, JSON, "{\"a\":1}");
+        assert_eq!(answered(3, Some(&same), &recorded_answer()), Ok(()));
+        // An answer with no body and no type, as a 204 is.
+        let nothing = json!({ "status": 204, "contentType": null, "body": null });
+        assert_eq!(answered(3, Some(&passed(204, None, "")), &nothing), Ok(()));
+    }
+
+    #[test]
+    fn a_status_a_type_or_a_byte_that_is_not_nodes_fails_the_exchange_though_cf_would_take_it() {
+        // `cf` takes any 2xx, and reads any type as JSON: none of these would
+        // change what it printed.
+        let cases = [
+            ("answered 201, Node 200", passed(201, JSON, "{\"a\":1}")),
+            (
+                "answered as Some(\"text/plain\"), Node as Some(\"application/json\")",
+                passed(200, Some("text/plain"), "{\"a\":1}"),
+            ),
+            (
+                "answered as None, Node as Some(\"application/json\")",
+                passed(200, None, "{\"a\":1}"),
+            ),
+            (
+                "exchange 3's answer differs at byte 5",
+                passed(200, JSON, "{\"a\": 1}"),
+            ),
+        ];
+        for (says, reply) in cases {
+            let why = answered(3, Some(&reply), &recorded_answer()).unwrap_err();
+            assert!(
+                why.starts_with("exchange 3") && why.contains(says),
+                "{says}: {why}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_answer_that_never_passed_the_relay_fails_the_exchange() {
+        let why = answered(3, None, &recorded_answer()).unwrap_err();
+        assert!(why.starts_with("exchange 3: no whole answer"), "{why}");
     }
 
     #[test]

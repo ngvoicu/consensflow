@@ -312,13 +312,15 @@ impl Drop for Waited {
 // ours, which reaches no network): here the admin's version probe of a CLI that
 // never answers, which is the same call, a child of the daemon's that it waits
 // for. The stop exits without running destructors, so it must end that child
-// itself, or the program outlives the daemon.
+// itself, or the program outlives the daemon: and what the program started,
+// as an installer starts programs of its own, or that goes on after the daemon
+// has said `exit 0`.
 #[cfg(unix)]
 #[test]
 fn a_program_the_daemon_is_waiting_for_is_ended_when_it_stops() {
     for how in hows() {
         let root = Root::new();
-        let asked = root.claude_that_never_answers();
+        let (asked, started) = root.claude_that_never_answers();
         let mut daemon = Daemon::start(&root);
         let frames = daemon.frames();
         let token = daemon.handle["token"].as_str().expect("a token").to_owned();
@@ -331,9 +333,10 @@ fn a_program_the_daemon_is_waiting_for_is_ended_when_it_stops() {
             body.len()
         ));
         let waited = Waited(pid_written_to(&asked));
+        let helper = Waited(pid_written_to(&started));
         assert!(
-            cf_process::alive(waited.0),
-            "{how:?}: the program is running"
+            cf_process::alive(waited.0) && cf_process::alive(helper.0),
+            "{how:?}: the program and what it started are running"
         );
 
         if let How::OutputBroken = how {
@@ -350,6 +353,10 @@ fn a_program_the_daemon_is_waiting_for_is_ended_when_it_stops() {
         assert!(
             waited.ends_soon(),
             "{how:?}: the program the daemon waited for outlived it"
+        );
+        assert!(
+            helper.ends_soon(),
+            "{how:?}: what that program started outlived the daemon"
         );
         let (_, ended) = check.read_to_the_end();
         assert!(ended, "{how:?}: the request's connection ended");

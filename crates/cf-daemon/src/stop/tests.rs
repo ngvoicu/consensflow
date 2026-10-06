@@ -339,6 +339,10 @@ async fn children_that_cannot_be_ended_are_written_down_and_the_ledger_is_still_
         .await;
 }
 
+// The stop ends the trees of the programs it ends, not only the programs.
+#[cfg(any(unix, windows))]
+mod tree;
+
 /// A program that runs for a minute: `sleep`, or on Windows `ping`.
 #[cfg(any(unix, windows))]
 fn for_a_minute() -> Program {

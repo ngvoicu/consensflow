@@ -6,7 +6,8 @@
 //! every run of `cf` Node's `cf-board.test.mjs` made against the API, made
 //! again with the native `cf` built from this workspace, against this one: its
 //! arguments, its input, its output and its exit as Node's recorded them, and
-//! every request it wrote, whole, and no other.
+//! every request it wrote, whole, and no other, and each answer it was given as
+//! the bytes it got: its status, its type and its body.
 //!
 //! - `core-api-*`, `core-daemon-*`: the suites that held the API in Node.
 //! - `corners-api-*`: what no suite looked at (the order of the checks, how a
@@ -29,6 +30,7 @@
 )]
 
 mod checks;
+mod frames;
 mod names;
 mod player;
 mod relay;

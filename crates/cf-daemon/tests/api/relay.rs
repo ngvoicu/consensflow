@@ -1,20 +1,25 @@
-//! What a run of `cf` sends, written down as it passes: a relay on a port of
-//! loopback of its own that the run is told is the API, which forwards every
-//! byte to the API under test and every byte of the answer back, and keeps each
-//! request the run wrote.
+//! What a run of `cf` sends and is answered, written down as it passes: a relay
+//! on a port of loopback of its own that the run is told is the API, which
+//! forwards every byte to the API under test and every byte of the answer back,
+//! and keeps each request the run wrote and each answer the API gave.
 //!
 //! The API cannot say what it was sent. A handler is given the path, the bearer
 //! and a body it reads when it chooses (`Request` holds no query to list, no
 //! content type, and no body that a route refused before reading); Node's
 //! recorder read each request off the bytes a connection carried, and so does
-//! this. A connection may carry several requests (`ureq` keeps them alive), so
-//! they are told apart by their framing: a head, and as many bytes of body as
-//! its `Content-Length` says.
+//! this. Nor can what the API says be had from what its handler answered: the
+//! server writes it, and a status or a content type it got wrong would still
+//! be what the handler said, and what `cf` takes for an answer (any 2xx; any
+//! type). So the answer is read off the bytes the relay passes back, as `cf`
+//! got them. How a connection's bytes are cut into either is `frames.rs`.
 //!
-//! The relay writes a request down before the API can have taken it (the same
-//! turn of the one thread that forwards the bytes reads the request in them),
-//! so once a run has ended, and the API answered each request it made, the
-//! relay holds exactly the requests the run made.
+//! The relay writes a request down before the API is sent a byte of it, and an
+//! answer before the client is: so once a run has ended, and the API answered
+//! each request it made, the relay holds exactly the requests the run made and
+//! each answer the run was given. An answer is its request's by its place: the
+//! API serves a connection's requests one at a time, so the n-th answer on a
+//! connection is the n-th request's, whichever of the two was whole first (a
+//! route that refuses before it reads a body answers before the body is).
 
 use std::cell::RefCell;
 use std::io;
@@ -24,22 +29,25 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::{JoinHandle, JoinSet};
 
-/// A request as the client wrote it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Sent {
-    pub method: String,
-    /// The request line's target, with its query, as written.
-    pub target: String,
-    pub authorization: Option<String>,
-    pub content_type: Option<String>,
-    pub body: Vec<u8>,
+use crate::frames::{replies, requests, Sent};
+use crate::front::Reply;
+
+/// A request that passed, and where: the connection it came over, and which of
+/// that connection's requests it was.
+struct Written {
+    sent: Sent,
+    connection: usize,
+    nth: usize,
 }
 
 /// What has passed.
 #[derive(Default)]
 struct Passed {
-    requests: Vec<Sent>,
-    /// Why a request could not be read, which the relay then stopped reading.
+    requests: Vec<Written>,
+    /// What each connection was answered, in order: one list a connection.
+    answers: Vec<Vec<Reply>>,
+    /// Why a request or an answer could not be read, which the relay then
+    /// stopped reading.
     unread: Vec<String>,
 }
 
@@ -72,10 +80,22 @@ impl Relay {
     }
 
     /// The requests that have passed, in the order they were written, and why
-    /// any request could not be read.
+    /// any request or answer could not be read.
     pub fn taken(&self) -> (Vec<Sent>, Vec<String>) {
         let passed = self.passed.borrow();
-        (passed.requests.clone(), passed.unread.clone())
+        let sent = passed.requests.iter().map(|it| it.sent.clone()).collect();
+        (sent, passed.unread.clone())
+    }
+
+    /// How each request that has passed was answered, as the API wrote the
+    /// answer, in the order of `taken`: none where no whole answer has passed.
+    pub fn replies(&self) -> Vec<Option<Reply>> {
+        let passed = self.passed.borrow();
+        passed
+            .requests
+            .iter()
+            .map(|it| passed.answers[it.connection].get(it.nth).cloned())
+            .collect()
     }
 }
 
@@ -103,98 +123,91 @@ async fn pass(client: TcpStream, api: String, passed: Rc<RefCell<Passed>>) {
     if client.set_nodelay(true).is_err() || upstream.set_nodelay(true).is_err() {
         return;
     }
+    let connection = {
+        let mut passed = passed.borrow_mut();
+        passed.answers.push(Vec::new());
+        passed.answers.len() - 1
+    };
     let (mut from_client, mut to_client) = client.into_split();
     let (mut from_api, mut to_api) = upstream.into_split();
     let asking = async {
         let mut chunk = vec![0_u8; 16 * 1024];
         let mut pending = Vec::new();
         let mut forwarding = true;
+        let mut counted = 0;
         loop {
             let count = match from_client.read(&mut chunk).await {
                 Ok(0) | Err(_) => break,
                 Ok(count) => count,
             };
+            // Written down before the API is sent a byte of it.
+            pending.extend_from_slice(&chunk[..count]);
+            let read = requests(&mut pending);
+            match &read {
+                Ok(more) => {
+                    let mut passed = passed.borrow_mut();
+                    for sent in more {
+                        passed.requests.push(Written {
+                            sent: sent.clone(),
+                            connection,
+                            nth: counted,
+                        });
+                        counted += 1;
+                    }
+                }
+                Err(why) => passed.borrow_mut().unread.push(why.clone()),
+            }
             // The API may have gone, having refused what it need not read: the
             // client's request is read to its end all the same.
             if forwarding && to_api.write_all(&chunk[..count]).await.is_err() {
                 forwarding = false;
             }
-            pending.extend_from_slice(&chunk[..count]);
-            match requests(&mut pending) {
-                Ok(more) => passed.borrow_mut().requests.extend(more),
-                Err(why) => {
-                    passed.borrow_mut().unread.push(why);
-                    break;
-                }
+            if read.is_err() {
+                break;
             }
         }
         let _ = to_api.shutdown().await;
     };
     let answering = async {
-        let _ = tokio::io::copy(&mut from_api, &mut to_client).await;
+        let mut chunk = vec![0_u8; 16 * 1024];
+        let mut pending = Vec::new();
+        let mut reading = true;
+        loop {
+            let count = match from_api.read(&mut chunk).await {
+                Ok(0) | Err(_) => break,
+                Ok(count) => count,
+            };
+            // Written down before the client is sent a byte of it, so that a
+            // client that has read its answer through has it written down.
+            if reading {
+                pending.extend_from_slice(&chunk[..count]);
+                match replies(&mut pending) {
+                    Ok(more) => passed.borrow_mut().answers[connection].extend(more),
+                    Err(why) => {
+                        passed.borrow_mut().unread.push(why);
+                        reading = false;
+                    }
+                }
+            }
+            if to_client.write_all(&chunk[..count]).await.is_err() {
+                break;
+            }
+        }
         let _ = to_client.shutdown().await;
     };
     tokio::join!(asking, answering);
 }
 
-/// The requests whole in `pending`, taken off its front: a head, and a body of
-/// as many bytes as the head says.
-fn requests(pending: &mut Vec<u8>) -> Result<Vec<Sent>, String> {
-    let mut taken = Vec::new();
-    while let Some(end) = pending.windows(4).position(|window| window == b"\r\n\r\n") {
-        let head = String::from_utf8_lossy(&pending[..end]).into_owned();
-        let mut lines = head.split("\r\n");
-        let mut start = lines.next().unwrap_or_default().splitn(3, ' ');
-        let (method, target) = (
-            start.next().unwrap_or_default(),
-            start.next().unwrap_or_default(),
-        );
-        let (mut authorization, mut content_type, mut length) = (None, None, 0);
-        for line in lines {
-            let (name, value) = line
-                .split_once(':')
-                .ok_or_else(|| format!("a header with no colon: {line}"))?;
-            let value = value.trim();
-            match name.to_ascii_lowercase().as_str() {
-                "authorization" => authorization = Some(value.to_owned()),
-                "content-type" => content_type = Some(value.to_owned()),
-                "content-length" => {
-                    length = value
-                        .parse::<usize>()
-                        .map_err(|_| format!("a content length that is no number: {value}"))?;
-                }
-                "transfer-encoding" => {
-                    return Err(format!(
-                        "a body sent as {value}, which the relay does not read"
-                    ));
-                }
-                _ => {}
-            }
-        }
-        let whole = end + 4 + length;
-        if pending.len() < whole {
-            break;
-        }
-        let body = pending[end + 4..whole].to_vec();
-        pending.drain(..whole);
-        taken.push(Sent {
-            method: method.to_owned(),
-            target: target.to_owned(),
-            authorization,
-            content_type,
-            body,
-        });
-    }
-    Ok(taken)
-}
-
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use crate::support::trace::locally;
 
     const NOTE: &[u8] = b"POST /api/notes?to=human HTTP/1.1\r\nHost: x\r\nAUTHORIZATION: Bearer abc\r\ncontent-type: application/json\r\nContent-Length: 7\r\n\r\n{\"a\":1}";
-    const WHOAMI: &[u8] = b"GET /api/whoami HTTP/1.1\r\nHost: x\r\n\r\n";
+    const ANSWER: &[u8] =
+        b"HTTP/1.1 201 Created\r\ncontent-type: application/json\r\nContent-Length: 2\r\n\r\n{}";
 
     fn note() -> Sent {
         Sent {
@@ -206,40 +219,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_request_is_taken_when_its_head_and_its_body_are_whole_and_not_before() {
-        let mut pending = NOTE[..NOTE.len() - 3].to_vec();
-        assert_eq!(requests(&mut pending), Ok(Vec::new()));
-        assert_eq!(pending.len(), NOTE.len() - 3, "what is not whole is kept");
-        pending.extend_from_slice(&NOTE[NOTE.len() - 3..]);
-        assert_eq!(requests(&mut pending), Ok(vec![note()]));
-        assert!(pending.is_empty());
-    }
-
-    #[test]
-    fn a_connection_that_carries_requests_one_after_the_other_gives_each() {
-        let mut pending = [NOTE, WHOAMI, &NOTE[..20]].concat();
-        let taken = requests(&mut pending).unwrap();
-        let whoami = Sent {
-            method: "GET".to_owned(),
-            target: "/api/whoami".to_owned(),
-            authorization: None,
-            content_type: None,
-            body: Vec::new(),
-        };
-        assert_eq!(taken, vec![note(), whoami]);
-        assert_eq!(pending, &NOTE[..20], "the one still coming is kept");
-    }
-
-    #[test]
-    fn a_body_it_cannot_frame_is_a_failure_and_not_a_guess() {
-        for head in [
-            "Transfer-Encoding: chunked",
-            "Content-Length: many",
-            "no colon here",
-        ] {
-            let mut pending = format!("POST / HTTP/1.1\r\n{head}\r\n\r\n").into_bytes();
-            assert!(requests(&mut pending).is_err(), "{head}");
+    fn created() -> Reply {
+        Reply {
+            status: 201,
+            content_type: Some("application/json".to_owned()),
+            body: b"{}".to_vec(),
         }
     }
 
@@ -248,7 +232,6 @@ mod tests {
         locally(async {
             let api = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
             let address = api.local_addr().unwrap().to_string();
-            const ANSWER: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
             let serving = tokio::task::spawn_local(async move {
                 let (mut stream, _) = api.accept().await.unwrap();
                 let mut got = vec![0_u8; NOTE.len()];
@@ -268,6 +251,207 @@ mod tests {
             assert_eq!(answered, ANSWER);
             assert_eq!(serving.await.unwrap(), NOTE);
             assert_eq!(relay.taken(), (vec![note()], Vec::new()));
+            // The client has read the answer through: it is written down.
+            assert_eq!(relay.replies(), vec![Some(created())]);
+        });
+    }
+
+    /// Reads more of what `stream` carries onto `seen`: false once it has ended.
+    async fn more(stream: &mut TcpStream, seen: &mut Vec<u8>) -> bool {
+        let mut chunk = [0_u8; 4096];
+        match stream.read(&mut chunk).await {
+            Ok(0) | Err(_) => false,
+            Ok(count) => {
+                seen.extend_from_slice(&chunk[..count]);
+                true
+            }
+        }
+    }
+
+    /// One connection of an API that answers each request with a 200 that
+    /// says its target and how many requests it has answered here. It answers
+    /// as soon as it has a request's head if `early` (a route that refuses
+    /// before it reads a body does), and reads the body after; else it waits
+    /// for the whole request.
+    async fn echo(mut stream: TcpStream, early: bool) {
+        let mut seen = Vec::new();
+        let mut answered = 0;
+        loop {
+            let end = loop {
+                if let Some(end) = seen.windows(4).position(|window| window == b"\r\n\r\n") {
+                    break end;
+                }
+                if !more(&mut stream, &mut seen).await {
+                    return;
+                }
+            };
+            let head = String::from_utf8_lossy(&seen[..end]).into_owned();
+            let target = head.split(' ').nth(1).unwrap_or_default().to_owned();
+            let length = head
+                .lines()
+                .find_map(|line| line.strip_prefix("Content-Length: "))
+                .map_or(0, |length| length.parse::<usize>().unwrap());
+            let whole = end + 4 + length;
+            while !early && seen.len() < whole {
+                if !more(&mut stream, &mut seen).await {
+                    return;
+                }
+            }
+            let body = format!("{{\"target\":\"{target}\",\"nth\":{answered}}}");
+            let said = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(said.as_bytes()).await.unwrap();
+            answered += 1;
+            while seen.len() < whole {
+                if !more(&mut stream, &mut seen).await {
+                    return;
+                }
+            }
+            seen.drain(..whole);
+        }
+    }
+
+    /// The address of an API of that kind.
+    async fn echoing(early: bool) -> String {
+        let api = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = api.local_addr().unwrap().to_string();
+        tokio::task::spawn_local(async move {
+            while let Ok((stream, _)) = api.accept().await {
+                tokio::task::spawn_local(echo(stream, early));
+            }
+        });
+        address
+    }
+
+    /// What `client` is answered, read to the end of the JSON the echo says.
+    async fn answer_to(client: &mut TcpStream) -> String {
+        let mut said = String::new();
+        let mut chunk = [0_u8; 4096];
+        while !said.ends_with('}') {
+            let count = client.read(&mut chunk).await.unwrap();
+            said.push_str(&String::from_utf8_lossy(&chunk[..count]));
+        }
+        said
+    }
+
+    /// A request with a body written as `ureq` writes one, in two writes: the
+    /// head, and then the body. An API that answers at the head is read from
+    /// before the body is written, so that its answer is the relay's first.
+    async fn post(client: &mut TcpStream, target: &str, early: bool) -> String {
+        let body = "{\"a\":1}";
+        let head = format!(
+            "POST {target} HTTP/1.1\r\nHost: x\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+        client.write_all(head.as_bytes()).await.unwrap();
+        if early {
+            let said = answer_to(client).await;
+            client.write_all(body.as_bytes()).await.unwrap();
+            return said;
+        }
+        tokio::task::yield_now().await;
+        client.write_all(body.as_bytes()).await.unwrap();
+        answer_to(client).await
+    }
+
+    #[test]
+    fn an_answer_is_its_requests_by_its_place_on_its_connection_whichever_was_whole_first() {
+        for early in [false, true] {
+            locally(async {
+                let relay = Relay::start(&echoing(early).await).await.unwrap();
+                // Two connections, and a request again on the first: the
+                // order the requests were written is the order of the replies.
+                let mut clients = [
+                    TcpStream::connect(relay.address()).await.unwrap(),
+                    TcpStream::connect(relay.address()).await.unwrap(),
+                ];
+                for (client, target) in [(0, "/a"), (1, "/b"), (0, "/c")] {
+                    post(&mut clients[client], target, early).await;
+                }
+                // An API that answered at the head did so before the body was
+                // written, and the relay reads the body when it next can.
+                until_taken(&relay, 3).await;
+                let (sent, unread) = relay.taken();
+                assert_eq!(unread, Vec::<String>::new(), "early {early}");
+                let targets: Vec<&str> = sent.iter().map(|sent| sent.target.as_str()).collect();
+                assert_eq!(targets, ["/a", "/b", "/c"], "early {early}");
+                let bodies: Vec<String> = relay
+                    .replies()
+                    .into_iter()
+                    .map(|reply| String::from_utf8(reply.expect("answered").body).unwrap())
+                    .collect();
+                assert_eq!(
+                    bodies,
+                    [
+                        r#"{"target":"/a","nth":0}"#,
+                        r#"{"target":"/b","nth":0}"#,
+                        r#"{"target":"/c","nth":1}"#
+                    ],
+                    "early {early}"
+                );
+            });
+        }
+    }
+
+    /// Waits until the relay has written down `count` requests: it has read
+    /// them when it has.
+    async fn until_taken(relay: &Relay, count: usize) {
+        for _ in 0..500 {
+            if relay.taken().0.len() == count {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    #[test]
+    fn a_request_that_passed_and_was_not_answered_has_no_reply() {
+        locally(async {
+            // An API that takes what it is sent and says nothing.
+            let silent = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let address = silent.local_addr().unwrap().to_string();
+            tokio::task::spawn_local(async move {
+                let _kept = silent.accept().await;
+                std::future::pending::<()>().await;
+            });
+            let relay = Relay::start(&address).await.unwrap();
+            let mut client = TcpStream::connect(relay.address()).await.unwrap();
+            client.write_all(NOTE).await.unwrap();
+            until_taken(&relay, 1).await;
+            assert_eq!(relay.replies(), vec![None]);
+        });
+    }
+
+    /// An answer that carries no length and is not bodiless: it ends where its
+    /// connection does, which the relay does not read.
+    const ODD: &[u8] = b"HTTP/1.1 200 OK\r\n\r\n{}";
+
+    #[test]
+    fn an_answer_that_cannot_be_framed_is_passed_on_as_it_was_and_says_why_it_was_not_read() {
+        locally(async {
+            let odd = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let address = odd.local_addr().unwrap().to_string();
+            tokio::task::spawn_local(async move {
+                let (mut stream, _) = odd.accept().await.unwrap();
+                let mut got = vec![0_u8; NOTE.len()];
+                stream.read_exact(&mut got).await.unwrap();
+                stream.write_all(ODD).await.unwrap();
+                std::future::pending::<()>().await;
+            });
+            let relay = Relay::start(&address).await.unwrap();
+            let mut client = TcpStream::connect(relay.address()).await.unwrap();
+            client.write_all(NOTE).await.unwrap();
+            let mut said = vec![0_u8; ODD.len()];
+            client.read_exact(&mut said).await.unwrap();
+            assert_eq!(said, ODD, "the client has it as it was");
+            let (_, unread) = relay.taken();
+            assert!(
+                unread[0].starts_with("an answer of 200 with no length"),
+                "{unread:?}"
+            );
+            assert_eq!(relay.replies(), vec![None]);
         });
     }
 }

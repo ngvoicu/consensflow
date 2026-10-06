@@ -8,7 +8,7 @@ use std::time::Duration;
 use cf_base::env::Env;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::{terminate, Ender, Ending, Run};
+use crate::{Ender, Run};
 
 /// How long a program asked to end at its timeout has before it is forced:
 /// Node waits for it as long as it runs, and a probe every launch shares
@@ -47,8 +47,8 @@ pub struct Failed {
 /// has exited and its streams have closed, as Node's `close`. At its
 /// timeout, whether it is still writing or has closed its streams and goes
 /// on, or once a stream says more than its limit, both streams are closed
-/// and it is asked to end, and how it ends decides: one that ends with 0
-/// has answered, as with Node.
+/// and it is asked to end (with the group it leads, on Unix: see `capture`),
+/// and how it ends decides: one that ends with 0 has answered, as with Node.
 ///
 /// `started` is given the program's [`Ender`] once it has started, as
 /// `capture` gives it.
@@ -113,15 +113,6 @@ pub(crate) async fn read_both(
                 Ok(count) => if !err.keep(&err_chunk[..count], limit) { return },
             },
         }
-    }
-}
-
-/// Asks the program to end, as `child.kill()` does: SIGTERM on Unix. On
-/// Windows its whole tree goes, where Node ends the program alone (and a
-/// `.cmd`'s own program, left running, keeps its streams open).
-pub(crate) fn end(pid: Option<u32>) {
-    if let Some(pid) = pid {
-        terminate(pid, Ending::Asked);
     }
 }
 

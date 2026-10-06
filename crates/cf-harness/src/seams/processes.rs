@@ -79,7 +79,11 @@ impl SystemProcesses {
     }
 
     /// Forces every child still running to end: what this process does on
-    /// its way out, as Node's exit hook did for OpenCode's server.
+    /// its way out, as Node's exit hook did for OpenCode's server. A program
+    /// run to its end (`run`, `capture`) goes with the group it leads on Unix
+    /// and the tree it started on Windows: an update's installer, and the
+    /// children that installer started, are not left changing the
+    /// installation after this process has gone.
     pub fn end_all(&self) {
         for ender in self.started.borrow_mut().drain(..) {
             ender.force();

@@ -12,11 +12,14 @@ mod alive;
 mod capture;
 mod child;
 mod execute;
+mod group;
 mod job;
 mod memory;
 mod runnable;
 mod search;
 mod terminate;
+#[cfg(test)]
+mod testing;
 
 pub use alive::alive;
 pub use capture::{capture, CaptureFailed, Captured};
@@ -26,7 +29,7 @@ pub use job::with_required;
 pub use memory::{megabytes, rss};
 pub use runnable::{pane_argv, runnable, Run};
 pub use search::{find_in, on_path};
-pub use terminate::{terminate, terminate_without_waiting, Ending};
+pub use terminate::{terminate, Ending};
 
 use std::ffi::{OsStr, OsString};
 use std::io;

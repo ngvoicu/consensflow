@@ -3,8 +3,10 @@
 //! exchange sent and its answer compared as bytes (with the wake-ups, the
 //! events, the clock and the roster it drew on), each run of `cf` made whole
 //! and what it printed compared, with every request it wrote (and no other)
-//! as the trace has it, and at the end the database the ledger left: a trace
-//! whose ledger left a database is played to the `close` that compares it.
+//! as the trace has it, and each answer it was given as the bytes it got (its
+//! status, its type, its body), and at the end the database the ledger left: a
+//! trace whose ledger left a database is played to the `close` that compares
+//! it.
 //!
 //! An exchange or a run that other steps overlap (a door held open while the
 //! API closes; a hook's long poll that the test answers meanwhile) is left
@@ -354,9 +356,12 @@ impl Player<'_> {
         }
         self.tally.runs += 1;
         checks::sent(&relay, &self.names, &exchanges)?;
-        for exchange in &exchanges {
+        // Each request was written down with the answer it was given, as it
+        // passed: `sent` has held the requests to as many as the run made, so
+        // each of the run's exchanges has the answer written down for it.
+        for (exchange, reply) in exchanges.iter().zip(relay.replies()) {
             let response = self.response_of(exchange);
-            checks::made(&self.rig, &self.names, exchange, &response)?;
+            checks::made(&self.rig, &self.names, exchange, &response, reply.as_ref())?;
             self.tally.exchanges += 1;
         }
         let (events, kicks) = self.take_all();

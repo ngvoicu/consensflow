@@ -339,6 +339,9 @@ fn an_ender_ends_the_program_of_a_capture_that_is_still_running() {
     assert!(!kept.as_ref().expect("handed over").running());
 }
 
+// What ending a capture ends with it: the tree of its program.
+mod tree;
+
 #[test]
 fn a_capture_dropped_while_its_program_runs_leaves_nothing_for_its_ender_to_end() {
     let kept: Rc<RefCell<Option<Ender>>> = Rc::default();
