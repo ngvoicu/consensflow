@@ -277,5 +277,9 @@ fn a_cf_in_the_verbatim_spelling_is_named_plainly() {
 
     let text = fs::read_to_string(&command).expect("the command");
     assert!(!text.contains(r"\\?\"), "{text}");
-    assert!(text.contains(&this.display().to_string()), "{text}");
+    // The plain spelling of the same place: the long one, as a temporary folder
+    // given in its short 8.3 form (`RUNNER~1`) resolves to.
+    let plain = verbatim.to_string_lossy();
+    let plain = plain.strip_prefix(r"\\?\").unwrap_or(&plain);
+    assert!(text.contains(plain), "{text}");
 }
