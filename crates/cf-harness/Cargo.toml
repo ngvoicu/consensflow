@@ -12,6 +12,9 @@ publish = false
 # basic-auth header.
 base64.workspace = true
 cf-base.workspace = true
+# The terminal command, which what opening the app prepares (`prepare`) makes
+# beside the harnesses' extensions.
+cf-launcher.workspace = true
 cf-process.workspace = true
 cf-proto.workspace = true
 # A probe's run, shared by every caller that asked while it ran.

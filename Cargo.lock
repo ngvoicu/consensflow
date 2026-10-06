@@ -488,6 +488,7 @@ dependencies = [
  "base64 0.22.1",
  "cf-base",
  "cf-harness",
+ "cf-launcher",
  "cf-process",
  "cf-proto",
  "flate2",
@@ -508,6 +509,17 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "cf-launcher"
+version = "3.0.0-alpha.78"
+dependencies = [
+ "cf-base",
+ "cf-process",
+ "nix",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

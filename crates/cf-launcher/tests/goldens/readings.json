@@ -1,0 +1,44 @@
+{
+  "readings": [
+    {"name":"an old launcher for sh","text":"#!/bin/sh\n# Installed by ConsensFlow. x\nexec \"/App/MacOS/node\" \"/App/Resources/cli/bin/cf.mjs\" \"$@\"\n","read":{"runtime":"/App/MacOS/node","entry":"/App/Resources/cli/bin/cf.mjs"}},
+    {"name":"one that pins a home","text":"#!/bin/sh\n# Installed by ConsensFlow. x\nexport CONSENSFLOW_HOME=\"/Users/me/.cf\"\nexec \"/n\" \"/x/bin/cf.mjs\" \"$@\"\n","read":{"runtime":"/n","entry":"/x/bin/cf.mjs"}},
+    {"name":"an old launcher for cmd","text":"@echo off\r\nREM Installed by ConsensFlow. x\r\n\"C:\\App\\node.exe\" \"C:\\App\\cli\\bin\\cf.mjs\" %*\r\n","read":{"runtime":"C:\\App\\node.exe","entry":"C:\\App\\cli\\bin\\cf.mjs"}},
+    {"name":"one for cmd that pins a home","text":"@echo off\r\nREM Installed by ConsensFlow. x\r\nsetlocal\r\nset \"CONSENSFLOW_HOME=C:\\h\"\r\n\"C:\\n.exe\" \"C:\\x\\cf.mjs\" %*\r\n","read":{"runtime":"C:\\n.exe","entry":"C:\\x\\cf.mjs"}},
+    {"name":"a runtime with a space in its path","text":"# Installed by ConsensFlow\nexec \"/a b/node\" \"/c d/cf.mjs\" \"$@\"\n","read":{"runtime":"/a b/node","entry":"/c d/cf.mjs"}},
+    {"name":"white space of any kind between the two","text":"# Installed by ConsensFlow\n\"/n\"\n\t \r\n\"/x/cf.mjs\"","read":{"runtime":"/n","entry":"/x/cf.mjs"}},
+    {"name":"a no-break space between the two","text":"# Installed by ConsensFlow\n\"/n\" \"/x/cf.mjs\"","read":{"runtime":"/n","entry":"/x/cf.mjs"}},
+    {"name":"a byte order mark between the two","text":"# Installed by ConsensFlow\n\"/n\"﻿\"/x/cf.mjs\"","read":{"runtime":"/n","entry":"/x/cf.mjs"}},
+    {"name":"a next-line character between the two","text":"# Installed by ConsensFlow\n\"/n\"\"/x/cf.mjs\"","read":null},
+    {"name":"nothing between the two","text":"# Installed by ConsensFlow\n\"/n\"\"/x/cf.mjs\"","read":null},
+    {"name":"a cf.mjs with nothing before it","text":"# Installed by ConsensFlow\n\"/n\" \"cf.mjs\"","read":null},
+    {"name":"a cf.mjs with something before it","text":"# Installed by ConsensFlow\n\"/n\" \"/cf.mjs\"","read":{"runtime":"/n","entry":"/cf.mjs"}},
+    {"name":"a path that ends in more than cf.mjs","text":"# Installed by ConsensFlow\n\"/n\" \"/x/cf.mjs.bak\"","read":null},
+    {"name":"an empty runtime","text":"# Installed by ConsensFlow\n\"\" \"/x/cf.mjs\"","read":null},
+    {"name":"the first pair that fits, from the left","text":"# Installed by ConsensFlow\n\"a\" \"b\" \"/n\" \"/x/cf.mjs\" \"/m\" \"/y/cf.mjs\"","read":{"runtime":"/n","entry":"/x/cf.mjs"}},
+    {"name":"a native cf, which is no shape of Node","text":"#!/bin/sh\n# Installed by ConsensFlow. x\nexec \"/App/cli/bin/cf\" \"$@\"\n","read":null},
+    {"name":"a command that is not ours","text":"exec \"/n\" \"/x/cf.mjs\" \"$@\"\n","read":null},
+    {"name":"a mark and nothing else","text":"# Installed by ConsensFlow\n","read":null},
+    {"name":"an empty file","text":"","read":null},
+    {"name":"quotes that never pair","text":"# Installed by ConsensFlow\n\"/n \"/x/cf.mjs","read":null}
+  ],
+  "dirnames": [
+    {"path":"/a/b/c/d/cf.mjs","dirname":"/a/b/c/d"},
+    {"path":"cf.mjs","dirname":"."},
+    {"path":"/cf.mjs","dirname":"/"},
+    {"path":"/","dirname":"/"},
+    {"path":"","dirname":"."},
+    {"path":"/a/b/","dirname":"/a"},
+    {"path":"//a","dirname":"//"},
+    {"path":"a/b","dirname":"a"},
+    {"path":"a//b","dirname":"a/"},
+    {"path":"a/","dirname":"."},
+    {"path":"//","dirname":"/"},
+    {"path":"///a","dirname":"//"},
+    {"path":"./a","dirname":"."},
+    {"path":"a","dirname":"."},
+    {"path":"/a","dirname":"/"},
+    {"path":"/a/","dirname":"/"},
+    {"path":"a/b/c//","dirname":"a/b"},
+    {"path":"/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf","dirname":"/Applications/ConsensFlow.app/Contents/Resources/cli/bin"}
+  ]
+}
