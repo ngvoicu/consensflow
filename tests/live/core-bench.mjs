@@ -321,7 +321,7 @@ try {
     const started = Date.now()
     const worker = AGENTS[name]
     const told = await tell(
-      `Run exactly this command in your shell, then reply with one line:\ncf task add ${tierFlag(tiers[name])} "Use your ${QUESTION_TOOL[name]} to ask me which colour I prefer, with the options red and blue. After I answer, reply with exactly one line: COLOUR=<the answer>"`,
+      `Run exactly this command in your shell, then reply with one line:\ncf task add ${tierFlag(tiers[name])} "Use your ${QUESTION_TOOL[name]} to ask which colour to use, with the options red and blue. Once it is answered, reply with exactly one line: COLOUR=<the answer>"\nWhen its question reaches you, choose a colour yourself and answer it with cf answer.`,
     )
     const question = told
       ? await until(
