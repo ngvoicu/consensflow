@@ -17,7 +17,8 @@ use cf_base::file::error_code;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdin, ChildStdout};
 
-use crate::{terminate, terminate_without_waiting, Ending, Run};
+use crate::terminate::{end, Reach};
+use crate::{terminate, Ending, Run};
 
 /// What a child's streams are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,7 +181,7 @@ impl Child {
     /// What ends it later, should this process be ending: the forcing of it
     /// while it runs.
     pub fn ender(&self) -> Ender {
-        Ender::new(self.pid, &self.exited)
+        Ender::new(self.pid, Reach::Process, &self.exited)
     }
 
     fn poll_closing(&self, context: &mut Context<'_>) -> Poll<()> {
@@ -210,17 +211,20 @@ impl Drop for Child {
 #[derive(Debug, Clone)]
 pub struct Ender {
     pid: Option<u32>,
+    reach: Reach,
     exited: Weak<Cell<bool>>,
 }
 
 impl Ender {
     /// The end of the program `pid`, which is still there while `exited` is
     /// held and not set: once it is set (the program has been waited for, and
-    /// its pid may be another's) or dropped (the program is no one's to end),
-    /// nothing is sent.
-    pub(crate) fn new(pid: Option<u32>, exited: &Rc<Cell<bool>>) -> Self {
+    /// its pid, and the id of the group it led, may be another's) or dropped
+    /// (the program is no one's to end), nothing is sent. `reach` is what
+    /// the end is sent to: the program alone, or the group it leads.
+    pub(crate) fn new(pid: Option<u32>, reach: Reach, exited: &Rc<Cell<bool>>) -> Self {
         Self {
             pid,
+            reach,
             exited: Rc::downgrade(exited),
         }
     }
@@ -230,12 +234,12 @@ impl Ender {
         self.exited.upgrade().is_some_and(|exited| !exited.get())
     }
 
-    /// Forces the child to end, if it is still there, and waits for nothing
-    /// (on Windows `taskkill` is started and let go): this is the end of a
-    /// process on its way out.
+    /// Forces the child to end, and the group it leads with it, if it is
+    /// still there, and waits for nothing (on Windows `taskkill` is started
+    /// and let go): this is the end of a process on its way out.
     pub fn force(&self) {
         if let (Some(pid), true) = (self.pid, self.running()) {
-            terminate_without_waiting(pid, Ending::Forced);
+            end(pid, Ending::Forced, self.reach, false);
         }
     }
 }

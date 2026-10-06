@@ -6,16 +6,15 @@
 //! two together, which Node's `execFile` hands over whole and `execute` has
 //! no use for, and so no field for.
 
-use std::cell::Cell;
 use std::path::Path;
 use std::process::Stdio;
-use std::rc::Rc;
 
 use cf_base::env::Env;
 use cf_base::file::error_code;
 
-use crate::execute::{command_line, end, hide_window, read_both, Read, FORCE_AFTER};
-use crate::{terminate, Ender, Ending, Limits, Run};
+use crate::execute::{command_line, hide_window, read_both, Read, FORCE_AFTER};
+use crate::group::{lead, Group};
+use crate::{Ender, Ending, Limits, Run};
 
 /// What a program that ended with 0 wrote: `execFile`'s `{ stdout, stderr }`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,10 +47,16 @@ pub struct CaptureFailed {
 /// than its limit) and answers what it wrote to both streams, or how it
 /// failed with what it wrote.
 ///
+/// The program leads a process group of its own on Unix, and what ends it (a
+/// stop, its time running out, this future dropped) ends the group: the
+/// installer's children with it, which Node's `kill` left running (a
+/// difference kept). Windows ends the whole tree at a stop and at its time
+/// running out, as it does; a future dropped there ends the program alone.
+///
 /// `started` is given the program's [`Ender`] once it has started, for
-/// whoever ends this process's children on its way out: the program is its to
-/// end until it has been waited for or this future is dropped (which ends it
-/// too), and no longer after.
+/// whoever ends this process's children on its way out: the program, and the
+/// group it leads, are its to end until the program has been waited for or
+/// this future is dropped (which ends them too), and no longer after.
 pub async fn capture(
     run: &Run,
     cwd: Option<&Path>,
@@ -78,6 +83,7 @@ pub async fn capture(
         command.current_dir(cwd);
     }
     hide_window(&mut command);
+    lead(&mut command);
     let mut child = command.spawn().map_err(|failed| {
         unstarted(format!(
             "spawn {} {}",
@@ -86,9 +92,10 @@ pub async fn capture(
         ))
     })?;
     crate::job::adopt(&child);
-    let pid = child.id();
-    let exited = Rc::new(Cell::new(false));
-    started(Ender::new(pid, &exited));
+    // Declared after the child, so it is dropped before it: a capture dropped
+    // ends the group while its leader is not yet reaped.
+    let group = Group::new(child.id());
+    started(group.ender());
     let _input = child.stdin.take();
     let (Some(mut stdout), Some(mut stderr)) = (child.stdout.take(), child.stderr.take()) else {
         return Err(unstarted(
@@ -127,23 +134,22 @@ pub async fn capture(
         Some(status) => status,
         None => {
             // As Node's `kill`: both streams closed first, so nothing it left
-            // running holds the answer back, then the program asked to end.
+            // running holds the answer back, then the program asked to end,
+            // and the group it leads with it.
             drop((stdout, stderr));
-            end(pid);
+            group.end(Ending::Asked);
             tokio::select! {
                 status = child.wait() => status,
                 () = tokio::time::sleep(FORCE_AFTER) => {
-                    if let Some(pid) = pid {
-                        terminate(pid, Ending::Forced);
-                    }
+                    group.end(Ending::Forced);
                     child.wait().await
                 }
             }
         }
     };
 
-    // Waited for: its pid is no longer its to end.
-    exited.set(true);
+    // Waited for: its pid is no longer its to end, nor its group's id.
+    group.release();
 
     let stdout = String::from_utf8_lossy(&out.bytes).into_owned();
     let stderr = String::from_utf8_lossy(&err.bytes).into_owned();

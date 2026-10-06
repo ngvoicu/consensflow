@@ -45,20 +45,22 @@ impl Root {
         std::fs::read_to_string(self.home().join("daemon.log")).unwrap_or_default()
     }
 
-    /// A `claude` that never answers: it writes its pid to a file beside it
-    /// (the file is what this gives) and sleeps, two minutes at most. The
-    /// daemon runs a CLI in the environment's `HOME`, which is made here: a
-    /// program whose folder is not there does not start. And a run that never
-    /// gets its version never asks a release feed.
+    /// A `claude` that never answers: it writes its pid to a file beside it,
+    /// starts a helper that sleeps, as an installer starts programs of its own,
+    /// writes the helper's pid to another file, and waits for it, two minutes
+    /// at most. The two files are what this gives: the program's and its
+    /// helper's. The daemon runs a CLI in the environment's `HOME`, which is
+    /// made here: a program whose folder is not there does not start. And a run
+    /// that never gets its version never asks a release feed.
     #[cfg(unix)]
-    pub fn claude_that_never_answers(&self) -> PathBuf {
+    pub fn claude_that_never_answers(&self) -> (PathBuf, PathBuf) {
         std::fs::create_dir_all(self.dir.path().join("home")).expect("a home folder");
         std::fs::write(
             self.bin().join("claude"),
-            "#!/bin/sh\necho $$ > \"${0%/*}/asked\"\nexec /bin/sleep 120\n",
+            "#!/bin/sh\necho $$ > \"${0%/*}/asked\"\n/bin/sleep 120 &\necho $! > \"${0%/*}/helper\"\nwait\n",
         )
         .expect("a stand-in claude");
-        self.bin().join("asked")
+        (self.bin().join("asked"), self.bin().join("helper"))
     }
 
     /// A project that was open when the last daemon ended, with its chief on

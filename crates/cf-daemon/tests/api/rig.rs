@@ -16,10 +16,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use cf_base::env::Env;
-use cf_base::js;
 use cf_base::refusal::Refusal;
 use cf_catalog::{AgentRow, Catalog};
-use cf_daemon::api::answer::{Answer, Content, Failure};
 use cf_daemon::api::context::AgentRows;
 use cf_daemon::api::{handle, Api, Handler};
 use cf_daemon::roster::Agents;
@@ -32,41 +30,14 @@ use crate::ledger;
 /// carries it (`tests/api/main.rs` holds that), so no request opens them.
 pub const UI_TOKEN: &str = "the-ui-token-no-trace-of-the-api-carries";
 
-/// What the API answered a request, as the server would say it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Answered {
-    pub status: u16,
-    pub content_type: Option<&'static str>,
-    pub body: String,
-}
-
-impl Answered {
-    fn of(answer: &Result<Answer, Failure>) -> Self {
-        let answer = match answer {
-            Ok(answer) => answer.clone(),
-            Err(failure) => failure.answer(),
-        };
-        let (content_type, body) = match &answer.content {
-            Content::Json(value) => (Some("application/json"), js::stringify(value)),
-            Content::Html(page) => (Some("text/html; charset=utf-8"), page.clone()),
-            Content::Nothing => (None, String::new()),
-        };
-        Self {
-            status: answer.status,
-            content_type,
-            body,
-        }
-    }
-}
-
-/// A request the API took, in the order it came: what it was, and what it
-/// was answered once it was.
+/// A request the API took, in the order it came: what it was, as its handler
+/// was given it. (How it was answered is the bytes the answer was written as,
+/// which only a client of the API has: a run of `cf` has it from the relay.)
 #[derive(Debug, Clone)]
 pub struct Seen {
     pub method: String,
     pub path: String,
     pub bearer: Option<String>,
-    pub answered: Option<Answered>,
 }
 
 /// The saved agents the API reads, which it is asked for by name.
@@ -118,23 +89,13 @@ impl Rig {
         let seen = Rc::new(RefCell::new(Vec::<Seen>::new()));
         let (context, heard) = (Rc::clone(&front.context), Rc::clone(&seen));
         let handler: Rc<Handler> = Rc::new(move |request| {
-            let (context, screens, seen) =
-                (Rc::clone(&context), Rc::clone(&screens), Rc::clone(&heard));
-            let at = {
-                let mut heard = seen.borrow_mut();
-                heard.push(Seen {
-                    method: request.method.to_string(),
-                    path: request.path.clone(),
-                    bearer: request.bearer().map(str::to_owned),
-                    answered: None,
-                });
-                heard.len() - 1
-            };
-            Box::pin(async move {
-                let answer = handle(&context, &screens, request).await;
-                seen.borrow_mut()[at].answered = Some(Answered::of(&answer));
-                answer
-            })
+            let (context, screens) = (Rc::clone(&context), Rc::clone(&screens));
+            heard.borrow_mut().push(Seen {
+                method: request.method.to_string(),
+                path: request.path.clone(),
+                bearer: request.bearer().map(str::to_owned),
+            });
+            Box::pin(async move { handle(&context, &screens, request).await })
         });
         let closing = front.context.closing.clone();
         let api = Api::start(handler, closing, Rc::clone(&front.spawn))
