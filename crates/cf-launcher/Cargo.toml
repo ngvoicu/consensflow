@@ -1,0 +1,24 @@
+[package]
+name = "cf-launcher"
+description = "The command ConsensFlow puts in the user's terminal: the launcher written in the home's bin, what a command found there runs, and its repair."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+cf-base.workspace = true
+
+# `access`, which asks the system whether this user may write a folder
+# (`accessSync` of Node's).
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["fs"] }
+
+[dev-dependencies]
+# A `.cmd` started as Windows starts one, and the goldens' reading.
+cf-process.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
