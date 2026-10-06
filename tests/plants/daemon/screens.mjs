@@ -200,10 +200,10 @@ export const PLANTS = [
     meant: 'a_body_that_is_no_object_is_read_as_javascript_read_it',
   },
   {
-    name: 'screens: an agent that is not offered says notInstalled before hidden',
+    name: 'screens: an agent that is not offered says notInstalled before hidden (the roster offers them, for the page too)',
     edits: [
       [
-        `${SCREENS}/agents.rs`,
+        `${DAEMON}/roster.rs`,
         lines(
           '                fields.insert("hidden".to_owned(), Value::Bool(true));',
           '                fields.insert("notInstalled".to_owned(), Value::Bool(true));',
