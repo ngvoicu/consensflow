@@ -141,6 +141,108 @@ fn every_server_is_given_a_harmless_definition_that_is_disabled() {
     );
 }
 
+/// The flags that switch off a server `name` by command.
+fn by_command(name: &str) -> Vec<String> {
+    [
+        "-c",
+        &format!("mcp_servers.{name}.command=\"/usr/bin/true\""),
+        "-c",
+        &format!("mcp_servers.{name}.enabled=false"),
+    ]
+    .map(str::to_owned)
+    .to_vec()
+}
+
+/// The flags that switch off a server `name` by URL.
+fn at_url(name: &str) -> Vec<String> {
+    [
+        "-c",
+        &format!("mcp_servers.{name}.url=\"http://127.0.0.1:9/disabled\""),
+        "-c",
+        &format!("mcp_servers.{name}.enabled=false"),
+    ]
+    .map(str::to_owned)
+    .to_vec()
+}
+
+#[test]
+fn a_server_codex_reaches_by_url_is_given_a_url_and_one_reached_by_command_a_command_in_the_order_listed(
+) {
+    let flags = switched_off(&[
+        json!({ "name": "cua_repl", "transport": { "type": "stdio", "command": "cua", "args": [] } }),
+        json!({
+            "name": "idea",
+            "transport": { "type": "streamable_http", "url": "http://127.0.0.1:64342/stream" },
+        }),
+        json!({ "name": "computer-history" }),
+        json!({ "name": "authd", "transport": { "type": "streamable_http", "url": "http://127.0.0.1:9/mcp" } }),
+    ]);
+    let expected: Vec<String> = [
+        by_command("cua_repl"),
+        at_url("idea"),
+        by_command("computer-history"),
+        at_url("authd"),
+    ]
+    .concat();
+    assert_eq!(flags, Ok(expected));
+    assert!(!flags
+        .unwrap()
+        .iter()
+        .any(|flag| flag.starts_with("mcp_servers.idea.command")));
+}
+
+#[test]
+fn a_server_is_reached_by_url_when_its_transport_names_a_type_other_than_stdio_whatever_else_it_holds(
+) {
+    for (server, by_url) in [
+        (
+            json!({ "transport": { "type": "stdio", "command": "cua", "args": [], "env": null, "env_vars": [], "cwd": null } }),
+            false,
+        ),
+        (
+            json!({ "transport": {
+                "type": "streamable_http",
+                "url": "http://127.0.0.1:64342/stream",
+                "bearer_token_env_var": "IDEA_TOKEN",
+                "http_headers": { "X-A": "b" },
+                "env_http_headers": null,
+                "http_headers_helper": null,
+            } }),
+            true,
+        ),
+        // A type Codex has not listed so far.
+        (
+            json!({ "transport": { "type": "sse", "url": "http://127.0.0.1:64342/sse" } }),
+            true,
+        ),
+        // No type, or none that is text: what an older Codex lists, and nothing a URL server says.
+        (json!({}), false),
+        (json!({ "transport": null }), false),
+        (json!({ "transport": {} }), false),
+        (json!({ "transport": { "type": null } }), false),
+        (json!({ "transport": { "type": 5 } }), false),
+        (
+            json!({ "transport": { "type": ["streamable_http"] } }),
+            false,
+        ),
+        (
+            json!({ "transport": { "url": "http://127.0.0.1:64342/stream" } }),
+            false,
+        ),
+        (json!({ "transport": "streamable_http" }), false),
+        (json!({ "transport": ["streamable_http"] }), false),
+    ] {
+        let mut server = server;
+        server["name"] = json!("srv");
+        let expected = if by_url {
+            at_url("srv")
+        } else {
+            by_command("srv")
+        };
+        assert_eq!(switched_off(&[server.clone()]), Ok(expected), "{server}");
+    }
+}
+
 #[test]
 fn a_name_is_read_as_javascript_reads_it_whatever_text_a_number_or_a_flag_it_makes() {
     for (name, text) in [
@@ -193,6 +295,10 @@ fn a_name_the_pattern_refuses_stops_the_launch_naming_it_as_json_writes_it() {
         (json!({ "name": [] }), "[]"),
         (json!({ "name": 1.5 }), "1.5"),
         (json!({ "name": 1e21 }), "1e+21"),
+        (
+            json!({ "name": "a.b", "transport": { "type": "streamable_http", "url": "http://127.0.0.1:64342/stream" } }),
+            "\"a.b\"",
+        ),
     ] {
         assert_eq!(
             switched_off(std::slice::from_ref(&server)),

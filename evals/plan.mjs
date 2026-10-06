@@ -271,21 +271,23 @@ export function realOnPath(
  * The `-c` overrides that switch off every MCP server Codex would start
  * (`codex mcp list --json`): each gets a harmless, disabled definition,
  * which also covers servers a plugin or the ChatGPT app adds outside
- * config.toml (a bare `enabled=false` is refused for those).
+ * config.toml (a bare `enabled=false` is refused for those). A server Codex
+ * reaches by URL gets a URL, never a command, as the product's own
+ * (`mcpIsolation`, src/adapters/codex.js): Codex refuses both on one server.
  */
 export function codexIsolation(servers) {
-  return servers.flatMap(({ name }) => {
+  return servers.flatMap(({ name, transport }) => {
     // Codex's -c takes the key's segments literally: a quoted name would
     // define a new server and leave the real one on. Refuse, never half-isolate.
     if (!/^[A-Za-z0-9_-]+$/.test(name)) {
       throw new Error(`cannot switch off the Codex MCP server ${JSON.stringify(name)}`)
     }
-    return [
-      '-c',
-      `mcp_servers.${name}.command="/usr/bin/true"`,
-      '-c',
-      `mcp_servers.${name}.enabled=false`,
-    ]
+    const kind = transport?.type
+    const definition =
+      typeof kind === 'string' && kind !== 'stdio'
+        ? 'url="http://127.0.0.1:9/disabled"'
+        : 'command="/usr/bin/true"'
+    return ['-c', `mcp_servers.${name}.${definition}`, '-c', `mcp_servers.${name}.enabled=false`]
   })
 }
 

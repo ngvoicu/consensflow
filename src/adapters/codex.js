@@ -70,24 +70,37 @@ async function codexMcpServers(executable, env) {
 }
 
 /**
+ * Where a switched-off server reached by URL points: the discard port on
+ * loopback, which nothing answers.
+ */
+const DISABLED_URL = 'http://127.0.0.1:9/disabled'
+
+/**
  * A member runs in full-permission mode and reads what others wrote, so every
  * MCP server Codex would start is switched off: this Mac's Codex drives the
  * browser and the screen through them (the ChatGPT app's, since 2026-09-26).
  * Each gets a harmless, disabled definition; a bare `enabled=false` is refused
  * for servers defined outside config.toml, and a name that needs quotes would
- * define a new server instead, so such a name stops the launch.
+ * define a new server instead, so such a name stops the launch. The definition
+ * is in the form of the server's own transport: Codex refuses a command on a
+ * server reached by URL ("url is not supported for stdio"), and every Codex
+ * window of a Mac that had one closed at once (2026-10-06). Codex lists
+ * `stdio` and `streamable_http`: a transport of another type is taken for a
+ * URL's, and a server with none (an older Codex) for a command's.
+ * Exported for `tests/live/codex-mcp-switch-off.mjs`, which hands its flags
+ * to the real Codex.
  */
-function mcpIsolation(servers) {
-  return servers.flatMap(({ name }) => {
+export function mcpIsolation(servers) {
+  return servers.flatMap(({ name, transport }) => {
     if (!/^[A-Za-z0-9_-]+$/.test(name ?? '')) {
       throw new Error(`cannot switch off the Codex MCP server ${JSON.stringify(name)} for a member`)
     }
-    return [
-      '-c',
-      `mcp_servers.${name}.command="/usr/bin/true"`,
-      '-c',
-      `mcp_servers.${name}.enabled=false`,
-    ]
+    const kind = transport?.type
+    const definition =
+      typeof kind === 'string' && kind !== 'stdio'
+        ? `url="${DISABLED_URL}"`
+        : 'command="/usr/bin/true"'
+    return ['-c', `mcp_servers.${name}.${definition}`, '-c', `mcp_servers.${name}.enabled=false`]
   })
 }
 

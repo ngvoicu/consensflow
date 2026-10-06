@@ -19,6 +19,8 @@ import { lookScenarios, readyScenarios, startedScenarios } from './codex-looks.m
 import { roleScenarios } from './codex-roles.mjs'
 import {
   appServer,
+  byCommand,
+  byUrl,
   chief,
   codex,
   ENV,
@@ -96,6 +98,59 @@ export function codexScenarios() {
         ),
         prepares({}, appServer()),
         prepares({ ...ofChief(), launchId: SECOND }, appServer()),
+      ],
+    },
+    {
+      name: 'codex: a member whose MCP server Codex reaches by URL has it switched off as a URL, with no command, and the chief keeps it',
+      harness: 'codex',
+      env: ENV,
+      steps: [
+        codex(lists(byUrl('idea'))),
+        prepares({}, appServer()),
+        prepares({ ...ofChief(), launchId: SECOND }, appServer()),
+      ],
+    },
+    {
+      name: 'codex: a member whose servers Codex reaches by command, by URL and by neither said has each switched off in its own form, in the order listed',
+      harness: 'codex',
+      env: ENV,
+      steps: [
+        codex(
+          lists(
+            byCommand('cua_repl'),
+            byUrl('idea'),
+            { name: 'computer-history' },
+            byUrl('authd', 'http://127.0.0.1:9/mcp', {
+              bearer_token_env_var: 'AUTHD_TOKEN',
+              http_headers: { 'X-A': 'b' },
+              env_http_headers: { 'X-B': 'B_ENV' },
+            }),
+            byCommand('node_repl', '/usr/bin/node'),
+          ),
+        ),
+        prepares({}, appServer()),
+      ],
+    },
+    {
+      name: 'codex: a transport of a type other than stdio is taken for a URL one, and a transport that names no such type for a command one',
+      harness: 'codex',
+      env: ENV,
+      steps: [
+        codex(
+          lists(
+            { name: 'sse', transport: { type: 'sse', url: 'http://127.0.0.1:64342/sse' } },
+            { name: 'null', transport: null },
+            { name: 'empty', transport: {} },
+            { name: 'untyped', transport: { url: 'http://127.0.0.1:64342/stream' } },
+            { name: 'nulled', transport: { type: null } },
+            { name: 'number', transport: { type: 5 } },
+            { name: 'list-type', transport: { type: ['streamable_http'] } },
+            { name: 'text', transport: 'streamable_http' },
+            { name: 'list', transport: ['streamable_http'] },
+            { name: 'stdio', transport: { type: 'stdio', url: 'http://127.0.0.1:64342/stream' } },
+          ),
+        ),
+        prepares({}, appServer()),
       ],
     },
     {
@@ -272,6 +327,7 @@ export function codexScenarios() {
     named('is named by an object', [{ name: {} }]),
     named('is named by a list of two', [{ name: ['a', 'b'] }]),
     named('has a name that needs quotes', [{ name: 'a.b' }]),
+    named('is reached by URL and has a name that needs quotes', [byUrl('idea'), byUrl('a.b')]),
     named('has a name with a space', [{ name: 'a b' }]),
     named('has an empty name', [{ name: '' }]),
     named('has a name of letters Codex’s keys do not hold', [{ name: 'serveur-é' }]),

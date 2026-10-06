@@ -413,6 +413,60 @@ fn switches_off_every_mcp_server_codex_would_start_for_a_member_the_chief_keeps_
 }
 
 #[test]
+fn switches_off_a_server_codex_reaches_by_url_as_a_url_never_with_a_command_which_codex_refuses_on_one(
+) {
+    let home = Home::new();
+    let (adapter, fakes) = adapter(&home);
+    // As Codex 0.160.1 lists them: by command, by URL, and (an older Codex) with no transport.
+    let listing = json!([
+        { "name": "cua_repl", "transport": { "type": "stdio", "command": "cua", "args": [] } },
+        {
+            "name": "idea",
+            "transport": { "type": "streamable_http", "url": "http://127.0.0.1:64342/stream" },
+        },
+        { "name": "computer-history" },
+    ]);
+    fakes
+        .processes
+        .run_answer("codex mcp list --json", Ok(listing.to_string()));
+    let member = prepare(&adapter, &Request::default()).unwrap();
+    let flags = words(&[
+        "-c",
+        "mcp_servers.cua_repl.command=\"/usr/bin/true\"",
+        "-c",
+        "mcp_servers.cua_repl.enabled=false",
+        "-c",
+        "mcp_servers.idea.url=\"http://127.0.0.1:9/disabled\"",
+        "-c",
+        "mcp_servers.idea.enabled=false",
+        "-c",
+        "mcp_servers.computer-history.command=\"/usr/bin/true\"",
+        "-c",
+        "mcp_servers.computer-history.enabled=false",
+    ]);
+    let at = member
+        .argv
+        .iter()
+        .position(|arg| arg == "mcp_servers.cua_repl.enabled=false")
+        .unwrap();
+    assert_eq!(member.argv[at - 3..at - 3 + flags.len()], flags[..]);
+    assert!(!member
+        .argv
+        .iter()
+        .any(|arg| arg.starts_with("mcp_servers.idea.command")));
+    let chief = prepare(&adapter, &Request::chief()).unwrap();
+    assert!(!chief.argv.iter().any(|arg| arg.starts_with("mcp_servers.")));
+    fakes.processes.run_answer(
+        "codex mcp list --json",
+        Ok(r#"[{"name":"a.b","transport":{"type":"streamable_http"}}]"#.to_owned()),
+    );
+    assert_eq!(
+        prepare(&adapter, &Request::default()).err().as_deref(),
+        Some("cannot switch off the Codex MCP server \"a.b\" for a member")
+    );
+}
+
+#[test]
 fn gives_the_chief_no_question_tool_it_asks_the_human_in_plain_words_in_its_window() {
     let home = Home::new();
     let (adapter, _fakes) = adapter(&home);
