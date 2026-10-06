@@ -4,7 +4,7 @@
 
 use cf_ledger::{Claim, Read};
 
-use crate::fixture::{gated_world, world, World};
+use crate::fixture::{gated_world, ids, world, World};
 
 /// A task given to zeus, its brief received, with two questions asked.
 fn with_two_questions(w: &mut World, options: bool) -> (i64, i64, i64) {
@@ -146,37 +146,177 @@ fn a_question_answered_while_it_waits_at_the_gate_obliges_while_the_answer_is_on
     assert_eq!(w.state(task), "working");
 }
 
+/// A task given to zeus in a project with a gate, its brief passed on and
+/// received, and a question of zeus's answered while it still waited for the
+/// human, which withdrew it: the task, the question and its answer, which the
+/// human has not yet decided on.
+fn answered_at_the_gate(w: &mut World) -> (i64, i64, i64) {
+    let created = w.give("zeus", "Parser");
+    let (task, brief) = (created.task.number, created.message.expect("a brief").id);
+    w.ledger.approve_message(brief, "human").expect("passed on");
+    w.deliver(brief);
+    let question = w.ask("zeus", task, "Which format?");
+    assert_eq!(w.states(&[question.id]), ["gated"]);
+    let answer = w.answer(question.id, "JSON");
+    assert_eq!(w.states(&[question.id, answer.id]), ["cancelled", "gated"]);
+    (task, question.id, answer.id)
+}
+
+/// Something unrelated reaches zeus, as the human's note does: the task is
+/// reconciled by it, and must still be waiting for the answer it never had.
+fn an_unrelated_receipt(w: &mut World, task: i64) {
+    let note = w.note("human", "zeus", task, "Mind the tests");
+    w.deliver(note.id);
+}
+
+/// The chief answers the question again, the human passes it on, it is received.
+fn answered_again_and_received(w: &mut World, question: i64) {
+    let again = w.answer(question, "JSON, then");
+    w.ledger
+        .approve_message(again.id, "human")
+        .expect("passed on");
+    w.deliver(again.id);
+}
+
 #[test]
 fn an_answer_the_human_declines_gives_the_question_back_to_the_gate_and_the_task_still_waits() {
+    let mut w = gated_world();
+    let (task, question, answer) = answered_at_the_gate(&mut w);
+    w.ledger.decline_message(answer, "human").expect("declined");
+    assert_eq!(
+        w.states(&[question, answer]),
+        ["gated", "cancelled"],
+        "nobody received an answer: the question is the human's to pass on again"
+    );
+    an_unrelated_receipt(&mut w, task);
+    assert_eq!(w.state(task), "waiting");
+
+    answered_again_and_received(&mut w, question);
+    assert_eq!(w.state(task), "working");
+}
+
+#[test]
+fn an_answer_whose_delivery_failed_leaves_a_question_withdrawn_at_the_gate_obliging() {
+    let mut w = gated_world();
+    let (task, question, answer) = answered_at_the_gate(&mut w);
+    w.ledger
+        .approve_message(answer, "human")
+        .expect("passed on");
+    w.begin(answer);
+    w.ledger
+        .fail_delivery(answer, "the window closed")
+        .expect("given up");
+    assert_eq!(w.states(&[question, answer]), ["cancelled", "failed"]);
+
+    an_unrelated_receipt(&mut w, task);
+    assert_eq!(
+        w.state(task),
+        "waiting",
+        "no answer was received: what happened to this one does not resolve the question"
+    );
+
+    answered_again_and_received(&mut w, question);
+    assert_eq!(w.state(task), "working");
+}
+
+#[test]
+fn an_answer_cancelled_by_the_task_failing_leaves_the_question_obliging_through_the_reopen() {
+    let mut w = gated_world();
+    let (task, question, answer) = answered_at_the_gate(&mut w);
+    w.ledger
+        .approve_message(answer, "human")
+        .expect("passed on");
+    w.ledger
+        .fail_task(w.project, task, "its pane died")
+        .expect("failed");
+    assert_eq!(w.states(&[question, answer]), ["cancelled", "cancelled"]);
+
+    let words = w
+        .ledger
+        .reopen_task(w.project, task, "chief", "Try again")
+        .expect("reopened")
+        .message
+        .expect("its words");
+    w.ledger
+        .approve_message(words.id, "human")
+        .expect("passed on");
+    w.deliver(words.id);
+    assert_eq!(
+        w.state(task),
+        "waiting",
+        "the answer it was owed was cancelled with the task, and never received"
+    );
+
+    answered_again_and_received(&mut w, question);
+    assert_eq!(w.state(task), "working");
+}
+
+#[test]
+fn an_answer_an_agent_cancelled_leaves_the_question_obliging_as_a_failed_one_does() {
+    let mut w = gated_world();
+    let (task, question, answer) = answered_at_the_gate(&mut w);
+    w.ledger
+        .approve_message(answer, "human")
+        .expect("passed on");
+    w.ledger
+        .cancel_message(answer, "withdrawn by the chief")
+        .expect("cancelled");
+    an_unrelated_receipt(&mut w, task);
+    assert_eq!(w.state(task), "waiting");
+
+    answered_again_and_received(&mut w, question);
+    assert_eq!(w.state(task), "working");
+}
+
+#[test]
+fn a_hold_between_the_approval_and_the_delivery_carries_the_answer_and_the_task_goes_on() {
+    let mut w = gated_world();
+    let (task, question, answer) = answered_at_the_gate(&mut w);
+    w.ledger
+        .approve_message(answer, "human")
+        .expect("passed on");
+    w.hold(task);
+    let words = w.daemon_resumes(task).message.expect("its words");
+    assert_eq!(w.state(task), "queued");
+    let begun = w.deliver(words.id);
+    assert_eq!(
+        ids(&begun.carried),
+        [answer],
+        "the hold kept the answer, and the resume carried it"
+    );
+    assert_eq!(w.states(&[question]), ["cancelled"]);
+    assert_eq!(w.state(task), "working", "received with the words");
+}
+
+#[test]
+fn a_question_withdrawn_with_no_answer_at_all_obliges_no_more() {
     let mut w = gated_world();
     let created = w.give("zeus", "Parser");
     let (task, brief) = (created.task.number, created.message.expect("a brief").id);
     w.ledger.approve_message(brief, "human").expect("passed on");
     w.deliver(brief);
     let question = w.ask("zeus", task, "Which format?");
-    let answer = w.answer(question.id, "JSON");
+    // The task fails and is reopened: what still waited at the gate went with
+    // the failure, and nobody ever saw the question.
     w.ledger
-        .decline_message(answer.id, "human")
-        .expect("declined");
+        .fail_task(w.project, task, "its pane died")
+        .expect("failed");
+    assert_eq!(w.states(&[question.id]), ["cancelled"]);
+    let words = w
+        .ledger
+        .reopen_task(w.project, task, "chief", "Try again")
+        .expect("reopened")
+        .message
+        .expect("its words");
+    w.ledger
+        .approve_message(words.id, "human")
+        .expect("passed on");
+    w.deliver(words.id);
     assert_eq!(
-        w.states(&[question.id, answer.id]),
-        ["gated", "cancelled"],
-        "nobody received an answer: the question is the human's to pass on again"
+        w.state(task),
+        "working",
+        "nothing was answered and nobody can answer what no one saw"
     );
-    let note = w.note("chief", "zeus", task, "Mind the tests");
-    w.ledger
-        .approve_message(note.id, "human")
-        .expect("passed on");
-    w.deliver(note.id);
-    assert_eq!(w.state(task), "waiting");
-
-    // The chief answers it again, and the new answer is received.
-    let again = w.answer(question.id, "YAML");
-    w.ledger
-        .approve_message(again.id, "human")
-        .expect("passed on");
-    w.deliver(again.id);
-    assert_eq!(w.state(task), "working");
 }
 
 #[test]
@@ -257,7 +397,7 @@ fn a_question_asked_while_its_task_is_paused_or_queued_behind_the_words_that_res
     let second = w.choose(queued.id, "blue");
     let begun = w.deliver(words.id);
     assert_eq!(
-        crate::fixture::ids(&begun.carried),
+        ids(&begun.carried),
         [first.id, second.id],
         "an answer to a question the pause shut goes in the paste of the words"
     );

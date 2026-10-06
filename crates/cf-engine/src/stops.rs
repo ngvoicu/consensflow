@@ -185,6 +185,21 @@ impl Dispatcher {
         stop.seq > paid
     }
 
+    /// The words that begin a task for a window at rest are being begun: they
+    /// answer every pause asked of that task until now, with no key. A pause
+    /// of a task none of whose words had reached the window was one no look at
+    /// rest could pay (a window works on the task its newest words were about)
+    /// and no turn of the window was for it to stop; left owed, it would
+    /// interrupt the very turn these words begin. A pause that comes while
+    /// they are pasted has a greater sequence, and is still owed.
+    pub(crate) fn pay_with_words(&self, record: &Record) -> Result<(), EngineError> {
+        let stop = self.seams.ledger.borrow().stop_of(record.id)?;
+        if let Some(stop) = stop {
+            self.pay(record, &stop);
+        }
+        Ok(())
+    }
+
     /// The window is at rest, and the stop is paid with no key. What it had
     /// of the rounds is over, and so is what the board said of it.
     fn pay(&self, record: &Record, stop: &Stop) {

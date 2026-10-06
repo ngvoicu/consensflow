@@ -22,7 +22,7 @@ use crate::store::Store;
 use crate::tasks::pause_task;
 use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
 
-pub(crate) use carrying::{adopt, fold, release_carried, transfer};
+pub(crate) use carrying::{adopt, fold, release_carried, release_stranded, transfer};
 pub(crate) use delivery::{
     begin_delivery, cancel_message, confirm_delivery, fail_delivery, first_received, in_flight,
     last_pasted, next_delivery, retry_delivery, with_work,

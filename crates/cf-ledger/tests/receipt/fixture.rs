@@ -6,8 +6,8 @@
 
 use cf_base::time::Clock;
 use cf_ledger::{
-    open_ledger, Begun, Ledger, MessageView, NewChief, NewMember, NewNote, NewProject, NewQuestion,
-    NewTask, Options, TaskCreated, TaskMoved, RESUME_WORDS,
+    open_ledger, Begun, Ledger, LedgerError, MessageView, NewChief, NewMember, NewNote, NewProject,
+    NewQuestion, NewTask, Options, TaskCreated, TaskMoved, RESUME_WORDS,
 };
 use serde_json::{json, Value};
 
@@ -169,6 +169,30 @@ impl World {
         self.ledger
             .assign_task(self.project, number, member)
             .expect("assigned")
+    }
+
+    /// The chief gives a follow-up to the session that did task `after`, and
+    /// has it wait on the board for the tasks it `needs`, which is how a session
+    /// is given a second task while one waits for it.
+    pub fn follow_up(
+        &mut self,
+        after: i64,
+        body: &str,
+        needs: &[i64],
+    ) -> Result<TaskCreated, LedgerError> {
+        self.ledger.create_task(
+            self.project,
+            &NewTask {
+                from: "chief".into(),
+                after: Some(after),
+                needs: needs
+                    .iter()
+                    .map(|number| u64::try_from(*number).expect("a task number"))
+                    .collect(),
+                body: body.into(),
+                ..NewTask::default()
+            },
+        )
     }
 
     /// A message is pasted and proved: its delivery begins and is confirmed.

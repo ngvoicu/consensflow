@@ -279,3 +279,87 @@ fn a_window_out_of_quota_and_still_at_work_is_interrupted_while_its_activity_say
     assert_eq!(context.host.inputs().len(), 1);
     assert_eq!(context.dispatcher.unstopped(zeus), None);
 }
+
+#[test]
+fn a_pause_of_a_task_the_window_holds_but_does_not_work_on_presses_no_key_and_its_own_task_is_stopped(
+) {
+    let context = Context::new();
+    let project = working(&context);
+    // A second task given to the same participant: its words wait for the
+    // first to be over, and the window works on the first.
+    context.give(project, "zeus", "Docs");
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 2).task.state, "queued");
+    context.adapter.busy("zeus");
+    context.pause_task(project, 2);
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.inputs(),
+        Vec::<Value>::new(),
+        "T-2 was never given to the window at work on T-1"
+    );
+
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    let pane = pane_of(&context, "zeus");
+    assert_eq!(
+        context.host.inputs(),
+        [escape(&pane)],
+        "the pause of the task it works on is a stop of it"
+    );
+}
+
+#[test]
+fn the_words_that_first_reach_a_window_for_a_task_paused_before_they_came_answer_that_pause() {
+    let context = Context::new();
+    let project = working(&context);
+    // T-2 is given to the window, which works on T-1, and is paused before any
+    // words of it reach the window: nothing in the window is for it to stop.
+    context.give(project, "zeus", "Docs");
+    context.pause_task(project, 2);
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs(), Vec::<Value>::new());
+    // T-1 ends paused, and its window, seen at rest, pays that stop with no key.
+    context.pause_task(project, 1);
+    context.adapter.answer("zeus", "Stopped");
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs(), Vec::<Value>::new());
+
+    // The words that resume T-2 are the first it is given, a window at rest
+    // taking them: no turn of the window was ever for T-2's pause to stop.
+    context.resume_task(project, 2, "Go on");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 2).task.state, "working");
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.inputs(),
+        Vec::<Value>::new(),
+        "the turn the words began is not interrupted for a pause that came before them"
+    );
+}
+
+#[test]
+fn a_stop_paid_for_one_task_the_window_held_never_hides_the_stop_of_the_task_it_goes_on_with() {
+    let context = Context::new();
+    let project = working(&context);
+    context.give(project, "zeus", "Docs");
+    // T-1 is paused and its turn ends before a look finds it at work: the
+    // window, seen at rest, pays the stop with no key.
+    context.pause_task(project, 1);
+    context.adapter.answer("zeus", "Stopped");
+    context.pass().unwrap();
+    // The words of T-2 go in, and the window works on it.
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 2).task.state, "working");
+    assert_eq!(context.task(project, 1).task.state, "paused");
+    assert_eq!(context.host.inputs(), Vec::<Value>::new());
+
+    // T-2 is paused in its turn: its stop is owed, whatever was paid for T-1.
+    context.adapter.busy("zeus");
+    context.pause_task(project, 2);
+    context.pass().unwrap();
+    let pane = pane_of(&context, "zeus");
+    assert_eq!(context.host.inputs(), [escape(&pane)]);
+}

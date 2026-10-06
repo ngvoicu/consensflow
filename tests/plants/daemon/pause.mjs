@@ -249,7 +249,7 @@ export const PLANTS = [
     edits: [
       [
         `${ENGINE}/windows.rs`,
-        '            part.stopped = captured.map(|stop| (stop.task_id, stop.seq));',
+        '            part.stopped = planned.stop.map(|stop| (stop.task_id, stop.seq));',
         lines(
           '            part.stopped = self',
           '                .seams',

@@ -146,6 +146,14 @@ pub(crate) fn continuable_session(
             ))
         }
     };
+    require_free(store, &session)?;
+    bring_back(store, session)
+}
+
+/// A member session takes one task at a time: one with a task on its hands
+/// is refused another, a follow-up or a task sent back to it alike, so that
+/// its window is never at work on one task while the board speaks of another.
+pub(crate) fn require_free(store: &Store, session: &ParticipantRow) -> Result<(), LedgerError> {
     if holds_work(store, session.id)? {
         return Err(LedgerError::refused_with(
             "session-busy",
@@ -156,7 +164,7 @@ pub(crate) fn continuable_session(
             409,
         ));
     }
-    bring_back(store, session)
+    Ok(())
 }
 
 /// Whether a member has a task on its hands: one task per member session

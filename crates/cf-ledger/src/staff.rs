@@ -22,7 +22,8 @@ pub(crate) use pools::{candidates, has_members_of_tier, members, nearest_tier};
 pub(crate) use quota::{mark_back, mark_out};
 use sessions::close_session;
 pub(crate) use sessions::{
-    bring_back, can_continue, continuable_session, end_session, holds_work, start_session,
+    bring_back, can_continue, continuable_session, end_session, holds_work, require_free,
+    start_session,
 };
 
 /// A participant joining a project: its handle, its role or its roles (the
