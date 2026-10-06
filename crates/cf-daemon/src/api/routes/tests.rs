@@ -41,7 +41,7 @@ fn each_route_is_the_one_node_matches_for_its_method_and_path() {
     assert_eq!(route(Method::POST, "/api/answers"), Some(Route::Answers));
 }
 
-/// The one route Node has no twin of: a door says it handed its answer over.
+/// A route Node has no twin of: a door says it handed its answer over.
 #[test]
 fn the_receipt_of_an_answer_is_a_post_to_its_number_and_nothing_else_is() {
     assert_eq!(
@@ -61,6 +61,25 @@ fn the_receipt_of_an_answer_is_a_post_to_its_number_and_nothing_else_is() {
         (Method::POST, "/api/answers/12/receipt/"),
         (Method::POST, "/api/answers/12/Receipt"),
         (Method::POST, "/api/answers/12/receipts"),
+    ] {
+        assert_eq!(route(method.clone(), path), None, "{method} {path}");
+    }
+}
+
+/// The other: `cf` says which answers it wrote whole.
+#[test]
+fn the_read_of_answers_is_a_post_to_read_and_nothing_else_is() {
+    assert_eq!(
+        route(Method::POST, "/api/answers/read"),
+        Some(Route::AnswersRead)
+    );
+    for (method, path) in [
+        (Method::GET, "/api/answers/read"),
+        (Method::PUT, "/api/answers/read"),
+        (Method::POST, "/api/answers/read/"),
+        (Method::POST, "/api/answers/Read"),
+        (Method::POST, "/api/answers/reads"),
+        (Method::POST, "/api/answers/read/receipt"),
     ] {
         assert_eq!(route(method.clone(), path), None, "{method} {path}");
     }
@@ -232,6 +251,7 @@ async fn every_route_is_answered_by_a_handler_of_its_own() {
             Route::AnswerReceipt { id: "9".to_owned() },
             400,
         ),
+        (Method::POST, "/api/answers/read", Route::AnswersRead, 400),
     ] {
         let asked = request(method.clone(), path, Some(&scene.zeus), "");
         let (got, body) = said(dispatch(&scene.context, &caller, route, asked).await);
@@ -414,6 +434,11 @@ pub(super) mod support {
 
     /// A task the chief put on the board for a standard worker, which waits.
     pub(in crate::api::routes) fn open_task(scene: &Scene) -> i64 {
+        open_task_of(scene, "Lexer")
+    }
+
+    /// [`open_task`], with `brief` as its words.
+    pub(in crate::api::routes) fn open_task_of(scene: &Scene, brief: &str) -> i64 {
         let created = scene
             .context
             .ledger
@@ -424,7 +449,7 @@ pub(super) mod support {
                     from: "chief".to_owned(),
                     pool: Some("worker".to_owned()),
                     tier: Some("standard".to_owned()),
-                    body: "Lexer".to_owned(),
+                    body: brief.to_owned(),
                     ..NewTask::default()
                 },
             )
@@ -460,13 +485,18 @@ pub(super) mod support {
     /// worker and given to `zeus` by the daemon: its brief waits at the gate.
     /// The token of the session the daemon opened, and the brief's number.
     pub(in crate::api::routes) fn gated_brief(scene: &Scene) -> (String, i64) {
+        gated_brief_of(scene, "Lexer")
+    }
+
+    /// [`gated_brief`], with `brief` as its words.
+    pub(in crate::api::routes) fn gated_brief_of(scene: &Scene, brief: &str) -> (String, i64) {
         scene
             .context
             .ledger
             .borrow_mut()
             .set_gate(scene.project.id, true)
             .unwrap();
-        let number = open_task(scene);
+        let number = open_task_of(scene, brief);
         let mut ledger = scene.context.ledger.borrow_mut();
         let project = ledger.project(scene.project.id).unwrap().unwrap();
         let zeus = project

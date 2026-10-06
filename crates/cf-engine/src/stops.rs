@@ -116,10 +116,13 @@ impl Dispatcher {
     }
 
     /// One look at a member's window, as far as the stops of its task go. At
-    /// rest, what a door claimed and nobody acknowledged is the ledger's
-    /// again, and a stop owed is paid with no key; at work, it is
-    /// interrupted by the cadence. `starting` is whether the look found the
-    /// window still drawing its screen or unnamed: it is neither.
+    /// rest, and while the window shows a dialog of its own, what a door
+    /// claimed and nobody acknowledged is the ledger's again (a door that
+    /// handed its answer over has no dialog open: it gave up, or it is gone,
+    /// and nothing else would free the claim); a stop owed is paid at rest
+    /// with no key; at work, it is interrupted by the cadence. `starting` is
+    /// whether the look found the window still drawing its screen or
+    /// unnamed: it is neither.
     pub(crate) async fn settle_stop(
         self: &Rc<Self>,
         project: &ProjectView,
@@ -138,11 +141,16 @@ impl Dispatcher {
         } else {
             Look::Work
         };
-        if look == Look::Rest {
+        let unclaim = match look {
+            Look::Rest => Some("its window is at rest"),
+            _ if observed.waiting.is_some() => Some("its window shows a dialog of its own"),
+            _ => None,
+        };
+        if let Some(because) = unclaim {
             self.seams
                 .ledger
                 .borrow_mut()
-                .release_claims(participant.id, "its window is at rest")?;
+                .release_claims(participant.id, because)?;
         }
         let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
         if let Some(stop) = stop.filter(|stop| self.owes(record, stop)) {

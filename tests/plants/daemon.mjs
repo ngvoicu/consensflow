@@ -28,6 +28,7 @@ import { PLANTS as LAUNCHER } from './daemon/launcher.mjs'
 import { PLANTS as PARTS } from './daemon/parts.mjs'
 import { PLANTS as PAUSE } from './daemon/pause.mjs'
 import { PLANTS as PLAYERS } from './daemon/players.mjs'
+import { PLANTS as RECEIPT_A } from './daemon/receipt-a.mjs'
 import { PLANTS as RUN } from './daemon/run.mjs'
 import { PLANTS as SCREENS } from './daemon/screens.mjs'
 import { PLANTS as SUPPORT } from './daemon/support.mjs'
@@ -47,6 +48,7 @@ const PLANTS = [
   ...PLAYERS,
   ...LAUNCHER,
   ...PAUSE,
+  ...RECEIPT_A,
 ]
 
 const args = process.argv.slice(2)
@@ -117,6 +119,50 @@ function leave(code) {
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => leave(130))
 
 /**
+ * One run of tests: a `cargo test` of the arguments a run is, or `node --test`
+ * of the files of a run written `{ node: [...] }`.
+ */
+function testRun(run) {
+  return Array.isArray(run) ? cargoTest(run) : nodeTest(run.node)
+}
+
+/**
+ * One `node --test`: its output, and the tests it says failed (the TAP
+ * reporter's `not ok` lines, which a test of the files' own failures is
+ * among and a failing file as a whole is another).
+ */
+function nodeTest(files) {
+  return new Promise((resolve) => {
+    const child = spawn('node', ['--test', '--test-reporter=tap', ...files], {
+      cwd: REPO,
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    running = child
+    let output = ''
+    child.stdout.on('data', (data) => {
+      output += data
+    })
+    child.stderr.on('data', (data) => {
+      output += data
+    })
+    let hung = false
+    const late = setTimeout(() => {
+      hung = true
+      endRun()
+    }, RUN_LIMIT)
+    child.on('close', (code) => {
+      clearTimeout(late)
+      running = null
+      const caught = [...output.matchAll(/^\s*not ok \d+ - (.+)$/gm)].map((hit) => hit[1])
+      if (!hung && code !== 0 && caught.length === 0)
+        caught.push(`node --test ${files.join(' ')} failed`)
+      resolve({ output, caught, compiled: true, hung, runArgs: ['node', '--test', ...files] })
+    })
+  })
+}
+
+/**
  * One `cargo test`: its output, and what caught the plant if anything did: the
  * tests it says failed, or the run itself where a test binary died with no
  * test left to say so (a signal nothing was ready for).
@@ -169,7 +215,7 @@ async function trial(plant) {
   try {
     let ran = null
     for (const runArgs of plant.runs) {
-      ran = await cargoTest(runArgs)
+      ran = await testRun(runArgs)
       if (!ran.compiled) return { verdict: 'does not compile', ran }
       if (ran.hung) return { verdict: 'hung', ran }
       if (ran.caught.length > 0) return { verdict: 'caught', ran }

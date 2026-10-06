@@ -8,12 +8,17 @@
 //! codex-session`) ask through [`ask`], where a closed window ends the wait.
 //! An answer is claimed for the door when it polls for it, and is the door's
 //! to hand to its harness: once it has, it says so ([`acknowledge`]), which
-//! is what makes the answer received. A door that was shut by a pause is
-//! refused, and what the board says it is passed on as it is. OpenCode's
-//! extension keeps its own copy, `hosts/lib/question-door.js`: the harness
-//! loads it into its own runtime.
+//! is what makes the answer received. A poll that gets no answer (its reply
+//! was lost on its way back) is asked again a few times, and the board gives
+//! the same claimed answer to the same question: the harness's own dialog,
+//! which nobody watches in a member's window, takes over only from a board
+//! that stays out of reach. A door that was shut by a pause is refused, and
+//! what the board says it is passed on as it is. OpenCode's extension keeps
+//! its own copy, `hosts/lib/question-door.js`: the harness loads it into its
+//! own runtime.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
@@ -69,6 +74,17 @@ const DOOR_CLOSED: &str = "door-closed";
 pub const DOOR_WAIT: Duration = Duration::from_millis(3_500_000);
 /// One request's share of that wait; the API holds a request 25 seconds at most.
 const POLL_WAIT: Duration = Duration::from_secs(20);
+/// How long a door waits before it asks again after a poll that got no
+/// answer, once for each poll that failed in a row: the poll's reply may have
+/// been lost on its way back, and the board gives the same answer to the same
+/// question again. A board that stays out of reach through all of them is
+/// gone, and the harness's own dialog takes over.
+const POLL_RETRIES: [Duration; 4] = [
+    Duration::from_millis(250),
+    Duration::from_millis(500),
+    Duration::from_millis(1_000),
+    Duration::from_millis(2_000),
+];
 
 /// What a member's window tells its model when the board refuses its
 /// question: nobody watches a member's window, so its own dialog would hold
@@ -84,12 +100,25 @@ fn refusal_reason(cause: &BoardError) -> String {
 /// out), or until `stop` is raised: checked before each request, so a poll
 /// already held at the board ends first (up to 20 seconds). A window whose
 /// question nobody waits for any more (its broker closed, its connection
-/// gone) raises it.
+/// gone) raises it. A poll that gets no answer is asked again
+/// ([`POLL_RETRIES`]); the question itself is put once, whatever comes of it.
 fn ask_the_board_until(
     board: &Board,
     questions: &[Question],
     wait: Duration,
     stop: &AtomicBool,
+) -> Result<Option<Answer>, BoardError> {
+    ask_retrying(board, questions, wait, stop, &POLL_RETRIES)
+}
+
+/// [`ask_the_board_until`], a poll that gets no answer asked again after each
+/// pause of `retries`.
+fn ask_retrying(
+    board: &Board,
+    questions: &[Question],
+    wait: Duration,
+    stop: &AtomicBool,
+    retries: &[Duration],
 ) -> Result<Option<Answer>, BoardError> {
     if stop.load(Ordering::Relaxed) {
         return Ok(None);
@@ -101,6 +130,7 @@ fn ask_the_board_until(
         .and_then(Value::as_u64)
         .ok_or_else(|| posted.lacks("message id"))?;
     let until = Instant::now().checked_add(wait);
+    let mut lost = 0;
     loop {
         let left = until.map_or(POLL_WAIT, |until| {
             until.saturating_duration_since(Instant::now())
@@ -112,7 +142,16 @@ fn ask_the_board_until(
             "/api/questions/{id}?wait={}",
             left.min(POLL_WAIT).as_millis()
         );
-        let polled = board.get(&path)?;
+        let polled = match board.get(&path) {
+            Ok(polled) => polled,
+            Err(cause) if cause.is_unreachable() && lost < retries.len() => {
+                thread::sleep(retries[lost]);
+                lost += 1;
+                continue;
+            }
+            Err(cause) => return Err(cause),
+        };
+        lost = 0;
         match polled.part("answer")? {
             Value::Null => {}
             answer => {
@@ -127,7 +166,7 @@ fn ask_the_board_until(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scripted::{reply, scripted};
+    use crate::scripted::{hang_up, reply, scripted};
     use cf_proto::questions::Choice;
 
     fn one_question() -> Vec<Question> {
@@ -244,6 +283,125 @@ mod tests {
         let asked = ask_the_board_until(&board, &one_question(), DOOR_WAIT, &AtomicBool::new(true));
         assert_eq!(asked.unwrap(), None);
         assert!(api.received().is_empty());
+    }
+
+    const QUICK: [Duration; 4] = [Duration::from_millis(1); 4];
+
+    #[test]
+    fn a_poll_whose_reply_was_lost_is_asked_again_and_gets_the_answer_the_board_claimed_for_it() {
+        // The board took the poll, claimed the answer for it, and the reply
+        // never got back: asked again, it gives the same answer.
+        let api = scripted(vec![
+            reply(201, json!({ "message": { "id": 12 } })),
+            hang_up(),
+            reply(
+                200,
+                json!({ "question": {}, "answer": { "id": 13, "choices": [["SQLite"]] } }),
+            ),
+        ]);
+        let board = Board::new(Some(&api.url), "tok");
+        let answer = ask_retrying(
+            &board,
+            &one_question(),
+            DOOR_WAIT,
+            &AtomicBool::new(false),
+            &QUICK,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(answer.id(), Some(13));
+        let paths: Vec<_> = api
+            .received()
+            .into_iter()
+            .map(|r| (r.method, r.path))
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                ("POST".to_owned(), "/api/questions".to_owned()),
+                ("GET".to_owned(), "/api/questions/12?wait=20000".to_owned()),
+                ("GET".to_owned(), "/api/questions/12?wait=20000".to_owned()),
+            ],
+            "the question was put once and the poll twice"
+        );
+    }
+
+    #[test]
+    fn a_board_that_stays_out_of_reach_is_asked_four_times_more_and_then_the_dialog_takes_over() {
+        let mut replies = vec![reply(201, json!({ "message": { "id": 12 } }))];
+        replies.extend((0..5).map(|_| hang_up()));
+        // A sixth would be an answer: it must not be asked for.
+        replies.push(reply(
+            200,
+            json!({ "question": {}, "answer": { "id": 13, "choices": [["SQLite"]] } }),
+        ));
+        let api = scripted(replies);
+        let board = Board::new(Some(&api.url), "tok");
+        let stop = AtomicBool::new(false);
+        let asked = ask_retrying(&board, &one_question(), DOOR_WAIT, &stop, &QUICK);
+        // What `ask` makes of it is the harness's own dialog.
+        assert!(asked.unwrap_err().is_unreachable());
+        assert_eq!(api.received().len(), 6, "the question, and five polls");
+    }
+
+    #[test]
+    fn polls_that_fail_once_each_between_answers_never_add_up_to_the_end_of_the_door() {
+        // Five failures in all, none more than one in a row: each is forgiven.
+        let mut replies = vec![reply(201, json!({ "message": { "id": 12 } }))];
+        for _ in 0..5 {
+            replies.push(hang_up());
+            replies.push(reply(200, json!({ "question": {}, "answer": null })));
+        }
+        replies.push(reply(
+            200,
+            json!({ "question": {}, "answer": { "id": 13, "choices": [["SQLite"]] } }),
+        ));
+        let api = scripted(replies);
+        let board = Board::new(Some(&api.url), "tok");
+        let answer = ask_retrying(
+            &board,
+            &one_question(),
+            DOOR_WAIT,
+            &AtomicBool::new(false),
+            &QUICK,
+        )
+        .unwrap();
+        assert_eq!(answer.and_then(|answer| answer.id()), Some(13));
+    }
+
+    #[test]
+    fn the_question_is_put_once_whatever_comes_of_it_and_a_refusal_or_an_unreadable_answer_is_not_asked_again(
+    ) {
+        let api = scripted(vec![
+            hang_up(),
+            reply(201, json!({ "message": { "id": 12 } })),
+        ]);
+        let board = Board::new(Some(&api.url), "tok");
+        let lost = ask_retrying(
+            &board,
+            &one_question(),
+            DOOR_WAIT,
+            &AtomicBool::new(false),
+            &QUICK,
+        );
+        assert!(lost.unwrap_err().is_unreachable());
+        assert_eq!(api.received().len(), 1, "no second question");
+
+        let api = scripted(vec![
+            reply(201, json!({ "message": { "id": 12 } })),
+            reply(409, json!({ "error": "door-closed", "message": "shut" })),
+            reply(200, json!({ "question": {}, "answer": null })),
+        ]);
+        let board = Board::new(Some(&api.url), "tok");
+        let refused = ask_retrying(
+            &board,
+            &one_question(),
+            DOOR_WAIT,
+            &AtomicBool::new(false),
+            &QUICK,
+        );
+        assert!(refused.unwrap_err().is_refusal());
+        assert_eq!(api.received().len(), 2, "the refusal was final");
     }
 
     #[test]

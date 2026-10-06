@@ -7,8 +7,17 @@ export const PLANTS = [
     edits: [
       [
         `${DAEMON}/api/routes/door.rs`,
-        '        if context.closing.is_set() || context.credentials.resolve(request.bearer()).is_none() {',
-        '        if context.credentials.resolve(request.bearer()).is_none() {',
+        lines(
+          '        if context.closing.is_set()',
+          '            || request.consumer().has_left()',
+          '            || context.credentials.resolve(request.bearer()).is_none()',
+          '        {',
+        ),
+        lines(
+          '        if request.consumer().has_left()',
+          '            || context.credentials.resolve(request.bearer()).is_none()',
+          '        {',
+        ),
       ],
       [
         `${DAEMON}/api/routes/door.rs`,
@@ -24,9 +33,9 @@ export const PLANTS = [
     edits: [
       [
         `${DAEMON}/api/routes/door.rs`,
-        lines('            () = context.closing.wait() => {}', '        }', '    }'),
+        lines('            () = request.consumer().left() => {}', '        }', '    }'),
         lines(
-          '            () = context.closing.wait() => {}',
+          '            () = request.consumer().left() => {}',
           '        }',
           '        return unanswered(&asked);',
           '    }',

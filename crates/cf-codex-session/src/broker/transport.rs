@@ -6,15 +6,17 @@
 use std::cell::Cell;
 use std::io;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use cf_base::json::{from_slice_lossy, is_json_lossy};
-use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::stream::SplitStream;
+use futures_util::{Sink, SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::{self, ClientRequestBuilder, Message, Utf8Bytes};
@@ -35,7 +37,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Io for T {}
 
 /// A WebSocket, over whatever carries it.
 pub(crate) type Socket = WebSocketStream<Box<dyn Io>>;
-pub(crate) type SocketSink = SplitSink<Socket, Message>;
 pub(crate) type SocketStream = SplitStream<Socket>;
 
 /// What every socket is configured with: messages and frames up to
@@ -144,19 +145,35 @@ pub(crate) enum Sent {
     Full,
 }
 
+/// What waits in a socket's queue: a message, and for one whose fate matters
+/// to someone, what it is watched by.
+struct Queued {
+    message: Message,
+    watch: Option<Watch>,
+}
+
+/// What watches a queued message: `ended`, raised once it is no longer
+/// wanted, and where the writer says what became of it. A message dropped
+/// from the queue unsent says nothing, which its receiver reads as not
+/// written.
+struct Watch {
+    ended: Arc<AtomicBool>,
+    written: oneshot::Sender<bool>,
+}
+
 /// The way into a socket's writer: messages wait in its queue, and the bytes
 /// the queue holds (what the writer has not finished sending included) are
 /// counted, so a socket that does not take what is sent cannot be made to hold
 /// without limit.
 pub(crate) struct Outbox {
-    queue: mpsc::UnboundedSender<Message>,
+    queue: mpsc::UnboundedSender<Queued>,
     unsent: Rc<Cell<usize>>,
     open: Rc<Cell<bool>>,
 }
 
 /// The writer's end of an [`Outbox`].
 pub(crate) struct Inbox {
-    queue: mpsc::UnboundedReceiver<Message>,
+    queue: mpsc::UnboundedReceiver<Queued>,
     unsent: Rc<Cell<usize>>,
     open: Rc<Cell<bool>>,
 }
@@ -185,6 +202,30 @@ impl Outbox {
     /// would hold more than [`MAX_FRAME`] bytes unsent. Synchronous, so
     /// whoever sends is not interrupted between a check and the send.
     pub(crate) fn send(&self, message: Message) -> Sent {
+        self.enqueue(message, None)
+    }
+
+    /// [`Outbox::send`], for a message that is not wanted any more once
+    /// `ended` is raised: the writer, which reads it right before it begins
+    /// the message, sends nothing of it from then on. What the writer made of
+    /// it comes through the receiver: true when it was written to the socket
+    /// whole, false when `ended` came first or the socket failed or went
+    /// before it was written (a dropped receiver is that too). The writer
+    /// begins a message once, and one begun is written whatever is raised
+    /// meanwhile.
+    pub(crate) fn send_unless(
+        &self,
+        message: Message,
+        ended: Arc<AtomicBool>,
+    ) -> Result<oneshot::Receiver<bool>, Sent> {
+        let (written, reported) = oneshot::channel();
+        match self.enqueue(message, Some(Watch { ended, written })) {
+            Sent::Queued => Ok(reported),
+            refused => Err(refused),
+        }
+    }
+
+    fn enqueue(&self, message: Message, watch: Option<Watch>) -> Sent {
         if !self.open.get() {
             return Sent::Closed;
         }
@@ -193,7 +234,7 @@ impl Outbox {
             return Sent::Full;
         }
         self.unsent.set(self.unsent.get() + size);
-        if self.queue.send(message).is_err() {
+        if self.queue.send(Queued { message, watch }).is_err() {
             self.open.set(false);
             return Sent::Closed;
         }
@@ -207,11 +248,22 @@ impl Outbox {
 }
 
 /// Sends what the queue holds to `sink`, in order, until the queue ends: true
-/// then; false when the socket failed.
-pub(crate) async fn write_all(mut sink: SocketSink, mut inbox: Inbox) -> bool {
-    while let Some(message) = inbox.queue.recv().await {
+/// then; false when the socket failed. A message that is not wanted any more
+/// when its turn comes is skipped, and the one who asked is told it was not
+/// written; so is the one whose message the socket failed on, and whoever's
+/// message was left in the queue with it.
+pub(crate) async fn write_all<S: Sink<Message> + Unpin>(mut sink: S, mut inbox: Inbox) -> bool {
+    while let Some(Queued { message, watch }) = inbox.queue.recv().await {
         let size = message.len();
-        if sink.send(message).await.is_err() {
+        let wanted = watch
+            .as_ref()
+            .is_none_or(|watch| !watch.ended.load(Ordering::SeqCst));
+        let written = wanted && sink.send(message).await.is_ok();
+        if let Some(watch) = watch {
+            // Whoever asked may not be waiting any more.
+            let _ = watch.written.send(written);
+        }
+        if wanted && !written {
             inbox.open.set(false);
             return false;
         }

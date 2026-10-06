@@ -1,7 +1,8 @@
 //! The door's wait, on the clock that moves only when nothing else can run:
 //! how long it holds, what ends it early, what it refuses, and what a poll
 //! writes: the answer it finds is claimed for the door, and nothing is
-//! claimed for a daemon that is stopping or a window that is gone.
+//! claimed for a daemon that is stopping, a window that is gone or a client
+//! that has left.
 
 use std::time::Duration;
 
@@ -10,7 +11,7 @@ use serde_json::{json, Value};
 
 use super::*;
 use crate::api::callers::caller_of;
-use crate::api::routes::tests::support::working_question;
+use crate::api::routes::tests::support::{state_of, working_question};
 use crate::testing::{request, said, scene, Scene};
 
 /// The door of `zeus` for message `id`, asked as `target` says, answered when it is.
@@ -249,6 +250,131 @@ async fn a_window_that_exited_ends_its_poll_at_the_next_look_and_nothing_is_clai
         scene.next_for_zeus().is_some(),
         "nothing was claimed for it"
     );
+}
+
+/// The door of zeus for the question `id`, whose client `leaves` of at some
+/// time: the answer it was given, and the status.
+async fn door_whose_client_leaves(
+    scene: &Scene,
+    id: &str,
+    leaves: impl std::future::Future<Output = ()>,
+) -> (u16, Value) {
+    let asked = request(
+        Method::GET,
+        &format!("/api/questions/{id}?wait=25000"),
+        Some(&scene.zeus),
+        "",
+    );
+    let client = asked.consumer().clone();
+    let caller = caller_of(&scene.context, &asked).unwrap();
+    let (answered, ()) = tokio::join!(handle(&scene.context, &caller, asked, id), async {
+        leaves.await;
+        client.leave();
+    });
+    said(answered)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_client_that_leaves_ends_the_poll_at_once_and_an_answer_that_comes_after_is_not_claimed_for_it(
+) {
+    let scene = scene();
+    let question = working_question(&scene);
+    let id = question.id.to_string();
+    let started = Instant::now();
+    let answered = door_whose_client_leaves(&scene, &id, async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    })
+    .await;
+    assert_eq!((answered.0, &answered.1["answer"]), (200, &Value::Null));
+    assert_eq!(
+        started.elapsed(),
+        Duration::from_millis(100),
+        "not at the next poll, nor at the end of the wait"
+    );
+    // The answer comes with nobody there to read it: the paste has it.
+    scene.choose(question.id, "red");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(scene.next_for_zeus(), Some("H: red".to_owned()));
+    assert_eq!(scene.logged("delivery.claimed"), 0);
+}
+
+/// Astraeus's sequence for the claim that outlives its request: the door's
+/// client goes while its poll waits, the chief's answer comes after, and the
+/// door asks again. The dead poll claimed nothing, so the answer is the new
+/// poll's, claimed once, and it is the task's way out of waiting.
+#[tokio::test(start_paused = true)]
+async fn a_door_that_asks_again_after_its_client_left_gets_the_answer_the_dead_poll_did_not_take() {
+    let scene = scene();
+    let question = working_question(&scene);
+    let id = question.id.to_string();
+    let first = door_whose_client_leaves(&scene, &id, async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    })
+    .await;
+    assert_eq!(first.1["answer"], Value::Null);
+    scene.choose(question.id, "red");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        scene.logged("delivery.claimed"),
+        0,
+        "nobody was there to take it"
+    );
+    // The door asks again, and is given the answer.
+    let target = format!("/api/questions/{id}?wait=25000");
+    let (status, body) = door(&scene, &scene.zeus, &target, &id).await;
+    assert_eq!(
+        (status, &body["answer"]["choices"]),
+        (200, &json!([["red"]]))
+    );
+    assert_eq!(
+        scene.logged("delivery.claimed"),
+        1,
+        "claimed once, for the one that took it"
+    );
+    // Handed over, said so, and the task is not waiting any more.
+    let answer = scene
+        .context
+        .ledger
+        .borrow()
+        .inbox(scene.id("zeus"), 100)
+        .unwrap()
+        .into_iter()
+        .find(|message| message.kind == "answer")
+        .unwrap();
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .settle_claim(answer.id, scene.id("zeus"), true)
+        .unwrap();
+    assert_eq!(state_of(&scene, 1), "working");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_poll_whose_client_has_gone_before_it_looks_claims_nothing_though_the_answer_is_there() {
+    let scene = scene();
+    let question = working_question(&scene);
+    scene.choose(question.id, "red");
+    let id = question.id.to_string();
+    let asked = request(
+        Method::GET,
+        &format!("/api/questions/{id}?wait=25000"),
+        Some(&scene.zeus),
+        "",
+    );
+    asked.consumer().leave();
+    let caller = caller_of(&scene.context, &asked).unwrap();
+    let started = Instant::now();
+    let (status, body) = said(handle(&scene.context, &caller, asked, &id).await);
+    assert_eq!((status, &body["answer"]), (200, &Value::Null));
+    assert_eq!(started.elapsed(), Duration::ZERO);
+    assert_eq!(
+        scene.next_for_zeus(),
+        Some("H: red".to_owned()),
+        "not claimed"
+    );
+    assert_eq!(scene.logged("delivery.claimed"), 0);
+    assert_eq!(scene.kicks.get(), 0);
 }
 
 #[tokio::test(start_paused = true)]

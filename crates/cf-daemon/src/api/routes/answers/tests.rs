@@ -2,12 +2,13 @@
 //! and that the dispatcher is woken once the answer is written and never
 //! for one that was refused.
 
+use cf_ledger::MessageView;
 use hyper::Method;
 use serde_json::{json, Value};
 
 use super::*;
 use crate::api::callers::caller_of;
-use crate::api::routes::tests::support::{question_on, state_of, working_question};
+use crate::api::routes::tests::support::{note_for_zeus, question_on, state_of, working_question};
 use crate::testing::{request, said, scene, Scene};
 
 /// `POST /api/answers` from the window of `token`, with `body` as its text.
@@ -419,6 +420,142 @@ async fn only_the_one_an_answer_was_for_may_say_it_was_handed_over_and_only_of_a
         format!("no answer m-{} for you", answer.id)
     );
     assert_eq!(scene.message(answer.id).state, "queued", "nothing was read");
+    assert_eq!(scene.kicks.get(), 0);
+}
+
+/// `POST /api/answers/read` from the window of `token`, with `body` as its text.
+async fn read_from(scene: &Scene, token: &str, body: &str) -> (u16, Value) {
+    let asked = request(Method::POST, "/api/answers/read", Some(token), body);
+    let caller = caller_of(&scene.context, &asked).unwrap();
+    said(read(&scene.context, &caller, asked).await)
+}
+
+fn said_read(ids: &[i64], via: &str) -> String {
+    json!({ "answers": ids, "via": via }).to_string()
+}
+
+#[tokio::test]
+async fn answers_cf_wrote_whole_are_received_by_the_one_they_are_for_and_the_dispatcher_is_woken() {
+    let scene = scene();
+    let question = working_question(&scene);
+    let first = scene.choose(question.id, "red");
+    let other = question_on(&scene, 1);
+    let second = scene.choose(other.id, "blue");
+    assert_eq!(state_of(&scene, 1), "waiting");
+    // One of the two, said to have been read with `cf task get`: the other still obliges.
+    let (status, said) = read_from(&scene, &scene.zeus, &said_read(&[first.id], "task")).await;
+    assert_eq!((status, said), (200, json!({})));
+    let read = scene.message(first.id);
+    assert_eq!(read.state, "read");
+    assert_eq!(read.receipt, json!({ "read": "task" }));
+    assert!(read.delivered_at.is_some());
+    assert_eq!(
+        state_of(&scene, 1),
+        "waiting",
+        "the other question has no answer yet"
+    );
+    assert_eq!(scene.logged("message.read"), 1);
+    assert_eq!(scene.kicks.get(), 1, "the dispatcher is woken");
+    // The other, by `cf inbox read`: the task goes on.
+    let (status, _) = read_from(&scene, &scene.zeus, &said_read(&[second.id], "inbox")).await;
+    assert_eq!(status, 200);
+    assert_eq!(scene.message(second.id).receipt, json!({ "read": "inbox" }));
+    assert_eq!(state_of(&scene, 1), "working");
+    assert_eq!(scene.kicks.get(), 2);
+}
+
+#[tokio::test]
+async fn an_answer_a_door_claimed_is_received_by_a_read_and_its_claim_is_given_up() {
+    let scene = scene();
+    let (_, answer) = claimed(&scene);
+    assert_eq!(scene.next_for_zeus(), None, "claimed: the paste skips it");
+    let (status, _) = read_from(&scene, &scene.zeus, &said_read(&[answer.id], "inbox")).await;
+    assert_eq!(status, 200);
+    assert_eq!(scene.message(answer.id).receipt, json!({ "read": "inbox" }));
+    assert_eq!(state_of(&scene, 1), "working");
+    assert_eq!(scene.next_for_zeus(), None, "nothing is left to paste");
+}
+
+#[tokio::test]
+async fn what_is_not_a_queued_answer_for_the_caller_is_left_as_it_is_and_wakes_nothing() {
+    let scene = scene();
+    let (_, answer) = claimed(&scene);
+    let note = note_for_zeus(&scene, 1, "Mind the tests");
+    // Said by the chief, who is not the one it was for; a note; a message that is not there.
+    let (status, _) = read_from(
+        &scene,
+        &scene.chief,
+        &said_read(&[answer.id, scene.question.id], "task"),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (status, _) = read_from(
+        &scene,
+        &scene.zeus,
+        &said_read(&[note.id, 99_999, -1, 0], "task"),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(scene.message(answer.id).state, "queued");
+    assert_eq!(scene.message(note.id).state, "queued");
+    assert_eq!(scene.logged("message.read"), 0);
+    assert_eq!(scene.kicks.get(), 0);
+    // An answer received is not received twice.
+    read_from(&scene, &scene.zeus, &said_read(&[answer.id], "task")).await;
+    read_from(&scene, &scene.zeus, &said_read(&[answer.id], "task")).await;
+    assert_eq!(scene.logged("message.read"), 1);
+    assert_eq!(scene.kicks.get(), 1);
+}
+
+#[tokio::test]
+async fn an_answer_held_for_the_human_is_not_received_by_being_named() {
+    let scene = scene();
+    let question = working_question(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .set_gate(scene.project.id, true)
+        .unwrap();
+    let answer = scene.choose(question.id, "red");
+    assert_eq!(answer.state, "gated");
+    read_from(&scene, &scene.zeus, &said_read(&[answer.id], "task")).await;
+    assert_eq!(scene.message(answer.id).state, "gated");
+    assert_eq!(scene.kicks.get(), 0);
+}
+
+#[tokio::test]
+async fn a_read_that_names_no_answers_is_ok_and_one_that_is_no_list_of_numbers_or_names_no_way_is_refused(
+) {
+    let scene = scene();
+    let (_, answer) = claimed(&scene);
+    let (status, said) = read_from(&scene, &scene.zeus, &said_read(&[], "task")).await;
+    assert_eq!((status, said), (200, json!({})));
+    let id = answer.id;
+    for written in [
+        "{}".to_owned(),
+        r#"{"answers":[1]}"#.to_owned(),
+        json!({ "answers": [id], "via": "list" }).to_string(),
+        json!({ "answers": [id], "via": 3 }).to_string(),
+        json!({ "via": "task" }).to_string(),
+        json!({ "answers": id, "via": "task" }).to_string(),
+        json!({ "answers": [id, "7"], "via": "task" }).to_string(),
+        json!({ "answers": [id, 2.5], "via": "task" }).to_string(),
+        json!({ "answers": [null], "via": "task" }).to_string(),
+    ] {
+        let (status, said) = read_from(&scene, &scene.zeus, &written).await;
+        assert_eq!(status, 400, "{written}");
+        assert_eq!(said["error"], "invalid-read", "{written}");
+    }
+    for (written, status, error) in [
+        ("not json", 400, "invalid-json"),
+        ("[1]", 400, "invalid-json"),
+        (&"x".repeat(3 * 1024 * 1024), 413, "too-large"),
+    ] {
+        let (got, said) = read_from(&scene, &scene.zeus, written).await;
+        assert_eq!((got, said["error"].as_str()), (status, Some(error)));
+    }
+    assert_eq!(scene.next_for_zeus(), None, "the claim stands");
     assert_eq!(scene.kicks.get(), 0);
 }
 

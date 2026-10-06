@@ -1,12 +1,12 @@
 //! `GET /api/inbox`: what the ledger holds for the window, newest first, as
-//! summaries, and not what still waits for the human.
+//! summaries, and not what still waits for the human. A list changes nothing.
 
 use hyper::Method;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::api::routes::tests::support::{
     answer_in_words, answered_question, api, gated_brief, note_for_zeus, plain_question_on,
-    state_of, working_question, working_task,
+    question_on, state_of, working_question, working_task,
 };
 use crate::testing::scene;
 
@@ -83,65 +83,46 @@ fn listed(said: &Value) -> Vec<(i64, &str)> {
 }
 
 #[tokio::test]
-async fn an_answer_the_list_shows_whole_is_received_by_the_read_and_its_task_works_again() {
+async fn a_list_receives_nothing_whatever_it_shows_and_the_answers_are_still_to_be_delivered() {
     let scene = scene();
-    let answer = answered_question(&scene, "JSON");
-    assert_eq!(state_of(&scene, 1), "waiting");
-    let (status, said) = api(&scene, Method::GET, "/api/inbox", &scene.zeus, "").await;
-    assert_eq!(status, 200);
-    assert_eq!(
-        listed(&said)[0],
-        (answer.id, "queued"),
-        "the list says it as it was served"
-    );
-    let read = scene.message(answer.id);
-    assert_eq!(read.state, "read");
-    assert_eq!(read.receipt, json!({ "read": "inbox" }));
-    assert!(read.delivered_at.is_some());
-    assert_eq!(state_of(&scene, 1), "working");
-    assert_eq!(scene.logged("message.read"), 1);
-    assert_eq!(
-        scene.kicks.get(),
-        1,
-        "the dispatcher is woken: the task goes on"
-    );
-    // The next list says it read, and writes nothing more.
-    let (_, said) = api(&scene, Method::GET, "/api/inbox", &scene.zeus, "").await;
-    assert_eq!(listed(&said)[0], (answer.id, "read"));
-    assert_eq!(scene.logged("message.read"), 1);
-    assert_eq!(scene.kicks.get(), 1);
-}
-
-#[tokio::test]
-async fn an_answer_the_door_claimed_is_received_by_the_read_and_its_claim_is_given_up() {
-    let scene = scene();
-    let question = working_question(&scene);
-    let answer = scene.choose(question.id, "red");
-    scene.claim(question.id);
-    assert_eq!(scene.next_for_zeus(), None, "claimed: the paste skips it");
-    api(&scene, Method::GET, "/api/inbox", &scene.zeus, "").await;
-    assert_eq!(scene.message(answer.id).receipt, json!({ "read": "inbox" }));
-    assert_eq!(state_of(&scene, 1), "working");
-}
-
-#[tokio::test]
-async fn an_answer_the_list_cuts_and_a_note_are_not_received() {
-    let scene = scene();
-    // Two questions on the one task: one answered over two lines, one in a line too long for a preview.
+    // Four things on the one task: an answer the list shows whole, one it cuts
+    // over two lines, one in a line too long for a preview, and a note; and one
+    // a door claimed.
     let number = working_task(&scene);
-    let first = plain_question_on(&scene, number, "Which formats?");
-    let second = plain_question_on(&scene, number, "Which grammar?");
-    let two_lines = answer_in_words(&scene, first.id, "JSON\nand then YAML");
-    let long = answer_in_words(&scene, second.id, &"x".repeat(300));
+    let ask = |words: &str| plain_question_on(&scene, number, words);
+    let (first, second, third) = (ask("Which?"), ask("Which formats?"), ask("Which grammar?"));
+    let whole = answer_in_words(&scene, first.id, "JSON");
+    let two_lines = answer_in_words(&scene, second.id, "JSON\nand then YAML");
+    let long = answer_in_words(&scene, third.id, &"x".repeat(300));
     let note = note_for_zeus(&scene, number, "Mind the tests");
+    let claimed = question_on(&scene, number);
+    let held = scene.choose(claimed.id, "red");
+    scene.claim(claimed.id);
     let (status, said) = api(&scene, Method::GET, "/api/inbox", &scene.zeus, "").await;
     assert_eq!(status, 200);
-    for id in [two_lines.id, long.id, note.id] {
+    for id in [whole.id, two_lines.id, long.id, note.id, held.id] {
         assert!(listed(&said).contains(&(id, "queued")), "m-{id} is listed");
         assert_eq!(scene.message(id).state, "queued", "m-{id} was not received");
     }
-    assert_eq!(state_of(&scene, 1), "waiting");
+    assert_eq!(scene.message(held.id).receipt, Value::Null);
+    assert_eq!(state_of(&scene, number), "waiting");
+    assert_eq!(scene.logged("message.read"), 0);
     assert_eq!(scene.kicks.get(), 0, "nothing was written");
+    assert_eq!(scene.next_for_zeus(), Some("JSON".to_owned()));
+}
+
+#[tokio::test]
+async fn an_answer_a_list_showed_is_still_there_to_be_pasted_when_the_next_one_is_read() {
+    let scene = scene();
+    let answer = answered_question(&scene, "JSON");
+    assert_eq!(state_of(&scene, 1), "waiting");
+    for _ in 0..2 {
+        let (status, said) = api(&scene, Method::GET, "/api/inbox", &scene.zeus, "").await;
+        assert_eq!(status, 200);
+        assert_eq!(listed(&said)[0], (answer.id, "queued"));
+    }
+    assert_eq!(scene.next_for_zeus(), Some("H: JSON".to_owned()));
+    assert_eq!(state_of(&scene, 1), "waiting");
 }
 
 #[tokio::test]

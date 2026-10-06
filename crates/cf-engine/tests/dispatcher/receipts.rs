@@ -1,11 +1,13 @@
 //! What makes an answer received, and what a task does until it is: a door's
-//! claim that nobody acknowledged is voided when its window rests, exits or
-//! the daemon starts; an answer `cf` served whole is received; a turn that
-//! ends while the task waits makes no result. None of these tests is held to a
-//! Node recording: Node's answer was read when it was written.
+//! claim that nobody acknowledged is voided when its window rests, shows a
+//! dialog of its own, exits or the daemon starts; an answer `cf` says it
+//! printed whole is received; a turn that ends while the task waits makes no
+//! result. None of these tests is held to a Node recording: Node's answer was
+//! read when it was written.
 
 use cf_engine::delivery_text::marker_of;
 use cf_engine::testing::Context;
+use cf_harness::contract::Waiting;
 use cf_ledger::{Claim, NewQuestion, Read};
 use serde_json::json;
 
@@ -98,6 +100,74 @@ fn an_unacknowledged_claim_is_voided_at_the_look_that_finds_the_window_at_rest_a
     assert_eq!(context.message(answer).state, "delivered");
     context.pass().unwrap();
     assert_eq!(pasted(&context, answer), 1);
+}
+
+/// The door's transport failed after its poll claimed the answer, and the
+/// harness's own dialog took over: the window waits on it, which is neither
+/// at work nor at rest. Nobody that holds the claim is left, so the look gives
+/// it up; a dialog is no place to paste into, so the answer waits for the
+/// window to leave it, and is then pasted once and received: the task leaves
+/// waiting.
+#[test]
+fn a_claim_whose_door_gave_up_for_the_windows_own_dialog_is_voided_and_the_answer_is_pasted_once_the_dialog_is_gone(
+) {
+    let context = Context::new();
+    let (project, question, answer) = answered_through_a_door(&context);
+    claim(&context, project, question);
+    let zeus = context.id(project, "zeus");
+    assert_eq!(context.task(project, 1).task.state, "waiting");
+    context.adapter.with("zeus", |agent| {
+        agent.waiting = Some(Waiting {
+            reason: Some("a question".to_owned()),
+        });
+    });
+    context.pass().unwrap();
+    assert_eq!(
+        unclaimed(&context, project),
+        ["its window shows a dialog of its own"]
+    );
+    assert_eq!(
+        pasted(&context, answer),
+        0,
+        "nothing is pasted into a dialog"
+    );
+    assert_eq!(context.message(answer).state, "queued");
+    assert_eq!(
+        context
+            .ledger
+            .borrow()
+            .next_delivery(zeus)
+            .unwrap()
+            .map(|message| message.id),
+        Some(answer),
+        "the ledger's again, to deliver when the window can take it"
+    );
+    // Stays on the dialog: nothing is pasted at any look, and nothing is given up twice.
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, answer), 0);
+    // The dialog is left, the turn over: the window is at rest, and takes the answer.
+    context.adapter.with("zeus", |agent| {
+        agent.waiting = None;
+        agent.settled = true;
+    });
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, answer), 1, "pasted once, at that look");
+    context.pass().unwrap();
+    assert_eq!(context.message(answer).state, "delivered");
+    assert_eq!(context.task(project, 1).task.state, "working");
+    assert_eq!(pasted(&context, answer), 1);
+}
+
+#[test]
+fn a_dialog_of_its_own_gives_up_no_claim_that_was_not_there() {
+    let context = Context::new();
+    let (project, _, _) = answered_through_a_door(&context);
+    context.adapter.with("zeus", |agent| {
+        agent.waiting = Some(Waiting { reason: None })
+    });
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(unclaimed(&context, project).is_empty());
 }
 
 #[test]

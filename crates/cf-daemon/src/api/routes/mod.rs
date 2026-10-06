@@ -2,9 +2,10 @@
 //! `src/core/api.js:79-310`, and `taskRoute`, `:312-386`). **Frozen**: the
 //! table is [`recognize`], the order of the checks around it is
 //! [`super::handle`], and a route's place is its own module, which a landing
-//! fills in without touching this file. Its one route that Node's has no
-//! twin of is the door's receipt (`POST /api/answers/<n>/receipt`), which the
-//! receipt and stop redesign added after the answers' own.
+//! fills in without touching this file. Its two routes that Node's has no
+//! twin of are the door's receipt (`POST /api/answers/<n>/receipt`) and `cf`'s
+//! (`POST /api/answers/read`), which the receipt and stop redesign added
+//! after the answers' own.
 //!
 //! The order of a request's checks, as Node has it:
 //!
@@ -101,6 +102,8 @@ pub enum Route {
     Answers,
     /// `POST /api/answers/<id>/receipt`: a door says it handed its answer over.
     AnswerReceipt { id: String },
+    /// `POST /api/answers/read`: `cf` says which answers it wrote whole.
+    AnswersRead,
 }
 
 /// The route a request is for, in Node's order; none for the rest.
@@ -142,6 +145,9 @@ pub fn recognize(method: &Method, path: &str) -> Option<Route> {
     }
     if post && path == "/api/answers" {
         return Some(Route::Answers);
+    }
+    if post && path == "/api/answers/read" {
+        return Some(Route::AnswersRead);
     }
     if let (true, Some(id)) = (post, answer_receipt(path)) {
         return Some(Route::AnswerReceipt { id });
@@ -202,6 +208,7 @@ pub async fn dispatch(
         Route::Question { id } => door::handle(context, caller, request, &id).await,
         Route::Answers => answers::handle(context, caller, request).await,
         Route::AnswerReceipt { id } => answers::receipt(context, caller, request, &id).await,
+        Route::AnswersRead => answers::read(context, caller, request).await,
     }
 }
 

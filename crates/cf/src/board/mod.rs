@@ -34,15 +34,61 @@ impl From<BoardError> for Failure {
     }
 }
 
-/// What a command answers: the API's data for `--json`, a sentence otherwise.
+/// What a command answers: the API's data for `--json`, a sentence otherwise,
+/// and the answers the output carries whole, if it is one that does.
 pub struct Said {
     data: Value,
     text: String,
+    wrote: Option<Wrote>,
+}
+
+/// The answers a command's output carries whole, and how it was read: what
+/// `cf` says to the board, once the output is complete, to have them received.
+struct Wrote {
+    via: &'static str,
+    answers: Vec<i64>,
+}
+
+impl Said {
+    fn new(data: Value, text: String) -> Self {
+        Self {
+            data,
+            text,
+            wrote: None,
+        }
+    }
+
+    /// Of an output that carries the whole body of each of `answers` (one that
+    /// cuts them, or leaves them out, has none to say): those are the ones it
+    /// wrote whole, `via` the way it was read.
+    fn having_written(mut self, via: &'static str, answers: Vec<i64>) -> Self {
+        self.wrote = Some(Wrote { via, answers });
+        self
+    }
+}
+
+impl Wrote {
+    /// The output is complete: the board is told which answers it carried
+    /// whole, and an answer it says so of is received. What the board says back
+    /// is of no use to a command that has printed what it was asked to (a
+    /// daemon of Node's knows no such route): it is not raised, and an answer
+    /// not acknowledged waits to be pasted, as an unread one does.
+    fn acknowledge(&self, board: &Board) {
+        if self.answers.is_empty() {
+            return;
+        }
+        let _ = board.post(
+            "/api/answers/read",
+            &json!({ "answers": self.answers, "via": self.via }),
+        );
+    }
 }
 
 /// Runs the command in `words` against `board`, reading a `-` text from
 /// `input`, answering with the API's JSON when `json` asks: the exit code.
-/// Only a failure to write `out` or `err` is an error.
+/// Only a failure to write `out` or `err` is an error. The answers an output
+/// carried whole are acknowledged to the board once all of it is written, and
+/// not when it was not: a read is not a receipt.
 pub fn run(
     words: &[String],
     json: bool,
@@ -52,12 +98,16 @@ pub fn run(
     err: &mut dyn Write,
 ) -> io::Result<u8> {
     match command(words, board, input) {
-        Ok(said) => {
+        Ok(Said { data, text, wrote }) => {
             if json {
-                let data = cf_base::json::js_order(said.data);
+                let data = cf_base::json::js_order(data);
                 writeln!(out, "{}", serde_json::to_string_pretty(&data)?)?;
             } else {
-                writeln!(out, "{}", said.text)?;
+                writeln!(out, "{text}")?;
+            }
+            out.flush()?;
+            if let Some(wrote) = wrote {
+                wrote.acknowledge(board);
             }
             Ok(0)
         }
@@ -78,7 +128,7 @@ fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<Said
         None => ("help", words),
     };
     match verb {
-        "help" | "--help" | "-h" => Ok(Said { data: json!({ "usage": usage() }), text: usage().to_string() }),
+        "help" | "--help" | "-h" => Ok(Said::new(json!({ "usage": usage() }), usage().to_string())),
         "task" => task::command(rest, board, input),
         "inbox" => inbox(rest, board),
         "note" => note(rest, board, input),
@@ -95,6 +145,9 @@ fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<Said
     }
 }
 
+/// `cf inbox read m-N` prints a message whole, and so says of an answer that it
+/// wrote it whole. `cf inbox` lists first lines, cut, and says nothing of what
+/// it printed: no preview is a body, and a list does not know which are.
 fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
     if rest.first().map(String::as_str) == Some("read") {
         let id = message_id(rest.get(1).map(String::as_str))?;
@@ -105,10 +158,8 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
             message_line(&message),
             js::text(message.get("body"))
         );
-        return Ok(Said {
-            data: message,
-            text,
-        });
+        let answers = lines::waiting_answers(std::slice::from_ref(&message));
+        return Ok(Said::new(message, text).having_written("inbox", answers));
     }
     let mut answer = board.get("/api/inbox")?;
     let messages = answer.take("messages")?;
@@ -116,10 +167,7 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
         [] => "Your inbox is empty.".to_string(),
         all => all.iter().map(message_line).collect::<Vec<_>>().join("\n"),
     };
-    Ok(Said {
-        data: messages,
-        text,
-    })
+    Ok(Said::new(messages, text))
 }
 
 fn note(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
@@ -139,10 +187,7 @@ fn note(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fa
         js::text(message.get("id")),
         js::text(message.get("recipient"))
     );
-    Ok(Said {
-        data: message,
-        text,
-    })
+    Ok(Said::new(message, text))
 }
 
 fn ask(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
@@ -159,10 +204,7 @@ fn ask(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
         js::text(message.get("id")),
         js::text(message.get("recipient"))
     );
-    Ok(Said {
-        data: message,
-        text,
-    })
+    Ok(Said::new(message, text))
 }
 
 fn tell(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
@@ -178,10 +220,7 @@ fn tell(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fa
         js::text(message.get("id")),
         js::text(message.get("recipient"))
     );
-    Ok(Said {
-        data: message,
-        text,
-    })
+    Ok(Said::new(message, text))
 }
 
 fn answer(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
@@ -205,10 +244,7 @@ fn answer(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, 
             "."
         }
     );
-    Ok(Said {
-        data: message,
-        text,
-    })
+    Ok(Said::new(message, text))
 }
 
 fn staff(board: &Board) -> Result<Said, Failure> {
@@ -231,10 +267,7 @@ fn staff(board: &Board) -> Result<Said, Failure> {
             .collect::<Vec<_>>()
             .join("\n"),
     };
-    Ok(Said {
-        data: members,
-        text,
-    })
+    Ok(Said::new(members, text))
 }
 
 fn history(rest: &[String], board: &Board) -> Result<Said, Failure> {
@@ -257,7 +290,7 @@ fn history(rest: &[String], board: &Board) -> Result<Said, Failure> {
     };
     let page = board.get(&path)?.into_value();
     let text = js::text(page.get("text")).into_owned();
-    Ok(Said { data: page, text })
+    Ok(Said::new(page, text))
 }
 
 fn whoami(board: &Board) -> Result<Said, Failure> {
@@ -281,10 +314,7 @@ fn whoami(board: &Board) -> Result<Said, Failure> {
         js::text(participant.and_then(|it| it.get("role"))),
         js::text(me.get("project").and_then(|it| it.get("name"))),
     );
-    Ok(Said {
-        data: answer.into_value(),
-        text,
-    })
+    Ok(Said::new(answer.into_value(), text))
 }
 
 /// The text a command was given, or standard input when it is `-`: a brief
@@ -314,3 +344,6 @@ fn body_of(text: String) -> Map<String, Value> {
 fn posted(board: &Board, path: &str, body: Map<String, Value>) -> Result<Value, Failure> {
     Ok(board.post(path, &Value::Object(body))?.take("message")?)
 }
+
+#[cfg(test)]
+mod tests;

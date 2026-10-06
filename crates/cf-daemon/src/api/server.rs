@@ -9,7 +9,9 @@
 //! client that leaves does not drop the handler, which Node ran to the end (an
 //! update would die halfway), and a panic in it is caught there and answered
 //! 500 `internal`. A connection that waits for its next request is held to
-//! five seconds, as Node's keep-alive held it.
+//! five seconds, as Node's keep-alive held it. The handler is told when its
+//! client has gone ([`Consumer`]), for the doors that wait: a door has
+//! nobody to give an answer to, and claims none.
 //!
 //! Each poll of a connection is a callback of its own ([`Drained`]): what it
 //! woke is run to its end before another task runs, as Node ran its microtasks
@@ -59,7 +61,7 @@ use tokio::time::sleep;
 use super::answer::{Answer, Content, Failure};
 use super::body::Body;
 use super::context::Closing;
-use super::request::Request;
+use super::request::{Consumer, Request};
 use crate::errors::{contain, Errors};
 use crate::seams::DaemonSpawn;
 
@@ -280,11 +282,26 @@ impl<F: Future> Future for Drained<F> {
     }
 }
 
+/// What tells a handler its client is gone: the request's work in the
+/// connection ends with it, and is dropped before its answer is written when
+/// the client closes the connection. The handler goes on, and is told. Once
+/// the request is answered nobody is left to ask, and it makes no difference.
+struct Leaves(Consumer);
+
+impl Drop for Leaves {
+    fn drop(&mut self) {
+        self.0.leave();
+    }
+}
+
 /// One request: its handler is begun here, in the request's first part, and
 /// the rest of it is the executor's, so that the client going away does not
-/// stop it; a panic in it is a 500. What the first part woke is run to its
-/// end before the connection goes on.
+/// stop it, and the handler is told it has gone ([`Consumer`]); a panic in
+/// it is a 500. What the first part woke is run to its end before the
+/// connection goes on.
 async fn respond(server: &Rc<Server>, request: hyper::Request<Incoming>) -> Response<Full<Bytes>> {
+    let consumer = Consumer::default();
+    let _client = Leaves(consumer.clone());
     // The body comes through a pump beside the request, which reads and lets
     // go what is left of it once the request no longer reads it.
     let (parts, incoming) = request.into_parts();
@@ -295,7 +312,7 @@ async fn respond(server: &Rc<Server>, request: hyper::Request<Incoming>) -> Resp
     let state = Rc::clone(server);
     let begun = begin(&*server.spawn, async move {
         let outcome = contain(async {
-            let request = Request::from_hyper(request)?;
+            let request = Request::from_hyper(request)?.consumed_by(consumer);
             (state.handler)(request).await
         })
         .await;

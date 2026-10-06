@@ -61,16 +61,26 @@ use support::trace::{self, Tally};
 const SUITES: [&str; 4] = ["core-api", "core-daemon", "corners-api", "cf-board"];
 
 /// The traces the receipt and stop redesign moved on purpose: a choice answer
-/// is received, not read at its creation, and a resume takes in what its
-/// window kept. Found by playing them against the daemon.
+/// is received, not read at its creation, a resume takes in what its window
+/// kept, a command written wrong asks the board nothing, and a brief that
+/// waits at the gate is not given to an agent. Found by playing them against
+/// the daemon.
 const DEPARTED: &[Departed] = &[
     (
         "core-api-006",
         "the answer to a question with options lands `queued`: it is read when received, not when written",
     ),
     (
+        "cf-board-001",
+        "`cf task get T-1 --transcript --last 0` says its usage failure before it asks the board anything: Node asked for the task first, and the board took the answers in its thread as read, though nothing of them was printed",
+    ),
+    (
         "cf-board-003",
         "a resume carries the brief that never arrived and logs `message.carried`: one more clock reading, so the task's `updatedAt` is a second later",
+    ),
+    (
+        "cf-board-010",
+        "the task an agent reads while its brief waits at the gate has no `body`: the brief is for its window once the human passes it on",
     ),
     (
         "cf-board-023",

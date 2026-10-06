@@ -2,7 +2,6 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::rc::Weak;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -15,7 +14,7 @@ use serde_json::{json, Value};
 use super::fixture::{run, wait, Fixture, Options, Tui, A, B};
 
 /// Codex's request for the question tool, as the app-server sends it.
-fn request_user_input() -> Value {
+pub(super) fn request_user_input() -> Value {
     json!({
         "id": "ask-1",
         "method": "item/tool/requestUserInput",
@@ -40,8 +39,8 @@ fn request_user_input() -> Value {
 /// A board that takes a question and holds the answer to its polls until the
 /// test lets it go, so what happens while a question is held does not depend
 /// on how fast the test runs.
-struct HeldBoard {
-    url: String,
+pub(super) struct HeldBoard {
+    pub(super) url: String,
     released: Arc<AtomicBool>,
     polls: Arc<AtomicUsize>,
     /// What it was posted, by path.
@@ -50,7 +49,7 @@ struct HeldBoard {
 
 impl HeldBoard {
     /// A board whose polls, once released, are answered with `answer`.
-    fn start(answer: Value) -> Self {
+    pub(super) fn start(answer: Value) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let url = format!("http://{}", listener.local_addr().expect("its address"));
         let released = Arc::new(AtomicBool::new(false));
@@ -81,17 +80,17 @@ impl HeldBoard {
     }
 
     /// Lets the held polls answer.
-    fn release(&self) {
+    pub(super) fn release(&self) {
         self.released.store(true, Ordering::SeqCst);
     }
 
     /// How many polls it has been asked.
-    fn polls(&self) -> usize {
+    pub(super) fn polls(&self) -> usize {
         self.polls.load(Ordering::SeqCst)
     }
 
     /// What it was told of the answers it gave: each receipt's `received`, in order.
-    fn receipts(&self) -> Vec<Value> {
+    pub(super) fn receipts(&self) -> Vec<Value> {
         let posted = self.posted.lock().expect("what was posted");
         posted
             .iter()
@@ -154,7 +153,7 @@ fn serve(
 }
 
 /// A window whose board is at `url`, and a TUI that connected to it. Codex's end of the TUI's connection is peer 1.
-async fn window(url: &str, question_wait: Duration) -> (Fixture, Tui) {
+pub(super) async fn window(url: &str, question_wait: Duration) -> (Fixture, Tui) {
     let board = Arc::new(Board::new(Some(url), "window-token"));
     let f = Fixture::with(Options {
         board: Some(board),
@@ -166,14 +165,14 @@ async fn window(url: &str, question_wait: Duration) -> (Fixture, Tui) {
     (f, tui)
 }
 
-fn asked_of(f: &Fixture, id: &str) -> Option<Value> {
+pub(super) fn asked_of(f: &Fixture, id: &str) -> Option<Value> {
     f.codex
         .requests()
         .into_iter()
         .find(|message| message["id"] == id)
 }
 
-fn showed_the_dialog(tui: &Tui) -> bool {
+pub(super) fn showed_the_dialog(tui: &Tui) -> bool {
     tui.has_seen(|message| message["method"] == "item/tool/requestUserInput")
 }
 
@@ -424,7 +423,7 @@ fn a_question_whose_tui_connection_ended_stops_asking_at_its_next_poll_and_the_o
 }
 
 #[test]
-fn a_pair_keeps_no_handle_of_a_question_answered_long_ago() {
+fn a_broker_keeps_no_handle_of_a_question_answered_long_ago() {
     run(async {
         // Each question is put, polled for its answer, and the answer then acknowledged.
         let replies = (0..4)
@@ -443,15 +442,9 @@ fn a_pair_keeps_no_handle_of_a_question_answered_long_ago() {
             .collect();
         let api = scripted(replies);
         let (f, _tui) = window(&api.url, Duration::from_secs(5)).await;
-        let held = || {
-            f.broker
-                .shared
-                .pairs
-                .borrow()
-                .values()
-                .find_map(Weak::upgrade)
-                .map_or(0, |pair| pair.tasks_held())
-        };
+        // A question's poll and its handoff are tasks of the broker's: what each
+        // leaves is its own two handles, which the next question's task clears.
+        let held = || f.broker.shared.tasks.borrow().len();
         let mut after_one = 0;
         for at in 1..=4 {
             let id = format!("ask-{at}");
@@ -459,6 +452,9 @@ fn a_pair_keeps_no_handle_of_a_question_answered_long_ago() {
             request["id"] = json!(id);
             f.codex.send_json(1, &request);
             wait(|| asked_of(&f, &id).is_some()).await;
+            // The board has been told, and what ran for it has ended.
+            wait(|| api.received().len() == 3 * at).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
             if at == 1 {
                 after_one = held();
             }
@@ -472,7 +468,7 @@ fn a_pair_keeps_no_handle_of_a_question_answered_long_ago() {
 }
 
 /// A request for the question tool on `thread`, as `id`.
-fn request_on(thread: &str, id: &str) -> Value {
+pub(super) fn request_on(thread: &str, id: &str) -> Value {
     let mut request = request_user_input();
     request["id"] = json!(id);
     request["params"]["threadId"] = json!(thread);
@@ -480,7 +476,7 @@ fn request_on(thread: &str, id: &str) -> Value {
 }
 
 /// Codex says its turn on `thread` is over.
-fn turn_completed(thread: &str) -> Value {
+pub(super) fn turn_completed(thread: &str) -> Value {
     json!({
         "method": "turn/completed",
         "params": { "threadId": thread, "turn": { "id": "turn-1", "status": "interrupted" } },
@@ -488,7 +484,7 @@ fn turn_completed(thread: &str) -> Value {
 }
 
 /// Codex says `thread` is idle.
-fn went_idle(thread: &str) -> Value {
+pub(super) fn went_idle(thread: &str) -> Value {
     json!({
         "method": "thread/status/changed",
         "params": { "threadId": thread, "status": { "type": "idle" } },
@@ -498,7 +494,7 @@ fn went_idle(thread: &str) -> Value {
 /// A question is held at the board; the turn that asked it ends; the board
 /// then gives its answer, which is not handed over: the TUI is shown nothing,
 /// Codex is sent nothing, and the board is told the answer was not received.
-async fn an_ended_turn_ends_the_question_it_asked(ending: Value) {
+pub(super) async fn an_ended_turn_ends_the_question_it_asked(ending: Value) {
     let board = HeldBoard::start(json!({ "id": 70, "choices": [["red"]] }));
     let (f, tui) = window(&board.url, Duration::from_secs(60)).await;
     f.codex.send_json(1, &request_user_input());

@@ -44,6 +44,13 @@ impl BoardError {
         matches!(self, BoardError::Refused { .. })
     }
 
+    /// Whether no answer came: the connection failed or was lost, and the
+    /// request may have been taken or not. A request that changes nothing can
+    /// be asked again after it.
+    pub fn is_unreachable(&self) -> bool {
+        matches!(self, BoardError::Unreachable { .. })
+    }
+
     /// The code the API gave a refusal (`door-closed`), when it gave one.
     pub fn code(&self) -> Option<&str> {
         match self {
@@ -242,11 +249,13 @@ pub mod scripted {
     }
 
     /// One scripted reply: a status, a body as sent, and how long the API
-    /// holds the request before it answers, as it holds a door's poll.
+    /// holds the request before it answers, as it holds a door's poll; or
+    /// none at all, the connection closed on the request.
     pub struct Reply {
         status: u16,
         text: String,
         hold: Duration,
+        hang_up: bool,
     }
 
     /// A reply of `body`, written as JSON.
@@ -260,6 +269,16 @@ pub mod scripted {
             status,
             text: text.into(),
             hold: Duration::ZERO,
+            hang_up: false,
+        }
+    }
+
+    /// No reply: the connection is closed once the request is read, as one is
+    /// that is lost on its way back, and the request is still kept.
+    pub fn hang_up() -> Reply {
+        Reply {
+            hang_up: true,
+            ..reply_text(0, "")
         }
     }
 
@@ -289,7 +308,13 @@ pub mod scripted {
         let received = Arc::new(Mutex::new(Vec::new()));
         let kept = Arc::clone(&received);
         thread::spawn(move || {
-            for Reply { status, text, hold } in replies {
+            for Reply {
+                status,
+                text,
+                hold,
+                hang_up,
+            } in replies
+            {
                 let Ok((stream, _)) = listener.accept() else {
                     return;
                 };
@@ -325,6 +350,9 @@ pub mod scripted {
                     body,
                 });
                 thread::sleep(hold);
+                if hang_up {
+                    continue;
+                }
                 let answer = format!(
                     "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}",
                     text.len()

@@ -206,8 +206,8 @@ export const PLANTS = [
     edits: [
       [
         `${ENGINE}/stops.rs`,
-        '        if look == Look::Rest {',
-        '        if look == Look::Rest && false {',
+        '            Look::Rest => Some("its window is at rest"),',
+        '            Look::Rest => None,',
       ],
     ],
     runs: [dispatcher],
@@ -348,7 +348,10 @@ export const PLANTS = [
       [
         `${DAEMON}/api/routes/door.rs`,
         lines(
-          '        if context.closing.is_set() || context.credentials.resolve(request.bearer()).is_none() {',
+          '        if context.closing.is_set()',
+          '            || request.consumer().has_left()',
+          '            || context.credentials.resolve(request.bearer()).is_none()',
+          '        {',
           '            return unanswered(&asked);',
           '        }',
           '        let claimed = context',
@@ -361,7 +364,10 @@ export const PLANTS = [
           '            .ledger',
           '            .borrow_mut()',
           '            .claim_answer(asked.id, caller.participant.id)?;',
-          '        if context.closing.is_set() || context.credentials.resolve(request.bearer()).is_none() {',
+          '        if context.closing.is_set()',
+          '            || request.consumer().has_left()',
+          '            || context.credentials.resolve(request.bearer()).is_none()',
+          '        {',
           '            return unanswered(&asked);',
           '        }',
         ),
@@ -370,18 +376,6 @@ export const PLANTS = [
     runs: [daemon('routes::door')],
     meant:
       'an_answer_that_came_as_the_daemon_stops_is_not_claimed_and_stays_the_ledgers_to_deliver',
-  },
-  {
-    name: 'pause: the list receives an answer it shows cut',
-    edits: [
-      [
-        `${DAEMON}/api/routes/inbox.rs`,
-        '        .filter(|(message, summary)| summary.preview == message.body)',
-        '        .filter(|_| true)',
-      ],
-    ],
-    runs: [daemon('routes::inbox')],
-    meant: 'an_answer_the_list_cuts_and_a_note_are_not_received',
   },
   {
     name: 'pause: a thread shows and receives what waits for the human',
@@ -458,8 +452,8 @@ export const PLANTS = [
     edits: [
       [
         `${CODEX}/broker/pair.rs`,
-        '        if let (true, Some(thread)) = (over, thread) {',
-        '        if let (true, Some(thread)) = (false, thread) {',
+        '            let turn_ended = turn_over && thread.is_some() && held.thread.as_deref() == thread;',
+        '            let turn_ended = false && thread.is_some() && held.thread.as_deref() == thread;',
       ],
     ],
     runs: [unit('cf-codex-session', 'broker::tests::questions')],
@@ -471,8 +465,18 @@ export const PLANTS = [
     edits: [
       [
         `${CODEX}/broker/pair.rs`,
-        '            let ended = stop.load(Ordering::SeqCst);',
+        '            let ended = ending.is_raised();',
         '            let ended = false;',
+      ],
+      // The writer's own check of it is a second hold on the answer: both go.
+      [
+        `${CODEX}/broker/transport.rs`,
+        lines(
+          '        let wanted = watch',
+          '            .as_ref()',
+          '            .is_none_or(|watch| !watch.ended.load(Ordering::SeqCst));',
+        ),
+        '        let wanted = true;',
       ],
     ],
     runs: [unit('cf-codex-session', 'broker::tests::questions')],

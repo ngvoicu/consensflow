@@ -5,13 +5,18 @@
 //! it was then, awaiting the body after: who may do what is decided on the
 //! task as it was read, and the ledger decides on it as it is. The number is
 //! the digits as the path had them, read as `Number(...)` reads them.
+//!
+//! A read changes nothing: an answer in the thread that `cf` printed is
+//! received when `cf` says it wrote it whole (`POST /api/answers/read`), not
+//! when the thread was served. What the human has not passed on is not for an
+//! agent to read: the thread leaves out a gated message, and the brief is
+//! not given while it waits at the gate.
 
 use cf_base::js;
-use cf_ledger::{MessageView, NewQuestion, Read, TaskThread};
+use cf_ledger::{NewQuestion, TaskThread};
 use hyper::Method;
 use serde_json::{json, Map, Value};
 
-use super::answers::received_whole;
 use super::{Answer, Caller, Context, Failure, Request, TaskAction};
 use crate::api::views::{value, MessageSummary, TaskSummary};
 
@@ -52,13 +57,13 @@ pub(super) async fn handle(
     let get = request.method == Method::GET;
     if action.is_none() && get {
         // The thread as far as the human has let it go: a gated message waits
-        // unseen, and is not received. What the thread says whole of the
-        // answers for the caller is read by it.
+        // unseen, and so does the brief while it is one of them.
+        let held_back = brief_waits_at_the_gate(&task);
         task.messages.retain(|message| message.state != "gated");
-        let answer = Answer::ok(json!({ "task": value(&task)? }));
-        let served: Vec<&MessageView> = task.messages.iter().collect();
-        received_whole(context, caller, &served, Read::Task)?;
-        return Ok(answer);
+        if held_back {
+            task.task.body.clear();
+        }
+        return Ok(Answer::ok(json!({ "task": value(&task)? })));
     }
     if action == Some(TaskAction::Transcript) && get {
         return transcript(context, caller, &task, &request);
@@ -87,6 +92,31 @@ pub(super) async fn handle(
         TaskAction::Tell => tell(context, caller, &task, words),
         _ => moved(context, caller, &task, action, words.unwrap_or_default()),
     }
+}
+
+/// Whether the task's brief still waits for the human to pass it on: a task
+/// message for the window that has the task is held at the gate, and none was
+/// received by it. A window that received the brief has it, and a later task
+/// message held at the gate (the words of a resume) does not take it back.
+/// The brief is `TaskView.body`: the human and the board read it from the
+/// ledger, and an agent does not until it has passed.
+fn brief_waits_at_the_gate(task: &TaskThread) -> bool {
+    let Some(window) = task.task.assignee.as_deref() else {
+        return false;
+    };
+    let mut held = false;
+    for message in task
+        .messages
+        .iter()
+        .filter(|message| message.kind == "task" && message.recipient == window)
+    {
+        match message.state.as_str() {
+            "delivered" | "read" => return false,
+            "gated" => held = true,
+            _ => {}
+        }
+    }
+    held
 }
 
 /// What the task's window did so far, from ConsensFlow's own copy: the last

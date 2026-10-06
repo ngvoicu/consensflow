@@ -17,6 +17,7 @@ use cf_board::{door, Board};
 use cf_proto::questions::{Answer, Reply};
 use futures_util::StreamExt;
 use serde_json::Value;
+use tokio::sync::Notify;
 use tokio::task::AbortHandle;
 use tokio_tungstenite::tungstenite::{Message, Utf8Bytes};
 
@@ -44,12 +45,50 @@ enum Said {
     TooMuch,
 }
 
+/// What ends one question: raised when the turn that asked it is over, when
+/// Codex resolves the request itself (an interrupt does), or when the pair
+/// retires. The poll at the board reads it between its requests, and the
+/// answer on its way to Codex is not sent once it is raised, whatever stage
+/// it is at.
+struct Ending {
+    raised: Arc<AtomicBool>,
+    woken: Notify,
+}
+
+impl Ending {
+    fn new() -> Rc<Self> {
+        Rc::new(Self {
+            raised: Arc::new(AtomicBool::new(false)),
+            woken: Notify::new(),
+        })
+    }
+
+    fn raise(&self) {
+        self.raised.store(true, Ordering::SeqCst);
+        self.woken.notify_one();
+    }
+
+    fn is_raised(&self) -> bool {
+        self.raised.load(Ordering::SeqCst)
+    }
+
+    /// Ends once it is raised: at once if it is.
+    async fn wait(&self) {
+        while !self.is_raised() {
+            self.woken.notified().await;
+        }
+    }
+}
+
 /// A question Codex asked that the board is answering for it: the thread it
-/// is on, and what stops its poll. The poll is the request's own: it ends
-/// with the turn that asked it, and not only with the pair.
+/// is on, its request's id, and what ends it. The question is the request's
+/// own: it ends with the turn that asked it, with the request's resolution,
+/// and not only with the pair, and it is held, answer and all, until it is
+/// known whether Codex was handed the answer.
 struct Held {
     thread: Option<String>,
-    stop: Arc<AtomicBool>,
+    request: Value,
+    ending: Rc<Ending>,
 }
 
 pub(super) struct Pair {
@@ -222,14 +261,17 @@ impl Pair {
         self.forward(&self.tui, text);
     }
 
-    /// The turn a thread was on is over, or the thread is idle: the questions
-    /// Codex asked on it were asked by a turn that has ended (an interrupt
-    /// ends one in the middle of its question), so what asked them is not
-    /// waiting for an answer any more, and their polls stop. Another thread's
-    /// go on.
+    /// A question Codex asked is over: the turn its thread was on is over, or
+    /// the thread is idle (an interrupt ends a turn in the middle of its
+    /// question, and says so with both, and with the request's resolution
+    /// too), or Codex says the request itself is resolved. What asked it is
+    /// not waiting for an answer any more, so its poll stops, and an answer
+    /// on its way to Codex is not sent. Another thread's, and another
+    /// request's, go on.
     fn end_questions_of(&self, message: &Value) {
         let params = message.get("params");
-        let over = match message.get("method").and_then(Value::as_str) {
+        let method = message.get("method").and_then(Value::as_str);
+        let turn_over = match method {
             Some("turn/completed") => true,
             Some("thread/status/changed") => {
                 params
@@ -243,22 +285,27 @@ impl Pair {
         let thread = params
             .and_then(|params| params.get("threadId"))
             .and_then(Value::as_str);
-        if let (true, Some(thread)) = (over, thread) {
-            for held in self.held.borrow().iter() {
-                if held.thread.as_deref() == Some(thread) {
-                    held.stop.store(true, Ordering::SeqCst);
-                }
+        let resolved = if method == Some("serverRequest/resolved") {
+            params.and_then(|params| params.get("requestId"))
+        } else {
+            None
+        };
+        for held in self.held.borrow().iter() {
+            let turn_ended = turn_over && thread.is_some() && held.thread.as_deref() == thread;
+            if turn_ended || resolved.is_some_and(|request| *request == held.request) {
+                held.ending.raise();
             }
         }
     }
 
     /// Codex asked its client a question: the board answers it, while the
     /// frames of this pair and every other go on. When nobody answers in time
-    /// the request goes on to the TUI, as it came, unless the turn that asked
-    /// it ended meanwhile: then the request is obsolete, nothing goes to the
-    /// TUI, and an answer the board gave is given back, not handed over. The
-    /// stop is read and the answer queued in one step, so no turn ends
-    /// between them.
+    /// the request goes on to the TUI, as it came, unless the question ended
+    /// meanwhile ([`Ending`]): then the request is obsolete, nothing goes to
+    /// the TUI, and an answer the board gave is given back, not handed over.
+    /// The ending is read and the answer queued in one step, so none comes
+    /// between them. An answer is handed over by [`Pair::hand_over`], and is
+    /// the board's to hear of only once that is known.
     fn hold_question(
         self: &Rc<Self>,
         id: Value,
@@ -272,26 +319,31 @@ impl Pair {
         };
         let this = Rc::clone(self);
         let wait = self.shared.question_wait;
-        let stop = Arc::new(AtomicBool::new(false));
+        let ending = Ending::new();
         self.held.borrow_mut().push(Held {
             thread: params
                 .and_then(|params| params.get("threadId"))
                 .and_then(Value::as_str)
                 .map(str::to_owned),
-            stop: Arc::clone(&stop),
+            request: id.clone(),
+            ending: Rc::clone(&ending),
         });
-        self.spawn(async move {
-            let (asking, polling, ending) = (asked.clone(), Arc::clone(&board), Arc::clone(&stop));
+        // A task of the broker's, not the pair's: a pair that ends while the
+        // board is still polled for the question has its poll end at the next
+        // request, and an answer the board claimed meanwhile is still given back.
+        self.shared.spawn(async move {
+            let (asking, polling, raised) = (
+                asked.clone(),
+                Arc::clone(&board),
+                Arc::clone(&ending.raised),
+            );
             let outcome =
-                tokio::task::spawn_blocking(move || asking.ask(&polling, wait, &ending)).await;
-            let ended = stop.load(Ordering::SeqCst);
-            this.held
-                .borrow_mut()
-                .retain(|held| !Arc::ptr_eq(&held.stop, &stop));
+                tokio::task::spawn_blocking(move || asking.ask(&polling, wait, &raised)).await;
+            let ended = ending.is_raised();
             match (outcome, ended) {
                 (Ok(Reply::Answered(answer)), false) => {
-                    this.answer_codex(&asked.answered(&id, &answer));
-                    acknowledge(board, answer, true).await;
+                    this.hand_over(&asked.answered(&id, &answer), answer, board, ending);
+                    return;
                 }
                 (Ok(Reply::Answered(answer)), true) => acknowledge(board, answer, false).await,
                 (Ok(Reply::Refused(reason)), false) => {
@@ -300,13 +352,53 @@ impl Pair {
                 (Ok(Reply::Unanswered) | Err(_), false) => this.forward(&this.tui, text),
                 (_, true) => {}
             }
+            this.release(&ending);
         });
     }
 
-    /// How many of its tasks the pair still holds a handle to.
-    #[cfg(test)]
-    pub(super) fn tasks_held(&self) -> usize {
-        self.tasks.borrow().len()
+    /// The board's answer to Codex's question goes to Codex, and the board is
+    /// told whether it was handed over once that is known: the writer says so
+    /// when the frame is written to Codex's socket, and the answer is
+    /// received only then. If the question ends first (the turn is over,
+    /// Codex resolved the request, the pair is gone) the frame is not sent,
+    /// or if it is being written already, the answer is not counted as
+    /// received all the same: it may have come too late to be taken. A socket
+    /// that fails, or is not there, is not a receipt either. The question is
+    /// held until then, so its ending is heard, and the board is told by a
+    /// task of the broker's own: a pair that ends does not take it with it.
+    fn hand_over(
+        self: &Rc<Self>,
+        response: &Value,
+        answer: Answer,
+        board: Arc<Board>,
+        ending: Rc<Ending>,
+    ) {
+        let frame = Message::Text(Utf8Bytes::from(response.to_string()));
+        let written = match self.native.send_unless(frame, Arc::clone(&ending.raised)) {
+            Ok(written) => written,
+            Err(_) => {
+                self.release(&ending);
+                self.retire();
+                self.shared.spawn(acknowledge(board, answer, false));
+                return;
+            }
+        };
+        let this = Rc::clone(self);
+        self.shared.spawn(async move {
+            let handed = tokio::select! {
+                written = written => written.unwrap_or(false),
+                () = ending.wait() => false,
+            };
+            this.release(&ending);
+            acknowledge(board, answer, handed && !ending.is_raised()).await;
+        });
+    }
+
+    /// The question is no longer held: it was answered, or it ended.
+    fn release(&self, ending: &Rc<Ending>) {
+        self.held
+            .borrow_mut()
+            .retain(|held| !Rc::ptr_eq(&held.ending, ending));
     }
 
     fn answer_codex(&self, response: &Value) {
@@ -330,7 +422,7 @@ impl Pair {
         self.shared.state.borrow_mut().retire(self.id);
         self.shared.pairs.borrow_mut().remove(&self.id);
         for held in self.held.borrow().iter() {
-            held.stop.store(true, Ordering::SeqCst);
+            held.ending.raise();
         }
         self.tui.close();
         self.native.close();

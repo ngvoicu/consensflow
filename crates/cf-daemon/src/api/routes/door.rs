@@ -9,8 +9,14 @@
 //! ledger is asked every 250 ms, one claim at a time, and never holds
 //! anything across the wait. A door that was shut by a pause is told so at
 //! once (409 `door-closed`), in words its model is to take as they are; a
-//! daemon that is stopping, and a window that exited (its token revoked), end
-//! the wait with no answer and claim nothing.
+//! daemon that is stopping, a window that exited (its token revoked), and a
+//! client that has gone (the server runs a handler on after its client left)
+//! end the wait with no answer and claim nothing: an answer claimed for
+//! nobody would be held from the paste, with nobody to hand it over. A claim
+//! whose reply still did not get through is asked again by the door, which is
+//! given the same answer (`Claim::Answered` for an answer it holds), and
+//! otherwise given up by the window's next look at rest or at a dialog of
+//! its own, its exit, a pause or the daemon's start.
 
 use std::time::Duration;
 
@@ -62,8 +68,12 @@ pub(super) async fn handle(
     let until = Instant::now() + wait_of(request.param("wait"));
     loop {
         // Nothing is claimed for a daemon that is stopping, nor for a window
-        // that is gone: its token was revoked when it exited.
-        if context.closing.is_set() || context.credentials.resolve(request.bearer()).is_none() {
+        // that is gone (its token was revoked when it exited), nor for a
+        // client that has left: nobody would read what it was given.
+        if context.closing.is_set()
+            || request.consumer().has_left()
+            || context.credentials.resolve(request.bearer()).is_none()
+        {
             return unanswered(&asked);
         }
         let claimed = context
@@ -85,6 +95,7 @@ pub(super) async fn handle(
         tokio::select! {
             () = sleep(POLL.min(left)) => {}
             () = context.closing.wait() => {}
+            () = request.consumer().left() => {}
         }
     }
 }

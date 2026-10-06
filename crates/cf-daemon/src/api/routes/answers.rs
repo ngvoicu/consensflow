@@ -9,9 +9,15 @@
 //! Only the answer's own recipient says so, and only handing it over makes it
 //! read; a door that was shut meanwhile is refused (409 `door-closed`), and
 //! the answer comes as a message.
+//!
+//! `POST /api/answers/read`: `cf` says which answers it wrote whole to its
+//! output (`{"answers": [ids], "via": "inbox" | "task"}`), once that output is
+//! complete. The ones among them that are for the caller and still queued are
+//! received. A read never receives anything by itself: a response that did
+//! not reach its reader, or an output that was cut off, says nothing.
 
 use cf_base::js;
-use cf_ledger::{MessageView, Read};
+use cf_ledger::Read;
 use serde_json::{json, Value};
 
 use super::{Answer, Caller, Context, Failure, Request};
@@ -49,35 +55,53 @@ pub(super) async fn handle(
     ))
 }
 
-/// Answers `cf` has just served whole to the one they were for are received
-/// by it: among `served`, the ones for the caller that still wait in the
-/// queue are `read`, and the dispatcher is woken, for the task they were what
-/// waited for may go on. What was served to anyone else, or in part, is not
-/// the answers' receipt, and `served` leaves it out.
-pub(super) fn received_whole(
+/// `cf` wrote answers whole to its output and says so: those among them that
+/// are for the caller and still wait in the queue are `read`, each once, and
+/// the dispatcher is woken, for the task they were what waited for may go on.
+/// An answer for anyone else, or one that is not queued, is left as it is,
+/// and saying so again wakes nothing.
+pub(super) async fn read(
     context: &Context,
     caller: &Caller,
-    served: &[&MessageView],
-    via: Read,
-) -> Result<(), Failure> {
-    let ids: Vec<i64> = served
-        .iter()
-        .filter(|message| {
+    mut request: Request,
+) -> Result<Answer, Failure> {
+    let body = request.json().await?;
+    let invalid = || {
+        Failure::refuse(
+            400,
+            "invalid-read",
+            "answers is a list of message numbers and via is inbox or task",
+        )
+    };
+    let via = match body.get("via").and_then(Value::as_str) {
+        Some("inbox") => Read::Inbox,
+        Some("task") => Read::Task,
+        _ => return Err(invalid()),
+    };
+    let named = body
+        .get("answers")
+        .and_then(Value::as_array)
+        .and_then(|list| list.iter().map(Value::as_i64).collect::<Option<Vec<_>>>())
+        .ok_or_else(invalid)?;
+    let mut waiting = Vec::new();
+    for id in named {
+        let found = context.ledger.borrow().message(id)?;
+        if found.is_some_and(|message| {
             message.kind == "answer"
                 && message.state == "queued"
                 && message.recipient_id == caller.participant.id
-        })
-        .map(|message| message.id)
-        .collect();
-    if ids.is_empty() {
-        return Ok(());
+        }) {
+            waiting.push(id);
+        }
     }
-    context
-        .ledger
-        .borrow_mut()
-        .receive_read(caller.participant.id, &ids, via)?;
-    (context.kick)();
-    Ok(())
+    if !waiting.is_empty() {
+        context
+            .ledger
+            .borrow_mut()
+            .receive_read(caller.participant.id, &waiting, via)?;
+        (context.kick)();
+    }
+    Ok(Answer::ok(json!({})))
 }
 
 /// What the door says of an answer it claimed: the ledger decides what that

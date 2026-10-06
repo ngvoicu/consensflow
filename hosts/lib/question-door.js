@@ -10,7 +10,8 @@
  *
  * The answer a poll finds is claimed for the door, and is received only once
  * the door says it handed it over (`acknowledge`): a door that never says so
- * leaves the answer to arrive a second time as text, and loses none. A door
+ * leaves the answer to arrive a second time as text, and loses none. A poll
+ * whose reply was lost is asked again, and gets the same claimed answer. A door
  * the board shut (the task was stopped) is refused with the words its model
  * is to hear, which are handed over as they are.
  */
@@ -18,6 +19,14 @@
 /** How long a door waits for the board before the harness's own dialog takes over. */
 const DOOR_WAIT_MS = 3_500_000
 const POLL_WAIT_MS = 20_000
+/**
+ * How long a door waits before it asks again after a poll that got no answer,
+ * once for each poll that failed in a row: the poll's reply may have been lost
+ * on its way back, and the board gives the same claimed answer to the same
+ * question again. A board that stays out of reach through all of them is
+ * gone, and the harness's own dialog takes over.
+ */
+const POLL_RETRIES_MS = [250, 500, 1_000, 2_000]
 
 /** A request to the board's API as the window's participant; `null` outside a window. */
 export function boardClient({
@@ -60,20 +69,26 @@ export const refusalReason = (cause) =>
  * Puts the questions on the board and waits for their answer: `{ id, answer }`,
  * the answer null when the wait ran out or `signal` ended it. `questions` are
  * in the board's shape: question, header, options (label, description), multiple.
+ * A poll that gets no answer is asked again (`retries`, the pauses between
+ * them); the question itself is put once, whatever comes of it.
  */
-export async function askTheBoard(client, questions, { signal } = {}) {
+export async function askTheBoard(client, questions, { signal, retries = POLL_RETRIES_MS } = {}) {
   const { message } = await client('POST', '/api/questions', { questions })
   const until = Date.now() + DOOR_WAIT_MS
   let answer = null
+  let lost = 0
   while (answer === null && Date.now() < until && !signal?.aborted) {
     const wait = Math.min(POLL_WAIT_MS, until - Date.now())
     try {
       answer = (
         await client('GET', `/api/questions/${message.id}?wait=${wait}`, undefined, { signal })
       ).answer
+      lost = 0
     } catch (cause) {
       if (signal?.aborted) break
-      throw cause
+      // Answered, and refused: final. No answer at all: asked again.
+      if (cause?.refused || lost >= retries.length) throw cause
+      await new Promise((resolve) => setTimeout(resolve, retries[lost++]))
     }
   }
   return { id: message.id, answer }

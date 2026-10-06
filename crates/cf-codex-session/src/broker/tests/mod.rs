@@ -7,6 +7,7 @@ mod delivery;
 /// The fake Codex server and the rest of what these tests stand on, which the
 /// supervisor's tests use too.
 pub(crate) mod fixture;
+mod handoff;
 mod lifecycle;
 mod questions;
 mod switching;

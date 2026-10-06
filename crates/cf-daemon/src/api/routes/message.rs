@@ -1,12 +1,11 @@
 //! `GET /api/inbox/<id>` (`api.js:208-221`): one message, whole, to its
 //! recipient or its sender, unless it still waits for the human. The id is the
-//! digits as the path had them: the 404 quotes them as typed. An answer read
-//! here by the one it is for is received.
+//! digits as the path had them: the 404 quotes them as typed. It changes
+//! nothing: an answer read here is received when `cf` says it wrote it whole
+//! (`POST /api/answers/read`).
 
-use cf_ledger::Read;
 use serde_json::json;
 
-use super::answers::received_whole;
 use super::{Answer, Caller, Context, Failure, Request};
 use crate::api::views::value;
 
@@ -29,11 +28,7 @@ pub(super) async fn handle(
             && !(message.state == "gated" && Some(message.recipient.as_str()) == handle)
     });
     match visible {
-        Some(message) => {
-            let answer = Answer::ok(json!({ "message": value(&message)? }));
-            received_whole(context, caller, &[&message], Read::Inbox)?;
-            Ok(answer)
-        }
+        Some(message) => Ok(Answer::ok(json!({ "message": value(&message)? }))),
         None => Err(Failure::refuse(
             404,
             "unknown-message",
