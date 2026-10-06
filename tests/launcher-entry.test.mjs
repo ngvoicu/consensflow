@@ -45,6 +45,12 @@ function launcher(t, text, name = 'consensflow') {
   return file
 }
 
+/**
+ * Where Windows is, the command is `consensflow.cmd` in the form of cmd.exe, which
+ * the test of that form holds there; these write the form of sh.
+ */
+const SH_ONLY = process.platform === 'win32' && 'the form of sh; cmd.exe’s is held below'
+
 describe('the CLI the command on PATH runs, by either shape of the launcher', () => {
   it('is the cf.mjs the old shape names', () => {
     const t = tempEnv()
@@ -56,7 +62,7 @@ describe('the CLI the command on PATH runs, by either shape of the launcher', ()
     }
   })
 
-  it('is the cf.mjs beside the native cf the new shape names', () => {
+  it('is the cf.mjs beside the native cf the new shape names', { skip: SH_ONLY }, () => {
     const t = tempEnv()
     try {
       const cf = bundle(t, 'Candidate', 'dev.ngvoicu.consensflow.candidate')
@@ -70,7 +76,9 @@ describe('the CLI the command on PATH runs, by either shape of the launcher', ()
     }
   })
 
-  it('says the live app’s bundle is live, in the new shape as in the old', () => {
+  it('says the live app’s bundle is live, in the new shape as in the old', {
+    skip: SH_ONLY,
+  }, () => {
     const t = tempEnv()
     try {
       const cf = bundle(t, 'ConsensFlow', 'dev.ngvoicu.consensflow')
