@@ -182,7 +182,8 @@ fn open(address: &str, env: &Env) {
             timeout: Duration::from_secs(30),
             max_buffer: 64 * 1024,
         };
-        let _ = execute(&run, None, &env, limits).await;
+        // Nothing waits for it, nor ends it with the daemon: it is `open`.
+        let _ = execute(&run, None, &env, limits, |_| {}).await;
     }));
 }
 

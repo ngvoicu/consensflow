@@ -130,6 +130,18 @@ export const PLANTS = [
     meant: 'closes_in_place_where_it_is_shared_and_frees_the_file_with_its_data_kept',
   },
   {
+    name: 'start: a start that failed says nothing of its exit',
+    edits: [
+      [
+        `${DAEMON}/start.rs`,
+        lines('    if started.is_err() {', '        log.info("exit 1");', '    }', '    started'),
+        '    started',
+      ],
+    ],
+    runs: [daemon('start::'), stop],
+    meant: 'a_second_daemon_on_the_same_home_is_refused_and_touches_no_window_of_the_first',
+  },
+  {
     name: 'start: SIGTERM and SIGINT are not listened for',
     edits: [
       [

@@ -261,6 +261,101 @@ fn a_busy_daemon_is_stopped_within_one_deadline_whatever_is_open() {
     }
 }
 
+/// The pid a program wrote to `file` as it started: the program is running.
+#[cfg(unix)]
+fn pid_written_to(file: &std::path::Path) -> u32 {
+    let until = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < until {
+        let written = std::fs::read_to_string(file).ok();
+        if let Some(pid) = written.and_then(|text| text.trim().parse().ok()) {
+            return pid;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the program never wrote its pid to {}", file.display());
+}
+
+/// The pid of a program the daemon is waiting for. A test that fails with it
+/// still running ends it as it goes: a daemon killed with the test would leave
+/// it running for as long as it sleeps.
+#[cfg(unix)]
+struct Waited(u32);
+
+#[cfg(unix)]
+impl Waited {
+    /// Whether it has ended soon: it was the daemon's to end as it stopped.
+    fn ends_soon(&self) -> bool {
+        let until = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < until {
+            if !cf_process::alive(self.0) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Waited {
+    fn drop(&mut self) {
+        if std::thread::panicking() && cf_process::alive(self.0) {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &self.0.to_string()])
+                .status();
+        }
+    }
+}
+
+// A harness admin's program is run to its end by the daemon, as an update is
+// (an update's own is asked of a release feed first, and so is no test of
+// ours, which reaches no network): here the admin's version probe of a CLI that
+// never answers, which is the same call, a child of the daemon's that it waits
+// for. The stop exits without running destructors, so it must end that child
+// itself, or the program outlives the daemon.
+#[cfg(unix)]
+#[test]
+fn a_program_the_daemon_is_waiting_for_is_ended_when_it_stops() {
+    for how in hows() {
+        let root = Root::new();
+        let asked = root.claude_that_never_answers();
+        let mut daemon = Daemon::start(&root);
+        let frames = daemon.frames();
+        let token = daemon.handle["token"].as_str().expect("a token").to_owned();
+        // The human's screen asks about Claude: the daemon runs `claude
+        // --version` and waits for its answer.
+        let body = r#"{"id":"claude"}"#;
+        let mut check = Client::connect(&daemon.url());
+        check.write(&format!(
+            "POST /api/harnesses/check HTTP/1.1\r\nHost: t\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        ));
+        let waited = Waited(pid_written_to(&asked));
+        assert!(
+            cf_process::alive(waited.0),
+            "{how:?}: the program is running"
+        );
+
+        if let How::OutputBroken = how {
+            frames.leave_after_the_next_line();
+            daemon.ping("r-last");
+            std::thread::sleep(Duration::from_millis(300));
+        }
+        let at = stop(&mut daemon, how);
+        let (code, took) = daemon.exits(at, Duration::from_secs(10));
+        assert_eq!(code, Some(0), "{how:?}");
+        // The request that waits for the program is open at the deadline, and
+        // is dropped there: one deadline, as the busy daemon takes.
+        assert!(took < Duration::from_millis(1_600), "{how:?}: {took:?}");
+        assert!(
+            waited.ends_soon(),
+            "{how:?}: the program the daemon waited for outlived it"
+        );
+        let (_, ended) = check.read_to_the_end();
+        assert!(ended, "{how:?}: the request's connection ended");
+    }
+}
+
 #[test]
 fn without_the_switch_cf_ui_is_not_the_native_daemon() {
     // Not the switch's value: the daemon is asked for by `native` and nothing else.
@@ -317,12 +412,19 @@ fn a_daemon_that_cannot_start_says_why_in_cf_s_words_and_exits_1() {
         .output()
         .expect("cf runs");
     assert_eq!(ran.status.code(), Some(1));
-    let said = String::from_utf8_lossy(&ran.stderr);
+    let stderr = String::from_utf8_lossy(&ran.stderr);
     assert!(
-        said.starts_with("cf: another ConsensFlow has ") && said.contains("consensflow.db open"),
-        "{said}"
+        stderr.starts_with("cf: another ConsensFlow has ")
+            && stderr.contains("consensflow.db open"),
+        "{stderr}"
     );
     assert_eq!(String::from_utf8_lossy(&ran.stdout), "", "no handle line");
+    // The log of the home says how the second ended, as Node's exit logger did:
+    // its start line, after the first's, and `exit 1` under it.
+    let lines = said(&root.log());
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(lines[1].starts_with("info start pid "), "{lines:?}");
+    assert_eq!(lines[2], "info exit 1", "{lines:?}");
     drop(first);
 }
 

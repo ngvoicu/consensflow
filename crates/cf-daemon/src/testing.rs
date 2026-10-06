@@ -6,8 +6,10 @@
 //! bridge with the app's end for the test.
 
 use std::cell::{Cell, RefCell};
+use std::io;
 use std::rc::Rc;
 
+use bytes::Bytes;
 use cf_base::refusal::Refusal;
 use cf_bridge::local::{Bridge, BridgeBuilder};
 use cf_catalog::AgentRow;
@@ -15,7 +17,11 @@ use cf_ledger::{
     open_ledger, MessageView, NewChief, NewMember, NewProject, NewQuestion, Options, ProjectView,
 };
 use cf_proto::bridge::Role;
+use futures_util::stream;
+use http_body_util::StreamBody;
+use hyper::body::Frame;
 use hyper::Method;
+use tokio::sync::mpsc;
 
 use crate::api::answer::{Answer, Content, Failure};
 use crate::api::body::Body;
@@ -190,6 +196,36 @@ pub fn scene() -> Scene {
         zeus,
         question,
     }
+}
+
+/// What sends the frames of a body [`sent_body`] made: a chunk or a failure at
+/// a time, as the test chooses, and the end of the body when it is dropped.
+pub struct Sending(mpsc::UnboundedSender<io::Result<Frame<Bytes>>>);
+
+impl Sending {
+    /// The next chunk of the body.
+    pub fn chunk(&self, bytes: &[u8]) {
+        let _ = self.0.send(Ok(Frame::data(Bytes::copy_from_slice(bytes))));
+    }
+
+    /// The connection fails, with `words`.
+    pub fn fail(&self, words: &str) {
+        let _ = self.0.send(Err(io::Error::other(words.to_owned())));
+    }
+}
+
+/// A body as hyper hands one over, whose frames come when the test sends them:
+/// what `Body::pumped` is given where a connection would give it hyper's own,
+/// with the schedule in the test's hands.
+pub fn sent_body() -> (
+    Sending,
+    impl hyper::body::Body<Data = Bytes, Error = io::Error> + Unpin + 'static,
+) {
+    let (sender, mut received) = mpsc::unbounded_channel();
+    (
+        Sending(sender),
+        StreamBody::new(stream::poll_fn(move |context| received.poll_recv(context))),
+    )
 }
 
 /// A request with `token` as its bearer, and `body` as the text it sends.

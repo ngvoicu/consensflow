@@ -8,7 +8,7 @@ use std::time::Duration;
 use cf_base::env::Env;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::{terminate, Ending, Run};
+use crate::{terminate, Ender, Ending, Run};
 
 /// How long a program asked to end at its timeout has before it is forced:
 /// Node waits for it as long as it runs, and a probe every launch shares
@@ -49,13 +49,17 @@ pub struct Failed {
 /// on, or once a stream says more than its limit, both streams are closed
 /// and it is asked to end, and how it ends decides: one that ends with 0
 /// has answered, as with Node.
+///
+/// `started` is given the program's [`Ender`] once it has started, as
+/// `capture` gives it.
 pub async fn execute(
     run: &Run,
     cwd: Option<&Path>,
     env: &Env,
     limits: Limits,
+    started: impl FnOnce(Ender),
 ) -> Result<String, Failed> {
-    crate::capture::capture(run, cwd, env, limits)
+    crate::capture::capture(run, cwd, env, limits, started)
         .await
         .map(|captured| captured.stdout)
         .map_err(|failed| Failed {
@@ -181,7 +185,7 @@ mod tests {
             .enable_all()
             .build()
             .unwrap()
-            .block_on(execute(run, None, env, limits))
+            .block_on(execute(run, None, env, limits, |_| {}))
     }
 
     const ROOMY: Limits = Limits {

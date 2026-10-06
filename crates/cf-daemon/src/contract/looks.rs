@@ -13,6 +13,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
+use cf_engine::runtime::begin;
 use cf_engine::seams::Adapters;
 use cf_harness::contract::Work;
 use cf_harness::seams::Time;
@@ -102,26 +103,32 @@ async fn two_looks_whose_timers_elapse_together_are_two_callbacks_in_the_order_t
     .await;
 }
 
+/// A rig whose adapters' looks wait for the daemon's records, whose worker is
+/// the stand-in the test lets answer, once the looks are armed.
+async fn records_looked_at() -> (Rig, Rc<Standing>, Rc<Looks>) {
+    let standing = Rc::new(Standing::default());
+    let records: Rc<RefCell<Option<Rc<DaemonRecords>>>> = Rc::default();
+    let asking = Rc::clone(&records);
+    let looks = Looks::new(move |handle| {
+        let records = asking.borrow().clone().expect("the records");
+        let waiting: Work<'static, ()> = match handle {
+            "chief" => Box::pin(async {}),
+            _ => Box::pin(async move { look(&records).await }),
+        };
+        waiting
+    });
+    let (worker, wired) = (Rc::clone(&standing), Rc::clone(&looks));
+    let wiring = Wiring::new().adapters(move |spawn, _, fakes: Rc<dyn Adapters>| {
+        *records.borrow_mut() = Some(worker.over(spawn));
+        looking(fakes, wired)
+    });
+    (Rig::wired(wiring).await, standing, looks)
+}
+
 #[tokio::test]
 async fn two_looks_the_records_answer_together_are_two_callbacks_in_the_order_the_kit_ran_them() {
     scene(async {
-        let standing = Rc::new(Standing::default());
-        let records: Rc<RefCell<Option<Rc<DaemonRecords>>>> = Rc::default();
-        let asking = Rc::clone(&records);
-        let looks = Looks::new(move |handle| {
-            let records = asking.borrow().clone().expect("the records");
-            let waiting: Work<'static, ()> = match handle {
-                "chief" => Box::pin(async {}),
-                _ => Box::pin(async move { look(&records).await }),
-            };
-            waiting
-        });
-        let (worker, wired) = (Rc::clone(&standing), Rc::clone(&looks));
-        let wiring = Wiring::new().adapters(move |spawn, _, fakes: Rc<dyn Adapters>| {
-            *records.borrow_mut() = Some(worker.over(spawn));
-            looking(fakes, wired)
-        });
-        let mut rig = Rig::wired(wiring).await;
+        let (mut rig, standing, looks) = records_looked_at().await;
         let project = two_workers_with_a_look_each(&mut rig).await;
         looks.arm();
         rig.adapter.answer("zeus", "Parser done");
@@ -131,6 +138,33 @@ async fn two_looks_the_records_answer_together_are_two_callbacks_in_the_order_th
         // Zeus's look was asked before hera's, and the worker answers both
         // before the engine's thread looks at either.
         standing.answer(2);
+        rig.serve_until(|| passing.ended()).await;
+        rig.quiet().await;
+        assert_ran_apart(&rig, project);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn two_looks_answered_before_the_executors_first_poll_of_the_pass_are_two_callbacks_too() {
+    scene(async {
+        let (mut rig, standing, looks) = records_looked_at().await;
+        let project = two_workers_with_a_look_each(&mut rig).await;
+        looks.arm();
+        rig.adapter.answer("zeus", "Parser done");
+        rig.mark();
+        // The pass is begun where the loop begins it: both looks are asked in
+        // its first part, and the executor has not polled it since. The
+        // worker's answers are there when it does, and each look's
+        // continuation is the callback of its relay all the same, as the kit
+        // ran them.
+        let dispatcher = Rc::clone(&rig.dispatcher);
+        let passing = begin(&*rig.pieces.spawn, async move {
+            dispatcher.pass().await.map_err(|failed| failed.to_string())
+        })
+        .await;
+        standing.answer(2);
+        rig.pieces.spawn.drain();
         rig.serve_until(|| passing.ended()).await;
         rig.quiet().await;
         assert_ran_apart(&rig, project);

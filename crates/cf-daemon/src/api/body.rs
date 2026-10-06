@@ -21,7 +21,6 @@ use bytes::Bytes;
 use cf_base::json::from_slice_lossy;
 use futures_util::stream::{self, Stream, StreamExt};
 use http_body_util::BodyExt;
-use hyper::body::Incoming;
 use serde_json::{Map, Value};
 
 use super::answer::Failure;
@@ -58,22 +57,32 @@ impl Body {
         Self::new(stream::empty())
     }
 
-    /// The body hyper reads off a connection, through a pump that is spawned
-    /// beside the request: the data frames come through it as the handler
-    /// reads them, a failure of the connection as an error, and then no more.
+    /// The body hyper reads off a connection (`incoming`: anything that comes
+    /// as frames), through a pump that is spawned beside the request: the data
+    /// frames come through it as the handler reads them, a failure of the
+    /// connection as an error, and then no more.
     /// Once the handler lets the body go, answered before it read all of it (a
     /// check that comes before the body, a body over its limit), the pump reads
     /// what is left and lets it go, [`DRAIN_BYTES`] at most and for
     /// [`DRAIN_WAIT`] at most, as Node's server read the rest once a response
     /// ended: a client still sending reads its answer, where Windows resets a
     /// socket closed with bytes unread, and the answer with it (seen on zeewin).
-    /// `arrived` is called once a chunk was handed over, as the connection's
-    /// own reads are followed: what the chunk woke is run there, a callback of
-    /// its own.
-    pub fn pumped(
-        incoming: Incoming,
+    ///
+    /// `arrived` is called as the connection's own reads are followed, each
+    /// time something the handler waits for has come: a chunk handed over, and
+    /// the end of the body, the channel closed first (a failure of the
+    /// connection is the end too). What it woke is run there, a callback of its
+    /// own: a handler goes on from the end of its body, as Node's did from
+    /// `end`, before any other callback that is already runnable (a window's
+    /// exit read from the bridge, say).
+    pub fn pumped<B>(
+        incoming: B,
         arrived: impl Fn() + 'static,
-    ) -> (Self, impl Future<Output = ()> + 'static) {
+    ) -> (Self, impl Future<Output = ()> + 'static)
+    where
+        B: hyper::body::Body<Data = Bytes> + Unpin + 'static,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
         let (sender, mut received) = tokio::sync::mpsc::channel(1);
         let pump = async move {
             let mut incoming = incoming;
@@ -92,9 +101,14 @@ impl Body {
                 }
                 arrived();
                 if broke {
-                    return;
+                    break;
                 }
             }
+            // The body is over, ended or broken: closing the channel wakes the
+            // handler that waits for that, and it goes on now, not when the
+            // executor's driver is next polled.
+            drop(sender);
+            arrived();
         };
         let body = Self::new(stream::poll_fn(move |context| received.poll_recv(context)));
         (body, pump)
@@ -108,7 +122,10 @@ impl Body {
 
 /// Reads what is left of a body nobody reads any more, and lets it go: to its
 /// end, a failure, [`DRAIN_BYTES`], or [`DRAIN_WAIT`], whichever comes first.
-async fn let_go(incoming: &mut Incoming) {
+async fn let_go<B>(incoming: &mut B)
+where
+    B: hyper::body::Body<Data = Bytes> + Unpin,
+{
     let rest = async {
         let mut read = 0;
         while let Some(Ok(frame)) = incoming.frame().await {

@@ -19,6 +19,16 @@
 //! engine and its adapters sleep on ([`DaemonTime`]) and the answers of the
 //! records' worker ([`DaemonRecords`]) are such waits.
 //!
+//! Once a wait has answered that it has not ended, its answer is taken only
+//! from the poll its relay's wake brings, and from no other: work is polled
+//! again for other reasons (the executor takes up what [`begin`] began with a
+//! poll of its own, a `join` of waits polls them all at each wake), and an
+//! answer that came meanwhile, taken by such a poll, would be run inside
+//! whatever drain was running, its relay discarded: a callback that was not its
+//! own.
+//!
+//! [`begin`]: cf_engine::runtime::begin
+//!
 //! Not every wait is one: the bridge's answers are the reader's, which drains
 //! after the frames of its read; a request's body is its connection's; a
 //! request to the host that passes its deadline is woken by the bridge's own
@@ -27,7 +37,7 @@
 //! woken by tokio's sockets and pipes, as its timers were: the same
 //! [`DaemonSpawn::arrival`] would make those callbacks too.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -56,6 +66,7 @@ impl DaemonSpawn {
             spawn: Rc::clone(self),
             tell: Arc::new(Tell::default()),
             waiting: Rc::default(),
+            relayed: Rc::default(),
             relay: None,
         })
     }
@@ -69,6 +80,10 @@ struct Arrival<'a, T> {
     tell: Arc<Tell>,
     /// The work that awaits this, which the relay wakes.
     waiting: Rc<RefCell<Option<Waker>>>,
+    /// Set by the relay as it wakes the work, and cleared when the wait is
+    /// polled and has not ended: the wait is polled for its answer only while
+    /// it is set, once there is a relay.
+    relayed: Rc<Cell<bool>>,
     /// Made when the wait first answers that it has not ended: one that ends
     /// at its first poll needs no task.
     relay: Option<Relay>,
@@ -80,6 +95,12 @@ impl<T> Future for Arrival<'_, T> {
     fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<T> {
         let this = &mut *self;
         *this.waiting.borrow_mut() = Some(context.waker().clone());
+        if this.relay.is_some() && !this.relayed.get() {
+            // Polled for some other reason than the relay's wake: whatever
+            // the wait has to say is the relay's to bring. The wait keeps its
+            // waker, and wakes it when it has something to say.
+            return Poll::Pending;
+        }
         let waker = Waker::from(Arc::clone(&this.tell));
         match this.wait.as_mut().poll(&mut Context::from_waker(&waker)) {
             Poll::Ready(answer) => {
@@ -87,8 +108,14 @@ impl<T> Future for Arrival<'_, T> {
                 Poll::Ready(answer)
             }
             Poll::Pending => {
+                this.relayed.set(false);
                 if this.relay.is_none() {
-                    this.relay = Some(Relay::start(&this.spawn, &this.tell, &this.waiting));
+                    this.relay = Some(Relay::start(
+                        &this.spawn,
+                        &this.tell,
+                        &this.waiting,
+                        &this.relayed,
+                    ));
                 }
                 Poll::Pending
             }
@@ -119,11 +146,18 @@ impl Relay {
         spawn: &Rc<DaemonSpawn>,
         tell: &Arc<Tell>,
         waiting: &Rc<RefCell<Option<Waker>>>,
+        relayed: &Rc<Cell<bool>>,
     ) -> Self {
-        let (spawn, tell, waiting) = (Rc::clone(spawn), Arc::clone(tell), Rc::clone(waiting));
+        let (spawn, tell, waiting, relayed) = (
+            Rc::clone(spawn),
+            Arc::clone(tell),
+            Rc::clone(waiting),
+            Rc::clone(relayed),
+        );
         Self(tokio::task::spawn_local(async move {
             loop {
                 tell.0.notified().await;
+                relayed.set(true);
                 let work = waiting.borrow().clone();
                 if let Some(work) = work {
                     work.wake();

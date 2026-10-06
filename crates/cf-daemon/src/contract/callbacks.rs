@@ -7,15 +7,17 @@
 //! the first one's chain was over before the second's began, and an answer
 //! that came while microtasks ran waited for them. The daemon makes them
 //! callbacks ([`DaemonSpawn::arrival`]); these tests give it two at once, a
-//! timer with the exit of a window or a request, and an answer in the middle
+//! timer with the exit of a window or a request, an answer in the middle
 //! of a drain (the exit's, the request's first part, another chain's), and
+//! two answers that came between a work's `begin` and the executor's first
+//! poll of it (which finds them, and leaves them to their relays), and
 //! read the order of the chains, which is Node's when each is whole. The
 //! engine's own chains on timers and answers are in [`super::looks`].
 
 use std::rc::Rc;
 use std::time::Duration;
 
-use cf_engine::runtime::{next_turn, LocalWork};
+use cf_engine::runtime::{begin, next_turn, LocalWork};
 use cf_harness::seams::Time;
 use serde_json::{json, Value};
 
@@ -151,6 +153,39 @@ async fn two_answers_a_worker_thread_sends_together_each_run_their_chain_whole()
         standing.answer(2);
         settle().await;
         assert_whole(&order, [("a", TURNS), ("b", TURNS)]);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn two_answers_that_come_between_begin_and_the_executors_first_poll_are_two_callbacks() {
+    scene(async {
+        let Worked { spawn, .. } = worked();
+        let standing = Rc::new(Standing::default());
+        let records = standing.over(&spawn);
+        let order = Order::default();
+        // Each work is begun where JavaScript called it: its look is asked in
+        // its first part, and the executor has not polled it since.
+        let mut begun = Vec::new();
+        for name in ["a", "b"] {
+            let (order, records) = (Rc::clone(&order), Rc::clone(&records));
+            begun.push(
+                begin(&*spawn, async move {
+                    look(&records).await;
+                    chain(order, name, TURNS).await;
+                })
+                .await,
+            );
+        }
+        // Both answers are there when the executor takes up the work: the
+        // poll it makes of each finds its answer, and the work waits for its
+        // relay all the same, so that each chain is a callback of its own.
+        standing.answer(2);
+        spawn.drain();
+        assert_eq!(*order.borrow(), Vec::<String>::new(), "no chain began yet");
+        settle().await;
+        assert_whole(&order, [("a", TURNS), ("b", TURNS)]);
+        drop(begun);
     })
     .await;
 }

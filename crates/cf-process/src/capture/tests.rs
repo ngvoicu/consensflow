@@ -1,6 +1,8 @@
+use std::cell::RefCell;
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use super::*;
 use crate::execute;
@@ -40,7 +42,7 @@ fn run_now(run: &Run, cwd: Option<&Path>, limits: Limits) -> Result<Captured, Ca
         .enable_all()
         .build()
         .unwrap()
-        .block_on(capture(run, cwd, &system_env(), limits))
+        .block_on(capture(run, cwd, &system_env(), limits, |_| {}))
 }
 
 const ROOMY: Limits = Limits {
@@ -255,7 +257,7 @@ fn capture_and_execute_say_the_same_of_every_way_a_program_ends() {
             .enable_all()
             .build()
             .unwrap()
-            .block_on(execute(&run, None, &system_env(), limits));
+            .block_on(execute(&run, None, &system_env(), limits, |_| {}));
         let captured = run_now(&run, None, limits);
         match (ran, captured) {
             (Ok(stdout), Ok(captured)) => assert_eq!(stdout, captured.stdout),
@@ -268,4 +270,88 @@ fn capture_and_execute_say_the_same_of_every_way_a_program_ends() {
             (ran, captured) => panic!("{run:?}: execute {ran:?}, capture {captured:?}"),
         }
     }
+}
+
+/// A program that runs far longer than any test: `sleep` on Unix, `ping` on Windows.
+fn long_running() -> Run {
+    shell(if cfg!(windows) {
+        "ping -n 30 127.0.0.1 >NUL"
+    } else {
+        "exec sleep 30"
+    })
+}
+
+fn runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+}
+
+#[test]
+fn a_program_is_handed_over_to_be_ended_while_it_runs_and_let_go_of_once_it_has_ended() {
+    let kept: RefCell<Vec<Ender>> = RefCell::new(Vec::new());
+    runtime()
+        .block_on(capture(
+            &writes("out", "err", ""),
+            None,
+            &system_env(),
+            ROOMY,
+            |ender| {
+                assert!(ender.running(), "handed over as it starts");
+                kept.borrow_mut().push(ender);
+            },
+        ))
+        .unwrap();
+    let kept = kept.into_inner();
+    let [ender] = &kept[..] else {
+        panic!("handed over once: {} times", kept.len());
+    };
+    assert!(!ender.running(), "waited for: its pid may be another's now");
+    // Nothing is sent to it.
+    ender.force();
+}
+
+#[test]
+fn an_ender_ends_the_program_of_a_capture_that_is_still_running() {
+    let kept: Rc<RefCell<Option<Ender>>> = Rc::default();
+    let (run, env) = (long_running(), system_env());
+    let began = Instant::now();
+    let failed = runtime()
+        .block_on(async {
+            let (handed, forcing) = (Rc::clone(&kept), Rc::clone(&kept));
+            let capturing = capture(&run, None, &env, ROOMY, move |ender| {
+                *handed.borrow_mut() = Some(ender);
+            });
+            let ending = async move {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                forcing.borrow().as_ref().expect("handed over").force();
+            };
+            tokio::join!(capturing, ending).0
+        })
+        .unwrap_err();
+    assert!(
+        began.elapsed() < Duration::from_secs(20),
+        "it ended with the force"
+    );
+    assert!(!failed.killed, "not at its time: it had none");
+    let kept = kept.borrow();
+    assert!(!kept.as_ref().expect("handed over").running());
+}
+
+#[test]
+fn a_capture_dropped_while_its_program_runs_leaves_nothing_for_its_ender_to_end() {
+    let kept: Rc<RefCell<Option<Ender>>> = Rc::default();
+    let (run, env) = (long_running(), system_env());
+    runtime().block_on(async {
+        let handed = Rc::clone(&kept);
+        let capturing = capture(&run, None, &env, ROOMY, move |ender| {
+            *handed.borrow_mut() = Some(ender);
+        });
+        // Dropped at the end of the test's own wait: the program went with it.
+        let _ = tokio::time::timeout(Duration::from_millis(300), capturing).await;
+    });
+    let kept = kept.borrow();
+    let ender = kept.as_ref().expect("handed over before it was dropped");
+    assert!(!ender.running(), "it is no one's to end");
 }

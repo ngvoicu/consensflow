@@ -55,6 +55,34 @@ export const PLANTS = [
     meant: 'work_spawned_waits_for_a_drain_and_a_drain_runs_it_in_the_order_it_was_woken',
   },
   {
+    name: 'seams: a wait is taken by a poll that is not its relay’s',
+    edits: [
+      [
+        `${DAEMON}/seams/boundary.rs`,
+        '        if this.relay.is_some() && !this.relayed.get() {',
+        '        if false {',
+      ],
+    ],
+    runs: [daemon('contract::callbacks'), daemon('contract::looks')],
+    meant: 'two_answers_that_come_between_begin_and_the_executors_first_poll_are_two_callbacks',
+  },
+  {
+    name: 'seams: a wait its relay woke with nothing to say is taken again without its relay',
+    edits: [
+      [
+        `${DAEMON}/seams/boundary.rs`,
+        lines(
+          '            Poll::Pending => {',
+          '                this.relayed.set(false);',
+          '                if this.relay.is_none() {',
+        ),
+        lines('            Poll::Pending => {', '                if this.relay.is_none() {'),
+      ],
+    ],
+    runs: [daemon('seams::')],
+    meant: 'a_wait_its_relay_woke_with_nothing_to_say_has_its_answer_from_its_relay_again',
+  },
+  {
     name: 'host: the daemon’s bridge does not run what the frames woke after a read',
     edits: [
       [
@@ -230,6 +258,66 @@ export const PLANTS = [
     ],
     runs: [unit('cf-process', 'terminate::')],
     meant: 'ends_a_child_with_the_signal_asked_for',
+  },
+  {
+    name: 'process: a program run to its end does not hand over its end',
+    edits: [
+      [
+        'crates/cf-process/src/capture.rs',
+        '    started(Ender::new(pid, &exited));',
+        '    let _ = started;',
+      ],
+    ],
+    runs: [unit('cf-process', 'capture::')],
+    meant: 'a_program_is_handed_over_to_be_ended_while_it_runs_and_let_go_of_once_it_has_ended',
+  },
+  {
+    name: 'process: a program run to its end (run) is not kept for the way out',
+    edits: [
+      [
+        'crates/cf-harness/src/seams/processes.rs',
+        lines(
+          '            let kept = |ender| self.keep(ender);',
+          '            cf_process::execute(&run, program.cwd.as_deref(), &env, limits, kept).await',
+        ),
+        lines(
+          '            let kept = |_ender| ();',
+          '            cf_process::execute(&run, program.cwd.as_deref(), &env, limits, kept).await',
+        ),
+      ],
+    ],
+    runs: [unit('cf-harness', 'seams::processes'), daemon('stop::')],
+    meant: 'programs_run_to_their_end_are_kept_while_they_run_and_let_go_of_once_they_have_ended',
+  },
+  {
+    name: 'process: a program captured (an update) is not kept for the way out',
+    edits: [
+      [
+        'crates/cf-harness/src/seams/processes.rs',
+        lines(
+          '            let kept = |ender| self.keep(ender);',
+          '            cf_process::capture(&run, program.cwd.as_deref(), &env, limits, kept).await',
+        ),
+        lines(
+          '            let kept = |_ender| ();',
+          '            cf_process::capture(&run, program.cwd.as_deref(), &env, limits, kept).await',
+        ),
+      ],
+    ],
+    runs: [stop, daemon('stop::')],
+    meant: 'a_program_the_daemon_is_waiting_for_is_ended_when_it_stops',
+  },
+  {
+    name: 'process: programs that ended are kept for the way out',
+    edits: [
+      [
+        'crates/cf-harness/src/seams/processes.rs',
+        lines('        started.retain(Ender::running);', '        started.push(ender);'),
+        '        started.push(ender);',
+      ],
+    ],
+    runs: [unit('cf-harness', 'seams::processes')],
+    meant: 'programs_run_to_their_end_are_kept_while_they_run_and_let_go_of_once_they_have_ended',
   },
   {
     name: 'process: a size in megabytes is rounded down',

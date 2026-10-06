@@ -180,10 +180,7 @@ impl Child {
     /// What ends it later, should this process be ending: the forcing of it
     /// while it runs.
     pub fn ender(&self) -> Ender {
-        Ender {
-            pid: self.pid,
-            exited: Rc::downgrade(&self.exited),
-        }
+        Ender::new(self.pid, &self.exited)
     }
 
     fn poll_closing(&self, context: &mut Context<'_>) -> Poll<()> {
@@ -208,7 +205,8 @@ impl Drop for Child {
 }
 
 /// A child's end, kept apart from the child: this process's exit path
-/// forces every child still running.
+/// forces every child still running. A program run to its end (`capture`,
+/// `execute`) hands its own over as it starts.
 #[derive(Debug, Clone)]
 pub struct Ender {
     pid: Option<u32>,
@@ -216,6 +214,17 @@ pub struct Ender {
 }
 
 impl Ender {
+    /// The end of the program `pid`, which is still there while `exited` is
+    /// held and not set: once it is set (the program has been waited for, and
+    /// its pid may be another's) or dropped (the program is no one's to end),
+    /// nothing is sent.
+    pub(crate) fn new(pid: Option<u32>, exited: &Rc<Cell<bool>>) -> Self {
+        Self {
+            pid,
+            exited: Rc::downgrade(exited),
+        }
+    }
+
     /// Whether the child is still there to be ended.
     pub fn running(&self) -> bool {
         self.exited.upgrade().is_some_and(|exited| !exited.get())
