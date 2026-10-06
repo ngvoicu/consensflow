@@ -7,10 +7,9 @@
  * the caller's shell does not choose for it, and the suites refuse a selection
  * that is not the leg's own. tests/cli.test.mjs holds the cf that runs to the
  * leg by the Node processes that start (Node's cf is one, the native cf starts
- * none for the catalog), and says which it found to this runner, which fails a
- * leg that ran the other. What the native cf still hands to Node's
- * sources (`setup` and `doctor`) runs on the runtime of this process, and every
- * other verb is given none, so that a native cf that handed it on would fail.
+ * none for any verb), and says which it found to this runner, which fails a
+ * leg that ran the other. The native cf is named no runtime for any verb, so
+ * that one that handed a verb to Node's sources would fail.
  *
  *   node tests/clis.mjs [--offline]
  */

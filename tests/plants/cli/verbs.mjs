@@ -27,7 +27,7 @@ export const PLANTS = [
       lines('    let catalog = bundled()?;', '    match action {'),
       lines(
         '    let catalog = bundled()?;',
-        '    if let Some(path) = roster_path(env) {',
+        '    if let Some(path) = cf_catalog::roster_path(env) {',
         '        let _ = std::fs::create_dir_all(path.parent().unwrap_or(&path));',
         '    }',
         '    match action {',

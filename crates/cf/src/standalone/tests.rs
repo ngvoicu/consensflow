@@ -1,14 +1,40 @@
 //! Which words this module answers and which it leaves to the CLI's Node
-//! sources: the switch, a window's token, and the verbs not ported. What it
-//! says for the ones it answers is held to Node's recording
-//! (`tests/cli_goldens.rs`).
+//! sources: the switch, a window's token, and `ui`. What it says for the ones
+//! it answers is held to Node's recording (`tests/cli_goldens`); here are the
+//! orders and refusals that recording cannot hold, because Node asked the
+//! system for what the environment does not name.
 
-use std::io;
+use std::path::Path;
+use std::{fs, io};
 
 use super::*;
 
 fn env(vars: &[(&str, &str)]) -> Env {
     Env::from_vars(vars.iter().copied())
+}
+
+/// What a user has who keeps ConsensFlow's home, Claude Code's folder and the
+/// whole of what they look in under `dir`, with no harness on the PATH and
+/// the switch on.
+fn homed(dir: &Path) -> Vec<(&'static str, String)> {
+    let at = |name: &str| dir.join(name).to_string_lossy().into_owned();
+    vec![
+        ("CONSENSFLOW_DAEMON", "native".to_owned()),
+        ("CONSENSFLOW_HOME", at("consensflow")),
+        ("HOME", at("home")),
+        ("CLAUDE_CONFIG_DIR", at("claude")),
+        ("PATH", at("bin")),
+    ]
+}
+
+/// `ran` for a user of `homed`.
+fn ran_in(dir: &Path, args: &[&str]) -> (Option<u8>, String, String) {
+    let vars = homed(dir);
+    let vars: Vec<(&str, &str)> = vars
+        .iter()
+        .map(|(name, text)| (*name, text.as_str()))
+        .collect();
+    ran(&vars, args)
 }
 
 fn words(args: &[&str]) -> Vec<OsString> {
@@ -72,12 +98,19 @@ fn a_window_token_makes_cf_the_board_which_this_module_does_not_answer() {
 }
 
 #[test]
-fn the_verbs_that_wait_for_another_landing_go_on_to_node_with_the_switch_on() {
-    for verb in ["setup", "doctor", "ui"] {
-        assert_eq!(
-            ran(&NATIVE, &[verb, "--json"]),
-            (None, String::new(), String::new()),
-            "{verb}"
+fn ui_is_the_one_verb_left_to_the_daemon_with_the_switch_on() {
+    assert_eq!(
+        ran(&NATIVE, &["ui", "--json"]),
+        (None, String::new(), String::new())
+    );
+    // `setup` and `doctor` are answered here, though there is no home to
+    // answer for: what they say is that, and not that they are no command.
+    for verb in ["setup", "doctor"] {
+        let (code, _, wrong) = ran(&NATIVE, &[verb]);
+        assert_eq!(code, Some(1), "{verb}");
+        assert!(
+            wrong.contains("no folder to keep its things in"),
+            "{verb}: {wrong}"
         );
     }
 }
@@ -166,11 +199,17 @@ fn a_reader_that_went_away_is_the_callers_to_end_quietly_and_no_message_of_the_v
 
 #[test]
 fn with_no_folder_to_keep_the_agents_in_a_verb_that_needs_it_says_so() {
+    // `setup` and `doctor` say it before they make or say anything: the
+    // launcher would say its own words for a home it cannot find, and the
+    // roster would refuse again after.
     for args in [
         &["agent", "list"][..],
         &["agent", "edit", "x"],
         &["agent", "remove", "x"],
         &["agent", "add", "x", "--harness", "claude", "--model", "m"],
+        &["setup"],
+        &["doctor"],
+        &["doctor", "--anything"],
     ] {
         assert_eq!(
             ran(&NATIVE, args),
@@ -185,4 +224,78 @@ fn with_no_folder_to_keep_the_agents_in_a_verb_that_needs_it_says_so() {
     }
     // The catalog is no file of the home's.
     assert_eq!(ran(&NATIVE, &["catalog", "--harness", "pi"]).0, Some(0));
+}
+
+#[test]
+fn setup_reads_its_words_before_it_makes_anything() {
+    let dir = tempfile::tempdir().unwrap();
+    for (word, said) in [
+        (
+            "x",
+            "Unexpected argument 'x'. This command does not take positional arguments",
+        ),
+        ("--json", "Unknown option '--json'"),
+    ] {
+        assert_eq!(
+            ran_in(dir.path(), &["setup", word]),
+            (Some(1), String::new(), format!("cf: {said}\n")),
+            "{word}"
+        );
+        // Not a launcher, nor the folder for one.
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0, "{word}");
+    }
+}
+
+#[test]
+fn setup_makes_the_command_in_the_home_and_says_what_it_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, said, wrong) = ran_in(dir.path(), &["setup"]);
+    assert_eq!((code, wrong.as_str()), (Some(0), ""));
+    let (harnesses, agents) = said.split_once('\n').unwrap();
+    assert_eq!(harnesses, "harnesses: none found on PATH");
+    assert!(
+        agents.starts_with("agents: ")
+            && agents.ends_with(" saved — manage them with cf ui or cf agent\n"),
+        "{agents:?}"
+    );
+    let extension = if cfg!(windows) { ".cmd" } else { "" };
+    for name in ["cf", "consensflow"] {
+        let command = dir
+            .path()
+            .join("consensflow/bin")
+            .join(format!("{name}{extension}"));
+        let text = fs::read_to_string(&command).unwrap();
+        assert!(text.contains("Installed by ConsensFlow"), "{name}: {text}");
+    }
+}
+
+#[test]
+fn doctor_says_what_stops_it_after_the_lines_it_has_said() {
+    let dir = tempfile::tempdir().unwrap();
+    // The command is there and cannot be read: a folder where it goes.
+    let first = if cfg!(windows) {
+        "consensflow.cmd"
+    } else {
+        "consensflow"
+    };
+    fs::create_dir_all(dir.path().join("consensflow/bin").join(first)).unwrap();
+    let (code, said, wrong) = ran_in(dir.path(), &["doctor"]);
+    assert_eq!(code, Some(1));
+    assert_eq!(
+        wrong,
+        "cf: EISDIR: illegal operation on a directory, read\n"
+    );
+    let home = dir.path().join("consensflow");
+    assert!(
+        said.starts_with(&format!(
+            "consensflow {}\nhome:         {}\nharnesses:    none on PATH\nagents:       ",
+            env!("CARGO_PKG_VERSION"),
+            home.display()
+        )),
+        "{said}"
+    );
+    assert!(
+        said.ends_with("roles:        bundled chief, worker, reviewer and advisor; prepared when a window launches\n"),
+        "{said}"
+    );
 }

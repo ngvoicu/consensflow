@@ -1,7 +1,7 @@
 /**
  * Plays a scenario against the legacy CLI, `node bin/cf.mjs`, and writes down
  * what it did: the oracle `crates/cf` is held to, case by case, by the Rust
- * player (`crates/cf/tests/cli_goldens.rs`).
+ * player (`crates/cf/tests/cli_goldens/`).
  *
  * A scenario is data: `{ name, args, env, stdin, files, pipe, kept }`.
  * - `args`: the words after `cf`.

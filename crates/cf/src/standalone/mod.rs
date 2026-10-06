@@ -1,30 +1,41 @@
-//! The standalone verbs of the CLI (`bin/cf.mjs`) that need no launcher, answered
-//! here as Node answered them, word for word: the usage, the version,
-//! `catalog`, and `agent add|list|edit|remove`. `tests/cli_goldens.rs` holds
-//! them to what Node said (`npm run goldens:cli`), file by file.
+//! The standalone verbs of the CLI (`bin/cf.mjs`), answered here as Node
+//! answered them, word for word: the usage, the version, `catalog`,
+//! `agent add|list|edit|remove`, and `setup` and `doctor`, which wire the
+//! launcher, the stale hooks and the app's preparation
+//! (`cf_launcher`, `cf_harness`). `tests/cli_goldens` holds them to what Node
+//! said (`npm run goldens:cli`), file by file.
 //!
 //! They are dormant until the flip (step 4): reached only with
 //! `CONSENSFLOW_DAEMON=native`, as `cf ui` is, and tokenless (a window has its
 //! participant's token, and there `cf` is the board). Without the switch every
-//! tokenless verb goes to the CLI's Node sources as it always did, and so do
-//! `setup` and `doctor` with it, until a landing brings the launcher and the
-//! stale hooks they need.
+//! tokenless verb goes to the CLI's Node sources as it always did.
 //!
 //! A verb says what it prints as it goes, and what stops it as `cf: <words>`
 //! with exit code 1: Node's `fail` and every error `main` caught.
 
 mod agent;
 mod catalog;
+mod doctor;
+mod setup;
 
 use std::ffi::OsString;
 use std::io::{self, Write};
+use std::path::PathBuf;
 
 use cf_base::env::Env;
+use cf_base::home::config_root;
 use cf_base::js;
 use cf_base::refusal::Refusal;
-use cf_catalog::Catalog;
+use cf_catalog::{roster_path, Catalog, Roster};
+use cf_daemon::machine;
+use cf_harness::detect::detect_harnesses;
 use serde::Serialize;
 use serde_json::Value;
+
+/// Said when the environment names no folder to keep ConsensFlow's things in.
+/// Node asked the system for the user's home then; here it is not asked for.
+const NO_HOME: &str =
+    "ConsensFlow has no folder to keep its things in: set CONSENSFLOW_HOME, or HOME";
 
 /// What `cf help` prints, with the version where `{version}` stands.
 const USAGE: &str = include_str!("usage.txt");
@@ -54,9 +65,8 @@ type Done = Result<(), Stop>;
 
 /// Runs `args` as a standalone verb when it is one answered here, and the
 /// switch is on: its exit code. None when it is not for this module: the
-/// switch is off, a window's token is there, or the verb is one of those still
-/// answered by the CLI's Node sources (`setup`, `doctor`, and `ui`, which
-/// `cf_daemon` answers). Only a failure to write is an error.
+/// switch is off, a window's token is there, or the verb is `ui`, which
+/// `cf_daemon` answers. Only a failure to write is an error.
 pub fn run(
     env: &Env,
     args: &[OsString],
@@ -83,7 +93,10 @@ pub fn run(
         }
         Some("catalog") => catalog::run(rest, out),
         Some("agent") => agent::run(env, rest, out),
-        Some("setup" | "doctor" | "ui") => return Ok(None),
+        Some("setup") => setup::run(env, rest, out),
+        // Whatever words follow it are no matter, as in Node.
+        Some("doctor") => doctor::run(env, out),
+        Some("ui") => return Ok(None),
         Some(other) => Err(Stop::Said(format!(
             "unknown command {} — run `cf help`",
             js::stringify(&Value::from(other))
@@ -113,6 +126,49 @@ fn bundled() -> Result<Catalog, Stop> {
 /// `value` as JSON, for the verb that prints it.
 fn to_json<T: Serialize>(value: &T) -> Result<Value, Stop> {
     serde_json::to_value(value).map_err(|failed| Stop::Said(failed.to_string()))
+}
+
+/// What stops a verb that needs ConsensFlow's folder where none is named.
+fn no_home() -> Stop {
+    Stop::Said(NO_HOME.to_owned())
+}
+
+/// ConsensFlow's folder, which the verbs that keep something in it refuse to
+/// go on without.
+fn home(env: &Env) -> Result<PathBuf, Stop> {
+    config_root(env).ok_or_else(no_home)
+}
+
+/// The roster of the home `env` names, over `catalog`.
+fn roster<'a>(env: &Env, catalog: &'a Catalog) -> Result<Roster<'a>, Stop> {
+    let path = roster_path(env).ok_or_else(no_home)?;
+    Ok(Roster::new(catalog, path))
+}
+
+/// How many agents there are, the catalog's and the human's together: what
+/// `setup` and `doctor` count (`listAgents(env).length`).
+fn agents_saved(env: &Env) -> Result<usize, Stop> {
+    let catalog = bundled()?;
+    Ok(roster(env, &catalog)?.list()?.len())
+}
+
+/// The harnesses installed here, by id, in the order detection lists them.
+fn harness_ids(env: &Env) -> Vec<&'static str> {
+    detect_harnesses(env)
+        .iter()
+        .map(|found| found.id.as_str())
+        .collect()
+}
+
+/// The `cf` of the bundle this program is in: the one a launcher runs, and
+/// the one `doctor` asks a launcher about.
+fn own_cf() -> Result<PathBuf, Stop> {
+    match std::env::current_exe() {
+        Ok(exe) => Ok(machine::bundle_of(&exe).cf),
+        Err(cause) => Err(Stop::Said(format!(
+            "cannot tell which folder it is in: {cause}"
+        ))),
+    }
 }
 
 #[cfg(test)]

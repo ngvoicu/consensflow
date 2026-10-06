@@ -26,6 +26,7 @@ import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from '
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { PLANTS as ADMIN } from './cli/admin.mjs'
 import { PLANTS as DISPATCH } from './cli/dispatch.mjs'
 import { BOTH } from './cli/kit.mjs'
 import { PLANTS as ORACLE } from './cli/oracle.mjs'
@@ -37,7 +38,7 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const RUN_LIMIT = 10 * 60 * 1000
 
 /** Every plant, by area. */
-const PLANTS = [...PARSER, ...VERBS, ...DISPATCH, ...ORACLE]
+const PLANTS = [...PARSER, ...VERBS, ...ADMIN, ...DISPATCH, ...ORACLE]
 
 const args = process.argv.slice(2)
 const words = args.filter((arg) => !arg.startsWith('--'))

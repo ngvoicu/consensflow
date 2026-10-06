@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { rosterPath } from '../src/roster.js'
 import { noteRan } from './choice.mjs'
-import { cliEnv, cliTarget } from './cli-target.mjs'
+import { cliTarget } from './cli-target.mjs'
 import { fakeExecutable, tempEnv } from './helpers.mjs'
 
 /** A launcher is `cf` on POSIX and `cf.cmd` on Windows. */
@@ -23,7 +23,7 @@ const target = cliTarget()
 async function cf(args, env) {
   try {
     const { stdout, stderr } = await run(target.command, [...target.args, ...args], {
-      env: cliEnv(target, args, env),
+      env: { ...env, ...target.env },
       timeout: 30_000,
     })
     return { code: 0, stdout, stderr }
