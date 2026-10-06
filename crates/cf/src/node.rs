@@ -1,8 +1,8 @@
 //! The way back to Node: the CLI's sources, `cf.mjs` beside this binary, run on
 //! the Node the bundle carries. A home that has taken it (the `use-node` file in
 //! it) sends every command of a terminal here, as it sends the app's daemon.
-//! Nothing else does: this binary answers every verb itself but `ui`, which is
-//! the daemon's (`native_ui`).
+//! Nothing else does: it is run with the file that sent the home, and for no
+//! other reason.
 //!
 //! The Node is found from this binary's own place in the bundle, and from
 //! nowhere else: a terminal has no `CONSENSFLOW_NODE` (the app names it to the
@@ -25,8 +25,6 @@
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-
-use cf_base::way_back::Choice;
 
 /// Where the bundle keeps its Node, for the `cf` at `cf`, in the order they
 /// are looked in: the places of the layout above. `windows` says whose layout.
@@ -62,34 +60,25 @@ fn bundled_node(cf: &Path) -> Result<PathBuf, Vec<PathBuf>> {
         .ok_or(tried)
 }
 
-/// What is said where no Node is bundled: why the command needs one, where it
+/// What is said where no Node is bundled: which file asked for one, where it
 /// was looked for, and what to do.
-fn missing(choice: &Choice, script: &Path, tried: &[PathBuf]) -> String {
+fn missing(file: &Path, script: &Path, tried: &[PathBuf]) -> String {
     let places: Vec<_> = tried
         .iter()
         .map(|place| place.display().to_string())
         .collect();
-    let (why, remedy) = match choice.file.as_deref().filter(|_| choice.node) {
-        Some(file) => (
-            format!("{} sends this home's commands to Node", file.display()),
-            "delete the file to run the native cf, or run",
-        ),
-        None => (
-            "this command runs on ConsensFlow's own Node".to_owned(),
-            "run",
-        ),
-    };
     format!(
-        "cf: {why}, and none is bundled beside this cf (looked for {}): {remedy} {} with a node of your choosing.",
+        "cf: {} sends this home's commands to Node, and none is bundled beside this cf (looked for {}): delete the file to run the native cf, or run {} with a node of your choosing.",
+        file.display(),
         places.join(", "),
         script.display()
     )
 }
 
 /// Runs `cf.mjs` with `args` in this process's place, on the Node of this
-/// bundle: an exit code only when it could not be run. `choice` is what the
-/// way back said for this home, which a refusal names.
-pub fn run(args: &[OsString], choice: &Choice, err: &mut dyn Write) -> io::Result<u8> {
+/// bundle: an exit code only when it could not be run. `file` is the one that
+/// sent the home to Node (`Choice::node_file`), which a refusal names.
+pub fn run(args: &[OsString], file: &Path, err: &mut dyn Write) -> io::Result<u8> {
     let exe = match std::env::current_exe() {
         Ok(exe) => exe,
         Err(cause) => {
@@ -101,7 +90,7 @@ pub fn run(args: &[OsString], choice: &Choice, err: &mut dyn Write) -> io::Resul
     let node = match bundled_node(&exe) {
         Ok(node) => node,
         Err(tried) => {
-            writeln!(err, "{}", missing(choice, &script, &tried))?;
+            writeln!(err, "{}", missing(file, &script, &tried))?;
             return Ok(1);
         }
     };
@@ -214,21 +203,12 @@ mod tests {
     fn the_refusal_names_the_file_that_asked_for_node_and_how_to_be_rid_of_it() {
         let tried = [PathBuf::from("/app/Contents/MacOS/node")];
         let script = Path::new("/app/Contents/Resources/cli/bin/cf.mjs");
-        let way_back = Choice {
-            file: Some(PathBuf::from("/home/me/.consensflow/use-node")),
-            node: true,
-        };
+        let file = Path::new("/home/me/.consensflow/use-node");
         assert_eq!(
-            missing(&way_back, script, &tried),
+            missing(file, script, &tried),
             "cf: /home/me/.consensflow/use-node sends this home's commands to Node, and none is bundled \
              beside this cf (looked for /app/Contents/MacOS/node): delete the file to run the native cf, \
              or run /app/Contents/Resources/cli/bin/cf.mjs with a node of your choosing."
         );
-        let waiting = Choice {
-            file: Some(PathBuf::from("/home/me/.consensflow/use-node")),
-            node: false,
-        };
-        assert!(missing(&waiting, script, &tried)
-            .starts_with("cf: this command runs on ConsensFlow's own Node, and none is bundled"));
     }
 }

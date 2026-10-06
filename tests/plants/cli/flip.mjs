@@ -38,12 +38,10 @@ const app = (filter) => [...APP, filter]
 
 /** What the native `cf` of the first reader does with the file: `ui` is the daemon only without it. */
 const UI_ASKS = ' && !way_back::choose(env).node;'
-/** What it does with a verb when the home has the file: Node's. */
-const VERBS_ASK = lines(
-  '            if choice.node {',
-  '                return node::run(args, &choice, err);',
-  '            }',
-)
+/** What it does with a verb when the home has the file: Node's, with the file. */
+const VERBS_ASK = 'Some(file) => node::run(args, file, err),'
+/** What it does with a verb when the home has none: its own. */
+const VERBS_OWN = 'None => standalone::run(env, args, out, err),'
 /** What the app does: the daemon is Node's when the home has the file. */
 const APP_ASKS = '(command_for(node, cli, choice.node), choice)'
 /** What the door does: a verb is forwarded unless the file is there. */
@@ -70,7 +68,7 @@ export const PLANTS = [
   },
   {
     name: 'flip: the native cf answers a verb itself though the home has the file',
-    edits: [[LIB, VERBS_ASK, '']],
+    edits: [[LIB, VERBS_ASK, 'Some(_) => standalone::run(env, args, out, err),']],
     runs: [WAY_BACK],
     meant: 'with_the_file_every_tokenless_verb_runs_on_the_node_beside_cf_with_none_named',
   },
@@ -134,6 +132,12 @@ export const PLANTS = [
     runs: [TABLE],
     meant: 'every_case_has_one_answer_whatever_the_environment_adds',
   },
+  {
+    name: 'flip: the Rust decider names the file as the way back where nothing is there',
+    edits: [[DECIDER, 'self.file.as_deref().filter(|_| self.node)', 'self.file.as_deref()']],
+    runs: [TABLE],
+    meant: 'every_case_has_one_answer_whatever_the_environment_adds',
+  },
 
   // The old CONSENSFLOW_DAEMON, read again by one reader.
   {
@@ -177,8 +181,13 @@ export const PLANTS = [
     edits: [
       [
         LIB,
-        'if choice.node {',
-        'if choice.node || env.text("CONSENSFLOW_DAEMON") == Some("node") {',
+        VERBS_OWN,
+        lines(
+          'None if env.text("CONSENSFLOW_DAEMON") == Some("node") => {',
+          '                node::run(args, std::path::Path::new("use-node"), err)',
+          '            }',
+          `            ${VERBS_OWN}`,
+        ),
       ],
     ],
     runs: [WAY_BACK],
@@ -381,7 +390,7 @@ export const PLANTS = [
   // What runs the readers: the native cf built from the planted sources, one writer for a home.
   {
     name: 'flip: the native cf answers a verb itself though the home has the file, seen by one writer',
-    edits: [[LIB, VERBS_ASK, '']],
+    edits: [[LIB, VERBS_ASK, 'Some(_) => standalone::run(env, args, out, err),']],
     runs: [BUILD, WRITER],
     meant: 'writes a roster through Node with the file in the home, and through Rust without it',
   },

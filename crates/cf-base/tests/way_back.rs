@@ -126,6 +126,12 @@ fn every_case_has_one_answer_whatever_the_environment_adds() {
                     }
                 );
                 assert_eq!(choice.file, Some(folder.join(FILE)), "{name}");
+                // The file is named as the way back where it sends the home to Node.
+                assert_eq!(
+                    choice.node_file(),
+                    expected.then_some(folder.join(FILE).as_path()),
+                    "{name}"
+                );
                 held += 1;
             }
             unmake(&folder);

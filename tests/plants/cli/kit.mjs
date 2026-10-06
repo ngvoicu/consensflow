@@ -18,6 +18,8 @@ export const ARGS = cargo('-p', 'cf-base', '--test', 'args')
 export const UNITS = cargo('-p', 'cf', '--lib', 'standalone')
 /** Which `cf` answers, as a process. */
 export const PROCESS = cargo('-p', 'cf', '--test', 'standalone')
+/** The library as a caller other than `main` has it: what no process can bring to it. */
+export const LIBRARY = cargo('-p', 'cf', '--test', 'dispatch')
 /** The checked-in recording held to what Node answers now. */
 export const HELD = [process.execPath, '--test', 'tests/cli-goldens.test.mjs']
 /** The suites of the CLI against Node's `cf.mjs` and then the native `cf`. */

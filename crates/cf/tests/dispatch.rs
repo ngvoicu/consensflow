@@ -1,12 +1,15 @@
 //! Which `cf` answers what: the board's commands with a window's token, the
 //! hooks with or without one, and the Codex window's supervisor matched on
 //! the first word. What is handed to the CLI's Node sources is `way_back.rs`'s
-//! and `standalone.rs`'s.
+//! and `standalone.rs`'s. A `ui` that reaches the library is held by calling
+//! the library: a process never gets one there.
 
 mod common;
 
-use std::fs;
+use std::ffi::OsString;
+use std::{fs, io};
 
+use cf_base::env::Env;
 use common::cf;
 
 #[test]
@@ -117,4 +120,28 @@ fn a_codex_window_says_when_codex_cannot_start_and_leaves_no_socket_behind() {
     // The window's socket folder went with it.
     let left = fs::read_dir(home.path().join("tmp")).map_or(0, |entries| entries.count());
     assert_eq!(left, 0);
+}
+
+#[test]
+fn a_ui_that_reaches_the_library_is_an_unknown_command_and_starts_nothing() {
+    // `main` takes `ui` before `cf::run` (`cf::native_ui`), so no process gets
+    // one there; a caller of the library that does not would, were it handed
+    // to the CLI's Node sources, start Node's daemon on a home that runs
+    // native: two writers for one home.
+    let home = tempfile::tempdir().unwrap();
+    let env = Env::from_vars([("CONSENSFLOW_HOME", home.path())]);
+    for words in [&["ui"][..], &["ui", "--json", "--no-open"]] {
+        let args: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = cf::run(&env, &args, &mut io::empty(), &mut out, &mut err).unwrap();
+        assert_eq!(code, 1, "{words:?}");
+        assert!(out.is_empty(), "{words:?}");
+        assert_eq!(
+            String::from_utf8(err).unwrap(),
+            "cf: unknown command \"ui\" — run `cf help`\n",
+            "{words:?}"
+        );
+    }
+    // Nothing was made in the home: no daemon, no log.
+    assert_eq!(fs::read_dir(home.path()).unwrap().count(), 0);
 }

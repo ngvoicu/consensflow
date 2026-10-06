@@ -138,9 +138,8 @@ jobs:
           # `rust`, and so does the default, which is the native one since the flip.
           $expected = if ($env:CF_DAEMON) { @{ node = 'node'; native = 'rust'; default = 'rust' }[$env:CF_DAEMON] }
           if ($expected -and $kind -ne $expected) { "asked for the $env:CF_DAEMON daemon, its log says '$kind'"; exit 1 }
-          # A pane's `cf`: the runtime's cf.exe, on the runtime's Node where it
-          # hands a command on to the CLI's sources (the bundle still has them).
-          $env:CONSENSFLOW_NODE = Join-Path $runtime 'node.exe'
+          # A pane's `cf`: the runtime's cf.exe, which needs nothing in the environment
+          # to answer, or to find its Node where the home has the way back.
           $said = & (Join-Path $runtime 'cli\bin\cf.exe') --version
           if ($said -ne $version) { "the runtime's cf.exe said '$said', not $version"; exit 1 }
           # The terminals' console host, which the app names to Windows' library search.

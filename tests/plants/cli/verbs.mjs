@@ -60,7 +60,7 @@ export const PLANTS = [
       'write!(out, "{}", usage()).map_err(Stop::from)',
     ],
   ]),
-  verb('a refusal exits with 0', [[MOD, 'Ok(Some(1))', 'Ok(Some(0))']]),
+  verb('a refusal exits with 0', [[MOD, 'Ok(1)', 'Ok(0)']]),
   verb("an unknown command is said without JSON's escapes", [
     [MOD, 'js::stringify(&Value::from(other))', 'format!("\\"{other}\\"")'],
   ]),

@@ -1,8 +1,9 @@
-//! Which words this module answers and which it leaves to the daemon: all but
-//! `ui`, whatever the environment says. What it says for the ones it answers is
-//! held to Node's recording (`tests/cli_goldens`); here are the orders and
-//! refusals that recording cannot hold, because Node asked the system for what
-//! the environment does not name.
+//! Which words this module answers, whatever the environment says: the verbs,
+//! and as unknown commands every word that is none, `ui` (the daemon's) among
+//! them. What it says for the verbs is held to Node's recording
+//! (`tests/cli_goldens`); here are the orders and refusals that recording
+//! cannot hold, because Node asked the system for what the environment does
+//! not name.
 
 use std::path::Path;
 use std::{fs, io};
@@ -26,7 +27,7 @@ fn homed(dir: &Path) -> Vec<(&'static str, String)> {
 }
 
 /// `ran` for a user of `homed`.
-fn ran_in(dir: &Path, args: &[&str]) -> (Option<u8>, String, String) {
+fn ran_in(dir: &Path, args: &[&str]) -> (u8, String, String) {
     let vars = homed(dir);
     let vars: Vec<(&str, &str)> = vars
         .iter()
@@ -40,7 +41,7 @@ fn words(args: &[&str]) -> Vec<OsString> {
 }
 
 /// What `run` made of the words: its code, and what it said on each output.
-fn ran(vars: &[(&str, &str)], args: &[&str]) -> (Option<u8>, String, String) {
+fn ran(vars: &[(&str, &str)], args: &[&str]) -> (u8, String, String) {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let code = run(&env(vars), &words(args), &mut out, &mut err).unwrap();
     (
@@ -60,25 +61,24 @@ fn it_answers_by_default_and_the_old_switch_in_the_environment_changes_nothing()
     for value in ["native", "node", "NATIVE", "1", ""] {
         let vars = [("CONSENSFLOW_DAEMON", value)];
         let (code, said, wrong) = ran(&vars, &["help"]);
-        assert_eq!((code, wrong.as_str()), (Some(0), ""), "{value:?}");
+        assert_eq!((code, wrong.as_str()), (0, ""), "{value:?}");
         assert!(said.starts_with("consensflow "), "{value:?}: {said}");
     }
 }
 
 #[test]
-fn ui_is_the_one_verb_left_to_the_daemon() {
-    assert_eq!(
-        ran(&NONE, &["ui", "--json"]),
-        (None, String::new(), String::new())
-    );
-    // `setup` and `doctor` are answered here, though there is no home to
-    // answer for: what they say is that, and not that they are no command.
-    for verb in ["setup", "doctor"] {
-        let (code, _, wrong) = ran(&NONE, &[verb]);
-        assert_eq!(code, Some(1), "{verb}");
-        assert!(
-            wrong.contains("no folder to keep its things in"),
-            "{verb}: {wrong}"
+fn ui_is_the_daemons_and_reaching_this_module_it_is_an_unknown_command() {
+    // `main` runs the daemon before the words get here, and starts nothing
+    // for a word that does: this module has nothing to hand it to.
+    for args in [&["ui"][..], &["ui", "--json"], &["ui", "--no-open"]] {
+        assert_eq!(
+            ran(&NONE, args),
+            (
+                1,
+                String::new(),
+                "cf: unknown command \"ui\" — run `cf help`\n".to_owned()
+            ),
+            "{args:?}"
         );
     }
 }
@@ -87,7 +87,7 @@ fn ui_is_the_one_verb_left_to_the_daemon() {
 fn the_usage_is_the_one_node_printed_with_this_builds_version_and_a_blank_line_at_its_end() {
     for args in [&[][..], &["help"], &["--help"], &["help", "agent"]] {
         let (code, said, wrong) = ran(&NONE, args);
-        assert_eq!((code, wrong.as_str()), (Some(0), ""), "{args:?}");
+        assert_eq!((code, wrong.as_str()), (0, ""), "{args:?}");
         assert!(
             said.starts_with(&format!(
                 "consensflow {}\n\nUsage: cf <command>",
@@ -105,11 +105,7 @@ fn the_version_alone_in_each_of_its_three_spellings() {
     for spelling in ["--version", "-v", "version"] {
         assert_eq!(
             ran(&NONE, &[spelling, "x"]),
-            (
-                Some(0),
-                format!("{}\n", env!("CARGO_PKG_VERSION")),
-                String::new()
-            ),
+            (0, format!("{}\n", env!("CARGO_PKG_VERSION")), String::new()),
             "{spelling}"
         );
     }
@@ -128,7 +124,7 @@ fn a_command_it_has_not_is_said_as_json_writes_it_and_fails() {
         assert_eq!(
             ran(&NONE, &[word]),
             (
-                Some(1),
+                1,
                 String::new(),
                 format!("cf: unknown command {written} — run `cf help`\n")
             ),
@@ -179,7 +175,7 @@ fn with_no_folder_to_keep_the_agents_in_a_verb_that_needs_it_says_so() {
         assert_eq!(
             ran(&NONE, args),
             (
-                Some(1),
+                1,
                 String::new(),
                 "cf: ConsensFlow has no folder to keep its things in: set CONSENSFLOW_HOME, or HOME\n"
                     .to_owned()
@@ -188,7 +184,7 @@ fn with_no_folder_to_keep_the_agents_in_a_verb_that_needs_it_says_so() {
         );
     }
     // The catalog is no file of the home's.
-    assert_eq!(ran(&NONE, &["catalog", "--harness", "pi"]).0, Some(0));
+    assert_eq!(ran(&NONE, &["catalog", "--harness", "pi"]).0, 0);
 }
 
 #[test]
@@ -203,7 +199,7 @@ fn setup_reads_its_words_before_it_makes_anything() {
     ] {
         assert_eq!(
             ran_in(dir.path(), &["setup", word]),
-            (Some(1), String::new(), format!("cf: {said}\n")),
+            (1, String::new(), format!("cf: {said}\n")),
             "{word}"
         );
         // Not a launcher, nor the folder for one.
@@ -215,7 +211,7 @@ fn setup_reads_its_words_before_it_makes_anything() {
 fn setup_makes_the_command_in_the_home_and_says_what_it_found() {
     let dir = tempfile::tempdir().unwrap();
     let (code, said, wrong) = ran_in(dir.path(), &["setup"]);
-    assert_eq!((code, wrong.as_str()), (Some(0), ""));
+    assert_eq!((code, wrong.as_str()), (0, ""));
     let (harnesses, agents) = said.split_once('\n').unwrap();
     assert_eq!(harnesses, "harnesses: none found on PATH");
     assert!(
@@ -245,7 +241,7 @@ fn doctor_says_what_stops_it_after_the_lines_it_has_said() {
     };
     fs::create_dir_all(dir.path().join("consensflow/bin").join(first)).unwrap();
     let (code, said, wrong) = ran_in(dir.path(), &["doctor"]);
-    assert_eq!(code, Some(1));
+    assert_eq!(code, 1);
     assert_eq!(
         wrong,
         "cf: EISDIR: illegal operation on a directory, read\n"

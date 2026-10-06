@@ -1,6 +1,6 @@
 [package]
 name = "cf"
-description = "ConsensFlow's command: the board's verbs and the harness hooks inside a window, the standalone verbs and the daemon outside one; the CLI's Node sources only for setup, doctor, and a home that has taken the way back."
+description = "ConsensFlow's command: the board's verbs and the harness hooks inside a window, the standalone verbs and the daemon outside one; the CLI's Node sources only for a home that has taken the way back."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

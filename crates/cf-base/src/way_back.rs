@@ -46,6 +46,15 @@ pub struct Choice {
     pub node: bool,
 }
 
+impl Choice {
+    /// The file that sends the home to Node, where it is there: what a reader
+    /// that runs Node for the home hands to the code that does, so that code
+    /// is never run for a home with no file.
+    pub fn node_file(&self) -> Option<&Path> {
+        self.file.as_deref().filter(|_| self.node)
+    }
+}
+
 /// The implementation that writes the home `env` names, and where that was
 /// read. Nothing else in the environment is looked at.
 pub fn choose(env: &Env) -> Choice {
@@ -101,5 +110,18 @@ mod tests {
         std::fs::write(home.path().join(FILE), "").expect("the file");
         let env = Env::from_vars([("CONSENSFLOW_HOME", home.path())]);
         assert!(choose(&env).node);
+    }
+
+    #[test]
+    fn the_node_file_is_named_only_where_it_is_there() {
+        assert_eq!(choose(&Env::default()).node_file(), None, "no home");
+        let home = tempfile::tempdir().expect("a home");
+        let env = Env::from_vars([("CONSENSFLOW_HOME", home.path())]);
+        assert_eq!(choose(&env).node_file(), None, "a home with no file");
+        std::fs::write(home.path().join(FILE), "").expect("the file");
+        assert_eq!(
+            choose(&env).node_file(),
+            Some(home.path().join(FILE).as_path())
+        );
     }
 }
