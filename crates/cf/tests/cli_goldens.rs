@@ -4,8 +4,9 @@
 //! with the clock fixed and the environment given in full, and wrote down the
 //! files of the folder before and after, the output, the error output and the
 //! exit code. Here each case is made again in a folder of its own, the binary run
-//! as the case says with the switch on (`CONSENSFLOW_DAEMON=native`), and all of
-//! it compared byte for byte. The format is in tests/goldens/cli/FORMAT.md.
+//! as the case says (no home of a recording has the way back's `use-node` file
+//! in it, so the verbs are Rust's), and all of it compared byte for byte. The
+//! format is in tests/goldens/cli/FORMAT.md.
 //!
 //! The binary cannot be given the clock Node was: what it stamps an agent with
 //! is read as the instant the recorder fixed once it is known to be one instant,
@@ -182,7 +183,7 @@ struct Ran {
 }
 
 /// The binary run as the case says, in `root`: with exactly the environment the
-/// case gives, and the switch on.
+/// case gives.
 fn spawn(case: &Value, root: &Path) -> (Output, Option<String>) {
     let name = plain(&root.to_string_lossy());
     let mut command = Command::new(env!("CARGO_BIN_EXE_cf"));
@@ -190,7 +191,6 @@ fn spawn(case: &Value, root: &Path) -> (Output, Option<String>) {
     for (variable, value) in case["env"].as_object().unwrap() {
         command.env(variable, value.as_str().unwrap().replace("$ROOT", &name));
     }
-    command.env("CONSENSFLOW_DAEMON", "native");
     if cfg!(windows) {
         if let Some(system) = std::env::var_os("SystemRoot") {
             command.env("SystemRoot", system);

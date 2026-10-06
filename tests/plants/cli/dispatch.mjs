@@ -1,38 +1,24 @@
 /**
- * Plants in which `cf` answers the standalone verbs: the switch, a window's
- * token, the verbs that wait, the words as they came, and a reader that went
- * away. The tests of the module and of the process catch them; two are given to
- * the suites of the CLI alone, run against both CLIs, which must catch them
- * too.
+ * Plants in which `cf` answers the standalone verbs: the verbs that wait, the
+ * words as they came, and a reader that went away. The tests of the module and
+ * of the process catch them; two are given to the suites of the CLI alone, run
+ * against both CLIs, which must catch them too. Which implementation answers
+ * (the home's file, a window's token) is `flip.mjs`'s.
  */
 import { BOTH, GOLDENS, lines, PROCESS, STANDALONE, UNITS } from './kit.mjs'
 
 const MOD = `${STANDALONE}/mod.rs`
-const SWITCH =
-  'if env.text("CONSENSFLOW_DAEMON") != Some("native") || env.text("CONSENSFLOW_TOKEN").is_some() {'
 
 export const PLANTS = [
   {
-    name: 'dispatch: the switch is not looked at',
-    edits: [[MOD, SWITCH, 'if env.text("CONSENSFLOW_TOKEN").is_some() {']],
-    runs: [UNITS],
-    meant: 'it_answers_nothing_while_the_switch_is_off_whatever_the_verb',
-  },
-  {
-    // The suites give the native cf its switch, so one that ignored it would pass
-    // them: what they see is a verb handed back to Node's sources, with no runtime.
-    name: 'dispatch: the catalog is handed to Node though the switch is on, seen by the suites of the CLI',
+    // The suites give the native cf no Node beside it, so one that handed the
+    // verb on would be refused: what they see is `none is bundled`.
+    name: 'dispatch: the catalog is handed to Node, seen by the suites of the CLI',
     edits: [
       [MOD, 'Some("catalog") => catalog::run(rest, out),', 'Some("catalog") => return Ok(None),'],
     ],
     runs: [BOTH],
     meant: 'runs the native cf',
-  },
-  {
-    name: 'dispatch: a window token does not make cf the board',
-    edits: [[MOD, SWITCH, 'if env.text("CONSENSFLOW_DAEMON") != Some("native") {']],
-    runs: [UNITS],
-    meant: 'a_window_token_makes_cf_the_board_which_this_module_does_not_answer',
   },
   {
     name: 'dispatch: setup and doctor are answered as unknown commands',
@@ -44,21 +30,21 @@ export const PLANTS = [
       ],
     ],
     runs: [UNITS, PROCESS],
-    meant: 'the_verbs_that_wait_for_another_landing_go_on_to_node_with_the_switch_on',
+    meant: 'the_verbs_that_wait_for_another_landing_go_on_to_node',
   },
   {
     name: 'dispatch: the verbs are handed the words with --json taken out',
     edits: [
       [
         'crates/cf/src/lib.rs',
-        'None => match standalone::run(env, args, out, err)? {',
+        'match standalone::run(env, args, out, err)? {',
         lines(
-          'None => match standalone::run(',
-          '            env,',
-          '            &args.iter().filter(|arg| *arg != "--json").cloned().collect::<Vec<_>>(),',
-          '            out,',
-          '            err,',
-          '        )? {',
+          'match standalone::run(',
+          '                env,',
+          '                &args.iter().filter(|arg| *arg != "--json").cloned().collect::<Vec<_>>(),',
+          '                out,',
+          '                err,',
+          '            )? {',
         ),
       ],
     ],

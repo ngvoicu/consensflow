@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { roleConfiguration } from '../src/role-skills.js'
-import { choose, DEFAULT_DAEMON, NATIVE_CF } from './choice.mjs'
+import { assertBuilt, choose, chooseHome, DEFAULT_DAEMON, NATIVE_CF } from './choice.mjs'
 
 /**
  * Every test runs against a throwaway CONSENSFLOW_HOME and throwaway harness
@@ -28,20 +28,39 @@ export function tempEnv() {
 }
 
 /**
+ * What Windows itself needs to start a process and to find a program: where its
+ * system is, its command interpreter, and which extensions make a file a program.
+ * Nothing elsewhere. `tempEnv` gives a test none of it, since a test that starts
+ * only the process it names does without; one that starts what starts a `.cmd` or
+ * a program by its name adds this to the environment it gives.
+ */
+export const windowsEnv = () =>
+  process.platform === 'win32'
+    ? {
+        SystemRoot: process.env.SystemRoot,
+        ComSpec: process.env.ComSpec,
+        PATHEXT: process.env.PATHEXT,
+      }
+    : {}
+
+/**
  * How a test starts a daemon, as `CONSENSFLOW_TEST_DAEMON` names it (the words
  * are tests/choice.mjs's): `node`, Node's, `node <nodeArgs>`; `native` or a JSON
  * array, a command and its arguments, the native one (`cf ui --json --no-open`
- * of the build under test); nothing, the tests' default. Each has the switch
- * the product reads (`CONSENSFLOW_DAEMON`) said in its environment, Node's too,
- * so that no start leaves to the product's own default which one it is. Either
- * is told the runtime to name to the windows it opens (`CONSENSFLOW_NODE`): the
- * Node daemon names its own whatever this says, the native one names what it is
- * given. `env` is what to add to the environment the test gives the daemon, and
- * `kind` is the one chosen, `node` or `native`: what `assertStarted` holds the
- * daemon that starts to. A run labelled with its leg (`CONSENSFLOW_TEST_LEG`)
- * is refused a choice that is not its own. The options are what a test sets to
- * choose in its own words, not the environment's: the selection, the leg, and
- * the default.
+ * of the build under test); nothing, the tests' default, which is the native
+ * one. The product chooses by the file in the home, not by the environment, so
+ * the choice is made in the home the daemon is to run on: `home` is that
+ * folder, which the Node daemon's gets the way back's file in and the native
+ * one's has none (`chooseHome`), whatever else starts in it, and which
+ * `assertStarted` holds to the choice. A start that names none leaves the home
+ * to its caller. Either is told the runtime to name to the windows it opens
+ * (`CONSENSFLOW_NODE`): the Node daemon names its own whatever this says, the
+ * native one names what it is given. `env` is what to add to the environment
+ * the test gives the daemon, and `kind` is the one chosen, `node` or `native`:
+ * what `assertStarted` holds the daemon that starts to. A run labelled with
+ * its leg (`CONSENSFLOW_TEST_LEG`) is refused a choice that is not its own.
+ * The options are what a test sets to choose in its own words, not the
+ * environment's: the selection, the leg, and the default.
  */
 export function daemonCommand(
   nodeArgs,
@@ -49,24 +68,27 @@ export function daemonCommand(
     named = process.env.CONSENSFLOW_TEST_DAEMON,
     leg = process.env.CONSENSFLOW_TEST_LEG,
     fallback = DEFAULT_DAEMON,
+    home = undefined,
   } = {},
 ) {
   const chosen = choose('CONSENSFLOW_TEST_DAEMON', { named, leg, fallback })
   const env = { CONSENSFLOW_NODE: process.execPath }
+  if (home !== undefined) chooseHome(chosen.kind, home)
   if (chosen.kind === 'node') {
     return {
       command: process.execPath,
       args: nodeArgs,
-      env: { ...env, CONSENSFLOW_DAEMON: 'node' },
+      env,
       native: false,
       kind: 'node',
     }
   }
+  if (chosen.command === null) assertBuilt()
   const [command, ...args] = chosen.command ?? [NATIVE_CF, 'ui', '--json', '--no-open']
   return {
     command,
     args,
-    env: { ...env, CONSENSFLOW_DAEMON: 'native' },
+    env,
     native: true,
     kind: 'native',
   }

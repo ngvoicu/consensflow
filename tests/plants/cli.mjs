@@ -1,7 +1,9 @@
 /**
  * Plants bugs in the standalone verbs of `cf`, the parser they read their words
- * with, the roster they write through, and the recording that holds them to Node,
- * one at a time, and checks that a test catches each. A plant is a few pieces of
+ * with, the roster they write through, the recording that holds them to Node, and
+ * the flip (which implementation writes a home: the file every reader asks, the
+ * Node `cf` finds, the door and the repair), one at a time, and checks that a
+ * test catches each. A plant is a few pieces of
  * text replaced in the sources; the tests that should notice are run (never in
  * parallel: the sources are changed under them) and each plant is reported
  * caught or missed. Every file a plant touches is first copied outside the
@@ -27,7 +29,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PLANTS as DISPATCH } from './cli/dispatch.mjs'
-import { BOTH } from './cli/kit.mjs'
+import { PLANTS as FLIP } from './cli/flip.mjs'
+import { BOTH, BUILD } from './cli/kit.mjs'
 import { PLANTS as ORACLE } from './cli/oracle.mjs'
 import { PLANTS as PARSER } from './cli/parser.mjs'
 import { PLANTS as VERBS } from './cli/verbs.mjs'
@@ -37,7 +40,7 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const RUN_LIMIT = 10 * 60 * 1000
 
 /** Every plant, by area. */
-const PLANTS = [...PARSER, ...VERBS, ...DISPATCH, ...ORACLE]
+const PLANTS = [...PARSER, ...VERBS, ...DISPATCH, ...FLIP, ...ORACLE]
 
 const args = process.argv.slice(2)
 const words = args.filter((arg) => !arg.startsWith('--'))
@@ -167,7 +170,7 @@ async function trial(plant) {
   try {
     let ran = null
     for (const command of plant.runs) {
-      built = built || command === BOTH
+      built = built || command === BOTH || command === BUILD
       ran = await execute(command)
       if (!ran.compiled) return { verdict: 'does not compile', ran }
       if (ran.hung) return { verdict: 'hung', ran }

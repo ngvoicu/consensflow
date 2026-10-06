@@ -1,7 +1,9 @@
 /**
  * The packaged smoke (tests/smoke.test.mjs) on both daemons, on the app as it is
- * built: Node's, then the native one. Each leg sets the daemon the app starts
- * (`CONSENSFLOW_DAEMON`) itself, so a variable in the caller's shell chooses
+ * built: Node's, then the native one. Each leg names its daemon by the tests' own
+ * selector (`CONSENSFLOW_TEST_DAEMON`), which the smoke turns into the choice in
+ * its box's home (the `use-node` file for Node's: the product reads no
+ * environment variable for it), so a variable in the caller's shell chooses
  * nothing, and the smoke holds the daemon that started, which its log names, to
  * the one asked for. It runs against the bundle at `CONSENSFLOW_SMOKE_APP`, or
  * the one `npm --prefix app run build -- --bundles app` leaves.
@@ -15,7 +17,7 @@ const REPO = fileURLToPath(new URL('..', import.meta.url))
 
 function run(label, daemon) {
   process.stdout.write(`\n== ${label}\n`)
-  const env = { ...process.env, CONSENSFLOW_SMOKE: '1', CONSENSFLOW_DAEMON: daemon }
+  const env = { ...process.env, CONSENSFLOW_SMOKE: '1', CONSENSFLOW_TEST_DAEMON: daemon }
   // The smoke is a test runner of its own, even when a test runs this.
   delete env.NODE_TEST_CONTEXT
   const ran = spawnSync(process.execPath, ['--test', 'tests/smoke.test.mjs'], {

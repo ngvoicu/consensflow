@@ -17,15 +17,27 @@ use crate::path;
 pub fn config_root(env: &Env) -> Option<PathBuf> {
     // Node reads its environment as UTF-8, and a byte that is none as U+FFFD:
     // this reads the text Node's `path.join` is given.
-    let text = |name: &str| {
-        env.path(name)
-            .map(|value| value.to_string_lossy().into_owned())
-    };
-    if let Some(root) = text("CONSENSFLOW_HOME") {
+    if let Some(root) = named(env, "CONSENSFLOW_HOME") {
         return Some(PathBuf::from(root));
     }
-    let home = text("HOME").or_else(|| text("USERPROFILE").filter(|_| cfg!(windows)))?;
+    default_root(env)
+}
+
+/// The folder ConsensFlow's home is when nothing names another: `.consensflow`
+/// in the user's own home, whatever `CONSENSFLOW_HOME` says. The home a
+/// launcher with no pin talks to (`cf-launcher`'s repair asks which homes it
+/// may touch). None when there is no user's home either.
+pub fn default_root(env: &Env) -> Option<PathBuf> {
+    let home =
+        named(env, "HOME").or_else(|| named(env, "USERPROFILE").filter(|_| cfg!(windows)))?;
     Some(PathBuf::from(path::join(&[&home, ".consensflow"])))
+}
+
+/// The variable as text when it is set to something, a byte that is no UTF-8
+/// as U+FFFD.
+fn named(env: &Env, name: &str) -> Option<String> {
+    env.path(name)
+        .map(|value| value.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]
@@ -60,6 +72,20 @@ mod tests {
             "/home/me/.consensflow"
         };
         assert_eq!(text(config_root(&env)).as_deref(), Some(expected));
+    }
+
+    #[test]
+    fn the_default_folder_is_the_users_whatever_the_variable_says() {
+        let env = Env::from_vars([("CONSENSFLOW_HOME", "/work/cf"), ("HOME", "/home/me")]);
+        let expected = if cfg!(windows) {
+            r"\home\me\.consensflow"
+        } else {
+            "/home/me/.consensflow"
+        };
+        assert_eq!(text(default_root(&env)).as_deref(), Some(expected));
+        // With no user's home there is no default, though the variable names a folder.
+        let variable = Env::from_vars([("CONSENSFLOW_HOME", "/work/cf")]);
+        assert_eq!(default_root(&variable), None);
     }
 
     #[cfg(unix)]

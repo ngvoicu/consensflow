@@ -147,7 +147,7 @@ describe('the daemon from the checkout', () => {
     const bin = join(root, 'bin')
     mkdirSync(home, { recursive: true })
     mkdirSync(bin)
-    const started = daemonCommand([DAEMON])
+    const started = daemonCommand([DAEMON], { home })
     t.diagnostic(started.native ? 'the native daemon' : "Node's daemon")
     const env = {
       ...Object.fromEntries(

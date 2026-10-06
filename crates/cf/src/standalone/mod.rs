@@ -3,12 +3,13 @@
 //! `catalog`, and `agent add|list|edit|remove`. `tests/cli_goldens.rs` holds
 //! them to what Node said (`npm run goldens:cli`), file by file.
 //!
-//! They are dormant until the flip (step 4): reached only with
-//! `CONSENSFLOW_DAEMON=native`, as `cf ui` is, and tokenless (a window has its
-//! participant's token, and there `cf` is the board). Without the switch every
-//! tokenless verb goes to the CLI's Node sources as it always did, and so do
-//! `setup` and `doctor` with it, until a landing brings the launcher and the
-//! stale hooks they need.
+//! They are what `cf` answers by default (the flip, step 4), for a tokenless
+//! command (a window has its participant's token, and there `cf` is the
+//! board) in a home that has not taken the way back: with the `use-node` file
+//! in it every tokenless command goes to the CLI's Node sources instead
+//! (`crate::run` asks `cf_base::way_back`, once). `setup` and `doctor` go
+//! there too, until a landing brings the launcher and the stale hooks they
+//! need.
 //!
 //! A verb says what it prints as it goes, and what stops it as `cf: <words>`
 //! with exit code 1: Node's `fail` and every error `main` caught.
@@ -52,20 +53,17 @@ impl From<Refusal> for Stop {
 /// How a verb ended.
 type Done = Result<(), Stop>;
 
-/// Runs `args` as a standalone verb when it is one answered here, and the
-/// switch is on: its exit code. None when it is not for this module: the
-/// switch is off, a window's token is there, or the verb is one of those still
+/// Runs `args` as a standalone verb when it is one answered here: its exit
+/// code. None when it is not for this module: the verb is one of those still
 /// answered by the CLI's Node sources (`setup`, `doctor`, and `ui`, which
-/// `cf_daemon` answers). Only a failure to write is an error.
+/// `cf_daemon` answers). The caller has found no window's token and no way
+/// back to Node. Only a failure to write is an error.
 pub fn run(
     env: &Env,
     args: &[OsString],
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> io::Result<Option<u8>> {
-    if env.text("CONSENSFLOW_DAEMON") != Some("native") || env.text("CONSENSFLOW_TOKEN").is_some() {
-        return Ok(None);
-    }
     // Node reads its arguments as UTF-8, and a byte that is none as U+FFFD.
     let words: Vec<String> = args
         .iter()

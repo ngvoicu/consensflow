@@ -1,7 +1,7 @@
 /**
  * The proof of the agents screens (tests/agents-proof.mjs) against each daemon
  * from the checkout, and nothing else: Node's, then the native one (`cf ui`,
- * built and put in bin/ as the app ships it, behind `CONSENSFLOW_DAEMON=native`).
+ * built and put in bin/ as the app ships it).
  * `npm run test:daemons` runs it with the daemon suites; this is the quick way
  * to hold the agents' API of both to the one proof, and what the plants of the
  * agents screens (`npm run plants:release`) run. The packaged smoke runs the same
@@ -26,7 +26,9 @@ function run(label, daemon) {
   return ran.status ?? 1
 }
 
-const node = run('the Node daemon', '')
+// Each says which daemon it means: an empty selection is the default's, and the
+// default is the native one since the flip.
+const node = run('the Node daemon', 'node')
 const native = run('the native daemon', JSON.stringify([cf, 'ui', '--json', '--no-open']))
 process.stdout.write(
   `\nNode: ${node === 0 ? 'passed' : 'FAILED'}; native: ${native === 0 ? 'passed' : 'FAILED'}\n`,

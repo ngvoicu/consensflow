@@ -26,56 +26,26 @@ fn ran(vars: &[(&str, &str)], args: &[&str]) -> (Option<u8>, String, String) {
     )
 }
 
-const NATIVE: [(&str, &str); 1] = [("CONSENSFLOW_DAEMON", "native")];
+/// An environment that says nothing: the verbs are answered by default.
+const NONE: [(&str, &str); 0] = [];
 
 #[test]
-fn it_answers_nothing_while_the_switch_is_off_whatever_the_verb() {
-    for args in [
-        &[][..],
-        &["help"],
-        &["--version"],
-        &["catalog"],
-        &["agent", "list"],
-        &["agent", "add", "x"],
-        &["frobnicate"],
-    ] {
-        assert_eq!(
-            ran(&[], args),
-            (None, String::new(), String::new()),
-            "{args:?}"
-        );
-    }
-}
-
-#[test]
-fn the_switch_is_native_and_no_other_word() {
-    for value in ["node", "NATIVE", "Native", "1", "true", "", " native"] {
+fn it_answers_by_default_and_the_old_switch_in_the_environment_changes_nothing() {
+    // `CONSENSFLOW_DAEMON` was the switch of the releases before the flip; the
+    // product reads no environment variable for which implementation answers.
+    for value in ["native", "node", "NATIVE", "1", ""] {
         let vars = [("CONSENSFLOW_DAEMON", value)];
-        assert_eq!(ran(&vars, &["help"]).0, None, "{value:?}");
+        let (code, said, wrong) = ran(&vars, &["help"]);
+        assert_eq!((code, wrong.as_str()), (Some(0), ""), "{value:?}");
+        assert!(said.starts_with("consensflow "), "{value:?}: {said}");
     }
-    assert_eq!(ran(&NATIVE, &["help"]).0, Some(0));
 }
 
 #[test]
-fn a_window_token_makes_cf_the_board_which_this_module_does_not_answer() {
-    let vars = [
-        ("CONSENSFLOW_DAEMON", "native"),
-        ("CONSENSFLOW_TOKEN", "participant"),
-    ];
-    assert_eq!(
-        ran(&vars, &["catalog"]),
-        (None, String::new(), String::new())
-    );
-    // An empty token is none, as in Node.
-    let empty = [("CONSENSFLOW_DAEMON", "native"), ("CONSENSFLOW_TOKEN", "")];
-    assert_eq!(ran(&empty, &["help"]).0, Some(0));
-}
-
-#[test]
-fn the_verbs_that_wait_for_another_landing_go_on_to_node_with_the_switch_on() {
+fn the_verbs_that_wait_for_another_landing_go_on_to_node() {
     for verb in ["setup", "doctor", "ui"] {
         assert_eq!(
-            ran(&NATIVE, &[verb, "--json"]),
+            ran(&NONE, &[verb, "--json"]),
             (None, String::new(), String::new()),
             "{verb}"
         );
@@ -85,7 +55,7 @@ fn the_verbs_that_wait_for_another_landing_go_on_to_node_with_the_switch_on() {
 #[test]
 fn the_usage_is_the_one_node_printed_with_this_builds_version_and_a_blank_line_at_its_end() {
     for args in [&[][..], &["help"], &["--help"], &["help", "agent"]] {
-        let (code, said, wrong) = ran(&NATIVE, args);
+        let (code, said, wrong) = ran(&NONE, args);
         assert_eq!((code, wrong.as_str()), (Some(0), ""), "{args:?}");
         assert!(
             said.starts_with(&format!(
@@ -103,7 +73,7 @@ fn the_usage_is_the_one_node_printed_with_this_builds_version_and_a_blank_line_a
 fn the_version_alone_in_each_of_its_three_spellings() {
     for spelling in ["--version", "-v", "version"] {
         assert_eq!(
-            ran(&NATIVE, &[spelling, "x"]),
+            ran(&NONE, &[spelling, "x"]),
             (
                 Some(0),
                 format!("{}\n", env!("CARGO_PKG_VERSION")),
@@ -125,7 +95,7 @@ fn a_command_it_has_not_is_said_as_json_writes_it_and_fails() {
         ("-h", r#""-h""#),
     ] {
         assert_eq!(
-            ran(&NATIVE, &[word]),
+            ran(&NONE, &[word]),
             (
                 Some(1),
                 String::new(),
@@ -152,10 +122,7 @@ impl io::Write for Gone {
 #[test]
 fn a_reader_that_went_away_is_the_callers_to_end_quietly_and_no_message_of_the_verb() {
     let home = tempfile::tempdir().unwrap();
-    let vars = [
-        ("CONSENSFLOW_DAEMON", "native"),
-        ("CONSENSFLOW_HOME", home.path().to_str().unwrap()),
-    ];
+    let vars = [("CONSENSFLOW_HOME", home.path().to_str().unwrap())];
     for args in [&["help"][..], &["catalog"], &["agent", "list"]] {
         let mut err = Vec::new();
         let ended = run(&env(&vars), &words(args), &mut Gone, &mut err).unwrap_err();
@@ -173,7 +140,7 @@ fn with_no_folder_to_keep_the_agents_in_a_verb_that_needs_it_says_so() {
         &["agent", "add", "x", "--harness", "claude", "--model", "m"],
     ] {
         assert_eq!(
-            ran(&NATIVE, args),
+            ran(&NONE, args),
             (
                 Some(1),
                 String::new(),
@@ -184,5 +151,5 @@ fn with_no_folder_to_keep_the_agents_in_a_verb_that_needs_it_says_so() {
         );
     }
     // The catalog is no file of the home's.
-    assert_eq!(ran(&NATIVE, &["catalog", "--harness", "pi"]).0, Some(0));
+    assert_eq!(ran(&NONE, &["catalog", "--harness", "pi"]).0, Some(0));
 }

@@ -332,27 +332,18 @@ export const PLANTS = [
     meant: 'megabytes_are_rounded_as_math_round_rounds_them',
   },
   {
-    name: 'cf: any value of CONSENSFLOW_DAEMON is the native daemon',
-    edits: [
-      [
-        'crates/cf/src/lib.rs',
-        '        && env.text("CONSENSFLOW_DAEMON") == Some("native")',
-        '        && env.text("CONSENSFLOW_DAEMON").is_some()',
-      ],
-    ],
-    runs: [[...stop, 'without_the_switch']],
-    meant: 'without_the_switch_cf_ui_is_not_the_native_daemon',
+    name: 'cf: ui is the native daemon though the home has taken the way back',
+    edits: [['crates/cf/src/lib.rs', ' && !way_back::choose(env).node;', ';']],
+    runs: [[...stop, 'with_the_way_back']],
+    meant: 'with_the_way_back_cf_ui_is_not_the_native_daemon_whatever_the_old_switch_says',
   },
   {
     name: 'cf: a window’s cf ui is the daemon',
     edits: [
       [
         'crates/cf/src/lib.rs',
-        lines(
-          '        && env.text("CONSENSFLOW_DAEMON") == Some("native")',
-          '        && env.text("CONSENSFLOW_TOKEN").is_none();',
-        ),
-        '        && env.text("CONSENSFLOW_DAEMON") == Some("native");',
+        'first == "ui" && env.text("CONSENSFLOW_TOKEN").is_none()',
+        'first == "ui"',
       ],
     ],
     runs: [[...stop, 'a_window_s_cf_ui']],

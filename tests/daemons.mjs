@@ -1,7 +1,7 @@
 /**
  * The daemon cases that go through a process, run against both daemons: Node's,
- * then the native one (`cf ui`, built and put in bin/ as the app ships it, behind
- * `CONSENSFLOW_DAEMON=native`). Each leg names its daemon (`node`, `native`) and
+ * then the native one (`cf ui`, built and put in bin/ as the app ships it). Each
+ * leg names its daemon (`node`, `native`) and
  * says which leg it is (tests/legs.mjs, tests/choice.mjs): the suites refuse a
  * selection that is not the leg's own, and hold every daemon they start to it by
  * the start line in its log, which says which ran (`node v…` or `rust …`). The

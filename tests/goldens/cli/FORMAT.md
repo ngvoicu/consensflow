@@ -1,8 +1,10 @@
 # What Node answers on the CLI's standalone verbs: the recordings and their format
 
-Step 4 flips the app to Rust, and the verbs `bin/cf.mjs` answers by itself
+Step 4 flips the app to Rust, and the verbs Node's CLI answers by itself
 (`--help`, the version, `catalog`, `agent`, `setup`, `doctor`) go with it. They
-are recorded first, from `node bin/cf.mjs` as it is, and `crates/cf`
+are recorded first, from `node src/cli.js` as it is (the CLI `bin/cf.mjs` runs
+for a home that has taken the way back to Node; `bin/cf.mjs` itself hands every
+command of any other home to the native `cf`, so it is no oracle), and `crates/cf`
 (`standalone/`) is held to the recording; `setup` and `doctor` are recorded for
 the day Rust answers them.
 
@@ -32,7 +34,7 @@ environment of its own (nothing is inherited: `HOME`, `CONSENSFLOW_HOME`,
 `CONSENSFLOW_BIN_DIR`, all under the folder, as `tempEnv` makes them, apart from
 what the scenario changes and what Node cannot start without on Windows,
 `SystemRoot`, which a player gives alike), the clock fixed, and the CLI run as
-`node --import clock.mjs bin/cf.mjs <args>`.
+`node --import clock.mjs src/cli.js <args>`.
 
 A case of `cases` is:
 
@@ -69,9 +71,10 @@ recorded: `world.mjs` checks every case).
 ## What the Rust player does with a recording
 
 It makes the case's folder from `before` (`$ROOT` in a file's text is the folder),
-runs the binary with exactly the environment of `env` (and the switch,
-`CONSENSFLOW_DAEMON=native`, which Node ignores), and compares the output, the
-error output, the exit code and the files after, byte for byte.
+runs the binary with exactly the environment of `env` (no folder of a recording
+has the way back's `use-node` file in it, so the binary answers by itself), and
+compares the output, the error output, the exit code and the files after, byte
+for byte.
 
 - **The clock.** The binary cannot be given the clock Node was. Each `createdAt`
   and `updatedAt` of an agents file that holds an instant of the run's own (as

@@ -1,6 +1,7 @@
 //! Which `cf` answers what: the board's commands with a window's token, the
-//! hooks with or without one, and everything else handed to the CLI's Node
-//! sources, here refused because no runtime is named or it cannot start.
+//! hooks with or without one, and the Codex window's supervisor matched on
+//! the first word. What is handed to the CLI's Node sources is `way_back.rs`'s
+//! and `standalone.rs`'s.
 
 mod common;
 
@@ -50,33 +51,14 @@ fn a_question_hook_with_no_window_says_nothing_and_succeeds() {
 }
 
 #[test]
-fn outside_a_window_a_command_needs_the_runtime_the_app_names() {
-    for env in [&[][..], &[("CONSENSFLOW_TOKEN", "")][..]] {
-        let ran = cf(&["catalog"], env, "");
-        assert_eq!(ran.status.code(), Some(1));
-        assert!(ran.stdout.is_empty());
-        let said = String::from_utf8_lossy(&ran.stderr);
-        assert!(
-            said.starts_with("cf: CONSENSFLOW_NODE is not set:"),
-            "{said}"
-        );
-        assert!(said.contains("cf.mjs"), "{said}");
-    }
-}
-
-#[test]
-fn a_runtime_that_does_not_start_is_said_and_fails() {
+fn outside_a_window_an_empty_token_is_none_and_cf_answers_by_itself() {
     let ran = cf(
-        &["catalog"],
-        &[("CONSENSFLOW_NODE", "/nonexistent/node")],
+        &["catalog", "--harness", "pi"],
+        &[("CONSENSFLOW_TOKEN", "")],
         "",
     );
-    assert_eq!(ran.status.code(), Some(1));
-    let said = String::from_utf8_lossy(&ran.stderr);
-    assert!(
-        said.starts_with("cf: /nonexistent/node did not start:"),
-        "{said}"
-    );
+    assert_eq!(ran.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&ran.stdout).starts_with("pi:\n"));
 }
 
 const BRIDGE: &str =
@@ -103,11 +85,11 @@ fn a_codex_window_is_matched_on_the_first_argument_before_a_window_token_is_look
 
 #[test]
 fn a_json_flag_before_it_makes_it_no_codex_window() {
+    // It is the standalone verbs' unknown command, as the words came.
     let ran = cf(&["--json", "codex-session", "/nonexistent/codex"], &[], "");
-    let said = String::from_utf8_lossy(&ran.stderr);
-    assert!(
-        said.starts_with("cf: CONSENSFLOW_NODE is not set:"),
-        "{said}"
+    assert_eq!(
+        String::from_utf8_lossy(&ran.stderr),
+        "cf: unknown command \"--json\" — run `cf help`\n"
     );
 }
 

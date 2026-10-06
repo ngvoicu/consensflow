@@ -1,7 +1,10 @@
 /**
- * Plays a scenario against the legacy CLI, `node bin/cf.mjs`, and writes down
- * what it did: the oracle `crates/cf` is held to, case by case, by the Rust
- * player (`crates/cf/tests/cli_goldens.rs`).
+ * Plays a scenario against the legacy CLI, `node src/cli.js` (the CLI `bin/cf.mjs`
+ * runs where a home has taken the way back to Node; the door itself forwards a
+ * home that has not, so the oracle is not run through it: no `use-node` file
+ * may be in the folder a scenario is played in, which the recording lists), and
+ * writes down what it did: the oracle `crates/cf` is held to, case by case, by
+ * the Rust player (`crates/cf/tests/cli_goldens.rs`).
  *
  * A scenario is data: `{ name, args, env, stdin, files, pipe, kept }`.
  * - `args`: the words after `cf`.
@@ -49,7 +52,7 @@ import { dirname, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO = fileURLToPath(new URL('../../..', import.meta.url)).replace(/[\\/]$/, '')
-const CF = join(REPO, 'bin', 'cf.mjs')
+const CF = join(REPO, 'src', 'cli.js')
 // A URL, not a path: `--import` reads `D:\…` on Windows as a URL with the scheme `d:`.
 const CLOCK = new URL('./clock.mjs', import.meta.url).href
 const VERSION = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8')).version

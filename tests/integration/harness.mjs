@@ -210,8 +210,14 @@ export async function startIntegration({
   // agents a test wrote are still the ones its chief and staff run on.
   if (existingRoot === null) writeRoster(env)
 
-  // The daemon under test, chosen on purpose (see above).
-  const asked = daemonCommand([daemon], select === undefined ? {} : { named: select, leg: select })
+  // The daemon under test, chosen on purpose (see above), in the home it runs
+  // on: the product's `cf` verbs choose by the file in the home, so the home
+  // has the file for Node's daemon and none for the native one's, and a
+  // restart of it on the other daemon takes the file away or makes it.
+  const asked = daemonCommand([daemon], {
+    ...(select === undefined ? {} : { named: select, leg: select }),
+    home: env.CONSENSFLOW_HOME,
+  })
   const node = spawn(asked.command, asked.args, {
     cwd: REPO,
     env: { ...env, ...asked.env },
@@ -245,6 +251,7 @@ export async function startIntegration({
       asked,
       readFileSync(join(env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8'),
       node.pid,
+      env.CONSENSFLOW_HOME,
     )
     handle = JSON.parse(handleLine.line)
     assert.match(handle.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)

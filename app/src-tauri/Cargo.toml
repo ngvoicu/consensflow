@@ -17,6 +17,9 @@ serde.workspace = true
 cf-proto.workspace = true
 cf-bridge.workspace = true
 cf-panes.workspace = true
+# Which implementation writes the home (the way back to Node), and the terminal's command repaired at the start.
+cf-base.workspace = true
+cf-launcher.workspace = true
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-dialog = "2.7.3"
 tauri-plugin-updater = "~2.11.0"

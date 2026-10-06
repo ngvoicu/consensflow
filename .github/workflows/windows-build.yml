@@ -87,8 +87,11 @@ jobs:
           $cfHome = Join-Path $env:RUNNER_TEMP 'portable-home'
           New-Item -ItemType Directory -Force $cfHome | Out-Null
           $env:CONSENSFLOW_HOME = $cfHome
-          # The daemon, when a hand run asked for one by name (node or native).
-          if ($env:CF_DAEMON -and $env:CF_DAEMON -ne 'default') { $env:CONSENSFLOW_DAEMON = $env:CF_DAEMON }
+          # The daemon, when a hand run asked for Node's by name: the app chooses by the
+          # file `use-node` in the home it runs on (and by nothing in its environment), so
+          # Node's daemon is a run whose home has it; native's, and the default, which is
+          # native, have none.
+          if ($env:CF_DAEMON -eq 'node') { New-Item -ItemType File -Force (Join-Path $cfHome 'use-node') | Out-Null }
           $app = Start-Process -FilePath $exe -PassThru `
             -RedirectStandardOutput (Join-Path $cfHome 'app-stdout.log') `
             -RedirectStandardError (Join-Path $cfHome 'app-stderr.log')
@@ -131,8 +134,9 @@ jobs:
           # Bounded: this step runs inside every release.
           [void]$app.WaitForExit(30000)
           if ($outcome -ne 'up') { exit 1 }
-          # A daemon asked for by name is the one that started: node says `node`, native says `rust`.
-          $expected = if ($env:CF_DAEMON) { @{ node = 'node'; native = 'rust' }[$env:CF_DAEMON] }
+          # A daemon asked for by name is the one that started: node says `node`, native says
+          # `rust`, and so does the default, which is the native one since the flip.
+          $expected = if ($env:CF_DAEMON) { @{ node = 'node'; native = 'rust'; default = 'rust' }[$env:CF_DAEMON] }
           if ($expected -and $kind -ne $expected) { "asked for the $env:CF_DAEMON daemon, its log says '$kind'"; exit 1 }
           # A pane's `cf`: the runtime's cf.exe, on the runtime's Node where it
           # hands a command on to the CLI's sources (the bundle still has them).

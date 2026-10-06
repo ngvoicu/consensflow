@@ -33,6 +33,7 @@
     "test:clis": "node tests/clis.mjs",
     "test:app": "node tests/app-tests.mjs",
     "clippy:windows": "node tests/windows-clippy.mjs",
+    "clippy:app": "node tests/app-clippy.mjs",
     "plants:daemon": "node tests/plants/daemon.mjs",
     "plants:cli": "node tests/plants/cli.mjs",
     "plants:release": "node tests/plants/release.mjs",
@@ -67,7 +68,7 @@
     "live:terminal": "node tests/live/devin-terminal.mjs",
     "live:home-parity": "node tests/live/home-parity.mjs",
     "windows": "node tests/live/windows.mjs",
-    "check:all": "npm run check && cargo fmt --all --check && cargo test --offline --workspace && cargo clippy --offline --workspace --all-targets -- -D warnings && cargo test --offline -p cf-bridge --features local && cargo clippy --offline -p cf-bridge --features local --all-targets -- -D warnings && npm --prefix app run test:ui && npm run build:bridge -- --offline && npm run build:cf -- --offline && npm run test:integration && npm run smoke"
+    "check:all": "npm run build:cf -- --offline && npm run check && cargo fmt --all --check && cargo test --offline --workspace && cargo clippy --offline --workspace --all-targets -- -D warnings && cargo test --offline -p cf-bridge --features local && cargo clippy --offline -p cf-bridge --features local --all-targets -- -D warnings && npm --prefix app run test:ui && npm run build:bridge -- --offline && npm run test:integration && npm run smoke"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.8",

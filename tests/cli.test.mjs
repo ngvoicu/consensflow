@@ -7,23 +7,25 @@ import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { rosterPath } from '../src/roster.js'
 import { noteRan } from './choice.mjs'
-import { cliEnv, cliTarget } from './cli-target.mjs'
+import { cliEnv, cliRun, cliTarget } from './cli-target.mjs'
 import { fakeExecutable, tempEnv } from './helpers.mjs'
 
 /** A launcher is `cf` on POSIX and `cf.cmd` on Windows. */
 const CMD = process.platform === 'win32' ? '.cmd' : ''
 
 const run = promisify(execFile)
-const CF = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
+/** Node's own CLI, whose sources a look is taken at: `bin/cf.mjs` only starts it. */
+const CF = join(import.meta.dirname, '..', 'src', 'cli.js')
 const FIXTURES = join(import.meta.dirname, 'fixtures')
 /** A preload that has every Node process say it started: which cf ran is told by it. */
 const NODE_SPY = join(FIXTURES, 'node-spy.mjs')
-/** The cf these tests run: Node's, or the native one (tests/cli-target.mjs, `npm run test:clis`). */
+/** The cf these tests run: the native one, or Node's (tests/cli-target.mjs, `npm run test:clis`). */
 const target = cliTarget()
 async function cf(args, env) {
+  const { command, args: words } = cliRun(target, args)
   try {
-    const { stdout, stderr } = await run(target.command, [...target.args, ...args], {
-      env: cliEnv(target, args, env),
+    const { stdout, stderr } = await run(command, words, {
+      env: cliEnv(target, env),
       timeout: 30_000,
     })
     return { code: 0, stdout, stderr }
@@ -43,9 +45,8 @@ describe('cf manages the roster', () => {
   after(() => t.cleanup())
 
   it(`runs ${target.name}`, async () => {
-    // Node's sources are run by a runtime the app names, and the native cf is
-    // given none for the catalog: that it answers says it is the native cf that
-    // did, and did not hand the verb on.
+    // The native cf is given no Node for the catalog: that it answers says it
+    // is the native cf that did, and did not hand the verb on.
     const out = await cf(['catalog', '--harness', 'pi'], t.env)
     assert.equal(out.code, 0, out.stderr)
     assert.match(out.stdout, /^pi:\n/)
@@ -165,9 +166,10 @@ describe('cf manages the roster', () => {
     const { spawn } = await import('node:child_process')
     // `false` never reads: the pipe is closed before cf writes anything, so
     // every write EPIPEs. PIPESTATUS surfaces cf's own exit code.
-    const command = [target.command, ...target.args].map((word) => `"${word}"`).join(' ')
-    const child = spawn('/bin/bash', ['-c', `${command} help | false; exit \${PIPESTATUS[0]}`], {
-      env: { ...t.env, ...target.env, PATH: `${t.env.PATH}:/usr/bin:/bin` },
+    const piped = cliRun(target, ['help'])
+    const command = [piped.command, ...piped.args].map((word) => `"${word}"`).join(' ')
+    const child = spawn('/bin/bash', ['-c', `${command} | false; exit \${PIPESTATUS[0]}`], {
+      env: { ...cliEnv(target, t.env), PATH: `${t.env.PATH}:/usr/bin:/bin` },
       stdio: ['ignore', 'ignore', 'pipe'],
     })
     let stderr = ''
