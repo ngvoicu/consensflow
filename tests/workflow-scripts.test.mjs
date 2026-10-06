@@ -56,6 +56,7 @@ describe('the scripts of the workflows', { skip: !hasBash && 'there is no bash h
     const release = bashSteps(readFileSync(join(WORKFLOWS, 'release.yml'), 'utf8'))
     assert.ok(release.length >= 10, `release.yml: ${release.length} bash steps found`)
     for (const name of [
+      'The old feeds serve the bridge, for a release after it',
       'Notes, and the update feed for this build',
       'Publish the release, then its update feeds',
       'The feeds serve this release, and its archive downloads',

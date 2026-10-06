@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { proveAgents } from './agents-proof.mjs'
 
 /**
  * The packaged smoke: the REAL `.app`, not this checkout.
@@ -22,8 +23,13 @@ import { fileURLToPath } from 'node:url'
  * only place that asks whether the thing Gabriel double-clicks works — the
  * bundle's own page, the bundle's own Node, the bundle's own CLI copy, the
  * production Tauri commands, and a real PTY child. So it resolves NOTHING
- * from the repository except this file, and every path it asserts on has to
- * live under `Contents/`.
+ * of the product from the repository, and every path it asserts on has to
+ * live under `Contents/`. What it takes from the repository is this file and
+ * the proof of the agents screens (tests/agents-proof.mjs), which only speaks
+ * HTTP to the daemon the app started and reads the roster that daemon wrote:
+ * it imports no module of the product, so it holds the native daemon as it
+ * holds Node's. (The extension's load below still runs on the bundle's Node,
+ * until Node leaves the bundle.)
  *
  * It is gated, not skipped-by-default-forever: without `CONSENSFLOW_SMOKE`
  * the tests skip so `npm test` stays a unit run, and WITH it a missing
@@ -620,6 +626,20 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.match(screens[0].src, /^http:\/\/localhost:\d+\/\?token=/)
   assert.match(screens[1].src, /^http:\/\/localhost:\d+\/harnesses\?token=/)
 
+  // The agents behind those screens, asked of the daemon that serves them: the
+  // one this app chose, Node's or the native one, over its API and through the
+  // roster it writes. The packaged build's own catalog, an agent saved with its
+  // profile, the screens behind the UI token, and the deletion of the agent
+  // saved; nothing of the product's modules is imported to ask. The address and
+  // the token are the ones the frame was given.
+  const served = new URL(screens[0].src)
+  await proveAgents({
+    url: served.origin,
+    token: served.searchParams.get('token'),
+    home: box.env.CONSENSFLOW_HOME,
+  })
+  t.diagnostic(`the ${ran} daemon's agents: the catalog, a saved profile, the screens, a deletion`)
+
   const pasted = await app.waitFor('large-paste')
   const expectedPaste = Buffer.from(`\x1b[200~${'漢字 résumé 🙂\r'.repeat(30_000)}\x1b[201~`)
   assert.equal(pasted.data.bytes, expectedPaste.length)
@@ -764,59 +784,4 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.equal(ended.code, 0, `the app exited ${ended.code} / ${ended.signal}`)
   assert.deepEqual(harnessPids.filter(alive), [], 'a fake harness outlived the app')
   finished = true
-})
-
-test('built Agents catalog serves complete saved profiles and current browsing controls', async (t) => {
-  const found = gate(t)
-  if (found === null) return
-  const box = sandbox()
-  t.after(() => box.cleanup())
-  const cli = join(found.app, 'Contents', 'Resources', 'cli')
-  const result = await withBundledNode(
-    found.node,
-    box,
-    `
-    import assert from 'node:assert/strict'
-    import { mkdirSync, readFileSync } from 'node:fs'
-    import { join } from 'node:path'
-    import { CATALOG, catalogEntry } from ${JSON.stringify(join(cli, 'src/catalog.js'))}
-    import { agentsUi } from ${JSON.stringify(join(cli, 'src/core/agents-server.js'))}
-    import { Credentials, startApi } from ${JSON.stringify(join(cli, 'src/core/api.js'))}
-    import { openLedger } from ${JSON.stringify(join(cli, 'src/ledger/index.js'))}
-    import { addAgent, listAgents, rosterPath } from ${JSON.stringify(join(cli, 'src/roster.js'))}
-    assert.equal(Object.values(CATALOG).flat().length, 119, 'packaged preset count')
-    assert.equal(catalogEntry('pygmalion').model, 'codex-image')
-    // Every catalog agent is in the roster, as the catalog has it; the file keeps only your own.
-    assert.equal(listAgents(process.env).length, 119)
-    addAgent({ name: 'my-maia', harness: 'codex', model: 'gpt-6-astra', effort: 'low' }, process.env)
-    // The agents pages the way the daemon serves them: behind its API, opened with the UI token.
-    mkdirSync(process.env.CONSENSFLOW_HOME, { recursive: true })
-    const ledger = openLedger(join(process.env.CONSENSFLOW_HOME, 'consensflow.db'))
-    const token = 'smoke-ui-token'
-    const server = await startApi({ ledger, credentials: new Credentials(), ui: agentsUi(process.env, { token }) })
-    try {
-      const headers = { authorization: 'Bearer ' + token }
-      const data = await (await fetch(server.url + '/api/agents', { headers })).json()
-      const stored = JSON.parse(readFileSync(rosterPath(process.env), 'utf8')).agents.find(a => a.id === 'my-maia')
-      assert.deepEqual([stored.effort, stored.model, Object.hasOwn(stored, 'profile')], ['low', 'gpt-6-astra', false])
-      const mine = data.agents.find(a => a.name === 'my-maia')
-      assert.deepEqual([mine.effort, mine.custom, mine.profile.workTier], ['low', true, 'light'])
-      assert.equal(data.agents.length, 120)
-      const html = await (await fetch(server.url, { headers })).text()
-      for (const text of ['aria-label="Agents"', 'Model and reasoning', 'My own agents', 'model-summary', 'model-group', 'value="model-reasoning" selected', 'Work tier', 'tier-pill', 'Important work only · No coding']) assert.ok(html.includes(text), text)
-      for (const text of ['id="catalog-section"', 'Agent library', 'Your agents', 'PM candidate', 'name="tags"', 'category-pill', 'Chief of Staff candidate', 'name="category"', 'Name in use', 'offer__actions', 'Saved only', 'Sort by', 'benchmark', 'Artificial Analysis', 'AA ']) assert.ok(!html.includes(text), 'gone: ' + text)
-      assert.equal((await fetch(server.url + '/api/agents/maia', { method: 'DELETE', headers })).status, 400)
-      assert.equal((await fetch(server.url + '/api/agents/my-maia', { method: 'DELETE', headers })).status, 204)
-      const after = await (await fetch(server.url + '/api/agents', { headers })).json()
-      assert.equal(after.agents.length, 119)
-      assert.equal(Object.hasOwn(after, 'catalog'), false)
-      console.log('packaged catalog and saved profiles verified')
-    } finally {
-      await server.close()
-      ledger.close()
-    }
-  `,
-  )
-  assert.equal(result.code, 0, result.err)
-  assert.match(result.out, /packaged catalog and saved profiles verified/)
 })

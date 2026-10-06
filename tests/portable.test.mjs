@@ -99,9 +99,10 @@ describe('the portable Windows exe', () => {
     const parent = /const RUNTIME_PARENT: &str = "([^"]+)";/.exec(rust)?.[1]
     assert.ok(parent, 'portable.rs names no RUNTIME_PARENT')
     assert.notEqual(parent, 'runtime', 'the old apps empty `runtime`')
+    // The release page tells where the portable exe unpacks; its text is the publisher's.
     for (const file of [
       '.github/workflows/windows-build.yml',
-      '.github/workflows/release.yml',
+      'app/scripts/publish.mjs',
       'app/scripts/portable.mjs',
     ]) {
       const text = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')

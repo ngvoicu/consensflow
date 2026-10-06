@@ -1,4 +1,5 @@
 {
   "feeds": { "alpha": "feed-alpha", "stable": "feed-stable" },
-  "legacy": { "alpha": "update-alpha", "stable": "update-stable" }
+  "legacy": { "alpha": "update-alpha", "stable": "update-stable" },
+  "bridge": { "version": "3.0.0-alpha.80", "legacy": ["alpha"] }
 }

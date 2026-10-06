@@ -11,18 +11,23 @@
 # tauri.conf.json agree; prepare-update checks all three). Its message becomes
 # the notes; a tag without one gets the commits since the previous release.
 # A hand run (Actions → Release → Run workflow) builds, signs and smoke-tests
-# the same files and publishes nothing; it prints the feeds a tag would move.
+# the same files and publishes nothing, even where it is run on a tag: only the
+# push of a tag publishes. It prints the feeds a tag would move, and what a tag
+# would be refused for.
 #
 # The update feeds. Installed apps read a rolling release's latest.json: the
-# apps before the flip release (3.0.0-alpha.79 and earlier) read update-alpha
-# and update-stable, the flip release and those after it read feed-alpha and
-# feed-stable (app/feeds.json). Every release moves the new feed of its
-# channels. The flip release, the first whose tree holds app/feeds.json, moves
-# the old feeds too, once: it is what the old apps install, being the last
-# release laid out as they check for. A later release leaves the old feeds
-# pinned to it, and nothing deletes the release they name. The rule is
-# app/scripts/feeds.mjs's: it plans the feeds in the Mac job, from the tags
-# and the archive, and checks them in the publish job.
+# apps before the bridge (3.0.0-alpha.79 and earlier) read update-alpha and
+# update-stable, the bridge and those after it read feed-alpha and feed-stable
+# (app/feeds.json, which also records which release is the bridge). Every
+# release moves the new feed of its channels. The bridge moves the old feed of
+# each channel in use too, once: it is what the old apps install, being the
+# last release laid out as they check for. A later release moves the new feeds
+# only, and only once the old feeds serve the bridge, with its files: it reads
+# that from the feeds, not from the tags, since a bridge whose release failed
+# leaves its tag behind and the old apps where they were. It fails before it
+# moves anything when they do not. Nothing deletes the release the old feeds
+# name. The rule and its checks are app/scripts/feeds.mjs's, the moving is
+# app/scripts/publish.mjs's, which a run that died is finished by running again.
 name: Release
 
 on:
@@ -34,10 +39,10 @@ permissions:
   contents: read
 
 # Releases go out one at a time, so two tags never race to move the feed. A
-# hand run publishes nothing and queues apart: in the same group it would
-# replace a tag's run that waits there.
+# hand run publishes nothing and queues apart, on a tag as on a branch: in the
+# same group it would replace a tag's run that waits there.
 concurrency:
-  group: ${{ github.ref_type == 'tag' && 'release' || format('release-trial-{0}', github.run_id) }}
+  group: ${{ github.event_name == 'push' && github.ref_type == 'tag' && 'release' || format('release-trial-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
@@ -65,6 +70,18 @@ jobs:
       - name: The tag names the source version
         if: github.ref_type == 'tag'
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+      # A release after the bridge finds out here, before an hour of building,
+      # that the old feeds serve the bridge with its files; the publish job asks
+      # again before it moves anything. A hand run says what a tag would be
+      # refused for, and is not failed by it.
+      - name: The old feeds serve the bridge, for a release after it
+        run: |
+          set -euo pipefail
+          dry=()
+          if [ "$GITHUB_EVENT_NAME" != push ]; then dry=(--dry-run); fi
+          node app/scripts/feeds.mjs prerequisites \
+            --version "$(node -p "require('./package.json').version")" \
+            --base "https://github.com/$GITHUB_REPOSITORY/releases/download" ${dry[@]+"${dry[@]}"}
 
       - run: npm ci
       - run: npm ci --prefix app
@@ -140,11 +157,13 @@ jobs:
             --archive "$out/$archive" --signature "$out/$archive.sig" \
             --notes "$out/notes.txt" --output "$out/latest.json" \
             --channel "$channel" --date "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          # The feeds this release moves, from the tags and the archive; the
-          # publish job follows the list. It fails here, before anything is
-          # published, for a flip release the old apps would refuse.
+          # The feeds this release moves, by the rule and the archive. It fails
+          # here, before anything is published, for a bridge the old apps would
+          # refuse, or a release before the bridge; a hand run says so instead.
+          dry=()
+          if [ "$GITHUB_EVENT_NAME" != push ]; then dry=(--dry-run); fi
           node app/scripts/feeds.mjs plan --version "$version" \
-            --archive "$out/$archive" --previous "$previous" > "$out/feeds.txt"
+            --archive "$out/$archive" ${dry[@]+"${dry[@]}"}
       - uses: actions/upload-artifact@v7
         with:
           name: ConsensFlow-mac
@@ -160,7 +179,9 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   publish:
-    if: github.ref_type == 'tag'
+    # Only the push of a tag publishes. A hand run is a workflow_dispatch, and
+    # is on a tag whenever someone picks one to run it on.
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [mac, windows, gate]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -170,12 +191,14 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      # The feed rule's script and its manifest, nothing else of the tree: it
-      # checks the feeds below, and holds no credential of its own.
+      # The feed rule's script, the publisher and the manifest, nothing else of
+      # the tree: they run below, and hold no credential of their own (the
+      # publisher is given gh's, by the job's environment).
       - uses: actions/checkout@v7
         with:
           sparse-checkout: |
             app/scripts/feeds.mjs
+            app/scripts/publish.mjs
             app/feeds.json
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -187,59 +210,25 @@ jobs:
           path: ${{ runner.temp }}/dist
           merge-multiple: true
       # Versioned files first, then the rolling feeds installed apps read: a
-      # feed naming an archive that is not up yet would fail every check. The
-      # feeds are the ones the Mac job planned (feeds.txt, by the rule at the
-      # top of this file); a feed that does not exist yet is made, and the
-      # old feeds, when the flip release moves them, are marked as pinned.
+      # feed naming an archive that is not up yet would fail every check. It is
+      # app/scripts/publish.mjs's, in this order: the rule's refusals before
+      # anything moves (a later release is refused until the old feeds serve the
+      # bridge with its files), the versioned release, whose files are held to
+      # the ones built here (a release made by a run that died is finished, not
+      # refused for existing), then each feed the rule names, its latest.json
+      # swapped in without a moment spent deleted. Run again after a failure, it
+      # finishes the work.
       - name: Publish the release, then its update feeds
         working-directory: ${{ runner.temp }}/dist
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          mac="ConsensFlow_${version}_aarch64"
-          assets=(
-            "$mac.dmg" "$mac.app.tar.gz" "$mac.app.tar.gz.sig" latest.json
-            "nsis/ConsensFlow_${version}_x64-setup.exe"
-            "portable/ConsensFlow_${version}_x64-portable.exe"
-          )
-          for asset in "${assets[@]}"; do test -s "$asset" || { echo "missing $asset"; exit 1; }; done
-          test -s feeds.txt || { echo "missing feeds.txt"; exit 1; }
-          feeds=()
-          while IFS= read -r feed; do feeds+=("$feed"); done < feeds.txt
-          for asset in "${assets[@]}"; do (cd "$(dirname "$asset")" && sha256sum "$(basename "$asset")"); done > SHA256SUMS
-          {
-            cat notes.txt
-            echo
-            echo "**Downloads.** macOS on Apple silicon: the DMG, signed with a Developer ID"
-            echo "and notarized by Apple. Windows x64: the installer (\`-setup.exe\`), or the"
-            echo "portable exe (\`-portable.exe\`), one file you run from anywhere: its first"
-            echo "start unpacks Node and the CLI into"
-            echo "\`%LOCALAPPDATA%\\dev.ngvoicu.consensflow\\portable-runtime\`. Its data stays in your user"
-            echo "folder either way. Neither Windows file is code-signed, so Windows shows its"
-            echo "unknown-publisher warning. The Mac app updates itself through"
-            echo "ConsensFlow → Check for Updates on the $([[ "$version" == *-* ]] && echo Alpha || echo Stable) channel."
-          } > body.md
-          prerelease=()
-          [[ "$version" == *-* ]] && prerelease=(--prerelease)
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "ConsensFlow $version" \
-            --notes-file body.md ${prerelease[@]+"${prerelease[@]}"} "${assets[@]}" SHA256SUMS
-          for feed in "${feeds[@]}"; do
-            name="${feed#*-}"
-            label="$(printf '%s' "${name:0:1}" | tr '[:lower:]' '[:upper:]')${name:1}"
-            if ! gh release view "$feed" > /dev/null 2>&1; then
-              gh release create "$feed" --prerelease --title "$label update feed" \
-                --notes "The latest.json installed apps read on this channel. Do not delete."
-            fi
-            gh release upload "$feed" latest.json --clobber
-            if [[ "$feed" == update-* ]]; then
-              gh release edit "$feed" --title "$label update feed, pinned" \
-                --notes "Pinned to ConsensFlow $version, the first release to read feed-$name: the apps before it read this feed and install it, and from it on read feed-$name. Never move this feed, and never delete this release or the one it names."
-            fi
-          done
+          node "$GITHUB_WORKSPACE/app/scripts/publish.mjs" --dir . --tag "$GITHUB_REF_NAME" \
+            --base "https://github.com/$GITHUB_REPOSITORY/releases/download"
       # What the rule says, read back from where installed apps read it: every
-      # feed this release moved serves its latest.json, the archive it names
-      # downloads as the one built, and no old feed it did not move serves it,
-      # nor has lost the release it is pinned to (app/scripts/feeds.mjs).
+      # file of the release downloads as the one built, every new feed of its
+      # channels serves its latest.json, and the old feeds in use serve the
+      # bridge, with the archive, installer and portable the old apps need
+      # (app/scripts/feeds.mjs).
       - name: The feeds serve this release, and its archive downloads
         working-directory: ${{ runner.temp }}/dist
         run: |
