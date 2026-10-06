@@ -23,6 +23,7 @@ use super::*;
 use crate::testing::Said;
 
 mod restart;
+mod screens;
 
 const UI_TOKEN_DIGITS: usize = 48;
 
@@ -215,10 +216,17 @@ async fn a_ping_over_the_bridge_is_answered_and_every_page_operation_is_there() 
                 ask(&rig.app, "ping", json!({})).await,
                 json!({ "ok": true })
             );
-            // The page operations have not landed: each says which one it is.
-            let answer = ask(&rig.app, "board.get", json!({ "project": 1 })).await;
-            assert_eq!(answer["ok"], false);
-            assert!(answer["error"].as_str().unwrap().contains("board.get"));
+            // The page's operations are served, on the daemon's own ledger and
+            // saved agents: one that reads answers its fields, and one for a
+            // project the ledger has not is refused in the ledger's words.
+            assert_eq!(
+                ask(&rig.app, "projects.list", json!({})).await,
+                json!({ "ok": true, "projects": [] })
+            );
+            assert_eq!(
+                ask(&rig.app, "board.get", json!({ "project": 1 })).await,
+                json!({ "ok": false, "error": "no project 1" })
+            );
             assert_eq!(
                 ask(&rig.app, "no.such.operation", json!({})).await,
                 json!({ "ok": false, "error": "unknown-op" })

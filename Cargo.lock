@@ -428,6 +428,7 @@ dependencies = [
 name = "cf-daemon"
 version = "3.0.0-alpha.78"
 dependencies = [
+ "base64 0.22.1",
  "bytes",
  "cf-base",
  "cf-bridge",
@@ -437,12 +438,18 @@ dependencies = [
  "cf-ledger",
  "cf-process",
  "cf-proto",
+ "flate2",
  "futures-util",
  "getrandom 0.4.3",
  "http-body-util",
  "hyper",
  "hyper-util",
  "jiff",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "rustls",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "sha2",

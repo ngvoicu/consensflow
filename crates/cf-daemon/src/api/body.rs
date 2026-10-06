@@ -12,8 +12,10 @@
 //!   chunk read as text on its own as Node read it, so what is cut between
 //!   two chunks reads as U+FFFD.
 
+use std::future::Future;
 use std::io;
 use std::pin::Pin;
+use std::time::Duration;
 
 use bytes::Bytes;
 use cf_base::json::from_slice_lossy;
@@ -29,6 +31,13 @@ pub const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
 
 /// The most a screen's request may hold: 64 K UTF-16 code units.
 pub const MAX_TEXT_UNITS: usize = 64 * 1024;
+
+/// How much of a body is read and let go once its request was answered before
+/// all of it was read: 16 MiB.
+pub const DRAIN_BYTES: usize = 16 * 1024 * 1024;
+
+/// How long the rest of such a body is read: two seconds.
+pub const DRAIN_WAIT: Duration = Duration::from_secs(2);
 
 /// A request's body, the bytes as they arrive.
 pub struct Body {
@@ -49,29 +58,70 @@ impl Body {
         Self::new(stream::empty())
     }
 
-    /// The body hyper reads off a connection: its data frames, a failure of
-    /// the connection as an error, and then no more.
-    pub fn incoming(incoming: Incoming) -> Self {
-        Self::new(stream::unfold(Some(incoming), |state| async move {
-            let mut incoming = state?;
-            loop {
-                match incoming.frame().await {
-                    None => return None,
-                    Some(Err(failed)) => return Some((Err(io::Error::other(failed)), None)),
-                    Some(Ok(frame)) => {
-                        if let Ok(data) = frame.into_data() {
-                            return Some((Ok(data), Some(incoming)));
-                        }
-                    }
+    /// The body hyper reads off a connection, through a pump that is spawned
+    /// beside the request: the data frames come through it as the handler
+    /// reads them, a failure of the connection as an error, and then no more.
+    /// Once the handler lets the body go, answered before it read all of it (a
+    /// check that comes before the body, a body over its limit), the pump reads
+    /// what is left and lets it go, [`DRAIN_BYTES`] at most and for
+    /// [`DRAIN_WAIT`] at most, as Node's server read the rest once a response
+    /// ended: a client still sending reads its answer, where Windows resets a
+    /// socket closed with bytes unread, and the answer with it (seen on zeewin).
+    /// `arrived` is called once a chunk was handed over, as the connection's
+    /// own reads are followed: what the chunk woke is run there, a callback of
+    /// its own.
+    pub fn pumped(
+        incoming: Incoming,
+        arrived: impl Fn() + 'static,
+    ) -> (Self, impl Future<Output = ()> + 'static) {
+        let (sender, mut received) = tokio::sync::mpsc::channel(1);
+        let pump = async move {
+            let mut incoming = incoming;
+            while let Some(frame) = incoming.frame().await {
+                let chunk = match frame {
+                    Err(failed) => Err(io::Error::other(failed)),
+                    Ok(frame) => match frame.into_data() {
+                        Ok(data) => Ok(data),
+                        Err(_) => continue,
+                    },
+                };
+                let broke = chunk.is_err();
+                if sender.send(chunk).await.is_err() {
+                    let_go(&mut incoming).await;
+                    return;
+                }
+                arrived();
+                if broke {
+                    return;
                 }
             }
-        }))
+        };
+        let body = Self::new(stream::poll_fn(move |context| received.poll_recv(context)));
+        (body, pump)
     }
 
     /// The next chunk: none once the body ended.
     pub async fn next(&mut self) -> Option<io::Result<Bytes>> {
         self.chunks.next().await
     }
+}
+
+/// Reads what is left of a body nobody reads any more, and lets it go: to its
+/// end, a failure, [`DRAIN_BYTES`], or [`DRAIN_WAIT`], whichever comes first.
+async fn let_go(incoming: &mut Incoming) {
+    let rest = async {
+        let mut read = 0;
+        while let Some(Ok(frame)) = incoming.frame().await {
+            if let Ok(data) = frame.into_data() {
+                read += data.len();
+                if read > DRAIN_BYTES {
+                    return;
+                }
+            }
+        }
+    };
+    // Past the wait the rest is left unread: a body that never ends.
+    let _ = tokio::time::timeout(DRAIN_WAIT, rest).await;
 }
 
 /// The agents' API's body, as the one JSON object it is (`readJson`).

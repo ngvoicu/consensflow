@@ -4,27 +4,57 @@
 //! request; the agents' own tokens open none of this, and the UI token opens
 //! none of the agents' API.
 //!
-//! This is their place, and nothing of them yet: [`Screens::handle`] answers
-//! none of them, so a screen's path falls through to the agents' API and is
-//! answered as Node answers a path it has no route for (401 from a caller with
-//! no window token, else 404) until the screens land. What the landing needs of
-//! the daemon is here: the UI token, which [`Screens::token`] holds, and what
-//! the routes that change the roster must do once they have (`on_roster_change`,
-//! `daemon.js:103-106`).
+//! [`Screens::handle`] is Node's `handle`, in its order:
+//!
+//! 1. a path that is none of the screens' is the agents' API's: none is
+//!    answered ([`recognize`]);
+//! 2. the UI token, as the bearer or, where the bearer says nothing, in the
+//!    query; without it, 401 `{error: "unauthorized"}`, a bare one (the API's
+//!    own 401 says why);
+//! 3. a GET of a page or of the agents is answered, and no body is read;
+//! 4. any other method has its body read, as the one JSON value it holds (`{}`
+//!    where it has none), before any route is looked for: a body that is no
+//!    JSON fails a request that has no route as it fails one that has;
+//! 5. the route the method and the path name, else 404 `{error: "not found"}`.
+//!
+//! Anything that throws is 400 `{error: <its words>}`: a refusal of the
+//! roster's, a body too large, a harness the admin will not update. Every
+//! write to the roster is followed by `on_roster_change`.
+//!
+//! - [`pages`] holds the two pages as the text Node served,
+//! - [`agents`] the roster's routes,
+//! - [`harnesses`] the diagnostics',
+//! - [`body`] what a route reads of its body, and
+//! - [`network`] where the harness feeds are asked.
+
+mod agents;
+mod body;
+mod harnesses;
+pub mod network;
+mod pages;
 
 use std::rc::Rc;
 
-use crate::api::answer::Answer;
-use crate::api::request::Request;
+use cf_base::env::Env;
+use cf_harness::admin::HarnessAdmin;
+use hyper::Method;
+use serde_json::{json, Map, Value};
 
-/// The screens' own paths, in the order Node lists them (`:69-78`). A path
-/// that is none of these is the agents' API's.
+use crate::api::answer::Answer;
+use crate::api::credentials::token_matches;
+use crate::api::request::Request;
+use crate::roster::Agents;
+
+/// The screens' own paths, in the order Node lists them (`:69-78`). A path that
+/// is none of these is the agents' API's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Screen {
-    /// `GET /` and `GET /harnesses`: a page.
+    /// `/` and `/harnesses`: a page.
     Page,
-    /// `/api/agents` and `/api/agents/<name>`: the roster's agents.
+    /// `/api/agents`: the roster's agents.
     Agents,
+    /// `/api/agents/<name>`: one agent of the human's own.
+    Agent(String),
     /// `/api/preferences`.
     Preferences,
     /// `/api/harnesses/check`.
@@ -43,7 +73,7 @@ pub fn recognize(path: &str) -> Option<Screen> {
         "/api/harnesses/update" => Some(Screen::HarnessUpdate),
         _ => {
             let name = path.strip_prefix("/api/agents/")?;
-            is_agent_name(name).then_some(Screen::Agents)
+            is_agent_name(name).then(|| Screen::Agent(name.to_owned()))
         }
     }
 }
@@ -67,15 +97,77 @@ pub struct Screens {
     /// failure is the words of why the tiers could not follow, which fail the
     /// request as Node's throw did, the change itself being made.
     pub on_roster_change: Rc<dyn Fn() -> Result<(), String>>,
+    /// The environment the daemon runs in, which says what is installed here.
+    pub env: Env,
+    /// The saved agents, listed and changed by the routes.
+    pub agents: Rc<Agents>,
+    /// What is known of each harness's CLI, and its update.
+    pub admin: HarnessAdmin,
 }
 
 impl Screens {
     /// Answers a request that is one of the screens', or none when its path is
-    /// not theirs. Until they land, it answers none.
-    pub async fn handle(&self, _request: &mut Request) -> Option<Answer> {
-        None
+    /// not theirs.
+    pub async fn handle(&self, request: &mut Request) -> Option<Answer> {
+        let screen = recognize(&request.path)?;
+        if !self.opens(request) {
+            return Some(Answer::json(401, json!({ "error": "unauthorized" })));
+        }
+        Some(
+            self.answer(screen, request)
+                .await
+                .unwrap_or_else(|words| Answer::json(400, json!({ "error": words }))),
+        )
+    }
+
+    /// Whether `request` carries the UI token: as the bearer, which is read as
+    /// none when it is empty, else as the query's first `token`.
+    fn opens(&self, request: &Request) -> bool {
+        let presented = request
+            .bearer()
+            .filter(|bearer| !bearer.is_empty())
+            .or_else(|| request.param("token"))
+            .unwrap_or_default();
+        !presented.is_empty() && token_matches(presented, &self.token)
+    }
+
+    /// The route's answer, or the words of why it threw.
+    async fn answer(&self, screen: Screen, request: &mut Request) -> Result<Answer, String> {
+        let get = request.method == Method::GET;
+        if get {
+            match screen {
+                Screen::Page => return Ok(Answer::html(self.page(&request.path))),
+                Screen::Agents => return self.list_agents(),
+                _ => {}
+            }
+        }
+        let body = if get {
+            Value::Object(Map::new())
+        } else {
+            body::read(request).await?
+        };
+        match (&request.method, screen) {
+            (&Method::POST, Screen::Agents) => self.add_agent(&body),
+            (&Method::POST, Screen::Preferences) => self.set_preferences(&body),
+            (&Method::POST, Screen::HarnessUpdate) => self.update_harness(&body).await,
+            (&Method::POST, Screen::HarnessCheck) => self.check_harnesses(&body).await,
+            (&Method::PATCH, Screen::Agent(name)) => self.edit_agent(&name, &body),
+            (&Method::DELETE, Screen::Agent(name)) => self.remove_agent(&name),
+            _ => Ok(Answer::json(404, json!({ "error": "not found" }))),
+        }
+    }
+
+    /// The page at `path`, `/` or `/harnesses`, made for the UI token.
+    fn page(&self, path: &str) -> String {
+        if path == "/" {
+            pages::agents(&self.token)
+        } else {
+            pages::harnesses(&self.token)
+        }
     }
 }
 
+#[cfg(test)]
+pub(crate) mod testing;
 #[cfg(test)]
 mod tests;

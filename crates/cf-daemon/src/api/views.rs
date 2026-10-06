@@ -5,7 +5,8 @@
 //! land.
 
 use cf_base::text::utf16_prefix;
-use cf_ledger::MessageView;
+use cf_ledger::{MessageView, TaskCard, TaskView};
+use cf_proto::ledger::Need;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -19,6 +20,59 @@ const PREVIEW_UNITS: usize = 160;
 /// which none does.
 pub fn value<T: Serialize>(view: &T) -> Result<Value, Failure> {
     serde_json::to_value(view).map_err(|failed| Failure::Internal(failed.to_string()))
+}
+
+/// A task, summarised (`summary`): what a window needs to tell its tasks
+/// apart, and not the brief. Node's also read `task.kind`, which no task has,
+/// so `JSON.stringify` left it out: it is not here.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskSummary {
+    pub number: i64,
+    pub title: String,
+    pub state: String,
+    pub requester: String,
+    pub assignee: Option<String>,
+    pub pool: Option<String>,
+    pub tier: Option<String>,
+    pub needs: Vec<Need>,
+    pub blocked_by: Vec<i64>,
+    pub updated_at: String,
+}
+
+impl From<&TaskView> for TaskSummary {
+    fn from(task: &TaskView) -> Self {
+        Self {
+            number: task.number,
+            title: task.title.clone(),
+            state: task.state.clone(),
+            requester: task.requester.clone(),
+            assignee: task.assignee.clone(),
+            pool: task.pool.clone(),
+            tier: task.tier.clone(),
+            needs: task.needs.clone(),
+            blocked_by: task.blocked_by.clone(),
+            updated_at: task.updated_at.clone(),
+        }
+    }
+}
+
+/// A card on the board says as much as a task does.
+impl From<&TaskCard> for TaskSummary {
+    fn from(card: &TaskCard) -> Self {
+        Self {
+            number: card.number,
+            title: card.title.clone(),
+            state: card.state.clone(),
+            requester: card.requester.clone(),
+            assignee: card.assignee.clone(),
+            pool: card.pool.clone(),
+            tier: card.tier.clone(),
+            needs: card.needs.clone(),
+            blocked_by: card.blocked_by.clone(),
+            updated_at: card.updated_at.clone(),
+        }
+    }
 }
 
 /// A message, summarised (`messageSummary`): its first line, cut at 160
@@ -103,6 +157,54 @@ mod tests {
             created_at: "2026-10-05T09:00:00.000Z".to_owned(),
             delivered_at: None,
         }
+    }
+
+    fn task() -> TaskView {
+        TaskView {
+            id: 9,
+            project_id: 1,
+            number: 4,
+            title: "Parser".to_owned(),
+            body: "The whole brief".to_owned(),
+            state: "waiting".to_owned(),
+            requester: "chief".to_owned(),
+            assignee: Some("zeus".to_owned()),
+            pool: Some("worker".to_owned()),
+            tier: Some("standard".to_owned()),
+            purpose: Some("hard-problem".to_owned()),
+            session: Some("amber-pine".to_owned()),
+            needs: vec![Need {
+                number: 2,
+                state: "done".to_owned(),
+            }],
+            blocked_by: vec![3],
+            held_until: None,
+            paused_at: None,
+            deleted_at: None,
+            created_at: "2026-10-05T08:00:00.000Z".to_owned(),
+            updated_at: "2026-10-05T09:00:00.000Z".to_owned(),
+        }
+    }
+
+    const SUMMARY: &str = r#"{"number":4,"title":"Parser","state":"waiting","requester":"chief","assignee":"zeus","pool":"worker","tier":"standard","needs":[{"number":2,"state":"done"}],"blockedBy":[3],"updatedAt":"2026-10-05T09:00:00.000Z"}"#;
+
+    #[test]
+    fn a_task_is_summarised_in_the_order_node_said_it_with_no_brief_and_no_kind() {
+        // Node's `summary` read `task.kind` too, which a task has none of, so
+        // `JSON.stringify` left it out.
+        assert_eq!(
+            serde_json::to_string(&TaskSummary::from(&task())).unwrap(),
+            SUMMARY
+        );
+    }
+
+    #[test]
+    fn a_card_on_the_board_is_summarised_as_its_task_is() {
+        let card = TaskCard::of(task(), Some("Done.".to_owned()));
+        assert_eq!(
+            serde_json::to_string(&TaskSummary::from(&card)).unwrap(),
+            SUMMARY
+        );
     }
 
     #[test]

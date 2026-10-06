@@ -58,8 +58,19 @@ memchr = "2"
 nix = { version = "0.28", default-features = false }
 portable-pty = "0.9"
 regex = "1"
+# HTTPS for the harness feed (`cf-daemon`'s `screens::network`): rustls, so no
+# TLS library of the system's and nothing to build with OpenSSL on Windows.
+# `rustls-no-provider` is the one reqwest feature that brings none: the app's
+# updater builds rustls on ring, and a second provider (aws-lc-rs, reqwest's
+# own) would leave rustls with none to choose. `cf-daemon` hands the client its
+# own TLS settings, built on ring, and so installs nothing process-wide.
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls-no-provider"] }
 # The ledger's SQLite, built in: every platform runs the same SQLite.
 rusqlite = { version = "0.40", features = ["bundled"] }
+# The TLS of the harness feed's client, on ring alone (see `reqwest`).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# The system's own trust in a feed's certificate, as the platform keeps it.
+rustls-platform-verifier = "0.7"
 serde = { version = "1.0", features = ["derive"] }
 # Objects keep their keys in the order written, as JavaScript's do: JSON
 # that Node wrote reads back, and goes out again, as Node had it.

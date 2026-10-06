@@ -252,6 +252,50 @@ async fn a_request_target_that_is_no_url_is_not_answered_200() {
 }
 
 #[tokio::test]
+async fn a_body_its_request_was_answered_before_reading_is_read_after_so_its_client_reads_the_answer(
+) {
+    LocalSet::new()
+        .run_until(async {
+            // A check that comes before the body (a member creating a task):
+            // the handler answers without reading it.
+            let (api, _rig) = serving(|_| {
+                Box::pin(async {
+                    Err(Failure::refuse(403, "not-a-coordinator", "members do not"))
+                })
+            })
+            .await;
+            let length = 1024 * 1024;
+            let first = 64 * 1024;
+            let mut stream = TcpStream::connect(address(&api)).await.unwrap();
+            let head = format!(
+                "POST /api/tasks HTTP/1.1\r\nHost: t\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(head.as_bytes()).await.unwrap();
+            stream.write_all(&vec![b' '; first]).await.unwrap();
+            // The answer comes while the client is still sending.
+            let mut answered = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            while !String::from_utf8_lossy(&answered).contains("members do not") {
+                let read = stream.read(&mut buffer).await.unwrap();
+                assert!(read > 0, "the connection ended before the answer");
+                answered.extend_from_slice(&buffer[..read]);
+            }
+            assert_eq!(parse(&answered).status, 403);
+            // The rest is read and let go, not met with a reset: on Windows
+            // a reset loses an answer the client has not read yet.
+            stream.write_all(&vec![b' '; length - first]).await.unwrap();
+            stream.shutdown().await.unwrap();
+            let mut rest = Vec::new();
+            stream
+                .read_to_end(&mut rest)
+                .await
+                .expect("the connection ends, not reset");
+            api.close().await;
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn a_client_that_leaves_does_not_drop_its_handler() {
     LocalSet::new()
         .run_until(async {

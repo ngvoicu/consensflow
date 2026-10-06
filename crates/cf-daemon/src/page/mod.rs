@@ -3,12 +3,15 @@
 //! [`PageOperation`](cf_proto::page::PageOperation), and `ping`, which says
 //! the bridge is up.
 //!
-//! **Frozen** for the page operations' landing: every operation is registered
-//! on the bridge here ([`register`]), and [`operations::serve`] is the table
-//! of which function serves which. Until an operation lands it answers an
-//! error that names it. What the operations stand on is [`Page`] and the
-//! engine they call ([`Engine`]), a small trait of what `page.js` calls on the
-//! dispatcher and its five projections, which the dispatcher is.
+//! Every operation is registered on the bridge here ([`register`]), and
+//! [`operations::serve`] is the table of which function serves which; each
+//! concern has a module of its own: [`projects`], [`staff`] (the agents and
+//! the staff), [`sessions`], [`board`] (and the inbox), [`tasks`] and
+//! [`messages`]. What they stand on is [`Page`] and the engine they call
+//! ([`Engine`]), a small trait of what `page.js` calls on the dispatcher and
+//! its five projections, which the dispatcher is; the saved agents are read
+//! from the file at each use ([`agents`]), and the body is read as JavaScript
+//! read it ([`body`]).
 //!
 //! How an operation answers is the bridge's: `{ok: true, ...fields}` for the
 //! fields it serves, `{ok: false, error}` with the words of its failure. One
@@ -24,8 +27,16 @@
 //! contained, whatever poll it panics at, and answers `{ok: false}` with what
 //! it said.
 
+mod agents;
+mod board;
+mod body;
 mod engine;
+mod messages;
 mod operations;
+mod projects;
+mod sessions;
+mod staff;
+mod tasks;
 
 use std::cell::RefCell;
 use std::rc::Rc;

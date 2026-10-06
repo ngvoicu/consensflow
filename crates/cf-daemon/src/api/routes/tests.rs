@@ -2,7 +2,7 @@
 //! order they are matched, and that nothing Node routes is left out.
 
 use super::*;
-use crate::testing::{request, said, scene};
+use crate::testing::{request, said, scene, Scene};
 
 fn route(method: Method, path: &str) -> Option<Route> {
     recognize(&method, path)
@@ -158,20 +158,24 @@ fn every_route_node_names_by_its_method_and_path_is_one() {
     );
 }
 
+/// Every route has a handler that answers it, as its own and not as a route
+/// there is none of: what a window with nothing to its name is told is the
+/// route's own (a refusal, an empty answer, an unknown task), never
+/// `unknown-route`.
 #[tokio::test]
-async fn a_route_with_no_handler_yet_answers_as_node_answers_one_it_has_none_for() {
+async fn every_route_is_answered_by_a_handler_of_its_own() {
     let scene = scene();
     let caller = crate::api::callers::caller_of(
         &scene.context,
         &request(Method::GET, "/api/whoami", Some(&scene.zeus), ""),
     )
     .unwrap();
-    for (method, path, route) in [
-        (Method::GET, "/api/whoami", Route::Whoami),
-        (Method::GET, "/api/history", Route::History),
-        (Method::GET, "/api/staff", Route::Staff),
-        (Method::GET, "/api/tasks", Route::Tasks),
-        (Method::POST, "/api/tasks", Route::CreateTask),
+    for (method, path, route, status) in [
+        (Method::GET, "/api/whoami", Route::Whoami, 200),
+        (Method::GET, "/api/history", Route::History, 403),
+        (Method::GET, "/api/staff", Route::Staff, 200),
+        (Method::GET, "/api/tasks", Route::Tasks, 200),
+        (Method::POST, "/api/tasks", Route::CreateTask, 403),
         (
             Method::GET,
             "/api/tasks/3",
@@ -179,26 +183,194 @@ async fn a_route_with_no_handler_yet_answers_as_node_answers_one_it_has_none_for
                 number: "3".to_owned(),
                 action: None,
             },
+            404,
         ),
-        (Method::GET, "/api/inbox", Route::Inbox),
+        (Method::GET, "/api/inbox", Route::Inbox, 200),
         (
             Method::GET,
             "/api/inbox/9",
             Route::Message { id: "9".to_owned() },
+            404,
         ),
-        (Method::POST, "/api/questions", Route::AskQuestion),
-        (Method::POST, "/api/notes", Route::Note),
+        (Method::POST, "/api/questions", Route::AskQuestion, 400),
+        (Method::POST, "/api/notes", Route::Note, 400),
+        (
+            Method::GET,
+            "/api/questions/9",
+            Route::Question { id: "9".to_owned() },
+            404,
+        ),
+        (Method::POST, "/api/answers", Route::Answers, 404),
     ] {
         let asked = request(method.clone(), path, Some(&scene.zeus), "");
-        let (status, body) = said(dispatch(&scene.context, &caller, route, asked).await);
-        assert_eq!(status, 404, "{method} {path}");
-        assert_eq!(
-            body,
-            serde_json::json!({
-                "error": "unknown-route",
-                "message": format!("no such command: {method} {path}")
-            })
-        );
+        let (got, body) = said(dispatch(&scene.context, &caller, route, asked).await);
+        assert_eq!(got, status, "{method} {path}: {body}");
+        assert_ne!(body["error"], "unknown-route", "{method} {path}");
     }
-    assert_eq!(scene.kicks.get(), 0);
+}
+
+/// What the route tests stand on: the API as a client reaches it, and the
+/// board's state to start from.
+pub(super) mod support {
+
+    use bytes::Bytes;
+    use cf_ledger::NewTask;
+    use futures_util::stream;
+    use serde_json::{json, Value};
+
+    use super::{request, said, Method, Scene};
+    use crate::api::body::Body;
+    use crate::api::request::Request;
+
+    /// `method target` from the window of `token`, with `body` as its text:
+    /// through the API's own checks, as a client sends it. The answer's
+    /// status and JSON.
+    pub(in crate::api::routes) async fn api(
+        scene: &Scene,
+        method: Method,
+        target: &str,
+        token: &str,
+        body: &str,
+    ) -> (u16, Value) {
+        through(scene, request(method, target, Some(token), body)).await
+    }
+
+    /// A request of this shape, whose body is `body`: for a body that does
+    /// something as it is read.
+    pub(in crate::api::routes) fn with_body(
+        method: Method,
+        target: &str,
+        token: &str,
+        body: Body,
+    ) -> Request {
+        Request::new(method, target, Some(format!("Bearer {token}")), body).unwrap()
+    }
+
+    /// `text`, which says `meanwhile` is done as it is read: what Node did
+    /// between its view of the board and its use of it, with the board.
+    pub(in crate::api::routes) fn read_while(
+        text: &str,
+        meanwhile: impl FnOnce() + 'static,
+    ) -> Body {
+        let text = text.to_owned();
+        Body::new(stream::once(async move {
+            meanwhile();
+            Ok(Bytes::from(text))
+        }))
+    }
+
+    pub(in crate::api::routes) async fn through(scene: &Scene, asked: Request) -> (u16, Value) {
+        let screens = crate::screens::testing::inert();
+        said(crate::api::handle(&scene.context, &screens, asked).await)
+    }
+
+    /// A task the chief gave `zeus` by name and its window took: working.
+    pub(in crate::api::routes) fn working_task(scene: &Scene) -> i64 {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let created = ledger
+            .create_task(
+                scene.project.id,
+                &NewTask {
+                    from: "chief".to_owned(),
+                    to: Some("zeus".to_owned()),
+                    body: "Parser".to_owned(),
+                    ..NewTask::default()
+                },
+            )
+            .unwrap();
+        let brief = created.message.unwrap().id;
+        ledger.begin_delivery(brief).unwrap();
+        ledger
+            .confirm_delivery(brief, Some(&json!({ "item": "test" })))
+            .unwrap();
+        created.task.number
+    }
+
+    /// A task the chief put on the board for a standard worker, which waits.
+    pub(in crate::api::routes) fn open_task(scene: &Scene) -> i64 {
+        let created = scene
+            .context
+            .ledger
+            .borrow_mut()
+            .create_task(
+                scene.project.id,
+                &NewTask {
+                    from: "chief".to_owned(),
+                    pool: Some("worker".to_owned()),
+                    tier: Some("standard".to_owned()),
+                    body: "Lexer".to_owned(),
+                    ..NewTask::default()
+                },
+            )
+            .unwrap();
+        created.task.number
+    }
+
+    /// A task the daemon gave a window of `zeus` of its own (a session), which
+    /// has finished it: the one a follow-up goes back to.
+    pub(in crate::api::routes) fn finished_session_task(scene: &Scene) -> i64 {
+        let number = open_task(scene);
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let project = ledger.project(scene.project.id).unwrap().unwrap();
+        let zeus = project
+            .participants
+            .iter()
+            .find(|participant| participant.handle == "zeus")
+            .unwrap()
+            .id;
+        let moved = ledger.assign_task(scene.project.id, number, zeus).unwrap();
+        let brief = moved.message.unwrap().id;
+        ledger.begin_delivery(brief).unwrap();
+        ledger
+            .confirm_delivery(brief, Some(&json!({ "item": "test" })))
+            .unwrap();
+        ledger
+            .record_result(scene.project.id, number, "Done.")
+            .unwrap();
+        number
+    }
+
+    /// With the human's approval required, a task opened for a standard
+    /// worker and given to `zeus` by the daemon: its brief waits at the gate.
+    /// The token of the session the daemon opened, and the brief's number.
+    pub(in crate::api::routes) fn gated_brief(scene: &Scene) -> (String, i64) {
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .set_gate(scene.project.id, true)
+            .unwrap();
+        let number = open_task(scene);
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let project = ledger.project(scene.project.id).unwrap().unwrap();
+        let zeus = project
+            .participants
+            .iter()
+            .find(|participant| participant.handle == "zeus")
+            .unwrap();
+        let moved = ledger
+            .assign_task(scene.project.id, number, zeus.id)
+            .unwrap();
+        let project = ledger.project(scene.project.id).unwrap().unwrap();
+        let session = project
+            .participants
+            .iter()
+            .find(|participant| Some(&participant.handle) == moved.task.assignee.as_ref())
+            .unwrap();
+        let token = scene.context.credentials.issue(project.id, session.id);
+        (token, moved.message.unwrap().id)
+    }
+
+    /// The state task `number` is in now.
+    pub(in crate::api::routes) fn state_of(scene: &Scene, number: i64) -> String {
+        scene
+            .context
+            .ledger
+            .borrow()
+            .task(scene.project.id, number)
+            .unwrap()
+            .unwrap()
+            .task
+            .state
+    }
 }

@@ -30,10 +30,11 @@ use cf_catalog::{roster_path, Catalog, CatalogError};
 use cf_engine::runtime::begin;
 use cf_engine::seams::{Limits, Seams};
 use cf_engine::Dispatcher;
+use cf_harness::admin::feed::Feed;
+use cf_harness::admin::HarnessAdmin;
 use cf_harness::records::Thread;
 use cf_harness::seams::{
     Bundle, LoopbackPorts, Probes, Services, SystemEntropy, SystemLoopback, SystemProcesses,
-    SystemTime,
 };
 use cf_ledger::{open_ledger, LedgerError, Options as LedgerOptions};
 use cf_proto::page::HandleLine;
@@ -52,9 +53,11 @@ use crate::machine;
 use crate::page::{self, Page};
 use crate::pass::{throttle, PassLoop};
 use crate::roster::Agents;
+use crate::screens::network::HttpsFeed;
 use crate::screens::Screens;
 use crate::seams::{
-    DaemonSpawn, HarnessAdapters, LaunchFolders, RandomLaunchIds, RoleTexts, WindowEnv,
+    DaemonRecords, DaemonSpawn, DaemonTime, HarnessAdapters, LaunchFolders, RandomLaunchIds,
+    RoleTexts, WindowEnv,
 };
 use crate::stop::{arm, Latch, Stopping};
 
@@ -255,6 +258,13 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
         log: Rc::clone(&log),
         trace: Rc::clone(&trace),
     });
+    // The programs the daemon runs and the time it reads: the engine's windows
+    // are run with them, and so are the harness diagnostics of the screens, which
+    // ask each CLI its version and each feed its latest release. What waits on a
+    // timer ends as a callback of its own, which the executor is drained after
+    // (`seams::boundary`).
+    let processes = Rc::new(SystemProcesses::new(env.clone()));
+    let time = Rc::new(DaemonTime::new(Rc::clone(&spawn)));
     let screens = Rc::new(Screens {
         token: token.clone(),
         on_roster_change: {
@@ -273,6 +283,14 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
                 Ok(())
             })
         },
+        env: env.clone(),
+        agents: Rc::clone(&agents),
+        admin: HarnessAdmin::new(
+            env.clone(),
+            Rc::clone(&time) as _,
+            Rc::new(Feed::new(Rc::clone(&time) as _, Rc::new(HttpsFeed::new()))),
+            Rc::clone(&processes) as _,
+        ),
     });
     let api = Rc::new(
         api::serve(Rc::clone(&context), screens, Rc::clone(&spawn))
@@ -281,13 +299,14 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
     );
 
     // What the engine runs windows with.
-    let processes = Rc::new(SystemProcesses::new(env.clone()));
-    let time = Rc::new(SystemTime);
     let zone = machine::zone();
-    let records = Rc::new(
-        Thread::new(env.clone(), zone.clone(), Rc::clone(&time) as _)
-            .map_err(|failed| StartError::System(failed.to_string()))?,
-    );
+    let records = Rc::new(DaemonRecords::new(
+        Rc::new(
+            Thread::new(env.clone(), zone.clone(), Rc::clone(&time) as _)
+                .map_err(|failed| StartError::System(failed.to_string()))?,
+        ),
+        Rc::clone(&spawn),
+    ));
     let services = Services {
         env: env.clone(),
         records: Rc::clone(&records) as _,
@@ -304,8 +323,8 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
         ledger: Rc::clone(&ledger),
         host: Rc::new(BridgeHost::new(bridge.clone(), env.clone())),
         adapters: Rc::new(HarnessAdapters::new(&services)),
-        records,
-        time,
+        records: Rc::clone(&records) as _,
+        time: Rc::clone(&time) as _,
         launch_ids: Rc::new(RandomLaunchIds),
         credentials: Rc::clone(&credentials) as _,
         pane_env: Rc::new(WindowEnv::new(

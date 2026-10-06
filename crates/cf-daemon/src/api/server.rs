@@ -11,6 +11,14 @@
 //! 500 `internal`. A connection that waits for its next request is held to
 //! five seconds, as Node's keep-alive held it.
 //!
+//! Each poll of a connection is a callback of its own ([`Drained`]): a body's
+//! last piece, which the connection reads, wakes the handler that waits for it
+//! directly, and what that woke is run to its end before another task runs, as
+//! Node ran its microtasks after each `data` event of a socket. A handler's
+//! answer is written when its connection is next polled, a turn after the
+//! drain that ended its work; hyper serves a connection's requests one at a
+//! time, so a request written behind another waits for its answer.
+//!
 //! Closing ([`Api::close`]) is told to every part together: the doors waiting
 //! for an answer are answered at once ([`Closing`]), the listener is let go,
 //! and each connection is asked to finish what it has (hyper's graceful
@@ -24,9 +32,11 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::future::Future;
 use std::io;
-use std::pin::pin;
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -46,6 +56,7 @@ use tokio::task::AbortHandle;
 use tokio::time::sleep;
 
 use super::answer::{Answer, Content, Failure};
+use super::body::Body;
 use super::context::Closing;
 use super::request::Request;
 use crate::errors::{contain, Errors};
@@ -217,16 +228,53 @@ async fn serve(server: &Rc<Server>, stream: TcpStream) {
         .timer(TokioTimer::new())
         .header_read_timeout(server.idle)
         .serve_connection(TokioIo::new(stream), service);
-    let mut connection = pin!(connection);
+    let mut connection = Drained::new(connection, Rc::clone(&server.spawn));
     let mut closing = server.closing.subscribe();
     let ended = tokio::select! {
-        _ = connection.as_mut() => true,
+        _ = &mut connection => true,
         _ = closing.wait_for(|closing| *closing) => false,
     };
     if !ended {
         // What it has in hand is finished, and no request after it is read.
-        connection.as_mut().graceful_shutdown();
-        let _ = connection.as_mut().await;
+        connection.pinned().graceful_shutdown();
+        let _ = (&mut connection).await;
+    }
+}
+
+/// A connection each poll of which is a callback of its own. What a poll
+/// reads (the last piece of a request's body, say) wakes the handler that
+/// waits for it directly, where no drain is, and tokio would run the tasks
+/// queued ahead of the driver first: another connection's, the bridge's
+/// reader. The poll is followed by a drain, so that what it woke runs to its
+/// end before any other task, as Node's microtasks ran after each `data` event
+/// of a socket and before the next.
+struct Drained<F> {
+    connection: Pin<Box<F>>,
+    spawn: Rc<DaemonSpawn>,
+}
+
+impl<F> Drained<F> {
+    fn new(connection: F, spawn: Rc<DaemonSpawn>) -> Self {
+        Self {
+            connection: Box::pin(connection),
+            spawn,
+        }
+    }
+
+    /// The connection, for what hyper asks of it pinned.
+    fn pinned(&mut self) -> Pin<&mut F> {
+        self.connection.as_mut()
+    }
+}
+
+impl<F: Future> Future for Drained<F> {
+    type Output = F::Output;
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<F::Output> {
+        let this = &mut *self;
+        let polled = this.connection.as_mut().poll(context);
+        this.spawn.drain();
+        polled
     }
 }
 
@@ -235,6 +283,13 @@ async fn serve(server: &Rc<Server>, stream: TcpStream) {
 /// stop it; a panic in it is a 500. What the first part woke is run to its
 /// end before the connection goes on.
 async fn respond(server: &Rc<Server>, request: hyper::Request<Incoming>) -> Response<Full<Bytes>> {
+    // The body comes through a pump beside the request, which reads and lets
+    // go what is left of it once the request no longer reads it.
+    let (parts, incoming) = request.into_parts();
+    let spawn = Rc::clone(&server.spawn);
+    let (body, pump) = Body::pumped(incoming, move || spawn.drain());
+    tokio::task::spawn_local(pump);
+    let request = hyper::Request::from_parts(parts, body);
     let state = Rc::clone(server);
     let begun = begin(&*server.spawn, async move {
         let outcome = contain(async {

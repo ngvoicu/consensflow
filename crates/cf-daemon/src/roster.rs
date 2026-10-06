@@ -8,9 +8,10 @@
 use std::path::PathBuf;
 
 use cf_base::refusal::Refusal;
-use cf_catalog::{AgentRow, Catalog, Roster};
+use cf_catalog::{AgentRow, AgentView, Catalog, Harness, Roster};
 use cf_engine::seams::SavedAgent;
 use cf_ledger::{Ledger, TierChange};
+use serde_json::Value;
 
 use crate::api::context::AgentRows;
 
@@ -79,3 +80,30 @@ impl cf_engine::seams::Roster for Agents {
 
 #[cfg(test)]
 mod tests;
+
+/// The agents as the pickers offer them (`offerable`, `src/harnesses.js`),
+/// for the page's `agents.list` and the agents screen alike: one whose harness
+/// is not installed here is hidden, so only the Harnesses screen shows that
+/// harness, where it is installed; so is one saved for a harness this build
+/// does not run (Kimi, dropped), for no window could open on it. Each is its
+/// view with `hidden` and `notInstalled` said, in that order, as `{...agent,
+/// hidden: true, notInstalled: true}` says them: a key the view already has
+/// keeps its place, a new one comes last.
+pub fn offerable(agents: &[AgentView], missing: &[Harness]) -> serde_json::Result<Vec<Value>> {
+    agents
+        .iter()
+        .map(|agent| {
+            let mut view = serde_json::to_value(agent)?;
+            let unavailable = agent.unsupported
+                || agent
+                    .harness
+                    .as_deref()
+                    .is_some_and(|word| missing.iter().any(|harness| harness.as_str() == word));
+            if let (true, Value::Object(fields)) = (unavailable, &mut view) {
+                fields.insert("hidden".to_owned(), Value::Bool(true));
+                fields.insert("notInstalled".to_owned(), Value::Bool(true));
+            }
+            Ok(view)
+        })
+        .collect()
+}
