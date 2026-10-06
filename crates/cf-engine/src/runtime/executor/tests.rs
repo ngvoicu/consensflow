@@ -15,6 +15,8 @@ use crate::runtime::next_turn;
 use crate::runtime::stage::{Log, Stage};
 use crate::testing::Gate;
 
+mod budget;
+
 #[test]
 fn a_drain_runs_what_is_woken_and_what_that_wakes_and_says_whether_anything_ran() {
     let executor = Executor::strict();
