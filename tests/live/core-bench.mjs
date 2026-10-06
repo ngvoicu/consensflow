@@ -60,7 +60,14 @@ const AGENTS = {
     model: 'openrouter/meta/muse-spark-1.3',
     workTier: 'standard',
   },
-  devin: { id: 'bench-devin', kind: 'devin', model: 'swe-1-6-slow', workTier: 'critical' },
+  // SWE-1.6 Slow, the free plan's, is not on Devin Pro (2026-10-03); SWE-2 is free there.
+  devin: {
+    id: 'bench-devin',
+    kind: 'devin',
+    model: 'swe-2',
+    effort: 'medium',
+    workTier: 'critical',
+  },
   codex: { id: 'bench-codex', kind: 'codex', model: 'gpt-5.6-luna', workTier: 'critical' },
 }
 const tierFlag = (tier) =>

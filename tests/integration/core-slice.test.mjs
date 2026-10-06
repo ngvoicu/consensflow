@@ -182,3 +182,42 @@ test('switching the chief opens a fresh window that gets the handoff and reads w
     await app.close()
   }
 })
+
+test('a restart brings the project back on its chief’s own conversation', async () => {
+  let app = await startIntegration({
+    daemon: DAEMON,
+    fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
+  })
+  const root = app.root
+  try {
+    const opened = await app.requestNode('project.open', {
+      directory: app.workspace,
+      agent: 'chief',
+    })
+    const project = opened.project.id
+    const first = await app.openFrame(`p${project}-chief`)
+    const session = first.argv[first.argv.indexOf('--session-id') + 1]
+    await app.tell(project, 'Reply with exactly: BEFORE-RESTART')
+    await app.waitFor(() => app.transcript(session).includes('"text":"BEFORE-RESTART"'))
+
+    // The app's quit order: the daemon dies first, then the pane host.
+    app.killDaemon()
+    await app.waitFor(() => app.daemonExited(), 10_000)
+    await app.close({ preserveRoot: true })
+    app = await startIntegration({
+      daemon: DAEMON,
+      fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
+      existingRoot: root,
+    })
+    const again = await app.openFrame(`p${project}-chief`, 30_000)
+    assert.equal(
+      again.argv[again.argv.indexOf('--resume') + 1],
+      session,
+      JSON.stringify(again.argv),
+    )
+    const { board } = await app.requestNode('board.get', { project })
+    assert.equal(board.project.state, 'open')
+  } finally {
+    await app.close()
+  }
+})
