@@ -4,8 +4,8 @@
  * bug is one plant for each of them.
  *
  * What no plant can show is what no recorded trace can see: the `«now»` a world's
- * file is written with (nothing compares the stamps of a roster the page and the
- * screens read, and the screens mask them), the queues and the events an operation
+ * file is written with (the recorder masks the stamps of a roster, so nothing
+ * compares them: `players.mjs` holds the mask itself), the queues and the events an operation
  * held while a stand-in made a call of its own (the recorder refuses an operation
  * that reads the clock itself and through a stand-in too, and none logs an event
  * before one), and what only Windows reads (the shims of the programs, `PATHEXT`).

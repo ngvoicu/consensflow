@@ -41,8 +41,8 @@ recording, and a test holds this document to the files that are checked in.
 | `scenarios/corners-page.test.mjs` | `corners-page-001` to `008` | `page` | the page operations |
 | `tests/core-agents-server.test.mjs` | `core-agents-server-001` to `009` | `screens` | the screens |
 | `scenarios/corners-screens.test.mjs` | `corners-screens-001` to `010` | `screens` | the screens |
-| `tests/core-trace.test.mjs` | `core-trace-001` to `002` | `trace` | the line formats |
-| `tests/core-log.test.mjs` | `core-log-001` | `log` | the line formats |
+| `tests/core-trace.test.mjs` | `core-trace-001` to `002` | `trace` | none: `files.json` holds the line formats |
+| `tests/core-log.test.mjs` | `core-log-001` | `log` | none: `files.json` holds the line formats |
 
 (`scenarios/` is `tests/goldens/daemon/scenarios/`: what no suite looked at, the order of the API's checks, how it reads a target, a body and a number, what the screens write. They are Node's tests of Node, kept there because the ledger recorder takes every suite in `tests/`. Their words are in the traces.)
 
@@ -50,20 +50,20 @@ A screens trace holds the exchanges the API answers when the UI token opens none
 
 ## Reading the files
 
-Every trace is JSON, gzipped, one line and a final line break. Read it as text first: the placeholders below are replaced in the text, as the ledger's replay replaces `«ledger»`, and then it is parsed.
+Every trace is JSON, gzipped, one line and a final line break. Read it as JSON, and put each name below where a player uses it.
 
-**Names for what differs from one run to the next.** Nothing else in a trace varies from one run to the next.
+**Names for what differs from one run to the next.** Nothing else in a trace varies from one run to the next. A name is put by the player that owns what varies (the folder it made, the port its relay listens on, the tokens it issued), in the field that holds it, once the trace is read: no player replaces the names in the text of a trace, and a name is only where the table says. The recorder refuses a trace that has one anywhere else (`check.mjs`), so that a name no player puts is not left in a trace.
 
-| Placeholder | Stands for | A player |
+| Placeholder | Where it is | A player |
 |---|---|---|
-| `«ledger»` | the path of the ledger's file | puts the path of its own |
-| `«root»` | the folder the test made: `HOME`, `CONSENSFLOW_HOME`, `PATH`, the roster, the stand-ins on `PATH` | puts the folder of its own |
-| `«api»` | `127.0.0.1:<port>`, the host and port the API listened on | puts the host and port of the API under test |
-| `«token:T1»` | the token the step `issue` named `T1` gave | puts the token its credentials issued for that window; `T1`, `T2`… are the order they were issued in |
-| `«now»` | a time the writer stamped from its own clock: a roster agent's `createdAt` and `updatedAt`, the `at` of a trace line whose entry had none, the time of a log line the test gave no clock | compares its own output with that time replaced by `«now»` |
-| `«frame»` | one stack frame in the text of a logged error | none: the error is given as the text it is |
+| `«ledger»` | `ledger.file` only: the path of the ledger's file | none reads it: each player opens a ledger on a file of its own |
+| `«root»` | the values of a `world`'s `env` (`HOME`, `CONSENSFLOW_HOME`, `PATH`: the folder the test made, which holds the roster and the stand-ins on `PATH`), and the `body` of a response (`corners-screens`) | puts the folder of its own, as the platform writes a path (a Windows path's backslashes are escaped as JSON escapes them) |
+| `«api»` | the values of a run's `env` (`CONSENSFLOW_URL`): `127.0.0.1:<port>`, where the API listened | the API's player puts the host and port a run reaches the API at: those of the relay it puts between the run and the API under test, which writes down what the run sends |
+| `«token:T1»` | the values of a run's `env`, a request's `authorization` and its `target`: the token the step `issue` named `T1` gave | the API's player puts the token its credentials issued for that window; `T1`, `T2`… are the order they were issued in |
+| `«now»` | the text of a file: of a `world`'s, and of the `before` and `after` of a `wrote`: a roster agent's `createdAt` and `updatedAt`, which the writer stamped from its own clock (and, in the traces of the lines, which no player plays, the `at` of a line whose entry had none and the time of a log line the test gave no clock) | the players of the page and the screens write a time of their own where a world's file says it, and read the time of each `createdAt` and `updatedAt` of a roster (`agents.json`, wherever it lies) as `«now»`, as the recorder did (a field that holds another text than a time stays as it is, and so is not `«now»`): no other text of it, and no other file, is masked |
+| `«frame»` | an error's `text` and the files of the log's traces (which no player plays): one stack frame in the text of a logged error | none: the error is given as the text it is |
 
-The ports and tokens are not in the traces: only these names are. A trace holds no path of the machine that made it, no token and no port. The recorder checks each trace as it makes it (`check.mjs`: step kinds, tokens issued before they are used, intervals settled, no temporary folder and no 64 random hex digits left), and `--check` records again and compares. That check of leftovers looks for the temporary folder of the machine it runs on: it is a guard at the recording, not on another machine; what keeps a path out of a trace is the naming.
+The ports and tokens are not in the traces: only these names are. A trace holds no path of the machine that made it, no token and no port. The recorder checks each trace as it makes it (`check.mjs`: step kinds, each name only where the table says, tokens issued before they are used, intervals settled, a ledger that left a database ended by the `close` that compares it, no temporary folder and no 64 random hex digits left), and `--check` records again and compares. That check of leftovers looks for the temporary folder of the machine it runs on: it is a guard at the recording, not on another machine; what keeps a path out of a trace is the naming.
 
 **Values JSON cannot hold** are tagged as in step 3.1's traces: `{"$undefined":true}` (a key that was there, with no value: it differs from a key that was not), `{"$number":"NaN"}`, `{"$bigint":"…"}`, `{"$date":"…"}`, `{"$set":[…]}`, `{"$map":[[key,value]…]}`, `{"$fn":n}`, and `{"$error":{"name","code","status","message"}}` for what a call threw.
 
@@ -82,7 +82,7 @@ The ports and tokens are not in the traces: only these names are. A trace holds 
 | `ui` | `{token}` when the screens were mounted: the UI token the test gave them |
 | `steps` | what happened, in order |
 
-`ledger` is `{file, options, initial?, openError?, final, unclosed?}`. `file` is `«ledger»`. `options` says whether the test gave the ledger its own `now`, `names` and `trace` (`false`: the recorder's). `initial`, as in step 3.1's traces, is what a file there before the open held. `final` is the database after the ledger's `close` step, to compare exactly: `{userVersion, schema, tables: {name: {columns, rows}}}`, each value as SQLite quotes it. A ledger the test never closed has `final: null` and `unclosed: true`. A test that opened no ledger has `null`: the traces of the lines, and those of `core-agents-server`, whose suite opens its ledger before its tests and closes it after.
+`ledger` is `{file, options, initial?, openError?, final, unclosed?}`. `file` is `«ledger»`, which no player reads. `options` says whether the test gave the ledger its own `now`, `names` and `trace` (`false`: the recorder's). `initial`, as in step 3.1's traces, is what a file there before the open held. `final` is the database after the ledger's `close` step, which ends the trace, to compare exactly: `{userVersion, schema, tables: {name: {columns, rows}}}`, each value as SQLite quotes it. A ledger the test never closed has `final: null` and `unclosed: true`. A test that opened no ledger has `null`: the traces of the lines, and those of `core-agents-server`, whose suite opens its ledger before its tests and closes it after.
 
 ## Steps
 
@@ -310,7 +310,7 @@ A request that is refused before its body is read still has it:
 }
 ```
 
-**`wrote`** (screens and page traces): `{ "<path under «root»>": {before, after} }`, each side `null` (not there) or `{text, executable?}` (`base64` for a file that is no UTF-8): the files this exchange changed. A roster file's `createdAt` and `updatedAt` are `«now»`: the time is the clock's. The screens' write routes leave the file as `after` says, and nothing else under `«root»`.
+**`wrote`** (screens and page traces): `{ "<path under «root»>": {before, after} }`, each side `null` (not there) or `{text, executable?}` (`base64` for a file that is no UTF-8): the files this exchange or operation changed. A roster file's `createdAt` and `updatedAt` are `«now»`: the time is the clock's. That is all the recorder masks, in a file named `agents.json` and in no other, so a roster rewritten with no change but its stamps changed nothing. The screens' write routes leave the file as `after` says, and nothing else under `«root»`; a step with no `wrote` (every page operation: none writes a file) changed no file, and a player holds that too.
 
 <!-- example: core-agents-server-007 steps.6 -->
 ```json
@@ -716,9 +716,11 @@ A trace of the event file or the daemon's log (`surface` `trace` or `log`) has n
 
 ## Playing a trace
 
-All players: replace the placeholders in the text, parse, make the folder the test made (`«root»`) and the ledger's file, and walk `steps` in order. Compare at each step what it says; at the end compare the database at the ledger's `close` with `ledger.final`.
+All players: parse the trace and put each name where the player uses it (above); make the folder the test made (`«root»`) and a ledger on a file of its own; and walk `steps` in order. Compare at each step what it says. The last step of a trace whose ledger left a database (`ledger.final`) is its `close`, where the database is compared with `ledger.final`: a player whose trace stopped before it has compared nothing of the ledger, and fails.
 
 ### The agents' API (`api`, and the exchanges of `cf`)
+
+The API is the daemon's own dispatch (`api::handle`), served with the screens mounted in front of it as the daemon mounts them: inert, over a home of their own, with a UI token no trace carries. Node's traces of the API were recorded with none (`ui` is null), so a path that is the screens' (`/`, `/harnesses`, `/api/agents`, `/api/agents/<name>`, `/api/preferences`, `/api/harnesses/check`, `/api/harnesses/update`) is answered by them, whoever asks, with their bare 401 `{"error":"unauthorized"}`, where the API's routes alone answered it as an unknown route. One exchange of the traces is such: the fifth of `corners-api-001`, a `GET /` with a window's token (Node: 404 `unknown-route`). The player holds it to the screens' answer, as the daemon gives it, and says so in a list that a test holds to the traces (`DEPARTURES` of `tests/api/player.rs`, as the screens' player lists its own); every other answer is held to the bytes Node recorded.
 
 1. `ledger`: replay as 3.1's replay does (`clock` and `names` into the queues, the call, the answer or refusal, the events, the readings taken).
 2. `issue`: issue a token for the window on the API's credentials; keep `T1` → token. `revoke`: give it back.
@@ -726,23 +728,23 @@ All players: replace the placeholders in the text, parse, make the folder the te
 4. `api.close`: close the API and wait; it must return, whatever is left waiting (a door's long poll is answered at once with `answer: null`).
 5. The last step is the ledger's `close`.
 
-The API's own calls are the Rust API's own: a player compares what they leave (the database, the events, the readings and names taken), not which calls they were.
+The API's own calls are the Rust API's own: a player compares what they leave (the database, the events, the readings and names taken), not which calls they were. The API took the requests the trace has and no others: as many as its `exchange` steps.
 
 ### `cf` against the API (`cf`)
 
-`cf-board-*` hold the same steps with `run`s. A player that runs the real `cf`: for a `run`, spawn the native `cf` with `argv`; an environment that is its own less every `CONSENSFLOW_*`, `CF_*` and `CHISEL_*`, plus `env` (named values put back); write `stdin`, close it; compare `stdout`, `stderr` and `code` exactly. Do not send the exchanges with `client: "cf"`: the run makes them, and what the API receives from it should be what they say. Where steps come between a `run` and its end (`detached`), the run is left running and compared at its `settle`; before a step of the test's own that follows an exchange of the run (a `POST /api/answers` after the run's question was put), wait until the API under test has received the run's exchanges recorded before it. The hook cases (`cf hook …`) are the two that do: `cf-board-023` and `024`.
+`cf-board-*` hold the same steps with `run`s. A player that runs the real `cf`: for a `run`, spawn the native `cf` with `argv`; an environment that is its own less every `CONSENSFLOW_*`, `CF_*` and `CHISEL_*`, plus `env` (named values put back); write `stdin`, close it; compare `stdout`, `stderr` and `code` exactly. Do not send the exchanges with `client: "cf"`: the run makes them, and what the API receives from it should be what they say: the API does not say what it was sent (the query, a body it never read, the content type), so the player puts a relay between the run and the API, which passes every byte on and writes each request down as `cf` wrote it, and holds them to the run's exchanges: as many and no more, and each whole, its `method`, its `target` with its query, its `authorization`, its `contentType` and the bytes of its `body`. Where steps come between a `run` and its end (`detached`), the run is left running and compared at its `settle`; before a step of the test's own that follows an exchange of the run (a `POST /api/answers` after the run's question was put), wait until the API under test has received the run's exchanges recorded before it. The hook cases (`cf hook …`) are the two that do: `cf-board-023` and `024`.
 
 ### The page operations (`page`)
 
-Per `operation`: put the `world` in place; set up the stand-ins from `seams` in order: the first call the operation makes on the dispatcher must be `seams[0]` (method and `args`), and so on, and none may be left over; put the operation's `clock` and `names` in the queues; call the operation with `body`; compare its reply to `reply` (as bytes), its kicks to `kicks`, a refusal's `message` to `refusal.message`, the events its ledger logged to `events`. `operations.json` lists the names and `ping`'s reply.
+Per `operation`: put the `world` in place; set up the stand-ins from `seams` in order: the first call the operation makes on the dispatcher must be `seams[0]` (method and `args`), and so on, and none may be left over; put the operation's `clock` and `names` in the queues; call the operation with `body`, as the app does, over a bridge whose app end the player holds by hand, so that what the daemon wrote is read as the line it is; compare its reply to `reply` as the bytes the bridge carried (the text of the `body` of the frame the daemon wrote, not a value read off the bridge and written again), its kicks to `kicks`, the files it wrote to its `wrote` (the files of the `world` that are not as they were before it: none, where the operation has no `wrote`), a refusal's `message` to `refusal.message`, the events its ledger logged to `events`. `operations.json` lists the names and `ping`'s reply.
 
 ### The screens (`screens`)
 
-As the API, with the UI token (`ui.token`) in place of a window's: put the first `world` in place (the stand-ins on `PATH`, the roster the earlier tests of the suite left, so each trace starts whole), mount the screens with that token, and for each exchange compare the answer and the `wrote` (the files it changed, as `after` says, and no other under `«root»`). The pages are `pages/` filled in. Exchanges without `screens` are the API's answer, beneath the screens: for a route they do not own, a 401 that is the API's (`error`, `message`), not their bare `{"error":"unauthorized"}`.
+As the API, with the UI token (`ui.token`) in place of a window's: put the first `world` in place (the stand-ins on `PATH`, the roster the earlier tests of the suite left, so each trace starts whole), mount the screens with that token, and for each exchange compare the answer and the `wrote` (the files it changed, as `after` says, and no other under `«root»`; a roster is read with its stamps masked as the recorder masks them, and nothing else is). The pages are `pages/` filled in. Exchanges without `screens` are the API's answer, beneath the screens: for a route they do not own, a 401 that is the API's (`error`, `message`), not their bare `{"error":"unauthorized"}`.
 
 ### The line formats (`trace`, `log`)
 
-Make the folder, call the Rust trace or log as each step says, and compare every file of the folder with `files`, name by name and byte by byte, once `«now»` is put in the lines that have it. `daemon.json` holds the lines the daemon writes at its start and its stop with the time, pid, home, Node's version and memory named `$TIME`, `$PID`, `$HOME`, `$NODE` and `$MB`: Rust's words differ where Node's are its runtime's (`node v…`, a stack, `heap`), as `decision-36` says; the rest is the format.
+No test plays the traces of the lines today: the daemon's line formats are held to `files.json` (`crates/cf-daemon/tests/files.rs`), made of the same Node modules at a clock of its own. A player of these traces would make the folder, call the Rust trace or log as each step says, and compare every file of the folder with `files`, name by name and byte by byte, once `«now»` is put in the lines that have it. `daemon.json` holds the lines the daemon writes at its start and its stop with the time, pid, home, Node's version and memory named `$TIME`, `$PID`, `$HOME`, `$NODE` and `$MB`: Rust's words differ where Node's are its runtime's (`node v…`, a stack, `heap`), as `decision-36` says; the rest is the format.
 
 <!-- file: daemon.json -->
 ```json

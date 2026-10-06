@@ -550,8 +550,83 @@ describe('what a trace must be', () => {
         trace([exchange(1)], { ledger: { file: '«ledger»', options: {}, final: null } }),
         /no database at the close/,
       ],
+      [
+        trace([exchange(1)], { ledger: { file: '«ledger»', options: {}, final: { tables: {} } } }),
+        /does not end with the close that compares it/,
+      ],
+      [
+        trace([exchange(1), { kind: 'ledger', method: 'close' }, exchange(2)], {
+          ledger: { file: '«ledger»', options: {}, final: { tables: {} } },
+        }),
+        /does not end with the close that compares it/,
+      ],
     ]
     for (const [bad, why] of refused) assert.throws(() => check('bad', bad), why)
+  })
+
+  it('refuses a name of what varies where no player puts it, and says where it stood', () => {
+    const named = (over) => trace([exchange(1, over)])
+    const refused = [
+      [
+        named({ response: { status: 200, contentType: null, body: '«ledger»' } }),
+        /«ledger» is in steps\.#\.response\.body, where no player puts it/,
+      ],
+      [
+        named({
+          request: {
+            method: 'GET',
+            target: '/',
+            authorization: null,
+            contentType: null,
+            body: '«now»',
+          },
+        }),
+        /«now» is in steps\.#\.request\.body/,
+      ],
+      [
+        named({
+          request: {
+            method: 'GET',
+            target: '/«api»',
+            authorization: null,
+            contentType: null,
+            body: null,
+          },
+        }),
+        /«api» is in steps\.#\.request\.target/,
+      ],
+      [
+        trace([{ kind: 'world', env: { '«root»': 'x' }, files: {} }]),
+        /«root» is in steps\.#\.env \(a key\)/,
+      ],
+      [
+        trace([{ kind: 'world', env: { HOME: '«frame»' }, files: {} }]),
+        /«frame» is in steps\.#\.env\.\*, where no player puts it/,
+      ],
+      [
+        trace([exchange(1)], {
+          ledger: { file: '«root»', options: {}, final: null, unclosed: true },
+        }),
+        /«root» is in ledger\.file/,
+      ],
+    ]
+    for (const [bad, why] of refused) assert.throws(() => check('bad', bad), why)
+    // Where a player puts each: a file's text is where the clock's stamps are, a run's
+    // environment is where the API's address and a window's token are.
+    check(
+      'places',
+      trace([
+        issue('T1'),
+        {
+          kind: 'world',
+          env: { HOME: '«root»/home', URL: 'http://«api»', T: '«token:T1»' },
+          files: {
+            'agents.json': { text: '"createdAt": "«now»"' },
+          },
+        },
+        { kind: 'world', files: { 'bin/x': null } },
+      ]),
+    )
   })
 })
 

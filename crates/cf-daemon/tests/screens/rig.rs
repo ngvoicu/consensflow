@@ -13,12 +13,9 @@ use cf_catalog::{roster_path, Catalog};
 use cf_daemon::api::context::AgentRows;
 use cf_daemon::api::{serve, Api};
 use cf_daemon::roster::Agents;
-use cf_daemon::screens::Screens;
-use cf_harness::admin::HarnessAdmin;
-use cf_harness::testing::{ManualTime, ScriptedCapture, ScriptedLatest, EPOCH_MS};
 use cf_ledger::{open_ledger, Ledger, Options};
 
-use crate::front::Front;
+use crate::front::{screens, Front};
 use crate::support::daemon::Kicks;
 
 pub struct Rig {
@@ -50,21 +47,15 @@ pub async fn start(token: &str, env: Env, ledger_file: &Path) -> Rig {
     );
     let told = Kicks::new();
     let tell = told.waker();
-    let screens = Rc::new(Screens {
-        token: token.to_owned(),
-        on_roster_change: Rc::new(move || {
+    let screens = screens(
+        token,
+        env,
+        agents,
+        Rc::new(move || {
             tell();
             Ok(())
         }),
-        env: env.clone(),
-        agents,
-        admin: HarnessAdmin::new(
-            env,
-            Rc::new(ManualTime::new(EPOCH_MS)),
-            Rc::new(ScriptedLatest::default()),
-            Rc::new(ScriptedCapture::default()),
-        ),
-    });
+    );
     let api = serve(Rc::clone(&front.context), screens, Rc::clone(&front.spawn))
         .await
         .unwrap();

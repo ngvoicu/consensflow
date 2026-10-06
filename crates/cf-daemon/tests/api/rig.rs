@@ -1,30 +1,36 @@
-//! The API under test: the real routes, in the real server, over a ledger of
-//! the player's own, whose clock and session names are the ones Node's calls
-//! drew and whose events are heard as they are logged; a roster that is the
-//! daemon's own, over a file the player writes, and says which agents it was
-//! asked for; the windows' tokens; and a count of the wake-ups the API sent.
+//! The API under test: the daemon's own dispatch (`api::handle`: the screens
+//! first, then the window's token, then the routes), in the real server, over a
+//! ledger of the player's own, whose clock and session names are the ones
+//! Node's calls drew and whose events are heard as they are logged; a roster
+//! that is the daemon's own, over a file the player writes, and says which
+//! agents it was asked for; the windows' tokens; and a count of the wake-ups
+//! the API sent.
 //!
-//! The screens are not mounted: Node's traces of the agents' API were recorded
-//! with none (`ui` was null), and a screen's path is answered by them, not by
-//! the API, once they are.
+//! The screens are mounted, as the daemon mounts them: inert, over a home of
+//! their own, with a UI token no trace uses. Node's traces of the agents' API
+//! were recorded with none (`ui` was null), so a path of the screens' is
+//! answered by them here and by the API's routes there; that is the one
+//! exchange of the traces that is theirs (`player::DEPARTURES`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use cf_base::env::Env;
 use cf_base::js;
 use cf_base::refusal::Refusal;
 use cf_catalog::{AgentRow, Catalog};
 use cf_daemon::api::answer::{Answer, Content, Failure};
-use cf_daemon::api::callers::caller_of;
-use cf_daemon::api::context::{AgentRows, Context};
-use cf_daemon::api::request::Request;
-use cf_daemon::api::routes::{dispatch, recognize};
-use cf_daemon::api::{Api, Handler};
+use cf_daemon::api::context::AgentRows;
+use cf_daemon::api::{handle, Api, Handler};
 use cf_daemon::roster::Agents;
 use serde_json::{json, Value};
 
-use crate::front::Front;
+use crate::front::{screens, Front};
 use crate::ledger;
+
+/// The UI token of the screens the API is mounted under. No trace of the API
+/// carries it (`tests/api/main.rs` holds that), so no request opens them.
+pub const UI_TOKEN: &str = "the-ui-token-no-trace-of-the-api-carries";
 
 /// What the API answered a request, as the server would say it.
 #[derive(Debug, Clone, PartialEq)]
@@ -99,10 +105,21 @@ impl Rig {
             asked: Rc::clone(&asked),
         };
         let front = Front::new(home.path(), Rc::clone(&ledger.ledger), Rc::new(roster));
+        // Mounted as the daemon mounts them, over a home that is none of the API's.
+        let screens = screens(
+            UI_TOKEN,
+            Env::default(),
+            Rc::new(Agents::new(
+                Catalog::bundled().expect("the catalog"),
+                home.path().join("screens").join("agents.json"),
+            )),
+            Rc::new(|| Ok(())),
+        );
         let seen = Rc::new(RefCell::new(Vec::<Seen>::new()));
         let (context, heard) = (Rc::clone(&front.context), Rc::clone(&seen));
         let handler: Rc<Handler> = Rc::new(move |request| {
-            let (context, seen) = (Rc::clone(&context), Rc::clone(&heard));
+            let (context, screens, seen) =
+                (Rc::clone(&context), Rc::clone(&screens), Rc::clone(&heard));
             let at = {
                 let mut heard = seen.borrow_mut();
                 heard.push(Seen {
@@ -114,7 +131,7 @@ impl Rig {
                 heard.len() - 1
             };
             Box::pin(async move {
-                let answer = through(&context, request).await;
+                let answer = handle(&context, &screens, request).await;
                 seen.borrow_mut()[at].answered = Some(Answered::of(&answer));
                 answer
             })
@@ -149,15 +166,5 @@ impl Rig {
         let file = json!({ "schemaVersion": 1, "agents": rows });
         std::fs::write(self.home.path().join("agents.json"), file.to_string())
             .expect("the agents file");
-    }
-}
-
-/// The API's own checks and routes, in the order `api::handle` has them,
-/// without the screens before them.
-async fn through(context: &Context, request: Request) -> Result<Answer, Failure> {
-    let caller = caller_of(context, &request)?;
-    match recognize(&request.method, &request.path) {
-        Some(route) => dispatch(context, &caller, route, request).await,
-        None => Err(request.unknown_route()),
     }
 }

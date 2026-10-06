@@ -2,7 +2,9 @@
 //! says: the ledger's calls replayed, the windows' tokens issued, each
 //! exchange sent and its answer compared as bytes (with the wake-ups, the
 //! events, the clock and the roster it drew on), each run of `cf` made whole
-//! and what it printed compared, and at the end the database the ledger left.
+//! and what it printed compared, with every request it wrote (and no other)
+//! as the trace has it, and at the end the database the ledger left: a trace
+//! whose ledger left a database is played to the `close` that compares it.
 //!
 //! An exchange or a run that other steps overlap (a door held open while the
 //! API closes; a hook's long poll that the test answers meanwhile) is left
@@ -16,13 +18,14 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use base64::Engine;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use crate::checks;
 use crate::front::{self, Reply};
 use crate::names::Names;
+use crate::relay::Relay;
 use crate::rig::Rig;
 use crate::runs::{self, Ran};
 use crate::support::compare::differs;
@@ -31,11 +34,32 @@ use crate::support::trace::{self, Tally};
 /// How long a step may wait for what it needs of the API or of `cf`.
 const WAIT: Duration = Duration::from_secs(60);
 
-/// A run of `cf` still going: what it was, and what it makes of the API.
+/// The exchanges whose answer is the screens', not the API's that Node
+/// recorded: by trace, the exchange's `id`. Node's traces of the API were made
+/// with no screens mounted, and the daemon mounts them in front of the API
+/// (`api::handle`), so a path that is theirs is theirs to answer, whatever
+/// window asks: `GET /` with a window's token is their bare 401 where the
+/// API's own routes said 404 `unknown-route`. Every other answer is held to
+/// Node's bytes, and a test holds this list to the traces.
+pub const DEPARTURES: [(&str, u64); 1] = [("corners-api-001", 5)];
+
+/// What the screens answer a request of theirs that carries no UI token, as
+/// the daemon gives it (`Screens::handle`): not the API's 401, which says why.
+fn screens_answer() -> Value {
+    json!({
+        "status": 401,
+        "contentType": "application/json",
+        "body": r#"{"error":"unauthorized"}"#,
+    })
+}
+
+/// A run of `cf` still going: what it was, what it makes of the API, and the
+/// relay that writes down what it sends.
 struct Running {
     step: Value,
     exchanges: Vec<Value>,
     ran: oneshot::Receiver<Ran>,
+    relay: Relay,
 }
 
 /// An exchange of the test's own still waiting for its answer.
@@ -44,7 +68,9 @@ struct Waiting {
     reply: JoinHandle<io::Result<Reply>>,
 }
 
-struct Player {
+struct Player<'a> {
+    /// The trace's name, which says which exchanges are the screens'.
+    name: &'a str,
     rig: Rc<Rig>,
     names: Names,
     trace: Value,
@@ -56,6 +82,8 @@ struct Player {
     /// What the API did that belongs to what is still running.
     events: Vec<Value>,
     kicks: usize,
+    /// Whether the trace's `close` of its ledger was played.
+    ledger_closed: bool,
     /// What has been compared so far.
     tally: Tally,
 }
@@ -75,6 +103,7 @@ pub async fn play(name: &str) -> Result<Tally, String> {
         }
     }
     let mut player = Player {
+        name,
         names: Names::new(&front::address(&rig.api)),
         rig,
         trace,
@@ -84,6 +113,7 @@ pub async fn play(name: &str) -> Result<Tally, String> {
         closes: HashMap::new(),
         events: Vec::new(),
         kicks: 0,
+        ledger_closed: false,
         tally: Tally::default(),
     };
     for (at, step) in steps.iter().enumerate() {
@@ -100,7 +130,7 @@ pub async fn play(name: &str) -> Result<Tally, String> {
     Ok(player.tally)
 }
 
-impl Player {
+impl Player<'_> {
     async fn step(&mut self, kind: &str, step: &Value) -> Result<(), String> {
         match kind {
             "ledger" => self.ledger(step),
@@ -149,8 +179,20 @@ impl Player {
         if let Some(why) = self.rig.ledger.close(step, &self.trace["ledger"]["final"]) {
             return Err(why);
         }
+        self.ledger_closed = true;
         self.tally.databases += 1;
         Ok(())
+    }
+
+    /// What an exchange is answered with, by the one that Node recorded or by
+    /// the screens where the exchange is theirs.
+    fn response_of(&self, exchange: &Value) -> Value {
+        let id = exchange["id"].as_u64().unwrap_or_default();
+        if DEPARTURES.contains(&(self.name, id)) {
+            screens_answer()
+        } else {
+            exchange["response"].clone()
+        }
     }
 
     /// An exchange of the test's own: sent here. One that is a run's is the
@@ -180,7 +222,8 @@ impl Player {
             .map_err(|why| format!("the exchange failed: {why}"))?
             .map_err(|why| format!("no answer: {why}"))?;
         let (events, kicks) = self.take();
-        checks::exchange(&self.rig, step, &reply, &events, kicks)?;
+        let response = self.response_of(step);
+        checks::exchange(&self.rig, step, &response, &reply, &events, kicks)?;
         self.tally.exchanges += 1;
         Ok(())
     }
@@ -256,15 +299,17 @@ impl Player {
                 })
                 .unwrap_or_default()
         };
+        // The run is told the API is at the relay, which writes down what it sends.
+        let relay = Relay::start(&front::address(&self.rig.api))
+            .await
+            .map_err(|why| format!("no relay for the run: {why}"))?;
+        let names = self.names.facing(relay.address());
         let env: Vec<(String, String)> = step["env"]
             .as_object()
             .map(|env| {
                 env.iter()
                     .map(|(name, value)| {
-                        (
-                            name.clone(),
-                            self.names.put(value.as_str().unwrap_or_default()),
-                        )
+                        (name.clone(), names.put(value.as_str().unwrap_or_default()))
                     })
                     .collect()
             })
@@ -275,6 +320,7 @@ impl Player {
             step: step.clone(),
             exchanges,
             ran,
+            relay,
         };
         if step["detached"] == true {
             self.runs.insert(id, running);
@@ -289,6 +335,7 @@ impl Player {
             step,
             exchanges,
             ran,
+            relay,
         } = running;
         let ran = tokio::time::timeout(WAIT, ran)
             .await
@@ -306,8 +353,10 @@ impl Player {
             return Err(format!("ended with {:?}, Node {}", ran.code, step["code"]));
         }
         self.tally.runs += 1;
+        checks::sent(&relay, &self.names, &exchanges)?;
         for exchange in &exchanges {
-            checks::made(&self.rig, &self.names, exchange)?;
+            let response = self.response_of(exchange);
+            checks::made(&self.rig, &self.names, exchange, &response)?;
             self.tally.exchanges += 1;
         }
         let (events, kicks) = self.take_all();
@@ -328,7 +377,8 @@ impl Player {
                 .map_err(|why| format!("the exchange failed: {why}"))?
                 .map_err(|why| format!("no answer: {why}"))?;
             let (events, kicks) = self.take_all();
-            checks::exchange(&self.rig, &waiting.step, &reply, &events, kicks)?;
+            let response = self.response_of(&waiting.step);
+            checks::exchange(&self.rig, &waiting.step, &response, &reply, &events, kicks)?;
             self.tally.exchanges += 1;
             return Ok(());
         }
@@ -397,11 +447,32 @@ impl Player {
     }
 
     /// The trace is played: nothing is left running and nothing is left over.
+    /// The API took the requests Node's trace has and no others, and a trace
+    /// whose ledger left a database was played to the `close` that compares it.
     fn finish(&mut self) -> Result<(), String> {
         if !self.runs.is_empty() || !self.exchanges.is_empty() || !self.closes.is_empty() {
             return Err("something was left running".to_owned());
         }
-        if self.trace["ledger"].is_null() {
+        let recorded = self.trace["steps"].as_array().map_or(0, |steps| {
+            steps
+                .iter()
+                .filter(|step| step["kind"] == "exchange")
+                .count()
+        });
+        if self.rig.received() != recorded {
+            return Err(format!(
+                "the API took {} requests, Node's trace has {recorded}",
+                self.rig.received()
+            ));
+        }
+        let left_one = !self.trace["ledger"]["final"].is_null();
+        if left_one && !self.ledger_closed {
+            return Err(
+                "the trace never reached the close of its ledger, whose database Node left"
+                    .to_owned(),
+            );
+        }
+        if !self.ledger_closed {
             // A trace with no ledger of its own never closed this one: its
             // file is let go here, where it is held open until the home goes.
             self.rig

@@ -2,9 +2,9 @@
 //! made as the trace says, and each answer is held to Node's: its status, its
 //! type and its bytes (key order, absent against null), the roster file before
 //! and after each exchange and no other file of the folder changed, the roster's
-//! change told as often as it should be, and the ledger left as Node left it.
-
-use std::collections::BTreeSet;
+//! change told as often as it should be, and the ledger left as Node left it: a
+//! trace whose ledger left a database is played to its `close`, where the
+//! database is compared.
 
 use serde_json::Value;
 
@@ -13,7 +13,7 @@ use crate::rig::{start, Rig};
 use crate::support::compare::{differs, left};
 use crate::support::trace::{self, Tally};
 use crate::world::World;
-use crate::wrote::{changes, is, snapshot, File, Snapshot};
+use crate::wrote::{held, snapshot, Snapshot};
 
 /// The pages as Node's generator wrote them, `$TOKEN` and `$VERSION` for what goes in.
 const AGENTS_PAGE: &str = include_str!("../goldens/pages/agents.html");
@@ -67,6 +67,7 @@ pub async fn play(name: &str) -> Tally {
         ledgers: tempfile::tempdir().unwrap(),
         rig: None,
         closed: false,
+        ledger_closed: false,
         tally: Tally::default(),
     };
     for (at, step) in trace["steps"].as_array().unwrap().iter().enumerate() {
@@ -78,7 +79,7 @@ pub async fn play(name: &str) -> Tally {
             other => panic!("{name} step {at}: no screens trace has a {other} step"),
         }
     }
-    game.finish().await
+    game.finish(&trace["ledger"]).await
 }
 
 struct Game<'a> {
@@ -88,6 +89,8 @@ struct Game<'a> {
     ledgers: tempfile::TempDir,
     rig: Option<Rig>,
     closed: bool,
+    /// Whether the trace's `close` of its ledger was played.
+    ledger_closed: bool,
     /// What has been compared so far.
     tally: Tally,
 }
@@ -212,35 +215,8 @@ impl Game<'_> {
     /// The files the exchange changed are the ones the trace says, each as it was
     /// and as it became.
     fn holds_the_files(&self, label: &str, step: &Value, before: &Snapshot, after: &Snapshot) {
-        let recorded = step.get("wrote").and_then(Value::as_object);
-        let actual = changes(before, after);
-        let (recorded_paths, actual_paths): (BTreeSet<&str>, BTreeSet<&str>) = (
-            recorded
-                .into_iter()
-                .flatten()
-                .map(|(path, _)| path.as_str())
-                .collect(),
-            actual.keys().map(String::as_str).collect(),
-        );
-        assert_eq!(
-            actual_paths, recorded_paths,
-            "{label}: the files it changed"
-        );
-        for (path, (was, now)) in &actual {
-            let sides = &recorded.unwrap()[path];
-            assert!(
-                is(was.as_ref(), &sides["before"], &self.world),
-                "{label}: {path} before\n  Node: {}\n  here: {}",
-                sides["before"],
-                shown(was.as_ref())
-            );
-            assert!(
-                is(now.as_ref(), &sides["after"], &self.world),
-                "{label}: {path} after\n  Node: {}\n  here: {}",
-                sides["after"],
-                shown(now.as_ref())
-            );
-        }
+        let problems = held(step, before, after);
+        assert!(problems.is_empty(), "{label}: {}", problems.join("\n"));
     }
 
     async fn close(&mut self) {
@@ -253,6 +229,7 @@ impl Game<'_> {
     fn ledger(&mut self, at: usize, step: &Value, ledger: &Value) {
         assert_eq!(step["method"], "close", "{} step {at}", self.name);
         self.rig().ledger.borrow_mut().close_in_place().unwrap();
+        self.ledger_closed = true;
         if let Some(recorded) = ledger.get("final").filter(|recorded| !recorded.is_null()) {
             if let Some(why) = left(&self.rig().ledger_file, recorded) {
                 panic!("{} step {at}: {why}", self.name);
@@ -261,19 +238,24 @@ impl Game<'_> {
         }
     }
 
-    /// The API closed, if no step did, and what the trace held.
-    async fn finish(mut self) -> Tally {
+    /// The API closed, if no step did, and what the trace held. A trace whose
+    /// ledger left a database was played to the `close` that compares it: one
+    /// that stopped short held nothing of the ledger.
+    async fn finish(mut self, ledger: &Value) -> Tally {
+        let left_one = ledger
+            .get("final")
+            .is_some_and(|database| !database.is_null());
+        assert!(
+            self.ledger_closed || !left_one,
+            "{}: the trace never reached the close of its ledger, whose database Node left",
+            self.name
+        );
         if !self.closed {
             self.close().await;
         }
         self.tally.traces += 1;
         self.tally
     }
-}
-
-/// The text of a file as a failure shows it.
-fn shown(file: Option<&File>) -> String {
-    file.map_or_else(|| "none".to_owned(), |file| format!("{:?}", file.text))
 }
 
 /// Whether the daemon answered as it says a body that is no JSON: a 400 whose one

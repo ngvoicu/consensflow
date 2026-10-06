@@ -1,5 +1,6 @@
 //! The daemon's front over real sockets: what the API under test and the
-//! screens are served from ([`Front`]), and a client of it ([`send`]) that
+//! screens are served from ([`Front`]), the screens as the daemon mounts them
+//! in front of the API ([`screens`]), and a client of it ([`send`]) that
 //! writes one request as the trace has it. A client that normalized the target
 //! (`/api\whoami`, `//host/api/whoami`, a fragment) or the header (`Bearer`
 //! with nothing after it) would not send what Node was sent.
@@ -15,10 +16,15 @@ use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
 
+use cf_base::env::Env;
 use cf_daemon::api::context::{AgentRows, Closing, Context};
 use cf_daemon::api::credentials::Credentials;
 use cf_daemon::api::Api;
+use cf_daemon::roster::Agents;
+use cf_daemon::screens::Screens;
 use cf_daemon::seams::DaemonSpawn;
+use cf_harness::admin::HarnessAdmin;
+use cf_harness::testing::{ManualTime, ScriptedCapture, ScriptedLatest, EPOCH_MS};
 use cf_ledger::Ledger;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -61,8 +67,32 @@ impl Front {
     }
 }
 
-/// `127.0.0.1:<port>`, where `api` listens: what a client connects to, and what
-/// a trace names «api».
+/// The screens as the daemon mounts them in front of the API (`api::serve`),
+/// which `token` opens, over `env` and the saved `agents`; `on_roster_change`
+/// is what a change to the roster tells. The harness admin asks no feed and
+/// runs no program: its seams are scripted, with nothing scripted, so a request
+/// that reached for either would fail and not reach out.
+pub fn screens(
+    token: &str,
+    env: Env,
+    agents: Rc<Agents>,
+    on_roster_change: Rc<dyn Fn() -> Result<(), String>>,
+) -> Rc<Screens> {
+    Rc::new(Screens {
+        token: token.to_owned(),
+        on_roster_change,
+        agents,
+        admin: HarnessAdmin::new(
+            env.clone(),
+            Rc::new(ManualTime::new(EPOCH_MS)),
+            Rc::new(ScriptedLatest::default()),
+            Rc::new(ScriptedCapture::default()),
+        ),
+        env,
+    })
+}
+
+/// `127.0.0.1:<port>`, where `api` listens: what a client connects to.
 pub fn address(api: &Api) -> String {
     api.url()
         .strip_prefix("http://")
