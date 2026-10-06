@@ -1,6 +1,8 @@
 //! What the app starts as its daemon: the bundled runtime running the bundled
 //! CLI, `cf ui --json`, on the PATH the human's login shell sets up. The
 //! portable Windows app carries both inside its exe and unpacks them first.
+//! With `CONSENSFLOW_DAEMON=native` in the app's environment it starts the
+//! native daemon instead (step 3.6, behind its switch until the flip).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -18,12 +20,19 @@ const LOGIN_PATH_TIMEOUT: Duration = Duration::from_secs(5);
 /// The bundled daemon, `cf ui --json`, on the human's login PATH. A runtime
 /// or CLI missing from the app is not worth another start.
 pub(crate) fn daemon_command(app: &AppHandle) -> Result<Command, DaemonFailure> {
-    let (node, cli) = bundled_cli(app).map_err(|cause| DaemonFailure {
+    let missing = |cause| DaemonFailure {
         cause,
         retry: false,
-    })?;
-    let mut command = Command::new(node);
-    command.arg(cli).args(["ui", "--json", "--no-open"]);
+    };
+    let (node, cli) = bundled_cli(app).map_err(missing)?;
+    let native = std::env::var_os("CONSENSFLOW_DAEMON").is_some_and(|value| value == "native");
+    let mut command = command_for(&node, &cli, native);
+    if native && !Path::new(command.get_program()).exists() {
+        return Err(missing(format!(
+            "the bundled native ConsensFlow is missing from this app ({:?})",
+            command.get_program()
+        )));
+    }
     if let Some(path) = login_path() {
         command.env("PATH", path);
     }
@@ -37,6 +46,24 @@ pub(crate) fn daemon_command(app: &AppHandle) -> Result<Command, DaemonFailure> 
         command.creation_flags(CREATE_NO_WINDOW);
     }
     Ok(command)
+}
+
+/// The daemon `node` and the CLI `cf.mjs` make: Node's, `node cf.mjs ui
+/// --json`; or, `native`, the native `cf` beside `cf.mjs` running `cf ui
+/// --json`, told where the bundled node is, which the windows' `cf.mjs` verbs
+/// run on (Node's daemon names its own).
+fn command_for(node: &Path, cli: &Path, native: bool) -> Command {
+    if native {
+        let mut command =
+            Command::new(cli.with_file_name(if cfg!(windows) { "cf.exe" } else { "cf" }));
+        command
+            .args(["ui", "--json", "--no-open"])
+            .env("CONSENSFLOW_NODE", node);
+        return command;
+    }
+    let mut command = Command::new(node);
+    command.arg(cli).args(["ui", "--json", "--no-open"]);
+    command
 }
 
 fn bundled_cli(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
@@ -189,6 +216,38 @@ fn login_path_in(shell: &Path, timeout: Duration) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_daemon_is_node_running_cf_mjs_and_with_the_switch_the_native_cf_beside_it() {
+        let node = Path::new("/bundle/binaries/node");
+        let cli = Path::new("/bundle/cli/bin/cf.mjs");
+        let node_daemon = command_for(node, cli, false);
+        assert_eq!(node_daemon.get_program(), node.as_os_str());
+        let args: Vec<_> = node_daemon.get_args().collect();
+        assert_eq!(
+            args,
+            ["/bundle/cli/bin/cf.mjs", "ui", "--json", "--no-open"]
+        );
+        assert_eq!(node_daemon.get_envs().count(), 0);
+
+        let native = command_for(node, cli, true);
+        let cf = if cfg!(windows) {
+            "/bundle/cli/bin/cf.exe"
+        } else {
+            "/bundle/cli/bin/cf"
+        };
+        assert_eq!(Path::new(native.get_program()), Path::new(cf));
+        let args: Vec<_> = native.get_args().collect();
+        assert_eq!(args, ["ui", "--json", "--no-open"]);
+        let envs: Vec<_> = native.get_envs().collect();
+        assert_eq!(
+            envs,
+            [(
+                std::ffi::OsStr::new("CONSENSFLOW_NODE"),
+                Some(node.as_os_str())
+            )]
+        );
+    }
 
     /// A stand-in for the human's login shell: `body` runs with the command
     /// the app gives it (`-lc <command>`) as `$2`.

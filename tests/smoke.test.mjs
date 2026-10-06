@@ -313,6 +313,11 @@ process.stdin.on('data', chunk => {
       CFSMOKE_PIDFILE: paths.pidFile,
       CFSMOKE_PASTE_READER: pasteReader,
       CFSMOKE_TAG: tag,
+      // The daemon as the app chooses it: CONSENSFLOW_DAEMON=native runs the
+      // native one (step 3.6, behind its switch until the flip).
+      ...(process.env.CONSENSFLOW_DAEMON
+        ? { CONSENSFLOW_DAEMON: process.env.CONSENSFLOW_DAEMON }
+        : {}),
     },
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   }
@@ -501,6 +506,10 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   //    `project.open`, the production operation.
   const opened = await app.waitFor('project')
   assert.equal(opened.data.ok, true, `project.open refused: ${JSON.stringify(opened.data)}`)
+  // The daemon the app chose: Node's, or the native one behind its switch.
+  const [started] = readFileSync(join(box.env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8').split('\n')
+  const runtime = box.env.CONSENSFLOW_DAEMON === 'native' ? / start pid \d+ rust / : / node v/
+  assert.match(started, runtime, `the daemon's first line: ${started}`)
 
   const rendered = await app.waitFor('rendered')
   assert.match(rendered.data.banner, new RegExp(`CFSMOKE-READY ${box.tag}`))
