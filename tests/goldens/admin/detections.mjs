@@ -1,8 +1,9 @@
 /**
  * Which harnesses are installed here and where: on PATH first, then in the
- * places each installs itself and the places any may land in, by the names
- * this system gives a program. Each scenario is one look at a home, a PATH and
- * an environment, answered as the page and the screens read it: every harness
+ * places each installs itself and the places any may land in (on Windows,
+ * npm's global folder, %APPDATA%\npm, among them), by the names this system
+ * gives a program. Each scenario is one look at a home, a PATH and an
+ * environment, answered as the page and the screens read it: every harness
  * known, the ones missing, the ones detected and where each is.
  */
 import { exe, onPath, WINDOWS } from './kit.mjs'
@@ -109,9 +110,58 @@ export function detections() {
       OS: 'Windows_NT',
       PATHEXT: '',
     }),
+    detects(
+      "on Windows npm's global folder, %APPDATA%\\npm, is looked in when PATH lacks it, for the .cmd npm writes",
+      [
+        runnable('$ROOT/appdata/npm/pi'),
+        runnable('$ROOT/appdata/npm/pi.ps1'),
+        runnable('$ROOT/appdata/npm/pi.cmd'),
+        runnable('$ROOT/appdata/npm/codex'),
+        runnable('$ROOT/appdata/npm/codex.ps1'),
+      ],
+      { OS: 'Windows_NT', APPDATA: '$ROOT/appdata' },
+    ),
+    detects(
+      "npm's folder comes after PATH, the harness's own places and the common ones",
+      [
+        runnable('$ROOT/bin/codex.cmd'),
+        runnable('$ROOT/appdata/npm/codex.cmd'),
+        runnable('$ROOT/home/.pi/bin/pi.cmd'),
+        runnable('$ROOT/home/.volta/bin/pi.cmd'),
+        runnable('$ROOT/appdata/npm/pi.cmd'),
+        runnable('$ROOT/home/.volta/bin/claude.cmd'),
+        runnable('$ROOT/appdata/npm/claude.cmd'),
+        runnable('$ROOT/appdata/npm/opencode.cmd'),
+      ],
+      { OS: 'Windows_NT', APPDATA: '$ROOT/appdata' },
+    ),
+    detects(
+      "PATHEXT decides the names in npm's folder as it does on PATH",
+      [runnable('$ROOT/appdata/npm/pi.cmd'), runnable('$ROOT/appdata/npm/claude.exe')],
+      { OS: 'Windows_NT', APPDATA: '$ROOT/appdata', PATHEXT: '.EXE' },
+    ),
+    detects(
+      "a missing APPDATA adds no folder, not even Windows' own place for it under the home",
+      [runnable('$ROOT/home/AppData/Roaming/npm/pi.cmd')],
+      { OS: 'Windows_NT', APPDATA: undefined },
+    ),
+    detects(
+      "an empty APPDATA adds no folder either, nor falls back to Windows' own place",
+      [runnable('$ROOT/home/AppData/Roaming/npm/pi.cmd')],
+      { OS: 'Windows_NT', APPDATA: '' },
+    ),
     ...(WINDOWS
       ? []
       : [
+          detects(
+            "off Windows npm's folder is no place at all, whatever APPDATA says",
+            [
+              exe('$ROOT/appdata/npm/pi'),
+              runnable('$ROOT/appdata/npm/pi.cmd'),
+              exe('$ROOT/appdata/npm/codex'),
+            ],
+            { APPDATA: '$ROOT/appdata' },
+          ),
           detects(
             'a file this user may not run is passed over for the next folder',
             [plain('$ROOT/a/codex'), exe('$ROOT/b/codex'), plain('$ROOT/a/pi')],

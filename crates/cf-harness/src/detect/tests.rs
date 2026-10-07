@@ -3,15 +3,22 @@ use std::path::Path;
 
 use super::*;
 
-/// A file at `path` this user can start.
-fn startable(path: &Path) {
+mod npm_global;
+
+/// A file at `path` this user can start, holding `text`.
+fn startable_with(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(path, "").unwrap();
+    fs::write(path, text).unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }
+}
+
+/// A file at `path` this user can start.
+fn startable(path: &Path) {
+    startable_with(path, "");
 }
 
 #[test]

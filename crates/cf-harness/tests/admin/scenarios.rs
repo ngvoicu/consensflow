@@ -27,8 +27,10 @@ use crate::shape::{
 };
 
 /// How many scenarios there are at least: a file with fewer has lost some.
-/// Windows records nine fewer, those that make a link.
-const AT_LEAST: usize = if cfg!(windows) { 85 } else { 94 };
+/// Windows records ten fewer, the nine that make a link and the one that tries
+/// a system that is not Windows; its floor waits for the five of npm's folder,
+/// which only a run on Windows records, to be counted (90).
+const AT_LEAST: usize = if cfg!(windows) { 85 } else { 100 };
 
 /// What a begun step settled with.
 type Done = Result<Value, String>;

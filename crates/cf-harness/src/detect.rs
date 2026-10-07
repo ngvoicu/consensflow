@@ -1,9 +1,10 @@
 //! Where each harness's CLI is on this machine (`harnessPath`,
 //! `src/harnesses.js`): on PATH first, then in the places each installs
 //! itself, which a Finder-launched app's PATH may lack. Every place is the
-//! user's own: a system-wide one (`/opt/homebrew/bin`) is on every login
-//! PATH already, and a test with a home of its own then sees only the CLIs
-//! it put there. And which harnesses those are: the ones that are
+//! user's own, under the home but for npm's folder on Windows, which the
+//! environment names: a system-wide one (`/opt/homebrew/bin`) is on every
+//! login PATH already, and a test with a home of its own then sees only the
+//! CLIs it put there. And which harnesses those are: the ones that are
 //! installed here, and the ones that are not.
 
 use std::path::PathBuf;
@@ -12,7 +13,7 @@ use cf_base::env::Env;
 use cf_proto::agents::Harness;
 use serde::Serialize;
 
-use crate::shared::paths::home;
+use crate::shared::paths::{home, set};
 
 /// Every harness, in the order `src/harnesses.js` lists them (`HARNESSES`):
 /// the order detection answers in and the Harnesses page lists its rows in.
@@ -51,17 +52,43 @@ const COMMON: [&[&str]; 3] = [
     &[".volta", "bin"],
 ];
 
+/// The folders under the home `harness`'s CLI may be in, its own places
+/// first, then the common ones; none where the environment has no home.
+fn homed(harness: Harness, env: &Env) -> Vec<PathBuf> {
+    let Ok(home) = home(env) else {
+        return Vec::new();
+    };
+    locations(harness)
+        .iter()
+        .chain(COMMON.iter())
+        .map(|parts| {
+            parts
+                .iter()
+                .fold(PathBuf::from(&home), |folder, part| folder.join(part))
+        })
+        .collect()
+}
+
+/// npm's global folder on Windows, `%APPDATA%\npm` (`NPM_GLOBAL`,
+/// `src/harnesses.js`): where `npm install -g` puts the shims of a CLI, and
+/// which a terminal reaches through the shell's own setup, as an app started
+/// from the Start menu does not. It comes from the `APPDATA` of the
+/// environment given, never the machine's own; one that is missing or empty
+/// adds nothing, and so does any other system.
+fn npm_global(env: &Env) -> Option<PathBuf> {
+    if !env.on_windows() {
+        return None;
+    }
+    Some(PathBuf::from(set(env, "APPDATA")?).join("npm"))
+}
+
 /// The absolute path `harness`'s CLI resolves to here, or none: a pane opens
-/// only on an absolute program.
+/// only on an absolute program. On PATH, else in the harness's own places,
+/// else in the common ones, npm's folder on Windows the last of them.
 pub fn harness_path(harness: Harness, env: &Env) -> Option<PathBuf> {
     let command = harness.as_str();
     cf_process::on_path(command, env).or_else(|| {
-        let home = PathBuf::from(home(env).ok()?);
-        let folders = locations(harness).iter().chain(COMMON.iter()).map(|parts| {
-            parts
-                .iter()
-                .fold(home.clone(), |folder, part| folder.join(part))
-        });
+        let folders = homed(harness, env).into_iter().chain(npm_global(env));
         cf_process::find_in(command, folders, env)
     })
 }

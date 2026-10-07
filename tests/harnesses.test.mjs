@@ -3,7 +3,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
+import { executableFor } from '../src/adapters/shared.js'
 import {
+  detectHarnesses,
   devinFolders,
   harnessPath,
   missingHarnesses,
@@ -14,7 +16,7 @@ import {
   runnable,
   terminate,
 } from '../src/harnesses.js'
-import { fakeNodeExecutable } from './helpers.mjs'
+import { fakeNodeExecutable, windowsEnv } from './helpers.mjs'
 
 /** The last line of the shim npm writes for a global package, with npm's variables. */
 const NPM_SHIM =
@@ -239,6 +241,207 @@ describe('finding a harness on Windows', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+/**
+ * Where npm puts the shims of a global install on Windows, %APPDATA%\npm: a
+ * terminal reaches it through the shell's own setup, which an app started from
+ * the Start menu never runs. Windows is simulated on any system: `OS` says it is.
+ */
+describe("npm's global folder on Windows", () => {
+  const PATHEXT = '.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.CPL'
+  const PI_SHIM = NPM_SHIM.replace(
+    '@x\\cli\\bin\\cli.js',
+    '@earendil-works\\pi-coding-agent\\dist\\cli.js',
+  )
+
+  /** A file at `path`, startable where a mode says so. Returns the path. */
+  function stub(path, text = '') {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, text, { mode: 0o755 })
+    return path
+  }
+
+  /**
+   * A Windows machine as a test lays one out: a home, the roaming folder
+   * APPDATA names, and a PATH folder that holds nothing.
+   */
+  function machine() {
+    const root = mkdtempSync(join(tmpdir(), 'cf-win-appdata-'))
+    const roaming = join(root, 'home', 'AppData', 'Roaming')
+    const bin = join(root, 'bin')
+    mkdirSync(bin, { recursive: true })
+    return {
+      root,
+      home: join(root, 'home'),
+      bin,
+      npm: join(roaming, 'npm'),
+      /** Its environment with `changes` made to it: a variable given `undefined` is taken away. */
+      env(changes = {}) {
+        const env = {
+          OS: 'Windows_NT',
+          PATHEXT,
+          HOME: join(root, 'home'),
+          APPDATA: roaming,
+          PATH: bin,
+          ...changes,
+        }
+        for (const [name, value] of Object.entries(changes)) {
+          if (value === undefined) delete env[name]
+        }
+        return env
+      },
+      cleanup: () => rmSync(root, { recursive: true, force: true }),
+    }
+  }
+
+  /** Pi as `npm install -g` leaves it in `folder`: its shim, and the script the shim runs. */
+  function installPi(folder, script = '') {
+    const cli = stub(
+      join(folder, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'cli.js'),
+      script,
+    )
+    return { shim: stub(join(folder, 'pi.cmd'), PI_SHIM), script: cli }
+  }
+
+  it('is where a harness is found when PATH lacks it, by the .cmd Windows starts', () => {
+    const win = machine()
+    try {
+      const env = win.env()
+      assert.equal(harnessPath('pi', env), null)
+      // What npm writes for a global package is three files, one of which starts.
+      stub(join(win.npm, 'pi'))
+      stub(join(win.npm, 'pi.ps1'))
+      assert.equal(harnessPath('pi', env), null, 'a bare name and a script are no program')
+      stub(join(win.npm, 'pi.cmd'))
+      assert.equal(harnessPath('pi', env), join(win.npm, 'pi.cmd'))
+      // A window opens on it, where it is refused for a harness that is not there.
+      assert.equal(executableFor('pi', env), join(win.npm, 'pi.cmd'))
+      assert.throws(() => executableFor('claude', env), /claude is not installed on this machine/)
+      // The pickers and the Harnesses page ask what is installed.
+      assert.deepEqual(detectHarnesses(env), [{ id: 'pi', command: 'pi' }])
+      assert.deepEqual(missingHarnesses(env), ['devin', 'claude', 'codex', 'opencode'])
+      stub(join(win.npm, 'codex.cmd'))
+      assert.equal(harnessPath('claude', env), null, "another harness's shim is not this one's")
+    } finally {
+      win.cleanup()
+    }
+  })
+
+  it("comes after PATH, the harness's own places and the other common ones", () => {
+    const win = machine()
+    try {
+      const env = win.env()
+      stub(join(win.npm, 'pi.cmd'))
+      assert.equal(harnessPath('pi', env), join(win.npm, 'pi.cmd'))
+      for (const common of ['.bun', '.npm-global', '.volta']) {
+        const there = stub(join(win.home, common, 'bin', 'pi.cmd'))
+        assert.equal(harnessPath('pi', env), there, `${common} before npm's folder`)
+        rmSync(there)
+      }
+      stub(join(win.home, '.volta', 'bin', 'pi.cmd'))
+      const own = stub(join(win.home, '.pi', 'bin', 'pi.cmd'))
+      assert.equal(harnessPath('pi', env), own, "the harness's own place before the common ones")
+      const onPath = stub(join(win.bin, 'pi.cmd'))
+      assert.equal(harnessPath('pi', env), onPath)
+    } finally {
+      win.cleanup()
+    }
+  })
+
+  it('adds nothing when APPDATA is missing or empty, nor a folder named npm in the working one', () => {
+    const win = machine()
+    const previous = process.cwd()
+    try {
+      // Where Windows keeps roaming data by default: not where a missing APPDATA points.
+      stub(join(win.npm, 'pi.cmd'))
+      // And where an empty APPDATA, joined with `npm`, would point from the working folder.
+      stub(join(win.root, 'npm', 'pi.cmd'))
+      process.chdir(win.root)
+      for (const appdata of [undefined, '']) {
+        const env = win.env({ APPDATA: appdata })
+        assert.equal(harnessPath('pi', env), null, `APPDATA ${appdata}`)
+        assert.throws(() => executableFor('pi', env), /pi is not installed on this machine/)
+      }
+      assert.equal(harnessPath('pi', win.env()), join(win.npm, 'pi.cmd'))
+    } finally {
+      process.chdir(previous)
+      win.cleanup()
+    }
+  })
+
+  it('changes nothing off Windows, whatever APPDATA says', {
+    skip: process.platform === 'win32' && 'this platform is Windows',
+  }, () => {
+    const win = machine()
+    try {
+      // A bare name is the program there, and this one starts.
+      stub(join(win.npm, 'pi'))
+      stub(join(win.npm, 'pi.cmd'))
+      for (const OS of [undefined, 'Linux', 'Darwin']) {
+        assert.equal(harnessPath('pi', win.env({ OS })), null, `OS ${OS}`)
+      }
+      // The same files, found where the environment says it is Windows's.
+      assert.equal(harnessPath('pi', win.env()), join(win.npm, 'pi.cmd'))
+    } finally {
+      win.cleanup()
+    }
+  })
+
+  describe('holds a shim that is started as one on PATH is', () => {
+    it("with the node beside it, else the one on PATH, else the app's own", () => {
+      const win = machine()
+      try {
+        const env = win.env()
+        const { shim, script } = installPi(win.npm)
+        assert.equal(harnessPath('pi', env), shim)
+        const started = (file) => ({ file, args: [script, '--version'], options: {} })
+        // No node on PATH, none beside the shim: the one this runs, as for a shim on PATH.
+        assert.deepEqual(runnable(shim, ['--version'], env), started(process.execPath))
+        stub(join(win.bin, 'node.exe'))
+        assert.deepEqual(runnable(shim, ['--version'], env), started(join(win.bin, 'node.exe')))
+        // The same shim in a folder PATH names is started with the same node.
+        const onPath = installPi(win.bin).shim
+        assert.equal(runnable(onPath, [], env).file, runnable(shim, [], env).file)
+        // And the node beside it first, as npm itself would.
+        stub(join(win.npm, 'node.exe'))
+        assert.deepEqual(runnable(shim, ['--version'], env), started(join(win.npm, 'node.exe')))
+      } finally {
+        win.cleanup()
+      }
+    })
+
+    it('and a window opens on it as its node and script', () => {
+      const win = machine()
+      try {
+        const env = win.env()
+        const { shim, script } = installPi(win.npm)
+        const node = stub(join(win.npm, 'node.exe'))
+        const found = harnessPath('pi', env)
+        assert.equal(found, shim)
+        assert.deepEqual(paneArgv([found, '--model', 'a b'], env), [node, script, '--model', 'a b'])
+      } finally {
+        win.cleanup()
+      }
+    })
+
+    it('and the harness runs', async () => {
+      const win = machine()
+      try {
+        // No node on PATH or beside the shim: this very Node runs the script.
+        const env = win.env(windowsEnv())
+        installPi(win.npm, "console.log('pi', ...process.argv.slice(2))\n")
+        const found = harnessPath('pi', env)
+        assert.equal(found, join(win.npm, 'pi.cmd'))
+        assert.deepEqual(await probeExecutable(found, ['--version'], env), {
+          stdout: 'pi --version\n',
+          code: 0,
+        })
+      } finally {
+        win.cleanup()
+      }
+    })
   })
 })
 
