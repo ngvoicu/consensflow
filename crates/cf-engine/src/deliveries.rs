@@ -213,12 +213,19 @@ impl Dispatcher {
             if delivering.chief || waited <= self.seams.limits.launch_ms {
                 return Ok(());
             }
-            record.delivery.borrow_mut().delivering = None;
+            // What the window shows is asked before it closes: the screen goes with it.
+            let pane = record.window.borrow().pane.clone();
+            let (shown, settles) = self.look_before_giving_up(record, pane.as_ref()).await;
+            // An exit that came while the host answered settled the launch already.
+            if !settles {
+                return Ok(());
+            }
             let (this, held) = (Rc::clone(self), Rc::clone(record));
             let closing = begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
+            let because = "the window never showed its first message";
             self.settle_failure(
                 delivering,
-                "the window never showed its first message",
+                &self.unstarted_because(record, because, &shown),
                 false,
             )?;
             closing.await?;

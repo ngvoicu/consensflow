@@ -10,5 +10,6 @@ pub mod bridge;
 pub mod codex;
 pub mod ledger;
 pub mod page;
+pub mod panes;
 pub mod questions;
 pub mod trace;

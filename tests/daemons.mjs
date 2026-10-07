@@ -13,7 +13,7 @@
  * here, with a stand-in harness in real windows (a task handed out and its
  * result back, a question and its answer, a chief switched, sessions, a
  * refusal, the human's approval, the board after a re-plan, a tell and a
- * cancel).
+ * cancel, a window with no login whose screen the failure quotes).
  *
  *   node tests/daemons.mjs [--offline]
  */
@@ -34,6 +34,7 @@ const SUITES = [
   'tests/integration/core-questions.test.mjs',
   'tests/integration/core-board.test.mjs',
   'tests/integration/core-tells.test.mjs',
+  'tests/integration/window-says-why.test.mjs',
 ]
 const offline = process.argv.includes('--offline')
 

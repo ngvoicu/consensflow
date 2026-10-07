@@ -21,6 +21,7 @@ use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
 use crate::runtime::{begin, caught, returning};
 use crate::seams::{EngineError, SavedAgent};
+use crate::shown::Shown;
 use crate::stops::{Interrupted, Unstopped};
 
 /// The key that interrupts a harness's current turn, and the gap of a double press.
@@ -85,12 +86,13 @@ impl Activity {
     }
 }
 
-/// A pane on its way open, and whether its exit came before the host's
-/// answer (the host watches a window's process before it answers).
+/// A pane on its way open, and, if its exit came before the host's answer
+/// (the host watches a window's process before it answers), what the host
+/// said of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Opening {
     pub(crate) pane: Pane,
-    pub(crate) exited: bool,
+    pub(crate) exited: Option<Shown>,
 }
 
 /// The chief's window failing to start, tried again ever more slowly: how
@@ -410,7 +412,7 @@ impl Dispatcher {
         // an exit can come first, even in the same read: the exit finds it here.
         record.window.borrow_mut().opening = Some(Opening {
             pane: pane.clone(),
-            exited: false,
+            exited: None,
         });
         // `.catch(...)` made a promise of its own to wait on, a turn after
         // the host's answer.
@@ -427,7 +429,7 @@ impl Dispatcher {
             .borrow_mut()
             .opening
             .take()
-            .is_some_and(|opening| opening.exited);
+            .and_then(|opening| opening.exited);
         let pid = match opened {
             Ok(Opened::Open { pid }) => pid,
             Ok(Opened::Refused { error }) => {
@@ -464,8 +466,8 @@ impl Dispatcher {
                 part.token = Some(token);
             }
             // One that exited before its open was answered has gone already.
-            if exited {
-                Box::pin(self.exited(&pane)).await?;
+            if let Some(shown) = exited {
+                Box::pin(self.exited(&pane, shown)).await?;
             }
             return Ok(());
         }
@@ -499,15 +501,16 @@ impl Dispatcher {
         }
         record.delivery.borrow_mut().delivering = delivering.clone();
         // A window that exited before its open was answered goes as any exit does.
-        if exited {
-            Box::pin(self.exited(&pane)).await?;
+        if let Some(shown) = exited {
+            Box::pin(self.exited(&pane, shown)).await?;
             return Ok(());
         }
         // The adapter's `started` is an `async` function, and `.catch(...)`
         // made a promise of its own to wait on.
         let started = caught(planned.window.started()).await;
         if let (Err(error), Some(delivering)) = (&started, delivering) {
-            record.delivery.borrow_mut().delivering = None;
+            // What the window shows is asked before it closes: the screen goes with it.
+            let (shown, settles) = self.look_before_giving_up(record, Some(&pane)).await;
             // The chief's window goes without taking its project with it: the chief is tried again.
             if participant.role == "chief" {
                 self.close_own(record, &pane).await?;
@@ -520,13 +523,14 @@ impl Dispatcher {
                     .await,
                 );
             }
-            return self.launch_failed(
-                record,
-                project,
-                participant,
-                Some(delivering),
-                &format!("the window could not take its first message: {error}"),
-            );
+            let because = format!("the window could not take its first message: {error}");
+            // An exit that came while the host answered settled the launch, and logged it.
+            let said = if settles {
+                self.unstarted_because(record, &because, &shown)
+            } else {
+                shown.after(&because)
+            };
+            return self.launch_failed(record, project, participant, Some(delivering), &said);
         }
         if self.forgotten(record) {
             return Ok(());
@@ -940,8 +944,9 @@ impl Dispatcher {
         let open = record.window.borrow().pane.as_ref() == Some(pane);
         if open {
             // An exit may close windows in turn: boxed, so the futures of
-            // closing and exiting are not each the other's inside.
-            Box::pin(self.exited(pane)).await?;
+            // closing and exiting are not each the other's inside. The engine
+            // closed it, so it knows no more of what it showed than it did.
+            Box::pin(self.exited(pane, Shown::default())).await?;
         }
         Ok(true)
     }

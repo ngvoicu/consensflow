@@ -25,6 +25,10 @@ import { dirname, join } from 'node:path'
  * this window was launched with runs on a synthetic AskUserQuestion event, and
  * the turn answers with what the hook handed back. A question whose text says
  * `REPLY <words>` is answered with `cf answer`. Anything else is acknowledged.
+ *
+ * The window of the participant `CF_TEST_NO_LOGIN` names has no login: it
+ * prints that and stays, doing nothing else (`CF_TEST_NO_LOGIN_EXITS`: and ends
+ * with the code 3).
  */
 
 const VALUE_FLAGS = new Set([
@@ -67,6 +71,30 @@ appendFileSync(
   `${process.pid}\t${sessionId}\n`,
 )
 process.on('exit', () => rmSync(statusFile, { force: true }))
+
+/** Whether `variable` names this window's participant, or the member it is a session of. */
+const named = (variable) => {
+  const wanted = process.env[variable]
+  const me = process.env.CONSENSFLOW_PARTICIPANT ?? ''
+  return Boolean(wanted) && (me === wanted || me.startsWith(`${wanted}-`))
+}
+// A harness with no login, as Pi is on a machine that has none: it says so on its
+// screen and writes no record of a conversation or a status, so the message it
+// was launched with never shows. The window of the participant `CF_TEST_NO_LOGIN`
+// names stays like that; that of `CF_TEST_NO_LOGIN_EXITS`, with the code 3, ends.
+if (named('CF_TEST_NO_LOGIN') || named('CF_TEST_NO_LOGIN_EXITS')) {
+  const exits = named('CF_TEST_NO_LOGIN_EXITS')
+  const said = 'No API key found for the selected model.\r\nUse /login to log into a provider.\r\n'
+  // A write to a terminal may be asynchronous: the window ends once it is written.
+  process.stdout.write(said, () => {
+    if (exits) process.exit(3)
+  })
+  process.on('SIGHUP', () => process.exit(0))
+  process.on('SIGTERM', () => process.exit(0))
+  process.stdin.on('end', () => process.exit(0))
+  process.stdin.resume()
+  await new Promise(() => {})
+}
 
 let ordinal = 0
 const append = (fields) => {

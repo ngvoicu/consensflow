@@ -301,6 +301,60 @@ async fn an_exit_is_told_where_it_is_read_before_the_frame_after_it() {
 }
 
 #[tokio::test]
+async fn an_exit_tells_how_the_window_ended_and_what_its_screen_showed_where_the_host_said() {
+    LocalSet::new()
+        .run_until(async {
+            let Worked { spawn, .. } = worked();
+            let (daemon, app) = bridge_pair_over(&spawn);
+            let heard = Rc::new(RefCell::new(Vec::new()));
+            let told = Rc::clone(&heard);
+            let _watching = watch_exits(&daemon, spawn, move |exit| {
+                told.borrow_mut().push(exit);
+                None
+            });
+            daemon.on("ping", |_, _| async { Ok(json!({ "ok": true })) });
+            app.event(
+                "pane.exit",
+                json!({
+                    "id": "p1-zeus", "generation": 2, "exitCode": 3, "signal": "Hangup: 1",
+                    "tail": ["No API key found", "Use /login"],
+                }),
+            );
+            // A field that is not what it should be was not said; the exit stands.
+            app.event(
+                "pane.exit",
+                json!({ "id": "p1-zeus", "generation": 3, "exitCode": "three", "tail": "x" }),
+            );
+            // An older host says which pane and no more.
+            app.event("pane.exit", json!({ "id": "p1-zeus", "generation": 4 }));
+            app.request("ping", json!({}), Some(Duration::from_secs(5)))
+                .await
+                .unwrap();
+            let bare = |generation| PaneExit {
+                id: "p1-zeus".to_owned(),
+                generation,
+                exit_code: None,
+                signal: None,
+                tail: None,
+            };
+            assert_eq!(
+                *heard.borrow(),
+                [
+                    PaneExit {
+                        exit_code: Some(3),
+                        signal: Some("Hangup: 1".to_owned()),
+                        tail: Some(vec!["No API key found".to_owned(), "Use /login".to_owned()]),
+                        ..bare(2)
+                    },
+                    bare(3),
+                    bare(4),
+                ]
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn what_an_exit_has_still_to_do_goes_on_apart_and_is_never_waited_for_there() {
     LocalSet::new()
         .run_until(async {

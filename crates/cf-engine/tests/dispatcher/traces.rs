@@ -44,7 +44,8 @@
 //!
 //! A test whose rule is Node's still, but whose trace the engine departs from
 //! on purpose (the notes that tell a requester its task is paused go once it is
-//! resumed), is named in [`DEPARTED`], with what it does that Node does not.
+//! resumed; a window that did not come up is asked what it shows before it is
+//! closed), is named in [`DEPARTED`], with what it does that Node does not.
 //! It is held to a trace of its own, recorded from the engine
 //! (`tests/departures/`, `npm run goldens:departed`), and fails when Node's
 //! trace is the engine's again, so the departure is taken off once Node does
@@ -143,6 +144,30 @@ const DEPARTED: &[(&str, &str)] = &[
     (
         "keeps a held task paused, its hold cleared, when its session was deleted before the hold ended, and tells its requester once while every other task goes on",
         "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn, where Node leaves it queued",
+    ),
+    (
+        "fails a launch whose first message never arrives",
+        "before it closes a window whose first message never showed, the engine asks the pane host what the window shows (`pane.snapshot` with `tail`), to tell it in the failure, where Node closes it unasked",
+    ),
+    (
+        "is killed once when its launch never showed its first message, though its exit comes late",
+        "before it closes a window whose first message never showed, the engine asks the pane host what the window shows (`pane.snapshot` with `tail`), to tell it in the failure, where Node closes it unasked",
+    ),
+    (
+        "fails the first message at once when the harness cannot take it after the window opens",
+        "before it closes a window whose harness could not take its first message, the engine asks the pane host what the window shows (`pane.snapshot` with `tail`), to tell it in the failure, where Node closes it unasked",
+    ),
+    (
+        "keeps the project open when the new chief cannot take its handoff, and opens it again with it",
+        "before it closes the chief's window, whose harness could not take its handoff, the engine asks the pane host what the window shows (`pane.snapshot` with `tail`), to tell it in the failure, where Node closes it unasked",
+    ),
+    (
+        "a note written 5 turns after a pass whose launch cannot take its first message",
+        "the engine asks the pane host what the window shows (`pane.snapshot` with `tail`) before it closes a window whose harness could not take its first message, which takes the turns the host's answer takes: the note falls among other effects than in Node's trace",
+    ),
+    (
+        "a note written 6 turns after a pass whose launch cannot take its first message",
+        "the engine asks the pane host what the window shows (`pane.snapshot` with `tail`) before it closes a window whose harness could not take its first message, which takes the turns the host's answer takes: the note falls among other effects than in Node's trace",
     ),
 ];
 

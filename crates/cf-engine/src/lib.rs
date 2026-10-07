@@ -26,10 +26,12 @@ pub mod roles;
 pub mod runtime;
 mod scheduler;
 pub mod seams;
+mod shown;
 mod stalls;
 mod stops;
 mod taken_back;
 mod transcripts;
+mod unstarted;
 mod windows;
 
 pub use chief_switch::SwitchTo;

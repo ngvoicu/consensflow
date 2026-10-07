@@ -8,6 +8,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use cf_base::env::Env;
 use cf_base::refusal::Refusal;
 use cf_harness::contract::{Adapter, Agent, LaunchId, Records};
 use cf_harness::seams::Time;
@@ -69,10 +70,13 @@ pub trait Trace {
     fn forget(&self, project: i64);
 }
 
-/// What failed apart from anything that waits for it (`log.error`): a launch
-/// or a delivery that nobody awaits.
+/// What the engine writes to the daemon's log: what failed apart from
+/// anything that waits for it (`log.error`, a launch or a delivery that nobody
+/// awaits), and what a window that did not come up showed (`log.warn`).
 pub trait Log {
     fn error(&self, message: &str, cause: &str);
+    /// Something that went wrong and was gone past, said in one line.
+    fn warn(&self, message: &str);
 }
 
 /// The files a launch wrote, forgotten once no window will read them
@@ -158,6 +162,27 @@ impl Default for Limits {
     }
 }
 
+/// The variable that sets how long a window may take to show its first
+/// message, in milliseconds. A test that waits for a window that never does
+/// would otherwise wait three minutes; nothing in a person's environment sets it.
+pub const LAUNCH_MS_VARIABLE: &str = "CONSENSFLOW_LAUNCH_TIMEOUT_MS";
+
+impl Limits {
+    /// The daemon's limits, with the launch's wait what `env` says it is
+    /// ([`LAUNCH_MS_VARIABLE`]) where it names a number of milliseconds above
+    /// zero; any other value is no value.
+    pub fn of(env: &Env) -> Self {
+        let launch = env
+            .text(LAUNCH_MS_VARIABLE)
+            .and_then(|text| text.parse::<i64>().ok())
+            .filter(|ms| *ms > 0);
+        Self {
+            launch_ms: launch.unwrap_or(Self::default().launch_ms),
+            ..Self::default()
+        }
+    }
+}
+
 /// Everything the engine is made with: each seam shared, so a second
 /// engine can be made with the same ones (a restart's).
 #[derive(Clone)]
@@ -179,4 +204,26 @@ pub struct Seams {
     pub launch_files: Rc<dyn LaunchFiles>,
     pub spawn: Rc<dyn Spawn>,
     pub limits: Limits,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_launch_wait_is_three_minutes_unless_the_environment_names_a_number_of_milliseconds() {
+        let wait =
+            |value: &str| Limits::of(&Env::from_vars([(LAUNCH_MS_VARIABLE, value)])).launch_ms;
+        assert_eq!(Limits::of(&Env::default()), Limits::default());
+        assert_eq!(wait("1500"), 1_500);
+        for refused in ["", "0", "-5", "soon", "1.5", "2s"] {
+            assert_eq!(wait(refused), 180_000, "{refused:?}");
+        }
+        let named = Limits::of(&Env::from_vars([(LAUNCH_MS_VARIABLE, "1500")]));
+        assert_eq!(
+            (named.arrival_ms, named.max_attempts),
+            (60_000, 3),
+            "the rest is as it was"
+        );
+    }
 }

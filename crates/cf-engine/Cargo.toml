@@ -15,6 +15,9 @@ cf-ledger.workspace = true
 cf-proto.workspace = true
 # A pass answers at its first failure while the other steps run on.
 futures-util.workspace = true
+# What looks like a key or a token in a window's last screen (`shown::mask`);
+# the ported tests keep the patterns they matched with.
+regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -36,8 +39,6 @@ cf-engine = { path = ".", features = ["test-support"] }
 # a test's ledger left, read as Node read its own.
 flate2.workspace = true
 rusqlite.workspace = true
-# The ported tests keep the patterns they matched with.
-regex.workspace = true
 tempfile.workspace = true
 # The executor's tests run it on a real `LocalSet`, as the daemon does, with
 # channels whose answers are ready.

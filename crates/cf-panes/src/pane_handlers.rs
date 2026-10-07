@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use portable_pty::PtySize;
 use serde::de::DeserializeOwned;
@@ -13,13 +14,21 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::arbiter::{InputArbiter, OutputClock};
+use crate::ended::Ended;
 use crate::input_queue::{wait_for_input_blocking, InputError, InputQueue};
 use crate::output_hub::OutputHub;
 use crate::pty::{validate_drop_env, PaneEnvironment, PaneKey, PaneTable, StreamedPane};
+use crate::screen::PaneScreen;
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
+use cf_proto::panes::{PaneExit, SnapshotRequest, TAIL_LINES};
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
+
+/// How long `pane.exit` waits, once a program has closed its terminal, for
+/// the program's exit code to be readable: it closes the terminal a moment
+/// before it has gone, and the event does not wait beyond this for a code.
+const ENDED_WAIT: Duration = Duration::from_secs(1);
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -239,24 +248,35 @@ pub fn register_pane_handlers(
     });
 
     let snapshot_arbiter = Arc::clone(&arbiter);
+    let snapshot_panes = Arc::clone(&panes);
     builder.on("pane.snapshot", move |_bridge, body| {
-        let request: PaneRequest = parse_body(body)?;
+        let request: SnapshotRequest = parse_body(body)?;
+        let key = pane_key(&request.id, request.generation)?;
         let snapshot = snapshot_arbiter
-            .snapshot(&pane_key(&request.id, request.generation)?)
+            .snapshot(&key)
             .map_err(|error| error.to_string())?;
-        Ok(json!({
+        let mut answer = json!({
             "ok":true,
             "generation":snapshot.generation,
             "pasteInFlight":snapshot.paste_in_flight,
             "inputFailed":snapshot.input_failed,
             "unsent":snapshot.unsent,
             "outputQuietMs":snapshot.output_quiet_ms,
-        }))
+        });
+        // The screen's last lines, for a request that asks for them. A pane
+        // the table no longer holds has none to give.
+        if let Some(lines) = request.tail {
+            if let Ok(tail) = snapshot_panes.tail(&key, lines.min(TAIL_LINES)) {
+                answer["tail"] = json!(tail);
+            }
+        }
+        Ok(answer)
     });
 }
 
-/// A pane's output, on to the page, and its end: `pane.exit`, after which a
-/// pane whose program has gone leaves the table.
+/// A pane's output, on to the page and into its screen, and its end:
+/// `pane.exit`, which says how the program ended and what the screen showed
+/// last, after which a pane whose program has gone leaves the table.
 fn stream_to_page(
     streamed: StreamedPane,
     bridge: Bridge,
@@ -266,19 +286,37 @@ fn stream_to_page(
     output: Arc<OutputHub>,
 ) {
     thread::spawn(move || {
-        let key = streamed.key;
-        for message in streamed.output {
+        let StreamedPane {
+            key,
+            output: stream,
+            screen,
+            ended,
+            ..
+        } = streamed;
+        for message in stream {
             printed.note();
+            screen.feed(&message.bytes);
             output.publish(message.into());
         }
-        let _ = bridge.event(
-            "pane.exit",
-            json!({"id":key.id,"generation":key.generation}),
-        );
+        let ended = panes.wait_ended(&key, &ended, ENDED_WAIT);
+        let _ = bridge.event("pane.exit", exit_body(&key, &screen, ended));
         if matches!(panes.retire_exited(&key), Ok(true)) {
             inputs.retire(&key);
         }
     });
+}
+
+/// `pane.exit`'s body: the pane, how its program ended where that was read,
+/// and the last lines its screen showed.
+fn exit_body(key: &PaneKey, screen: &PaneScreen, ended: Option<Ended>) -> Value {
+    let exit = PaneExit {
+        id: key.id.clone(),
+        generation: key.generation,
+        exit_code: ended.as_ref().map(|ended| ended.code),
+        signal: ended.and_then(|ended| ended.signal),
+        tail: Some(screen.tail(TAIL_LINES)),
+    };
+    serde_json::to_value(&exit).unwrap_or_else(|_| json!({"id":key.id,"generation":key.generation}))
 }
 
 #[derive(Deserialize)]
