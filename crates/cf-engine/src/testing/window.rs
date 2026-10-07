@@ -231,6 +231,17 @@ impl Window for FakeWindow {
             Ok(observed)
         })
     }
+
+    /// Counted on the agent, and not written down: the JavaScript fake was
+    /// never told, so the Node traces have no such call.
+    fn interrupted(&self) {
+        self.fake.of_launch(&self.launch, |agent| {
+            agent.interrupted += 1;
+            if agent.stops_when_interrupted {
+                agent.settled = true;
+            }
+        });
+    }
 }
 
 /// What a look at `agent`'s window finds, its launch on `session`.

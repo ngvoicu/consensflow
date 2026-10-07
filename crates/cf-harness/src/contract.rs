@@ -148,6 +148,12 @@ pub trait Window {
     ) -> Work<'a, Result<Admission, String>>;
     /// What the window's harness says of it now.
     fn observe(&self) -> Work<'_, Result<Observed, String>>;
+    /// The engine pressed the interrupt keys into the window, and the host
+    /// took them: the turn it shows at work is the one they were for. A
+    /// harness whose record says how an interrupted turn ended has no use for
+    /// it; one that writes nothing of a turn it was interrupted in (Claude,
+    /// before its first word) reads the looks that follow by it.
+    fn interrupted(&self) {}
 }
 
 /// A window's pane, by the pane host's id and the generation it opened in.

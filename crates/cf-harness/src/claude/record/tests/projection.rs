@@ -208,15 +208,13 @@ fn output_of_clear() -> Value {
     output("u1")
 }
 
-/// Claude Code's own record of an interrupt of the message `m1`.
+/// Claude Code's own record of an interrupt.
 pub(super) fn interrupt() -> Value {
-    let mut record = user(
+    user(
         "i1",
         json!("a1"),
         json!([text(json!("[Request interrupted by user]"))]),
-    );
-    record["interruptedMessageId"] = json!("m1");
-    record
+    )
 }
 
 #[test]

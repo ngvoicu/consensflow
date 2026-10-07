@@ -13,7 +13,11 @@
  *   command   Escape into Claude inside a long command: the command and the
  *             turn stop, and nothing more is pressed once it is at rest.
  *   early     Escape right after the task's words went in, before Claude's
- *             first output; then the resume of the task.
+ *             first output. Claude writes no record of such a stop and puts
+ *             the words back in its input box; the daemon reads the window at
+ *             rest by its own press. Then the resume of the task: its words
+ *             must land as a message of their own, not after the old text, and
+ *             the task must end with its result.
  *   hook      Escape at its question hook (the member's question waits on the
  *             board): what happens to the hook's wait and the turn; then the
  *             answer the chief gives late, and the resume that carries it.
@@ -23,7 +27,8 @@
  *   slowhook  Escape while a hook of the project's own, that ignores the signals
  *             Claude ends a hook with, outlives Claude's turn (`--hook` says
  *             which: Stop, PreToolUse or UserPromptSubmit): the stop the daemon
- *             could take for ignored.
+ *             could take for ignored. When Claude stopped, the resume of the
+ *             task, and its result (the hook runs again in the turn after it).
  * Any harness (`--harness`):
  *   stuck     A window that may not stop, pressed until the stop is exhausted
  *             (the human and the requester are told): a command that ignores
@@ -33,7 +38,9 @@
  *   npm run live:stops                          every case, `stuck` on OpenCode
  *   npm run live:stops -- --case command --case hook
  *   npm run live:stops -- --case stuck --harness codex
- *   npm run live:stops -- --case early --daemon node     the same on Node's daemon
+ *   npm run live:stops -- --case early --daemon node     the same on Node's daemon, which
+ *                                                        keeps its rules: `early` and `slowhook`
+ *                                                        fail there, as the defect's baseline
  *
  * `--keep <folder>` copies each Claude transcript there. Needs `npm run
  * build:bridge` and `npm run build:cf`. The exit code is 1 when a case showed
@@ -44,6 +51,7 @@ import { basename, join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { lastLines } from './live-window.mjs'
 import {
+  claudeConversation,
   claudeRecord,
   claudeSettlement,
   claudeStatus,
@@ -77,6 +85,8 @@ const WORK_MS = 300_000
 const STOP_MS = 40_000
 /** How long the words that resume a task may take to go into its window. */
 const RESUME_MS = 90_000
+/** How long the task may then take to end with its result (a hook of the project's may run 100 s of it). */
+const RESULT_MS = 420_000
 /** How long the stop of a window that may not stop is watched. */
 const STUCK_WATCH_MS = 150_000
 /** How long a window at rest is watched for a press it should not get. */
@@ -141,15 +151,20 @@ function recordSince(session, from, last = 14) {
 }
 
 /**
- * How the reference record reader reads the window's transcript now: the
- * reading the daemon's look at the window rests its "at rest" on (it needs
- * Claude's status idle and the record settled).
+ * How the reference record reader (Node's, which keeps its rules) reads the
+ * window's transcript now. The native daemon's look at the window needs
+ * Claude's status idle and the record settled, as this reader says, but it
+ * departs from it in two cases, and reads the window at rest where this one
+ * says "not settled": an interrupt record that names no message (the
+ * `slowhook` case), and a turn the daemon's own press stopped before Claude
+ * wrote a word (the `early` case, which has no record of the stop). The
+ * daemon's own reading is the `window.activity` line of each case.
  */
 async function settlementLine(session) {
   const read = await claudeSettlement(session)
   return read === null
     ? 'the reference record reader finds no transcript'
-    : `the reference record reader (hosts/lib/completion.js) reads its transcript as ${read.settled ? 'SETTLED' : 'NOT settled'} (settlement ${read.settlement}; ${read.items} items, the last ${JSON.stringify(read.last)})`
+    : `the reference record reader (hosts/lib/completion.js, Node's, which keeps its rules) reads its transcript as ${read.settled ? 'SETTLED' : 'NOT settled'} (settlement ${read.settlement}; ${read.items} items, the last ${JSON.stringify(read.last)})`
 }
 
 /** What a window's screen shows now, its last lines. */
@@ -207,9 +222,10 @@ function stopEvents(rig, number) {
  * says (to the board, the human, the requester) that the window did not stop.
  * `ready(rig, number, lines)` waits for that place and returns whether it was
  * reached. The design (§1.3): a window that stopped is paid at rest with no
- * key, and is never reported as one that did not.
+ * key, and is never reported as one that did not. `recordless` is a stop
+ * before a word of Claude's answer, which it writes no interrupt record of.
  */
-async function stopOf(label, brief, ready, { command, after = null }) {
+async function stopOf(label, brief, ready, { command, after = null, recordless = false }) {
   const rig = await openRig({
     folder: `stops-${label}`,
     workers: ['claude'],
@@ -248,6 +264,20 @@ async function stopOf(label, brief, ready, { command, after = null }) {
     // A press more than a look after the window read idle is one at a window that had stopped.
     const lateKeys = presses.filter((press) => idleAt !== null && press > idleAt + 1_500)
     const ended = interrupted(watched.session, made)
+    // Claude's own words of the turn it was stopped in: none, where it stopped before the first.
+    const spoke = claudeRecord(watched.session).filter(
+      (item) => item.type === 'assistant' && item.at >= made - 500,
+    )
+    // When the daemon first read the window at rest after the pause: where the stop was paid.
+    const restedAt = rig
+      .events()
+      .find(
+        (event) =>
+          event.kind === 'window.activity' &&
+          event.participant === watched.window.handle &&
+          event.state === 'idle' &&
+          Date.parse(event.at) > made,
+      )
     const stuck = await unstopped(rig, 'claude')
     const told = (await rig.inbox(undefined)).filter((message) =>
       /did not stop for T-/.test(message.body),
@@ -273,12 +303,27 @@ async function stopOf(label, brief, ready, { command, after = null }) {
         idleAt !== null,
         idleAt ? `status read idle at ${at(idleAt, made)}` : `no idle in ${STOP_MS / 1000} s`,
       ],
+      recordless
+        ? [
+            'Claude stopped before a word of its answer',
+            spoke.length === 0,
+            spoke.length === 0
+              ? `its record holds no word of its answer and ${ended ? `an interrupt record ("${ended.text.slice(0, 60)}")` : 'no interrupt record'}: it says nothing of the stop`
+              : `${spoke.length} records of its answer: ${JSON.stringify(spoke[0].text.slice(0, 80))}`,
+          ]
+        : [
+            'the record says it was interrupted',
+            Boolean(ended),
+            ended
+              ? `"${ended.text.slice(0, 80)}" at ${at(ended.at, made)}`
+              : 'no interrupt record in its transcript',
+          ],
       [
-        'the record says it was interrupted',
-        Boolean(ended),
-        ended
-          ? `"${ended.text.slice(0, 80)}" at ${at(ended.at, made)}`
-          : 'no interrupt record in its transcript',
+        'the daemon read the window at rest, and paid the stop there',
+        Boolean(restedAt),
+        restedAt
+          ? `its reading of the window turned idle at ${at(Date.parse(restedAt.at), made)}`
+          : 'its reading of the window never turned idle',
       ],
       [
         'nothing is pressed once it has stopped',
@@ -361,11 +406,13 @@ const commandCase = () =>
 
 /**
  * The human resumes the paused task: its words (the resume carrier) must go
- * into the window once it reads at rest. Returns whether they did, within a
- * minute and a half; when they did not, why, from what the daemon said of the
- * message it held.
+ * into the window once it reads at rest, within a minute and a half; when they
+ * did not, why, from what the daemon said of the message it held. They must
+ * land as a message of their own, not after the text a window that stopped
+ * before its first word puts back in its input box, and the task must end with
+ * its result. Returns whether all of it happened.
  */
-async function resumeAfter(rig, number, lines) {
+async function resumeAfter(rig, number, lines, watched) {
   const resumedAt = Date.now()
   const resumed = await rig.app.requestNode('task.resume', { project: rig.project, task: number })
   lines.push(
@@ -383,7 +430,41 @@ async function resumeAfter(rig, number, lines) {
   lines.push(
     `${pasted ? 'ok  ' : 'FAIL'} the resume words went into the window: ${pasted ? `delivery.begun of m-${pasted.data.message} at +${seconds(Date.parse(pasted.at) - resumedAt)} s after the resume` : `nothing was pasted in ${RESUME_MS / 1000} s after the resume`}; its lane: activity ${JSON.stringify(lane?.activity)}, unstopped ${JSON.stringify(lane?.unstopped ?? null)}, holding ${lane?.holding}${reasons.length ? `; held because: ${reasons.join(' | ')}` : ''}`,
   )
-  return Boolean(pasted)
+  if (!pasted) return false
+  // What Claude's record holds of them: one message, with no other message's header in it.
+  const marker = `[ConsensFlow m-${pasted.data.message} `
+  const record = await until(
+    () =>
+      claudeRecord(watched.session).find(
+        (item) => item.type === 'user' && item.text.includes(marker),
+      ),
+    60_000,
+    250,
+  )
+  const headers = record?.text.match(/\[ConsensFlow m-\d+ /g) ?? []
+  const alone = Boolean(record) && headers.length === 1
+  lines.push(
+    `${alone ? 'ok  ' : 'FAIL'} the resume words landed as a message of their own: ${record ? JSON.stringify(record.text.slice(0, 200)) : 'its record never held them'}`,
+  )
+  const finished = await until(
+    async () => ENDED.includes((await rig.thread(number)).state),
+    RESULT_MS,
+    1_000,
+  )
+  const thread = await rig.thread(number)
+  const result = thread.messages.findLast((message) => message.kind === 'result')
+  const done = Boolean(finished) && ['done', 'accepted'].includes(thread.state) && Boolean(result)
+  lines.push(
+    `${done ? 'ok  ' : 'FAIL'} the task ended with its result: T-${number} is ${thread.state}${result ? `, its result ${JSON.stringify(result.body.slice(0, 200))}` : ' and holds none'}`,
+  )
+  // Not judged: what the model had to go on. A message Claude put back in its input box is one it took
+  // back out of its conversation, so a resume after such a stop is answered without the brief.
+  const brief = claudeRecord(watched.session).find((item) => item.type === 'user')
+  const holds = brief !== undefined && claudeConversation(watched.session).has(brief.uuid)
+  lines.push(
+    `     the conversation the resume was answered in ${holds ? "holds the task's brief" : "no longer holds the task's brief: Claude took it back out when it put it back in its input box, and the model had only the resume's words to go on"}`,
+  )
+  return alone && done
 }
 
 /** Escape into Claude right after its task's words went in: paused as soon as the task is working. */
@@ -401,7 +482,7 @@ const earlyCase = () =>
       else lines.push(`T-${number} is working: its first turn has just begun`)
       return Boolean(working)
     },
-    { command: false, after: resumeAfter },
+    { command: false, after: resumeAfter, recordless: true },
   )
 
 /** A member's question waits on the board: its hook polls. Returns what to watch, with the question. */
@@ -616,7 +697,14 @@ const HOOKS = {
     matcher: 'Bash',
     brief: 'Run exactly this one shell command, then stop: echo hello',
   },
-  prompt: { event: 'UserPromptSubmit', brief: 'Reply with exactly one line: DONE' },
+  // Claude writes a prompt's record after its UserPromptSubmit hooks: a hook of a hundred seconds keeps
+  // the resume's record out for longer than the daemon waits for it, which sends it again. The stop is
+  // what this variant shows.
+  prompt: {
+    event: 'UserPromptSubmit',
+    brief: 'Reply with exactly one line: DONE',
+    resumes: false,
+  },
 }
 
 async function ignoredCase() {
@@ -670,7 +758,9 @@ async function ignoredCase() {
       if (flag && flagged === null) flagged = { at: Date.now(), flag }
       if (!flag && flagged && cleared === null) cleared = Date.now()
       const idle = watched.status.samples.findLast((sample) => sample.at > made)
-      if (cleared !== null && idle?.status === 'idle') break
+      // A window that stopped and was never said to have ignored the stop has nothing more to show.
+      const stopped = flagged === null && idle?.status === 'idle' && Date.now() > made + 18_000
+      if ((cleared !== null && idle?.status === 'idle') || stopped) break
       await sleep(500)
     }
     await sleep(REST_MS / 2)
@@ -689,7 +779,9 @@ async function ignoredCase() {
     const interrupt = interrupted(watched.session, made)
     const gaps = presses.slice(1).map((press, at) => seconds(press - presses[at]))
     // Did Claude stop at the first Escape? Its status says so, whatever the hook it left behind does.
-    const stoppedAtOnce = idleAt !== null && idleAt - made < 5_000
+    // Where the hook keeps the first message from being written (UserPromptSubmit), the first Escape
+    // comes when the message is, a hundred seconds after the pause: the moment is the Escape's.
+    const stoppedAtOnce = idleAt !== null && presses.length > 0 && idleAt - presses[0] < 5_000
     const lateKeys = presses.filter((press) => idleAt !== null && press > idleAt + 1_500)
     const paneOpen = (await rig.lane(agent))?.pane != null
     const told = `${human.length} note${human.length === 1 ? '' : 's'} to the human${human[0] ? ` (${JSON.stringify(human[0].body)})` : ''} and ${requester.length} to the requester${requester[0] ? ` (${JSON.stringify(requester[0].body)})` : ''}`
@@ -739,9 +831,14 @@ async function ignoredCase() {
         made,
       ).join('; ')}`,
     )
+    // A window that stopped is paid at rest: the task goes on, and ends with its result.
+    const goes =
+      stoppedAtOnce && hook.resumes !== false && checks.every(([, ok]) => ok)
+        ? await resumeAfter(rig, number, lines, watched)
+        : true
     lines.push('     what the daemon wrote:')
     for (const line of stopEvents(rig, number)) lines.push(`       ${line}`)
-    return { ok: checks.every(([, ok]) => ok), lines }
+    return { ok: checks.every(([, ok]) => ok) && goes, lines }
   } finally {
     await closeRig(rig)
   }

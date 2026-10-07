@@ -186,28 +186,33 @@ fn pane_body(pane: &Pane) -> Value {
 /// as many times in a row as it asks for, and, where those presses open a
 /// dialog at a turn that ended just before them (Devin's rewind), one more
 /// after a pause, which closes it and is nothing anywhere else. A key the
-/// host did not take is not pressed again.
+/// host did not take is not pressed again. Whether the host took any key at
+/// all: one it refused, or never answered, is no press, whatever the harness
+/// would have done with it.
 pub(crate) async fn press_interrupt(
     host: &dyn EngineHost,
     time: &dyn Time,
     pane: &Pane,
     keys: Interrupt,
-) {
-    let escape = || {
+) -> bool {
+    let escape = || async {
         let mut body = pane_body(pane);
         body["bytes"] = json!([ESCAPE]);
-        host.request("pane.input", body)
+        let answer = host.request("pane.input", body).await;
+        answer.is_ok_and(|answer| answer.get("ok") == Some(&Value::Bool(true)))
     };
+    let mut taken = false;
     for press in 0..keys.presses {
         if press > 0 {
             time.sleep(DOUBLE_PRESS).await;
         }
-        let _ = escape().await;
+        taken |= escape().await;
     }
     if let Some(after) = keys.close_after {
         time.sleep(after).await;
-        let _ = escape().await;
+        taken |= escape().await;
     }
+    taken
 }
 
 /// `env` with `key` set as an object spread sets it: in its first place

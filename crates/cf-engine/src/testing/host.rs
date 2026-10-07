@@ -34,6 +34,8 @@ pub struct FakeHost {
     pub refuse: Cell<bool>,
     /// A kill is refused: the window stays, and no exit comes.
     pub refuse_kills: Cell<bool>,
+    /// Keys (`pane.input`) are refused: they are asked, and none is taken.
+    pub refuse_keys: Cell<bool>,
     /// An open waits for this gate.
     pub hold: RefCell<Option<Gate>>,
     /// The window of this handle exits as the next open is answered: the
@@ -148,7 +150,8 @@ impl FakeHost {
         }
         self.requests.borrow_mut().push((op.to_owned(), body));
         let mut answer = Map::new();
-        answer.insert("ok".to_owned(), json!(true));
+        let refused = op == "pane.input" && self.refuse_keys.get();
+        answer.insert("ok".to_owned(), json!(!refused));
         if op == "pane.snapshot" {
             answer.extend(self.snapshot.borrow().clone());
         }

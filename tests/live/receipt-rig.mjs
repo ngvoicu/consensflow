@@ -107,7 +107,9 @@ export function sessionOf(open) {
  * Claude's own status of a session, read as the daemon reads it (the
  * `sessions/<pid>.json` file that names the session) every 150 ms, until
  * stopped: when each read was made, the `status` word (`busy`, `idle`,
- * `waiting`) and what it waits for.
+ * `waiting`), what it waits for, and when Claude says the status last
+ * changed (`statusUpdatedAt`, which the daemon's look reads an interrupt's
+ * effect by).
  */
 export function claudeStatus(session) {
   const folder = join(HOME, '.claude', 'sessions')
@@ -133,6 +135,7 @@ export function claudeStatus(session) {
       at: Date.now(),
       status: row?.status ?? null,
       waitingFor: row?.waitingFor ?? null,
+      changedAt: row?.statusUpdatedAt ?? null,
     })
   }, 150)
   return { samples, stop: () => clearInterval(timer) }
@@ -225,9 +228,28 @@ export function claudeRecord(session) {
       type: `${record.message?.role ?? record.type}${record.subtype ? `/${record.subtype}` : ''}`,
       text: parts.map(shown).join(' ⏎ '),
       raw: line.slice(0, 400),
+      uuid: record.uuid,
+      parent: record.parentUuid,
     })
   }
   return items
+}
+
+/**
+ * The records of the conversation Claude answers from: the chain of parents
+ * from the transcript's last record back to its first. The transcript holds
+ * more than that: a message Claude took back out of its conversation (one it
+ * put back in its input box, interrupted before a word of its answer) stays in
+ * the file as a branch the next message does not follow.
+ */
+export function claudeConversation(session) {
+  const records = claudeRecord(session).filter((item) => item.uuid)
+  const byUuid = new Map(records.map((item) => [item.uuid, item]))
+  const chain = new Set()
+  for (let at = records.at(-1); at && !chain.has(at.uuid); at = byUuid.get(at.parent)) {
+    chain.add(at.uuid)
+  }
+  return chain
 }
 
 /** The ids of the processes whose command line holds `text`, from `ps`. */

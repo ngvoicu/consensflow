@@ -121,6 +121,8 @@ export async function openWindow(app, name, { folder, id, env = {}, dropEnv = []
     trust,
     screen,
     closed,
+    /** The conversation the window opened on, where its harness lets the app name it (Claude, Pi). */
+    session: native,
     /** The message as the app gives it to this window: Devin on Windows gets its marks in ASCII. */
     given: (body) =>
       name === 'devin' && onWindows(ENV) ? consoleText(windowText(body)) : windowText(body),

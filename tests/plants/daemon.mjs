@@ -22,6 +22,7 @@ import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from '
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { PLANTS as CLAUDE_REST } from './daemon/claude-rest.mjs'
 import { PLANTS as CONSTANTS } from './daemon/constants.mjs'
 import { PLANTS as FRONT } from './daemon/front.mjs'
 import { PLANTS as LAUNCHER } from './daemon/launcher.mjs'
@@ -55,6 +56,7 @@ const PLANTS = [
   ...OBLIGATIONS,
   ...SESSIONS,
   ...REVIEW,
+  ...CLAUDE_REST,
 ]
 
 const args = process.argv.slice(2)

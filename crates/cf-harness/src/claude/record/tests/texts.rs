@@ -147,13 +147,10 @@ fn a_user_record_an_interrupt_and_a_tool_result_need_their_ids() {
         once(&[lacking(hello(), "uuid")]),
         "unknown: unreadable: missing native claude user id at record 0"
     );
-    let interrupt = having(
-        user(
-            "u2",
-            json!("a1"),
-            json!([text(json!("[Request interrupted by user]"))]),
-        ),
-        json!({ "interruptedMessageId": "m1" }),
+    let interrupt = user(
+        "u2",
+        json!("a1"),
+        json!([text(json!("[Request interrupted by user]"))]),
     );
     assert_eq!(
         once(&[hello(), answer("a1", "u1"), lacking(interrupt, "uuid")]),
@@ -262,12 +259,9 @@ fn a_record_with_two_causes_of_failure_reports_the_one_javascript_met_first() {
         ]),
         "unknown: unreadable: missing native claude tool result id at record 2"
     );
-    let interrupted = having(
-        user_of(json!([tool_result(json!(7), json!("x"))])),
-        json!({ "interruptedMessageId": "m1" }),
-    );
+    let with_its_uuid = user_of(json!([tool_result(json!(7), json!("x"))]));
     assert_eq!(
-        once(&[hello(), calling(), interrupted]),
+        once(&[hello(), calling(), with_its_uuid]),
         "unknown: unreadable: missing native claude tool result id at record 2"
     );
 }

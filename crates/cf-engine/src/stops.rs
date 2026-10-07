@@ -13,6 +13,10 @@
 //! as it works: it never kills the window, and what is for it waits until
 //! its turn ends, when it is paid. An agent still at work on a turn about a
 //! task cancelled under it is interrupted the same way, three rounds at most.
+//! A harness that writes no record of a turn it was interrupted in (Claude,
+//! before a word of its answer) is told of each round whose keys the host took
+//! ([`cf_harness::contract::Window::interrupted`]), and reads the looks that
+//! follow by it.
 
 use std::rc::Rc;
 
@@ -370,14 +374,21 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// The keys that interrupt the window's turn are pressed into its pane.
+    /// The keys that interrupt the window's turn are pressed into its pane,
+    /// and its harness is told once the host took them: what the keys do is
+    /// read from the looks that follow, and a harness that writes nothing of
+    /// a turn it was interrupted in reads them by the press (Claude, before a
+    /// word of its answer). Keys the host refused were no press, and it is
+    /// not told.
     async fn press(self: &Rc<Self>, record: &Rc<Record>) {
-        let (pane, keys) = {
+        let (window, pane, keys) = {
             let part = record.window.borrow();
-            (part.pane.clone(), part.keys)
+            (part.window.clone(), part.pane.clone(), part.keys)
         };
-        if let (Some(pane), Some(keys)) = (pane, keys) {
-            press_interrupt(&*self.seams.host, &*self.seams.time, &pane, keys).await;
+        if let (Some(window), Some(pane), Some(keys)) = (window, pane, keys) {
+            if press_interrupt(&*self.seams.host, &*self.seams.time, &pane, keys).await {
+                window.interrupted();
+            }
         }
     }
 }

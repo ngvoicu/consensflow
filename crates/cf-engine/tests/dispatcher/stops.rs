@@ -363,3 +363,118 @@ fn a_stop_paid_for_one_task_the_window_held_never_hides_the_stop_of_the_task_it_
     let pane = pane_of(&context, "zeus");
     assert_eq!(context.host.inputs(), [escape(&pane)]);
 }
+
+#[test]
+fn a_turn_stopped_before_its_first_word_is_paid_at_rest_and_the_resume_goes_in_once_and_ends_with_its_result(
+) {
+    let context = Context::new();
+    let project = working(&context);
+    let zeus = context.id(project, "zeus");
+    assert_eq!(
+        context.adapter.agent("zeus").interrupted,
+        0,
+        "a window nobody pressed a key into was never told"
+    );
+    // The turn is in the hooks of its prompt, before a word of its answer. A
+    // harness that writes no record of a turn interrupted there reads at rest
+    // once it has stopped, its record as it was (the brief, and nothing after).
+    context.adapter.busy_until_interrupted("zeus");
+    context.pause_task(project, 1);
+    let pane = pane_of(&context, "zeus");
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs(), [escape(&pane)]);
+    assert_eq!(
+        context.adapter.agent("zeus").interrupted,
+        1,
+        "the window is told of the press: it reads the look that follows by it"
+    );
+
+    // The looks that follow find it at rest: paid, with no second key, and
+    // nobody is told it ignored the stop.
+    for _ in 0..3 {
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.host.inputs().len(), 1);
+    assert_eq!(context.dispatcher.unstopped(zeus), None);
+    assert_eq!(ignored(&context, project, "human"), Vec::<String>::new());
+    assert_eq!(ignored(&context, project, "chief"), Vec::<String>::new());
+    let thread = context.task(project, 1);
+    assert_eq!(thread.task.state, "paused");
+    assert!(
+        thread
+            .messages
+            .iter()
+            .all(|message| message.kind != "result"),
+        "no result comes of a turn that was stopped"
+    );
+
+    // The words that resume the task go in at once, once, and the result is
+    // the turn after them.
+    context.resume_task(project, 1, "Carry on");
+    context.pass().unwrap();
+    let words = context.adapter.agent("zeus").items.pop().unwrap();
+    assert_match(&words.text, r"T-1 · task from @chief\]\nResumed: Carry on$");
+    assert_eq!(context.host.inputs().len(), 1, "no key with them");
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "working");
+    context.adapter.answer("zeus", "Parser, finished");
+    context.pass().unwrap();
+    let thread = context.task(project, 1);
+    assert_eq!(thread.task.state, "done");
+    let result = thread.messages.iter().find(|m| m.kind == "result").unwrap();
+    assert_eq!(result.body, "Parser, finished");
+}
+
+#[test]
+fn keys_the_host_refused_are_no_press_and_the_window_is_not_told_until_a_round_goes_in() {
+    let context = Context::new();
+    let project = working(&context);
+    // The window stops when it is told it was interrupted, and not otherwise.
+    context.adapter.busy_until_interrupted("zeus");
+    context.host.refuse_keys.set(true);
+    context.pause_task(project, 1);
+    let pane = pane_of(&context, "zeus");
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs(), [escape(&pane)], "the key was tried");
+    assert_eq!(
+        context.adapter.agent("zeus").interrupted,
+        0,
+        "none was taken: no interrupt was pressed, and a window idle in its hooks must not be read at rest for it"
+    );
+
+    // The next round is taken: now it is told, and the window reads at rest.
+    context.host.refuse_keys.set(false);
+    context.advance(3_100);
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs().len(), 2);
+    assert_eq!(context.adapter.agent("zeus").interrupted, 1);
+    context.pass().unwrap();
+    assert_eq!(
+        context.dispatcher.unstopped(context.id(project, "zeus")),
+        None
+    );
+    assert_eq!(
+        context.host.inputs().len(),
+        2,
+        "paid at rest, with no more keys"
+    );
+}
+
+#[test]
+fn each_round_of_keys_is_told_to_the_window_and_a_round_given_up_on_is_not() {
+    let context = Context::new();
+    let project = working(&context);
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    for round in 1..=3_u32 {
+        context.pass().unwrap();
+        assert_eq!(context.host.inputs().len(), round as usize);
+        assert_eq!(context.adapter.agent("zeus").interrupted, round);
+        context.advance(3_100);
+    }
+    // The look after the third: the stop is given up on, and no key goes in.
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs().len(), 3);
+    assert_eq!(context.adapter.agent("zeus").interrupted, 3);
+}

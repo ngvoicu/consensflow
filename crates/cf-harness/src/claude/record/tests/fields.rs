@@ -347,12 +347,6 @@ fn read() -> Vec<Row> {
             is("error", json!("overloaded")),
         ),
         (
-            "interruptedMessageId",
-            interrupted,
-            2,
-            without("interruptedMessageId"),
-        ),
-        (
             "message.content, of an interrupt",
             interrupted,
             2,

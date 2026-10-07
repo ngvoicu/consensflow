@@ -53,15 +53,19 @@ pub(super) fn claude_tool_text(content: Option<&Value>) -> Result<String, String
 }
 
 /// `isClaudeInterrupt`: whether a user record is Claude Code's own record of
-/// an interrupt, naming the message it interrupted and saying nothing but
-/// one of its two markers.
+/// an interrupt: a list of one text block, which says one of its two markers
+/// and nothing else. What the user types is text, never such a list.
+///
+/// Departs from Node's reader on purpose (Node's daemon keeps its rules, by
+/// the owner's decision of 2026-10-07): Node asked the record to name the
+/// message it interrupted (`interruptedMessageId`) as well. Claude Code
+/// 2.1.292 names none when the interrupt comes while a Stop hook runs, after
+/// its answer was written and no message is left to name; read as the user's
+/// turn, that record began a turn which never ended, and the window never
+/// read at rest.
 pub(super) fn is_interrupt(record: &Value) -> bool {
     let message = record.get("message");
-    let names_message = record
-        .get("interruptedMessageId")
-        .and_then(Value::as_str)
-        .is_some_and(|id| !id.is_empty());
-    if field(message, "role").and_then(Value::as_str) != Some("user") || !names_message {
+    if field(message, "role").and_then(Value::as_str) != Some("user") {
         return false;
     }
     let Some(Value::Array(content)) = field(message, "content") else {
