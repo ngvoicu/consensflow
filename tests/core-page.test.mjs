@@ -479,6 +479,11 @@ describe('the page protocol of the daemon', () => {
         board.lanes.map((lane) => lane.participant.handle),
         ['human', 'chief'],
       )
+      assert.deepEqual(
+        board.open.map((task) => [task.number, task.state]),
+        [[1, 'cancelled']],
+        'the task that went with her has no lane, and stays on the board among the open ones',
+      )
     })
   })
 

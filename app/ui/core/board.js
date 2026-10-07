@@ -4,7 +4,9 @@ import { preview, render } from './markdown.js'
 /**
  * The board: a kanban of the project's tasks. One row per participant, one
  * column per state, every task a card that stays where it ended, with its
- * result on it. A review is a task like any other, on its reviewer's row.
+ * result on it. A review is a task like any other, on its reviewer's row. A
+ * task no member has (never given to one, or of one who left the staff) is on
+ * the row of whoever asked for it, so none goes unseen.
  * Above the grid, what waits for the human: messages to approve when the
  * project asks for approval, notes to read, and, while the chief waits for
  * the human in its terminal, the way there. The human is asked nothing here:
@@ -53,13 +55,20 @@ export const ICONS = {
 }
 /** How many cards a cell shows: more are one tile, a stack and how many, whose cards open in a dialog. */
 const CELL_HOLDS = 3
+/**
+ * The column a card sits in: its state's, but for a paused task. One in a
+ * window waits in the queue for its resumption; one no member has (it was
+ * paused in the backlog, or its member left the staff) stays in the backlog.
+ */
 export const columnOf = (task) =>
   task.questionPending
     ? 'working'
     : FINISHED.includes(task.state)
       ? 'finished'
       : task.state === 'paused'
-        ? 'queued'
+        ? task.laneless
+          ? 'open'
+          : 'queued'
         : task.state
 const STATE_LABEL = {
   open: 'Open',
@@ -126,10 +135,12 @@ export const isMember = (participant) =>
 const roleOf = (task, roles) => task.pool ?? roles[0]
 
 /**
- * A row's tasks, the newest first: its own, and those it asked for that
- * wait for a member, which sit in its backlog. A task of its own that waits
- * while its window is at work has a question pending, and says so: the board
- * keeps it `waiting`, and the window's activity is what tells the two apart.
+ * A row's tasks, the newest first: its own, and those it asked for that no
+ * lane has (`board.open`: waiting for a member, paused, called off or failed
+ * before one had it, or of a member who left the staff), each `laneless` and
+ * in the column of its state. A task of its own that waits while its window
+ * is at work has a question pending, and says so: the board keeps it
+ * `waiting`, and the window's activity is what tells the two apart.
  */
 export const rowTasks = (lane, board) =>
   [
@@ -138,7 +149,9 @@ export const rowTasks = (lane, board) =>
         ? { ...task, questionPending: true }
         : task,
     ),
-    ...board.open.filter((task) => task.requester === lane.participant.handle),
+    ...board.open
+      .filter((task) => task.requester === lane.participant.handle)
+      .map((task) => ({ ...task, laneless: true })),
   ].sort((a, b) => b.number - a.number)
 
 /**

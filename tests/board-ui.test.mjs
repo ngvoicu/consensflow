@@ -44,6 +44,41 @@ describe('a task that waits for an answer', () => {
   })
 })
 
+describe('a task no lane has', () => {
+  const chief = { participant: { handle: 'chief', role: 'chief' }, tasks: [], activity: null }
+  const unlaned = [
+    task(2, 'open'),
+    task(3, 'paused'),
+    task(4, 'cancelled'),
+    task(5, 'failed'),
+    task(6, 'done'),
+    task(7, 'accepted'),
+  ]
+
+  it("is on its requester's row, in the column of its state", () => {
+    const cards = rowTasks(chief, { open: unlaned, lanes: [] })
+    assert.deepEqual(
+      cards.map((card) => [card.number, columnOf(card), stateLabel(card)]),
+      [
+        [7, 'finished', 'Accepted'],
+        [6, 'done', 'Done'],
+        [5, 'finished', 'Failed'],
+        [4, 'finished', 'Cancelled'],
+        [3, 'open', 'Paused'],
+        [2, 'open', 'Open'],
+      ],
+    )
+    assert.deepEqual(rowTasks(lane({ state: 'idle' }, []), { open: unlaned, lanes: [] }), [])
+  })
+
+  it('stays in the backlog when paused, where a paused task in a window waits in the queue', () => {
+    const [kept] = rowTasks(chief, { open: [task(3, 'paused')], lanes: [] })
+    assert.equal(columnOf(kept), 'open')
+    const [waiting] = rowTasks(lane({ state: 'idle' }, [task(3, 'paused')]), board)
+    assert.equal(columnOf(waiting), 'queued')
+  })
+})
+
 describe('a lane whose window did not stop', () => {
   it('says which task it is still on an earlier turn of, before anything else about its window', () => {
     const ignoring = lane({ state: 'working' }, [], {

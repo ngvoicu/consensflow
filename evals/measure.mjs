@@ -215,18 +215,12 @@ function plumbing(file, chiefId, humanId) {
            AND EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state != 'failed')`,
         chiefId,
       ),
-      // The tasks the board places: a lane's (its assignee's, or its member's once the
-      // session ended) or the open ones. A task never given and no longer open is on
-      // neither, on both daemons alike (tests/integration/core-board.test.mjs).
-      placed: count(
-        `SELECT COUNT(*) AS n FROM task t
-           LEFT JOIN participant a ON a.id = t.assignee_id
-           LEFT JOIN participant m ON m.id = a.member_id
-           WHERE t.deleted_at IS NULL AND (
-                (t.assignee_id IS NULL AND t.state = 'open')
-             OR (a.id IS NOT NULL AND a.left_at IS NULL)
-             OR (a.left_at IS NOT NULL AND m.id IS NOT NULL AND m.left_at IS NULL))`,
-      ),
+      // The tasks the board places: every one the human has not deleted. A lane has the
+      // task of its participant (or of its member, once the session ended); every other,
+      // whatever its state (waiting for a member, paused or called off before any had
+      // it, a removed member's), is among the open ones, on both daemons alike
+      // (tests/integration/core-board.test.mjs).
+      placed: count('SELECT COUNT(*) AS n FROM task WHERE deleted_at IS NULL'),
       pauses: count(
         "SELECT COUNT(*) AS n FROM event WHERE kind = 'task.state' AND json_extract(data, '$.to') = 'paused'",
       ),

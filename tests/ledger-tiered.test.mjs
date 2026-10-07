@@ -137,9 +137,15 @@ describe('tiered dispatch: open tasks the daemon assigns', () => {
       const { task } = openTask(ledger, project, { tier: 'critical', purpose: 'architecture' })
       assert.deepEqual([task.tier, task.purpose], ['critical', 'architecture'])
       assert.deepEqual(
-        ledger.board(project.id).open.map((t) => t.number),
-        [task.number],
-        'the refusals created nothing',
+        ledger.board(project.id).open.map((t) => [t.number, t.state]),
+        [
+          [1, 'cancelled'],
+          [2, 'cancelled'],
+          [3, 'cancelled'],
+          [4, 'cancelled'],
+          [task.number, 'open'],
+        ],
+        'the refusals created nothing: the four called off stay on the board beside the new one',
       )
     })
   })

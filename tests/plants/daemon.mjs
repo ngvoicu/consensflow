@@ -22,6 +22,7 @@ import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from '
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { PLANTS as BOARD } from './daemon/board.mjs'
 import { PLANTS as CLAUDE_REST } from './daemon/claude-rest.mjs'
 import { PLANTS as CONSTANTS } from './daemon/constants.mjs'
 import { PLANTS as DETECT } from './daemon/detect.mjs'
@@ -63,6 +64,7 @@ const PLANTS = [
   ...REVIEW,
   ...CLAUDE_REST,
   ...TAKEN_BACK,
+  ...BOARD,
 ]
 
 const args = process.argv.slice(2)

@@ -105,9 +105,11 @@ export function board(store, projectId) {
   // Each task with the first line of its latest result: what its card shows.
   // Its brief stays out: the drawer reads it with the task, and a long-lived
   // board of briefs would outgrow the frame the page reads it in.
-  // A task of a session off the board (the human deleted it, or it went with
-  // its member) sits on its member's lane, and goes back to the session's own
-  // if a follow-up brings it back; a task the human deleted is on no lane.
+  // A task sits on the lane of whoever has it: its assignee's or, once the
+  // session that had it is off the board (the human deleted it), its
+  // member's, and it goes back to the session's own if a follow-up brings
+  // it back. A task the human deleted is on no lane and not among the open
+  // ones either.
   const rows = store.db
     .prepare(`${TASK_SELECT} WHERE t.project_id = ? AND t.deleted_at IS NULL ORDER BY t.number`)
     .all(projectId)
@@ -123,10 +125,15 @@ export function board(store, projectId) {
     const { body: _brief, ...card } = taskView(row)
     return { ...card, result: firstLine(results.get(row.id)) }
   })
+  const handles = new Set(project.participants.map((participant) => participant.handle))
   return {
     project,
-    // On the board for a member; one given by name waits in its own lane.
-    open: tasks.filter((task) => task.state === 'open' && task.assignee === null),
+    // Every task no lane has, whatever its state: one waiting for a member
+    // (one given by name waits in its own lane); one paused, called off or
+    // failed before any member had it; and one of a member who left the
+    // staff, finished or not. The page draws each on its requester's row, in
+    // the column of its state, a paused one in the backlog.
+    open: tasks.filter((task) => !handles.has(laneOf.get(task.id))),
     lanes: project.participants.map((participant) => ({
       participant,
       tasks: tasks.filter((task) => laneOf.get(task.id) === participant.handle),

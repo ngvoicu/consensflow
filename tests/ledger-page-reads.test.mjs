@@ -293,3 +293,72 @@ describe('views', () => {
     })
   })
 })
+
+describe('the board keeps every task in view', () => {
+  it('lists one no lane has among the open ones whatever its state, each by its number', async () => {
+    await withLedger((ledger) => {
+      const { project, id } = staff(ledger)
+      const open = (body) =>
+        ledger.createTask(project.id, { from: 'chief', pool: 'worker', tier: 'standard', body })
+      const byName = (to, body, needs) =>
+        ledger.createTask(project.id, { from: 'chief', to, body, needs })
+      /** A worker's task through to done: assigned to a new session of it, delivered, answered. */
+      const done = (number, member) => {
+        deliver(ledger, ledger.assignTask(project.id, number, id(member)).message)
+        ledger.recordResult(project.id, number, { body: 'Done' })
+      }
+      // Never given to a member: waiting (T-1), paused by the human (T-2),
+      // called off (T-3), failed (T-4).
+      for (const body of ['Waits', 'Paused', 'Called off', 'Failed']) open(body)
+      ledger.pauseTask(project.id, 2, { by: 'human' })
+      ledger.cancelTask(project.id, 3, { by: 'chief' })
+      ledger.failTask(project.id, 4, { reason: 'its launch never came up' })
+      // Diana's, before the human removes her from the staff: queued (T-5,
+      // cancelled with her), paused (T-6), done (T-7), accepted (T-8) and
+      // waiting for T-1 (T-9).
+      byName('diana', 'Queued')
+      byName('diana', 'Held')
+      ledger.pauseTask(project.id, 6, { by: 'human' })
+      for (const body of ['Finished', 'Accepted']) open(body)
+      done(7, 'diana')
+      done(8, 'diana')
+      ledger.acceptTask(project.id, 8, { by: 'chief' })
+      byName('diana', 'Waits for T-1', [1])
+      // Zeus's stays on his session's lane; a task the human deleted is nowhere.
+      open('Parser')
+      done(10, 'zeus')
+      open('Deleted')
+      done(11, 'zeus')
+      ledger.acceptTask(project.id, 11, { by: 'chief' })
+      ledger.deleteTasks(project.id, [11])
+      assert.deepEqual(ledger.removeMember(project.id, 'diana').cancelled, [5])
+
+      const board = ledger.board(project.id)
+      assert.deepEqual(
+        [
+          ...board.open.map((task) => ['open', task.number, task.state]),
+          ...board.lanes.flatMap((lane) =>
+            lane.tasks.map((task) => [lane.participant.handle, task.number, task.state]),
+          ),
+        ],
+        [
+          ['open', 1, 'open'],
+          ['open', 2, 'paused'],
+          ['open', 3, 'cancelled'],
+          ['open', 4, 'failed'],
+          ['open', 5, 'cancelled'],
+          ['open', 6, 'paused'],
+          ['open', 7, 'done'],
+          ['open', 8, 'accepted'],
+          ['open', 9, 'open'],
+          ['zeus-calm-brook', 10, 'done'],
+        ],
+      )
+      assert.deepEqual(
+        ledger.openTasks(project.id).map((task) => task.number),
+        [1],
+        'the daemon gives out only what waits for a member',
+      )
+    })
+  })
+})

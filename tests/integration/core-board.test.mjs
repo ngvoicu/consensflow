@@ -8,10 +8,12 @@ import { startIntegration } from './harness.mjs'
  * on both daemons (`npm run test:daemons`). The chief eval `six-decisions`
  * (2026-10-07, on the native daemon) cancelled tasks that were still open for
  * a tier, and its check "the board showed every task" counted fewer than it
- * had made. The board lists a task by the lane of whoever has it, or among
- * the open ones that wait for a member; a task called off or paused before
- * any member had it is neither, on Node's daemon as on the native one: it is
- * read by its number, and the board and `cf task list` do not draw it.
+ * had made: both daemons left such a task off the board, as a task paused in
+ * the backlog and a removed member's. The owner decided (2026-10-07) that none
+ * leaves it. The board lists a task by the lane of whoever has it, or among the
+ * open ones when no lane has it (waiting for a member, paused or called off
+ * before any member had it, or a removed member's), and `cf task list` lists
+ * both: the page draws the open ones on their requester's row.
  */
 
 const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
@@ -40,7 +42,7 @@ const printed = (record) =>
     .filter((text) => text.startsWith('ran cf: '))
     .map((text) => text.slice('ran cf: '.length).replace(/@worker-[a-z]+-[a-z]+/g, '@worker-*'))
 
-test('a task called off or paused before any member had it is on no lane and among no open ones, and read by its number', async () => {
+test('a task no lane has stays on the board and in cf task list: called off, paused, or a removed member’s', async () => {
   const app = await startIntegration({
     daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
@@ -77,7 +79,8 @@ test('a task called off or paused before any member had it is on no lane and amo
       'worker-* T-1 done',
     ])
 
-    // The chief calls T-2 off with its own `cf`: the next board it reads has no T-2.
+    // The chief calls T-2 off with its own `cf`: the next board it reads lists it apart
+    // from what waits for a member.
     await app.tell(project, 'CF task list')
     await app.tell(project, 'CF task cancel T-2')
     await app.waitFor(async () => (await task(2)).state === 'cancelled', 30_000)
@@ -85,13 +88,26 @@ test('a task called off or paused before any member had it is on no lane and amo
     await app.waitFor(async () => printed(app.transcript(chiefSession)).length === 3, 30_000)
     const [before, , after] = printed(app.transcript(chiefSession))
     assert.match(before, /^Waiting for a member\nT-2 \[open\] blocked by T-1 .*\nT-3 /)
-    assert.doesNotMatch(after, /T-2/, 'the chief reads a board without the task it called off')
-    assert.match(after, /^Waiting for a member\nT-3 \[open\] .*\nT-4 \[open\] /)
+    assert.match(
+      after,
+      /^Waiting for a member\nT-3 \[open\] .*\nT-4 \[open\] .*\nWith no member\nT-2 \[cancelled\] blocked by T-1 /,
+      'the chief reads the task it called off, no longer among those waiting',
+    )
+    assert.deepEqual(listed(await board()), [
+      'open T-2 cancelled',
+      'open T-3 open',
+      'open T-4 open',
+      'worker-* T-1 done',
+    ])
 
-    // The human cancels T-3 and pauses T-4, as the page's buttons do.
+    // The human cancels T-3 and pauses T-4, as the page's buttons do: both stay.
     assert.equal((await app.requestNode('task.cancel', { project, task: 3 })).ok, true)
     assert.equal((await app.requestNode('task.pause', { project, task: 4 })).ok, true)
-    assert.deepEqual(listed(await board()), ['worker-* T-1 done'], 'one of the four is drawn')
+    assert.deepEqual(
+      listed(await board()),
+      ['open T-2 cancelled', 'open T-3 cancelled', 'open T-4 paused', 'worker-* T-1 done'],
+      'all four are drawn: the paused one in the backlog, the two called off to be deleted',
+    )
     assert.deepEqual(
       await Promise.all([2, 3, 4].map(async (number) => [number, (await task(number)).state])),
       [
@@ -99,7 +115,6 @@ test('a task called off or paused before any member had it is on no lane and amo
         [3, 'cancelled'],
         [4, 'paused'],
       ],
-      'each is still there, and read by its number',
     )
     for (const number of [2, 3, 4]) {
       assert.equal((await task(number)).assignee, null, `no member ever had T-${number}`)
@@ -108,6 +123,22 @@ test('a task called off or paused before any member had it is on no lane and amo
       (await app.requestNode('task.get', { project, task: 5 })).ok,
       false,
       'and there are four, not five',
+    )
+
+    // The human resumes T-4 from the backlog and deletes the two called off, as the page does.
+    assert.equal((await app.requestNode('task.resume', { project, task: 4 })).ok, true)
+    assert.equal((await app.requestNode('tasks.delete', { project, tasks: [2, 3] })).ok, true)
+    assert.deepEqual(listed(await board()), ['open T-4 open', 'worker-* T-1 done'])
+
+    // The human removes the worker: T-1, which it did and the chief has not accepted, stays on
+    // the board, no lane's, and the chief reads it so.
+    assert.equal((await app.requestNode('member.remove', { project, agent: 'worker' })).ok, true)
+    assert.deepEqual(listed(await board()), ['open T-1 done', 'open T-4 open'])
+    await app.tell(project, 'CF task list')
+    await app.waitFor(async () => printed(app.transcript(chiefSession)).length === 4, 30_000)
+    assert.match(
+      printed(app.transcript(chiefSession)).at(-1),
+      /^Waiting for a member\nT-4 \[open\] blocked by T-1 .*\nWith no member\nT-1 \[done\] @worker-\* ← @chief: .*$/,
     )
   } finally {
     await app.close()

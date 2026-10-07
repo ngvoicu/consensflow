@@ -10,8 +10,10 @@ use super::task::whole;
 use super::{Answer, Caller, Context, Failure, Request};
 use crate::api::views::{value, TaskSummary};
 
-/// `GET /api/tasks`: the tasks on the board for a member, and each
-/// participant's lane with the tasks on it.
+/// `GET /api/tasks`: the tasks no lane has (`open`: those waiting for a
+/// member, those paused, called off or failed before any member had them, and
+/// those of a member who left the staff), and each participant's lane with the
+/// tasks on it.
 pub(super) async fn list(
     context: &Context,
     caller: &Caller,

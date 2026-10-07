@@ -151,13 +151,26 @@ fn add(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
     Ok(Said::new(created.into_value(), text))
 }
 
+/// Whether a task no lane has waits for a member to take it: a task paused or
+/// over before any member had it, or of a member who left the staff, does not.
+fn waits_for_a_member(task: &Value) -> bool {
+    js::text(task.get("state")) == "open" && matches!(task.get("assignee"), Some(Value::Null))
+}
+
+/// `cf task list`: what waits for a member, the other tasks no lane has, then
+/// each lane's.
 fn board_list(board: &Board) -> Result<Said, Failure> {
     let answer = board.get("/api/tasks")?;
     let mut lines = Vec::new();
-    let open = answer.list(answer.value().get("open"), "open")?;
-    if !open.is_empty() {
-        lines.push("Waiting for a member".to_string());
-        lines.extend(open.iter().map(task_line));
+    let (waiting, apart): (Vec<&Value>, Vec<&Value>) = answer
+        .list(answer.value().get("open"), "open")?
+        .iter()
+        .partition(|task| waits_for_a_member(task));
+    for (heading, group) in [("Waiting for a member", waiting), ("With no member", apart)] {
+        if !group.is_empty() {
+            lines.push(heading.to_string());
+            lines.extend(group.into_iter().map(task_line));
+        }
     }
     for lane in answer.list(answer.value().get("lanes"), "lanes")? {
         let lane_tasks = answer.list(lane.get("tasks"), "tasks")?;
@@ -309,5 +322,70 @@ fn clip(text: &str, units: usize) -> String {
         format!("{}…", utf16_prefix(text, units))
     } else {
         text.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use cf_board::scripted::{reply, scripted};
+
+    use super::*;
+
+    fn card(number: u32, state: &str, assignee: Option<&str>) -> Value {
+        json!({
+            "number": number, "state": state, "assignee": assignee, "requester": "chief",
+            "title": format!("Task {number}"), "blockedBy": [], "pool": "worker", "tier": "standard",
+        })
+    }
+
+    /// What `cf task list` prints of a board with these open tasks and lanes.
+    fn listed(open: &[Value], lanes: &Value) -> String {
+        let api = scripted(vec![reply(200, json!({ "open": open, "lanes": lanes }))]);
+        board_list(&Board::new(Some(&api.url), "tok")).unwrap().text
+    }
+
+    #[test]
+    fn what_waits_for_a_member_is_listed_apart_from_the_other_tasks_no_lane_has() {
+        let lanes = json!([{ "handle": "zeus", "role": "worker", "tasks": [card(1, "done", Some("zeus"))] }]);
+        assert_eq!(
+            listed(
+                &[
+                    card(2, "cancelled", None),
+                    card(3, "paused", None),
+                    card(4, "failed", None),
+                    card(5, "open", None),
+                    card(9, "cancelled", Some("athena")),
+                    card(13, "open", Some("athena")),
+                ],
+                &lanes,
+            ),
+            [
+                "Waiting for a member",
+                "T-5 [open] for a standard worker ← @chief: Task 5",
+                "With no member",
+                "T-2 [cancelled] for a standard worker ← @chief: Task 2",
+                "T-3 [paused] for a standard worker ← @chief: Task 3",
+                "T-4 [failed] for a standard worker ← @chief: Task 4",
+                "T-9 [cancelled] @athena ← @chief: Task 9",
+                "T-13 [open] @athena ← @chief: Task 13",
+                "@zeus (worker)",
+                "T-1 [done] @zeus ← @chief: Task 1",
+            ]
+            .join("\n")
+        );
+    }
+
+    #[test]
+    fn a_heading_with_no_task_under_it_is_not_printed() {
+        let lanes = json!([]);
+        assert_eq!(
+            listed(&[card(5, "open", None)], &lanes),
+            "Waiting for a member\nT-5 [open] for a standard worker ← @chief: Task 5"
+        );
+        assert_eq!(
+            listed(&[card(2, "paused", None)], &lanes),
+            "With no member\nT-2 [paused] for a standard worker ← @chief: Task 2"
+        );
+        assert_eq!(listed(&[], &lanes), "No tasks yet.");
     }
 }
