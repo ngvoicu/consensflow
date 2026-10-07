@@ -16,6 +16,31 @@ impl Ledger {
         messages::note(&mut self.store, project_id, note)
     }
 
+    /// ConsensFlow tells `to` that T-`number` is paused and why, when a stall
+    /// paused it: a note of the task alone, which the other stalls of the
+    /// pass join ([`Ledger::join_pause_note`]).
+    pub fn note_pause(
+        &mut self,
+        project_id: i64,
+        to: &str,
+        number: i64,
+        because: &str,
+    ) -> Result<MessageView, LedgerError> {
+        messages::note_pause(&mut self.store, project_id, to, number, because)
+    }
+
+    /// A stall of the same pass adds T-`number` to the pause note `note`
+    /// instead of a note of its own. None when the note cannot take it: its
+    /// reader has it, or it was withdrawn.
+    pub fn join_pause_note(
+        &mut self,
+        note: i64,
+        number: i64,
+        because: &str,
+    ) -> Result<Option<MessageView>, LedgerError> {
+        messages::join_pause_note(&mut self.store, note, number, because)
+    }
+
     /// A question for a coordinator; the asker's task waits for the answer.
     pub fn ask(
         &mut self,

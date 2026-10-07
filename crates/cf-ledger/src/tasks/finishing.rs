@@ -7,6 +7,7 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::{delivery_body, require_on_board, require_task_state, task_by_id};
+use crate::messages::leave_pause_notes;
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES,
     MAX_BODY, MEMBER_ROLES,
@@ -271,6 +272,8 @@ pub(crate) fn call_off(
        WHERE task_id = ? AND state IN ('queued', 'delivering', 'gated')",
         params![format!("cancelled by @{by}"), task.id],
     )?;
+    // A note of several that names it, still queued, names it no more.
+    leave_pause_notes(store, &task, "cancelled")?;
     store.move_task(&task, "cancelled", json!({ "by": by }))?;
     Ok((task, assignee.filter(|_| began)))
 }

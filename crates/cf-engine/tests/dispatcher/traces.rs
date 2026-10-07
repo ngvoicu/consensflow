@@ -36,25 +36,47 @@
 //! ([`lanes`]). The database each side left is held equal whole, table by
 //! table, each value as SQLite quotes it, the test's temporary folder
 //! written «dir».
+//!
+//! A test the engine departs from Node's trace on purpose is named in
+//! [`DEPARTED`], with what it does that Node does not. It is held to a trace
+//! of its own, recorded from the engine (`tests/departures/`,
+//! `npm run goldens:departed`), and fails when Node's trace is the engine's
+//! again, so the departure is taken off once Node does it too.
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::fs;
-use std::io::Read;
-use std::path::Path;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+use cf_base::env::Env;
 use cf_engine::testing::Closed;
 
 use crate::lanes;
 use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Map, Value};
 
-/// The Node traces, by each test's suites and sentence.
-static TRACES: LazyLock<HashMap<(Vec<String>, String), Value>> = LazyLock::new(|| {
-    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/traces");
+/// A test's suites and sentence: what names its trace.
+type Key = (Vec<String>, String);
+
+/// A recorded trace, and the file it is in.
+struct Recorded {
+    file: OsString,
+    trace: Value,
+}
+
+/// The traces in `folder`, by each test's suites and sentence; none when
+/// there is no folder.
+fn load(folder: &Path) -> HashMap<Key, Recorded> {
     let mut traces = HashMap::new();
-    for entry in fs::read_dir(&folder).expect("the traces' folder") {
+    let Ok(entries) = fs::read_dir(folder) else {
+        return traces;
+    };
+    for entry in entries {
         let path = entry.expect("a trace").path();
         let mut text = String::new();
         GzDecoder::new(fs::File::open(&path).expect("a trace's file"))
@@ -71,10 +93,27 @@ static TRACES: LazyLock<HashMap<(Vec<String>, String), Value>> = LazyLock::new(|
             .as_str()
             .expect("a test's name")
             .to_owned();
-        traces.insert((suites, name), trace);
+        let file = path.file_name().expect("a trace's name").to_owned();
+        traces.insert((suites, name), Recorded { file, trace });
     }
     traces
+}
+
+fn folder(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join(name)
+}
+
+/// The Node traces, by each test's suites and sentence.
+static TRACES: LazyLock<HashMap<Key, Recorded>> = LazyLock::new(|| {
+    let traces = load(&folder("traces"));
+    assert!(!traces.is_empty(), "no traces: npm run goldens:dispatcher");
+    traces
 });
+
+/// The engine's own traces of the tests it departs from Node's in.
+static DEPARTURES: LazyLock<HashMap<Key, Recorded>> = LazyLock::new(|| load(&folder("departures")));
 
 /// The tests whose effects may come in another order than Node's where two
 /// windows' interleave, and only there: JavaScript's microtask hops through
@@ -84,20 +123,65 @@ static TRACES: LazyLock<HashMap<(Vec<String>, String), Value>> = LazyLock::new(|
 /// the fakes' own), so each ported test's effects come in Node's order.
 const INTERLEAVED: &[&str] = &[];
 
-/// Holds a closed test to the Node trace of the test named `name` in `suites`.
+/// The tests the engine departs from Node's trace in on purpose, each with
+/// what the engine does that Node does not. Node never withdraws a note that
+/// told a requester a task was paused, so the notes the engine withdraws when
+/// the task is resumed are in Node's traces still queued, and pasted.
+const DEPARTED: &[(&str, &str)] = &[
+    (
+        "closes a project: its windows go, work in them pauses, and Resume brings the chief back",
+        "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, where Node pastes it into the window",
+    ),
+    (
+        "keeps a held task paused, its hold cleared, when its session was deleted before the hold ended, and tells its requester once while every other task goes on",
+        "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn, where Node leaves it queued",
+    ),
+];
+
+/// The variable that asks for the departures to be recorded again, which
+/// `npm run goldens:departed` sets.
+const RERECORD: &str = "CF_RERECORD_DEPARTED";
+
+/// Holds a closed test to the Node trace of the test named `name` in `suites`,
+/// or, if the engine departs from Node's in it, to the trace of its own.
 pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
     let key = (
         suites.iter().map(|suite| (*suite).to_owned()).collect(),
         name.to_owned(),
     );
-    let trace = TRACES.get(&key).unwrap_or_else(|| {
+    let node = TRACES.get(&key).unwrap_or_else(|| {
         panic!("no Node trace of {suites:?} › {name}: npm run goldens:dispatcher")
     });
+    let Some((_, departure)) = DEPARTED.iter().find(|(departed, _)| *departed == name) else {
+        if let Some(difference) = first_difference(&closed, &node.trace, name) {
+            panic!("{difference}");
+        }
+        return;
+    };
+    if Env::from_process().text(RERECORD).is_some() {
+        return rerecord(&closed, node);
+    }
+    let kept = DEPARTURES
+        .get(&key)
+        .unwrap_or_else(|| panic!("{name}: no trace of its departure: npm run goldens:departed"));
+    if let Some(difference) = first_difference(&closed, &kept.trace, name) {
+        panic!("{difference}");
+    }
+    assert!(
+        first_difference(&closed, &node.trace, name).is_some(),
+        "{name}: the engine does what Node's trace has again (it departed: {departure}): \
+         take it off DEPARTED and delete its departure"
+    );
+}
+
+/// Where the test's effects or the database it left first differ from
+/// `trace`'s, or none when they are the same.
+fn first_difference(closed: &Closed, trace: &Value, name: &str) -> Option<String> {
     let node = projected(trace["events"].as_array().expect("its events"));
     let rust = projected(&closed.events);
     if INTERLEAVED.contains(&name) {
         if let Some(difference) = lanes::first_difference(&node, &rust) {
-            panic!("{name}: the engine's effects differ {difference}");
+            return Some(format!("{name}: the engine's effects differ {difference}"));
         }
     } else if let Some(at) =
         (0..node.len().max(rust.len())).find(|&at| node.get(at) != rust.get(at))
@@ -109,19 +193,50 @@ pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
                 .collect::<Vec<_>>()
                 .join("\n")
         };
-        panic!(
+        return Some(format!(
             "{name}: the engine's effects differ at {at}\n  node:\n{}\n  rust:\n{}",
             around(&node),
             around(&rust)
-        );
+        ));
     }
     let left = dump(&closed.file, closed.dir.path());
-    let node_left = trace["finals"].as_array().and_then(|finals| finals.last());
-    assert_eq!(
-        Some(&left),
-        node_left,
-        "{name}: the database the engine left differs"
-    );
+    let held = trace["finals"].as_array().and_then(|finals| finals.last());
+    (Some(&left) != held).then(|| {
+        let table = left
+            .as_object()
+            .into_iter()
+            .flatten()
+            .find(|(table, rows)| held.and_then(|held| held.get(table.as_str())) != Some(*rows));
+        let words = table.map_or_else(String::new, |(table, rows)| {
+            format!(
+                " in {table}:\n  engine: {rows}\n  trace: {}",
+                held.and_then(|held| held.get(table.as_str()))
+                    .map_or_else(|| "none".to_owned(), ToString::to_string)
+            )
+        });
+        format!("{name}: the database the engine left differs{words}")
+    })
+}
+
+/// Writes the trace of a departed test from this run of the engine, in the
+/// shape of Node's: its `test`, what the engine did at its seams, and the
+/// database it left.
+fn rerecord(closed: &Closed, node: &Recorded) {
+    let trace = json!({
+        "test": node.trace["test"],
+        "events": closed.events,
+        "finals": [dump(&closed.file, closed.dir.path())],
+    });
+    let mut gzip = GzEncoder::new(Vec::new(), Compression::best());
+    gzip.write_all(trace.to_string().as_bytes())
+        .expect("the trace gzipped");
+    let departures = folder("departures");
+    fs::create_dir_all(&departures).expect("the departures' folder");
+    fs::write(
+        departures.join(&node.file),
+        gzip.finish().expect("the trace gzipped"),
+    )
+    .expect("the departure written");
 }
 
 /// What a trace's events are the engine's behaviour, as both sides write it.

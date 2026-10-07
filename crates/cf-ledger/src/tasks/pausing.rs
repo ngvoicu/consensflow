@@ -8,6 +8,7 @@ use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Map, Value};
 
 use super::{delivery_body, require_task_state, task, task_by_id};
+use crate::messages::leave_pause_notes;
 use crate::model::{self, LedgerError, ACTIVE_TASK_STATES, MAX_BODY};
 use crate::queue::{drop_queued, queue, Queued};
 use crate::store::Store;
@@ -196,7 +197,9 @@ pub(crate) fn told_since_paused(
 /// A paused task goes on with the words that resume it: into the same
 /// window when its session is still there (a brief never delivered goes in
 /// first), or back on the board for its tier when the session has ended.
-/// `by` is none when the daemon resumes a held task in its own name.
+/// `by` is none when the daemon resumes a held task in its own name. Whoever
+/// resumes it, what its requester was told of the pause and has not been
+/// given yet is withdrawn: it would arrive after the pause was over.
 pub(crate) fn resume_task(
     store: &mut Store,
     project_id: i64,
@@ -211,6 +214,8 @@ pub(crate) fn resume_task(
             .transpose()?;
         let task = store.task_row(project_id, number)?;
         require_task_state(&task, &["paused"], "resume")?;
+        // A refusal below writes nothing, this withdrawal with it.
+        leave_pause_notes(store, &task, "resumed")?;
         let assignee = task
             .assignee_id
             .map(|id| store.participant_row(id))

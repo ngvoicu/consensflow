@@ -10,7 +10,8 @@
 //! takes which task and who is out of quota (`scheduler`), each window's
 //! launch, looks and close (`windows`), what goes into a window and what
 //! comes back out (`deliveries`), the human's Switch chief (`chief_switch`),
-//! and the copy of each window's conversation (`transcripts`).
+//! the copy of each window's conversation (`transcripts`), and the task whose
+//! window went away, its requester told once for the tasks of a pass (`stalls`).
 //!
 //! Work runs as Node's did ([`crate::runtime`]): a piece of work is begun
 //! where JavaScript called it, and what JavaScript did not await goes on
@@ -26,8 +27,7 @@ use cf_base::time::iso;
 use cf_harness::contract::{Observed, Pane};
 use cf_ledger::model::fits_role;
 use cf_ledger::{
-    DeletedProject, NewNote, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
-    TaskView,
+    DeletedProject, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
 };
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
@@ -36,6 +36,7 @@ use crate::record::Record;
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
 use crate::scheduler::SchedulerState;
 use crate::seams::{EngineError, Seams};
+use crate::stalls::StallsState;
 use crate::windows::{Activity, ActivityState, WindowsState};
 
 /// When a Switch chief goes: now, or once the chief's turn ends.
@@ -90,6 +91,8 @@ pub struct Dispatcher {
     pub(crate) windows: WindowsState,
     /// What the scheduler keeps across records (`scheduler`).
     pub(crate) scheduler: SchedulerState,
+    /// What the bursts of stalls under way keep (`stalls`).
+    pub(crate) stalls: StallsState,
 }
 
 impl Dispatcher {
@@ -102,6 +105,7 @@ impl Dispatcher {
             transcript_listeners: RefCell::new(Vec::new()),
             windows: WindowsState::default(),
             scheduler: SchedulerState::default(),
+            stalls: StallsState::default(),
         })
     }
 
@@ -251,11 +255,13 @@ impl Dispatcher {
 
     /// Closes these participants' windows, each once its step in progress is
     /// over: the handles whose windows would not close. What closes is the
-    /// window of the record waited on, forgotten meanwhile or not.
+    /// window of the record waited on, forgotten meanwhile or not. The tasks
+    /// the windows were working on are told to their requesters together.
     async fn close_windows(
         self: &Rc<Self>,
         participants: &[ParticipantView],
     ) -> Result<Vec<String>, EngineError> {
+        let _burst = self.stalls.begin_burst();
         let mut closing = Vec::new();
         for participant in participants {
             let record = self.record_of(participant.id);
@@ -601,8 +607,10 @@ impl Dispatcher {
     /// One pass over every participant: each looks at its window, and a
     /// launch or a delivery it starts goes on apart. A project whose open
     /// tasks it gives out is read again, so their sessions open this pass.
-    /// It answers at the first step that fails, the others going on.
+    /// It answers at the first step that fails, the others going on. The
+    /// tasks whose windows are gone are told to their requesters together.
     pub async fn pass(self: &Rc<Self>) -> Result<(), EngineError> {
+        let _burst = self.stalls.begin_burst();
         self.resume_held()?;
         let listed = self.seams.ledger.borrow().projects()?;
         let mut projects = Vec::with_capacity(listed.len());
@@ -747,31 +755,6 @@ impl Dispatcher {
             }
         }
         self.changed();
-        Ok(())
-    }
-
-    /// A task whose window went away mid-work is paused, not given up: the
-    /// chief resumes it into the same window, with its memory.
-    fn stall(
-        &self,
-        project: &ProjectView,
-        task: &TaskView,
-        because: &str,
-    ) -> Result<(), EngineError> {
-        let mut ledger = self.seams.ledger.borrow_mut();
-        ledger.pause_task(project.id, task.number, None, Some(because))?;
-        ledger.note(
-            project.id,
-            &NewNote {
-                from: None,
-                to: task.requester.clone(),
-                task: Some(task.number),
-                body: format!(
-                    "T-{0} is paused: {because}. Resume it with: cf task resume T-{0} \"…\"; its window comes back on its own conversation.",
-                    task.number
-                ),
-            },
-        )?;
         Ok(())
     }
 

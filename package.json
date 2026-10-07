@@ -50,6 +50,7 @@
     "goldens:daemon": "node tests/goldens/daemon/record.mjs",
     "goldens:launcher": "node tests/goldens/launcher/record.mjs",
     "goldens:cli": "node tests/goldens/cli/record.mjs",
+    "goldens:departed": "node tests/goldens/departed.mjs",
     "parity:ledger": "npm run goldens:ledger && cargo test -p cf-ledger --test replay",
     "parity:records": "node tests/parity/records.mjs",
     "parity:launch": "node tests/parity/launch.mjs",
