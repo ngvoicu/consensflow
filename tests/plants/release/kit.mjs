@@ -22,6 +22,14 @@ export const BOTH = node('tests/agents-daemons.mjs', '--offline')
 /** The app crate's tests of the portable app's collector, built as a worktree can build it. */
 export const PORTABLE = node('tests/app-tests.mjs', 'portable::')
 
+/** The updater smoke's readers of evidence (processes, daemon, ledger), and of the terminal command. */
+export const EVIDENCE = test('tests/updater-smoke-evidence.test.mjs')
+export const LAUNCHERS = test('tests/updater-smoke-launchers.test.mjs')
+/** What the smoke is made of apart from the apps: its versions, keys, feed and bundles. */
+export const SMOKE_KIT = test('tests/updater-smoke-kit.test.mjs')
+/** The smoke on the apps it builds or takes, as `npm run smoke:updater` is. */
+export const smoke = (...args) => node('tests/smoke-updater.mjs', ...args)
+
 /** The test of a release run again after a later one went out: the feed it left alone must stay. */
 export const RERUN = 'leaves feed-alpha at alpha.82 when alpha.81'
 
@@ -29,3 +37,4 @@ export const FEEDS_JS = 'app/scripts/feeds.mjs'
 export const PUBLISH_JS = 'app/scripts/publish.mjs'
 export const RELEASE_YML = '.github/workflows/release.yml'
 export const PORTABLE_RS = 'app/src-tauri/src/portable.rs'
+export const SMOKE_DIR = 'tests/updater-smoke'
