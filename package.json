@@ -58,6 +58,7 @@
     "build:cf": "node app/scripts/build-cf.mjs",
     "smoke": "CONSENSFLOW_SMOKE=1 node --test tests/smoke.test.mjs",
     "smoke:daemons": "node tests/smoke-daemons.mjs",
+    "smoke:updater": "node tests/smoke-updater.mjs",
     "load": "CONSENSFLOW_LOAD=1 node --test tests/load/*.test.mjs",
     "candidate": "node app/scripts/candidate.mjs",
     "bench:core": "node tests/live/core-bench.mjs",

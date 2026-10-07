@@ -2,10 +2,15 @@
  * Plants bugs in what releases and the agents screens are made of, one at a
  * time, and checks that a test catches each: the rule of the feeds and its
  * checks, the publisher, the release workflow's text, the portable app's
- * collector, and the agents of both daemons as the packaged smoke holds them. A
+ * collector, the agents of both daemons as the packaged smoke holds them, and the
+ * updater smoke: its readers of evidence, and the product it holds (the app's
+ * daemon choice, the ledger's one holder, the check of an update). A
  * plant is a few pieces of text replaced in the sources; the tests that should
  * notice are run (never in parallel: the sources are changed under them) and
- * each plant is reported caught or missed. Every file a plant touches is first
+ * each plant is reported caught or missed. A plant may name commands to run
+ * first (`prepare`: they must succeed), files its runs take as given
+ * (`requires`) and say its runs build the native `cf` (`builds`). Every file a
+ * plant touches is first
  * copied outside the repository and is put back from that copy, byte for byte,
  * whatever the run came to, on Ctrl-C and on being terminated too; a run killed
  * past that leaves the copies in the folder it says first. The native `cf` that
@@ -22,7 +27,7 @@
  * any plant is missed or does not apply. The same shape as `plants:cli`.
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,6 +36,7 @@ import { PLANTS as FEEDS } from './release/feeds.mjs'
 import { BOTH } from './release/kit.mjs'
 import { PLANTS as PORTABLE } from './release/portable.mjs'
 import { PLANTS as PUBLISH } from './release/publish.mjs'
+import { PLANTS as UPDATER } from './release/updater.mjs'
 import { PLANTS as WORKFLOW } from './release/workflow.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -38,7 +44,7 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const RUN_LIMIT = 10 * 60 * 1000
 
 /** Every plant, by area. */
-const PLANTS = [...FEEDS, ...PUBLISH, ...WORKFLOW, ...PORTABLE, ...AGENTS]
+const PLANTS = [...FEEDS, ...PUBLISH, ...WORKFLOW, ...PORTABLE, ...AGENTS, ...UPDATER]
 
 const args = process.argv.slice(2)
 const words = args.filter((arg) => !arg.startsWith('--'))
@@ -55,8 +61,31 @@ function replaced(plant, file, text, from, to) {
   return text.replace(from, () => to)
 }
 
+/**
+ * What a plant needs in place before its text is replaced: a source it plants
+ * that is not in the repository until something exports it (`prepare`: commands
+ * that must succeed, which a static check of the text runs too). And, before a
+ * plant is run, what its runs take as given (`requires`: files that a build
+ * made once is). Either missing is an error to mend, never a pass: a run that
+ * has no build to take fails by itself, and would be taken for a catch.
+ */
+function prepare(plant) {
+  for (const [program, ...prepareArgs] of plant.prepare ?? []) {
+    const ran = spawnSync(program, prepareArgs, { cwd: REPO, stdio: 'inherit' })
+    if (ran.status !== 0)
+      throw new Error(`${plant.name}: ${program} ${prepareArgs.join(' ')} failed`)
+  }
+}
+
+function requires(plant) {
+  for (const file of plant.requires ?? []) {
+    if (!existsSync(join(REPO, file))) throw new Error(`${plant.name}: ${file} is not there`)
+  }
+}
+
 /** The text of each file `plant` touches once planted, by file. */
 function planted(plant) {
+  prepare(plant)
   const files = new Map()
   for (const [file, from, to] of plant.edits) {
     const text = files.get(file) ?? readFileSync(join(REPO, file), 'utf8')
@@ -155,8 +184,15 @@ function execute(command) {
   })
 }
 
+/** The line of the first error `node --test` ends its report with (the first failing test's), cut short. */
+function firstFailure(output) {
+  const found = /\n✖ [^\n]*\n {2}(\w*Error[^\n]*)/.exec(output.split('failing tests:')[1] ?? '')
+  return found === null ? null : found[1].slice(0, 220)
+}
+
 async function trial(plant) {
   const copies = []
+  requires(plant)
   const edited = planted(plant)
   for (const [file, text] of edited) {
     const path = join(REPO, file)
@@ -169,7 +205,7 @@ async function trial(plant) {
   try {
     let ran = null
     for (const command of plant.runs) {
-      built = built || command === BOTH
+      built = built || command === BOTH || plant.builds === true
       ran = await execute(command)
       if (!ran.compiled) return { verdict: 'does not compile', ran }
       if (ran.hung) return { verdict: 'hung', ran }
@@ -194,6 +230,9 @@ for (const plant of chosen) {
       : ''
   if (verdict !== 'caught') wrong += 1
   process.stdout.write(`${verdict.toUpperCase().padEnd(16)} ${plant.name} (${seconds} s)${by}\n`)
+  // What the first test to fail said, which the test's name does not: the check that fired.
+  const said = verdict === 'caught' ? firstFailure(ran.output) : null
+  if (said !== null) process.stdout.write(`    first failure: ${said}\n`)
   if (verdict === 'does not compile') process.stdout.write(`${ran.output.slice(-1500)}\n`)
   if (verdict === 'hung') {
     process.stdout.write(`    ${ran.command.join(' ')} did not end in ${RUN_LIMIT / 1000} s\n`)
