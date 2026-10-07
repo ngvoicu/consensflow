@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PLANTS as CONSTANTS } from './daemon/constants.mjs'
+import { PLANTS as DETECT } from './daemon/detect.mjs'
 import { PLANTS as FRONT } from './daemon/front.mjs'
 import { PLANTS as LAUNCHER } from './daemon/launcher.mjs'
 import { PLANTS as PARTS } from './daemon/parts.mjs'
@@ -45,6 +46,7 @@ const PLANTS = [
   ...SUPPORT,
   ...PLAYERS,
   ...LAUNCHER,
+  ...DETECT,
 ]
 
 const args = process.argv.slice(2)

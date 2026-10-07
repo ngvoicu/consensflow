@@ -38,14 +38,30 @@ const HARNESSES = [
 ]
 
 /**
- * Per-user bin directories any of them might land in.
- *
- * Deliberately all HOME-relative. System-wide places like /opt/homebrew/bin
- * and /usr/local/bin are already on every login PATH, so adding them here
- * would buy nothing — and would break the rule that a test with a throwaway
- * HOME sees only the harnesses it stubbed, by finding the real machine's.
+ * Where npm puts the shims of a global install on Windows: %APPDATA%\npm. A
+ * terminal reaches it through the shell's own setup (the PATH entry Node's
+ * installer adds), which an app started from the Start menu never runs. It
+ * comes from the APPDATA of the environment given, never the machine's own;
+ * one that is missing or empty adds nothing, and so does any other system.
  */
-const COMMON = [HOMED(['.bun', 'bin']), HOMED(['.npm-global', 'bin']), HOMED(['.volta', 'bin'])]
+const NPM_GLOBAL = (env) => (onWindows(env) && env.APPDATA ? join(env.APPDATA, 'npm') : null)
+
+/**
+ * Per-user bin directories any of them might land in: each a function of the
+ * environment, naming a folder or, where the environment has none, null.
+ *
+ * Deliberately all HOME-relative, but for npm's on Windows, which lies under
+ * APPDATA. System-wide places like /opt/homebrew/bin and /usr/local/bin are
+ * already on every login PATH, so adding them here would buy nothing — and
+ * would break the rule that a test with a throwaway HOME sees only the
+ * harnesses it stubbed, by finding the real machine's.
+ */
+const COMMON = [
+  HOMED(['.bun', 'bin']),
+  HOMED(['.npm-global', 'bin']),
+  HOMED(['.volta', 'bin']),
+  NPM_GLOBAL,
+]
 
 function home(env) {
   // Windows sets USERPROFILE, not HOME; homedir() knows that, but an explicit
@@ -170,13 +186,18 @@ function isInstalled(harness, env) {
   return locate(harness, env) !== null
 }
 
-/** The absolute path this harness's CLI resolves to here, or null. */
+/**
+ * The absolute path this harness's CLI resolves to here, or null: on PATH,
+ * else in the harness's own places, else in the common ones, in that order.
+ */
 function locate(harness, env) {
   const onPath = pathOnPath(harness.command, env)
   if (onPath !== null) return onPath
-  for (const dir of [...(harness.locations ?? []), ...COMMON]) {
+  for (const place of [...(harness.locations ?? []), ...COMMON]) {
+    const dir = place(env)
+    if (dir === null) continue
     for (const name of candidateNames(harness.command, env)) {
-      const candidate = resolve(dir(env), name)
+      const candidate = resolve(dir, name)
       try {
         if (!statSync(candidate).isFile()) continue
         if (process.platform !== 'win32') accessSync(candidate, constants.X_OK)
