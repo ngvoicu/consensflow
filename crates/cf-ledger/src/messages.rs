@@ -2,10 +2,13 @@
 //! delivered into a window one at a time and oldest first, except the
 //! human's, which wait in the app until read (`delivery`); and the human's
 //! gate, which holds one agent's word to another until the human passes it
-//! on or declines it (`gate`).
+//! on or declines it (`gate`). The note that tells a requester its tasks
+//! stalled is one for the tasks of a pass, and goes when they are resumed
+//! (`pauses`).
 
 mod delivery;
 mod gate;
+mod pauses;
 
 use cf_proto::ledger::{MessageView, Question};
 use rusqlite::{params, OptionalExtension};
@@ -23,6 +26,7 @@ pub(crate) use delivery::{
     retry_delivery, with_work,
 };
 pub(crate) use gate::{approve_message, decline_message, mark_read};
+pub(crate) use pauses::{join_pause_note, leave_pause_notes, note_pause};
 
 /// A note: from a participant (ConsensFlow itself when none) to another,
 /// about one of the project's tasks or none.

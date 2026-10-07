@@ -4,6 +4,15 @@
 //! the same calls, and each call's answer or refusal, the events it logged and
 //! the clock readings it took, then the database it left, compared exactly.
 //! A trace that calls what this crate does not do yet is skipped and counted.
+//!
+//! A trace this ledger departs from Node's on purpose is named in
+//! [`DEPARTED`], with the call where its answer first departs and why. A
+//! ledger trace is the calls Node's dispatcher made, so what the departure
+//! changes of what a dispatcher asks of the ledger is held by the engine's
+//! traces of its own (`crates/cf-engine/tests/departures/`); here the replay
+//! must agree with Node's recording up to that call, and depart at it. It
+//! fails when Node's recording replays clean again, so the departure is taken
+//! off once Node does it too.
 
 // The replay's own scaffolding: a failure in it is the test's.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -90,6 +99,39 @@ fn traces() -> PathBuf {
         .join("traces")
 }
 
+/// The traces this ledger departs from Node's recording of on purpose: the
+/// call where its answer first departs, and what the ledger does that Node
+/// does not. Node never withdraws a note that told a requester a task was
+/// paused, so the notes the ledger withdraws when the task is resumed are,
+/// in Node's recordings, queued still, and its dispatcher goes on to paste
+/// them.
+const DEPARTED: &[(&str, usize, &str)] = &[
+    (
+        "core-dispatcher-042.json.gz",
+        72,
+        "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, so the chief has no message waiting (`withWork`), where Node's has the note",
+    ),
+    (
+        "core-dispatcher-074.json.gz",
+        294,
+        "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn (`task`), where Node leaves it queued",
+    ),
+];
+
+/// What is wrong with a departed trace, or none when it is held as it should
+/// be: replayed, it agrees with Node's recording up to call `at`, and departs
+/// there.
+fn departure(node: &str, at: usize) -> Option<String> {
+    match replay(node) {
+        Outcome::Failed(why) if why.starts_with(&format!("call {at} (")) => None,
+        Outcome::Failed(why) => Some(format!("it departs elsewhere than at call {at}: {why}")),
+        Outcome::Replayed(_) => {
+            Some("it replays as Node recorded it: take it off DEPARTED".to_owned())
+        }
+        Outcome::Skipped(why) => Some(format!("it is skipped: {why}")),
+    }
+}
+
 #[test]
 fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
     let mut names: Vec<PathBuf> = std::fs::read_dir(traces())
@@ -100,6 +142,7 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
     names.sort();
     assert!(!names.is_empty(), "no traces: npm run goldens:ledger");
     let (mut replayed, mut skipped, mut failed) = (0, BTreeMap::<String, usize>::new(), Vec::new());
+    let mut departed = Vec::new();
     let mut calls = BTreeMap::<String, usize>::new();
     for name in &names {
         let mut text = String::new();
@@ -107,6 +150,11 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
             .read_to_string(&mut text)
             .unwrap();
         let trace = name.file_name().unwrap().to_string_lossy().to_string();
+        if let Some((_, at, why)) = DEPARTED.iter().find(|(file, ..)| *file == trace) {
+            departed.push(format!("{trace} at call {at}: {why}"));
+            failed.extend(departure(&text, *at).map(|wrong| format!("{trace}: {wrong}")));
+            continue;
+        }
         match replay(&text) {
             Outcome::Replayed(methods) => {
                 replayed += 1;
@@ -120,12 +168,16 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
     }
     let skipped_count: usize = skipped.values().sum();
     println!(
-        "{replayed} traces replayed, {skipped_count} skipped, {} failed of {}",
+        "{replayed} traces replayed, {skipped_count} skipped, {} departed, {} failed of {}",
+        departed.len(),
         failed.len(),
         names.len()
     );
     for (why, count) in &skipped {
         println!("  skipped {count}: {why}");
+    }
+    for departure in &departed {
+        println!("  departed {departure}");
     }
     let replayed_calls: Vec<String> = calls
         .iter()

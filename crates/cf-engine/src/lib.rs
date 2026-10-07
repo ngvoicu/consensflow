@@ -26,6 +26,7 @@ pub mod roles;
 pub mod runtime;
 mod scheduler;
 pub mod seams;
+mod stalls;
 mod transcripts;
 mod windows;
 
