@@ -1,6 +1,6 @@
 /**
  * What Node's `util.parseArgs` answers for the words after each verb of
- * bin/cf.mjs, the oracle `cf_base::args` is held to
+ * Node's CLI (src/cli.js), the oracle `cf_base::args` is held to
  * (crates/cf-base/tests/args.rs): the option sets the verbs call it with, and
  * lists of words from the ones people get wrong (a flag given a value, a text
  * option given none or given what looks like an option, a word of one dash, of
@@ -14,7 +14,7 @@
 import { parseArgs } from 'node:util'
 
 /**
- * The option sets the verbs of bin/cf.mjs pass, whether they take
+ * The option sets the verbs of src/cli.js pass, whether they take
  * positionals, and the options whose forms the lists combine (the rest are
  * the same code, and are met alone).
  */

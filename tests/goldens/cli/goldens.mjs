@@ -1,6 +1,6 @@
 /**
  * The legacy CLI's goldens, as Node answers them: what the standalone verbs
- * of `bin/cf.mjs` do, which `crates/cf` is held to for step 4. Every file is
+ * of Node's CLI (`src/cli.js`) do, which `crates/cf` is held to for step 4. Every file is
  * deterministic, so the unit suite holds the committed copies equal to what
  * this computes (tests/cli-goldens.test.mjs), and `npm run goldens:cli`
  * writes them again after a change to what they record. FORMAT.md says what

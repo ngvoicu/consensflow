@@ -287,14 +287,14 @@ mod tests {
         assert_eq!(ask(&["--version"]).as_deref(), Ok("once"));
         assert_eq!(ask(&["--version"]).as_deref(), Ok("always"));
         assert_eq!(ask(&["--version"]).as_deref(), Ok("always"));
-        assert_eq!(ask(&["mcp", "list"]).as_deref(), Ok("anything"));
+        assert_eq!(ask(&["login", "status"]).as_deref(), Ok("anything"));
         let ran: Vec<(String, Limits)> = scripted
             .take_ran()
             .iter()
             .map(|(program, limits)| (named(program), *limits))
             .collect();
         assert_eq!(ran.len(), 4);
-        assert_eq!(ran[3], ("codex mcp list".to_owned(), LIMITS));
+        assert_eq!(ran[3], ("codex login status".to_owned(), LIMITS));
     }
 
     #[test]

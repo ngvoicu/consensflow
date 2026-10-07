@@ -28,6 +28,11 @@
 //!   leaves unknown. A /clear or /resume in the window changes the
 //!   conversation that status names, never the process, so the window is
 //!   followed to it.
+//! - Every window starts with the MCP servers, claude.ai connectors and
+//!   Claude in Chrome the human's own Claude Code has, the chief's and a
+//!   member's alike (the owner's choice, 2026-10-06): the command line
+//!   switches none off. ConsensFlow's own hooks come from `--settings`, not
+//!   from MCP.
 
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
@@ -53,14 +58,6 @@ use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::record_state::switched_to;
 use crate::shared::{pane, window_args};
-
-/// A member runs in full-permission mode and reads what others wrote, so it
-/// starts without the human's MCP servers, claude.ai connectors and Claude
-/// in Chrome: an eval reviewer reached for the human's own browser, and this
-/// Mac's setup includes a brokerage connector. The chief, which works with
-/// the human, keeps them. ConsensFlow's own hooks come from `--settings`,
-/// not from MCP.
-const MEMBER_ISOLATION: [&str; 2] = ["--strict-mcp-config", "--no-chrome"];
 
 /// Claude Code, as the engine launches its windows.
 pub struct ClaudeAdapter {
@@ -123,9 +120,6 @@ impl Adapter for ClaudeAdapter {
             let mut argv = vec![executable];
             argv.extend(settings);
             argv.extend(role);
-            if launch.role != "chief" {
-                argv.extend(MEMBER_ISOLATION.map(str::to_owned));
-            }
             argv.extend(invocation.args);
             Ok(Prepared {
                 argv,

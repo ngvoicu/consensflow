@@ -26,6 +26,7 @@ pub mod roles;
 pub mod runtime;
 mod scheduler;
 pub mod seams;
+mod stalls;
 mod stops;
 mod taken_back;
 mod transcripts;

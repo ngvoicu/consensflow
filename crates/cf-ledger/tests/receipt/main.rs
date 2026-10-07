@@ -15,6 +15,7 @@ mod doors;
 mod fixture;
 mod gate;
 mod legacy;
+mod pause_notes;
 mod questions;
 mod sessions;
 mod taken_back;

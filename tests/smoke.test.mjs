@@ -14,6 +14,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { proveAgents } from './agents-proof.mjs'
+import { chooseHome, DEFAULT_DAEMON } from './choice.mjs'
 
 /**
  * The packaged smoke: the REAL `.app`, not this checkout.
@@ -22,8 +24,13 @@ import { fileURLToPath } from 'node:url'
  * only place that asks whether the thing Gabriel double-clicks works — the
  * bundle's own page, the bundle's own Node, the bundle's own CLI copy, the
  * production Tauri commands, and a real PTY child. So it resolves NOTHING
- * from the repository except this file, and every path it asserts on has to
- * live under `Contents/`.
+ * of the product from the repository, and every path it asserts on has to
+ * live under `Contents/`. What it takes from the repository is this file and
+ * the proof of the agents screens (tests/agents-proof.mjs), which only speaks
+ * HTTP to the daemon the app started and reads the roster that daemon wrote:
+ * it imports no module of the product, so it holds the native daemon as it
+ * holds Node's. (The extension's load below still runs on the bundle's Node,
+ * until Node leaves the bundle.)
  *
  * It is gated, not skipped-by-default-forever: without `CONSENSFLOW_SMOKE`
  * the tests skip so `npm test` stays a unit run, and WITH it a missing
@@ -110,7 +117,35 @@ function locateApp() {
       }
     }
   }
-  return { app, binary, node, cli, why: null }
+  return { app, binary, node, cli, cf, why: null }
+}
+
+/**
+ * What the first line of a daemon's log says of the daemon that started: Node's
+ * names its runtime (`node v26…`), the native one says `rust`. Which of the two
+ * the app starts is the home's to choose: the native one, unless the home has
+ * taken the way back (a `use-node` file in it). The smoke reads which ran from
+ * the log, and holds it to the choice it made in its box's home, which
+ * `CONSENSFLOW_TEST_DAEMON` names (`node`, `native`; none is the native one,
+ * the default the flip made).
+ */
+const START_LINES = {
+  node: / start pid \d+ node v\d+\.\d+\.\d+ home /,
+  native: / start pid \d+ rust \S+ home /,
+}
+
+/** The daemon the run asks for, by the tests' own selector; the default's when it names none. */
+function askedDaemon() {
+  const named = process.env.CONSENSFLOW_TEST_DAEMON || DEFAULT_DAEMON
+  if (!(named in START_LINES)) {
+    throw new Error(`CONSENSFLOW_TEST_DAEMON is ${named}: the smoke knows node and native`)
+  }
+  return named
+}
+
+/** `node`, `native`, or null where the line is neither's. */
+function daemonOf(line) {
+  return Object.entries(START_LINES).find(([, pattern]) => pattern.test(line))?.[0] ?? null
 }
 
 /** Skips only when nobody asked for the smoke; a requested one never skips. */
@@ -276,6 +311,8 @@ function sandbox() {
   for (const dir of [paths.home, paths.state, paths.workspace, paths.bin, paths.probe]) {
     mkdirSync(dir, { recursive: true })
   }
+  // The daemon the app starts, and every `cf` of this home, is chosen by the home.
+  chooseHome(askedDaemon(), paths.state)
   const tag = `smoke-${process.pid}-${Date.now()}`
   const harness = join(paths.bin, 'claude')
   writeFileSync(harness, FAKE_HARNESS, 'utf8')
@@ -313,11 +350,6 @@ process.stdin.on('data', chunk => {
       CFSMOKE_PIDFILE: paths.pidFile,
       CFSMOKE_PASTE_READER: pasteReader,
       CFSMOKE_TAG: tag,
-      // The daemon as the app chooses it: CONSENSFLOW_DAEMON=native runs the
-      // native one (step 3.6, behind its switch until the flip).
-      ...(process.env.CONSENSFLOW_DAEMON
-        ? { CONSENSFLOW_DAEMON: process.env.CONSENSFLOW_DAEMON }
-        : {}),
     },
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   }
@@ -451,6 +483,37 @@ function alive(pid) {
   }
 }
 
+/**
+ * Runs the BUNDLE's own `cf` from outside this checkout, as a second
+ * ConsensFlow on the home the app is using, and says how it ended. Its input is
+ * closed, so a daemon that started would stop at once; one that is still going
+ * after 30 seconds is killed, and its signal says so.
+ */
+function withPackagedCf(cf, box, args, extraEnv = {}) {
+  return new Promise((done) => {
+    const child = spawn(cf, args, {
+      cwd: box.probe,
+      env: { ...box.env, ...extraEnv },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let out = ''
+    let err = ''
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (chunk) => {
+      out += chunk
+    })
+    child.stderr.on('data', (chunk) => {
+      err += chunk
+    })
+    const timer = setTimeout(() => child.kill('SIGKILL'), 30_000)
+    child.on('exit', (code, signal) => {
+      clearTimeout(timer)
+      done({ code, signal, out, err })
+    })
+  })
+}
+
 /** Runs a script with the BUNDLE's node, outside this checkout. */
 function withBundledNode(node, box, script, extraEnv = {}) {
   const file = join(box.probe, `probe-${Math.random().toString(36).slice(2)}.mjs`)
@@ -506,10 +569,21 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   //    `project.open`, the production operation.
   const opened = await app.waitFor('project')
   assert.equal(opened.data.ok, true, `project.open refused: ${JSON.stringify(opened.data)}`)
-  // The daemon the app chose: Node's, or the native one behind its switch.
+  // The daemon the app chose, Node's or the native one: its own log says which
+  // started, and the one the home asked for (the file in it, or the default,
+  // which is the native one) is the one that ran.
   const [started] = readFileSync(join(box.env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8').split('\n')
-  const runtime = box.env.CONSENSFLOW_DAEMON === 'native' ? / start pid \d+ rust / : / node v/
-  assert.match(started, runtime, `the daemon's first line: ${started}`)
+  const ran = daemonOf(started)
+  assert.notEqual(
+    ran,
+    null,
+    `the daemon's first line is neither Node's nor the native one's: ${started}`,
+  )
+  const asked = askedDaemon()
+  assert.equal(ran, asked, `asked for the ${asked} daemon, the ${ran} one started: ${started}`)
+  t.diagnostic(
+    `the daemon that ran: ${ran} (${process.env.CONSENSFLOW_TEST_DAEMON ? 'asked for' : "the app's default"})`,
+  )
 
   const rendered = await app.waitFor('rendered')
   assert.match(rendered.data.banner, new RegExp(`CFSMOKE-READY ${box.tag}`))
@@ -558,6 +632,20 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   )
   assert.match(screens[0].src, /^http:\/\/localhost:\d+\/\?token=/)
   assert.match(screens[1].src, /^http:\/\/localhost:\d+\/harnesses\?token=/)
+
+  // The agents behind those screens, asked of the daemon that serves them: the
+  // one this app chose, Node's or the native one, over its API and through the
+  // roster it writes. The packaged build's own catalog, an agent saved with its
+  // profile, the screens behind the UI token, and the deletion of the agent
+  // saved; nothing of the product's modules is imported to ask. The address and
+  // the token are the ones the frame was given.
+  const served = new URL(screens[0].src)
+  await proveAgents({
+    url: served.origin,
+    token: served.searchParams.get('token'),
+    home: box.env.CONSENSFLOW_HOME,
+  })
+  t.diagnostic(`the ${ran} daemon's agents: the catalog, a saved profile, the screens, a deletion`)
 
   const pasted = await app.waitFor('large-paste')
   const expectedPaste = Buffer.from(`\x1b[200~${'漢字 résumé 🙂\r'.repeat(30_000)}\x1b[201~`)
@@ -676,6 +764,23 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     `the bundled node opened the running app's ledger: ${lock.out}`,
   )
 
+  // 6b. A second packaged `cf ui` on the app's home is a second ConsensFlow,
+  //     and the same lock refuses it, whichever daemon holds the ledger. Exit 1
+  //     alone could be a dependency the bundle lacks, so it is the ledger's own
+  //     words that must be on stderr, and no handle line on stdout. It is the
+  //     daemon the home chose that is asked for, by the file in the home and by
+  //     nothing in the environment, and Node's runs on the Node `cf` finds beside
+  //     itself in the bundle: none is named to it.
+  const second = await withPackagedCf(found.cf, box, ['ui', '--json', '--no-open'])
+  assert.equal(second.signal, null, `the second cf ui never ended: ${second.out}${second.err}`)
+  assert.equal(second.code, 1, `the second cf ui ended ${second.code}: ${second.out}${second.err}`)
+  assert.match(
+    second.err,
+    /^cf: another ConsensFlow has .*consensflow\.db open$/m,
+    `the second cf ui was refused, but not for the ledger's lock: ${second.err}`,
+  )
+  assert.equal(second.out, '', `the second cf ui printed a handle line: ${second.out}`)
+
   // 7. The app's own exit: stdin EOF, `RunEvent::Exit`, and nothing left.
   const settled = await app.waitFor('settled')
   assert.equal(settled.data.terminalPreserved, true)
@@ -684,59 +789,4 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.equal(ended.code, 0, `the app exited ${ended.code} / ${ended.signal}`)
   assert.deepEqual(harnessPids.filter(alive), [], 'a fake harness outlived the app')
   finished = true
-})
-
-test('built Agents catalog serves complete saved profiles and current browsing controls', async (t) => {
-  const found = gate(t)
-  if (found === null) return
-  const box = sandbox()
-  t.after(() => box.cleanup())
-  const cli = join(found.app, 'Contents', 'Resources', 'cli')
-  const result = await withBundledNode(
-    found.node,
-    box,
-    `
-    import assert from 'node:assert/strict'
-    import { mkdirSync, readFileSync } from 'node:fs'
-    import { join } from 'node:path'
-    import { CATALOG, catalogEntry } from ${JSON.stringify(join(cli, 'src/catalog.js'))}
-    import { agentsUi } from ${JSON.stringify(join(cli, 'src/core/agents-server.js'))}
-    import { Credentials, startApi } from ${JSON.stringify(join(cli, 'src/core/api.js'))}
-    import { openLedger } from ${JSON.stringify(join(cli, 'src/ledger/index.js'))}
-    import { addAgent, listAgents, rosterPath } from ${JSON.stringify(join(cli, 'src/roster.js'))}
-    assert.equal(Object.values(CATALOG).flat().length, 119, 'packaged preset count')
-    assert.equal(catalogEntry('pygmalion').model, 'codex-image')
-    // Every catalog agent is in the roster, as the catalog has it; the file keeps only your own.
-    assert.equal(listAgents(process.env).length, 119)
-    addAgent({ name: 'my-maia', harness: 'codex', model: 'gpt-6-astra', effort: 'low' }, process.env)
-    // The agents pages the way the daemon serves them: behind its API, opened with the UI token.
-    mkdirSync(process.env.CONSENSFLOW_HOME, { recursive: true })
-    const ledger = openLedger(join(process.env.CONSENSFLOW_HOME, 'consensflow.db'))
-    const token = 'smoke-ui-token'
-    const server = await startApi({ ledger, credentials: new Credentials(), ui: agentsUi(process.env, { token }) })
-    try {
-      const headers = { authorization: 'Bearer ' + token }
-      const data = await (await fetch(server.url + '/api/agents', { headers })).json()
-      const stored = JSON.parse(readFileSync(rosterPath(process.env), 'utf8')).agents.find(a => a.id === 'my-maia')
-      assert.deepEqual([stored.effort, stored.model, Object.hasOwn(stored, 'profile')], ['low', 'gpt-6-astra', false])
-      const mine = data.agents.find(a => a.name === 'my-maia')
-      assert.deepEqual([mine.effort, mine.custom, mine.profile.workTier], ['low', true, 'light'])
-      assert.equal(data.agents.length, 120)
-      const html = await (await fetch(server.url, { headers })).text()
-      for (const text of ['aria-label="Agents"', 'Model and reasoning', 'My own agents', 'model-summary', 'model-group', 'value="model-reasoning" selected', 'Work tier', 'tier-pill', 'Important work only · No coding']) assert.ok(html.includes(text), text)
-      for (const text of ['id="catalog-section"', 'Agent library', 'Your agents', 'PM candidate', 'name="tags"', 'category-pill', 'Chief of Staff candidate', 'name="category"', 'Name in use', 'offer__actions', 'Saved only', 'Sort by', 'benchmark', 'Artificial Analysis', 'AA ']) assert.ok(!html.includes(text), 'gone: ' + text)
-      assert.equal((await fetch(server.url + '/api/agents/maia', { method: 'DELETE', headers })).status, 400)
-      assert.equal((await fetch(server.url + '/api/agents/my-maia', { method: 'DELETE', headers })).status, 204)
-      const after = await (await fetch(server.url + '/api/agents', { headers })).json()
-      assert.equal(after.agents.length, 119)
-      assert.equal(Object.hasOwn(after, 'catalog'), false)
-      console.log('packaged catalog and saved profiles verified')
-    } finally {
-      await server.close()
-      ledger.close()
-    }
-  `,
-  )
-  assert.equal(result.code, 0, result.err)
-  assert.match(result.out, /packaged catalog and saved profiles verified/)
 })

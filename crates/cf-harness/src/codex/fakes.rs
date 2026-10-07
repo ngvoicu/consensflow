@@ -1,6 +1,6 @@
-//! What the tests of the Codex modules watch of the programs they run: what
-//! each was given (its folder, its environment, how long it had and how much
-//! it could say), and whether a child was ended and how.
+//! What the tests of the Codex modules watch of the programs they start: what
+//! each child was given (its folder, its environment, its streams), and
+//! whether it was ended and how.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -9,18 +9,17 @@ use crate::contract::Work;
 use crate::seams::processes::{Child, Ending, Failed, Limits, Processes, Program, Streams};
 use crate::testing::ScriptedProcesses;
 
-/// Scripted programs that keep a record of how they were run and ended.
+/// Scripted programs that keep a record of how their children were started
+/// and ended.
 #[derive(Default)]
 pub(super) struct Watching {
     pub(super) scripted: ScriptedProcesses,
-    pub(super) run: RefCell<Vec<(Program, Limits)>>,
     pub(super) spawned: RefCell<Vec<(Program, Streams)>>,
     pub(super) ended: Rc<RefCell<Vec<Ending>>>,
 }
 
 impl Processes for Watching {
     fn run(&self, program: Program, limits: Limits) -> Work<'_, Result<String, Failed>> {
-        self.run.borrow_mut().push((program.clone(), limits));
         self.scripted.run(program, limits)
     }
 

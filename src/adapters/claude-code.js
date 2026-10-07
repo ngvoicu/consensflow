@@ -38,16 +38,11 @@ import {
  *   that look leaves unknown. A /clear or /resume in the window changes the
  *   conversation that file names, never the process, so the window is
  *   followed to it.
+ * - Every window starts with the MCP servers, claude.ai connectors and Claude
+ *   in Chrome the human's own Claude Code has, the chief's and a member's
+ *   alike (the owner's choice, 2026-10-06): the command line switches none
+ *   off. ConsensFlow's own hooks come from --settings, not from MCP.
  */
-/**
- * A member runs in full-permission mode and reads what others wrote, so it
- * starts without the human's MCP servers, claude.ai connectors and Claude in
- * Chrome: an eval reviewer reached for the human's own browser, and this Mac's
- * setup includes a brokerage connector. The chief, which works with the human,
- * keeps them. ConsensFlow's own hooks come from --settings, not from MCP.
- */
-const MEMBER_ISOLATION = ['--strict-mcp-config', '--no-chrome']
-
 export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
   const configDir = path.resolve(
     env.CLAUDE_CONFIG_DIR ?? path.join(env.HOME ?? homedir(), '.claude'),
@@ -92,13 +87,7 @@ export function claudeCodeAdapter({ env, answers = cachedAnswers() }) {
         ? interactiveResume(identity, resume, windowText(message))
         : interactiveStart(identity, nativeSession, windowText(message))
       return {
-        argv: [
-          executable,
-          ...settings,
-          ...roleSetup.args,
-          ...(role === 'chief' ? [] : MEMBER_ISOLATION),
-          ...runner.args,
-        ],
+        argv: [executable, ...settings, ...roleSetup.args, ...runner.args],
         env: { ...roleSetup.env },
         dropEnv: runner.dropEnv,
         nativeSession,

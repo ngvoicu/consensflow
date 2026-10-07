@@ -414,18 +414,21 @@ function rootForms(root) {
 const BUNDLE_HASH = /(extensions[\\/]opencode[\\/])([0-9a-f]{64})/g
 
 /** What a step recorded, with the root and the live processes written as the scenario writes them. */
-function written(context, value) {
+function written(context, value, key = null) {
   if (Array.isArray(value)) return value.map((item) => written(context, item))
   if (value !== null && typeof value === 'object') {
     // A key beginning with `$` gets another: the runner's own (`$utf16`) stand apart.
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [
-        key.startsWith('$') ? `$${key}` : key,
-        written(context, item),
+      Object.entries(value).map(([name, item]) => [
+        name.startsWith('$') ? `$${name}` : name,
+        written(context, item, name),
       ]),
     )
   }
+  // A process id stands under `pid`, and only there: a timer of 3000 ms is no
+  // process, whatever process id this run happens to have (CI, 2026-10-06).
   if (typeof value === 'number') {
+    if (key !== 'pid') return value
     const live = Object.entries(pids(context)).find(
       ([name, pid]) => name !== '$DEAD' && pid === value,
     )

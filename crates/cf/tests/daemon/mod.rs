@@ -1,6 +1,6 @@
-//! `cf ui` as a process, as the app starts it: the native daemon behind its
-//! switch, its standard streams real pipes, the app's end of the bridge a
-//! few lines of this file, and a home and a ledger of its own.
+//! `cf ui` as a process, as the app starts it: the native daemon, its
+//! standard streams real pipes, the app's end of the bridge a few lines of
+//! this file, and a home and a ledger of its own.
 
 // The tests' own helper: a failure in it is the test's, and it starts cf
 // itself.
@@ -127,11 +127,16 @@ pub struct Daemon {
 impl Daemon {
     /// Starts it over `root`, and reads its handle line.
     pub fn start(root: &Root) -> Self {
+        Self::start_with(root, &[])
+    }
+
+    /// The same, with `extra` in its environment on top of the one a test gives it.
+    pub fn start_with(root: &Root, extra: &[(&str, &str)]) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_cf"));
         command
             .args(["ui", "--json", "--no-open"])
             .env_clear()
-            .env("CONSENSFLOW_DAEMON", "native")
+            .envs(extra.iter().copied())
             .env("CONSENSFLOW_HOME", root.home())
             .env("HOME", root.dir.path().join("home"))
             .env("USERPROFILE", root.dir.path().join("home"))

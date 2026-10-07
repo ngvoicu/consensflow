@@ -29,6 +29,7 @@ import { PLANTS as LAUNCHER } from './daemon/launcher.mjs'
 import { PLANTS as OBLIGATIONS } from './daemon/obligations.mjs'
 import { PLANTS as PARTS } from './daemon/parts.mjs'
 import { PLANTS as PAUSE } from './daemon/pause.mjs'
+import { PLANTS as PAUSE_NOTES } from './daemon/pause-notes.mjs'
 import { PLANTS as PLAYERS } from './daemon/players.mjs'
 import { PLANTS as RECEIPT_A } from './daemon/receipt-a.mjs'
 import { PLANTS as REVIEW } from './daemon/review.mjs'
@@ -53,6 +54,7 @@ const PLANTS = [
   ...PLAYERS,
   ...LAUNCHER,
   ...PAUSE,
+  ...PAUSE_NOTES,
   ...RECEIPT_A,
   ...OBLIGATIONS,
   ...SESSIONS,

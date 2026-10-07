@@ -113,8 +113,6 @@ describe('the Claude Code adapter', () => {
         path.join(roles, '.claude', 'skills', 'consensflow-worker', 'SKILL.md'),
         '--system-prompt-snapshot',
         'off',
-        '--strict-mcp-config',
-        '--no-chrome',
         '--session-id',
         plan.nativeSession,
         '--model',
@@ -147,11 +145,10 @@ describe('the Claude Code adapter', () => {
     })
   })
 
-  it("keeps a member away from the human's connectors and browser; the chief keeps them", async () => {
+  it("starts a member with the human's MCP servers, connectors and browser as it starts the chief: neither command line switches them off", async () => {
     await withHome(async ({ env }) => {
       const adapter = claudeCodeAdapter({ env })
       const member = await adapter.prepare(request())
-      assert.ok(member.argv.includes('--strict-mcp-config') && member.argv.includes('--no-chrome'))
       const chief = await adapter.prepare(
         request({
           role: 'chief',
@@ -160,9 +157,23 @@ describe('the Claude Code adapter', () => {
           message: null,
         }),
       )
-      assert.ok(!chief.argv.includes('--strict-mcp-config') && !chief.argv.includes('--no-chrome'))
-      // The chief asks the human in its own window: Claude's own question
-      // dialog, no hook putting it on the board.
+      // What a command line could say of them: a flag that names MCP or the browser.
+      const switches = (plan) => plan.argv.filter((arg) => /^-.*(mcp|chrome)/i.test(arg))
+      assert.deepEqual(switches(chief), [])
+      assert.deepEqual(switches(member), switches(chief))
+    })
+  })
+
+  it("gives the chief Claude's own question dialog: no hook puts its questions on the board", async () => {
+    await withHome(async ({ env }) => {
+      const chief = await claudeCodeAdapter({ env }).prepare(
+        request({
+          role: 'chief',
+          participant: { ...worker, handle: 'chief', role: 'chief', agent: null },
+          agent: null,
+          message: null,
+        }),
+      )
       const settings = JSON.parse(
         await readFile(chief.argv[chief.argv.indexOf('--settings') + 1], 'utf8'),
       )
@@ -178,7 +189,7 @@ describe('the Claude Code adapter', () => {
         request({ resume: session, message: null }),
       )
       assert.equal(plan.nativeSession, session)
-      assert.deepEqual(plan.argv.slice(11), [
+      assert.deepEqual(plan.argv.slice(9), [
         '--resume',
         session,
         '--model',

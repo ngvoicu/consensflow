@@ -54,9 +54,9 @@ export const ofChief = (fields = {}) =>
 export const QUEUE_HELP = 'Usage: codex queue --thread <id> --message <text>\n'
 
 /**
- * Codex installed: a stand-in that answers the three things a launch runs of
- * it (its native queue, its version, and the MCP servers a member's window
- * switches off: none), `says` over them. The app-server is the scenario's
+ * Codex installed: a stand-in that answers the two things a launch runs of
+ * it (its native queue and its version), `says` over them. It fails, saying
+ * so, when asked anything else. The app-server is the scenario's
  * (`appServer`): it is spawned, not run.
  */
 export const codex = (says = {}) => ({
@@ -65,14 +65,9 @@ export const codex = (says = {}) => ({
     answers: {
       'queue --help': { stdout: QUEUE_HELP },
       '--version': { stdout: 'codex-cli 0.150.0\n' },
-      'mcp list --json': { stdout: '[]\n' },
       ...says,
     },
   },
-})
-/** The MCP servers the stand-in lists, as `codex mcp list --json` writes them. */
-export const lists = (...servers) => ({
-  'mcp list --json': { stdout: `${JSON.stringify(servers)}\n` },
 })
 
 /**

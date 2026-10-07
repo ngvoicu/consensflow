@@ -17,6 +17,7 @@ use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 pub mod commands;
 mod daemon;
 mod daemon_command;
+mod launcher;
 // Only the Windows app reads a runtime from its own exe; tested everywhere.
 #[cfg_attr(not(windows), allow(dead_code))]
 mod portable;
@@ -387,6 +388,8 @@ pub fn run() {
         })
         .setup(|app| {
             app.manage(AppRuntime::start(app.handle()));
+            // The terminal's command names this bundle's `cf`, whichever build wrote it.
+            launcher::repair_in_background(app.handle());
             updates::setup(app)?;
             // The product name, so a candidate's window never reads as the live app's.
             let title = app.package_info().name.clone();

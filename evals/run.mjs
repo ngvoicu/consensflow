@@ -118,6 +118,8 @@ const chiefAgent = {
  * reaches their browser, screen and accounts: on 2026-09-26 an eval reviewer
  * called the Claude in Chrome tools, and Codex's setup gained browser and
  * computer-use servers the same day. A scripted run must reach none of them.
+ * The product leaves them on for every agent, the chief's and the staff's, so
+ * these wrappers are the only switch-off, and they cover every window of a run.
  */
 const ISOLATED_BIN = join(H, '.consensflow-candidate', 'evals', 'bin')
 const WINDOWS = process.platform === 'win32'
@@ -201,9 +203,9 @@ const realCodex = inRun('codex') ? realOnPath('codex', process.env.PATH ?? '') :
 // (seen 2026-09-26 with 0.157.0 out), and a chief started without a first
 // message waits on it for good: the eval turns the startup check off.
 // The chief's model, or the cheap one; a member's own --model still wins.
-// The product itself now skips Codex's update prompt, keeps ConsensFlow's
-// variables for Codex's commands and isolates members; the eval adds only
-// what is eval-only: the chief isolated too, and the model.
+// The product itself now skips Codex's update prompt and keeps ConsensFlow's
+// variables for Codex's commands; the eval adds only what is eval-only: every
+// window's MCP servers switched off, and the model.
 const codexModel = chief === 'codex' ? chiefSetup.model : HARNESSES.codex.model
 if (realCodex !== null) {
   wrapper(
@@ -295,6 +297,9 @@ async function run(index) {
   const started = Date.now()
   freshWorkspace()
   const app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV })
+  // Which daemon the run is on (CONSENSFLOW_TEST_DAEMON, tests/choice.mjs): what
+  // the Windows matrix reads back to say what it ran against.
+  process.stdout.write(`daemon: ${app.daemon.kind} (${app.daemon.runtime})\n`)
   await trustWorkspace(app)
   const log = []
   const note = (line) => {
@@ -633,6 +638,9 @@ async function runBare(index) {
   const started = Date.now()
   freshWorkspace()
   const app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV })
+  // Which daemon the run is on (CONSENSFLOW_TEST_DAEMON, tests/choice.mjs): what
+  // the Windows matrix reads back to say what it ran against.
+  process.stdout.write(`daemon: ${app.daemon.kind} (${app.daemon.runtime})\n`)
   await trustWorkspace(app)
   const log = []
   const note = (line) => {

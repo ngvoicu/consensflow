@@ -27,7 +27,7 @@ export const PLANTS = [
       lines('    let catalog = bundled()?;', '    match action {'),
       lines(
         '    let catalog = bundled()?;',
-        '    if let Some(path) = roster_path(env) {',
+        '    if let Some(path) = cf_catalog::roster_path(env) {',
         '        let _ = std::fs::create_dir_all(path.parent().unwrap_or(&path));',
         '    }',
         '    match action {',
@@ -60,7 +60,7 @@ export const PLANTS = [
       'write!(out, "{}", usage()).map_err(Stop::from)',
     ],
   ]),
-  verb('a refusal exits with 0', [[MOD, 'Ok(Some(1))', 'Ok(Some(0))']]),
+  verb('a refusal exits with 0', [[MOD, 'Ok(1)', 'Ok(0)']]),
   verb("an unknown command is said without JSON's escapes", [
     [MOD, 'js::stringify(&Value::from(other))', 'format!("\\"{other}\\"")'],
   ]),

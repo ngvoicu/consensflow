@@ -9,7 +9,17 @@ name: Windows build
 
 on:
   workflow_dispatch:
+    inputs:
+      daemon:
+        description: The daemon the portable exe starts (default is the app's own choice)
+        type: choice
+        options: [default, node, native]
+        default: default
   workflow_call:
+    inputs:
+      daemon:
+        type: string
+        default: default
 
 permissions:
   contents: read
@@ -18,6 +28,10 @@ jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      # What a run asked of the portable exe's daemon, by name: a release asks
+      # for none, and the app starts its own default.
+      CF_DAEMON: ${{ inputs.daemon }}
     defaults:
       run:
         shell: bash
@@ -43,9 +57,13 @@ jobs:
 
       # The portable exe, started once as someone would: its first start
       # unpacks the runtime its footer names (app/src-tauri/src/portable.rs)
-      # into the app's local data folder, and the daemon comes up on that Node,
-      # with a home of its own. The folder is read off the exe itself: the
-      # gzip trailer's CRC32 ends 24 bytes before the file does.
+      # into the app's local data folder, under portable-runtime (not the
+      # runtime folder of the apps before the flip release, whose collector
+      # would empty it), and the daemon comes up from that runtime, with a home
+      # of its own: Node's node.exe, or the native daemon's cf.exe, whichever
+      # the app starts, and the step says which it was. The folder is read off
+      # the exe itself: the gzip trailer's CRC32 ends 24 bytes before the file
+      # does.
       - name: The portable exe unpacks its runtime and its daemon starts
         shell: pwsh
         run: |
@@ -63,12 +81,17 @@ jobs:
           if ([Text.Encoding]::ASCII.GetString($end, 16, 8) -ne 'CFPAYLD1') {
             throw "$exe does not end with the portable footer"
           }
-          $runtime = Join-Path $env:LOCALAPPDATA ('dev.ngvoicu.consensflow\runtime\{0}-{1:x8}' -f $version, [BitConverter]::ToUInt32($end, 0))
+          $runtime = Join-Path $env:LOCALAPPDATA ('dev.ngvoicu.consensflow\portable-runtime\{0}-{1:x8}' -f $version, [BitConverter]::ToUInt32($end, 0))
           "payload: $([BitConverter]::ToUInt64($end, 8)) bytes; runtime: $runtime"
 
           $cfHome = Join-Path $env:RUNNER_TEMP 'portable-home'
           New-Item -ItemType Directory -Force $cfHome | Out-Null
           $env:CONSENSFLOW_HOME = $cfHome
+          # The daemon, when a hand run asked for Node's by name: the app chooses by the
+          # file `use-node` in the home it runs on (and by nothing in its environment), so
+          # Node's daemon is a run whose home has it; native's, and the default, which is
+          # native, have none.
+          if ($env:CF_DAEMON -eq 'node') { New-Item -ItemType File -Force (Join-Path $cfHome 'use-node') | Out-Null }
           $app = Start-Process -FilePath $exe -PassThru `
             -RedirectStandardOutput (Join-Path $cfHome 'app-stdout.log') `
             -RedirectStandardError (Join-Path $cfHome 'app-stderr.log')
@@ -78,11 +101,22 @@ jobs:
           $deadline = (Get-Date).AddMinutes(3)
           while ($true) {
             $unpacked = Test-Path (Join-Path $runtime '.unpacked')
-            $started = (Test-Path $log) -and [bool](Select-String -Path $log -SimpleMatch ' info start pid ' -Quiet)
-            $node = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
-              Where-Object { $_.ExecutablePath -like "$runtime\*" })
-            "unpacked: $unpacked; daemon log says it started: $started; node from the runtime: $($node.Count)"
-            if ($unpacked -and $started -and $node.Count -gt 0) { $outcome = 'up'; break }
+            # The daemon's own first line says which daemon it is: Node's names its
+            # runtime (`node v26...`), the native one says `rust`.
+            $kind = ''
+            if (Test-Path $log) {
+              $line = Select-String -Path $log -Pattern ' info start pid \d+ (node|rust) ' | Select-Object -First 1
+              if ($line) { $kind = $line.Matches[0].Groups[1].Value }
+            }
+            # And that daemon's program runs from the runtime: node.exe, or cf.exe.
+            $program = @{ node = 'node.exe'; rust = 'cf.exe' }[$kind]
+            $daemons = @()
+            if ($program) {
+              $daemons = @(Get-CimInstance Win32_Process -Filter "Name = '$program'" |
+                Where-Object { $_.ExecutablePath -like "$runtime\*" })
+            }
+            "unpacked: $unpacked; daemon log says it started: '$kind'; $program from the runtime: $($daemons.Count)"
+            if ($unpacked -and $kind -and $daemons.Count -gt 0) { $outcome = 'up'; break }
             if ($app.HasExited) { $outcome = "the app exited with code $($app.ExitCode)"; break }
             if ((Get-Date) -gt $deadline) { $outcome = 'nothing came up within three minutes'; break }
             Start-Sleep -Seconds 3
@@ -100,15 +134,23 @@ jobs:
           # Bounded: this step runs inside every release.
           [void]$app.WaitForExit(30000)
           if ($outcome -ne 'up') { exit 1 }
-          # A pane's `cf`: the runtime's cf.exe runs the CLI beside it on the runtime's Node.
-          $env:CONSENSFLOW_NODE = Join-Path $runtime 'node.exe'
+          # A daemon asked for by name is the one that started: node says `node`, native says
+          # `rust`, and so does the default, which is the native one since the flip.
+          $expected = if ($env:CF_DAEMON) { @{ node = 'node'; native = 'rust'; default = 'rust' }[$env:CF_DAEMON] }
+          if ($expected -and $kind -ne $expected) { "asked for the $env:CF_DAEMON daemon, its log says '$kind'"; exit 1 }
+          # A pane's `cf`: the runtime's cf.exe, which needs nothing in the environment
+          # to answer, or to find its Node where the home has the way back.
           $said = & (Join-Path $runtime 'cli\bin\cf.exe') --version
           if ($said -ne $version) { "the runtime's cf.exe said '$said', not $version"; exit 1 }
           # The terminals' console host, which the app names to Windows' library search.
           foreach ($name in 'conpty.dll', 'OpenConsole.exe') {
             if (-not (Test-Path (Join-Path $runtime $name))) { "the runtime has no $name"; exit 1 }
           }
-          "the portable exe unpacked $runtime with its console host, its daemon came up on that Node, and its cf.exe runs the CLI"
+          # The runtime went under its own parent, out of reach of the older
+          # apps' collector, and nothing was put in the folder it empties.
+          $older = Join-Path $env:LOCALAPPDATA 'dev.ngvoicu.consensflow\runtime'
+          if (Test-Path $older) { "the runtime was unpacked into the old folder $older"; exit 1 }
+          "the portable exe unpacked $runtime with its console host, its daemon came up from it (the $kind daemon, $program), and its cf.exe runs the CLI"
           exit 0
 
       - uses: actions/upload-artifact@v7

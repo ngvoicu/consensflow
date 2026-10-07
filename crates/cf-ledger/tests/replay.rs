@@ -4,10 +4,18 @@
 //! the same calls, and each call's answer or refusal, the events it logged and
 //! the clock readings it took, then the database it left, compared exactly,
 //! but for the four columns of migration 0011 that Node's ledger never writes
-//! (`cf_ledger::testing`). A call this replay does not know fails its trace;
-//! a trace the receipt and stop redesign moved on purpose is named in
-//! [`DEPARTED`], with why, and is counted and printed instead of replayed: a
-//! test replays those too, and holds each to still departing.
+//! (`cf_ledger::testing`). A call this replay does not know fails its trace.
+//!
+//! A trace this ledger departs from Node's on purpose is named in
+//! [`DEPARTED`], with the call where its answer first departs and why. It is
+//! counted and printed instead of replayed, and a test of its own replays it:
+//! the replay must agree with Node's recording up to that call, and depart at
+//! it, and it fails when Node's recording replays clean again, so the
+//! departure is taken off once Node does it too. A ledger trace is the calls
+//! Node's dispatcher made, so what a departure changes of what a dispatcher
+//! asks of the ledger is held by the engine's tests: by traces of their own for
+//! the pause notes' (`crates/cf-engine/tests/departures/`), and by what each
+//! asserts directly for the redesign's.
 
 // The replay's own scaffolding: a failure in it is the test's.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -40,56 +48,64 @@ enum Outcome {
     Failed(String),
 }
 
-/// The traces the redesign moved on purpose, by their file's name without
-/// `.json.gz`, each with the one thing that differs from Node's. Found by
+/// The traces this ledger departs from Node's recording of on purpose, by
+/// their file's name without `.json.gz`, each with the call where its replay
+/// first departs and the one thing that differs from Node's. Found by
 /// replaying the recordings against this ledger, not by guessing: a trace is
-/// here when its replay fails for a rule the redesign changed, and only then.
-const DEPARTED: &[(&str, &str)] = &[
-    ("core-api-006", "the door's read `answerTo` is gone (a poll claims with `claim_answer`), and a choice answer lands queued, not read"),
-    ("core-daemon-001", DOOR_READ),
-    ("core-dispatcher-010", REASON_PAUSE),
-    ("core-dispatcher-065", KEPT_IN_BRIEF),
-    ("core-dispatcher-107", KEPT_IN_BRIEF),
-    ("core-page-014", REASON_RELEASE),
-    ("ledger-gate-006", DOOR_READ),
-    ("ledger-gate-007", DOOR_READ),
-    ("ledger-gate-008", "the door's read `answerTo` is gone, and the choice answer the human approves lands queued, not read for the door"),
-    ("ledger-messages-009", "the door's read `answerTo` is gone, and a choice answer lands queued: its task waits until it is received"),
-    ("ledger-messages-010", READ_AT_ONCE),
-    ("ledger-messages-011", "the asker's own window answering first is received at once with the receipt `{window: true}` and its time; Node left both empty"),
-    ("ledger-messages-013", READ_AT_ONCE),
-    ("ledger-messages-014", READ_AT_ONCE),
-    ("ledger-messages-015", READ_AT_ONCE),
-    ("ledger-messages-017", DOOR_READ),
-    ("ledger-messages-022", DOOR_READ),
-    ("ledger-projects-002", KEPT_IN_BRIEF),
-    ("ledger-schema-005", KEPT_IN_BRIEF),
-    ("ledger-schema-006", KEPT_IN_BRIEF),
-    ("ledger-schema-007", KEPT_IN_BRIEF),
-    ("ledger-schema-010", KEPT_IN_BRIEF),
-    ("ledger-schema-011", KEPT_IN_BRIEF),
-    ("ledger-schema-013", KEPT_IN_BRIEF),
-    ("ledger-schema-014", KEPT_IN_BRIEF),
-    ("ledger-schema-016", KEPT_IN_BRIEF),
-    ("ledger-schema-017", KEPT_IN_BRIEF),
-    ("ledger-schema-019", KEPT_IN_BRIEF),
-    ("ledger-schema-020", KEPT_IN_BRIEF),
-    ("ledger-schema-021", KEPT_IN_BRIEF),
-    ("ledger-schema-023", KEPT_IN_BRIEF),
-    ("ledger-schema-024", KEPT_IN_BRIEF),
-    ("ledger-schema-025", KEPT_IN_BRIEF),
-    ("ledger-schema-027", KEPT_IN_BRIEF),
-    ("ledger-staff-008", KEPT_BY_PAUSE),
-    ("ledger-staff-019", KEPT_BY_PAUSE),
-    ("ledger-tasks-005", REASON_PAUSE),
-    ("ledger-tasks-016", KEPT_BY_PAUSE),
-    ("ledger-tasks-018", KEPT_BY_PAUSE),
-    ("ledger-tasks-020", REASON_PAUSE),
-    ("ledger-tasks-023", STOP_IN_EVENT),
-    ("ledger-tasks-024", STOP_IN_EVENT),
-    ("ledger-tasks-026", STOP_IN_EVENT),
-    ("ledger-tiered-013", KEPT_IN_BRIEF),
-    ("ledger-tiered-014", WINDOW_ENDED),
+/// here when its replay fails for a rule this ledger changed on purpose, and
+/// only then. The receipt and stop redesign moved all of them but
+/// `core-dispatcher-042` and `-074`, which the pause notes' withdrawal moved:
+/// Node never withdraws a note that told a requester a task was paused, so
+/// the notes this ledger withdraws when the task is resumed are, in Node's
+/// recordings, queued still, and its dispatcher goes on to paste them.
+const DEPARTED: &[(&str, usize, &str)] = &[
+    ("core-api-006", 15, "the door's read `answerTo` is gone (a poll claims with `claim_answer`), and a choice answer lands queued, not read"),
+    ("core-daemon-001", 6, DOOR_READ),
+    ("core-dispatcher-010", 121, REASON_PAUSE),
+    ("core-dispatcher-042", 72, "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, so the chief has no message waiting (`withWork`), where Node's has the note"),
+    ("core-dispatcher-065", 147, KEPT_IN_BRIEF),
+    ("core-dispatcher-074", 294, "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn (`task`), where Node leaves it queued"),
+    ("core-dispatcher-107", 122, KEPT_IN_BRIEF),
+    ("core-page-014", 9, REASON_RELEASE),
+    ("ledger-gate-006", 25, DOOR_READ),
+    ("ledger-gate-007", 15, DOOR_READ),
+    ("ledger-gate-008", 16, "the door's read `answerTo` is gone, and the choice answer the human approves lands queued, not read for the door"),
+    ("ledger-messages-009", 9, "the door's read `answerTo` is gone, and a choice answer lands queued: its task waits until it is received"),
+    ("ledger-messages-010", 11, READ_AT_ONCE),
+    ("ledger-messages-011", 10, "the asker's own window answering first is received at once with the receipt `{window: true}` and its time; Node left both empty"),
+    ("ledger-messages-013", 10, READ_AT_ONCE),
+    ("ledger-messages-014", 10, READ_AT_ONCE),
+    ("ledger-messages-015", 11, READ_AT_ONCE),
+    ("ledger-messages-017", 10, DOOR_READ),
+    ("ledger-messages-022", 12, DOOR_READ),
+    ("ledger-projects-002", 14, KEPT_IN_BRIEF),
+    ("ledger-schema-005", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-006", 18, KEPT_IN_BRIEF),
+    ("ledger-schema-007", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-010", 14, KEPT_IN_BRIEF),
+    ("ledger-schema-011", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-013", 14, KEPT_IN_BRIEF),
+    ("ledger-schema-014", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-016", 14, KEPT_IN_BRIEF),
+    ("ledger-schema-017", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-019", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-020", 14, KEPT_IN_BRIEF),
+    ("ledger-schema-021", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-023", 14, KEPT_IN_BRIEF),
+    ("ledger-schema-024", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-025", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-027", 14, KEPT_IN_BRIEF),
+    ("ledger-staff-008", 13, KEPT_BY_PAUSE),
+    ("ledger-staff-019", 18, KEPT_BY_PAUSE),
+    ("ledger-tasks-005", 26, REASON_PAUSE),
+    ("ledger-tasks-016", 10, KEPT_BY_PAUSE),
+    ("ledger-tasks-018", 16, KEPT_BY_PAUSE),
+    ("ledger-tasks-020", 19, REASON_PAUSE),
+    ("ledger-tasks-023", 10, STOP_IN_EVENT),
+    ("ledger-tasks-024", 13, STOP_IN_EVENT),
+    ("ledger-tasks-026", 29, STOP_IN_EVENT),
+    ("ledger-tiered-013", 13, KEPT_IN_BRIEF),
+    ("ledger-tiered-014", 22, WINDOW_ENDED),
 ];
 
 /// The door's poll is a write now, `claim_answer`; `answerTo`, its read, went.
@@ -194,12 +210,27 @@ fn recorded() -> Vec<(String, String)> {
         .collect()
 }
 
-/// Why a trace departed, when it is named in [`DEPARTED`].
-fn departed(trace: &str) -> Option<&'static str> {
+/// The call where a trace's answer first departs, and why, when it is named
+/// in [`DEPARTED`].
+fn departed(trace: &str) -> Option<(usize, &'static str)> {
     DEPARTED
         .iter()
-        .find(|(name, _)| *name == trace)
-        .map(|(_, why)| *why)
+        .find(|(name, ..)| *name == trace)
+        .map(|(_, at, why)| (*at, *why))
+}
+
+/// What is wrong with a departed trace, or none when it is held as it should
+/// be: replayed, it agrees with Node's recording up to call `at`, and departs
+/// there.
+fn departure(node: &str, at: usize) -> Option<String> {
+    match replay(node) {
+        Outcome::Failed(why) if why.starts_with(&format!("call {at} (")) => None,
+        Outcome::Failed(why) => Some(format!("it departs elsewhere than at call {at}: {why}")),
+        Outcome::Replayed(_) => {
+            Some("it replays as Node recorded it: take it off DEPARTED".to_owned())
+        }
+        Outcome::Skipped(why) => Some(format!("it is skipped: {why}")),
+    }
 }
 
 #[test]
@@ -209,8 +240,8 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
     let mut calls = BTreeMap::<String, usize>::new();
     let mut left = Vec::new();
     for (trace, text) in &traces {
-        if let Some(why) = departed(trace) {
-            left.push(format!("  {trace}: {why}"));
+        if let Some((at, why)) = departed(trace) {
+            left.push(format!("  {trace} at call {at}: {why}"));
             continue;
         }
         match replay(text) {
@@ -252,19 +283,18 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
 }
 
 /// A trace is named in [`DEPARTED`] because it differs from Node's, and
-/// for no other reason: one that no longer differs, or that is not there, is
-/// a line to take out, not a test left passing.
+/// for no other reason: one that no longer differs, that differs elsewhere
+/// than at its call, or that is not there, is a line to take out or to
+/// correct, not a test left passing.
 #[test]
 fn every_departed_trace_is_there_and_still_departs() {
     let traces = recorded();
     let mut wrong = Vec::new();
-    for (trace, why) in DEPARTED {
+    for (trace, at, why) in DEPARTED {
         match traces.iter().find(|(name, _)| name == trace) {
             None => wrong.push(format!("{trace} is not a recorded trace ({why})")),
             Some((_, text)) => {
-                if !matches!(replay(text), Outcome::Failed(_)) {
-                    wrong.push(format!("{trace} replays as Node's did now ({why})"));
-                }
+                wrong.extend(departure(text, *at).map(|wrong| format!("{trace}: {wrong} ({why})")))
             }
         }
     }
@@ -280,7 +310,11 @@ fn replay(text: &str) -> Outcome {
         serde_json::from_str(&text.replace("«ledger»", &path[1..path.len() - 1])).unwrap();
     let calls = trace["calls"].as_array().cloned().unwrap_or_default();
     // A trace is replayed only whole: a call this replay does not know fails it.
-    if let Some(unknown) = calls.iter().find_map(unknown_call) {
+    if let Some(unknown) = calls
+        .iter()
+        .enumerate()
+        .find_map(|(at, call)| unknown_call(at, call))
+    {
         return Outcome::Failed(unknown);
     }
     if let Some(probe) = calls.iter().find_map(probe_of_javascript) {
@@ -373,7 +407,11 @@ fn replay(text: &str) -> Outcome {
         }
         if method == "close" {
             let (ours, theirs) = (held_apart(dump(&file)), held_apart(trace["final"].clone()));
-            if let Some(why) = compare("the database it left", &ours, &theirs) {
+            if let Some(why) = compare(
+                &format!("call {at} ({method}), the database it left,"),
+                &ours,
+                &theirs,
+            ) {
                 return Outcome::Failed(why);
             }
         }
@@ -386,8 +424,9 @@ fn replay(text: &str) -> Outcome {
     )
 }
 
-/// A call this replay does not know, said as the failure it is; none for a method it does.
-fn unknown_call(call: &Value) -> Option<String> {
+/// The call `at` when this replay does not know it, said as the failure it
+/// is; none for a method it does.
+fn unknown_call(at: usize, call: &Value) -> Option<String> {
     let method = call["method"].as_str().unwrap_or_default();
     const DONE: &[&str] = &[
         "createProject",
@@ -468,7 +507,8 @@ fn unknown_call(call: &Value) -> Option<String> {
         "latestTranscript",
         "latestMessages",
     ];
-    (!DONE.contains(&method)).then(|| format!("calls {method}, which this replay does not know"))
+    (!DONE.contains(&method))
+        .then(|| format!("call {at} ({method}) is one this replay does not know"))
 }
 
 /// A probe of what only JavaScript could be handed, which the Rust signature

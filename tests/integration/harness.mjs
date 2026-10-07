@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { assertStarted, errorsWithCause, linesOf, NATIVE_CF } from '../choice.mjs'
 import { daemonCommand } from '../helpers.mjs'
 
 const WINDOWS = process.platform === 'win32'
@@ -25,7 +26,7 @@ const CURSOR_REPLY = [...Buffer.from('\u001b[1;1R')]
 const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fake-agent.mjs')
 /** The `cf` first on every window's PATH: the native one, beside cf.mjs. */
-const CF = join(REPO, 'bin', WINDOWS ? 'cf.exe' : 'cf')
+const CF = NATIVE_CF
 
 function parser(onLine) {
   let carry = Buffer.alloc(0)
@@ -173,12 +174,19 @@ function waitFor(predicate, timeoutMs = 10_000, intervalMs = 25) {
  * A real standalone daemon and the real Rust headless bridge, connected by
  * their production JSON-lines pipes. The helper only observes and routes the
  * bytes; pane.open, PTYs, input arbitration and cleanup stay native.
+ *
+ * The daemon is the one `CONSENSFLOW_TEST_DAEMON` names (`daemonCommand`), or the
+ * one `select` names (`node` or `native`) for a start that chooses in its own
+ * words whatever the environment says, as a restart on the other daemon does.
+ * What starts is held to what was asked for by the start line in its log
+ * (`assertStarted`), and `daemon` on what this returns says which it was.
  */
 export async function startIntegration({
   fakeEnv = {},
   bridgeEnv = {},
   existingRoot = null,
   daemon = DAEMON,
+  select = undefined,
 } = {}) {
   assert.equal(
     existsSync(BRIDGE),
@@ -202,18 +210,56 @@ export async function startIntegration({
   // agents a test wrote are still the ones its chief and staff run on.
   if (existingRoot === null) writeRoster(env)
 
-  // The daemon under test: Node's, or the native one CONSENSFLOW_TEST_DAEMON names.
-  const started = daemonCommand([daemon])
-  const node = spawn(started.command, started.args, {
+  // The daemon under test, chosen on purpose (see above), in the home it runs
+  // on: the product's `cf` verbs choose by the file in the home, so the home
+  // has the file for Node's daemon and none for the native one's, and a
+  // restart of it on the other daemon takes the file away or makes it.
+  const asked = daemonCommand([daemon], {
+    ...(select === undefined ? {} : { named: select, leg: select }),
+    home: env.CONSENSFLOW_HOME,
+  })
+  const node = spawn(asked.command, asked.args, {
     cwd: REPO,
-    env: { ...env, ...started.env },
+    env: { ...env, ...asked.env },
     stdio: ['pipe', 'pipe', 'pipe'],
   })
   const nodeErrors = []
   node.stderr.on('data', (chunk) => nodeErrors.push(String(chunk)))
-  const handleLine = await firstLine(node.stdout, node)
-  const handle = JSON.parse(handleLine.line)
-  assert.match(handle.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)
+  const nodeStderrEnded = new Promise((resolve) => node.stderr.once('close', resolve))
+  const handleLine = await firstLine(node.stdout, node).catch(async (cause) => {
+    // A daemon that refuses its home says why on its standard error, which may
+    // still be on its way when the process is seen to exit, and Node's says it
+    // in its log: it ends with 0, its refusal an unhandled rejection it logged.
+    await Promise.race([nodeStderrEnded, new Promise((resolve) => setTimeout(resolve, 1000))])
+    let logged = []
+    try {
+      const log = readFileSync(join(env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8')
+      logged = errorsWithCause(linesOf(log, node.pid))
+    } catch {}
+    cause.message += [nodeErrors.join('').trim(), ...logged]
+      .filter(Boolean)
+      .map((said) => `: ${said}`)
+      .join('')
+    throw cause
+  })
+  // Both daemons write their start line before the handle line. One that is not
+  // the one asked for is ended, with the home it was given if it was this call's.
+  let handle
+  let said
+  try {
+    said = assertStarted(
+      asked,
+      readFileSync(join(env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8'),
+      node.pid,
+      env.CONSENSFLOW_HOME,
+    )
+    handle = JSON.parse(handleLine.line)
+    assert.match(handle.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)
+  } catch (cause) {
+    node.kill('SIGKILL')
+    if (existingRoot === null) rmSync(root, { recursive: true, force: true })
+    throw cause
+  }
 
   const nodeFrames = []
   const rustFrames = []
@@ -377,6 +423,8 @@ export async function startIntegration({
     env,
     workspace,
     handle,
+    /** Which daemon this is, as its own start line says: `kind` (`node` or `native`), `runtime` (`node v26.8.1`, `rust 3.0.0-alpha.79`) and `line`. */
+    daemon: { kind: said.kind, runtime: said.runtime, line: said.line },
     nodeFrames,
     rustFrames,
     openFrames,

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
@@ -24,16 +24,18 @@ async function withHome(fn, { queue = true } = {}) {
     PATH: path.join(root, 'bin'),
   }
   await mkdir(env.PATH, { recursive: true })
-  // A Codex that answers the four things a launch asks of it: its version,
-  // whether it has the native queue, its effective instructions over the
-  // app-server, and the MCP servers a member's window switches off (none here).
+  // A Codex that answers the three things a launch asks of it: its version,
+  // whether it has the native queue, and its effective instructions over the
+  // app-server. It writes down what it is asked, a line of arguments each
+  // (`asked`).
+  const asking = path.join(root, 'asked.log')
   const executable = fakeNodeExecutable(
     path.join(env.PATH, 'codex'),
     `#!${process.execPath}
+import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
-if (process.argv[2] === 'mcp' && process.argv[3] === 'list') {
-  console.log('[]')
-} else if (process.argv[2] === '--version') {
+appendFileSync(${JSON.stringify(asking)}, process.argv.slice(2).join(' ') + '\\n')
+if (process.argv[2] === '--version') {
   console.log('codex-cli 0.150.0')
 } else if (process.argv[2] === 'queue') {
   ${queue ? "console.log('Usage: codex queue --thread <id> --message <text>')" : 'process.exit(2)'}
@@ -48,8 +50,10 @@ if (process.argv[2] === 'mcp' && process.argv[3] === 'list') {
 }
 `,
   )
+  const asked = async () =>
+    (await readFile(asking, 'utf8').catch(() => '')).split('\n').filter(Boolean)
   try {
-    await fn({ env, executable })
+    await fn({ env, executable, asked })
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -184,29 +188,30 @@ describe('the Codex adapter', () => {
     })
   })
 
-  it('switches off every MCP server Codex would start for a member; the chief keeps them', async () => {
+  it("starts a member with Codex's MCP servers as it starts the chief: neither command line switches them off", async () => {
     await withHome(async ({ env }) => {
-      const adapter = codexAdapter({
-        env,
-        mcpServers: async () => [{ name: 'cua_repl' }, { name: 'computer-history' }],
-      })
+      const adapter = codexAdapter({ env })
       const member = await adapter.prepare(request())
-      const flags = [
-        '-c',
-        'mcp_servers.cua_repl.command="/usr/bin/true"',
-        '-c',
-        'mcp_servers.cua_repl.enabled=false',
-        '-c',
-        'mcp_servers.computer-history.command="/usr/bin/true"',
-        '-c',
-        'mcp_servers.computer-history.enabled=false',
-      ]
-      const at = member.argv.indexOf(flags[1])
-      assert.deepEqual(member.argv.slice(at - 1, at - 1 + flags.length), flags)
       const chief = await adapter.prepare(request({ role: 'chief', agent: null, message: null }))
-      assert.ok(!chief.argv.some((arg) => arg.startsWith('mcp_servers.')))
-      const odd = codexAdapter({ env, mcpServers: async () => [{ name: 'a.b' }] })
-      await assert.rejects(odd.prepare(request()), /cannot switch off the Codex MCP server "a\.b"/)
+      // What a command line could say of them: a flag, or a `-c` setting, that names MCP.
+      const switches = (plan) =>
+        withoutRole(plan.argv).filter(
+          (arg, at, argv) => (arg.startsWith('-') || argv[at - 1] === '-c') && /mcp/i.test(arg),
+        )
+      assert.deepEqual(switches(chief), [])
+      assert.deepEqual(switches(member), switches(chief))
+    })
+  })
+
+  it("lists no MCP server of Codex's for a member's launch: there is none to switch off", async () => {
+    await withHome(async ({ env, asked }) => {
+      await codexAdapter({ env }).prepare(request())
+      const asks = await asked()
+      assert.ok(asks.includes('queue --help'), 'the stand-in tells what a launch asks of Codex')
+      assert.deepEqual(
+        asks.filter((ask) => /^mcp\b/.test(ask)),
+        [],
+      )
     })
   })
 

@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Credentials, startApi } from '../src/core/api.js'
 import { passLoop } from '../src/core/daemon.js'
 import { openLedger } from '../src/ledger/index.js'
+import { assertStarted, START_WORDS } from './choice.mjs'
 import { daemonCommand, fakeNodeExecutable } from './helpers.mjs'
 
 const DAEMON = fileURLToPath(new URL('./integration/core-daemon.mjs', import.meta.url))
@@ -20,12 +21,15 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
  * can show (a pass loop, an API, a Node preload) is skipped for the native one
  * with its reason.
  */
-const NATIVE = daemonCommand([DAEMON]).native
+const CHOSEN = daemonCommand([DAEMON])
+const NATIVE = CHOSEN.native
 const ONLY_NODE_CAN = NATIVE && "a test of Node's own modules, which the native daemon has none of"
+/** What the start line of the daemon under test says, and no other's does: `node v26.8.1`, `rust 3.0.0`. */
+const STARTS = START_WORDS[CHOSEN.kind]
 
-/** The daemon as a child, the one under test; Node flags only go to Node's. */
+/** The daemon as a child, the one under test; Node flags only go to Node's. Its home is made the choice's own. */
 function startDaemon(env, nodeFlags = []) {
-  const started = daemonCommand([...nodeFlags, DAEMON])
+  const started = daemonCommand([...nodeFlags, DAEMON], { home: env.CONSENSFLOW_HOME })
   return spawn(started.command, started.args, {
     env: { ...env, ...started.env },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -37,7 +41,7 @@ function startDaemon(env, nodeFlags = []) {
  * the native `cf`. It is the process a start that fails ends, with what that says.
  */
 function startCli(env) {
-  const named = daemonCommand([])
+  const named = daemonCommand([], { home: env.CONSENSFLOW_HOME })
   const [command, args] = named.native
     ? [named.command, named.args]
     : [process.execPath, [path.join(BUNDLE_BIN, 'cf.mjs'), 'ui', '--json', '--no-open']]
@@ -218,11 +222,11 @@ describe('the daemon and its log', () => {
         const code = await new Promise((resolve) => child.once('exit', resolve))
         assert.equal(code, 0, errors)
         const log = await readFile(path.join(home, 'daemon.log'), 'utf8')
-        // The runtime the start line names is the daemon's own: Node's version, or the native one's.
+        // The runtime the start line names is the daemon's own, the one under test: Node's version, or the native one's.
         assert.match(
           log,
           new RegExp(
-            `^\\S+ info start pid ${child.pid} (?:node v|rust )\\S+ home \\S+\\n\\S+ info stop: ${reason}; rss \\d+ MB\\n\\S+ info exit 0\\n$`,
+            `^\\S+ info start pid ${child.pid} ${STARTS}\\S+ home \\S+\\n\\S+ info stop: ${reason}; rss \\d+ MB\\n\\S+ info exit 0\\n$`,
           ),
         )
       } finally {
@@ -287,7 +291,7 @@ describe('the daemon and its log', () => {
       // the process ends with, which the native daemon writes too.
       assert.match(
         await readFile(path.join(home, 'daemon.log'), 'utf8'),
-        /^\S+ info start pid \d+ (?:node v|rust )\S+ home \S+\n\S+ info exit 1\n$/,
+        new RegExp(`^\\S+ info start pid \\d+ ${STARTS}\\S+ home \\S+\\n\\S+ info exit 1\\n$`),
       )
     } finally {
       running.close()
@@ -429,6 +433,8 @@ async function daemonOverItsBridge(t, { agents = [], preload = null } = {}) {
     return until(() => answer, `answered ${op}`)
   }
   await until(() => handle, 'said it was ready')
+  // The daemon that answers is the one under test: its log's start line says so.
+  assertStarted(CHOSEN, await readFile(path.join(home, 'daemon.log'), 'utf8'), child.pid, home)
   return {
     home,
     workspace,

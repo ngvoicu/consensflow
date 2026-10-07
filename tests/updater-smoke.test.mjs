@@ -1,705 +1,386 @@
 import assert from 'node:assert/strict'
-import { execFileSync, spawn } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import test, { after } from 'node:test'
+import { recordedPids } from './updater-smoke/box.mjs'
+import { REPO } from './updater-smoke/build.mjs'
 import {
-  chmodSync,
-  closeSync,
-  constants,
-  cpSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  readlinkSync,
-  realpathSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-  writeSync,
-} from 'node:fs'
-import { createServer } from 'node:https'
-import { tmpdir } from 'node:os'
-import { basename, dirname, join, relative, resolve } from 'node:path'
-import test from 'node:test'
-import { fileURLToPath } from 'node:url'
-
-const REPO = dirname(dirname(fileURLToPath(import.meta.url)))
-const REQUESTED = process.env.CONSENSFLOW_UPDATER_SMOKE === '1'
-const TIMEOUT_MS = Number(process.env.CONSENSFLOW_UPDATER_SMOKE_TIMEOUT_MS ?? 180_000)
-const SIGNER = join(REPO, 'app', 'node_modules', '.bin', 'tauri')
+  copyOver,
+  digestManifest,
+  REFUSED,
+  refusedBundle,
+  verifySeal,
+} from './updater-smoke/bundle.mjs'
+import {
+  blockedEvidence,
+  bootEvidence,
+  heldEvidence,
+  loadInputs,
+  releasePanes,
+  stagingLeft,
+  startCase,
+} from './updater-smoke/case.mjs'
+import {
+  appLog,
+  assertChoseNative,
+  assertOnlyProbesRefused,
+  daemonLog,
+  daemonOf,
+  gone,
+} from './updater-smoke/evidence.mjs'
+import { signedUpdate } from './updater-smoke/feed.mjs'
+import { assertRepaired, plantCommands } from './updater-smoke/launchers.mjs'
+import {
+  assertKept,
+  assertProjects,
+  assertSound,
+  assertTraced,
+  readLedger,
+  tracedEvents,
+} from './updater-smoke/ledger.mjs'
+import { alive, TIMEOUT_MS, until } from './updater-smoke/processes.mjs'
+import { generateKey } from './updater-smoke/signing.mjs'
 
 /**
- * This is the packaged acceptance gate, not a source or dev-server test.
- * Without the explicit opt-in it is one skipped test so the ordinary Node
- * suite stays cheap. Once requested, every missing or unsafe input fails with
- * the build-path the release driver needs to provide.
+ * The packaged update path, end to end: an installed app (the bridge) is given
+ * this checkout's app as an update by its own updater, from a feed this run serves,
+ * on a machine of the case's own. `npm run smoke:updater` builds the two apps and
+ * runs every case here; without that opt-in each is one skipped test, so the
+ * ordinary suite stays cheap, and once it is asked for a missing or unsafe input
+ * fails with the command that provides it.
+ *
+ * The cases:
+ *
+ * - the update: install and restart, the native daemon by default on the same
+ *   home, the ledger whole, the terminal command of the home repaired and no
+ *   other's;
+ * - two updates the app refuses (a signature that is not the key's, and bundles its
+ *   check refuses): the installed bundle is intact and the app still runs;
+ * - an app replaced by hand, as a disk image's copy does, with the app quit:
+ *   its first start repairs the command and keeps the ledger.
  */
 
-function requestedPath(name) {
-  const value = process.env[name]
-  assert.ok(
-    typeof value === 'string' && value.length > 0,
-    `${name} is required; Root must provide the two built app paths`,
-  )
-  const path = realpathSync(resolve(value))
-  assert.equal(path.endsWith('.app'), true, `${name} must point to a .app bundle: ${path}`)
-  const protectedRoot = resolve('/Applications')
-  const outside = relative(protectedRoot, path)
-  assert.ok(
-    outside === '..' || outside.startsWith('../') || outside.startsWith('/'),
-    `${name} may not point into /Applications: ${path}`,
-  )
-  assert.ok(existsSync(path), `${name} bundle does not exist: ${path}`)
-  return path
-}
+const REQUESTED = process.env.CONSENSFLOW_UPDATER_SMOKE === '1'
+const ONLY = (process.env.CONSENSFLOW_UPDATER_ONLY ?? '').split(',').filter(Boolean)
+/** The schema the bridge's ledger is at: a ledger the update touches is at it or past it. */
+const BRIDGE_SCHEMA = 10
+/** The daemon the installed app starts: the bridge's is Node's. */
+const INSTALLED_DAEMON = process.env.CONSENSFLOW_UPDATER_FROM_DAEMON ?? 'node'
 
-function commandOutput(command, args, options = {}) {
-  try {
-    return execFileSync(command, args, { encoding: 'utf8', ...options })
-  } catch (cause) {
-    const stderr = cause?.stderr?.toString?.() ?? ''
-    throw new Error(`${command} ${args.join(' ')} failed: ${stderr.trim() || cause.message}`)
-  }
-}
+let inputs = null
+after(() => {
+  if (inputs?.keyFolder) rmSync(inputs.keyFolder, { recursive: true, force: true })
+})
 
-function plist(app, field) {
-  return commandOutput('/usr/bin/plutil', [
-    '-extract',
-    field,
-    'raw',
-    '-o',
-    '-',
-    join(app, 'Contents', 'Info.plist'),
-  ]).trim()
-}
-
-function appInfo(app, label) {
-  assert.ok(
-    existsSync(join(app, 'Contents', 'Info.plist')),
-    `${label} has no Contents/Info.plist: ${app}`,
-  )
-  const executable = plist(app, 'CFBundleExecutable')
-  const binary = join(app, 'Contents', 'MacOS', executable)
-  const sidecar = join(app, 'Contents', 'MacOS', 'node')
-  const stagedNode = join(app, 'Contents', 'Resources', 'binaries', 'node')
-  const cli = join(app, 'Contents', 'Resources', 'cli')
-  const packageFile = join(cli, 'package.json')
-  const bundledNode = existsSync(sidecar) ? sidecar : stagedNode
-  for (const [what, path] of [
-    ['native executable', binary],
-    ['bundled Node runtime', bundledNode],
-    ['bundled CLI package', packageFile],
-    ['bundled CLI entrypoint', join(cli, 'bin', 'cf.mjs')],
-    ['bundled CLI hosts', join(cli, 'hosts')],
-    ['bundled CLI source', join(cli, 'src')],
-  ]) {
-    assert.ok(existsSync(path), `${label} has no ${what}: ${path}`)
-  }
-  const packageJson = JSON.parse(readFileSync(packageFile, 'utf8'))
-  return {
-    app,
-    binary,
-    bundledNode,
-    executable,
-    version: plist(app, 'CFBundleShortVersionString'),
-    cliVersion: packageJson.version,
-  }
-}
-
-function verifyBundle(info, expected, label) {
-  assert.equal(
-    info.version,
-    expected,
-    `${label} plist version is ${info.version}, expected ${expected}`,
-  )
-  assert.equal(
-    info.cliVersion,
-    expected,
-    `${label} bundled CLI version is ${info.cliVersion}, expected ${expected}`,
-  )
-  commandOutput('/usr/bin/codesign', ['--verify', '--deep', '--strict', info.app])
-}
-
-function digestManifest(root) {
-  const entries = []
-  function visit(directory) {
-    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) =>
-      a.name.localeCompare(b.name),
-    )) {
-      const path = join(directory, entry.name)
-      const name = relative(root, path)
-      if (entry.isDirectory()) {
-        visit(path)
-      } else if (entry.isSymbolicLink()) {
-        entries.push({ name, link: readlinkSync(path) })
-      } else if (entry.isFile()) {
-        entries.push({
-          name,
-          sha256: createHash('sha256').update(readFileSync(path)).digest('hex'),
-          mode: statSync(path).mode & 0o777,
-        })
-      } else {
-        throw new Error(`unsupported bundle entry in digest manifest: ${path}`)
-      }
+/** A case: skipped unless asked for, and on a machine of its own that is kept if it fails. */
+function updaterCase(name, body) {
+  test(name, { timeout: TIMEOUT_MS * 2 }, async (t) => {
+    if (!REQUESTED) {
+      t.skip(
+        'the updater smoke runs under `npm run smoke:updater` (sets CONSENSFLOW_UPDATER_SMOKE=1)',
+      )
+      return
     }
-  }
-  visit(root)
-  return entries
-}
-
-function shellQuote(value) {
-  return `'${value.replaceAll("'", "'\\''")}'`
-}
-
-function fakeHarnesses(box) {
-  const script = (name) => `#!/bin/sh
-set -eu
-if [ "\${1:-}" = "--version" ]; then
-  if [ "${name}" = "claude" ]; then
-    printf '2.1.266\\n'
-  else
-    printf '0.0.0\\n'
-  fi
-  exit 0
-fi
-printf '%s\\n' "$$" > ${shellQuote(join(box.pids, name))}-$$.pid
-printf 'CFUPDATER-ALIVE %s\\n' "$$"
-while IFS= read -r _line; do
-  :
-done
-`
-  for (const name of ['claude', 'codex', 'pi', 'opencode']) {
-    const path = join(box.bin, name)
-    writeFileSync(path, script(name), 'utf8')
-    chmodSync(path, 0o755)
-  }
-}
-
-function sandbox() {
-  // Tauri deliberately rejects relaunch paths with symlinked ancestors;
-  // macOS /var is a symlink to /private/var.
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'cf-updater-smoke-')))
-  const box = {
-    root,
-    apps: join(root, 'Applications'),
-    copy: join(root, 'Applications', 'ConsensFlow.app'),
-    home: join(root, 'home'),
-    state: join(root, 'state'),
-    workspace: join(root, 'workspace'),
-    secondWorkspace: join(root, 'workspace', '.consensflow-updater-second'),
-    bin: join(root, 'bin'),
-    pids: join(root, 'pids'),
-    tls: join(root, 'tls'),
-    probe: join(root, 'probe'),
-  }
-  for (const path of [
-    box.apps,
-    box.home,
-    box.state,
-    box.workspace,
-    box.secondWorkspace,
-    box.bin,
-    box.pids,
-    box.tls,
-    box.probe,
-  ])
-    mkdirSync(path, { recursive: true })
-  fakeHarnesses(box)
-  return box
-}
-
-function openssl(box) {
-  const caKey = join(box.tls, 'root.key')
-  const caCert = join(box.tls, 'root.pem')
-  const serverKey = join(box.tls, 'server.key')
-  const serverCsr = join(box.tls, 'server.csr')
-  const serverCert = join(box.tls, 'server.pem')
-  const extensions = join(box.tls, 'server.ext')
-  writeFileSync(
-    extensions,
-    [
-      'subjectAltName=DNS:localhost,IP:127.0.0.1',
-      'basicConstraints=critical,CA:FALSE',
-      'keyUsage=critical,digitalSignature,keyEncipherment',
-      'extendedKeyUsage=serverAuth',
-      'subjectKeyIdentifier=hash',
-      'authorityKeyIdentifier=keyid,issuer',
-      '',
-    ].join('\n'),
-    'utf8',
-  )
-  commandOutput(
-    'openssl',
-    [
-      'req',
-      '-x509',
-      '-newkey',
-      'rsa:2048',
-      '-nodes',
-      '-keyout',
-      caKey,
-      '-out',
-      caCert,
-      '-days',
-      '1',
-      '-subj',
-      '/CN=ConsensFlow updater smoke root',
-    ],
-    { stdio: ['ignore', 'ignore', 'pipe'] },
-  )
-  commandOutput(
-    'openssl',
-    [
-      'req',
-      '-newkey',
-      'rsa:2048',
-      '-nodes',
-      '-keyout',
-      serverKey,
-      '-out',
-      serverCsr,
-      '-subj',
-      '/CN=localhost',
-    ],
-    { stdio: ['ignore', 'ignore', 'pipe'] },
-  )
-  commandOutput(
-    'openssl',
-    [
-      'x509',
-      '-req',
-      '-in',
-      serverCsr,
-      '-CA',
-      caCert,
-      '-CAkey',
-      caKey,
-      '-CAcreateserial',
-      '-out',
-      serverCert,
-      '-days',
-      '1',
-      '-sha256',
-      '-extfile',
-      extensions,
-    ],
-    { stdio: ['ignore', 'ignore', 'pipe'] },
-  )
-  return {
-    caCert,
-    key: readFileSync(serverKey),
-    cert: readFileSync(serverCert),
-  }
-}
-
-function signArchive(box, archive) {
-  assert.ok(existsSync(SIGNER), `packaged Tauri signer is missing: ${SIGNER}`)
-  const key = join(box.tls, 'test-updater-key')
-  const env = { ...process.env }
-  delete env.TAURI_SIGNING_PRIVATE_KEY
-  delete env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-  commandOutput(SIGNER, ['signer', 'generate', '--ci', '--password', '', '--write-keys', key], {
-    cwd: REPO,
-    env,
-    stdio: ['ignore', 'ignore', 'pipe'],
-  })
-  commandOutput(SIGNER, ['signer', 'sign', '--password', '', '--private-key-path', key, archive], {
-    cwd: REPO,
-    env,
-    stdio: ['ignore', 'ignore', 'pipe'],
-  })
-  return {
-    publicKeyPath: `${key}.pub`,
-    signature: readFileSync(`${archive}.sig`, 'utf8').trim(),
-  }
-}
-
-async function listen(server) {
-  await new Promise((resolveListening, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', resolveListening)
-  })
-  const address = server.address()
-  assert.equal(typeof address, 'object')
-  return `https://127.0.0.1:${address.port}/feed`
-}
-
-function pidAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    const state = execFileSync('/bin/ps', ['-p', String(pid), '-o', 'stat='], {
-      encoding: 'utf8',
-    }).trim()
-    return state.length > 0 && !state.startsWith('Z')
-  } catch {
-    return false
-  }
-}
-
-function recordedPids(box) {
-  return readdirSync(box.pids)
-    .filter((name) => name.endsWith('.pid'))
-    .map((name) => Number(readFileSync(join(box.pids, name), 'utf8').trim()))
-    .filter((pid) => Number.isInteger(pid) && pid > 0)
-}
-
-function killRecordedChiefPids(box) {
-  for (const pid of new Set(recordedPids(box))) {
-    if (!pidAlive(pid)) continue
+    if (ONLY.length > 0 && !ONLY.some((word) => name.includes(word))) {
+      t.skip(`not among the cases asked for (${ONLY})`)
+      return
+    }
+    assert.equal(process.platform, 'darwin', 'the updater smoke needs macOS bundles and codesign')
+    inputs ??= loadInputs()
+    const kase = await startCase(inputs)
+    t.after(() => kase.cleanup())
     try {
-      process.kill(pid, 'SIGKILL')
-    } catch {
-      // The recorded test child already exited.
-    }
-  }
-}
-
-function lockPid(box) {
-  const file = join(box.state, 'app', 'instance.lock')
-  if (!existsSync(file)) return null
-  const first = readFileSync(file, 'utf8').split('\n', 1)[0]
-  try {
-    const value = JSON.parse(first).pid
-    return Number.isInteger(value) && value > 0 ? value : null
-  } catch {
-    return null
-  }
-}
-
-async function until(label, check, timeoutMs = TIMEOUT_MS) {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    const result = check()
-    if (result !== null && result !== undefined && result !== false) return result
-    if (Date.now() >= deadline) throw new Error(`${label} did not happen within ${timeoutMs} ms`)
-    await new Promise((wake) => setTimeout(wake, 100))
-  }
-}
-
-function launch(binary, env, cwd) {
-  // Node destroys a spawned child's managed stdin pipe when that PID exits.
-  // Keep a separate FIFO writer alive across Tauri's real process restart.
-  const fifo = join(cwd, 'updater-control.fifo')
-  commandOutput('/usr/bin/mkfifo', [fifo])
-  const hold = openSync(fifo, constants.O_RDWR | constants.O_NONBLOCK)
-  const input = openSync(fifo, 'r')
-  const control = openSync(fifo, 'w')
-  closeSync(hold)
-  let controlClosed = false
-  const child = spawn(binary, [], {
-    cwd,
-    env,
-    detached: true,
-    stdio: [input, 'pipe', 'pipe'],
-  })
-  closeSync(input)
-  const events = []
-  const failures = []
-  const stderr = []
-  let buffer = ''
-  const appPids = new Set([child.pid])
-  child.stdout.setEncoding('utf8')
-  child.stdout.on('data', (chunk) => {
-    buffer += chunk
-    let cut = buffer.indexOf('\n')
-    while (cut !== -1) {
-      const line = buffer.slice(0, cut)
-      buffer = buffer.slice(cut + 1)
-      if (line.startsWith('consensflow-selftest ')) {
-        try {
-          const event = JSON.parse(line.slice('consensflow-selftest '.length))
-          events.push(event)
-          process.stdout.write(`updater probe ${JSON.stringify(event)}\n`)
-          if (Number.isInteger(event.pid) && event.pid > 0) appPids.add(event.pid)
-          if (
-            ['update-failure', 'page-error', 'page-rejection', 'failed', 'deadline'].includes(
-              event.event,
-            )
-          )
-            failures.push(event)
-        } catch {
-          failures.push({ event: 'malformed-report', data: { line } })
-        }
-      }
-      cut = buffer.indexOf('\n')
+      await body(kase, t)
+      kase.finished = true
+    } catch (cause) {
+      cause.message += kase.report()
+      throw cause
     }
   })
-  child.stderr.setEncoding('utf8')
-  child.stderr.on('data', (chunk) => stderr.push(chunk))
+}
 
-  async function waitFor(label, predicate) {
-    return until(label, () => {
-      const found = events.find(predicate)
-      if (found !== undefined) return found
-      if (failures.length > 0) {
-        throw new Error(
-          `packaged app reported failure: ${JSON.stringify(failures.at(-1))}\nstderr: ${stderr.join('').slice(-4000)}`,
+/**
+ * The app's quit, and everything it had gone: the app, its daemons, the windows'
+ * stand-ins. The ledger had one holder to the end: no daemon of the app was refused it.
+ */
+async function quit(kase, daemons) {
+  const { app, box } = kase
+  app.closeInput()
+  await until('every app process exits', () => !app.anyAlive())
+  const ended = await app.exited
+  for (const pid of daemons) assert.ok(gone(pid), `the daemon (pid ${pid}) outlived the app`)
+  assert.deepEqual(recordedPids(box).filter(alive), [], 'a stand-in chief survived app shutdown')
+  assertOnlyProbesRefused(daemonLog(box), kase.probes)
+  return ended
+}
+
+/** The ledger of the case's home, read once no daemon holds it. */
+const ledgerOf = (kase) => readLedger(join(kase.box.state, 'consensflow.db'))
+
+/** The two folders the page opens its projects in. */
+const projectsOf = (kase) => [
+  kase.box.workspace,
+  join(kase.box.workspace, '.consensflow-updater-second'),
+]
+
+/** Offers the run's update, signed by the run's key. */
+function offerUpdate(kase, app = inputs.to.app) {
+  const update = signedUpdate({
+    tauri: REPO,
+    privateKey: inputs.key.privateKey,
+    app,
+    directory: kase.box.probe,
+  })
+  kase.feed.offer(update.version, update.signature, update.bytes)
+  return update
+}
+
+updaterCase(
+  'the update installs and restarts on the native daemon, keeps the ledger and repairs its own terminal command',
+  async (kase, t) => {
+    const { box } = kase
+    // Both names of this home's, one of which serves another home, and the other home's own.
+    const planted = plantCommands(kase.installed, box, { elsewhere: true })
+    offerUpdate(kase)
+    const app = kase.start(inputs.to.version)
+
+    // The installed app: its process, its daemon (the bridge's is Node's), ready, and holding the ledger.
+    const first = await bootEvidence(kase, app, { version: inputs.from.version })
+    assert.equal(
+      first.daemon.kind,
+      INSTALLED_DAEMON,
+      `the installed app started ${first.daemon.runtime}`,
+    )
+    const chiefs = await blockedEvidence(kase, app, first)
+    // The page has had its answers (two projects, two windows): the daemon has the ledger, and refuses a second.
+    await heldEvidence(kase)
+    t.diagnostic(
+      `installed ${inputs.from.version}: app pid ${first.app}, daemon pid ${first.daemon.pid} (${first.daemon.runtime}), ledger held`,
+    )
+    const traced = tracedEvents(readFileSync(join(box.state, 'events.jsonl'), 'utf8'))
+    assert.ok(traced.length > 0, 'the daemon traced no ledger event before the update')
+
+    // Both windows close, the install goes through, and the app starts again as the update.
+    await releasePanes(app, chiefs)
+    const second = await bootEvidence(kase, app, { version: inputs.to.version, pid: first.app })
+    const restarted = await app.waitFor(
+      'the update restart',
+      (event) => event.event === 'update-restarted',
+    )
+    assert.equal(
+      restarted.data.currentVersion,
+      inputs.to.version,
+      'the restart did not report the update',
+    )
+    assert.equal(restarted.data.blockers, 0, 'the restart reported open panes')
+    assert.equal(restarted.pid, second.app)
+    assert.notEqual(restarted.pid, first.app, 'the update restarted in the original process')
+    assert.ok(alive(restarted.pid), 'the restarted app was not alive when it reported ready')
+    await until('the first app exits', () => gone(first.app))
+    await until('the first daemon exits and lets go of the ledger', () => gone(first.daemon.pid))
+    // The page read the board of the update's daemon: it is ready, and has the ledger.
+    await heldEvidence(kase)
+
+    // The update's app: its daemon is the native one, by default, chosen as the app's log says.
+    assert.equal(second.daemon.kind, 'native', `the update started ${second.daemon.runtime}`)
+    assert.notEqual(second.daemon.pid, first.daemon.pid)
+    assertChoseNative(appLog(box), box.state)
+    assert.ok(!existsSync(join(box.state, 'use-node')), 'the way back to Node was taken')
+    t.diagnostic(
+      `updated ${inputs.to.version}: app pid ${second.app}, daemon pid ${second.daemon.pid} (${second.daemon.runtime}), ledger held, the app log names the choice`,
+    )
+
+    // The terminal command of this home runs the update's cf; no other command changed.
+    const cf = join(box.copy, 'Contents', 'Resources', 'cli', 'bin', 'cf')
+    assertRepaired({
+      box,
+      planted,
+      cf,
+      appLogText: appLog(box),
+      version: second.daemon.runtime.split(' ')[1],
+    })
+    t.diagnostic(
+      `the terminal command of ${box.state} now runs ${cf}; the commands of ${box.other} and the one pinned to it are as they were`,
+    )
+
+    // The bundle in place is the update, byte for byte, sealed, with nothing left of the install.
+    verifySeal(box.copy)
+    assert.deepEqual(
+      digestManifest(box.copy),
+      inputs.toManifest,
+      'installed copy bytes do not equal TO_APP',
+    )
+    assert.deepEqual(
+      digestManifest(inputs.to.app),
+      inputs.toManifest,
+      'TO_APP was mutated by the smoke',
+    )
+    assert.deepEqual(stagingLeft(box), [], 'the install left staging files in the home')
+
+    // The quit takes everything with it, and the ledger is whole.
+    const ended = await quit(kase, [first.daemon.pid, second.daemon.pid])
+    t.diagnostic(`the original app exited ${ended.code} / ${ended.signal}`)
+    assert.deepEqual(
+      app.events.filter((event) => event.event === 'update-failure'),
+      [],
+      'the successful updater smoke reported a failure',
+    )
+    const ledger = ledgerOf(kase)
+    assertSound(ledger, { atLeast: BRIDGE_SCHEMA })
+    assertProjects(ledger, projectsOf(kase))
+    assertTraced(traced, ledger)
+    t.diagnostic(
+      `the ledger: schema ${ledger.version}, sound, the ${traced.length} events traced before the update are in it`,
+    )
+  },
+)
+
+/** The steps of an update the installed app refuses: it runs to the install, or to the download. */
+async function refusedFlow(kase, t, { blocked }) {
+  const app = kase.start(inputs.to.version, { expected: ['update-failure'] })
+  const first = await bootEvidence(kase, app, { version: inputs.from.version })
+  assert.equal(first.daemon.kind, INSTALLED_DAEMON)
+  if (blocked) await releasePanes(app, await blockedEvidence(kase, app, first))
+  const failure = await app.waitFor('the refusal', (event) => event.event === 'update-failure', {
+    unless: (event) =>
+      event.event === 'update-restarted' ||
+      (event.event === 'update-boot' && event.data.currentVersion === inputs.to.version)
+        ? 'the app took an update it should have refused'
+        : null,
+  })
+  return { app, first, failure: failure.data.error, t }
+}
+
+/** What a refused update leaves: the installed bundle as it was, the app and its daemon running, the ledger held. */
+async function intactEvidence(kase, { app, first }, t) {
+  assert.deepEqual(
+    digestManifest(kase.box.copy),
+    inputs.fromManifest,
+    'the installed bundle changed',
+  )
+  verifySeal(kase.box.copy)
+  assert.deepEqual(stagingLeft(kase.box), [], 'the refused install left staging files in the home')
+  assert.ok(alive(first.app), 'the app stopped')
+  assert.ok(alive(first.daemon.pid), 'the daemon stopped')
+  const again = await daemonOf(kase.box, {
+    app: first.app,
+    bundle: kase.box.copy,
+    probes: kase.probes,
+  })
+  assert.equal(again.pid, first.daemon.pid, 'the app has another daemon')
+  await heldEvidence(kase)
+  assert.equal(app.events.filter((event) => event.event === 'update-restarted').length, 0)
+  t.diagnostic(
+    `app pid ${first.app} and daemon pid ${first.daemon.pid} still run, the bundle is byte for byte as installed, the ledger is held`,
+  )
+}
+
+updaterCase(
+  'an update signed by another key is refused and the installed app stays intact and running',
+  async (kase, t) => {
+    const { box } = kase
+    const stranger = generateKey(REPO, join(box.tls, 'stranger'))
+    const update = signedUpdate({
+      tauri: REPO,
+      privateKey: stranger.privateKey,
+      app: inputs.to.app,
+      directory: box.probe,
+    })
+    kase.feed.offer(update.version, update.signature, update.bytes)
+    const flow = await refusedFlow(kase, t, { blocked: false })
+    assert.match(
+      flow.failure,
+      /signature/i,
+      `the refusal does not name the signature: ${flow.failure}`,
+    )
+    t.diagnostic(`refused: ${flow.failure}`)
+    await intactEvidence(kase, flow, t)
+    const ended = await quit(kase, [flow.first.daemon.pid])
+    assert.equal(ended.code, 0, `the app exited ${ended.code} / ${ended.signal}`)
+    assertSound(ledgerOf(kase), { atLeast: BRIDGE_SCHEMA })
+    assertProjects(ledgerOf(kase), projectsOf(kase))
+  },
+)
+
+for (const [kind, refusal] of Object.entries(REFUSED)) {
+  updaterCase(
+    `a signed update whose bundle fails the check (${kind}) is refused and the installed app stays intact and running`,
+    async (kase, t) => {
+      const refused = refusedBundle(kind, inputs.to.app, join(kase.box.root, 'refused'))
+      offerUpdate(kase, refused)
+      const flow = await refusedFlow(kase, t, { blocked: true })
+      assert.match(flow.failure, refusal.words, `the refusal is not the check's: ${flow.failure}`)
+      t.diagnostic(`refused: ${flow.failure}`)
+      await intactEvidence(kase, flow, t)
+      const ended = await quit(kase, [flow.first.daemon.pid])
+      assert.equal(ended.code, 0, `the app exited ${ended.code} / ${ended.signal}`)
+      assertSound(ledgerOf(kase), { atLeast: BRIDGE_SCHEMA })
+    },
+  )
+}
+
+for (const how of ['replaced', 'copied over']) {
+  updaterCase(
+    `an app ${how} by hand, with the app quit, repairs the terminal command at its first start and keeps the ledger`,
+    async (kase, t) => {
+      const { box } = kase
+      // Both names of this home's serve it, and the other home has its own.
+      const planted = plantCommands(kase.installed, box, { elsewhere: false })
+      // The installed app has its session, and no update is offered: two projects opened and closed, then it is quit.
+      const old = kase.start(inputs.to.version, { expected: ['update-failure'] })
+      const first = await bootEvidence(kase, old, { version: inputs.from.version })
+      const none = await old.waitFor(
+        'no update to take',
+        (event) => event.event === 'update-failure',
+      )
+      assert.match(none.data.error, /update feed is unavailable/, 'the update was not unavailable')
+      const left = await quit(kase, [first.daemon.pid])
+      assert.equal(left.code, 0, `the app exited ${left.code} / ${left.signal}`)
+      const before = ledgerOf(kase)
+      assertSound(before, { atLeast: BRIDGE_SCHEMA })
+      assertProjects(before, projectsOf(kase))
+
+      // What a disk image's copy does: the update's app where the old one was.
+      if (how === 'replaced') rmSync(box.copy, { recursive: true, force: true })
+      copyOver(inputs.to.app, box.copy)
+      // Every file of the update is there as it is. A bundle with nothing of the old app's left
+      // in it is sealed as the update is; one with files the update has not (a Node the update
+      // ships none of) is not a sealed bundle, and what it must do is run.
+      const merged = digestManifest(box.copy)
+      for (const entry of inputs.toManifest) {
+        assert.deepEqual(
+          merged.find((each) => each.name === entry.name),
+          entry,
+          `${entry.name} is not the update's`,
         )
       }
-      return null
-    })
-  }
+      const stale = merged.filter(
+        (entry) => !inputs.toManifest.some((each) => each.name === entry.name),
+      )
+      t.diagnostic(`files of the old app left in the copy: ${stale.length}`)
+      if (stale.length === 0) verifySeal(box.copy)
 
-  return {
-    child,
-    events,
-    stderr,
-    appPids,
-    waitFor,
-    continueUpdate() {
-      writeSync(control, 'continue-updater\n')
-    },
-    closeInput() {
-      if (!controlClosed) {
-        closeSync(control)
-        controlClosed = true
-      }
-    },
-    killRecorded() {
-      if (!controlClosed) {
-        closeSync(control)
-        controlClosed = true
-      }
-      for (const pid of appPids) {
-        try {
-          process.kill(-pid, 'SIGKILL')
-        } catch {
-          // The process or its group already exited.
-        }
-      }
-    },
-  }
-}
-
-function smokeEnvironment(box, feed, tls, publicKeyPath, expected) {
-  return {
-    PATH: `${box.bin}:/usr/bin:/bin:/usr/sbin:/sbin`,
-    HOME: box.home,
-    TMPDIR: box.root,
-    CONSENSFLOW_HOME: box.state,
-    CLAUDE_CONFIG_DIR: join(box.home, '.claude'),
-    CODEX_HOME: join(box.home, '.codex'),
-    XDG_CONFIG_HOME: join(box.home, '.config'),
-    PI_CODING_AGENT_DIR: join(box.home, '.pi', 'agent'),
-    CONSENSFLOW_SELFTEST: '1',
-    CONSENSFLOW_SELFTEST_DIR: box.workspace,
-    CONSENSFLOW_SELFTEST_UPDATER_EXPECTED: expected,
-    CONSENSFLOW_SELFTEST_UPDATER_URL: feed,
-    CONSENSFLOW_SELFTEST_UPDATER_CERT: tls.caCert,
-    CONSENSFLOW_SELFTEST_UPDATER_KEY: publicKeyPath,
-    CONSENSFLOW_SELFTEST_DEADLINE_MS: String(TIMEOUT_MS + 10_000),
-  }
-}
-
-function archiveFor(box, target) {
-  const archive = join(box.probe, `ConsensFlow-${target.version}_aarch64.app.tar.gz`)
-  commandOutput(
-    '/usr/bin/tar',
-    ['-czf', archive, '-C', dirname(target.app), basename(target.app)],
-    {
-      cwd: REPO,
-      env: { ...process.env, COPYFILE_DISABLE: '1' },
-    },
-  )
-  return archive
-}
-
-function updaterFeed(target, signature) {
-  const archiveName = `ConsensFlow-${target.version}_aarch64.app.tar.gz`
-  return {
-    version: target.version,
-    notes: 'Packaged updater acceptance candidate.',
-    pub_date: '2026-09-09T12:00:00Z',
-    platforms: {
-      'darwin-aarch64': {
-        url: `https://github.com/ngvoicu/consensflow/releases/download/v${target.version}/${archiveName}`,
-        signature,
-      },
-    },
-  }
-}
-
-test('the packaged updater replaces only the isolated copy after pane admission closes', {
-  timeout: TIMEOUT_MS + 20_000,
-}, async (t) => {
-  if (!REQUESTED) {
-    t.skip('packaged updater smoke requires CONSENSFLOW_UPDATER_SMOKE=1')
-    return
-  }
-  assert.equal(
-    process.platform,
-    'darwin',
-    'the packaged updater smoke requires macOS bundles and codesign',
-  )
-  const fromApp = requestedPath('CONSENSFLOW_UPDATER_FROM_APP')
-  const toApp = requestedPath('CONSENSFLOW_UPDATER_TO_APP')
-  assert.notEqual(fromApp, toApp, 'FROM_APP and TO_APP must be distinct source bundles')
-
-  const box = sandbox()
-  let server
-  let app
-  t.after(async () => {
-    app?.killRecorded()
-    killRecordedChiefPids(box)
-    if (server !== undefined) await new Promise((resolveClosed) => server.close(resolveClosed))
-    if (process.env.CONSENSFLOW_UPDATER_SMOKE_KEEP !== '1') {
-      rmSync(box.root, { recursive: true, force: true })
-    }
-  })
-
-  const fromInfo = appInfo(fromApp, 'FROM_APP')
-  const toInfo = appInfo(toApp, 'TO_APP')
-  assert.notEqual(
-    fromInfo.version,
-    toInfo.version,
-    'the two acceptance builds must have different versions',
-  )
-  assert.notEqual(
-    fromInfo.cliVersion,
-    toInfo.cliVersion,
-    'the two acceptance builds must have different bundled CLI versions',
-  )
-  verifyBundle(fromInfo, fromInfo.version, 'FROM_APP')
-  verifyBundle(toInfo, toInfo.version, 'TO_APP')
-  const targetManifest = digestManifest(toApp)
-
-  cpSync(fromApp, box.copy, { recursive: true })
-  assert.deepEqual(
-    digestManifest(box.copy),
-    digestManifest(fromApp),
-    'the test copy differs from FROM_APP',
-  )
-  verifyBundle(appInfo(box.copy, 'isolated copy'), fromInfo.version, 'isolated copy')
-
-  const archive = archiveFor(box, toInfo)
-  const signed = signArchive(box, archive)
-  const tls = openssl(box)
-  const feed = updaterFeed(toInfo, signed.signature)
-  const feedBytes = Buffer.from(JSON.stringify(feed))
-  const archiveBytes = readFileSync(archive)
-  server = createServer({ key: tls.key, cert: tls.cert }, (request, response) => {
-    if (request.url === '/feed') {
-      response.writeHead(200, {
-        'content-type': 'application/json',
-        'content-length': feedBytes.length,
+      const app = kase.start(inputs.to.version)
+      const second = await bootEvidence(kase, app, { version: inputs.to.version })
+      await app.waitFor('the first start', (event) => event.event === 'update-restarted')
+      await heldEvidence(kase)
+      assert.equal(second.daemon.kind, 'native', `the first start ran ${second.daemon.runtime}`)
+      assertChoseNative(appLog(box), box.state)
+      assertRepaired({
+        box,
+        planted,
+        cf: join(box.copy, 'Contents', 'Resources', 'cli', 'bin', 'cf'),
+        appLogText: appLog(box),
+        version: second.daemon.runtime.split(' ')[1],
       })
-      response.end(feedBytes)
-      return
-    }
-    if (request.url === '/archive') {
-      response.writeHead(200, {
-        'content-type': 'application/gzip',
-        'content-length': archiveBytes.length,
-      })
-      response.end(archiveBytes)
-      return
-    }
-    response.writeHead(404).end('not found')
-  })
-  server.on('tlsClientError', (error) => process.stderr.write(`updater TLS: ${error.message}\n`))
-  const feedUrl = await listen(server)
-  const env = smokeEnvironment(box, feedUrl, tls, signed.publicKeyPath, toInfo.version)
-  app = launch(appInfo(box.copy, 'launch copy').binary, env, box.root)
-
-  const firstBoot = await app.waitFor('first update boot', (event) => event.event === 'update-boot')
-  assert.equal(
-    firstBoot.data.currentVersion,
-    fromInfo.version,
-    'first boot did not report the copied FROM version',
+      t.diagnostic(
+        `first start of ${inputs.to.version}: daemon pid ${second.daemon.pid} (${second.daemon.runtime}), the terminal command repaired`,
+      )
+      await quit(kase, [second.daemon.pid])
+      assertKept(before, ledgerOf(kase))
+      t.diagnostic(
+        `the ledger: schema ${before.version} then ${ledgerOf(kase).version}, every row it had is there`,
+      )
+    },
   )
-  assert.notEqual(firstBoot.data.currentVersion, toInfo.version)
-  const firstNativePid = firstBoot.pid
-  assert.ok(pidAlive(firstNativePid), 'the first native app was not alive at update boot')
-  const oldLockPid = await until('first Node process owns the state lock', () => {
-    const failed = app.events.find((event) =>
-      ['update-failure', 'page-error', 'page-rejection'].includes(event.event),
-    )
-    assert.equal(failed, undefined, JSON.stringify(failed))
-    const pid = lockPid(box)
-    return pid !== null && pidAlive(pid) ? pid : null
-  })
-  assert.ok(pidAlive(oldLockPid))
-
-  const beforeInstall = await app.waitFor(
-    'blocked update install report',
-    (event) => event.event === 'update-blocked',
-  )
-  assert.equal(beforeInstall.data.phase, 'ready')
-  assert.equal(
-    beforeInstall.data.blockers.length,
-    2,
-    'the ready snapshot did not expose both open panes',
-  )
-  const chiefPids = await until('two fake chief processes', () => {
-    const pids = [...new Set(recordedPids(box))]
-    return pids.length === 2 ? pids : null
-  })
-  assert.ok(
-    chiefPids.every(pidAlive),
-    `fake chiefs were not alive before blocked install: ${chiefPids.join(',')}`,
-  )
-  assert.ok(pidAlive(firstNativePid), 'blocked install changed the first app process')
-  assert.ok(pidAlive(oldLockPid), 'blocked install changed the state-lock owner')
-
-  app.continueUpdate()
-  await until('two fake chiefs close', () => chiefPids.every((pid) => !pidAlive(pid)))
-  const secondBoot = await app.waitFor(
-    'second update boot',
-    (event) => event.event === 'update-boot' && event.pid !== firstNativePid,
-  )
-  assert.equal(
-    secondBoot.data.currentVersion,
-    toInfo.version,
-    'second boot did not report the installed TO version',
-  )
-  const restarted = await app.waitFor(
-    'successful updater restart',
-    (event) => event.event === 'update-restarted',
-  )
-  assert.equal(
-    restarted.data.currentVersion,
-    toInfo.version,
-    'restart did not report the TO version',
-  )
-  assert.equal(restarted.data.blockers, 0, 'restart reported open panes')
-  assert.notEqual(restarted.pid, firstNativePid, 'updater restarted in the original native process')
-  assert.ok(
-    pidAlive(restarted.pid),
-    'the restarted native app was not alive when it reported ready',
-  )
-  await until('first native app exits', () => !pidAlive(firstNativePid))
-  const newLockPid = await until('new Node process owns the state lock', () => {
-    const pid = lockPid(box)
-    return pid !== null && pid !== oldLockPid && pidAlive(pid) ? pid : null
-  })
-  assert.notEqual(newLockPid, oldLockPid)
-  assert.ok(pidAlive(newLockPid))
-
-  const installed = appInfo(box.copy, 'installed isolated copy')
-  verifyBundle(installed, toInfo.version, 'installed isolated copy')
-  assert.deepEqual(
-    digestManifest(box.copy),
-    targetManifest,
-    'installed copy bytes do not equal TO_APP',
-  )
-  assert.deepEqual(digestManifest(toApp), targetManifest, 'TO_APP was mutated by the smoke')
-  assert.deepEqual(
-    readdirSync(dirname(box.copy)).filter((name) => name.startsWith('.consensflow-update-')),
-    [],
-    'the updater left staging files beside the isolated copy',
-  )
-
-  app.closeInput()
-  await until('all recorded app processes exit', () =>
-    [...app.appPids].every((pid) => !pidAlive(pid)),
-  )
-  assert.deepEqual(recordedPids(box).filter(pidAlive), [], 'a fake chief survived app shutdown')
-  assert.deepEqual(
-    app.events.filter((event) => event.event === 'update-failure'),
-    [],
-    'the successful updater smoke reported a failure',
-  )
-})
+}

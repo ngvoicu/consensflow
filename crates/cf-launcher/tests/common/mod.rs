@@ -47,9 +47,17 @@ impl Home {
         self.env_with(windows, &[])
     }
 
-    /// The same without a `CONSENSFLOW_HOME`: an ordinary terminal's.
+    /// The same without a `CONSENSFLOW_HOME`: an ordinary terminal's, and the
+    /// live app's, whose home is the default one.
     pub fn plain_env(&self, windows: bool) -> Env {
         self.env_with(windows, &[("CONSENSFLOW_HOME", None)])
+    }
+
+    /// The default home of that environment, `.consensflow` in the user's:
+    /// the home a command that pins none talks to, as Node joined it.
+    pub fn default_home(&self) -> PathBuf {
+        let user = self.root().join("home");
+        PathBuf::from(path::join(&[&user.to_string_lossy(), ".consensflow"]))
     }
 
     /// The environment with each of `changes` made: a variable set to a

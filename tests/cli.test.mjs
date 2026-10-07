@@ -3,8 +3,10 @@ import { execFile } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
+import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { rosterPath } from '../src/roster.js'
+import { noteRan } from './choice.mjs'
 import { cliEnv, cliTarget } from './cli-target.mjs'
 import { fakeExecutable, tempEnv } from './helpers.mjs'
 
@@ -12,14 +14,17 @@ import { fakeExecutable, tempEnv } from './helpers.mjs'
 const CMD = process.platform === 'win32' ? '.cmd' : ''
 
 const run = promisify(execFile)
-const CF = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
+/** Node's own CLI, whose sources a look is taken at: `bin/cf.mjs` only starts it. */
+const CF = join(import.meta.dirname, '..', 'src', 'cli.js')
 const FIXTURES = join(import.meta.dirname, 'fixtures')
-/** The cf these tests run: Node's, or the native one (tests/cli-target.mjs, `npm run test:clis`). */
+/** A preload that has every Node process say it started: which cf ran is told by it. */
+const NODE_SPY = join(FIXTURES, 'node-spy.mjs')
+/** The cf these tests run: the native one, or Node's (tests/cli-target.mjs, `npm run test:clis`). */
 const target = cliTarget()
 async function cf(args, env) {
   try {
     const { stdout, stderr } = await run(target.command, [...target.args, ...args], {
-      env: cliEnv(target, args, env),
+      env: cliEnv(target, env),
       timeout: 30_000,
     })
     return { code: 0, stdout, stderr }
@@ -39,12 +44,41 @@ describe('cf manages the roster', () => {
   after(() => t.cleanup())
 
   it(`runs ${target.name}`, async () => {
-    // Node's sources are run by a runtime the app names, and the native cf is
-    // given none for the catalog: that it answers says it is the native cf that
-    // did, and did not hand the verb on.
+    // The native cf is given no Node for the catalog: that it answers says it
+    // is the native cf that did, and did not hand the verb on.
     const out = await cf(['catalog', '--harness', 'pi'], t.env)
     assert.equal(out.code, 0, out.stderr)
     assert.match(out.stdout, /^pi:\n/)
+  })
+
+  // Which cf ran is told by the processes that started, not by the selection,
+  // which a selector that came to the other cf agrees with: Node's cf is a Node
+  // process running bin/cf.mjs, and the native cf serves the catalog with no
+  // Node at all. The leg (tests/legs.mjs) says which it should be.
+  it('is the cf its leg names: a Node process ran bin/cf.mjs, or none did', async () => {
+    const own = tempEnv()
+    try {
+      const marks = join(own.root, 'node-runs')
+      const out = await cf(['catalog', '--harness', 'pi'], {
+        ...own.env,
+        NODE_OPTIONS: `--import=${pathToFileURL(NODE_SPY).href}`,
+        CF_TEST_SPY: marks,
+      })
+      assert.equal(out.code, 0, out.stderr)
+      const ran = existsSync(marks) ? readFileSync(marks, 'utf8').split('\n').filter(Boolean) : []
+      const kind = ran.length > 0 ? 'node' : 'native'
+      // Said to the runner (`npm run test:clis`), which holds the leg to it.
+      noteRan(kind)
+      assert.equal(kind, process.env.CONSENSFLOW_TEST_LEG || target.kind, JSON.stringify(ran))
+      if (kind === 'node') {
+        assert.deepEqual(
+          ran.map((line) => line.split('\t')[1].replace(/^.*[\\/]/, '')),
+          ['cf.mjs'],
+        )
+      }
+    } finally {
+      own.cleanup()
+    }
   })
 
   it('adds, lists, edits and removes an agent', async () => {
@@ -133,7 +167,7 @@ describe('cf manages the roster', () => {
     // every write EPIPEs. PIPESTATUS surfaces cf's own exit code.
     const command = [target.command, ...target.args].map((word) => `"${word}"`).join(' ')
     const child = spawn('/bin/bash', ['-c', `${command} help | false; exit \${PIPESTATUS[0]}`], {
-      env: { ...t.env, ...target.env, PATH: `${t.env.PATH}:/usr/bin:/bin` },
+      env: { ...cliEnv(target, t.env), PATH: `${t.env.PATH}:/usr/bin:/bin` },
       stdio: ['ignore', 'ignore', 'pipe'],
     })
     let stderr = ''

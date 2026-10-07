@@ -3,14 +3,17 @@
 //! human's, which wait in the app until read (`delivery`); what a window
 //! keeps, which rides in the paste of the words that send it on
 //! (`carrying`); what makes a message received, and what that does to its
-//! task (`receipt`); and the human's gate, which holds one agent's word to
-//! another until the human passes it on or declines it (`gate`); and the
-//! one asked, told to answer again when an answer did not stand (`again`).
+//! task (`receipt`); the human's gate, which holds one agent's word to
+//! another until the human passes it on or declines it (`gate`); the one
+//! asked, told to answer again when an answer did not stand (`again`); and
+//! the note that tells a requester its tasks stalled, one for the tasks of a
+//! pass, which goes when they are resumed (`pauses`).
 
 mod again;
 mod carrying;
 mod delivery;
 mod gate;
+mod pauses;
 mod receipt;
 
 use cf_proto::ledger::{MessageView, Question};
@@ -31,6 +34,7 @@ pub(crate) use delivery::{
     last_pasted, next_delivery, retry_delivery, take_back, with_work,
 };
 pub(crate) use gate::{approve_message, decline_message, mark_read};
+pub(crate) use pauses::{join_pause_note, leave_pause_notes, note_pause};
 pub use receipt::Read;
 pub(crate) use receipt::{
     claim_answer, door_born_closed, receive_read, reconcile, release_all_claims, release_claims,

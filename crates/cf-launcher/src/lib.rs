@@ -13,9 +13,10 @@
 //!   asking, in the shape of every build, and the line `cf doctor` says of
 //!   it ([`Wiring::report`]).
 //! - [`repair`] is what the app runs at its start: a command of ours that
-//!   does not name this bundle's `cf` is rewritten, so the one an older
-//!   build wrote (its bundled Node and `cf.mjs`) keeps working after the
-//!   bundle has neither.
+//!   serves the app's own home and does not name this bundle's `cf` is
+//!   rewritten, so the one an older build wrote (its bundled Node and
+//!   `cf.mjs`) keeps working after the bundle has neither. One that serves
+//!   another home is left to the app of that home.
 //!
 //! It sits below the daemon, the native `cf` and the app, and knows no
 //! layout of a bundle: every caller names the `cf` of its own, the daemon's

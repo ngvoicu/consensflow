@@ -1,0 +1,257 @@
+/**
+ * Plants bugs in what releases and the agents screens are made of, one at a
+ * time, and checks that a test catches each: the rule of the feeds and its
+ * checks, the publisher, the release workflow's text, the portable app's
+ * collector, the agents of both daemons as the packaged smoke holds them, and the
+ * updater smoke: its readers of evidence, and the product it holds (the app's
+ * daemon choice, the ledger's one holder, the check of an update). A
+ * plant is a few pieces of text replaced in the sources; the tests that should
+ * notice are run (never in parallel: the sources are changed under them) and
+ * each plant is reported caught or missed. A plant may name commands to run
+ * first (`prepare`: they must succeed), files its runs take as given
+ * (`requires`) and say its runs build the native `cf` (`builds`). Every file a
+ * plant touches is first
+ * copied outside the repository and is put back from that copy, byte for byte,
+ * whatever the run came to, on Ctrl-C and on being terminated too; a run killed
+ * past that leaves the copies in the folder it says first. The native `cf` that
+ * `bin/` holds is built again from the sources as they are once the plants are
+ * done, if a plant had it built from its own.
+ *
+ *   npm run plants:release                  # every plant
+ *   npm run plants:release -- feeds publish   # the plants whose names hold a word
+ *   npm run plants:release -- --check       # only that every plant still applies
+ *
+ * A plant that stops applying (the text it replaces was changed) is an error to
+ * mend there, not a pass. One that does not compile, and one that makes a run
+ * wait for ever (it is ended after ten minutes), count as missed. Exit code 1 if
+ * any plant is missed or does not apply. The same shape as `plants:cli`.
+ */
+import { spawn, spawnSync } from 'node:child_process'
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { PLANTS as AGENTS } from './release/agents.mjs'
+import { PLANTS as FEEDS } from './release/feeds.mjs'
+import { BOTH } from './release/kit.mjs'
+import { PLANTS as PORTABLE } from './release/portable.mjs'
+import { PLANTS as PUBLISH } from './release/publish.mjs'
+import { PLANTS as UPDATER } from './release/updater.mjs'
+import { PLANTS as WORKFLOW } from './release/workflow.mjs'
+
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+/** The longest one run may take, in milliseconds: the dual runner builds a release `cf`. */
+const RUN_LIMIT = 10 * 60 * 1000
+
+/** Every plant, by area. */
+const PLANTS = [...FEEDS, ...PUBLISH, ...WORKFLOW, ...PORTABLE, ...AGENTS, ...UPDATER]
+
+const args = process.argv.slice(2)
+const words = args.filter((arg) => !arg.startsWith('--'))
+const chosen = PLANTS.filter(
+  (plant) => words.length === 0 || words.some((word) => plant.name.includes(word)),
+)
+
+/** `text` with `from` replaced by `to` where it is found exactly once. */
+function replaced(plant, file, text, from, to) {
+  const found = text.split(from).length - 1
+  if (found !== 1) {
+    throw new Error(`${plant.name}: ${file} holds ${JSON.stringify(from)} ${found} times, not once`)
+  }
+  return text.replace(from, () => to)
+}
+
+/**
+ * What a plant needs in place before its text is replaced: a source it plants
+ * that is not in the repository until something exports it (`prepare`: commands
+ * that must succeed, which a static check of the text runs too). And, before a
+ * plant is run, what its runs take as given (`requires`: files that a build
+ * made once is). Either missing is an error to mend, never a pass: a run that
+ * has no build to take fails by itself, and would be taken for a catch.
+ */
+function prepare(plant) {
+  for (const [program, ...prepareArgs] of plant.prepare ?? []) {
+    const ran = spawnSync(program, prepareArgs, { cwd: REPO, stdio: 'inherit' })
+    if (ran.status !== 0)
+      throw new Error(`${plant.name}: ${program} ${prepareArgs.join(' ')} failed`)
+  }
+}
+
+function requires(plant) {
+  for (const file of plant.requires ?? []) {
+    if (!existsSync(join(REPO, file))) throw new Error(`${plant.name}: ${file} is not there`)
+  }
+}
+
+/** The text of each file `plant` touches once planted, by file. */
+function planted(plant) {
+  prepare(plant)
+  const files = new Map()
+  for (const [file, from, to] of plant.edits) {
+    const text = files.get(file) ?? readFileSync(join(REPO, file), 'utf8')
+    files.set(file, replaced(plant, file, text, from, to))
+  }
+  return files
+}
+
+if (args.includes('--check')) {
+  for (const plant of chosen) planted(plant)
+  process.stdout.write(`${chosen.length} plants apply\n`)
+  process.exit(0)
+}
+
+const saved = mkdtempSync(join(tmpdir(), 'cf-plants-'))
+process.stdout.write(`copies of what is planted are kept in ${saved}\n`)
+/** What is planted now: its files, with the copies they go back from. */
+let planting = null
+let running = null
+/** Whether a run built the native `cf` of `bin/` from planted sources. */
+let built = false
+
+/** Puts every file of the plant in hand back from its copy, and says if one was not. */
+function restore() {
+  if (planting === null) return
+  const { copies } = planting
+  planting = null
+  for (const { path, copy, original } of copies) {
+    copyFileSync(copy, path)
+    if (!readFileSync(path).equals(original)) {
+      throw new Error(`${path} is not as it was: its copy is ${copy}`)
+    }
+  }
+}
+
+/** Ends the run in hand, with every process it started. */
+function endRun() {
+  if (running === null) return
+  try {
+    process.kill(-running.pid, 'SIGKILL')
+  } catch {}
+}
+
+function leave(code) {
+  endRun()
+  restore()
+  rmSync(saved, { recursive: true, force: true })
+  process.exit(code)
+}
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => leave(130))
+
+/** The tests a run's output says failed: `node --test`'s, and `cargo test`'s. */
+function failed(output) {
+  const names = []
+  for (const hit of output.matchAll(/^\s*✖ (.+?) \(\d[\d.]*ms\)$/gm)) names.push(hit[1])
+  for (const hit of output.matchAll(/^test (\S+) \.\.\. FAILED$/gm)) names.push(hit[1])
+  return [...new Set(names)]
+}
+
+/**
+ * One run: its output, and what caught the plant if anything did: the tests it
+ * says failed, or the run itself where it ended badly with no test left to say so.
+ */
+function execute(command) {
+  const [program, ...runArgs] = command
+  return new Promise((resolve) => {
+    const child = spawn(program, runArgs, {
+      cwd: REPO,
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, NODE_TEST_CONTEXT: undefined },
+    })
+    running = child
+    let output = ''
+    child.stdout.on('data', (data) => {
+      output += data
+    })
+    child.stderr.on('data', (data) => {
+      output += data
+    })
+    let hung = false
+    const late = setTimeout(() => {
+      hung = true
+      endRun()
+    }, RUN_LIMIT)
+    child.on('close', (code) => {
+      clearTimeout(late)
+      running = null
+      const compiled = !output.includes('could not compile') && !/error\[E\d+\]/.test(output)
+      const caught = failed(output)
+      if (compiled && !hung && code !== 0 && caught.length === 0) {
+        caught.push(`${command.slice(1).join(' ')}: ended with ${code}`)
+      }
+      resolve({ output, caught, compiled, hung, command })
+    })
+  })
+}
+
+/** The line of the first error `node --test` ends its report with (the first failing test's), cut short. */
+function firstFailure(output) {
+  const found = /\n✖ [^\n]*\n {2}(\w*Error[^\n]*)/.exec(output.split('failing tests:')[1] ?? '')
+  return found === null ? null : found[1].slice(0, 220)
+}
+
+async function trial(plant) {
+  const copies = []
+  requires(plant)
+  const edited = planted(plant)
+  for (const [file, text] of edited) {
+    const path = join(REPO, file)
+    const copy = join(saved, `${copies.length}-${file.replaceAll('/', '_')}`)
+    copyFileSync(path, copy)
+    copies.push({ path, copy, original: readFileSync(path) })
+    planting = { copies }
+    writeFileSync(path, text)
+  }
+  try {
+    let ran = null
+    for (const command of plant.runs) {
+      built = built || command === BOTH || plant.builds === true
+      ran = await execute(command)
+      if (!ran.compiled) return { verdict: 'does not compile', ran }
+      if (ran.hung) return { verdict: 'hung', ran }
+      if (ran.caught.length > 0) return { verdict: 'caught', ran }
+    }
+    return { verdict: 'missed', ran }
+  } finally {
+    restore()
+  }
+}
+
+let wrong = 0
+for (const plant of chosen) {
+  const started = Date.now()
+  const { verdict, ran } = await trial(plant)
+  const seconds = ((Date.now() - started) / 1000).toFixed(0)
+  const by =
+    verdict === 'caught'
+      ? ` by ${ran.caught[0]}${ran.caught.length > 1 ? ` (+${ran.caught.length - 1})` : ''}${
+          ran.caught.some((name) => name.includes(plant.meant)) ? '' : `, not by ${plant.meant}`
+        }`
+      : ''
+  if (verdict !== 'caught') wrong += 1
+  process.stdout.write(`${verdict.toUpperCase().padEnd(16)} ${plant.name} (${seconds} s)${by}\n`)
+  // What the first test to fail said, which the test's name does not: the check that fired.
+  const said = verdict === 'caught' ? firstFailure(ran.output) : null
+  if (said !== null) process.stdout.write(`    first failure: ${said}\n`)
+  if (verdict === 'does not compile') process.stdout.write(`${ran.output.slice(-1500)}\n`)
+  if (verdict === 'hung') {
+    process.stdout.write(`    ${ran.command.join(' ')} did not end in ${RUN_LIMIT / 1000} s\n`)
+  }
+  if (verdict === 'missed') {
+    // What the last run ran, to tell a test that passed from none that ran.
+    const summary = ran.output.split('\n').filter((line) => /^ℹ (tests|pass|fail)/.test(line))
+    process.stdout.write(`${summary.map((line) => `    ${line}`).join('\n')}\n`)
+  }
+}
+rmSync(saved, { recursive: true, force: true })
+if (built) {
+  process.stdout.write('the native cf of bin/ is built again from the sources as they are\n')
+  const again = spawnSync(
+    process.execPath,
+    [join(REPO, 'app', 'scripts', 'build-cf.mjs'), '--offline'],
+    { cwd: REPO, stdio: 'inherit' },
+  )
+  if (again.status !== 0) wrong += 1
+}
+process.stdout.write(`${chosen.length - wrong} of ${chosen.length} plants caught\n`)
+process.exit(wrong === 0 ? 0 : 1)

@@ -18,13 +18,12 @@ pub(super) enum Verdict {
 }
 
 /// The ways Node's adapters say a CLI could not answer a question of a plan
-/// (a version or a help it was asked, the MCP servers or the instructions of
-/// Codex, the throwaway server of OpenCode): it ran out of time, would not
-/// start, was too old, or said what no one can read.
+/// (a version or a help it was asked, the instructions of Codex, the
+/// throwaway server of OpenCode): it ran out of time, would not start, was
+/// too old, or said what no one can read.
 static UNANSWERED: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         r"^(could not ask Codex whether it has its native queue",
-        r"|could not list Codex's MCP servers to switch them off",
         r"|Cannot read native Codex instructions safely",
         r"|(This Codex|Codex \S+) has no native queue",
         r"|opencode serve (failed to start|exited early)",
@@ -79,7 +78,6 @@ mod tests {
     fn a_refusal_is_the_clis_for_a_cli_that_could_not_answer_and_never_for_a_launch_s_own() {
         for unanswered in [
             "could not ask Codex whether it has its native queue: it did not answer in time",
-            "could not list Codex's MCP servers to switch them off: Command failed: codex mcp list --json",
             "Cannot read native Codex instructions safely",
             "Codex 0.150.0 has no native queue, which ConsensFlow needs to reach its window: update Codex.",
             "This Codex has no native queue, which ConsensFlow needs to reach its window: update Codex.",

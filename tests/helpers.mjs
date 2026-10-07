@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { roleConfiguration } from '../src/role-skills.js'
+import { assertBuilt, choose, chooseHome, DEFAULT_DAEMON, NATIVE_CF } from './choice.mjs'
 
 /**
  * Every test runs against a throwaway CONSENSFLOW_HOME and throwaway harness
@@ -27,27 +28,70 @@ export function tempEnv() {
 }
 
 /**
- * How a test starts a daemon: Node's by default, `node <nodeArgs>`; with
- * `CONSENSFLOW_TEST_DAEMON` set to a JSON array, a command and its arguments,
- * the native one (`cf ui --json --no-open` of the build under test), with the
- * switch it runs behind (`CONSENSFLOW_DAEMON=native`) in its environment. Either
- * is told the runtime to name to the windows it opens (`CONSENSFLOW_NODE`): the
- * Node daemon names its own whatever this says, the native one names what it is
- * given. `env` is what to add to the environment the test gives the daemon.
+ * What Windows itself needs to start a process and to find a program: where its
+ * system is, its command interpreter, and which extensions make a file a program.
+ * Nothing elsewhere. `tempEnv` gives a test none of it, since a test that starts
+ * only the process it names does without; one that starts what starts a `.cmd` or
+ * a program by its name adds this to the environment it gives.
  */
-export function daemonCommand(nodeArgs) {
-  const named = process.env.CONSENSFLOW_TEST_DAEMON
+export const windowsEnv = () =>
+  process.platform === 'win32'
+    ? {
+        SystemRoot: process.env.SystemRoot,
+        ComSpec: process.env.ComSpec,
+        PATHEXT: process.env.PATHEXT,
+      }
+    : {}
+
+/**
+ * How a test starts a daemon, as `CONSENSFLOW_TEST_DAEMON` names it (the words
+ * are tests/choice.mjs's): `node`, Node's, `node <nodeArgs>`; `native` or a JSON
+ * array, a command and its arguments, the native one (`cf ui --json --no-open`
+ * of the build under test); nothing, the tests' default, which is the native
+ * one. The product chooses by the file in the home, not by the environment, so
+ * the choice is made in the home the daemon is to run on: `home` is that
+ * folder, which the Node daemon's gets the way back's file in and the native
+ * one's has none (`chooseHome`), whatever else starts in it, and which
+ * `assertStarted` holds to the choice. A start that names none leaves the home
+ * to its caller. Either is told the runtime to name to the windows it opens
+ * (`CONSENSFLOW_NODE`): the Node daemon names its own whatever this says, the
+ * native one names what it is given. `env` is what to add to the environment
+ * the test gives the daemon, and `kind` is the one chosen, `node` or `native`:
+ * what `assertStarted` holds the daemon that starts to. A run labelled with
+ * its leg (`CONSENSFLOW_TEST_LEG`) is refused a choice that is not its own.
+ * The options are what a test sets to choose in its own words, not the
+ * environment's: the selection, the leg, and the default.
+ */
+export function daemonCommand(
+  nodeArgs,
+  {
+    named = process.env.CONSENSFLOW_TEST_DAEMON,
+    leg = process.env.CONSENSFLOW_TEST_LEG,
+    fallback = DEFAULT_DAEMON,
+    home = undefined,
+  } = {},
+) {
+  const chosen = choose('CONSENSFLOW_TEST_DAEMON', { named, leg, fallback })
   const env = { CONSENSFLOW_NODE: process.execPath }
-  if (named === undefined || named === '') {
-    return { command: process.execPath, args: nodeArgs, env, native: false }
+  if (home !== undefined) chooseHome(chosen.kind, home)
+  if (chosen.kind === 'node') {
+    return {
+      command: process.execPath,
+      args: nodeArgs,
+      env,
+      native: false,
+      kind: 'node',
+    }
   }
-  const [command, ...args] = JSON.parse(named)
-  if (typeof command !== 'string' || args.some((arg) => typeof arg !== 'string')) {
-    throw new Error(
-      'CONSENSFLOW_TEST_DAEMON is a JSON array of strings: a command and its arguments',
-    )
+  if (chosen.command === null) assertBuilt()
+  const [command, ...args] = chosen.command ?? [NATIVE_CF, 'ui', '--json', '--no-open']
+  return {
+    command,
+    args,
+    env,
+    native: true,
+    kind: 'native',
   }
-  return { command, args, env: { ...env, CONSENSFLOW_DAEMON: 'native' }, native: true }
 }
 
 /** Native config resolution is a subprocess boundary, covered in role-skills.test. */
