@@ -194,11 +194,12 @@ const drawer = new TaskDrawer($('#task-drawer'), {
         project: task.projectId,
         task: task.number,
       })
-      note(
-        resumed.state === 'open'
-          ? `T-${task.number} is back on the board: the window that had it has ended.`
-          : `T-${task.number} resumes in @${resumed.assignee}.`,
-      )
+      // A task paused in the backlog had no window: it only waits for a member again.
+      const back =
+        task.assignee === null
+          ? `T-${task.number} is back on the board.`
+          : `T-${task.number} is back on the board: the window that had it has ended.`
+      note(resumed.state === 'open' ? back : `T-${task.number} resumes in @${resumed.assignee}.`)
     }),
   onDelete: (task) => askToDeleteTasks(task.projectId, [task.number], `Delete T-${task.number}?`),
   // The drawer covers the dock: it closes, and the task's window is in front.

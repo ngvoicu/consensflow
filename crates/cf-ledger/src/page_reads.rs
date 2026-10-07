@@ -5,7 +5,7 @@
 //! Sizes are of the JSON as the page receives it, which serde writes byte
 //! for byte as `JSON.stringify` did.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cf_base::text::utf16_len;
 use cf_proto::ledger::{
@@ -124,11 +124,14 @@ pub(crate) fn open_tasks(store: &Store, project_id: i64) -> Result<Vec<TaskView>
 
 /// The board: each task with the first line of its latest result, what its
 /// card shows; its brief stays out, as the drawer reads it with the task. A
-/// task of a session that has ended sits on its member's lane; one the human
-/// deleted is on no lane. A task is drawn by its lane or, waiting for a
-/// member, among the open ones: one that left `open` before any member had
-/// it (called off, paused or failed) is on neither, and neither is a removed
-/// member's, as on Node's board (`tests/cancelled.rs` holds the two to it).
+/// task sits on the lane of whoever has it: its assignee's or, once the
+/// session that had it is off the board (the human deleted it), its
+/// member's. A task no lane has is among the open ones, whatever its state:
+/// one waiting for a member; one paused, called off or failed before any
+/// member had it; one of a member who left the staff, finished or not. The
+/// page draws each on its requester's row, in the column of its state, a
+/// paused one in the backlog. A task the human deleted is on neither
+/// (`tests/cancelled.rs` holds the board to Node's on one file).
 pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError> {
     let Some(project) = project(store, project_id)? else {
         return Err(LedgerError::refused_with(
@@ -183,11 +186,20 @@ pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError
             })
         })
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    let handles: HashSet<&str> = project
+        .participants
+        .iter()
+        .map(|participant| participant.handle.as_str())
+        .collect();
+    let has_lane = |lane: &Option<String>| {
+        lane.as_deref()
+            .is_some_and(|handle| handles.contains(handle))
+    };
     Ok(Board {
-        // On the board for a member; one given by name waits in its own lane.
+        // Every task no lane has; one given by name waits in its own lane.
         open: cards
             .iter()
-            .filter(|(card, _)| card.state == "open" && card.assignee.is_none())
+            .filter(|(_, lane)| !has_lane(lane))
             .map(|(card, _)| card.clone())
             .collect(),
         lanes: project

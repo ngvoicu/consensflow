@@ -757,3 +757,62 @@ describe('the terminal questions eval', () => {
     ])
   })
 })
+
+describe('the tasks the board places', () => {
+  it('are every one it lists: one no lane has, whatever its state, and not one the human deleted', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-placed-'))
+    const file = path.join(dir, 'consensflow.db')
+    try {
+      const ledger = openLedger(file)
+      const project = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'claude-code' },
+      })
+      for (const agent of ['zeus', 'diana']) {
+        ledger.addMember(project.id, {
+          agent,
+          harness: 'claude-code',
+          role: 'worker',
+          tier: 'standard',
+        })
+      }
+      const open = (body) =>
+        ledger.createTask(project.id, { from: 'chief', pool: 'worker', tier: 'standard', body })
+      const finish = (number, agent) => {
+        const given = ledger.assignTask(
+          project.id,
+          number,
+          ledger.project(project.id).participants.find((p) => p.handle === agent).id,
+        )
+        ledger.beginDelivery(given.message.id)
+        ledger.confirmDelivery(given.message.id, { evidence: 'native' })
+        ledger.recordResult(project.id, number, { body: 'Done' })
+      }
+      // Waiting (T-1), paused (T-2), called off (T-3), failed (T-4): no member had them.
+      for (const body of ['Waits', 'Paused', 'Called off', 'Failed']) open(body)
+      ledger.pauseTask(project.id, 2, { by: 'human' })
+      ledger.cancelTask(project.id, 3, { by: 'chief' })
+      ledger.failTask(project.id, 4, { reason: 'its launch never came up' })
+      // Zeus's, on his session's lane (T-5); diana's, who then left the staff (T-6);
+      // and one the human deleted (T-7).
+      open('Parser')
+      finish(5, 'zeus')
+      open('Docs')
+      finish(6, 'diana')
+      ledger.removeMember(project.id, 'diana')
+      open('Old spike')
+      finish(7, 'zeus')
+      ledger.acceptTask(project.id, 7, { by: 'chief' })
+      ledger.deleteTasks(project.id, [7])
+      const board = ledger.board(project.id)
+      const listed = board.open.length + board.lanes.reduce((n, lane) => n + lane.tasks.length, 0)
+      ledger.close()
+
+      assert.equal(listed, 6, 'every task but the deleted one is on the board')
+      assert.equal(measure(file).plumbing.placed, listed)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})

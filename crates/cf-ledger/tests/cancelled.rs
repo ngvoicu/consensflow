@@ -2,9 +2,11 @@
 //! chief's re-plan of 2026-10-07 (the chief eval `six-decisions`, run on the
 //! native daemon) cancelled tasks that no member had yet and a task whose
 //! window it had told, and the eval counted fewer tasks on the board and
-//! fewer tells answered than it had made. Neither is a rule this ledger
-//! changed: each test writes the states here, has Node's ledger read or move
-//! them, and holds this one to what Node's does.
+//! fewer tells answered than it had made. The board then left such a task
+//! off both its lists, as it did a paused backlog task and a removed member's
+//! tasks; the owner decided (2026-10-07) that all three stay in view, and both
+//! boards place them so: each test writes the states here, has Node's ledger
+//! read or move them, and holds this one to what Node's does.
 
 // The tests start Node themselves; their helpers expect, as the tests do.
 #![allow(clippy::disallowed_methods, clippy::expect_used)]
@@ -63,6 +65,22 @@ fn id_of(project: &ProjectView, handle: &str) -> i64 {
         .id
 }
 
+/// The chief gives a task to `to` by name, waiting for `needs`.
+fn by_name(ledger: &mut Ledger, project: i64, to: &str, body: &str, needs: &[u64]) {
+    ledger
+        .create_task(
+            project,
+            &NewTask {
+                from: "chief".into(),
+                to: Some(to.into()),
+                body: body.into(),
+                needs: needs.to_vec(),
+                ..NewTask::default()
+            },
+        )
+        .expect("a task given by name");
+}
+
 /// The chief opens a task for a standard worker, waiting for `needs`.
 fn open(ledger: &mut Ledger, project: i64, body: &str, needs: &[u64]) {
     ledger
@@ -100,8 +118,8 @@ fn given(ledger: &mut Ledger, project: i64, number: i64, member: i64, result: Op
     }
 }
 
-/// Where each task the board lists is, as `place T-n state`: the open ones
-/// waiting for a member under `open`, the rest under their lane's handle.
+/// Where each task the board lists is, as `place T-n state`: those no lane
+/// has under `open`, the rest under their lane's handle.
 fn listed(board: &Board) -> Vec<String> {
     let card = |place: &str, task: &TaskCard| format!("{place} T-{} {}", task.number, task.state);
     board
@@ -116,8 +134,8 @@ fn listed(board: &Board) -> Vec<String> {
         .collect()
 }
 
-/// A ledger in every state a task may leave the board's lists in or stay on
-/// them, the way the chief's re-plan and the daemon's own moves leave them:
+/// A ledger in every state a task may be placed from, the way the chief's
+/// re-plan, the human and the daemon's own moves leave them:
 ///
 /// - T-1 given to zeus, done, and not accepted, so what needs it waits;
 /// - T-2 cancelled, T-3 paused and T-4 failed, each still open, no member
@@ -127,12 +145,20 @@ fn listed(board: &Board) -> Vec<String> {
 /// - T-6 given to zeus by name and cancelled: it has its assignee;
 /// - T-7 done in a session of hera that the human then ended;
 /// - T-8 done in a session of zeus, accepted, and deleted by the human;
-/// - T-9 given to athena by name, who the human then removed from the staff:
-///   it was cancelled with her, and her lane went.
+/// - athena's, before the human removed her from the staff: T-9 given to her
+///   by name, T-10 given to her by name and paused, T-11 done in a session
+///   of hers, T-12 done in another and accepted, T-13 given to her by name
+///   and waiting for T-1. Her removal cancelled T-9, the one task in her
+///   hands (queued); the others stay as they were, and her lane and her
+///   sessions' went.
 fn replanned(file: &Path) -> (Board, String) {
     let mut ledger = open_ledger(file, options()).expect("a ledger");
     let project = project(&mut ledger);
-    let (zeus, hera) = (id_of(&project, "zeus"), id_of(&project, "hera"));
+    let (zeus, hera, athena) = (
+        id_of(&project, "zeus"),
+        id_of(&project, "hera"),
+        id_of(&project, "athena"),
+    );
     for (body, needs) in [
         ("Parser", &[][..]),
         ("Docs", &[1]),
@@ -150,17 +176,7 @@ fn replanned(file: &Path) -> (Board, String) {
     ledger
         .fail_task(project.id, 4, "its launch never came up")
         .expect("T-4");
-    ledger
-        .create_task(
-            project.id,
-            &NewTask {
-                from: "chief".into(),
-                to: Some("zeus".into()),
-                body: "By name".into(),
-                ..NewTask::default()
-            },
-        )
-        .expect("T-6");
+    by_name(&mut ledger, project.id, "zeus", "By name", &[]);
     ledger.cancel_task(project.id, 6, "chief").expect("T-6");
     open(&mut ledger, project.id, "Ended", &[]);
     given(&mut ledger, project.id, 7, hera, Some("Done"));
@@ -171,17 +187,17 @@ fn replanned(file: &Path) -> (Board, String) {
     given(&mut ledger, project.id, 8, zeus, Some("Done"));
     ledger.accept_task(project.id, 8, "chief").expect("T-8");
     ledger.delete_tasks(project.id, &[8]).expect("T-8 goes");
+    by_name(&mut ledger, project.id, "athena", "Gone", &[]);
+    by_name(&mut ledger, project.id, "athena", "Held", &[]);
     ledger
-        .create_task(
-            project.id,
-            &NewTask {
-                from: "chief".into(),
-                to: Some("athena".into()),
-                body: "Gone".into(),
-                ..NewTask::default()
-            },
-        )
-        .expect("T-9");
+        .pause_task(project.id, 10, Some("chief"), None)
+        .expect("T-10");
+    open(&mut ledger, project.id, "Finished", &[]);
+    given(&mut ledger, project.id, 11, athena, Some("Done"));
+    open(&mut ledger, project.id, "Accepted", &[]);
+    given(&mut ledger, project.id, 12, athena, Some("Done"));
+    ledger.accept_task(project.id, 12, "chief").expect("T-12");
+    by_name(&mut ledger, project.id, "athena", "Waits", &[1]);
     ledger
         .remove_member(project.id, "athena")
         .expect("athena leaves");
@@ -192,7 +208,7 @@ fn replanned(file: &Path) -> (Board, String) {
 }
 
 #[test]
-fn a_task_called_off_or_paused_before_any_member_had_it_is_on_no_lane_as_node_draws_the_board() {
+fn a_task_no_lane_has_is_among_the_open_ones_whatever_its_state_as_node_draws_the_board() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("consensflow.db");
     let (board, here) = replanned(&file);
@@ -200,15 +216,23 @@ fn a_task_called_off_or_paused_before_any_member_had_it_is_on_no_lane_as_node_dr
     assert_eq!(
         listed(&board),
         [
+            "open T-2 cancelled",
+            "open T-3 paused",
+            "open T-4 failed",
             "open T-5 open",
+            "open T-9 cancelled",
+            "open T-10 paused",
+            "open T-11 done",
+            "open T-12 accepted",
+            "open T-13 open",
             "zeus T-6 cancelled",
             "hera T-7 done",
             "zeus-amber-pine T-1 done",
         ],
-        "T-2 (cancelled), T-3 (paused) and T-4 (failed) were never given to a member: the board \
-         lists a task by its lane or among the open ones, and they are on neither. T-8, a \
-         member's, was deleted by the human, and T-9 is a removed member's, whose lane is gone: \
-         neither is on a lane"
+        "T-2 (cancelled), T-3 (paused) and T-4 (failed) were never given to a member, and athena's \
+         tasks (T-9 to T-13, whatever their state) are of a member who left: the board lists a \
+         task by its lane, and these have none, so they are among the open ones, each in the \
+         order of its number. T-8 was deleted by the human: it is on neither"
     );
     let there = printed(&mut node(
         "const ledger = openLedger(file);\n\

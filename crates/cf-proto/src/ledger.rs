@@ -393,11 +393,14 @@ pub struct Lane {
     pub tasks: Vec<TaskCard>,
 }
 
-/// The board as the page reads it: the project, the tasks on the board for a
-/// member, each participant's lane, and what waits for the human's approval.
+/// The board as the page reads it: the project, the tasks no lane has, each
+/// participant's lane, and what waits for the human's approval.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Board {
     pub project: ProjectView,
+    /// Every task no lane has, whatever its state: one waiting for a member,
+    /// one paused, called off or failed before any member had it, and one of a
+    /// member who left the staff. A task the human deleted is on no list.
     pub open: Vec<TaskCard>,
     pub lanes: Vec<Lane>,
     pub gated: Vec<MessageView>,

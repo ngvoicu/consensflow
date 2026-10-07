@@ -395,7 +395,11 @@ describe('a plan on the board: needs', () => {
           { code: 'need-cancelled' },
         )
       }
-      assert.equal(ledger.board(project.id).open.length, 0)
+      assert.deepEqual(
+        ledger.board(project.id).open.map((task) => [task.number, task.state]),
+        [[1, 'cancelled']],
+        'the refusals created nothing: T-1, called off before any member had it, is all there is',
+      )
     })
   })
 
@@ -485,7 +489,12 @@ describe('pause and resume', () => {
         to: 'paused',
         by: null,
       })
-      assert.deepEqual(ledger.board(project.id).open, [], 'a paused task is not given out')
+      assert.deepEqual(ledger.openTasks(project.id), [], 'a paused task is not given out')
+      assert.deepEqual(
+        ledger.board(project.id).open.map((task) => [task.number, task.state]),
+        [[2, 'paused']],
+        'it stays in the backlog, paused',
+      )
       assert.throws(() => ledger.pauseTask(project.id, 2, { by: 'chief' }), {
         code: 'invalid-transition',
       })

@@ -764,6 +764,96 @@ test("draws the chief's row only while a task is on it: its own, or one it asked
   await expect(row.locator('td[data-state="open"] button.card[data-task="8"]')).toHaveCount(1)
 })
 
+test('keeps a task paused in the backlog in the backlog, marked paused, and resumes it from there', async ({
+  page,
+}) => {
+  const data = model()
+  const paused = task(8, 'Add the lexer', 'paused', 'chief', null, 4, {
+    pool: 'worker',
+    tier: 'standard',
+  })
+  data.boards[1].open.push(paused)
+  data.tasks['1:8'] = { ...paused, messages: [], resumesOpen: true }
+  await open(page, data)
+  const chief = page.locator('tr[data-handle="chief"]')
+  // Beside T-6, which waits for a member; it is not queued, for no window has it.
+  await expect(chief.locator('td[data-state="open"] button.card')).toHaveText([/^T-8/, /^T-6/])
+  await expect(page.locator('td[data-state="queued"] button.card[data-task="8"]')).toHaveCount(0)
+  const card = chief.locator('td[data-state="open"] button.card[data-task="8"]')
+  await expect(card).toHaveAttribute('data-state', 'paused')
+  await expect(card.locator('.card-state')).toHaveText('Paused')
+  await card.click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-8' })
+  await expect(drawer.getByRole('button')).toHaveText(['Close', 'Resume', 'Cancel task'])
+  await drawer.getByRole('button', { name: 'Resume' }).click()
+  await expect.poll(() => calls(page, 'task.resume')).toEqual([{ project: 1, task: 8 }])
+  await expect(page.locator('#status')).toHaveText('T-8 is back on the board.')
+})
+
+test('lists a task called off or failed before any member had it in Finished, and deletes it as any finished task', async ({
+  page,
+}) => {
+  const data = model()
+  const never = { pool: 'worker', tier: 'standard' }
+  data.boards[1].open.push(
+    task(8, 'Write the changelog', 'cancelled', 'chief', null, 30, never),
+    task(9, 'Add the lexer', 'failed', 'chief', null, 20, never),
+  )
+  data.tasks['1:8'] = { ...data.boards[1].open[1], messages: [] }
+  await open(page, data)
+  const finished = page.locator('tr[data-handle="chief"] td[data-state="finished"] button.card')
+  await expect(finished).toHaveText([/^T-9/, /^T-8/])
+  await expect(finished.first()).toHaveAttribute('data-state', 'failed')
+  await expect(finished.last()).toHaveAttribute('data-state', 'cancelled')
+  // From its drawer, once the human confirms.
+  await finished.last().click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-8' })
+  await expect(drawer.getByRole('button')).toHaveText(['Close', 'Delete task'])
+  await drawer.getByRole('button', { name: 'Delete task' }).click()
+  await page
+    .getByRole('dialog', { name: 'Delete T-8?' })
+    .getByRole('button', { name: 'Delete for good' })
+    .click()
+  await expect.poll(() => calls(page, 'tasks.delete')).toEqual([{ project: 1, tasks: [8] }])
+  await expect(page.locator('button.card[data-task="8"]')).toHaveCount(0)
+  // And from the Finished heading, with the others that may go.
+  const heading = page.getByRole('table', { name: 'Tasks' }).locator('th[data-state="finished"]')
+  await heading.getByRole('button', { name: 'Delete finished' }).click()
+  await page
+    .getByRole('dialog', { name: 'Delete 3 finished tasks?' })
+    .getByRole('button', { name: 'Delete for good' })
+    .click()
+  await expect
+    .poll(() => calls(page, 'tasks.delete'))
+    .toEqual([
+      { project: 1, tasks: [8] },
+      { project: 1, tasks: [3, 5, 9] },
+    ])
+  await expect(page.locator('button.card[data-task="9"]')).toHaveCount(0)
+})
+
+test("keeps a removed member's tasks on the board, on the row of whoever asked: finished in Finished, the rest by their state, a paused one in the backlog", async ({
+  page,
+}) => {
+  const data = model()
+  // @athena left the staff: her lane is gone, and no lane has her tasks.
+  data.boards[1].open.push(
+    task(8, 'Old spike', 'accepted', 'chief', 'athena', 90),
+    task(9, 'Add the lexer', 'paused', 'chief', 'athena-brisk-birch', 5),
+    task(10, 'Check the grammar', 'done', 'chief', 'athena-calm-brook', 3, {
+      result: 'Grammar checked.',
+    }),
+    task(11, 'Wire the docs', 'cancelled', 'chief', 'athena', 2),
+  )
+  await open(page, data)
+  await expect(page.locator('tr[data-handle="athena"]')).toHaveCount(0)
+  const chief = page.locator('tr[data-handle="chief"]')
+  await expect(chief.locator('td[data-state="finished"] button.card')).toHaveText([/^T-11/, /^T-8/])
+  await expect(chief.locator('td[data-state="open"] button.card')).toHaveText([/^T-9/, /^T-6/])
+  await expect(chief.locator('td[data-state="done"] button.card')).toHaveText([/^T-10/])
+  await expect(chief.locator('td[data-state="queued"] button.card')).toHaveCount(0)
+})
+
 test("says the effort an agent runs at, after its model: on a member's row, a session's, and the chief's card", async ({
   page,
 }) => {

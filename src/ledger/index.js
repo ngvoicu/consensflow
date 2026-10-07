@@ -80,6 +80,10 @@ export { RESUME_WORDS } from './tasks.js'
  *   the board and `cf task list` for good, and keeps its row: its number is
  *   never given again, its thread stays whole, and `cf task get` still reads
  *   it. A deleted task moves no more, and nothing new waits for it.
+ * - The board keeps every task the human has not deleted in view. It is on the
+ *   lane of whoever has it; a task no lane has is among the open ones, whatever
+ *   its state: one that waits for a member, one paused, called off or failed
+ *   before any member had it, one of a member who has left the staff.
  * - A review is a task like any other: the chief puts it on the board for a
  *   reviewer of a tier, and the reviewer's findings come back as its result.
  *
