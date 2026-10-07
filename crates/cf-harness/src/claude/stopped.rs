@@ -6,7 +6,10 @@
 //! brief, the words that resume a task), Claude's status reads idle, and
 //! Claude puts the message it was given back into its input box. Read as it
 //! always was, the turn is in flight for ever, and the window never reads at
-//! rest.
+//! rest. Nor does Claude keep the message in the conversation it answers
+//! from: the next message it is given follows what came before it (in the
+//! transcript the two are siblings), so the look says the window took the
+//! message back (`Observed::took_back`).
 //!
 //! Claude's status cannot tell that window from one whose turn has not begun:
 //! it reads idle for as long as the hooks of a prompt run, which is seconds,

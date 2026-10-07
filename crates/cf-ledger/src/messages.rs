@@ -28,7 +28,7 @@ pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{adopt, fold, release_carried, release_stranded, transfer};
 pub(crate) use delivery::{
     begin_delivery, cancel_message, confirm_delivery, fail_delivery, first_received, in_flight,
-    last_pasted, next_delivery, retry_delivery, with_work,
+    last_pasted, next_delivery, retry_delivery, take_back, with_work,
 };
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub use receipt::Read;

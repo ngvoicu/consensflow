@@ -14,10 +14,12 @@
  *             turn stop, and nothing more is pressed once it is at rest.
  *   early     Escape right after the task's words went in, before Claude's
  *             first output. Claude writes no record of such a stop and puts
- *             the words back in its input box; the daemon reads the window at
- *             rest by its own press. Then the resume of the task: its words
- *             must land as a message of their own, not after the old text, and
- *             the task must end with its result.
+ *             the words back in its input box, and out of the conversation it
+ *             answers from; the daemon reads the window at rest by its own
+ *             press, and the ledger keeps the brief for the window again.
+ *             Then the resume of the task: its words must land as a message
+ *             of their own, not after the old text, carry the brief, and the
+ *             task must end with its result, which holds the brief's answer.
  *   hook      Escape at its question hook (the member's question waits on the
  *             board): what happens to the hook's wait and the turn; then the
  *             answer the chief gives late, and the resume that carries it.
@@ -51,7 +53,6 @@ import { basename, join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { lastLines } from './live-window.mjs'
 import {
-  claudeConversation,
   claudeRecord,
   claudeSettlement,
   claudeStatus,
@@ -410,9 +411,12 @@ const commandCase = () =>
  * did not, why, from what the daemon said of the message it held. They must
  * land as a message of their own, not after the text a window that stopped
  * before its first word puts back in its input box, and the task must end with
- * its result. Returns whether all of it happened.
+ * its result. `expect` says more of a window that took its brief back out of
+ * its conversation when it stopped: the words that resume the task carry the
+ * `brief`, and the result holds the `answer` to it. Returns whether all of it
+ * happened.
  */
-async function resumeAfter(rig, number, lines, watched) {
+async function resumeAfter(rig, number, lines, watched, expect = {}) {
   const resumedAt = Date.now()
   const resumed = await rig.app.requestNode('task.resume', { project: rig.project, task: number })
   lines.push(
@@ -444,8 +448,15 @@ async function resumeAfter(rig, number, lines, watched) {
   const headers = record?.text.match(/\[ConsensFlow m-\d+ /g) ?? []
   const alone = Boolean(record) && headers.length === 1
   lines.push(
-    `${alone ? 'ok  ' : 'FAIL'} the resume words landed as a message of their own: ${record ? JSON.stringify(record.text.slice(0, 200)) : 'its record never held them'}`,
+    `${alone ? 'ok  ' : 'FAIL'} the resume words landed as a message of their own: ${record ? JSON.stringify(record.text.slice(0, 300)) : 'its record never held them'}`,
   )
+  // A brief the window took back is not in the conversation the resume is answered in: it is in the resume.
+  const carried = expect.brief === undefined || Boolean(record?.text.includes(expect.brief))
+  if (expect.brief !== undefined) {
+    lines.push(
+      `${carried ? 'ok  ' : 'FAIL'} the resume carried the task's brief: ${carried ? 'its message holds the brief whole' : 'its message does not hold it'}`,
+    )
+  }
   const finished = await until(
     async () => ENDED.includes((await rig.thread(number)).state),
     RESULT_MS,
@@ -457,21 +468,24 @@ async function resumeAfter(rig, number, lines, watched) {
   lines.push(
     `${done ? 'ok  ' : 'FAIL'} the task ended with its result: T-${number} is ${thread.state}${result ? `, its result ${JSON.stringify(result.body.slice(0, 200))}` : ' and holds none'}`,
   )
-  // Not judged: what the model had to go on. A message Claude put back in its input box is one it took
-  // back out of its conversation, so a resume after such a stop is answered without the brief.
-  const brief = claudeRecord(watched.session).find((item) => item.type === 'user')
-  const holds = brief !== undefined && claudeConversation(watched.session).has(brief.uuid)
-  lines.push(
-    `     the conversation the resume was answered in ${holds ? "holds the task's brief" : "no longer holds the task's brief: Claude took it back out when it put it back in its input box, and the model had only the resume's words to go on"}`,
-  )
-  return alone && done
+  const answered = expect.answer === undefined || Boolean(result?.body.includes(expect.answer))
+  if (expect.answer !== undefined) {
+    lines.push(
+      `${answered ? 'ok  ' : 'FAIL'} the result carries the task's own answer: ${answered ? JSON.stringify(expect.answer) : `${JSON.stringify(expect.answer)} is not in it: the worker did not have its brief`}`,
+    )
+  }
+  return alone && carried && done && answered
 }
+
+/** What the brief of the `early` case asks, and what only a worker that has the brief can answer. */
+const EARLY_ANSWER = 'EARLY-4117'
+const EARLY_BRIEF = `Reply with exactly one line: ${EARLY_ANSWER}`
 
 /** Escape into Claude right after its task's words went in: paused as soon as the task is working. */
 const earlyCase = () =>
   stopOf(
     'early',
-    `Run exactly this one shell command, then stop: ${LONG}`,
+    EARLY_BRIEF,
     async (rig, number, lines) => {
       const working = await until(
         async () => (await rig.thread(number)).state === 'working',
@@ -482,7 +496,12 @@ const earlyCase = () =>
       else lines.push(`T-${number} is working: its first turn has just begun`)
       return Boolean(working)
     },
-    { command: false, after: resumeAfter, recordless: true },
+    {
+      command: false,
+      recordless: true,
+      after: (rig, number, lines, watched) =>
+        resumeAfter(rig, number, lines, watched, { brief: EARLY_BRIEF, answer: EARLY_ANSWER }),
+    },
   )
 
 /** A member's question waits on the board: its hook polls. Returns what to watch, with the question. */

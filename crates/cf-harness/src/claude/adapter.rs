@@ -16,9 +16,11 @@
 //!   settled.
 //! - A turn the daemon interrupted before Claude wrote a word of it leaves
 //!   no record of its end, and Claude puts the message back in its input
-//!   box: the window is read at rest where the daemon pressed the interrupt
-//!   for that very turn ([`stopped`]), and the box is cleared before the
-//!   next paste, which would go in after the old text.
+//!   box, and out of the conversation it answers from: the window is read at
+//!   rest where the daemon pressed the interrupt for that very turn
+//!   ([`stopped`]), the look says it took the message back
+//!   (`Observed::took_back`), and the box is cleared before the next paste,
+//!   which would go in after the old text.
 //! - The window's Claude process is the pane's own child when a status names
 //!   it, so the first look already sees a /clear. Otherwise (Claude may run
 //!   as another process the child starts) it is the process whose status
@@ -320,7 +322,7 @@ impl Window for ClaudeWindow {
                 ),
                 Reading::Unknown(_) => (true, false, false, None),
             };
-            let observed = |settled, waiting| Observed {
+            let observed = |settled, waiting, took_back| Observed {
                 reading: Some(Arc::clone(&reading)),
                 settled,
                 waiting,
@@ -328,10 +330,11 @@ impl Window for ClaudeWindow {
                 quota: quota.clone(),
                 switched: None,
                 unnamed: false,
+                took_back,
             };
             Ok(match live {
                 Some(live) if self.elsewhere(&live) => {
-                    switched_to(observed(false, None), live.session)
+                    switched_to(observed(false, None, false), live.session)
                 }
                 live => {
                     // Claude's own status is the word on whether the window
@@ -349,10 +352,12 @@ impl Window for ClaudeWindow {
                     };
                     // A turn the daemon interrupted before a word of it was
                     // written has no end in the transcript: the press is it.
+                    // Claude then has its message in the input box again, and
+                    // out of the conversation it answers from: the look says so.
                     let by_press = idle && self.stopped(&reading);
                     self.restored.set(by_press);
                     *self.asked.borrow_mut() = stopped::last_user(&reading);
-                    observed(idle && (settled || empty) || by_press, waiting)
+                    observed(idle && (settled || empty) || by_press, waiting, by_press)
                 }
             })
         })

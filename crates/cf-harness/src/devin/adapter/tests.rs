@@ -174,6 +174,7 @@ fn a_window_that_has_named_no_conversation_says_nothing_of_one_to_look_at() {
             quota: None,
             switched: None,
             unnamed: false,
+            took_back: false,
         }
     );
 }

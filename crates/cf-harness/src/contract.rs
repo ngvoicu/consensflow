@@ -244,6 +244,12 @@ pub struct Observed {
     /// The window has not said which conversation it shows (it is
     /// starting, switching conversations or reconnecting).
     pub unnamed: bool,
+    /// The look read the window at rest because the interrupt the engine
+    /// pressed stopped its turn before a word of its answer (Claude): the
+    /// message that began the turn is in the window's input box again, and out
+    /// of the conversation the window answers from, though its record still
+    /// shows it.
+    pub took_back: bool,
 }
 
 impl Observed {

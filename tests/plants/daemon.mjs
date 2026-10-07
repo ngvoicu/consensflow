@@ -36,6 +36,7 @@ import { PLANTS as RUN } from './daemon/run.mjs'
 import { PLANTS as SCREENS } from './daemon/screens.mjs'
 import { PLANTS as SESSIONS } from './daemon/sessions.mjs'
 import { PLANTS as SUPPORT } from './daemon/support.mjs'
+import { PLANTS as TAKEN_BACK } from './daemon/taken-back.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 /** The longest one run of tests may take, in milliseconds: the slowest takes a minute. */
@@ -57,6 +58,7 @@ const PLANTS = [
   ...SESSIONS,
   ...REVIEW,
   ...CLAUDE_REST,
+  ...TAKEN_BACK,
 ]
 
 const args = process.argv.slice(2)

@@ -73,6 +73,7 @@ fn look(items: Vec<Item>) -> Observed {
         quota: None,
         switched: None,
         unnamed: false,
+        took_back: false,
     }
 }
 

@@ -142,6 +142,15 @@ impl Ledger {
         messages::retry_delivery(&mut self.store, message_id, reason, refund)
     }
 
+    /// A task message that arrived, and that its window took back out of its
+    /// conversation, was not received: it is kept for the window again, and
+    /// the words that resume the task carry it, with what its paste carried.
+    pub fn take_back(&mut self, message_id: i64, reason: &str) -> Result<MessageView, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("take_back", Some(message_id))?;
+        messages::take_back(&mut self.store, message_id, reason)
+    }
+
     /// A delivery given up. A task message that fails takes its task with it;
     /// an answer that fails leaves its question to be answered again, and the
     /// one who was asked is told so.

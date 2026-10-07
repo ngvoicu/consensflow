@@ -79,6 +79,12 @@ impl Stopped {
     fn settled(&self) -> bool {
         self.look().0
     }
+
+    /// Whether a look says the window took the message of its turn back out
+    /// of its conversation, which the engine tells the ledger.
+    fn took_back(&self) -> bool {
+        finished(self.window.observe()).unwrap().took_back
+    }
 }
 
 /// A host that takes keys and pastes, and says what it was asked.
@@ -126,6 +132,8 @@ fn a_turn_the_daemon_interrupted_before_claude_wrote_a_word_is_read_at_rest_a_mo
     );
     assert_eq!(last, Some((Role::User, BRIEF.to_owned())));
 
+    assert!(!stopped.took_back(), "it took nothing back");
+
     stopped.at(10_000);
     stopped.window.interrupted();
     assert!(!stopped.settled(), "not at the press");
@@ -134,6 +142,7 @@ fn a_turn_the_daemon_interrupted_before_claude_wrote_a_word_is_read_at_rest_a_mo
         !stopped.settled(),
         "a turn about to begin is busy within the moment"
     );
+    assert!(!stopped.took_back());
     stopped.at(11_000);
     let (settled, last) = stopped.look();
     assert!(
@@ -145,9 +154,14 @@ fn a_turn_the_daemon_interrupted_before_claude_wrote_a_word_is_read_at_rest_a_mo
         Some((Role::User, BRIEF.to_owned())),
         "the record is as it was: it says nothing of the stop"
     );
+    assert!(
+        stopped.took_back(),
+        "and the look says what Claude did: the brief is in its input box, out of its conversation"
+    );
 
     stopped.status("busy");
     assert!(!stopped.settled(), "Claude went on after all");
+    assert!(!stopped.took_back());
     stopped.status("idle");
     assert!(stopped.settled());
 }
@@ -236,6 +250,10 @@ fn a_turn_claude_has_begun_to_answer_waits_for_its_own_record_of_the_interrupt_w
         .transcript(SESSION, &fixture("stopped-in-the-stop-hook", SESSION));
     stopped.at(6_000);
     assert!(stopped.settled(), "its record of the interrupt ends it");
+    assert!(
+        !stopped.took_back(),
+        "the press was pressed, and the turn has words in the conversation to stay"
+    );
 }
 
 #[test]
@@ -266,6 +284,10 @@ fn an_interrupt_record_that_names_no_message_is_the_end_of_the_turn_with_no_pres
     assert_eq!(
         last,
         Some((Role::User, "[Request interrupted by user]".to_owned()))
+    );
+    assert!(
+        !stopped.took_back(),
+        "a turn with a record of its end keeps its message in the conversation"
     );
 }
 

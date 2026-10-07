@@ -60,6 +60,12 @@ pub struct FakeAgent {
     /// The window stops where it is when it is interrupted, writing nothing:
     /// a harness that wrote no record of a turn stopped before its first word.
     pub stops_when_interrupted: bool,
+    /// What it stops by being interrupted, it also takes back: the message of
+    /// its turn is out of the conversation it answers from (Claude's input box).
+    pub takes_back: bool,
+    /// The latest look found the window taken back so, until a message
+    /// arrives that begins another turn.
+    pub took_back: bool,
 }
 
 /// What a test makes `ready` answer, where it gives the adapter one.
@@ -208,12 +214,16 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.items.push(item);
             agent.settled = true;
+            agent.took_back = false;
         });
     }
 
     /// The agent is at work on a turn.
     pub fn busy(&self, handle: &str) {
-        self.with(handle, |agent| agent.settled = false);
+        self.with(handle, |agent| {
+            agent.settled = false;
+            agent.took_back = false;
+        });
     }
 
     /// The agent is at work on a turn it stops, at once and writing nothing,
@@ -223,6 +233,14 @@ impl FakeAdapter {
             agent.settled = false;
             agent.stops_when_interrupted = true;
         });
+    }
+
+    /// The same, and what it stops it takes back: Claude, stopped before a
+    /// word of its answer, has the message of its turn in its input box again
+    /// and out of its conversation.
+    pub fn busy_until_taken_back(&self, handle: &str) {
+        self.busy_until_interrupted(handle);
+        self.with(handle, |agent| agent.takes_back = true);
     }
 
     /// What the window's harness says of its quota.
@@ -299,6 +317,7 @@ impl FakeAdapter {
                 agent.settled = false;
                 // A message that arrives starts a turn: the one before it ended as it did.
                 agent.failed = false;
+                agent.took_back = false;
             }
             Admission::Admitted {
                 queued: agent.queued,
@@ -365,6 +384,8 @@ impl Asked {
             unnamed: None,
             interrupted: 0,
             stops_when_interrupted: false,
+            takes_back: false,
+            took_back: false,
         };
         if let Some(message) = launch.message {
             agent.items.push(fake.item(Role::User, message));

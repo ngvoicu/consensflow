@@ -32,6 +32,12 @@ pub fn fail_next_write(context: &Context) {
     fail_next(context, "pause_task", "the ledger could not be written");
 }
 
+/// The ledger's taking back of a message fails once, the next time it is
+/// written: the stop whose look told it stays owed.
+pub fn fail_next_take_back(context: &Context) {
+    fail_next(context, "take_back", "the ledger could not be written");
+}
+
 /// The ledger's `call` fails once, the next time it is made, in `words`.
 fn fail_next(context: &Context, call: &'static str, words: &'static str) {
     let failing = Rc::new(Cell::new(true));

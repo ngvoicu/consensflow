@@ -247,6 +247,7 @@ impl Window for CodexWindow {
                     quota: None,
                     switched: None,
                     unnamed: false,
+                    took_back: false,
                 });
             };
             // The broker's word first, then the record, which is then never

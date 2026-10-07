@@ -239,6 +239,7 @@ impl Window for FakeWindow {
             agent.interrupted += 1;
             if agent.stops_when_interrupted {
                 agent.settled = true;
+                agent.took_back = agent.takes_back;
             }
         });
     }
@@ -267,6 +268,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             quota: agent.quota.clone(),
             switched: Some(shows.clone()),
             unnamed: false,
+            took_back: false,
         };
     }
     let waiting = match &agent.unnamed {
@@ -283,6 +285,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
         quota: agent.quota.clone(),
         switched: None,
         unnamed: agent.unnamed.is_some(),
+        took_back: agent.took_back,
     }
 }
 
@@ -300,6 +303,9 @@ fn observed_json(observed: &Observed) -> Value {
     }
     if observed.unnamed {
         written["unnamed"] = json!(true);
+    }
+    if observed.took_back {
+        written["tookBack"] = json!(true);
     }
     written
 }

@@ -244,6 +244,7 @@ impl Window for DevinWindow {
                     quota: None,
                     switched: None,
                     unnamed: false,
+                    took_back: false,
                 });
             };
             // The record and the wire log are read together: the log as it is

@@ -228,28 +228,9 @@ export function claudeRecord(session) {
       type: `${record.message?.role ?? record.type}${record.subtype ? `/${record.subtype}` : ''}`,
       text: parts.map(shown).join(' ⏎ '),
       raw: line.slice(0, 400),
-      uuid: record.uuid,
-      parent: record.parentUuid,
     })
   }
   return items
-}
-
-/**
- * The records of the conversation Claude answers from: the chain of parents
- * from the transcript's last record back to its first. The transcript holds
- * more than that: a message Claude took back out of its conversation (one it
- * put back in its input box, interrupted before a word of its answer) stays in
- * the file as a branch the next message does not follow.
- */
-export function claudeConversation(session) {
-  const records = claudeRecord(session).filter((item) => item.uuid)
-  const byUuid = new Map(records.map((item) => [item.uuid, item]))
-  const chain = new Set()
-  for (let at = records.at(-1); at && !chain.has(at.uuid); at = byUuid.get(at.parent)) {
-    chain.add(at.uuid)
-  }
-  return chain
 }
 
 /** The ids of the processes whose command line holds `text`, from `ps`. */

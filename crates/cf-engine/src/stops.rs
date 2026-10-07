@@ -160,6 +160,11 @@ impl Dispatcher {
         if let Some(stop) = stop.filter(|stop| self.owes(record, stop)) {
             return match look {
                 Look::Rest => {
+                    // What the ledger is told is written first: a failure leaves
+                    // the stop owed, and the next look at rest tells it again.
+                    if observed.took_back {
+                        self.take_back(participant, &stop, observed)?;
+                    }
                     self.pay(record, &stop);
                     Ok(())
                 }

@@ -36,6 +36,7 @@ pub(crate) fn record_state(reading: Arc<Reading>) -> Observed {
         quota,
         switched: None,
         unnamed: false,
+        took_back: false,
     }
 }
 
