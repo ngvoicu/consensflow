@@ -30,7 +30,7 @@ use crate::shape::{
 /// Windows records ten fewer, the nine that make a link and the one that tries
 /// a system that is not Windows; its floor waits for the five of npm's folder,
 /// which only a run on Windows records, to be counted (90).
-const AT_LEAST: usize = if cfg!(windows) { 85 } else { 100 };
+const AT_LEAST: usize = if cfg!(windows) { 90 } else { 100 };
 
 /// What a begun step settled with.
 type Done = Result<Value, String>;
