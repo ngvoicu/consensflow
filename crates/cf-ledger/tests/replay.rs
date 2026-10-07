@@ -60,13 +60,14 @@ enum Outcome {
 /// recordings, queued still, and its dispatcher goes on to paste them.
 const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-api-006", 15, "the door's read `answerTo` is gone (a poll claims with `claim_answer`), and a choice answer lands queued, not read"),
-    ("core-daemon-001", 6, DOOR_READ),
     ("core-dispatcher-010", 121, REASON_PAUSE),
     ("core-dispatcher-042", 72, "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, so the chief has no message waiting (`withWork`), where Node's has the note"),
     ("core-dispatcher-065", 147, KEPT_IN_BRIEF),
     ("core-dispatcher-074", 294, "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn (`task`), where Node leaves it queued"),
     ("core-dispatcher-107", 122, KEPT_IN_BRIEF),
     ("core-page-014", 9, REASON_RELEASE),
+    ("home-copies-001", 34, KEPT_IN_BRIEF),
+    ("home-copies-004", 34, KEPT_IN_BRIEF),
     ("ledger-gate-006", 25, DOOR_READ),
     ("ledger-gate-007", 15, DOOR_READ),
     ("ledger-gate-008", 16, "the door's read `answerTo` is gone, and the choice answer the human approves lands queued, not read for the door"),

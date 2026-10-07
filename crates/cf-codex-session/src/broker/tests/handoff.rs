@@ -3,7 +3,8 @@
 //! frame is written to the socket, and never of one the turn outlived. The
 //! writer first, on a socket that takes what the test lets it and fails when
 //! it is told to; then a pair, with the question held at a board that answers
-//! when the test says and a writer held up behind a frame too big to go.
+//! when the test says and a writer the test holds on a frame the socket does
+//! not take (`hold`: how much a real socket takes unread is the system's).
 
 use std::cell::{Cell, RefCell};
 use std::pin::Pin;
@@ -17,7 +18,7 @@ use futures_util::Sink;
 use serde_json::{json, Value};
 use tokio_tungstenite::tungstenite::Message;
 
-use super::fixture::{run, wait, A};
+use super::fixture::{run, wait, Fixture, A};
 use super::questions::{
     an_ended_turn_ends_the_question_it_asked, asked_of, request_user_input, showed_the_dialog,
     turn_completed, went_idle, window, HeldBoard,
@@ -196,12 +197,14 @@ fn a_socket_that_fails_reports_the_frame_it_failed_on_and_those_behind_it_not_wr
     });
 }
 
-/// A frame of `size` bytes of padding, which the TUI says to Codex.
-fn padded(size: usize) -> String {
-    format!(
-        r#"{{"id":"pad","method":"pad","params":{{"padding":"{}"}}}}"#,
-        "x".repeat(size)
-    )
+/// A request the TUI says to Codex, which the writer is held on, or goes on to.
+fn request(id: &str) -> Value {
+    json!({ "id": id, "method": "pad", "params": {} })
+}
+
+/// Whether Codex has been sent request `id`.
+fn has_been_sent(f: &Fixture, id: &str) -> bool {
+    f.codex.requests().iter().any(|sent| sent["id"] == id)
 }
 
 /// Codex says its request `id` on `thread` is resolved.
@@ -264,13 +267,14 @@ fn an_answer_waiting_to_be_written_is_not_a_receipt_and_the_turn_ending_gives_it
     run(async {
         let board = HeldBoard::start(json!({ "id": 70, "choices": [["red"]] }));
         let (f, tui) = window(&board.url, Duration::from_secs(60)).await;
+        let hold = Rc::clone(&f.broker.shared.native_hold);
         f.codex.send_json(1, &request_user_input());
         wait(|| board.polls() == 1).await;
-        // Codex's end of the TUI's connection stops reading, and the TUI says
-        // something too big for the socket to take: the writer is held up on it.
-        f.codex.stall_peer(1);
-        tui.send_text(&padded(20 * 1024 * 1024));
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // The socket to Codex takes nothing more, and the TUI says something
+        // to Codex: the writer is held up on it.
+        hold.shut();
+        tui.send(request("pad"));
+        wait(|| hold.holds_a_frame()).await;
         // The board answers: the frame is queued behind it, and nothing is said of it.
         board.release();
         tokio::time::sleep(Duration::from_millis(400)).await;
@@ -284,6 +288,12 @@ fn an_answer_waiting_to_be_written_is_not_a_receipt_and_the_turn_ending_gives_it
         f.codex.send_json(1, &turn_completed(A));
         wait(|| !board.receipts().is_empty()).await;
         assert_eq!(board.receipts(), [json!(false)]);
+        // The socket takes frames again: the writer gets to the answer, which is
+        // not sent, and goes on to what the TUI says after it.
+        hold.open();
+        tui.send(request("after"));
+        wait(|| has_been_sent(&f, "after")).await;
+        assert!(has_been_sent(&f, "pad"));
         assert!(asked_of(&f, "ask-1").is_none());
     });
 }
@@ -293,11 +303,12 @@ fn an_answer_waiting_to_be_written_when_the_socket_to_codex_goes_is_given_back()
     run(async {
         let board = HeldBoard::start(json!({ "id": 70, "choices": [["red"]] }));
         let (f, tui) = window(&board.url, Duration::from_secs(60)).await;
+        let hold = Rc::clone(&f.broker.shared.native_hold);
         f.codex.send_json(1, &request_user_input());
         wait(|| board.polls() == 1).await;
-        f.codex.stall_peer(1);
-        tui.send_text(&padded(20 * 1024 * 1024));
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        hold.shut();
+        tui.send(request("pad"));
+        wait(|| hold.holds_a_frame()).await;
         board.release();
         tokio::time::sleep(Duration::from_millis(400)).await;
         assert!(board.receipts().is_empty(), "nothing was handed over");

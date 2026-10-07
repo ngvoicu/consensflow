@@ -169,13 +169,32 @@ impl Pair {
         }
     }
 
+    /// What the writer of the connection to Codex's server writes to: the
+    /// connection's own sink.
+    #[cfg(not(test))]
+    fn native_sink<S>(&self, sink: S) -> S {
+        sink
+    }
+
+    /// What the writer of the connection to Codex's server writes to: the
+    /// connection's own sink, behind the hold a test shuts to keep the writer
+    /// on a frame that the socket does not take, as a socket that fills would,
+    /// but however much the system's sockets hold.
+    #[cfg(test)]
+    fn native_sink<S: futures_util::Sink<Message> + Unpin>(
+        &self,
+        sink: S,
+    ) -> super::tests::Held<S> {
+        super::tests::Held::new(sink, Rc::clone(&self.shared.native_hold))
+    }
+
     /// The connection to Codex's server opened: everything the TUI said before
     /// goes to it now, in order, and what it says next goes straight through.
     fn native_opened(self: &Rc<Self>, socket: Socket, inbox: Inbox) {
         let (sink, mut stream) = socket.split();
         let this = Rc::clone(self);
         self.spawn(async move {
-            if !write_all(sink, inbox).await {
+            if !write_all(this.native_sink(sink), inbox).await {
                 this.retire();
             }
         });

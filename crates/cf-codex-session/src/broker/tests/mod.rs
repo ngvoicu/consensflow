@@ -8,7 +8,12 @@ mod delivery;
 /// supervisor's tests use too.
 pub(crate) mod fixture;
 mod handoff;
+/// The hold a test puts on the writer of a pair's connection to Codex's server
+/// (`Shared::native_hold`, the pair's `native_sink`).
+mod hold;
 mod lifecycle;
 mod questions;
 mod switching;
 mod transport;
+
+pub(crate) use hold::{Held, Hold};
