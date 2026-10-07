@@ -21,6 +21,7 @@ test-support = []
 
 [dev-dependencies]
 base64.workspace = true
+cf-ledger = { path = ".", features = ["test-support"] }
 flate2.workspace = true
 sha2.workspace = true
 tempfile.workspace = true

@@ -30,20 +30,23 @@ mod schema;
 mod staff;
 mod store;
 mod tasks;
+/// What the players of Node's recordings share, and the tests of this crate use.
+#[cfg(feature = "test-support")]
+pub mod testing;
 mod views;
 
 pub use cf_proto::ledger::{
-    Board, Candidate, ChiefConversation, ChiefOpenWork, ConversationView, Cut, DeletedProject,
-    EventView, HeldTask, Lane, LastSwitch, LatestMessages, LatestTranscript, MemberView,
-    MessageView, ParticipantView, ProjectView, Question, QuestionOption, RemovedMember,
-    StaffMember, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits, TaskThread,
+    Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationView, Cut,
+    DeletedProject, EventView, HeldTask, Lane, LastSwitch, LatestMessages, LatestTranscript,
+    MemberView, MessageView, ParticipantView, ProjectView, Question, QuestionOption, RemovedMember,
+    StaffMember, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits, TaskThread,
     TaskTranscript, TaskView, TierChange,
 };
 pub use conversations::{ChiefSwitch, TRANSCRIPT_ITEM_MAX};
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;
 pub use ledger::{open_ledger, Event, Ledger, Options};
-pub use messages::{NewNote, NewQuestion};
+pub use messages::{NewNote, NewQuestion, Read};
 pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;
 pub use projects::{NewChief, NewMember, NewProject};

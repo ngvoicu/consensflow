@@ -1,6 +1,8 @@
 //! `GET /api/inbox` (`api.js:205-207`): the messages waiting in the caller's
 //! inbox, newest first, at most a hundred: what the ledger holds for it, less
-//! what still waits for the human.
+//! what still waits for the human. It lists first lines, cut, and changes
+//! nothing: an answer is received when `cf` says it wrote it whole
+//! (`POST /api/answers/read`), which a list of previews never does.
 
 use serde_json::json;
 

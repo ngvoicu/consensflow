@@ -1,9 +1,36 @@
 import { createServer } from 'node:http'
-import { answerFromWindow, askTheBoard, boardClient, refusalReason } from '../lib/question-door.js'
+import {
+  acknowledge,
+  answerFromWindow,
+  askTheBoard,
+  boardClient,
+  refusalReason,
+} from '../lib/question-door.js'
 
 export const id = 'consensflow-session'
 const SESSION = /^ses_[A-Za-z0-9]+$/
 const refused = (error) => ({ ok: false, admitted: false, bytesWritten: 0, error })
+
+/**
+ * Whether OpenCode took a reply to its question tool: only then is the board's
+ * answer received. By its SDK's contract a request that failed does not throw:
+ * an HTTP error (a native 404 for a question that is gone), or a request that
+ * got no response, resolves as a result with its `error` (`throwOnError` is
+ * off), so a reply that resolved may be one that did not take. Throwing is
+ * asked for, for the SDKs that honour it, and the result is read all the same:
+ * it took when it holds no error and its response was a success, or it holds
+ * the `true` the question's reply answers with (an SDK that answers with the
+ * data alone says `true`, and nothing at all for an error).
+ */
+async function replied(client, input) {
+  try {
+    const result = await client.question.reply(input, { throwOnError: true })
+    if (result === true) return true
+    return result != null && !result.error && (result.response?.ok === true || result.data === true)
+  } catch {
+    return false
+  }
+}
 
 /** This API runs inside the TUI: server-side session lists cannot prove its selected route. */
 export async function tui(api, options) {
@@ -48,9 +75,13 @@ export async function tui(api, options) {
         { signal: control.signal },
       )
       if (control.window !== undefined) {
+        // An answer the board gave in the same moment was claimed and is not handed over.
+        if (asked.answer !== null) await acknowledge(board, asked.answer, false)
         await answerFromWindow(board, asked.id, control.window)
       } else if (asked.answer !== null) {
-        await api.client.question.reply({ requestID: id, answers: asked.answer.choices })
+        // Handed to the tool, then said so: the other way round, an answer would be lost.
+        const handed = await replied(api.client, { requestID: id, answers: asked.answer.choices })
+        await acknowledge(board, asked.answer, handed)
       }
     } catch (cause) {
       // Refused: the model hears why, as the answer. Not reached: the window's

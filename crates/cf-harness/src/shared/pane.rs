@@ -30,6 +30,32 @@ pub(crate) async fn write_paste(host: &dyn PaneHost, pane: &Pane, body: &str) ->
     }
 }
 
+/// Presses `keys` into the pane as the daemon presses its own (`pane.input`),
+/// which the host does not count as the human's: what they leave in the input
+/// box holds no paste back. The host's word for why it did not, or the
+/// bridge's when it never answered.
+pub(crate) async fn write_keys(
+    host: &dyn PaneHost,
+    pane: &Pane,
+    keys: &[u8],
+) -> Result<(), String> {
+    let mut request = named(pane);
+    request["bytes"] = json!(keys);
+    match host.request("pane.input", request).await {
+        Ok(answer) => {
+            let sent = Sent::from_reply(&answer);
+            if sent.ok {
+                return Ok(());
+            }
+            Err(sent
+                .cause
+                .or(sent.error)
+                .unwrap_or_else(|| "the window refused the keys".to_owned()))
+        }
+        Err(HostError { message, .. }) => Err(message),
+    }
+}
+
 /// What the pane host says of a window now (`pane.snapshot`).
 pub(crate) async fn snapshot(host: &dyn PaneHost, pane: &Pane) -> Result<Value, HostError> {
     host.request("pane.snapshot", named(pane)).await

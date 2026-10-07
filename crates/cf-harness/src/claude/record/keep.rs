@@ -56,7 +56,6 @@ pub(super) static RECORD: Keep = Keep::Members(&[
     ("isApiErrorMessage", &Keep::Scalar),
     ("apiErrorStatus", &Keep::Scalar),
     ("error", &Keep::Scalar),
-    ("interruptedMessageId", &Keep::Scalar),
     ("promptSource", &Keep::Scalar),
     ("isMeta", &Keep::Scalar),
     ("level", &Keep::Scalar),

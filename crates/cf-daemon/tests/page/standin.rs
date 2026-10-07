@@ -429,6 +429,11 @@ impl Engine for Standin {
     fn pane(&self, participant: i64) -> Option<Value> {
         Some(self.recorded("pane", vec![json!(participant)])).filter(|shown| !shown.is_null())
     }
+
+    /// Node's dispatcher never says a window ignored its stop.
+    fn unstopped(&self, _participant: i64) -> Option<Value> {
+        None
+    }
 }
 
 impl Standin {

@@ -99,6 +99,78 @@ async fn a_window_whose_task_was_cancelled_is_told_so_and_nothing_is_put() {
     assert_eq!(scene.kicks.get(), 0);
 }
 
+/// The first poll of the door of question `id`, as zeus's harness makes it.
+async fn poll(scene: &Scene, id: i64) -> (u16, Value) {
+    let target = format!("/api/questions/{id}?wait=5000");
+    api(scene, Method::GET, &target, &scene.zeus, "").await
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_window_the_pause_has_not_stopped_yet_asks_about_its_paused_task_and_its_door_is_born_shut(
+) {
+    let scene = scene();
+    let number = working_task(&scene);
+    scene.pause();
+    let (status, said) = ask(&scene, &scene.zeus, r#"{"body":"Which format?"}"#).await;
+    assert_eq!(status, 201, "{said}");
+    assert_eq!(
+        said["message"]["task"], number,
+        "it is about the task it was stopped on"
+    );
+    assert_eq!(state_of(&scene, number), "paused", "asking moves nothing");
+    assert_eq!(scene.kicks.get(), 1);
+    // The turn that asks is an old one: its door answers at its first poll, without a wait.
+    let started = tokio::time::Instant::now();
+    let (status, said) = poll(&scene, said["message"]["id"].as_i64().unwrap()).await;
+    assert_eq!((status, said["error"].as_str()), (409, Some("door-closed")));
+    assert_eq!(started.elapsed(), std::time::Duration::ZERO);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_window_whose_task_waits_for_the_words_that_resume_it_asks_about_it_with_its_door_born_shut(
+) {
+    let scene = scene();
+    let number = working_task(&scene);
+    scene.pause();
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .resume_task(scene.project.id, number, Some("chief"), "Carry on")
+        .unwrap();
+    assert_eq!(
+        state_of(&scene, number),
+        "queued",
+        "the words are not pasted yet"
+    );
+    let (status, said) = ask(&scene, &scene.zeus, r#"{"body":"Which format?"}"#).await;
+    assert_eq!(status, 201, "{said}");
+    assert_eq!(said["message"]["task"], number);
+    assert_eq!(
+        state_of(&scene, number),
+        "queued",
+        "the words that resume it come first"
+    );
+    let (status, said) = poll(&scene, said["message"]["id"].as_i64().unwrap()).await;
+    assert_eq!((status, said["error"].as_str()), (409, Some("door-closed")));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_window_at_work_asks_with_its_door_open_and_the_task_waits() {
+    let scene = scene();
+    let number = working_task(&scene);
+    let (_, said) = ask(&scene, &scene.zeus, r#"{"body":"Which format?"}"#).await;
+    assert_eq!(state_of(&scene, number), "waiting");
+    let started = tokio::time::Instant::now();
+    let (status, said) = poll(&scene, said["message"]["id"].as_i64().unwrap()).await;
+    assert_eq!((status, said["answer"].clone()), (200, json!(null)));
+    assert_eq!(
+        started.elapsed(),
+        std::time::Duration::from_secs(5),
+        "nothing shut it: it waited"
+    );
+}
+
 #[tokio::test]
 async fn words_that_are_no_words_are_refused_and_questions_that_are_none_are_refused_in_theirs() {
     let scene = scene();

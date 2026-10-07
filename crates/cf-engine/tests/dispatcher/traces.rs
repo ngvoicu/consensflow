@@ -35,13 +35,20 @@
 //! which may differ by how independent windows interleave, and only so
 //! ([`lanes`]). The database each side left is held equal whole, table by
 //! table, each value as SQLite quotes it, the test's temporary folder
-//! written «dir».
+//! written «dir», but for the four columns of migration 0011 that only this
+//! ledger writes (`cf_ledger::testing`), held apart on both sides.
 //!
-//! A test the engine departs from Node's trace on purpose is named in
-//! [`DEPARTED`], with what it does that Node does not. It is held to a trace
-//! of its own, recorded from the engine (`tests/departures/`,
-//! `npm run goldens:departed`), and fails when Node's trace is the engine's
-//! again, so the departure is taken off once Node does it too.
+//! A test of the receipt and stop redesign has no Node trace: its rule is Node's
+//! no more, so it is not held to one (`held_to` panics for a test with none)
+//! and asserts what it holds directly.
+//!
+//! A test whose rule is Node's still, but whose trace the engine departs from
+//! on purpose (the notes that tell a requester its task is paused go once it is
+//! resumed), is named in [`DEPARTED`], with what it does that Node does not.
+//! It is held to a trace of its own, recorded from the engine
+//! (`tests/departures/`, `npm run goldens:departed`), and fails when Node's
+//! trace is the engine's again, so the departure is taken off once Node does
+//! it too.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -52,6 +59,7 @@ use std::sync::LazyLock;
 
 use cf_base::env::Env;
 use cf_engine::testing::Closed;
+use cf_ledger::testing::{hold_apart_what_node_never_logs, hold_apart_what_node_never_writes};
 
 use crate::lanes;
 use flate2::read::GzDecoder;
@@ -178,7 +186,7 @@ pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
 /// `trace`'s, or none when they are the same.
 fn first_difference(closed: &Closed, trace: &Value, name: &str) -> Option<String> {
     let node = projected(trace["events"].as_array().expect("its events"));
-    let rust = projected(&closed.events);
+    let rust = projected(&logged(closed));
     if INTERLEAVED.contains(&name) {
         if let Some(difference) = lanes::first_difference(&node, &rust) {
             return Some(format!("{name}: the engine's effects differ {difference}"));
@@ -200,7 +208,19 @@ fn first_difference(closed: &Closed, trace: &Value, name: &str) -> Option<String
         ));
     }
     let left = dump(&closed.file, closed.dir.path());
-    let held = trace["finals"].as_array().and_then(|finals| finals.last());
+    // What Node's ledger never writes is held apart on both sides, so a
+    // recording made before the migration and one made after it are the same.
+    let held = trace["finals"]
+        .as_array()
+        .and_then(|finals| finals.last())
+        .cloned()
+        .map(|mut held| {
+            if let Value::Object(tables) = &mut held {
+                hold_apart_what_node_never_writes(tables);
+            }
+            held
+        });
+    let held = held.as_ref();
     (Some(&left) != held).then(|| {
         let table = left
             .as_object()
@@ -218,13 +238,26 @@ fn first_difference(closed: &Closed, trace: &Value, name: &str) -> Option<String
     })
 }
 
+/// What the engine did at its seams in a closed test, as Node's trace says
+/// it: the stop a pause counted is in the ledger's event, and Node's never
+/// says it.
+fn logged(closed: &Closed) -> Vec<Value> {
+    let mut logged = closed.events.clone();
+    for line in &mut logged {
+        if let Some(event) = line.get_mut("event") {
+            hold_apart_what_node_never_logs(std::slice::from_mut(event));
+        }
+    }
+    logged
+}
+
 /// Writes the trace of a departed test from this run of the engine, in the
 /// shape of Node's: its `test`, what the engine did at its seams, and the
 /// database it left.
 fn rerecord(closed: &Closed, node: &Recorded) {
     let trace = json!({
         "test": node.trace["test"],
-        "events": closed.events,
+        "events": logged(closed),
         "finals": [dump(&closed.file, closed.dir.path())],
     });
     let mut gzip = GzEncoder::new(Vec::new(), Compression::best());
@@ -409,6 +442,7 @@ fn dump(file: &Path, folder: &Path) -> Value {
             .expect("each row");
         tables.insert(name, json!({ "columns": columns, "rows": rows }));
     }
+    hold_apart_what_node_never_writes(&mut tables);
     let text = Value::Object(tables).to_string();
     let folder = serde_json::to_string(&folder.to_string_lossy()).expect("the folder as JSON");
     serde_json::from_str(&text.replace(&folder[1..folder.len() - 1], "«dir»"))

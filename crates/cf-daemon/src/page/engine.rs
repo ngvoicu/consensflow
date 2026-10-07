@@ -119,6 +119,11 @@ pub trait Engine {
     /// The participant's live window (`pane`): `{id, generation}`, none when
     /// it has none.
     fn pane(&self, participant: i64) -> Option<Value>;
+
+    /// A stop its window ignored in every round and has not paid:
+    /// `{task, rounds}`, none when there is none, which is nearly always. A
+    /// lane says it only then, so no other board answer moves.
+    fn unstopped(&self, participant: i64) -> Option<Value>;
 }
 
 /// An activity as `dispatcher.js` writes its object: `{state}`, `{state,
@@ -249,6 +254,11 @@ impl Engine for Rc<Dispatcher> {
 
     fn pane(&self, participant: i64) -> Option<Value> {
         Dispatcher::pane(self, participant).as_ref().map(pane_value)
+    }
+
+    fn unstopped(&self, participant: i64) -> Option<Value> {
+        Dispatcher::unstopped(self, participant)
+            .map(|ignored| json!({ "task": ignored.task, "rounds": ignored.rounds }))
     }
 }
 

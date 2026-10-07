@@ -10,7 +10,10 @@ use hyper::Method;
 use serde_json::{json, Value};
 
 use super::{items_of, whole};
-use crate::api::routes::tests::support::{api, gated_brief, open_task, working_task};
+use crate::api::routes::tests::support::{
+    answered_question, api, gated_brief, gated_brief_of, open_task, state_of, working_question,
+    working_task,
+};
 use crate::testing::{scene, Scene};
 
 fn refused(answered: &(u16, Value)) -> (u16, &str, &str) {
@@ -142,8 +145,32 @@ fn a_number_names_a_task_only_if_it_is_a_whole_number_a_double_holds_exactly() {
     }
 }
 
+/// The keys of a task as the ledger has it, its thread last.
+const TASK_KEYS: [&str; 20] = [
+    "id",
+    "projectId",
+    "number",
+    "title",
+    "body",
+    "state",
+    "requester",
+    "assignee",
+    "pool",
+    "tier",
+    "purpose",
+    "session",
+    "needs",
+    "blockedBy",
+    "heldUntil",
+    "pausedAt",
+    "deletedAt",
+    "createdAt",
+    "updatedAt",
+    "messages",
+];
+
 #[tokio::test]
-async fn a_task_is_read_whole_with_its_thread_less_what_waits_for_the_human() {
+async fn a_task_is_read_with_its_thread_less_what_waits_for_the_human() {
     let scene = scene();
     let (session, brief) = gated_brief(&scene);
     drop(session);
@@ -152,28 +179,7 @@ async fn a_task_is_read_whole_with_its_thread_less_what_waits_for_the_human() {
     let task = said["task"].as_object().unwrap();
     assert_eq!(
         task.keys().map(String::as_str).collect::<Vec<_>>(),
-        [
-            "id",
-            "projectId",
-            "number",
-            "title",
-            "body",
-            "state",
-            "requester",
-            "assignee",
-            "pool",
-            "tier",
-            "purpose",
-            "session",
-            "needs",
-            "blockedBy",
-            "heldUntil",
-            "pausedAt",
-            "deletedAt",
-            "createdAt",
-            "updatedAt",
-            "messages"
-        ],
+        TASK_KEYS,
         "the task as the ledger has it, its thread last"
     );
     assert_eq!(
@@ -191,6 +197,162 @@ async fn a_task_is_read_whole_with_its_thread_less_what_waits_for_the_human() {
         .unwrap();
     assert_eq!(thread.messages.len(), 1);
     assert_eq!(thread.messages[0].state, "gated");
+}
+
+/// Every window reads the task whose brief waits at the gate: its words are in
+/// no view of it, and every key is where it was. The task's title stays: it is
+/// the card's label, which every window lists and the human sees on the board
+/// (a brief of one line is its own title).
+#[tokio::test]
+async fn a_brief_that_waits_at_the_gate_is_in_no_agents_view_of_the_task() {
+    let scene = scene();
+    let scope = "Tokenize every file under src and print the tokens";
+    let (session, _) = gated_brief_of(&scene, &format!("Lexer\n{scope}"));
+    let held = scene
+        .context
+        .ledger
+        .borrow()
+        .task(scene.project.id, 1)
+        .unwrap()
+        .unwrap()
+        .task;
+    assert_eq!(
+        held.body,
+        format!("Lexer\n{scope}"),
+        "the ledger, which the human and the board read, has it"
+    );
+    // The human reads the task through the page, from the ledger: the brief is
+    // theirs to see, and it is held for them in the thread.
+    let seen = scene
+        .context
+        .ledger
+        .borrow()
+        .task_that_fits(scene.project.id, 1)
+        .unwrap()
+        .unwrap();
+    let seen = serde_json::to_value(&seen).unwrap();
+    assert_eq!(seen["body"], format!("Lexer\n{scope}"));
+    assert_eq!(seen["messages"][0]["state"], "gated");
+    for token in [&scene.chief, &scene.zeus, &session] {
+        let (status, said) = get(&scene, token, "1").await;
+        assert_eq!(status, 200);
+        let task = said["task"].as_object().unwrap();
+        assert_eq!(task["body"], "", "the brief is not given");
+        assert_eq!(task["title"], "Lexer", "the card's label is");
+        assert_eq!(
+            task.keys().map(String::as_str).collect::<Vec<_>>(),
+            TASK_KEYS
+        );
+        assert!(
+            !said.to_string().contains(scope),
+            "no field of the view holds the brief: {said}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_brief_is_given_once_it_has_passed_the_gate_and_a_later_message_held_there_does_not_take_it_back(
+) {
+    let scene = scene();
+    let (session, brief) = gated_brief(&scene);
+    let (_, said) = get(&scene, &scene.chief, "1").await;
+    assert_eq!(said["task"]["body"], "");
+    // The human passes it on, and the window receives it.
+    {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        ledger.approve_message(brief, "human").unwrap();
+        ledger.begin_delivery(brief).unwrap();
+        ledger
+            .confirm_delivery(brief, Some(&json!({ "item": "test" })))
+            .unwrap();
+    }
+    let (_, said) = get(&scene, &session, "1").await;
+    assert_eq!(said["task"]["body"], "Lexer");
+    // The chief stops it and sends it on with words of its own, which wait for
+    // approval in their turn: the brief is its window's already.
+    let resumed = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        ledger
+            .pause_task(scene.project.id, 1, Some("chief"), None)
+            .unwrap();
+        ledger
+            .resume_task(scene.project.id, 1, Some("chief"), "Mind the tests")
+            .unwrap()
+    };
+    assert_eq!(
+        resumed.message.map(|message| message.state).as_deref(),
+        Some("gated")
+    );
+    let (_, said) = get(&scene, &scene.chief, "1").await;
+    assert_eq!(said["task"]["body"], "Lexer");
+}
+
+/// Astraeus's sequence: a worker asks, the chief answers, and the worker runs
+/// `cf task get T-1 --transcript`: the thread first, then the transcript, which
+/// a worker may not read. Nothing it did consumed the answer.
+#[tokio::test]
+async fn a_worker_that_reads_its_task_and_is_refused_its_transcript_still_has_its_answer_to_be_pasted(
+) {
+    let scene = scene();
+    let answer = answered_question(&scene, "JSON");
+    assert_eq!(state_of(&scene, 1), "waiting");
+    let (status, said) = get(&scene, &scene.zeus, "1").await;
+    assert_eq!(status, 200);
+    assert!(said["task"]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|message| message["id"] == answer.id && message["body"] == "H: JSON"));
+    let refusal = get(&scene, &scene.zeus, "1/transcript").await;
+    assert_eq!(refused(&refusal).0, 403);
+    let still = scene.message(answer.id);
+    assert_eq!(still.state, "queued");
+    assert_eq!(still.receipt, Value::Null);
+    assert_eq!(state_of(&scene, 1), "waiting");
+    assert_eq!(scene.logged("message.read"), 0);
+    assert_eq!(scene.kicks.get(), 0);
+    assert_eq!(scene.next_for_zeus(), Some("H: JSON".to_owned()));
+}
+
+#[tokio::test]
+async fn a_thread_read_by_anyone_changes_nothing() {
+    let scene = scene();
+    let answer = answered_question(&scene, "JSON");
+    // The chief gave the task and zeus has it: neither read receives the answer.
+    for token in [&scene.chief, &scene.zeus, &scene.zeus] {
+        let (status, _) = get(&scene, token, "1").await;
+        assert_eq!(status, 200);
+    }
+    let (status, said) = get(&scene, &scene.chief, "1/transcript").await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(scene.message(answer.id).state, "queued");
+    assert_eq!(state_of(&scene, 1), "waiting");
+    assert_eq!(scene.kicks.get(), 0);
+}
+
+#[tokio::test]
+async fn a_gated_answer_is_left_out_of_the_thread_and_is_not_received() {
+    let scene = scene();
+    let question = working_question(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .set_gate(scene.project.id, true)
+        .unwrap();
+    let answer = scene.choose(question.id, "red");
+    assert_eq!(answer.state, "gated");
+    let (status, said) = get(&scene, &scene.zeus, "1").await;
+    assert_eq!(status, 200);
+    let ids: Vec<&Value> = said["task"]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|message| &message["id"])
+        .collect();
+    assert!(!ids.contains(&&json!(answer.id)), "{ids:?}");
+    assert_eq!(scene.message(answer.id).state, "gated");
+    assert_eq!(scene.kicks.get(), 0);
 }
 
 #[tokio::test]

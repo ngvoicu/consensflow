@@ -41,6 +41,50 @@ fn each_route_is_the_one_node_matches_for_its_method_and_path() {
     assert_eq!(route(Method::POST, "/api/answers"), Some(Route::Answers));
 }
 
+/// A route Node has no twin of: a door says it handed its answer over.
+#[test]
+fn the_receipt_of_an_answer_is_a_post_to_its_number_and_nothing_else_is() {
+    assert_eq!(
+        route(Method::POST, "/api/answers/12/receipt"),
+        Some(Route::AnswerReceipt {
+            id: "12".to_owned()
+        })
+    );
+    for (method, path) in [
+        (Method::GET, "/api/answers/12/receipt"),
+        (Method::PUT, "/api/answers/12/receipt"),
+        (Method::POST, "/api/answers/12"),
+        (Method::POST, "/api/answers/12/"),
+        (Method::POST, "/api/answers//receipt"),
+        (Method::POST, "/api/answers/x/receipt"),
+        (Method::POST, "/api/answers/12x/receipt"),
+        (Method::POST, "/api/answers/12/receipt/"),
+        (Method::POST, "/api/answers/12/Receipt"),
+        (Method::POST, "/api/answers/12/receipts"),
+    ] {
+        assert_eq!(route(method.clone(), path), None, "{method} {path}");
+    }
+}
+
+/// The other: `cf` says which answers it wrote whole.
+#[test]
+fn the_read_of_answers_is_a_post_to_read_and_nothing_else_is() {
+    assert_eq!(
+        route(Method::POST, "/api/answers/read"),
+        Some(Route::AnswersRead)
+    );
+    for (method, path) in [
+        (Method::GET, "/api/answers/read"),
+        (Method::PUT, "/api/answers/read"),
+        (Method::POST, "/api/answers/read/"),
+        (Method::POST, "/api/answers/Read"),
+        (Method::POST, "/api/answers/reads"),
+        (Method::POST, "/api/answers/read/receipt"),
+    ] {
+        assert_eq!(route(method.clone(), path), None, "{method} {path}");
+    }
+}
+
 #[test]
 fn a_task_route_is_the_task_and_the_word_after_it_whatever_the_method() {
     assert_eq!(route(Method::GET, "/api/tasks/5"), task("5", None));
@@ -201,6 +245,13 @@ async fn every_route_is_answered_by_a_handler_of_its_own() {
             404,
         ),
         (Method::POST, "/api/answers", Route::Answers, 404),
+        (
+            Method::POST,
+            "/api/answers/9/receipt",
+            Route::AnswerReceipt { id: "9".to_owned() },
+            400,
+        ),
+        (Method::POST, "/api/answers/read", Route::AnswersRead, 400),
     ] {
         let asked = request(method.clone(), path, Some(&scene.zeus), "");
         let (got, body) = said(dispatch(&scene.context, &caller, route, asked).await);
@@ -214,7 +265,7 @@ async fn every_route_is_answered_by_a_handler_of_its_own() {
 pub(super) mod support {
 
     use bytes::Bytes;
-    use cf_ledger::NewTask;
+    use cf_ledger::{MessageView, NewNote, NewQuestion, NewTask};
     use futures_util::stream;
     use serde_json::{json, Value};
 
@@ -286,8 +337,108 @@ pub(super) mod support {
         created.task.number
     }
 
+    /// [`working_task`], and a question `zeus` asked the chief through its
+    /// harness's tool on it, which waits for a choice: the task works, and the
+    /// question's door is open.
+    pub(in crate::api::routes) fn working_question(scene: &Scene) -> MessageView {
+        let number = working_task(scene);
+        question_on(scene, number)
+    }
+
+    /// [`working_question`], and the chief's answer to it in `words`: the task
+    /// waits, and the answer is queued for `zeus`.
+    pub(in crate::api::routes) fn answered_question(scene: &Scene, words: &str) -> MessageView {
+        let question = working_question(scene);
+        answer_in_words(scene, question.id, words)
+    }
+
+    /// A question in `words` `zeus` asked the chief about task `number`, with
+    /// no options to choose from: it is answered in words.
+    pub(in crate::api::routes) fn plain_question_on(
+        scene: &Scene,
+        number: i64,
+        words: &str,
+    ) -> MessageView {
+        let asked = NewQuestion {
+            from: Some("zeus".to_owned()),
+            to: "chief".to_owned(),
+            body: Some(words.to_owned()),
+            task: Some(number),
+            ..NewQuestion::default()
+        };
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .ask(scene.project.id, &asked)
+            .unwrap()
+    }
+
+    /// The chief's note to `zeus` about task `number`.
+    pub(in crate::api::routes) fn note_for_zeus(
+        scene: &Scene,
+        number: i64,
+        words: &str,
+    ) -> MessageView {
+        let note = NewNote {
+            from: Some("chief".to_owned()),
+            to: "zeus".to_owned(),
+            body: words.to_owned(),
+            task: Some(number),
+        };
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .note(scene.project.id, &note)
+            .unwrap()
+    }
+
+    /// The chief's answer to question `question` in `words`.
+    pub(in crate::api::routes) fn answer_in_words(
+        scene: &Scene,
+        question: i64,
+        words: &str,
+    ) -> MessageView {
+        let chief = scene.id("chief");
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .answer(question, chief, Some(&json!(words)), None)
+            .unwrap()
+    }
+
+    /// A question `zeus` asked the chief through its harness's tool about
+    /// task `number`, which waits for a choice.
+    pub(in crate::api::routes) fn question_on(scene: &Scene, number: i64) -> MessageView {
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .ask(
+                scene.project.id,
+                &NewQuestion {
+                    from: Some("zeus".to_owned()),
+                    to: "chief".to_owned(),
+                    task: Some(number),
+                    questions: Some(json!([{
+                        "question": "Which?", "header": "H",
+                        "options": [{ "label": "red" }, { "label": "blue" }], "multiple": false,
+                    }])),
+                    ..NewQuestion::default()
+                },
+            )
+            .unwrap()
+    }
+
     /// A task the chief put on the board for a standard worker, which waits.
     pub(in crate::api::routes) fn open_task(scene: &Scene) -> i64 {
+        open_task_of(scene, "Lexer")
+    }
+
+    /// [`open_task`], with `brief` as its words.
+    pub(in crate::api::routes) fn open_task_of(scene: &Scene, brief: &str) -> i64 {
         let created = scene
             .context
             .ledger
@@ -298,7 +449,7 @@ pub(super) mod support {
                     from: "chief".to_owned(),
                     pool: Some("worker".to_owned()),
                     tier: Some("standard".to_owned()),
-                    body: "Lexer".to_owned(),
+                    body: brief.to_owned(),
                     ..NewTask::default()
                 },
             )
@@ -334,13 +485,18 @@ pub(super) mod support {
     /// worker and given to `zeus` by the daemon: its brief waits at the gate.
     /// The token of the session the daemon opened, and the brief's number.
     pub(in crate::api::routes) fn gated_brief(scene: &Scene) -> (String, i64) {
+        gated_brief_of(scene, "Lexer")
+    }
+
+    /// [`gated_brief`], with `brief` as its words.
+    pub(in crate::api::routes) fn gated_brief_of(scene: &Scene, brief: &str) -> (String, i64) {
         scene
             .context
             .ledger
             .borrow_mut()
             .set_gate(scene.project.id, true)
             .unwrap();
-        let number = open_task(scene);
+        let number = open_task_of(scene, brief);
         let mut ledger = scene.context.ledger.borrow_mut();
         let project = ledger.project(scene.project.id).unwrap().unwrap();
         let zeus = project

@@ -1,20 +1,22 @@
 //! A message on its way, and off it (`src/ledger/queue.js`). `queue` writes
-//! one by participant id: queued for its recipient, read at once when the
-//! door that asked collects it, or held for the human when the project's
-//! gate holds it. `send` does the same by handle, and logs it. A message
-//! that no longer applies is withdrawn or dropped, and never delivered.
+//! one by participant id: queued for its recipient, read at once when it is
+//! the asker's own window that gave the answer, or held for the human when the
+//! project's gate holds it. `send` does the same by handle, and logs it. A
+//! message that no longer applies is withdrawn or dropped, and never delivered.
 
 use cf_proto::ledger::{MessageView, Question};
 use rusqlite::params;
 use serde_json::json;
 
+use crate::messages::{adopt, release_carried};
 use crate::model::{self, LedgerError, MAX_BODY};
 use crate::store::Store;
 
 /// A message to queue: its recipient and sender by id, what kind it is, the
-/// task it is about, the question it answers, and what it says; whether the
-/// door that asked collects it at once; a question's options, an answer's
-/// choices, and whether a tell is urgent.
+/// task it is about, the question it answers, and what it says; whether it
+/// is an answer the asker's own window gave, which is received as it is
+/// written; whether a question's door is shut from the start; a question's
+/// options, an answer's choices, and whether a tell is urgent.
 #[derive(Default)]
 pub(crate) struct Queued<'a> {
     pub(crate) to: i64,
@@ -23,15 +25,17 @@ pub(crate) struct Queued<'a> {
     pub(crate) task_id: Option<i64>,
     pub(crate) reply_to: Option<i64>,
     pub(crate) body: &'a str,
-    pub(crate) collected: bool,
+    pub(crate) from_window: bool,
+    pub(crate) door_closed: bool,
     pub(crate) questions: Option<&'a [Question]>,
     pub(crate) choices: Option<&'a [Vec<String>]>,
     pub(crate) urgent: bool,
 }
 
 /// Writes a message on its way: queued for its recipient, read at once when
-/// the door that asked collects it, or waiting for the human instead when
-/// the project gates it. Its id.
+/// the asker's own window gave it (its receipt says so), or waiting for the
+/// human instead when the project gates it. A row it keeps for a window joins
+/// the task message that waits for it. Its id.
 pub(crate) fn queue(
     store: &mut Store,
     project_id: i64,
@@ -39,7 +43,7 @@ pub(crate) fn queue(
 ) -> Result<i64, LedgerError> {
     let landing = if gate_holds(store, project_id, message.from, message.to)? {
         "gated"
-    } else if message.collected {
+    } else if message.from_window {
         "read"
     } else {
         "queued"
@@ -47,10 +51,12 @@ pub(crate) fn queue(
     let questions = message.questions.map(serde_json::to_string).transpose()?;
     let choices = message.choices.map(serde_json::to_string).transpose()?;
     let at = store.at();
+    let received = (landing == "read").then(|| (at.clone(), r#"{"window":true}"#));
     store.db.execute(
         "INSERT INTO message (project_id, recipient_id, sender_id, kind, task_id, reply_to, body,
-                            state, questions, choices, urgent, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            state, questions, choices, urgent, created_at, delivered_at, receipt,
+                            door_closed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         params![
             project_id,
             message.to,
@@ -64,9 +70,16 @@ pub(crate) fn queue(
             choices,
             i64::from(message.urgent),
             at,
+            received.as_ref().map(|(at, _)| at),
+            received.as_ref().map(|(_, receipt)| receipt),
+            message.door_closed.then_some(&at),
         ],
     )?;
-    Ok(store.db.last_insert_rowid())
+    let id = store.db.last_insert_rowid();
+    if landing == "queued" && matches!(message.kind, "answer" | "note") {
+        adopt(store, id)?;
+    }
+    Ok(id)
 }
 
 /// Whether the project's gate holds a message: one agent's word to another,
@@ -99,6 +112,7 @@ pub(crate) struct Sent<'a> {
     pub(crate) kind: &'a str,
     pub(crate) questions: Option<&'a [Question]>,
     pub(crate) urgent: bool,
+    pub(crate) door_closed: bool,
 }
 
 /// Queues a message by handle, and logs it.
@@ -129,6 +143,7 @@ pub(crate) fn send(
                 body: message.body,
                 questions: message.questions,
                 urgent: message.urgent,
+                door_closed: message.door_closed,
                 ..Queued::default()
             },
         )?;
@@ -157,13 +172,14 @@ pub(crate) fn withdraw(store: &Store, message_id: i64, reason: &str) -> Result<(
     Ok(())
 }
 
-/// A task's messages still held at the gate, withdrawn.
+/// A task's messages still held at the gate, withdrawn; what a withdrawn
+/// carrier carried is its own again.
 pub(crate) fn withdraw_gated(store: &Store, task_id: i64, reason: &str) -> Result<(), LedgerError> {
     store.db.execute(
         "UPDATE message SET state = 'cancelled', reason = ? WHERE task_id = ? AND state = 'gated'",
         params![reason, task_id],
     )?;
-    Ok(())
+    release_carried(store, task_id)
 }
 
 /// A cancelled or failed task's queued messages are never delivered.

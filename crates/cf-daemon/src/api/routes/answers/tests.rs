@@ -2,11 +2,13 @@
 //! and that the dispatcher is woken once the answer is written and never
 //! for one that was refused.
 
+use cf_ledger::MessageView;
 use hyper::Method;
 use serde_json::{json, Value};
 
 use super::*;
 use crate::api::callers::caller_of;
+use crate::api::routes::tests::support::{note_for_zeus, question_on, state_of, working_question};
 use crate::testing::{request, said, scene, Scene};
 
 /// `POST /api/answers` from the window of `token`, with `body` as its text.
@@ -16,13 +18,21 @@ async fn post(scene: &Scene, token: &str, body: &str) -> (u16, Value) {
     said(handle(&scene.context, &caller, asked).await)
 }
 
+/// The answer to the scene's question, as zeus's inbox holds it, or none while it waits.
 fn answer_to(scene: &Scene) -> Option<cf_ledger::MessageView> {
-    scene
-        .context
-        .ledger
-        .borrow()
-        .answer_to(scene.question.id)
+    let zeus = scene
+        .project
+        .participants
+        .iter()
+        .find(|participant| participant.handle == "zeus")
         .unwrap()
+        .id;
+    let inbox = scene.context.ledger.borrow().inbox(zeus, 100).unwrap();
+    inbox
+        .into_iter()
+        .filter(|message| message.kind == "answer" && message.reply_to == Some(scene.question.id))
+        .filter(|message| message.state != "cancelled")
+        .min_by_key(|message| message.id)
 }
 
 #[tokio::test]
@@ -190,6 +200,362 @@ async fn the_body_is_read_first_so_a_bad_one_is_refused_before_anything_is_asked
         let (got, said) = post(&scene, &scene.chief, written).await;
         assert_eq!((got, said["error"].as_str()), (status, Some(error)));
     }
+    assert_eq!(scene.kicks.get(), 0);
+}
+
+/// `POST /api/answers/<id>/receipt` from the window of `token`, with `body` as its text.
+async fn receipt_from(scene: &Scene, token: &str, id: &str, body: &str) -> (u16, Value) {
+    let target = format!("/api/answers/{id}/receipt");
+    let asked = request(Method::POST, &target, Some(token), body);
+    let caller = caller_of(&scene.context, &asked).unwrap();
+    said(receipt(&scene.context, &caller, asked, id).await)
+}
+
+const HANDED_OVER: &str = r#"{"received":true}"#;
+const NOT_HANDED_OVER: &str = r#"{"received":false}"#;
+
+/// zeus's question on its working task, the chief's choice for it, and the
+/// claim of zeus's door on that answer: the question's number and the answer.
+fn claimed(scene: &Scene) -> (i64, MessageView) {
+    let question = working_question(scene);
+    let answer = scene.choose(question.id, "red");
+    scene.claim(question.id);
+    (question.id, answer)
+}
+
+#[tokio::test]
+async fn a_door_that_handed_its_answer_over_makes_it_read_and_its_task_work_and_wakes_the_dispatcher(
+) {
+    let scene = scene();
+    let (_, answer) = claimed(&scene);
+    assert_eq!(state_of(&scene, 1), "waiting");
+    assert_eq!(scene.kicks.get(), 0);
+    let (status, said) =
+        receipt_from(&scene, &scene.zeus, &answer.id.to_string(), HANDED_OVER).await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["message"]["id"], answer.id);
+    assert_eq!(said["message"]["state"], "read");
+    let read = scene.message(answer.id);
+    assert_eq!(read.receipt, json!({ "door": true }));
+    assert!(read.delivered_at.is_some());
+    assert_eq!(state_of(&scene, 1), "working", "what it asked is answered");
+    assert_eq!(scene.logged("message.read"), 1);
+    assert_eq!(scene.next_for_zeus(), None, "nothing is left to paste");
+    assert_eq!(scene.kicks.get(), 1);
+}
+
+#[tokio::test]
+async fn an_answer_read_already_is_ok_and_writes_nothing_more_by_whichever_way_it_was_read() {
+    let scene = scene();
+    let (_, answer) = claimed(&scene);
+    let id = answer.id.to_string();
+    // The door's own receipt, said twice: a reply that was lost.
+    for _ in 0..2 {
+        let (status, said) = receipt_from(&scene, &scene.zeus, &id, HANDED_OVER).await;
+        assert_eq!(
+            (status, said["message"]["state"].as_str()),
+            (200, Some("read"))
+        );
+    }
+    assert_eq!(scene.logged("message.read"), 1, "read once");
+    assert_eq!(scene.message(answer.id).receipt, json!({ "door": true }));
+
+    // An answer `cf inbox read` served while the door held it, and then the door says so.
+    let question = question_on(&scene, 1);
+    let other = scene.choose(question.id, "blue");
+    scene.claim(question.id);
+    let zeus = scene.id("zeus");
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .receive_read(zeus, &[other.id], cf_ledger::Read::Inbox)
+        .unwrap();
+    let (status, _) = receipt_from(&scene, &scene.zeus, &other.id.to_string(), HANDED_OVER).await;
+    assert_eq!(status, 200);
+    assert_eq!(scene.message(other.id).receipt, json!({ "read": "inbox" }));
+    assert_eq!(scene.logged("message.read"), 2, "each was read once");
+}
+
+#[tokio::test]
+async fn an_answer_to_a_question_on_no_task_is_read_and_moves_no_task() {
+    let scene = scene();
+    let chief = scene.id("chief");
+    let answer = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .answer(scene.question.id, chief, Some(&json!("Yes")), None)
+        .unwrap();
+    let (status, said) =
+        receipt_from(&scene, &scene.zeus, &answer.id.to_string(), HANDED_OVER).await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(scene.message(answer.id).state, "read");
+    assert_eq!(scene.kicks.get(), 1);
+}
+
+#[tokio::test]
+async fn a_receipt_at_a_door_a_pause_shut_is_refused_and_the_answer_stays_to_come_as_a_message() {
+    let scene = scene();
+    let (_, answer) = claimed(&scene);
+    // The pause voids the claim and shuts the door; the answer waits for the words that resume the task.
+    scene.pause();
+    let (status, said) =
+        receipt_from(&scene, &scene.zeus, &answer.id.to_string(), HANDED_OVER).await;
+    assert_eq!(status, 409);
+    assert_eq!(
+        said,
+        json!({
+            "error": "door-closed",
+            "message": format!("m-{} is not answered here: it comes to you as a message", answer.id),
+        })
+    );
+    assert_eq!(scene.message(answer.id).state, "queued");
+    assert_eq!(scene.logged("message.read"), 0);
+    assert_eq!(scene.kicks.get(), 0, "nothing was written");
+}
+
+#[tokio::test]
+async fn a_receipt_for_an_answer_pasted_as_text_is_refused_whether_it_is_being_pasted_or_was() {
+    let scene = scene();
+    let (_, answer) = claimed(&scene);
+    // The window rested before the door said anything: its claim is voided and the answer is pasted.
+    let zeus = scene.id("zeus");
+    {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        ledger
+            .release_claims(zeus, "its window is at rest")
+            .unwrap();
+        ledger.begin_delivery(answer.id).unwrap();
+    }
+    let id = answer.id.to_string();
+    let (status, said) = receipt_from(&scene, &scene.zeus, &id, HANDED_OVER).await;
+    assert_eq!((status, said["error"].as_str()), (409, Some("door-closed")));
+    assert_eq!(scene.message(answer.id).state, "delivering");
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .confirm_delivery(answer.id, Some(&json!({ "item": "pasted" })))
+        .unwrap();
+    let (status, said) = receipt_from(&scene, &scene.zeus, &id, HANDED_OVER).await;
+    assert_eq!((status, said["error"].as_str()), (409, Some("door-closed")));
+    let pasted = scene.message(answer.id);
+    assert_eq!(pasted.state, "delivered");
+    assert_eq!(
+        pasted.receipt,
+        json!({ "item": "pasted" }),
+        "the paste's receipt stands"
+    );
+    assert_eq!(scene.kicks.get(), 0);
+}
+
+#[tokio::test]
+async fn a_door_that_did_not_hand_its_answer_over_gives_the_claim_back_and_wakes_the_dispatcher() {
+    let scene = scene();
+    let (_, answer) = claimed(&scene);
+    assert_eq!(scene.next_for_zeus(), None, "claimed: the paste skips it");
+    let (status, said) =
+        receipt_from(&scene, &scene.zeus, &answer.id.to_string(), NOT_HANDED_OVER).await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["message"]["state"], "queued");
+    assert_eq!(
+        scene.next_for_zeus(),
+        Some("H: red".to_owned()),
+        "the ledger's to deliver again"
+    );
+    assert_eq!(scene.logged("message.read"), 0);
+    assert_eq!(state_of(&scene, 1), "waiting", "nobody received it");
+    assert_eq!(scene.kicks.get(), 1);
+}
+
+#[tokio::test]
+async fn a_receipt_that_does_not_say_whether_it_was_handed_over_is_refused_and_changes_nothing() {
+    let scene = scene();
+    let (_, answer) = claimed(&scene);
+    let id = answer.id.to_string();
+    for written in [
+        "{}",
+        r#"{"received":"yes"}"#,
+        r#"{"received":1}"#,
+        r#"{"received":null}"#,
+    ] {
+        let (status, said) = receipt_from(&scene, &scene.zeus, &id, written).await;
+        assert_eq!(status, 400, "{written}");
+        assert_eq!(
+            said,
+            json!({ "error": "invalid-receipt", "message": "received is true (handed over) or false (not)" }),
+            "{written}"
+        );
+    }
+    for (written, status, error) in [
+        ("not json", 400, "invalid-json"),
+        ("[1]", 400, "invalid-json"),
+        (&"x".repeat(3 * 1024 * 1024), 413, "too-large"),
+    ] {
+        let (got, said) = receipt_from(&scene, &scene.zeus, &id, written).await;
+        assert_eq!((got, said["error"].as_str()), (status, Some(error)));
+    }
+    assert_eq!(scene.kicks.get(), 0);
+    assert_eq!(scene.next_for_zeus(), None, "the claim stands");
+}
+
+#[tokio::test]
+async fn only_the_one_an_answer_was_for_may_say_it_was_handed_over_and_only_of_an_answer() {
+    let scene = scene();
+    let (question, answer) = claimed(&scene);
+    for (token, id) in [
+        (&scene.chief, answer.id.to_string()),
+        (&scene.zeus, question.to_string()),
+        (&scene.zeus, "99999".to_owned()),
+        (&scene.zeus, "99999999999999999999".to_owned()),
+    ] {
+        let (status, said) = receipt_from(&scene, token, &id, HANDED_OVER).await;
+        assert_eq!(status, 404, "{id}");
+        assert_eq!(said["error"], "unknown-message", "{id}");
+    }
+    let (_, said) = receipt_from(&scene, &scene.chief, &answer.id.to_string(), HANDED_OVER).await;
+    assert_eq!(
+        said["message"],
+        format!("no answer m-{} for you", answer.id)
+    );
+    assert_eq!(scene.message(answer.id).state, "queued", "nothing was read");
+    assert_eq!(scene.kicks.get(), 0);
+}
+
+/// `POST /api/answers/read` from the window of `token`, with `body` as its text.
+async fn read_from(scene: &Scene, token: &str, body: &str) -> (u16, Value) {
+    let asked = request(Method::POST, "/api/answers/read", Some(token), body);
+    let caller = caller_of(&scene.context, &asked).unwrap();
+    said(read(&scene.context, &caller, asked).await)
+}
+
+fn said_read(ids: &[i64], via: &str) -> String {
+    json!({ "answers": ids, "via": via }).to_string()
+}
+
+#[tokio::test]
+async fn answers_cf_wrote_whole_are_received_by_the_one_they_are_for_and_the_dispatcher_is_woken() {
+    let scene = scene();
+    let question = working_question(&scene);
+    let first = scene.choose(question.id, "red");
+    let other = question_on(&scene, 1);
+    let second = scene.choose(other.id, "blue");
+    assert_eq!(state_of(&scene, 1), "waiting");
+    // One of the two, said to have been read with `cf task get`: the other still obliges.
+    let (status, said) = read_from(&scene, &scene.zeus, &said_read(&[first.id], "task")).await;
+    assert_eq!((status, said), (200, json!({})));
+    let read = scene.message(first.id);
+    assert_eq!(read.state, "read");
+    assert_eq!(read.receipt, json!({ "read": "task" }));
+    assert!(read.delivered_at.is_some());
+    assert_eq!(
+        state_of(&scene, 1),
+        "waiting",
+        "the other question has no answer yet"
+    );
+    assert_eq!(scene.logged("message.read"), 1);
+    assert_eq!(scene.kicks.get(), 1, "the dispatcher is woken");
+    // The other, by `cf inbox read`: the task goes on.
+    let (status, _) = read_from(&scene, &scene.zeus, &said_read(&[second.id], "inbox")).await;
+    assert_eq!(status, 200);
+    assert_eq!(scene.message(second.id).receipt, json!({ "read": "inbox" }));
+    assert_eq!(state_of(&scene, 1), "working");
+    assert_eq!(scene.kicks.get(), 2);
+}
+
+#[tokio::test]
+async fn an_answer_a_door_claimed_is_received_by_a_read_and_its_claim_is_given_up() {
+    let scene = scene();
+    let (_, answer) = claimed(&scene);
+    assert_eq!(scene.next_for_zeus(), None, "claimed: the paste skips it");
+    let (status, _) = read_from(&scene, &scene.zeus, &said_read(&[answer.id], "inbox")).await;
+    assert_eq!(status, 200);
+    assert_eq!(scene.message(answer.id).receipt, json!({ "read": "inbox" }));
+    assert_eq!(state_of(&scene, 1), "working");
+    assert_eq!(scene.next_for_zeus(), None, "nothing is left to paste");
+}
+
+#[tokio::test]
+async fn what_is_not_a_queued_answer_for_the_caller_is_left_as_it_is_and_wakes_nothing() {
+    let scene = scene();
+    let (_, answer) = claimed(&scene);
+    let note = note_for_zeus(&scene, 1, "Mind the tests");
+    // Said by the chief, who is not the one it was for; a note; a message that is not there.
+    let (status, _) = read_from(
+        &scene,
+        &scene.chief,
+        &said_read(&[answer.id, scene.question.id], "task"),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (status, _) = read_from(
+        &scene,
+        &scene.zeus,
+        &said_read(&[note.id, 99_999, -1, 0], "task"),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(scene.message(answer.id).state, "queued");
+    assert_eq!(scene.message(note.id).state, "queued");
+    assert_eq!(scene.logged("message.read"), 0);
+    assert_eq!(scene.kicks.get(), 0);
+    // An answer received is not received twice.
+    read_from(&scene, &scene.zeus, &said_read(&[answer.id], "task")).await;
+    read_from(&scene, &scene.zeus, &said_read(&[answer.id], "task")).await;
+    assert_eq!(scene.logged("message.read"), 1);
+    assert_eq!(scene.kicks.get(), 1);
+}
+
+#[tokio::test]
+async fn an_answer_held_for_the_human_is_not_received_by_being_named() {
+    let scene = scene();
+    let question = working_question(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .set_gate(scene.project.id, true)
+        .unwrap();
+    let answer = scene.choose(question.id, "red");
+    assert_eq!(answer.state, "gated");
+    read_from(&scene, &scene.zeus, &said_read(&[answer.id], "task")).await;
+    assert_eq!(scene.message(answer.id).state, "gated");
+    assert_eq!(scene.kicks.get(), 0);
+}
+
+#[tokio::test]
+async fn a_read_that_names_no_answers_is_ok_and_one_that_is_no_list_of_numbers_or_names_no_way_is_refused(
+) {
+    let scene = scene();
+    let (_, answer) = claimed(&scene);
+    let (status, said) = read_from(&scene, &scene.zeus, &said_read(&[], "task")).await;
+    assert_eq!((status, said), (200, json!({})));
+    let id = answer.id;
+    for written in [
+        "{}".to_owned(),
+        r#"{"answers":[1]}"#.to_owned(),
+        json!({ "answers": [id], "via": "list" }).to_string(),
+        json!({ "answers": [id], "via": 3 }).to_string(),
+        json!({ "via": "task" }).to_string(),
+        json!({ "answers": id, "via": "task" }).to_string(),
+        json!({ "answers": [id, "7"], "via": "task" }).to_string(),
+        json!({ "answers": [id, 2.5], "via": "task" }).to_string(),
+        json!({ "answers": [null], "via": "task" }).to_string(),
+    ] {
+        let (status, said) = read_from(&scene, &scene.zeus, &written).await;
+        assert_eq!(status, 400, "{written}");
+        assert_eq!(said["error"], "invalid-read", "{written}");
+    }
+    for (written, status, error) in [
+        ("not json", 400, "invalid-json"),
+        ("[1]", 400, "invalid-json"),
+        (&"x".repeat(3 * 1024 * 1024), 413, "too-large"),
+    ] {
+        let (got, said) = read_from(&scene, &scene.zeus, written).await;
+        assert_eq!((got, said["error"].as_str()), (status, Some(error)));
+    }
+    assert_eq!(scene.next_for_zeus(), None, "the claim stands");
     assert_eq!(scene.kicks.get(), 0);
 }
 

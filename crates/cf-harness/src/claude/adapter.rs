@@ -14,6 +14,13 @@
 //! - Claude's own `sessions/<pid>.json` says busy, idle or waiting (and
 //!   why); the transcript holds the conversation and says whether the turn
 //!   settled.
+//! - A turn the daemon interrupted before Claude wrote a word of it leaves
+//!   no record of its end, and Claude puts the message back in its input
+//!   box, and out of the conversation it answers from: the window is read at
+//!   rest where the daemon pressed the interrupt for that very turn
+//!   ([`stopped`]), the look says it took the message back
+//!   (`Observed::took_back`), and the box is cleared before the next paste,
+//!   which would go in after the old text.
 //! - The window's Claude process is the pane's own child when a status names
 //!   it, so the first look already sees a /clear. Otherwise (Claude may run
 //!   as another process the child starts) it is the process whose status
@@ -40,13 +47,14 @@ use serde_json::Value;
 
 use super::install;
 use super::status::{self, State, Status};
+use super::stopped::{self, Pressed};
 use crate::contract::{
     Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
     Waiting, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
-use crate::seams::{self, Entropy, Services};
+use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::record_state::switched_to;
 use crate::shared::{pane, window_args};
@@ -55,6 +63,7 @@ use crate::shared::{pane, window_args};
 pub struct ClaudeAdapter {
     env: Env,
     records: Rc<dyn Records>,
+    time: Rc<dyn Time>,
     entropy: Rc<dyn Entropy>,
     /// Where Claude keeps its own status of each of its processes, made
     /// whole once, as Node resolved it when it made the adapter; or why
@@ -68,6 +77,7 @@ impl ClaudeAdapter {
         Self {
             env: services.env.clone(),
             records: Rc::clone(&services.records),
+            time: Rc::clone(&services.time),
             entropy: Rc::clone(&services.entropy),
             statuses: status::folder(&services.env),
         }
@@ -122,10 +132,14 @@ impl Adapter for ClaudeAdapter {
                 native_session: Some(session.clone()),
                 window: Rc::new(ClaudeWindow {
                     records: Rc::clone(&self.records),
+                    time: Rc::clone(&self.time),
                     statuses,
                     session: RefCell::new(session),
                     pid: Cell::new(None),
                     claude_pid: Cell::new(None),
+                    asked: RefCell::new(None),
+                    pressed: RefCell::new(None),
+                    restored: Cell::new(false),
                 }),
             })
         })
@@ -135,6 +149,7 @@ impl Adapter for ClaudeAdapter {
 /// A Claude window, and what the engine told it of itself.
 struct ClaudeWindow {
     records: Rc<dyn Records>,
+    time: Rc<dyn Time>,
     statuses: String,
     /// The conversation the window shows: its launch's, or the one it was
     /// followed to.
@@ -143,6 +158,14 @@ struct ClaudeWindow {
     pid: Cell<Option<u32>>,
     /// The Claude whose status first named the window's conversation.
     claude_pid: Cell<Option<u32>>,
+    /// The id of the user's last message in the latest look: the turn the
+    /// window is in, and what an interrupt is pressed over.
+    asked: RefCell<Option<Arc<str>>>,
+    /// The interrupt the daemon pressed for that turn, if it did.
+    pressed: RefCell<Option<Pressed>>,
+    /// The latest look read the window at rest by that press: Claude has put
+    /// the message back in its input box.
+    restored: Cell<bool>,
 }
 
 impl ClaudeWindow {
@@ -174,6 +197,18 @@ impl ClaudeWindow {
     fn elsewhere(&self, status: &Status) -> bool {
         status.session != *self.session.borrow()
     }
+
+    /// Whether the interrupt the daemon pressed for the turn the window is in
+    /// is what ended it, though Claude wrote no record of that ([`stopped`]).
+    fn stopped(&self, reading: &Reading) -> bool {
+        let Reading::Known(record) = reading else {
+            return false;
+        };
+        self.pressed
+            .borrow()
+            .as_ref()
+            .is_some_and(|pressed| pressed.stopped(record, self.time.wall_ms()))
+    }
 }
 
 impl Window for ClaudeWindow {
@@ -185,6 +220,10 @@ impl Window for ClaudeWindow {
 
     fn follow(&self, session: &str) {
         session.clone_into(&mut self.session.borrow_mut());
+        // What was pressed for was a turn of the conversation the window left.
+        *self.asked.borrow_mut() = None;
+        *self.pressed.borrow_mut() = None;
+        self.restored.set(false);
     }
 
     fn started(&self) -> Work<'_, Result<Option<String>, String>> {
@@ -233,8 +272,23 @@ impl Window for ClaudeWindow {
         text: &'a str,
     ) -> Work<'a, Result<Admission, String>> {
         Box::pin(async move {
+            // A window read at rest by an interrupt of ours has the message it
+            // was given in its input box again, and this one would be pasted
+            // after it, to go as one: the box is cleared first.
+            if self.restored.get() {
+                if let Err(cause) = pane::write_keys(host, pane, &stopped::CLEAR_INPUT).await {
+                    let reason = format!("the window's input box could not be cleared: {cause}");
+                    return Ok(Admission::Refused { reason });
+                }
+            }
             let sent = pane::write_paste(host, pane, &window_text(text)).await;
-            Ok(admission(&sent, "the window refused the paste", false))
+            let admitted = admission(&sent, "the window refused the paste", false);
+            if matches!(admitted, Admission::Admitted { .. }) {
+                // The turn the paste begins is its own: no press was for it.
+                *self.pressed.borrow_mut() = None;
+                self.restored.set(false);
+            }
+            Ok(admitted)
         })
     }
 
@@ -262,7 +316,7 @@ impl Window for ClaudeWindow {
                 ),
                 Reading::Unknown(_) => (true, false, false, None),
             };
-            let observed = |settled, waiting| Observed {
+            let observed = |settled, waiting, took_back| Observed {
                 reading: Some(Arc::clone(&reading)),
                 settled,
                 waiting,
@@ -270,10 +324,11 @@ impl Window for ClaudeWindow {
                 quota: quota.clone(),
                 switched: None,
                 unnamed: false,
+                took_back,
             };
             Ok(match live {
                 Some(live) if self.elsewhere(&live) => {
-                    switched_to(observed(false, None), live.session)
+                    switched_to(observed(false, None, false), live.session)
                 }
                 live => {
                     // Claude's own status is the word on whether the window
@@ -289,9 +344,21 @@ impl Window for ClaudeWindow {
                         }) => Some(Waiting { reason }),
                         _ => None,
                     };
-                    observed(idle && (settled || empty), waiting)
+                    // A turn the daemon interrupted before a word of it was
+                    // written has no end in the transcript: the press is it.
+                    // Claude then has its message in the input box again, and
+                    // out of the conversation it answers from: the look says so.
+                    let by_press = idle && self.stopped(&reading);
+                    self.restored.set(by_press);
+                    *self.asked.borrow_mut() = stopped::last_user(&reading);
+                    observed(idle && (settled || empty) || by_press, waiting, by_press)
                 }
             })
         })
+    }
+
+    fn interrupted(&self) {
+        let over = self.asked.borrow().clone();
+        *self.pressed.borrow_mut() = over.map(|over| Pressed::new(self.time.wall_ms(), over));
     }
 }

@@ -99,6 +99,21 @@ pub fn message_line(message: &Value) -> String {
     )
 }
 
+/// The numbers of the answers among `messages` that still wait in the queue
+/// to be pasted: the ones a command that wrote every body of `messages` in
+/// full has written whole, and so says it has. An answer already read, or
+/// withheld, or any other kind of message, is not one of them.
+pub fn waiting_answers(messages: &[Value]) -> Vec<i64> {
+    messages
+        .iter()
+        .filter(|message| {
+            message.get("kind").and_then(Value::as_str) == Some("answer")
+                && message.get("state").and_then(Value::as_str) == Some("queued")
+        })
+        .filter_map(|message| message.get("id").and_then(Value::as_i64))
+        .collect()
+}
+
 /// The items of a JSON list; none when it is no list.
 pub fn list(value: Option<&Value>) -> &[Value] {
     value.and_then(Value::as_array).map_or(&[], Vec::as_slice)
@@ -139,6 +154,21 @@ mod tests {
         let kept = json!({ "number": 3, "state": "accepted", "assignee": "zeus", "requester": "chief",
             "title": "Parser", "blockedBy": [], "deletedAt": null });
         assert_eq!(task_head(&kept), "T-3 [accepted] @zeus ← @chief: Parser");
+    }
+
+    #[test]
+    fn the_answers_still_waiting_to_be_pasted_are_the_queued_ones_and_only_the_answers() {
+        let messages = [
+            json!({ "id": 3, "kind": "task", "state": "delivered", "body": "Parser" }),
+            json!({ "id": 5, "kind": "answer", "state": "queued", "body": "JSON" }),
+            json!({ "id": 6, "kind": "answer", "state": "read", "body": "YAML" }),
+            json!({ "id": 7, "kind": "note", "state": "queued", "body": "Mind the tests" }),
+            json!({ "id": 8, "kind": "answer", "state": "delivering", "body": "TOML" }),
+            json!({ "id": 9, "kind": "answer", "state": "queued", "body": "XML" }),
+            json!({ "kind": "answer", "state": "queued", "body": "no id" }),
+        ];
+        assert_eq!(waiting_answers(&messages), [5, 9]);
+        assert!(waiting_answers(&[]).is_empty());
     }
 
     #[test]

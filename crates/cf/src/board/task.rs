@@ -7,9 +7,9 @@ use cf_base::text::{utf16_len, utf16_prefix};
 use cf_board::Board;
 use serde_json::{json, Map, Value};
 
-use super::lines::{a_pool, message_line, numbers, task_head, task_line, tasks};
+use super::lines::{a_pool, message_line, numbers, task_head, task_line, tasks, waiting_answers};
 use super::usage::{task_usage, ADD_USAGE};
-use super::words::{quoted, require_text, split, task_number, task_numbers};
+use super::words::{quoted, require_text, split, task_number, task_numbers, Split};
 use super::{text_of, Failure, Said};
 
 /// How much of one transcript item `cf task get --transcript` shows, in UTF-16 units.
@@ -23,10 +23,7 @@ pub fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<
     match action {
         Some("help" | "--help" | "-h") => {
             let usage = task_usage();
-            return Ok(Said {
-                data: json!({ "usage": usage }),
-                text: usage,
-            });
+            return Ok(Said::new(json!({ "usage": usage }), usage));
         }
         Some("add") => return add(rest, board, input),
         Some("list") | None => return board_list(board),
@@ -151,10 +148,7 @@ fn add(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
             a_pool(pool, tier.as_ref())
         )
     };
-    Ok(Said {
-        data: created.into_value(),
-        text,
-    })
+    Ok(Said::new(created.into_value(), text))
 }
 
 fn board_list(board: &Board) -> Result<Said, Failure> {
@@ -181,20 +175,28 @@ fn board_list(board: &Board) -> Result<Said, Failure> {
     } else {
         lines.join("\n")
     };
-    Ok(Said {
-        data: answer.into_value(),
-        text,
-    })
+    Ok(Said::new(answer.into_value(), text))
 }
 
+/// `cf task get T-n`: the task with its whole thread, and said of each answer
+/// in it still waiting to be pasted that it was written whole; or, with
+/// `--transcript`, what its window did, which says of no answer that it was
+/// written: the thread is not what was asked for there (its text does not
+/// print it, and what its JSON carries of it is along the way). What is wrong
+/// with the command is said before the board is asked anything.
 fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
     let words = split(rest, &["--transcript"], &["--last"]);
+    let last = if words.on("--transcript") {
+        Some(items_asked(&words)?)
+    } else {
+        None
+    };
     let path = format!("/api/tasks/{number}");
     let mut answer = board.get(&path)?;
     let task = answer.take("task")?;
-    if !words.on("--transcript") {
-        let thread = answer
-            .list(task.get("messages"), "messages")?
+    let Some(last) = last else {
+        let messages = answer.list(task.get("messages"), "messages")?;
+        let thread = messages
             .iter()
             .map(|message| {
                 format!(
@@ -206,12 +208,9 @@ fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
             .collect::<Vec<_>>()
             .join("\n\n");
         let text = format!("{}\n\n{thread}", task_head(&task));
-        return Ok(Said { data: task, text });
-    }
-    let last = words.value("--last").map_or(10.0, js::number);
-    if last.fract() != 0.0 || !last.is_finite() || last < 1.0 {
-        return Err(Failure::Usage("--last takes a number of items".into()));
-    }
+        let answers = waiting_answers(messages);
+        return Ok(Said::new(task, text).having_written("task", answers));
+    };
     let transcript = format!("/api/tasks/{number}/transcript?last={last}");
     let copy = board.get(&transcript)?;
     let listed = copy.list(copy.value().get("items"), "items")?;
@@ -253,10 +252,17 @@ fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
     if let Value::Object(copy) = copy.into_value() {
         data.extend(copy);
     }
-    Ok(Said {
-        data: Value::Object(data),
-        text,
-    })
+    Ok(Said::new(Value::Object(data), text))
+}
+
+/// How many items of the transcript `--last` asks for: a whole number of one
+/// or more, as JavaScript reads it; ten when it is not given.
+fn items_asked(words: &Split) -> Result<f64, Failure> {
+    let last = words.value("--last").map_or(10.0, js::number);
+    if last.fract() != 0.0 || !last.is_finite() || last < 1.0 {
+        return Err(Failure::Usage("--last takes a number of items".into()));
+    }
+    Ok(last)
 }
 
 fn moved(
@@ -294,10 +300,7 @@ fn moved(
         "resume" => format!("T-{number} resumes in @{} with your words.", js::text(task.get("assignee"))),
         _ => task_line(&task),
     };
-    Ok(Said {
-        data: task,
-        text: said,
-    })
+    Ok(Said::new(task, said))
 }
 
 /// `text` cut to `units` UTF-16 units, with an ellipsis when it was longer.

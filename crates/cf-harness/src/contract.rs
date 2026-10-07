@@ -148,6 +148,12 @@ pub trait Window {
     ) -> Work<'a, Result<Admission, String>>;
     /// What the window's harness says of it now.
     fn observe(&self) -> Work<'_, Result<Observed, String>>;
+    /// The engine pressed the interrupt keys into the window, and the host
+    /// took them: the turn it shows at work is the one they were for. A
+    /// harness whose record says how an interrupted turn ended has no use for
+    /// it; one that writes nothing of a turn it was interrupted in (Claude,
+    /// before its first word) reads the looks that follow by it.
+    fn interrupted(&self) {}
 }
 
 /// A window's pane, by the pane host's id and the generation it opened in.
@@ -238,6 +244,12 @@ pub struct Observed {
     /// The window has not said which conversation it shows (it is
     /// starting, switching conversations or reconnecting).
     pub unnamed: bool,
+    /// The look read the window at rest because the interrupt the engine
+    /// pressed stopped its turn before a word of its answer (Claude): the
+    /// message that began the turn is in the window's input box again, and out
+    /// of the conversation the window answers from, though its record still
+    /// shows it.
+    pub took_back: bool,
 }
 
 impl Observed {

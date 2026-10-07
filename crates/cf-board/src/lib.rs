@@ -26,9 +26,13 @@ pub enum BoardError {
     NoUrl,
     #[error("ConsensFlow is not answering at {url} ({cause})")]
     Unreachable { url: String, cause: String },
-    /// Answered, and refused: the API's own message, or its status.
+    /// Answered, and refused: the API's own message, or its status, and the
+    /// code the API gave it, when it gave one.
     #[error("{message}")]
-    Refused { message: String },
+    Refused {
+        code: Option<String>,
+        message: String,
+    },
     /// Answered with a body that lacks what the call reads from it.
     #[error("ConsensFlow's answer to {path} has no {what}")]
     Malformed { path: String, what: &'static str },
@@ -38,6 +42,21 @@ impl BoardError {
     /// Whether the daemon answered and refused, as opposed to not answering at all.
     pub fn is_refusal(&self) -> bool {
         matches!(self, BoardError::Refused { .. })
+    }
+
+    /// Whether no answer came: the connection failed or was lost, and the
+    /// request may have been taken or not. A request that changes nothing can
+    /// be asked again after it.
+    pub fn is_unreachable(&self) -> bool {
+        matches!(self, BoardError::Unreachable { .. })
+    }
+
+    /// The code the API gave a refusal (`door-closed`), when it gave one.
+    pub fn code(&self) -> Option<&str> {
+        match self {
+            BoardError::Refused { code, .. } => code.as_deref(),
+            _ => None,
+        }
     }
 }
 
@@ -183,7 +202,11 @@ impl Board {
                 .get("message")
                 .and_then(Value::as_str)
                 .map_or_else(|| format!("ConsensFlow answered {status}"), str::to_string);
-            return Err(BoardError::Refused { message });
+            let code = value
+                .get("error")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            return Err(BoardError::Refused { code, message });
         }
         Ok(Answer {
             path: path.to_string(),
@@ -226,11 +249,13 @@ pub mod scripted {
     }
 
     /// One scripted reply: a status, a body as sent, and how long the API
-    /// holds the request before it answers, as it holds a door's poll.
+    /// holds the request before it answers, as it holds a door's poll; or
+    /// none at all, the connection closed on the request.
     pub struct Reply {
         status: u16,
         text: String,
         hold: Duration,
+        hang_up: bool,
     }
 
     /// A reply of `body`, written as JSON.
@@ -244,6 +269,16 @@ pub mod scripted {
             status,
             text: text.into(),
             hold: Duration::ZERO,
+            hang_up: false,
+        }
+    }
+
+    /// No reply: the connection is closed once the request is read, as one is
+    /// that is lost on its way back, and the request is still kept.
+    pub fn hang_up() -> Reply {
+        Reply {
+            hang_up: true,
+            ..reply_text(0, "")
         }
     }
 
@@ -273,7 +308,13 @@ pub mod scripted {
         let received = Arc::new(Mutex::new(Vec::new()));
         let kept = Arc::clone(&received);
         thread::spawn(move || {
-            for Reply { status, text, hold } in replies {
+            for Reply {
+                status,
+                text,
+                hold,
+                hang_up,
+            } in replies
+            {
                 let Ok((stream, _)) = listener.accept() else {
                     return;
                 };
@@ -309,6 +350,9 @@ pub mod scripted {
                     body,
                 });
                 thread::sleep(hold);
+                if hang_up {
+                    continue;
+                }
                 let answer = format!(
                     "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}",
                     text.len()
@@ -346,17 +390,22 @@ mod tests {
     }
 
     #[test]
-    fn a_refusal_carries_the_apis_message_or_its_status() {
+    fn a_refusal_carries_the_apis_message_or_its_status_and_the_code_it_gave() {
         let api = scripted(vec![
-            reply(409, json!({ "message": "T-3 is not yours" })),
+            reply(
+                409,
+                json!({ "error": "not-yours", "message": "T-3 is not yours" }),
+            ),
             reply(500, json!({})),
         ]);
         let board = Board::new(Some(&api.url), "tok");
         let refused = board.get("/api/tasks/3").unwrap_err();
         assert!(refused.is_refusal());
         assert_eq!(refused.to_string(), "T-3 is not yours");
+        assert_eq!(refused.code(), Some("not-yours"));
         let bare = board.get("/api/tasks").unwrap_err();
         assert_eq!(bare.to_string(), "ConsensFlow answered 500");
+        assert_eq!(bare.code(), None, "it gave none");
     }
 
     #[test]

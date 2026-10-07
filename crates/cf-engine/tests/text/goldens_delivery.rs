@@ -12,7 +12,7 @@ fn every_message_reads_in_the_window_as_node_gave_it() {
     let (mut with_text, mut halved) = (0, 0);
     for row in rows {
         let message = message_of(&row["message"]);
-        let text = delivery_text(&message);
+        let text = delivery_text(&message, &[]);
         let what = format!(
             "m-{} {} ({} units)",
             message.id,

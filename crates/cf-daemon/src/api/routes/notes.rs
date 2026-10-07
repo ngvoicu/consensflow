@@ -18,7 +18,7 @@ pub(super) async fn handle(
     let active = context
         .ledger
         .borrow()
-        .active_task(caller.participant.id, true)?;
+        .task_in_hand(caller.participant.id)?;
     let chief = caller.participant.role == "chief";
     if active.is_none() && !chief {
         refuse_cancelled(context, caller)?;

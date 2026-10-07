@@ -79,10 +79,12 @@ impl Dispatcher {
         if self.forgotten(record) {
             return Ok(());
         }
-        // Withdrawn while the window got ready (its task cancelled or paused
-        // meanwhile): it is handed nothing, and nothing fails.
-        let state = self.seams.ledger.borrow().message(message.id)?;
-        if state.is_none_or(|found| found.state != "queued") {
+        // Withdrawn, or overtaken, while the window got ready (its task cancelled
+        // or paused meanwhile, words held for the human's approval, a door
+        // claiming it): the ledger's own head of this queue is asked again, and
+        // nothing is handed over unless it is this message. Nothing fails.
+        let next = self.seams.ledger.borrow().next_delivery(record.id)?;
+        if next.is_none_or(|next| next.id != message.id) {
             return Ok(());
         }
         let held = match ready {
@@ -110,8 +112,14 @@ impl Dispatcher {
         let (Some(window), Some(pane)) = self.window_of(record) else {
             return Ok(());
         };
-        self.seams.ledger.borrow_mut().begin_delivery(message.id)?;
-        let outcome = match returning(window.deliver(host, &pane, &delivery_text(&message))).await {
+        // What is pasted is what the ledger says it is when delivery begins: the
+        // message, and the rows it carries still waiting, which are the set from now.
+        let begun = self.seams.ledger.borrow_mut().begin_delivery(message.id)?;
+        if begun.message.kind == "task" {
+            self.pay_with_words(record)?;
+        }
+        let text = delivery_text(&begun.message, &begun.carried);
+        let outcome = match returning(window.deliver(host, &pane, &text)).await {
             Ok(admission) => admission,
             // An adapter that failed never handed it over, and its error must show.
             Err(error) => Admission::Refused {
@@ -306,11 +314,13 @@ impl Dispatcher {
         let Some(thread) = task.filter(|thread| thread.task.state == "working") else {
             return Ok(());
         };
-        let latest = thread.messages.iter().rev().find(|message| {
-            message.recipient == participant.handle
-                && message.state == "delivered"
-                && (message.kind == "task" || message.kind == "answer")
-        });
+        // The last message pasted into the window (one that only rode in a
+        // paste, or that it read elsewhere, has no marker of its own).
+        let latest = self
+            .seams
+            .ledger
+            .borrow()
+            .last_pasted(participant.id, thread.task.id)?;
         let Some(latest) = latest else {
             return Ok(());
         };
@@ -486,6 +496,8 @@ impl Dispatcher {
     /// must not go again). Any other goes back to its queue with its
     /// attempt, as does one whose record cannot be read.
     pub(crate) async fn settle_in_flight(self: &Rc<Self>) -> Result<(), EngineError> {
+        // No door lives through a start: what one claimed is the ledger's again.
+        self.seams.ledger.borrow_mut().release_all_claims()?;
         let messages = self.seams.ledger.borrow().in_flight()?;
         for message in messages {
             let marker = marker_of(message.id);

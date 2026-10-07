@@ -19,7 +19,7 @@
  * - The API's and the screens' traces were not held to reach the ledger's
  *   `close`, where the database is compared, as the page's were.
  */
-import { DAEMON, lines } from './kit.mjs'
+import { DAEMON, lines, unit } from './kit.mjs'
 
 const TESTS = 'crates/cf-daemon/tests'
 const player = (name) => ['-p', 'cf-daemon', '--test', name]
@@ -103,8 +103,10 @@ export const PLANTS = [
         'const POLL_WAIT: Duration = Duration::from_secs(21);',
       ],
     ],
-    runs: [API],
-    meant: CF_RUNS,
+    // The traces that polled a door (cf-board-023 and 024) depart now, a choice
+    // answer being `queued` where Node's was `read`: the door's own test holds the poll.
+    runs: [API, unit('cf-board', 'door::')],
+    meant: 'puts_the_questions_on_the_board_and_polls_until_the_answer_comes',
   },
   {
     name: 'players: cf asks for a transcript of ten items whatever it was asked for',

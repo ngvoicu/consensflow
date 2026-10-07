@@ -2,17 +2,20 @@
 //! (`tests/goldens/ledger/`; `npm run goldens:ledger` records them into
 //! `tests/traces/`): the same file to start from, the same clock readings and
 //! the same calls, and each call's answer or refusal, the events it logged and
-//! the clock readings it took, then the database it left, compared exactly.
-//! A trace that calls what this crate does not do yet is skipped and counted.
+//! the clock readings it took, then the database it left, compared exactly,
+//! but for the four columns of migration 0011 that Node's ledger never writes
+//! (`cf_ledger::testing`). A call this replay does not know fails its trace.
 //!
 //! A trace this ledger departs from Node's on purpose is named in
-//! [`DEPARTED`], with the call where its answer first departs and why. A
-//! ledger trace is the calls Node's dispatcher made, so what the departure
-//! changes of what a dispatcher asks of the ledger is held by the engine's
-//! traces of its own (`crates/cf-engine/tests/departures/`); here the replay
-//! must agree with Node's recording up to that call, and depart at it. It
-//! fails when Node's recording replays clean again, so the departure is taken
-//! off once Node does it too.
+//! [`DEPARTED`], with the call where its answer first departs and why. It is
+//! counted and printed instead of replayed, and a test of its own replays it:
+//! the replay must agree with Node's recording up to that call, and depart at
+//! it, and it fails when Node's recording replays clean again, so the
+//! departure is taken off once Node does it too. A ledger trace is the calls
+//! Node's dispatcher made, so what a departure changes of what a dispatcher
+//! asks of the ledger is held by the engine's tests: by traces of their own for
+//! the pause notes' (`crates/cf-engine/tests/departures/`), and by what each
+//! asserts directly for the redesign's.
 
 // The replay's own scaffolding: a failure in it is the test's.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -27,6 +30,7 @@ use base64::Engine;
 use cf_base::js;
 use cf_base::time::{parse, Clock};
 use cf_ledger::model::{parse_gate, parse_roles};
+use cf_ledger::testing::{hold_apart_what_node_never_logs, hold_apart_what_node_never_writes};
 use cf_ledger::{
     open_ledger, ChiefSwitch, Event, Ledger, LedgerError, NewMember, NewNote, NewProject,
     NewQuestion, NewTask, Options,
@@ -39,10 +43,101 @@ use serde_json::{json, Value};
 enum Outcome {
     /// Every call answered as Node's did: the methods called, one per call.
     Replayed(Vec<String>),
-    /// Calls something this crate does not do yet.
+    /// Probes what only JavaScript could be handed: nothing to replay here.
     Skipped(String),
     Failed(String),
 }
+
+/// The traces this ledger departs from Node's recording of on purpose, by
+/// their file's name without `.json.gz`, each with the call where its replay
+/// first departs and the one thing that differs from Node's. Found by
+/// replaying the recordings against this ledger, not by guessing: a trace is
+/// here when its replay fails for a rule this ledger changed on purpose, and
+/// only then. The receipt and stop redesign moved all of them but
+/// `core-dispatcher-042` and `-074`, which the pause notes' withdrawal moved:
+/// Node never withdraws a note that told a requester a task was paused, so
+/// the notes this ledger withdraws when the task is resumed are, in Node's
+/// recordings, queued still, and its dispatcher goes on to paste them.
+/// Departed traces that Node's suite records only off Windows: the test
+/// that writes `home-copies-004` is skipped there, as Windows holds an open
+/// ledger's files (`tests/home-copies.test.mjs`). Elsewhere each must be there.
+const RECORDED_OFF_WINDOWS: &[&str] = &["home-copies-004"];
+
+const DEPARTED: &[(&str, usize, &str)] = &[
+    ("core-api-006", 15, "the door's read `answerTo` is gone (a poll claims with `claim_answer`), and a choice answer lands queued, not read"),
+    ("core-dispatcher-010", 121, REASON_PAUSE),
+    ("core-dispatcher-042", 72, "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, so the chief has no message waiting (`withWork`), where Node's has the note"),
+    ("core-dispatcher-065", 147, KEPT_IN_BRIEF),
+    ("core-dispatcher-074", 294, "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn (`task`), where Node leaves it queued"),
+    ("core-dispatcher-107", 122, KEPT_IN_BRIEF),
+    ("core-page-014", 9, REASON_RELEASE),
+    ("home-copies-001", 34, KEPT_IN_BRIEF),
+    ("home-copies-004", 34, KEPT_IN_BRIEF),
+    ("ledger-gate-006", 25, DOOR_READ),
+    ("ledger-gate-007", 15, DOOR_READ),
+    ("ledger-gate-008", 16, "the door's read `answerTo` is gone, and the choice answer the human approves lands queued, not read for the door"),
+    ("ledger-messages-009", 9, "the door's read `answerTo` is gone, and a choice answer lands queued: its task waits until it is received"),
+    ("ledger-messages-010", 11, READ_AT_ONCE),
+    ("ledger-messages-011", 10, "the asker's own window answering first is received at once with the receipt `{window: true}` and its time; Node left both empty"),
+    ("ledger-messages-013", 10, READ_AT_ONCE),
+    ("ledger-messages-014", 10, READ_AT_ONCE),
+    ("ledger-messages-015", 11, READ_AT_ONCE),
+    ("ledger-messages-017", 10, DOOR_READ),
+    ("ledger-messages-022", 12, DOOR_READ),
+    ("ledger-projects-002", 14, KEPT_IN_BRIEF),
+    ("ledger-schema-005", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-006", 18, KEPT_IN_BRIEF),
+    ("ledger-schema-007", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-010", 14, KEPT_IN_BRIEF),
+    ("ledger-schema-011", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-013", 14, KEPT_IN_BRIEF),
+    ("ledger-schema-014", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-016", 14, KEPT_IN_BRIEF),
+    ("ledger-schema-017", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-019", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-020", 14, KEPT_IN_BRIEF),
+    ("ledger-schema-021", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-023", 14, KEPT_IN_BRIEF),
+    ("ledger-schema-024", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-025", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-027", 14, KEPT_IN_BRIEF),
+    ("ledger-staff-008", 13, KEPT_BY_PAUSE),
+    ("ledger-staff-019", 18, KEPT_BY_PAUSE),
+    ("ledger-tasks-005", 26, REASON_PAUSE),
+    ("ledger-tasks-016", 10, KEPT_BY_PAUSE),
+    ("ledger-tasks-018", 16, KEPT_BY_PAUSE),
+    ("ledger-tasks-020", 19, REASON_PAUSE),
+    ("ledger-tasks-023", 10, STOP_IN_EVENT),
+    ("ledger-tasks-024", 13, STOP_IN_EVENT),
+    ("ledger-tasks-026", 29, STOP_IN_EVENT),
+    ("ledger-tiered-013", 13, KEPT_IN_BRIEF),
+    ("ledger-tiered-014", 22, WINDOW_ENDED),
+];
+
+/// The door's poll is a write now, `claim_answer`; `answerTo`, its read, went.
+const DOOR_READ: &str =
+    "the door's read `answerTo` is gone: a poll claims the answer with `claim_answer`";
+/// An answer is received, not read at its creation.
+const READ_AT_ONCE: &str =
+    "a choice answer lands queued: Node marked it read and stamped it at its creation, two clock readings more";
+/// What a window kept goes to the next window in the brief, not with the old one.
+const KEPT_IN_BRIEF: &str =
+    "a release carries what the old window kept into the task's brief, once (\"Kept from before\"); Node let it go with the window";
+/// The reason a release gives the rows it carried.
+const REASON_RELEASE: &str =
+    "a release cancels the old window's kept rows with the reason `carried into T-n's brief for its next window`; Node gave none";
+/// The reason a pause gives what the chief wrote and takes back.
+const REASON_PAUSE: &str =
+    "a chief's pause withdraws what the chief wrote for the window with the reason `withdrawn by @chief's pause`; Node gave none";
+/// A pause keeps what is on its way, as a receipt alone resolves it.
+const KEPT_BY_PAUSE: &str =
+    "a pause or a hold keeps what is on its way (a question, a task message, a result); Node's `dropQueued` cancelled every queued row of the task";
+/// A pause's event says which stop it asked.
+const STOP_IN_EVENT: &str =
+    "a pause's `task.state` event carries `stop`, the sequence of the stop it asked: Node's has no such key";
+/// The reason a release gives what the old window still held for the human.
+const WINDOW_ENDED: &str =
+    "a release withdraws what the old window still held for the human with the reason `withdrawn: @x's window ended first`; Node gave none";
 
 /// What Node's ledger drew in each call (the clock's readings, session
 /// names), answered here in the same order; drawing past them is noted.
@@ -99,24 +194,36 @@ fn traces() -> PathBuf {
         .join("traces")
 }
 
-/// The traces this ledger departs from Node's recording of on purpose: the
-/// call where its answer first departs, and what the ledger does that Node
-/// does not. Node never withdraws a note that told a requester a task was
-/// paused, so the notes the ledger withdraws when the task is resumed are,
-/// in Node's recordings, queued still, and its dispatcher goes on to paste
-/// them.
-const DEPARTED: &[(&str, usize, &str)] = &[
-    (
-        "core-dispatcher-042.json.gz",
-        72,
-        "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, so the chief has no message waiting (`withWork`), where Node's has the note",
-    ),
-    (
-        "core-dispatcher-074.json.gz",
-        294,
-        "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn (`task`), where Node leaves it queued",
-    ),
-];
+/// Every recorded trace, by its file's name without `.json.gz`, in that order.
+fn recorded() -> Vec<(String, String)> {
+    let mut names: Vec<PathBuf> = std::fs::read_dir(traces())
+        .expect("the traces: npm run goldens:ledger")
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "gz"))
+        .collect();
+    names.sort();
+    assert!(!names.is_empty(), "no traces: npm run goldens:ledger");
+    names
+        .iter()
+        .map(|name| {
+            let mut text = String::new();
+            flate2::read::GzDecoder::new(std::fs::File::open(name).unwrap())
+                .read_to_string(&mut text)
+                .unwrap();
+            let stem = name.file_name().unwrap().to_string_lossy();
+            (stem.trim_end_matches(".json.gz").to_string(), text)
+        })
+        .collect()
+}
+
+/// The call where a trace's answer first departs, and why, when it is named
+/// in [`DEPARTED`].
+fn departed(trace: &str) -> Option<(usize, &'static str)> {
+    DEPARTED
+        .iter()
+        .find(|(name, ..)| *name == trace)
+        .map(|(_, at, why)| (*at, *why))
+}
 
 /// What is wrong with a departed trace, or none when it is held as it should
 /// be: replayed, it agrees with Node's recording up to call `at`, and departs
@@ -134,28 +241,16 @@ fn departure(node: &str, at: usize) -> Option<String> {
 
 #[test]
 fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
-    let mut names: Vec<PathBuf> = std::fs::read_dir(traces())
-        .expect("the traces: npm run goldens:ledger")
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "gz"))
-        .collect();
-    names.sort();
-    assert!(!names.is_empty(), "no traces: npm run goldens:ledger");
+    let traces = recorded();
     let (mut replayed, mut skipped, mut failed) = (0, BTreeMap::<String, usize>::new(), Vec::new());
-    let mut departed = Vec::new();
     let mut calls = BTreeMap::<String, usize>::new();
-    for name in &names {
-        let mut text = String::new();
-        flate2::read::GzDecoder::new(std::fs::File::open(name).unwrap())
-            .read_to_string(&mut text)
-            .unwrap();
-        let trace = name.file_name().unwrap().to_string_lossy().to_string();
-        if let Some((_, at, why)) = DEPARTED.iter().find(|(file, ..)| *file == trace) {
-            departed.push(format!("{trace} at call {at}: {why}"));
-            failed.extend(departure(&text, *at).map(|wrong| format!("{trace}: {wrong}")));
+    let mut left = Vec::new();
+    for (trace, text) in &traces {
+        if let Some((at, why)) = departed(trace) {
+            left.push(format!("  {trace} at call {at}: {why}"));
             continue;
         }
-        match replay(&text) {
+        match replay(text) {
             Outcome::Replayed(methods) => {
                 replayed += 1;
                 for method in methods {
@@ -168,16 +263,16 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
     }
     let skipped_count: usize = skipped.values().sum();
     println!(
-        "{replayed} traces replayed, {skipped_count} skipped, {} departed, {} failed of {}",
-        departed.len(),
+        "{replayed} traces replayed, {} departed, {skipped_count} skipped, {} failed of {}",
+        left.len(),
         failed.len(),
-        names.len()
+        traces.len()
     );
+    for line in &left {
+        println!("{line}");
+    }
     for (why, count) in &skipped {
         println!("  skipped {count}: {why}");
-    }
-    for departure in &departed {
-        println!("  departed {departure}");
     }
     let replayed_calls: Vec<String> = calls
         .iter()
@@ -193,6 +288,27 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
     assert!(replayed > 0, "nothing replayed");
 }
 
+/// A trace is named in [`DEPARTED`] because it differs from Node's, and
+/// for no other reason: one that no longer differs, that differs elsewhere
+/// than at its call, or that is not there, is a line to take out or to
+/// correct, not a test left passing.
+#[test]
+fn every_departed_trace_is_there_and_still_departs() {
+    let traces = recorded();
+    let mut wrong = Vec::new();
+    for (trace, at, why) in DEPARTED {
+        match traces.iter().find(|(name, _)| name == trace) {
+            // Not there where its Node test does not run: that is its platform's say.
+            None if cfg!(windows) && RECORDED_OFF_WINDOWS.contains(trace) => {}
+            None => wrong.push(format!("{trace} is not a recorded trace ({why})")),
+            Some((_, text)) => {
+                wrong.extend(departure(text, *at).map(|wrong| format!("{trace}: {wrong} ({why})")))
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 fn replay(text: &str) -> Outcome {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("consensflow.db");
@@ -201,9 +317,16 @@ fn replay(text: &str) -> Outcome {
     let trace: Value =
         serde_json::from_str(&text.replace("«ledger»", &path[1..path.len() - 1])).unwrap();
     let calls = trace["calls"].as_array().cloned().unwrap_or_default();
-    // A trace is replayed only whole: anything it calls that this crate does not do skips it.
-    if let Some(unknown) = calls.iter().find_map(unsupported) {
-        return Outcome::Skipped(unknown);
+    // A trace is replayed only whole: a call this replay does not know fails it.
+    if let Some(unknown) = calls
+        .iter()
+        .enumerate()
+        .find_map(|(at, call)| unknown_call(at, call))
+    {
+        return Outcome::Failed(unknown);
+    }
+    if let Some(probe) = calls.iter().find_map(probe_of_javascript) {
+        return Outcome::Skipped(probe);
     }
     let held = start_from(&trace["initial"], &file);
     let readings = Draws::<i64>::new();
@@ -274,11 +397,12 @@ fn replay(text: &str) -> Outcome {
         if let Some(why) = settled.into_iter().flatten().next() {
             return Outcome::Failed(format!("call {at} ({method}) {why}"));
         }
-        let logged: Vec<Value> = told
+        let mut logged: Vec<Value> = told
             .borrow_mut()
             .drain(..)
             .map(|event| json!({ "at": event.at, "project": event.project, "kind": event.kind, "data": event.data }))
             .collect();
+        hold_apart_what_node_never_logs(&mut logged);
         if let Some(why) = compare(&format!("call {at} ({method})"), &answer, &call["result"]) {
             return Outcome::Failed(why);
         }
@@ -290,7 +414,12 @@ fn replay(text: &str) -> Outcome {
             return Outcome::Failed(why);
         }
         if method == "close" {
-            if let Some(why) = compare("the database it left", &dump(&file), &trace["final"]) {
+            let (ours, theirs) = (held_apart(dump(&file)), held_apart(trace["final"].clone()));
+            if let Some(why) = compare(
+                &format!("call {at} ({method}), the database it left,"),
+                &ours,
+                &theirs,
+            ) {
                 return Outcome::Failed(why);
             }
         }
@@ -303,8 +432,9 @@ fn replay(text: &str) -> Outcome {
     )
 }
 
-/// What this crate does not do yet, in one call; none when it does all of it.
-fn unsupported(call: &Value) -> Option<String> {
+/// The call `at` when this replay does not know it, said as the failure it
+/// is; none for a method it does.
+fn unknown_call(at: usize, call: &Value) -> Option<String> {
     let method = call["method"].as_str().unwrap_or_default();
     const DONE: &[&str] = &[
         "createProject",
@@ -366,7 +496,6 @@ fn unsupported(call: &Value) -> Option<String> {
         "note",
         "ask",
         "answer",
-        "answerTo",
         "nextDelivery",
         "withWork",
         "beginDelivery",
@@ -386,15 +515,15 @@ fn unsupported(call: &Value) -> Option<String> {
         "latestTranscript",
         "latestMessages",
     ];
-    if !DONE.contains(&method) {
-        return Some(format!("calls {method}"));
-    }
-    // A probe of what only JavaScript could be handed, which the Rust
-    // signature rules out.
-    if method == "copyTranscript" && !call["args"][1].is_array() {
-        return Some("hands copyTranscript items that are no list".into());
-    }
-    None
+    (!DONE.contains(&method))
+        .then(|| format!("call {at} ({method}) is one this replay does not know"))
+}
+
+/// A probe of what only JavaScript could be handed, which the Rust signature
+/// rules out: the one thing a trace is skipped for.
+fn probe_of_javascript(call: &Value) -> Option<String> {
+    (call["method"] == "copyTranscript" && !call["args"][1].is_array())
+        .then(|| "hands copyTranscript items that are no list".into())
 }
 
 /// A value a call passed, as the recorder wrote it: `undefined` is no value,
@@ -472,7 +601,7 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
             .and_then(|roles| encode(ledger.set_roles(id(), text(arg(args, 1)), &roles))),
         "removeMember" => encode(ledger.remove_member(id(), text(arg(args, 1)))),
         "lastStaff" => encode(ledger.last_staff()),
-        "holdsWork" => encode(ledger.holds_work(id())),
+        "holdsWork" => encode(ledger.has_task_in_hand(id())),
         "candidates" => encode(ledger.candidates(id(), integer(arg(args, 1)))),
         "members" => encode(ledger.members(id(), text(arg(args, 1)))),
         "endSession" => {
@@ -637,11 +766,10 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
             field(args, 1, "body"),
             field(args, 1, "choices"),
         )),
-        "answerTo" => encode(ledger.answer_to(id())),
         "nextDelivery" => encode(ledger.next_delivery(id())),
         // A Set, as the recorder wrote it.
         "withWork" => ledger.with_work(id()).map(|ids| json!({ "$set": ids })),
-        "beginDelivery" => encode(ledger.begin_delivery(id())),
+        "beginDelivery" => encode(ledger.begin_delivery(id()).map(|begun| begun.message)),
         "confirmDelivery" => encode(ledger.confirm_delivery(id(), arg(args, 1))),
         "cancelMessage" => encode(ledger.cancel_message(id(), text(arg(args, 1)))),
         "retryDelivery" => encode(
@@ -857,6 +985,14 @@ fn insert(db: &Connection, table: &str, contents: &Value) {
         ))
         .unwrap();
     }
+}
+
+/// A dump with what only this ledger writes held apart.
+fn held_apart(mut dump: Value) -> Value {
+    if let Some(Value::Object(tables)) = dump.get_mut("tables") {
+        hold_apart_what_node_never_writes(tables);
+    }
+    dump
 }
 
 /// The database a ledger left, as the recorder dumps it: its version, its

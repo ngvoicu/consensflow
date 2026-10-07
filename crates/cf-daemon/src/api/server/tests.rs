@@ -328,6 +328,76 @@ async fn a_client_that_leaves_does_not_drop_its_handler() {
         .await;
 }
 
+/// A door waits for its answer on behalf of its client: when the client goes,
+/// the handler is told, though the connection's work for it is what is
+/// dropped, and the handler waits on for nothing else.
+#[tokio::test]
+async fn a_handler_is_told_when_its_client_leaves_and_not_before() {
+    LocalSet::new()
+        .run_until(async {
+            let told = Rc::new(Cell::new(None));
+            let gate = Rc::new(Notify::new());
+            let (seen, held) = (Rc::clone(&told), Rc::clone(&gate));
+            let (api, _rig) = serving(move |request| {
+                let (seen, held) = (Rc::clone(&seen), Rc::clone(&held));
+                Box::pin(async move {
+                    let at_first = request.consumer().has_left();
+                    tokio::select! {
+                        () = request.consumer().left() => {}
+                        () = held.notified() => {}
+                    }
+                    seen.set(Some((at_first, request.consumer().has_left())));
+                    Ok(Answer::ok(json!({})))
+                })
+            })
+            .await;
+            let mut stream = TcpStream::connect(address(&api)).await.unwrap();
+            stream
+                .write_all(b"GET /x HTTP/1.1\r\nHost: t\r\n\r\n")
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert_eq!(told.get(), None, "its client is there: it waits");
+            drop(stream);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert_eq!(
+                told.get(),
+                Some((false, true)),
+                "it was told the client had left, and the gate was never opened"
+            );
+            api.close().await;
+        })
+        .await;
+}
+
+/// The other way: a client that stays is never told it has left, though the
+/// request's work in the connection ends with the answer.
+#[tokio::test]
+async fn a_handler_whose_client_stays_is_not_told_it_left() {
+    LocalSet::new()
+        .run_until(async {
+            let told = Rc::new(Cell::new(None));
+            let seen = Rc::clone(&told);
+            let (api, _rig) = serving(move |request| {
+                let seen = Rc::clone(&seen);
+                Box::pin(async move {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    seen.set(Some(request.consumer().has_left()));
+                    Ok(Answer::ok(json!({ "fine": true })))
+                })
+            })
+            .await;
+            let reply = ask(&api, "GET /x HTTP/1.1\r\nHost: t\r\n").await;
+            assert_eq!(
+                (reply.status, reply.body.as_str()),
+                (200, r#"{"fine":true}"#)
+            );
+            assert_eq!(told.get(), Some(false));
+            api.close().await;
+        })
+        .await;
+}
+
 #[tokio::test]
 async fn keep_alive_serves_several_requests_on_one_connection() {
     LocalSet::new()

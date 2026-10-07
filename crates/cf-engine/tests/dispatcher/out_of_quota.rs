@@ -7,6 +7,8 @@ use cf_engine::testing::Context;
 use cf_engine::ActivityState;
 use cf_ledger::NewTask;
 
+use serde_json::json;
+
 use crate::fixtures::{after, assert_match, exhausted, now, placed, soon, Tiers};
 use crate::traces::held_to;
 
@@ -143,11 +145,17 @@ fn closes_the_window_of_a_held_task_that_is_cancelled_though_its_member_is_still
         .cancel_task(tiers.project.id, 1, "human")
         .unwrap();
     context.pass().unwrap();
-    assert_eq!(context.host.killed(), [pane], "it waits for no reset now");
-    held_to(
-        context.close(),
-        SUITES,
-        "closes the window of a held task that is cancelled, though its member is still out",
+    assert_eq!(
+        context.host.killed(),
+        std::slice::from_ref(&pane),
+        "it waits for no reset now"
+    );
+    // Not held to Node's recording: an agent still at work on the turn of a
+    // task cancelled under it is interrupted while its member is out, as at any
+    // other time: its look says it works, whatever the board says of it.
+    assert_eq!(
+        context.host.inputs(),
+        [json!({ "id": pane.id, "generation": pane.generation, "bytes": [27] })]
     );
 }
 

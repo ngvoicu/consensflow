@@ -123,7 +123,7 @@ fn confirms_a_message_whose_header_the_copy_of_its_window_already_shows() {
     // The window showed it and the copy has it; the daemon stopped before it confirmed it.
     let shown = context
         .adapter
-        .item(Role::User, &delivery_text(&context.message(note.id)));
+        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
     let conversation = context
         .ledger
         .borrow()

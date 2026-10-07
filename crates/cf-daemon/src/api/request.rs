@@ -1,4 +1,6 @@
-//! A request as a handler sees it. **Frozen**.
+//! A request as a handler sees it. **Frozen**, but for the one thing the
+//! receipt and stop redesign added: whether its client is still there
+//! ([`Consumer`]).
 //!
 //! The target is read as Node reads it (`new URL(request.url,
 //! 'http://127.0.0.1')`, `api.js:80`): the WHATWG URL standard, so `path` is
@@ -13,6 +15,32 @@ use url::Url;
 
 use super::answer::Failure;
 use super::body::{read_json, read_text, Body, Unread};
+use super::context::Closing;
+
+/// Whether whoever sent a request is still there to read its answer. The
+/// server lets a handler run to its end when its client goes (Node did: an
+/// update would die halfway), so a handler that waits on something for its
+/// client asks, and stops waiting for one that has left: what it would give
+/// it, nobody receives.
+#[derive(Clone, Default)]
+pub struct Consumer(Closing);
+
+impl Consumer {
+    /// The client is gone.
+    pub(crate) fn leave(&self) {
+        self.0.set();
+    }
+
+    /// Whether the client has gone.
+    pub fn has_left(&self) -> bool {
+        self.0.is_set()
+    }
+
+    /// Ends once the client has gone: at once if it has.
+    pub async fn left(&self) {
+        self.0.wait().await;
+    }
+}
 
 /// A request: what asked, of what, with which credential, and its body.
 pub struct Request {
@@ -25,6 +53,7 @@ pub struct Request {
     /// The body, which only a handler that reads one touches: the agents' API
     /// reads it with [`Request::json`], the screens with [`Request::text`].
     pub body: Body,
+    consumer: Consumer,
 }
 
 impl Request {
@@ -53,7 +82,19 @@ impl Request {
                 .collect(),
             authorization,
             body,
+            consumer: Consumer::default(),
         })
+    }
+
+    /// This request, whose client is told by `consumer` when it leaves.
+    pub fn consumed_by(mut self, consumer: Consumer) -> Self {
+        self.consumer = consumer;
+        self
+    }
+
+    /// Whether the client is still there to read the answer.
+    pub fn consumer(&self) -> &Consumer {
+        &self.consumer
     }
 
     /// The request hyper read: its header as a text of Latin-1 characters

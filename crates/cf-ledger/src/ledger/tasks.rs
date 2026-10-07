@@ -2,7 +2,7 @@
 
 use super::Ledger;
 use crate::{
-    tasks, HeldTask, LedgerError, NewTask, TaskCreated, TaskMoved, TaskReleased, TaskThread,
+    tasks, HeldTask, LedgerError, NewTask, Stop, TaskCreated, TaskMoved, TaskReleased, TaskThread,
     TaskView,
 };
 
@@ -100,6 +100,21 @@ impl Ledger {
         tasks::held_tasks_due(&self.store, now)
     }
 
+    /// The stops asked of a participant's window: the task it works on, and
+    /// how many its pauses asked. None for a window that works on none. A
+    /// member session holds one task at a time (`require_free`), and is asked
+    /// for the stops of that one.
+    pub fn stop_of(&self, participant_id: i64) -> Result<Option<Stop>, LedgerError> {
+        tasks::stop_of(&self.store, participant_id)
+    }
+
+    /// The task a participant's window is on as far as what it sends goes: the
+    /// one it holds, else its paused one. A member session holds one task at
+    /// a time (`require_free`): this is it.
+    pub fn task_in_hand(&self, participant_id: i64) -> Result<Option<TaskThread>, LedgerError> {
+        tasks::task_in_hand(&self.store, participant_id)
+    }
+
     /// The paused task a participant still holds, or none.
     pub fn paused_task(&self, participant_id: i64) -> Result<Option<TaskThread>, LedgerError> {
         tasks::paused_task(&self.store, participant_id)
@@ -125,7 +140,9 @@ impl Ledger {
         tasks::resume_task(&mut self.store, project_id, number, by, body)
     }
 
-    /// A follow-up on a finished or failed task, back to its assignee.
+    /// A follow-up on a finished or failed task, back to its assignee. A
+    /// question of the window's whose answer did not stand is still to be
+    /// answered, and the one who was asked is told so.
     pub fn reopen_task(
         &mut self,
         project_id: i64,

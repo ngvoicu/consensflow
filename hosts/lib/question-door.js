@@ -7,11 +7,27 @@
  * window. When the answer does not come in time, the door gives up and the
  * harness's own dialog takes over; when the window answered first, the
  * board's copy of the question gets that answer, so nobody answers it twice.
+ *
+ * The answer a poll finds is claimed for the door, and is received only once
+ * the door says it handed it over (`acknowledge`): a door that never says so
+ * leaves the answer to arrive a second time as text, and loses none. A poll
+ * whose reply was lost is asked again, and gets the same claimed answer; a
+ * receipt whose reply was lost is said again. A door the board shut (the task
+ * was stopped) is refused with the words its model is to hear, which are
+ * handed over as they are.
  */
 
 /** How long a door waits for the board before the harness's own dialog takes over. */
 const DOOR_WAIT_MS = 3_500_000
 const POLL_WAIT_MS = 20_000
+/**
+ * How long a door waits before it asks again after a poll that got no answer,
+ * once for each poll that failed in a row: the poll's reply may have been lost
+ * on its way back, and the board gives the same claimed answer to the same
+ * question again. A board that stays out of reach through all of them is
+ * gone, and the harness's own dialog takes over.
+ */
+const POLL_RETRIES_MS = [250, 500, 1_000, 2_000]
 
 /** A request to the board's API as the window's participant; `null` outside a window. */
 export function boardClient({
@@ -32,6 +48,7 @@ export function boardClient({
       // Answered, and refused: not the same as a board that cannot be reached.
       throw Object.assign(new Error(value.message ?? `ConsensFlow answered ${response.status}`), {
         refused: true,
+        code: value.error,
       })
     }
     return value
@@ -41,32 +58,66 @@ export function boardClient({
 /**
  * What a member's window tells its model when the board refuses its
  * question: nobody watches a member's window, so its own dialog would hold
- * the task for good.
+ * the task for good. A door the board shut says in its own words that its
+ * answer comes as a message, and those words go as they are.
  */
 export const refusalReason = (cause) =>
-  `ConsensFlow could not put this question to the chief (${cause.message}). Ask with cf ask "…" instead.`
+  cause.code === 'door-closed'
+    ? cause.message
+    : `ConsensFlow could not put this question to the chief (${cause.message}). Ask with cf ask "…" instead.`
 
 /**
  * Puts the questions on the board and waits for their answer: `{ id, answer }`,
  * the answer null when the wait ran out or `signal` ended it. `questions` are
  * in the board's shape: question, header, options (label, description), multiple.
+ * A poll that gets no answer is asked again (`retries`, the pauses between
+ * them); the question itself is put once, whatever comes of it.
  */
-export async function askTheBoard(client, questions, { signal } = {}) {
+export async function askTheBoard(client, questions, { signal, retries = POLL_RETRIES_MS } = {}) {
   const { message } = await client('POST', '/api/questions', { questions })
   const until = Date.now() + DOOR_WAIT_MS
   let answer = null
+  let lost = 0
   while (answer === null && Date.now() < until && !signal?.aborted) {
     const wait = Math.min(POLL_WAIT_MS, until - Date.now())
     try {
       answer = (
         await client('GET', `/api/questions/${message.id}?wait=${wait}`, undefined, { signal })
       ).answer
+      lost = 0
     } catch (cause) {
       if (signal?.aborted) break
-      throw cause
+      // Answered, and refused: final. No answer at all: asked again.
+      if (cause?.refused || lost >= retries.length) throw cause
+      await new Promise((resolve) => setTimeout(resolve, retries[lost++]))
     }
   }
   return { id: message.id, answer }
+}
+
+/**
+ * The door handed the answer it claimed to its harness, or could not: the board
+ * is told so, which makes the answer received, or gives the claim back. What
+ * the board says to it is of no use to a door that has done what it was for,
+ * so a failure (a board of Node's, which knows no such route, included) is
+ * not raised. A receipt that gets no answer at all (the board cannot be
+ * reached) is said again, as a poll is (`retries`, the pauses between them):
+ * the answer is in the harness's hands already, and one never received would
+ * be pasted a second time and taken for the result. Said twice it does no
+ * harm: the board takes an answer already read as read, and a claim already
+ * given back as given back. An answer the board refused (the door was shut
+ * meanwhile) is final.
+ */
+export async function acknowledge(client, answer, received, { retries = POLL_RETRIES_MS } = {}) {
+  for (let lost = 0; ; lost += 1) {
+    try {
+      await client('POST', `/api/answers/${answer.id}/receipt`, { received })
+      return
+    } catch (cause) {
+      if (cause?.refused || lost >= retries.length) return
+      await new Promise((resolve) => setTimeout(resolve, retries[lost]))
+    }
+  }
 }
 
 /** The window answered first: the board's copy of the question takes that answer, from the asker. */

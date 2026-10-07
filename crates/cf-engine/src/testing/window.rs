@@ -231,6 +231,18 @@ impl Window for FakeWindow {
             Ok(observed)
         })
     }
+
+    /// Counted on the agent, and not written down: the JavaScript fake was
+    /// never told, so the Node traces have no such call.
+    fn interrupted(&self) {
+        self.fake.of_launch(&self.launch, |agent| {
+            agent.interrupted += 1;
+            if agent.stops_when_interrupted {
+                agent.settled = true;
+                agent.took_back = agent.takes_back;
+            }
+        });
+    }
 }
 
 /// What a look at `agent`'s window finds, its launch on `session`.
@@ -256,6 +268,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             quota: agent.quota.clone(),
             switched: Some(shows.clone()),
             unnamed: false,
+            took_back: false,
         };
     }
     let waiting = match &agent.unnamed {
@@ -272,6 +285,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
         quota: agent.quota.clone(),
         switched: None,
         unnamed: agent.unnamed.is_some(),
+        took_back: agent.took_back,
     }
 }
 
@@ -289,6 +303,9 @@ fn observed_json(observed: &Observed) -> Value {
     }
     if observed.unnamed {
         written["unnamed"] = json!(true);
+    }
+    if observed.took_back {
+        written["tookBack"] = json!(true);
     }
     written
 }

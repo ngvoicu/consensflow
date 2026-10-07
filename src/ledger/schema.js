@@ -458,6 +458,20 @@ export const MIGRATIONS = [
   `
   UPDATE event SET kind = 'chief.history.read' WHERE kind = 'lead.history.read';
   `,
+  // The receipt and stop redesign (2026-10-06), which only the Rust ledger
+  // reads and writes: a task counts the stops asked of its window (`stop_seq`),
+  // a message may ride in another's paste (`carried_by`), an answer a question's
+  // door took may wait for the door's receipt (`claimed_at`), and a question's
+  // door may be shut (`door_closed_at`). This ledger adds the columns and uses
+  // none of them: a row it writes reads there as never stopped, carried,
+  // claimed or shut. The same string is crates/cf-ledger/migrations/0011.sql.
+  `
+  ALTER TABLE task ADD COLUMN stop_seq INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE message ADD COLUMN carried_by INTEGER
+    CONSTRAINT message_carried_by_fk REFERENCES message (id) ON DELETE CASCADE;
+  ALTER TABLE message ADD COLUMN claimed_at TEXT;
+  ALTER TABLE message ADD COLUMN door_closed_at TEXT;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

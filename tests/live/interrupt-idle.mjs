@@ -15,6 +15,9 @@
  *   npm run live:interrupt -- --harness claude --harness devin
  *
  * The exit code is 1 when a window lost its conversation or the message after.
+ *
+ * What the daemon's interrupt does to a window at work (Escape into a long
+ * command, at a question hook, a stop that is ignored) is `npm run live:stops`.
  */
 import { parseArgs } from 'node:util'
 import { claudeCodeAdapter } from '../../src/adapters/claude-code.js'

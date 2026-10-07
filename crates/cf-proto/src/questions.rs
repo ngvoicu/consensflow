@@ -58,14 +58,22 @@ pub struct Choice {
     pub description: Option<Value>,
 }
 
-/// The chief's answer: the labels picked, one list per question.
+/// The chief's answer: its message, and the labels picked, one list per question.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Answer {
+    #[serde(default)]
+    id: Option<i64>,
     #[serde(default)]
     choices: Option<Vec<Vec<String>>>,
 }
 
 impl Answer {
+    /// The answer's own message, which a door says it received: the API always
+    /// gives it, and an answer read from anywhere else may not.
+    pub fn id(&self) -> Option<i64> {
+        self.id
+    }
+
     /// The labels picked for the question at `at`; none when it has none.
     pub fn picks(&self, at: usize) -> &[String] {
         self.choices

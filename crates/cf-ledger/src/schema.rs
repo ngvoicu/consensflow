@@ -11,7 +11,7 @@ use serde_json::json;
 
 use crate::model::LedgerError;
 
-pub const MIGRATIONS: [&str; 10] = [
+pub const MIGRATIONS: [&str; 11] = [
     include_str!("../migrations/0001.sql"),
     include_str!("../migrations/0002.sql"),
     include_str!("../migrations/0003.sql"),
@@ -22,6 +22,7 @@ pub const MIGRATIONS: [&str; 10] = [
     include_str!("../migrations/0008.sql"),
     include_str!("../migrations/0009.sql"),
     include_str!("../migrations/0010.sql"),
+    include_str!("../migrations/0011.sql"),
 ];
 
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
@@ -101,7 +102,7 @@ mod tests {
     #[test]
     fn keeps_each_migration_byte_for_byte_as_it_shipped() {
         use sha2::{Digest, Sha256};
-        const SHIPPED: [&str; 10] = [
+        const SHIPPED: [&str; 11] = [
             "51006450d3168c24b6a42ce41afdcf525994957ea22161b4a82f12bf26b65c01",
             "2c6ed236d1829599fbb378164b0c830893fac89eb9780f634688f9ca40f7f0f0",
             "14165bc20e6cb9d4c3c46a81bee45a95b4962ab759f4622aa1cebb8f8edc1ff2",
@@ -112,6 +113,7 @@ mod tests {
             "fe0ea090c22f838f2f77721fc54e3afcef9be9e47ff8fe7ba65b9eaf20663cd2",
             "402f0727daed5d35470d24d44169cb0187ad0afa50d51aa46e1df6d379f9c6a5",
             "ed27219b667184f2552284e38242ac8ea8060f61746edc876a63781e13f74a28",
+            "76dbc67a043e337b4ffc5fe46fa66c0e236bcc9ef303156e2d1135c8bd481922",
         ];
         for (at, (sql, shipped)) in MIGRATIONS.iter().zip(SHIPPED).enumerate() {
             let hash: String = Sha256::digest(sql.as_bytes())

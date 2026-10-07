@@ -89,6 +89,10 @@ struct Shared {
     /// Every task the broker started, to end them when it closes.
     tasks: RefCell<Vec<JoinHandle<()>>>,
     clients: Cell<u64>,
+    /// What a test holds the writers of the pairs' connections to Codex's
+    /// server with, to keep a writer on the frame it has.
+    #[cfg(test)]
+    native_hold: Rc<tests::Hold>,
 }
 
 impl Broker {
@@ -113,6 +117,8 @@ impl Broker {
             pairs: RefCell::new(HashMap::new()),
             tasks: RefCell::new(Vec::new()),
             clients: Cell::new(0),
+            #[cfg(test)]
+            native_hold: Rc::default(),
         });
         let socket = transport::connect(&shared.upstream)
             .await

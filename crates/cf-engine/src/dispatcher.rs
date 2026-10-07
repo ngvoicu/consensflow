@@ -700,6 +700,11 @@ impl Dispatcher {
         }
         let delivering = record.delivery.borrow_mut().delivering.take();
         self.closed(&record);
+        // No door survives its window: what one claimed and none acknowledged is the ledger's again.
+        self.seams
+            .ledger
+            .borrow_mut()
+            .release_claims(record.id, "its window exited")?;
         // A participant that left is forgotten already: its exit settles nothing more.
         let was_leaving = {
             let mut leaving = self.leaving.borrow_mut();
@@ -889,7 +894,7 @@ impl Dispatcher {
         }
         if out {
             return self
-                .while_out(project, participant, record, &owner, &observed)
+                .while_out(project, participant, record, &owner, &observed, starting)
                 .await;
         }
         if record.delivery.borrow().delivering.is_some() {
@@ -900,7 +905,7 @@ impl Dispatcher {
             return Ok(());
         }
         if participant.role != "chief" {
-            returning(self.interrupt_if_stopped(participant, record, &observed)).await?;
+            returning(self.settle_stop(project, participant, record, &observed, starting)).await?;
             if self.forgotten(record) {
                 return Ok(());
             }
@@ -935,7 +940,8 @@ impl Dispatcher {
     }
 
     /// A window of a member out of quota: a switch the human asked for goes
-    /// now; otherwise it says it is out, and a held task's agent stops.
+    /// now; otherwise it says it is out, and a held task's agent stops: by what
+    /// its look found it doing, whatever the board says it is.
     async fn while_out(
         self: &Rc<Self>,
         project: &ProjectView,
@@ -943,6 +949,7 @@ impl Dispatcher {
         record: &Rc<Record>,
         owner: &ParticipantView,
         observed: &Observed,
+        starting: bool,
     ) -> Result<(), EngineError> {
         let pending = record
             .pending_switch
@@ -958,7 +965,7 @@ impl Dispatcher {
             Activity::because(ActivityState::Out, format!("out of quota until {until}")),
         )?;
         if participant.role != "chief" {
-            returning(self.interrupt_if_stopped(participant, record, observed)).await?;
+            returning(self.settle_stop(project, participant, record, observed, starting)).await?;
             if !self.forgotten(record) {
                 self.close_if_free(record).await?;
             }

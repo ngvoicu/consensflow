@@ -1,7 +1,9 @@
 //! How a message reads in its recipient's pane (`src/core/delivery-text.js`).
 //! Its header doubles as the proof that it arrived: a delivery counts once the
 //! window's own record shows the header's start ([`marker_of`]), so the two are
-//! written together.
+//! written together. A message that carries others (what its window kept for
+//! it) reads as one paste: their words and its own, in the order of their ids,
+//! under the one header, which is the one marker that proves the paste arrived.
 
 use std::borrow::Cow;
 
@@ -18,28 +20,36 @@ use cf_proto::ledger::MessageView;
 const INLINE_LIMIT: usize = 16_000;
 const OPENING: usize = 15_000;
 
-/// How a message reads in the recipient's pane. The header doubles as the
-/// arrival marker.
+/// How a message reads in the recipient's pane, and the rows it `carried`
+/// with it, still waiting when its delivery began (a message that carries
+/// none reads as it always did). The header doubles as the arrival marker.
 ///
 /// A cut that falls inside a surrogate pair leaves half of it in Node, which
 /// `windowText` drops before the text reaches a window. Here the half is
 /// dropped at the cut, so what a window is given is the same.
-pub fn delivery_text(message: &MessageView) -> String {
+pub fn delivery_text(message: &MessageView, carried: &[MessageView]) -> String {
     let id = message.id;
-    let from = message
-        .sender
-        .as_ref()
-        .map_or_else(|| "ConsensFlow".to_owned(), |sender| format!("@{sender}"));
+    let from = from_of(message);
     let task = message
         .task_number
         .map_or_else(String::new, |number| format!(" · T-{number}"));
-    let length = utf16_len(&message.body);
+    let (whole, read_all) = match message.task_number.filter(|_| !carried.is_empty()) {
+        None => (
+            Cow::Borrowed(message.body.as_str()),
+            format!("cf inbox read m-{id}"),
+        ),
+        Some(number) => (
+            Cow::Owned(composite(message, carried)),
+            format!("cf task get T-{number}"),
+        ),
+    };
+    let length = utf16_len(&whole);
     let body = if length <= INLINE_LIMIT {
-        Cow::Borrowed(message.body.as_str())
+        whole
     } else {
         Cow::Owned(format!(
-            "{}\n… ({length} characters; read all of it with: cf inbox read m-{id})",
-            opening(&message.body)
+            "{}\n… ({length} characters; read all of it with: {read_all})",
+            opening(&whole)
         ))
     };
     format!(
@@ -47,6 +57,45 @@ pub fn delivery_text(message: &MessageView) -> String {
         message.kind,
         footer(message)
     )
+}
+
+/// Who a message is from: its sender's handle, or ConsensFlow itself.
+fn from_of(message: &MessageView) -> String {
+    message
+        .sender
+        .as_ref()
+        .map_or_else(|| "ConsensFlow".to_owned(), |sender| format!("@{sender}"))
+}
+
+/// What a carrier's paste says: its own words and the rows it carries, in the
+/// order of their ids, a blank line between. The carrier's words are its
+/// own; each row it carries is under a line that says what it is and whose.
+/// None of them holds a header, so only the carrier's marker is in the paste.
+fn composite(carrier: &MessageView, carried: &[MessageView]) -> String {
+    let mut rows: Vec<&MessageView> = carried.iter().chain([carrier]).collect();
+    rows.sort_by_key(|row| row.id);
+    rows.iter()
+        .map(|row| {
+            if row.id == carrier.id {
+                row.body.clone()
+            } else {
+                format!("{}\n{}", label(row), row.body)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// The line over a row a paste carries: what it is, and whose, and for an
+/// answer, which of the reader's questions it is for.
+fn label(row: &MessageView) -> String {
+    let (id, from) = (row.id, from_of(row));
+    match (row.kind.as_str(), row.reply_to) {
+        ("answer", Some(question)) => {
+            format!("(kept for you: answer m-{id} from {from}, to your m-{question})")
+        }
+        (kind, _) => format!("(kept for you: {kind} m-{id} from {from})"),
+    }
 }
 
 /// The start of a message's header, as a window's record shows it once the

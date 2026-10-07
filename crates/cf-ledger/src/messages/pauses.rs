@@ -152,9 +152,10 @@ pub(crate) fn leave_pause_notes(
     why: &str,
 ) -> Result<(), LedgerError> {
     let reason = format!("T-{} {why}", task.number);
-    // A pause drops what is queued for the task, so a note of its own that is
-    // queued now was written since: a stall's, a hold's, a refusal's, each
-    // says something about the pause.
+    // Whatever note of its own is queued for the requester about the task: a
+    // stall's, a hold's, a refusal's, each says something about the pause. A
+    // pause leaves what is queued for the task as it is, so one written
+    // before the pause goes with the rest.
     store.db.execute(
         "UPDATE message SET state = 'cancelled', reason = ?
        WHERE task_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'

@@ -25,6 +25,8 @@ use cf_harness::testing::{fake_executable, finished, AnsweringHost, Fakes, Other
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
+mod stops;
+
 /// The launch's id: a uuid, as the engine mints one (Node's tests took any
 /// filename-safe word).
 const LAUNCH: &str = "0a1b2c3d-4e5f-4061-8a7b-9c0d1e2f3a4b";

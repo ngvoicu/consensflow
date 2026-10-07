@@ -286,6 +286,35 @@ pub struct HeldTask {
     pub assignee_id: Option<i64>,
 }
 
+/// A message whose delivery has begun, and the rows that ride in its paste
+/// (the ones it carries, still waiting, by id). The ledger never serialises
+/// it: the engine writes the paste from it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Begun {
+    pub message: MessageView,
+    pub carried: Vec<MessageView>,
+}
+
+/// What a door finds when it asks for the answer to its question: the
+/// answer, now claimed for it (boxed: it is the one variant that holds a
+/// row); none yet; or the door is shut.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Claim {
+    Answered(Box<MessageView>),
+    Waiting,
+    Closed,
+}
+
+/// The stops asked of a window's task: how many its pauses have asked so
+/// far, which is the identity of the last. Two pauses in one millisecond are
+/// two stops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stop {
+    pub task_id: i64,
+    pub number: i64,
+    pub seq: i64,
+}
+
 /// One option of a question, as a harness's own question tool offers it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QuestionOption {

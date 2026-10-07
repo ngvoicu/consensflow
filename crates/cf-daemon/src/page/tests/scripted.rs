@@ -80,6 +80,10 @@ impl Engine for Scripted {
         None
     }
 
+    fn unstopped(&self, _: i64) -> Option<Value> {
+        None
+    }
+
     fn open_project(&self, _: NewProject) -> Work<'_, Result<Option<ProjectView>, EngineError>> {
         unreachable!("{UNUSED}")
     }

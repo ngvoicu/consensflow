@@ -7,13 +7,18 @@ use cf_proto::ledger::{TaskCreated, TaskMoved, TaskReleased};
 use rusqlite::params;
 use serde_json::{json, Map, Value};
 
-use super::{a_pool, delivery_body, pool_name, require_task_state, task_by_id, task_row_by_id};
+use super::{
+    a_pool, delivery_body, m_list, pool_name, release_ready, require_task_state, task_by_id,
+    task_row_by_id,
+};
+use crate::messages::transfer;
 use crate::model::{
     self, title_of, LedgerError, ACTIVE_TASK_STATES, COORDINATOR_ROLES, MAX_BODY, POOLS, PURPOSES,
 };
 use crate::queue::{queue, send, Queued, Sent};
 use crate::staff::{
-    continuable_session, has_members_of_tier, nearest_tier, require_member_row, start_session,
+    continuable_session, has_members_of_tier, nearest_tier, require_free, require_member_row,
+    start_session, Giving,
 };
 use crate::store::Store;
 use crate::views::TaskRow;
@@ -175,9 +180,15 @@ pub(crate) fn create_task(
         }
         // A follow-up on a finished task goes to the session that did it, while
         // it is still there and free: the one case a coordinator names a window.
+        // A task named for a session is held to the same rule, whether it goes
+        // to the window now or waits on the board for what it needs.
         let assignee = match (request.after, &request.to) {
             (Some(after), _) => Some(continuable_session(store, project_id, after)?),
-            (None, Some(to)) => Some(store.participant_by_handle(project_id, to)?),
+            (None, Some(to)) => {
+                let named = store.participant_by_handle(project_id, to)?;
+                require_free(store, &named, Giving::Task)?;
+                Some(named)
+            }
             (None, None) => None,
         };
         // A tier nobody on the staff holds goes to the nearest one somebody does,
@@ -410,9 +421,10 @@ pub(crate) fn assign_task(
 /// A task given by tier goes back to the board for another member of that
 /// tier: taken from a member that ran out of quota (the daemon), or
 /// reassigned by the human, working or paused. The task opens again with a
-/// warning for the next member, whatever was still on its way to the old
-/// one (a brief held for the human too) is withdrawn, and the requester is
-/// told.
+/// warning for the next member, and with the words that were on their way
+/// to the old one, an approved answer being delivered included, said once in
+/// its brief (`transfer`); what was still held at the gate for the human is
+/// withdrawn, and the requester is told so.
 pub(crate) fn release_task(
     store: &mut Store,
     project_id: i64,
@@ -428,21 +440,18 @@ pub(crate) fn release_task(
             .assignee_id
             .map(|id| store.participant_row(id))
             .transpose()?;
-        if let Some(member) = &member {
-            store.db.execute(
-                "UPDATE message SET state = 'cancelled'
-           WHERE task_id = ? AND recipient_id = ? AND state IN ('queued', 'delivering', 'gated')",
-                params![task.id, member.id],
-            )?;
-        }
+        let carried = match &member {
+            Some(member) => Some(transfer(store, &task, member, &delivery_body(&task))?),
+            None => None,
+        };
         // One statement: the row is never without an assignee in a working
         // state. It remembers the member it was taken from (a session's member).
-        let body = match &member {
-            None => task.body.clone(),
-            Some(member) => format!(
-                "{}\n\nReassigned from @{} ({because}); check the working tree for partial changes.",
-                task.body, member.handle
+        let body = match (&member, &carried) {
+            (Some(member), Some(carried)) => format!(
+                "{}{}\n\nReassigned from @{} ({because}); check the working tree for partial changes.",
+                task.body, carried.kept, member.handle
             ),
+            _ => task.body.clone(),
         };
         let at = store.at();
         store.db.execute(
@@ -470,15 +479,25 @@ pub(crate) fn release_task(
         let requester = store.participant_row(task.requester_id)?;
         let pool = task.pool.as_deref();
         let tier = task.tier.as_deref();
-        let note = match &member {
-            None => format!(
+        let note = match (&member, &carried) {
+            (Some(member), Some(carried)) => {
+                let withdrawn = if carried.gated.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " Withdrawn with it, still waiting for the human: {}.",
+                        m_list(&carried.gated)
+                    )
+                };
+                format!(
+                    "T-{number} was taken back from @{} ({because}) and waits for another {}.{withdrawn}",
+                    member.handle,
+                    pool_name(pool, tier)
+                )
+            }
+            _ => format!(
                 "T-{number} is back on the board ({because}) and waits for {}.",
                 a_pool(pool, tier)
-            ),
-            Some(member) => format!(
-                "T-{number} was taken back from @{} ({because}) and waits for another {}.",
-                member.handle,
-                pool_name(pool, tier)
             ),
         };
         send(
@@ -492,6 +511,7 @@ pub(crate) fn release_task(
                 ..Sent::default()
             },
         )?;
+        release_ready(store, project_id)?;
         Ok(TaskReleased {
             task: task_by_id(store, task.id)?,
         })

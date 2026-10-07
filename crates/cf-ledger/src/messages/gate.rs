@@ -6,7 +6,8 @@ use cf_proto::ledger::MessageView;
 use rusqlite::params;
 use serde_json::json;
 
-use super::{known_message, message_task, require_message, resume};
+use super::again::answer_again;
+use super::{adopt, known_message, message_task, require_message};
 use crate::model::LedgerError;
 use crate::queue::{send, withdraw, Sent};
 use crate::store::Store;
@@ -41,7 +42,10 @@ pub(crate) fn mark_read(store: &mut Store, message_id: i64) -> Result<MessageVie
     })
 }
 
-/// The human passes a gated message on: it goes the way it would have gone without the gate.
+/// The human passes a gated message on: it is queued for its recipient, as it
+/// would have been without the gate, and never read: only the one it is for
+/// receives it. What it becomes then, a row its window keeps, joins the task
+/// message that waits for that window.
 pub(crate) fn approve_message(
     store: &mut Store,
     message_id: i64,
@@ -50,31 +54,24 @@ pub(crate) fn approve_message(
     store.write(|store| {
         let message = require_message(store, message_id, "gated")?;
         store.participant_by_handle(message.project_id, by)?;
-        let landing = if message.choices.is_null() {
-            "queued"
-        } else {
-            "read"
-        };
         store.db.execute(
-            "UPDATE message SET state = ? WHERE id = ?",
-            params![landing, message_id],
+            "UPDATE message SET state = 'queued' WHERE id = ?",
+            [message_id],
         )?;
         store.log(
             message.project_id,
             "message.approved",
             json!({ "message": message_id, "by": by }),
         )?;
-        if landing == "read" {
-            let task = message_task(store, message_id)?;
-            resume(store, task.map(|task| task.id))?;
-        }
+        adopt(store, message_id)?;
         known_message(store, message_id)
     })
 }
 
 /// The human declines a gated message, and whoever sent it is told. A
 /// declined task is cancelled; a declined answer leaves its question open
-/// for another. A result or a question is passed on, never declined.
+/// for another, which is held for approval again if the answer had taken it
+/// off the gate. A result or a question is passed on, never declined.
 pub(crate) fn decline_message(
     store: &mut Store,
     message_id: i64,
@@ -96,19 +93,26 @@ pub(crate) fn decline_message(
             "message.declined",
             json!({ "message": message_id, "by": by }),
         )?;
+        if let (Some(question), "answer") = (message.reply_to, message.kind.as_str()) {
+            reopen_question(store, question)?;
+        }
         let task = message_task(store, message_id)?;
         let reply_to = message
             .reply_to
             .map_or_else(|| "null".to_string(), |id| id.to_string());
         let mut told = message.sender.clone();
         let mut word = format!(
-            "@{by} declined your answer to m-{reply_to}. Answer it again: cf answer m-{reply_to} \"…\""
+            "@{by} declined your answer to m-{reply_to}. {}",
+            answer_again(&reply_to)
         );
         if message.kind == "task" {
             if let Some(task) = &task {
                 told = Some(store.participant_row(task.requester_id)?.handle);
                 call_off(store, message.project_id, task.number, by)?;
-                word = format!("@{by} declined T-{} ({}). It is cancelled.", task.number, task.title);
+                word = format!(
+                    "@{by} declined T-{} ({}). It is cancelled.",
+                    task.number, task.title
+                );
             }
         }
         if told.as_deref() != Some(by) {
@@ -127,4 +131,17 @@ pub(crate) fn decline_message(
         }
         known_message(store, message_id)
     })
+}
+
+/// A question that was withdrawn from the gate because it was answered there
+/// is held for the human again once that answer is declined: nobody received
+/// an answer, so the question still obliges, and is still the human's to pass on.
+fn reopen_question(store: &Store, question: i64) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE message SET state = 'gated', reason = NULL
+         WHERE id = ? AND kind = 'question' AND state = 'cancelled'
+           AND reason LIKE 'answered by @%'",
+        [question],
+    )?;
+    Ok(())
 }

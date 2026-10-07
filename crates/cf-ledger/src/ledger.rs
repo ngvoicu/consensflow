@@ -17,6 +17,7 @@ use cf_base::time::{Clock, SystemClock};
 use rusqlite::{Connection, ErrorCode};
 use serde_json::Value;
 
+use crate::messages::release_stranded;
 use crate::model::LedgerError;
 use crate::names;
 use crate::schema::{migrate, MIGRATIONS};
@@ -64,7 +65,9 @@ pub struct Ledger {
 /// Opens the ledger at `file`, made or brought to this build's schema: the
 /// one instance that holds it. Another holder refuses it (`ledger-locked`),
 /// as does a file that is no ledger (`ledger-unreadable`) and one a newer
-/// build wrote (`ledger-newer`).
+/// build wrote (`ledger-newer`). A file the Node daemon last held is taken
+/// as it left it: rows it left under a carrier it never knew of are queued
+/// messages of their own again (`messages::release_stranded`).
 pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError> {
     let db = Connection::open(file)?;
     // SQLite's own default waits five seconds for a lock: a second instance
@@ -84,8 +87,10 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
         drop(db);
         return Err(opening_refusal(file, cause));
     }
+    let mut store = Store::new(db, options.clock, options.names, options.trace);
+    release_stranded(&mut store)?;
     Ok(Ledger {
-        store: Store::new(db, options.clock, options.names, options.trace),
+        store,
         #[cfg(feature = "test-support")]
         watcher: std::cell::RefCell::new(None),
     })
