@@ -58,6 +58,11 @@ enum Outcome {
 /// Node never withdraws a note that told a requester a task was paused, so
 /// the notes this ledger withdraws when the task is resumed are, in Node's
 /// recordings, queued still, and its dispatcher goes on to paste them.
+/// Departed traces that Node's suite records only off Windows: the test
+/// that writes `home-copies-004` is skipped there, as Windows holds an open
+/// ledger's files (`tests/home-copies.test.mjs`). Elsewhere each must be there.
+const RECORDED_OFF_WINDOWS: &[&str] = &["home-copies-004"];
+
 const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-api-006", 15, "the door's read `answerTo` is gone (a poll claims with `claim_answer`), and a choice answer lands queued, not read"),
     ("core-dispatcher-010", 121, REASON_PAUSE),
@@ -293,6 +298,8 @@ fn every_departed_trace_is_there_and_still_departs() {
     let mut wrong = Vec::new();
     for (trace, at, why) in DEPARTED {
         match traces.iter().find(|(name, _)| name == trace) {
+            // Not there where its Node test does not run: that is its platform's say.
+            None if cfg!(windows) && RECORDED_OFF_WINDOWS.contains(trace) => {}
             None => wrong.push(format!("{trace} is not a recorded trace ({why})")),
             Some((_, text)) => {
                 wrong.extend(departure(text, *at).map(|wrong| format!("{trace}: {wrong} ({why})")))
