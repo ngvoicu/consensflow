@@ -6,12 +6,10 @@
 //! refused to open or kill says so in the host's own words (which the human
 //! and the trace are told), where a request that never came back is a
 //! [`HostError`]. Exits come in the order the host sent them, each told to
-//! the engine where it is read ([`Exits`]), before the next frame, so an exit
+//! the engine where it is read (`Dispatcher::pane_exited`), before the next frame, so an exit
 //! that came before its open's answer is known by the time the answer is.
 
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
-
-use crate::runtime::LocalWork;
 
 /// What a pane is opened with (`pane.open`): the window's pane, the folder its
 /// program starts in, the program and its arguments, the environment the
@@ -52,13 +50,4 @@ pub trait EngineHost: PaneHost {
     fn open(&self, open: OpenPane) -> Work<'_, Result<Opened, HostError>>;
     /// Kills `pane`'s program.
     fn kill<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Killed, HostError>>;
-}
-
-/// Where the host's exits are told, one at a time, in the order they came
-/// (`dispatcher.paneExited`): what an exit changes is changed before this
-/// returns, and what it still has to do (closing a project whose chief's
-/// window ended) is returned, for the caller to run apart, never to wait for
-/// where frames are read.
-pub trait Exits {
-    fn pane_exited(&self, pane: &Pane) -> Option<LocalWork>;
 }

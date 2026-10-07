@@ -19,6 +19,7 @@ use cf_engine::host::{EngineHost, Killed, OpenPane, Opened};
 use cf_engine::runtime::LocalWork;
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::bridge::Role;
+use cf_proto::panes::PaneExit;
 use serde_json::{json, Map, Value};
 
 use crate::errors::contain_now;
@@ -149,30 +150,24 @@ pub fn daemon_bridge(spawn: &Rc<DaemonSpawn>) -> BridgeBuilder {
 /// changed before the frame after it is looked at, and what it still has to do
 /// (`exited` returns it) is spawned onto the executor, never waited for there,
 /// and run by the drain after the frames of the read. A body that names no
-/// pane exits nothing; a panic in `exited` is written down and the reader goes
-/// on, as one that ends it would end the bridge.
+/// pane exits nothing; one that says no more than which pane ended (an older
+/// host's) is an exit all the same, as is one with a field that is not what it
+/// should be, which was not said. A panic in `exited` is written down and the
+/// reader goes on, as one that ends it would end the bridge.
 pub fn watch_exits(
     bridge: &Bridge,
     spawn: Rc<DaemonSpawn>,
-    exited: impl Fn(Pane) -> Option<LocalWork> + 'static,
+    exited: impl Fn(PaneExit) -> Option<LocalWork> + 'static,
 ) -> Subscription {
     bridge.on_event("pane.exit", move |body| {
-        let Some(pane) = pane_of(body) else {
+        let Ok(exit) = serde_json::from_value::<PaneExit>(body.clone()) else {
             return;
         };
-        match contain_now(|| exited(pane)) {
+        match contain_now(|| exited(exit)) {
             Ok(Some(rest)) => spawn.apart("a window's exit failed", rest),
             Ok(None) => {}
             Err(panicked) => spawn.errors().caught("a window's exit failed", &panicked),
         }
-    })
-}
-
-/// The pane an exit names: `{id, generation}`.
-fn pane_of(body: &Value) -> Option<Pane> {
-    Some(Pane {
-        id: body.get("id")?.as_str()?.to_owned(),
-        generation: body.get("generation")?.as_u64()?,
     })
 }
 

@@ -187,10 +187,13 @@ impl Trace for FakeTrace {
     }
 }
 
-/// The log: what failed apart from any pass, which no test may leave.
+/// The log: what failed apart from any pass, which no test may leave, and the
+/// lines a window that did not come up wrote.
 pub struct FakeLog {
     pub(crate) recorder: Recorder,
     pub failures: RefCell<Vec<String>>,
+    /// The lines of `warn`, in order.
+    pub warnings: RefCell<Vec<String>>,
 }
 
 impl Log for FakeLog {
@@ -198,6 +201,12 @@ impl Log for FakeLog {
         self.recorder
             .called("log", Some("error"), json!([message, cause]), Value::Null);
         self.failures.borrow_mut().push(cause.to_owned());
+    }
+
+    fn warn(&self, message: &str) {
+        self.recorder
+            .called("log", Some("warn"), json!([message]), Value::Null);
+        self.warnings.borrow_mut().push(message.to_owned());
     }
 }
 

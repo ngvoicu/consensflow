@@ -29,6 +29,7 @@ use cf_ledger::model::fits_role;
 use cf_ledger::{
     DeletedProject, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
 };
+use cf_proto::panes::PaneExit;
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
 use crate::chief_switch::SwitchTo;
@@ -36,6 +37,7 @@ use crate::record::Record;
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
 use crate::scheduler::SchedulerState;
 use crate::seams::{EngineError, Seams};
+use crate::shown::Shown;
 use crate::stalls::StallsState;
 use crate::windows::{Activity, ActivityState, WindowsState};
 
@@ -654,11 +656,17 @@ impl Dispatcher {
     /// returned, for the reader to spawn onto the executor and run apart.
     /// Nobody awaits an exit the host sent, so one that cannot be settled is
     /// written down; the engine's own close of a window fails with it
-    /// instead.
-    pub fn pane_exited(self: &Rc<Self>, pane: Pane) -> Option<LocalWork> {
+    /// instead. The exit says how the program ended and what its screen last
+    /// showed, where the host did.
+    pub fn pane_exited(self: &Rc<Self>, exit: PaneExit) -> Option<LocalWork> {
         let this = Rc::clone(self);
+        let pane = Pane {
+            id: exit.id.clone(),
+            generation: exit.generation,
+        };
+        let shown = Shown::from_exit(exit);
         let mut work: LocalWork = Box::pin(async move {
-            if let Err(cause) = this.exited(&pane).await {
+            if let Err(cause) = this.exited(&pane, shown).await {
                 this.write_down(&cause);
             }
         });
@@ -672,8 +680,13 @@ impl Dispatcher {
 
     /// What a window's exit settles: the engine's own close of a window
     /// awaits it and fails with it; the host's event (`pane_exited`) tells it
-    /// to the log.
-    pub(crate) async fn exited(self: &Rc<Self>, pane: &Pane) -> Result<(), EngineError> {
+    /// to the log. `shown` is what the host said of the window's end, which a
+    /// launch that the exit ended tells in its failure.
+    pub(crate) async fn exited(
+        self: &Rc<Self>,
+        pane: &Pane,
+        shown: Shown,
+    ) -> Result<(), EngineError> {
         let ended = |candidate: Option<&Pane>| candidate.is_some_and(|candidate| candidate == pane);
         let record = {
             let records = self.records.borrow();
@@ -694,7 +707,7 @@ impl Dispatcher {
         // Still opening: its launch takes the exit once it has the window.
         if !ended(record.window.borrow().pane.as_ref()) {
             if let Some(opening) = record.window.borrow_mut().opening.as_mut() {
-                opening.exited = true;
+                opening.exited = Some(shown);
             }
             return Ok(());
         }
@@ -726,8 +739,17 @@ impl Dispatcher {
         else {
             return Ok(());
         };
+        // A launch the exit ended says what its window showed.
+        let at_launch = delivering
+            .as_ref()
+            .is_some_and(|delivering| delivering.launch);
+        let closed = format!("@{}'s window closed", participant.handle);
+        let because = if at_launch {
+            self.unstarted_because(&record, &closed, &shown)
+        } else {
+            closed
+        };
         if let Some(delivering) = delivering {
-            let because = format!("@{}'s window closed", participant.handle);
             // A chief's first message (a handoff, most often) waits for its next window.
             if delivering.chief {
                 self.give_back(delivering, &because)?;
@@ -744,6 +766,11 @@ impl Dispatcher {
                     .ledger
                     .borrow_mut()
                     .set_project_state(project.id, "suspended")?;
+                // The human closed nothing: a chief that went before its first
+                // message showed says why, where the host said.
+                if at_launch && shown.is_known() {
+                    self.tell_chief_closed(&project, &because)?;
+                }
                 let others: Vec<ParticipantView> = project
                     .participants
                     .iter()

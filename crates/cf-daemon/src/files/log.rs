@@ -70,10 +70,15 @@ impl Log {
 }
 
 /// What the engine writes down of what failed apart from anything that waits
-/// for it: a launch or a delivery that nobody awaits.
+/// for it (a launch or a delivery that nobody awaits), and in one line of its
+/// own of a window that did not come up.
 impl cf_engine::seams::Log for Log {
     fn error(&self, message: &str, cause: &str) {
         Log::error(self, message, Some(cause));
+    }
+
+    fn warn(&self, message: &str) {
+        Log::warn(self, message, None);
     }
 }
 
@@ -167,6 +172,20 @@ mod tests {
         log.info("nobody hears this");
         log.error("nor this", Some("cause"));
         assert!(!log.file().exists());
+    }
+
+    #[test]
+    fn the_engine_s_warning_is_one_line_and_nothing_underneath() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = log_in(dir.path(), LIMIT);
+        cf_engine::seams::Log::warn(
+            &log,
+            "the launch of p1-zeus failed: the window closed (exit code 3)",
+        );
+        assert_eq!(
+            std::fs::read_to_string(log.file()).unwrap(),
+            "2026-10-05T10:00:01.000Z warn the launch of p1-zeus failed: the window closed (exit code 3)\n"
+        );
     }
 
     #[test]

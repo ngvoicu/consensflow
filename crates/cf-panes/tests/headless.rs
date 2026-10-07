@@ -1321,6 +1321,200 @@ fn product_bridge_contract_forwards_a_natural_pane_exit() {
     helper.close_input_and_wait();
 }
 
+/// The `pane.exit` of the pane `opened` names, once the helper sends it.
+fn exit_of(helper: &Headless, events: &mut Vec<Value>, opened: &Value) -> Value {
+    while !events
+        .iter()
+        .any(|event| event["op"] == "pane.exit" && event["body"]["id"] == opened["id"])
+    {
+        events.push(helper.receive());
+    }
+    events
+        .iter()
+        .find(|event| event["op"] == "pane.exit" && event["body"]["id"] == opened["id"])
+        .expect("exit event")["body"]
+        .clone()
+}
+
+/// A window that fails to come up says why on its screen and ends: the exit
+/// carries the code the program ended with and the last lines it showed, which
+/// are all the daemon is left of it.
+#[test]
+fn a_pane_exit_says_how_the_program_ended_and_what_its_screen_showed() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body(
+            "printf 'No API key found for the selected model.\\nUse /login to log into a provider.\\n'; exit 3",
+            1024,
+        ),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    assert_eq!(
+        exit_of(&helper, &mut events, &opened),
+        json!({
+            "id": opened["id"],
+            "generation": opened["generation"],
+            "exitCode": 3,
+            "tail": [
+                "No API key found for the selected model.",
+                "Use /login to log into a provider.",
+            ],
+        })
+    );
+    helper.close_input_and_wait();
+}
+
+/// A screen that showed nothing is told as such, apart from a host that does
+/// not say: the tail is there and empty.
+#[test]
+fn a_pane_exit_of_a_program_that_printed_nothing_has_an_empty_tail() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request("pane.open", open_body("exit 0", 1024), &mut events);
+    assert_eq!(opened["ok"], true, "{opened}");
+    let exit = exit_of(&helper, &mut events, &opened);
+    assert_eq!((&exit["exitCode"], &exit["tail"]), (&json!(0), &json!([])));
+    helper.close_input_and_wait();
+}
+
+/// A program a signal ended has the code 1 and the signal's name.
+#[test]
+fn a_pane_exit_of_a_program_a_signal_ended_names_the_signal() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body("printf 'about to go'; kill -9 $$", 1024),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let exit = exit_of(&helper, &mut events, &opened);
+    assert_eq!(exit["exitCode"], 1, "{exit}");
+    assert!(
+        exit["signal"].as_str().is_some_and(|name| !name.is_empty()),
+        "{exit}"
+    );
+    assert_eq!(exit["tail"], json!(["about to go"]), "{exit}");
+    helper.close_input_and_wait();
+}
+
+/// A window the daemon closes while it is stuck ends with the screen it was
+/// stuck on, in the same event.
+#[test]
+fn a_pane_the_daemon_kills_exits_with_the_screen_it_was_stuck_on() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body("printf 'waiting for a login\\n'; exec /bin/sleep 30", 1024),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id");
+    let generation = opened["generation"].as_u64().expect("generation");
+    output_until(&helper, &mut events, pane_id, generation, b"login");
+    assert_eq!(
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events
+        ),
+        json!({"ok":true})
+    );
+    let exit = exit_of(&helper, &mut events, &opened);
+    assert_eq!(exit["tail"], json!(["waiting for a login"]), "{exit}");
+    assert!(exit["signal"].is_string(), "{exit}");
+    helper.close_input_and_wait();
+}
+
+/// The screen is what a person would see, not the bytes in the order they
+/// were printed: a line drawn over another replaces it.
+#[test]
+fn a_pane_exit_has_the_screen_and_not_the_stream() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body(
+            "printf 'loading 10%%\\rready     \\n'; printf '\\033[2J\\033[Hlast screen'",
+            1024,
+        ),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let exit = exit_of(&helper, &mut events, &opened);
+    assert_eq!(exit["tail"], json!(["last screen"]), "{exit}");
+    helper.close_input_and_wait();
+}
+
+/// A snapshot carries the screen's last lines when it asks for them and is
+/// what it was when it does not: it is polled all the time.
+#[test]
+fn a_snapshot_gives_the_screens_tail_only_when_asked_for_it() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body("printf 'ready\\nsteady\\n'; exec /bin/sleep 30", 1024),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id");
+    let generation = opened["generation"].as_u64().expect("generation");
+    output_until(&helper, &mut events, pane_id, generation, b"steady");
+
+    let plain = helper.request(
+        "pane.snapshot",
+        json!({"id":pane_id,"generation":generation}),
+        &mut events,
+    );
+    assert_eq!(plain["ok"], true, "{plain}");
+    assert!(plain.get("tail").is_none(), "unasked: {plain}");
+    let asked = |lines: u64, helper: &mut Headless, events: &mut Vec<Value>| {
+        helper.request(
+            "pane.snapshot",
+            json!({"id":pane_id,"generation":generation,"tail":lines}),
+            events,
+        )
+    };
+    assert_eq!(
+        asked(1, &mut helper, &mut events)["tail"],
+        json!(["steady"])
+    );
+    let all = asked(1_000, &mut helper, &mut events);
+    assert_eq!(all["tail"], json!(["ready", "steady"]));
+    assert_eq!(
+        all["unsent"], plain["unsent"],
+        "the rest of the answer is as it was"
+    );
+    assert_eq!(asked(0, &mut helper, &mut events)["tail"], json!([]));
+
+    let unknown = helper.request(
+        "pane.snapshot",
+        json!({"id":pane_id,"generation":generation,"lines":1}),
+        &mut events,
+    );
+    assert_eq!(unknown["ok"], false, "{unknown}");
+    assert_eq!(
+        helper.request(
+            "pane.kill",
+            json!({"id":pane_id,"generation":generation}),
+            &mut events
+        ),
+        json!({"ok":true})
+    );
+    helper.close_input_and_wait();
+}
+
 /// A window whose program ends on its own leaves the pane table after its
 /// `pane.exit`, its child reaped: nothing waits for a `pane.kill` the daemon
 /// never sends, and an update is not held up by a window long gone.

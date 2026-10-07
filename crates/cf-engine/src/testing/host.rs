@@ -12,6 +12,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
+use cf_proto::panes::PaneExit;
 use serde_json::{json, Map, Value};
 
 use super::executor::Gate;
@@ -48,6 +49,10 @@ pub struct FakeHost {
     pub hold_exits: Cell<bool>,
     /// What `pane.snapshot` answers besides `ok` ([`FakeHost::set_snapshot`]).
     snapshot: RefCell<Map<String, Value>>,
+    /// What every exit says besides which pane ended
+    /// ([`FakeHost::exits_showing`]): the program's code and signal, and the
+    /// lines its screen ended with.
+    exit_says: RefCell<ExitSays>,
     /// The window's process, when the test names one.
     pub pid: Cell<Option<u32>>,
     /// What a test's own `request` does first, given the request it wraps.
@@ -63,6 +68,15 @@ pub struct FakeHost {
 /// What a test's own `request` does before the host's, given the operation
 /// asked and its body.
 pub type OnRequest = Rc<dyn Fn(&str, &Value)>;
+
+/// What the exits of a test's host say of how a program ended and what its
+/// screen showed. The default says nothing, as the Node tests' host did.
+#[derive(Debug, Clone, Default)]
+struct ExitSays {
+    code: Option<u32>,
+    signal: Option<String>,
+    tail: Option<Vec<String>>,
+}
 
 impl FakeHost {
     pub fn new(recorder: Recorder) -> Rc<Self> {
@@ -84,6 +98,18 @@ impl FakeHost {
             panic!("a snapshot is an object");
         };
         *self.snapshot.borrow_mut() = fields;
+    }
+
+    /// What the exits from now on say: the program ended with `code` (or a
+    /// `signal`), and its screen ended with `tail`, the empty one a screen
+    /// that showed nothing. `None` says nothing of it, as a host that does not
+    /// say.
+    pub fn exits_showing(&self, code: Option<u32>, signal: Option<&str>, tail: Option<&[&str]>) {
+        *self.exit_says.borrow_mut() = ExitSays {
+            code,
+            signal: signal.map(str::to_owned),
+            tail: tail.map(|lines| lines.iter().map(|line| (*line).to_owned()).collect()),
+        };
     }
 
     /// The panes opened, in order.
@@ -132,8 +158,16 @@ impl FakeHost {
             .iter()
             .filter_map(Weak::upgrade)
             .collect();
+        let says = self.exit_says.borrow().clone();
+        let exit = PaneExit {
+            id: pane.id,
+            generation: pane.generation,
+            exit_code: says.code,
+            signal: says.signal,
+            tail: says.tail,
+        };
         for engine in engines {
-            if let Some(rest) = engine.pane_exited(pane.clone()) {
+            if let Some(rest) = engine.pane_exited(exit.clone()) {
                 rest.await;
             }
             // `await listener(...)`: the call returned a turn before the loop goes on.

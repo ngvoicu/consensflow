@@ -12,6 +12,7 @@ use std::rc::Rc;
 
 use cf_engine::runtime::Spawn;
 use cf_engine::testing::{Context, Gate};
+use cf_proto::panes::PaneExit;
 use tokio::runtime::Builder;
 use tokio::task::{spawn_local, yield_now, LocalSet};
 
@@ -51,7 +52,14 @@ fn finishes_the_task_of_a_worker_whose_look_found_its_answer_before_the_exit_tha
         // rest on the executor, and drains it.
         let reader = spawn_local(async move {
             arrives.wait().await;
-            if let Some(rest) = dispatcher.pane_exited(pane) {
+            let exit = PaneExit {
+                id: pane.id,
+                generation: pane.generation,
+                exit_code: None,
+                signal: None,
+                tail: None,
+            };
+            if let Some(rest) = dispatcher.pane_exited(exit) {
                 executor.spawn(rest);
             }
             executor.drain();

@@ -357,7 +357,7 @@ async fn run(
         log: Rc::clone(&log) as _,
         launch_files: Rc::new(LaunchFolders::new(home.clone(), Rc::clone(&errors))),
         spawn: Rc::clone(&spawn) as _,
-        limits: Limits::default(),
+        limits: Limits::of(&env),
     };
     let dispatcher = Dispatcher::new(seams);
 
