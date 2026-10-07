@@ -365,6 +365,7 @@ describe('measuring a chief from the ledger', () => {
         accepted: 1,
         tells: 0,
         tellsAnswered: 0,
+        placed: 4,
         pauses: 0,
         resumes: 0,
         continuations: 0,

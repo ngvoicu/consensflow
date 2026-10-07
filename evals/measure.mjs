@@ -203,14 +203,29 @@ function plumbing(file, chiefId, humanId) {
         humanId,
       ),
       accepted: count("SELECT COUNT(*) AS n FROM task WHERE state = 'accepted'"),
+      // A tell the chief's own cancel took back is not one owed an answer; an answer a
+      // cancel took back was still given (both daemons withdraw what is queued for a
+      // cancelled task alike: crates/cf-ledger/tests/cancelled.rs).
       tells: count(
-        `SELECT COUNT(*) AS n FROM message WHERE kind = 'question' AND urgent = 1 AND sender_id = ?`,
+        `SELECT COUNT(*) AS n FROM message WHERE kind = 'question' AND urgent = 1 AND sender_id = ? AND state != 'cancelled'`,
         chiefId,
       ),
       tellsAnswered: count(
-        `SELECT COUNT(*) AS n FROM message q WHERE q.kind = 'question' AND q.urgent = 1 AND q.sender_id = ?
-           AND EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state != 'cancelled')`,
+        `SELECT COUNT(*) AS n FROM message q WHERE q.kind = 'question' AND q.urgent = 1 AND q.sender_id = ? AND q.state != 'cancelled'
+           AND EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state != 'failed')`,
         chiefId,
+      ),
+      // The tasks the board places: a lane's (its assignee's, or its member's once the
+      // session ended) or the open ones. A task never given and no longer open is on
+      // neither, on both daemons alike (tests/integration/core-board.test.mjs).
+      placed: count(
+        `SELECT COUNT(*) AS n FROM task t
+           LEFT JOIN participant a ON a.id = t.assignee_id
+           LEFT JOIN participant m ON m.id = a.member_id
+           WHERE t.deleted_at IS NULL AND (
+                (t.assignee_id IS NULL AND t.state = 'open')
+             OR (a.id IS NOT NULL AND a.left_at IS NULL)
+             OR (a.left_at IS NOT NULL AND m.id IS NOT NULL AND m.left_at IS NULL))`,
       ),
       pauses: count(
         "SELECT COUNT(*) AS n FROM event WHERE kind = 'task.state' AND json_extract(data, '$.to') = 'paused'",
@@ -249,7 +264,7 @@ export function mechanics(metrics, boardTasks) {
     ),
     held('every answer reached the member', p.answersDelivered, p.memberQuestionsAnswered),
     held('every tell the chief sent was answered', p.tellsAnswered, p.tells),
-    held('the board showed every task', boardTasks, metrics.taskCount),
+    held('the board showed every task', boardTasks, p.placed),
   ]
 }
 
