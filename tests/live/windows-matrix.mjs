@@ -8,7 +8,7 @@
  *
  *   npm run eval:windows -- --host <ssh host> [--build] [--env NAME=VALUE] \
  *     --scenario round-trip --scenario question-trip \
- *     --pair devin:devin --pair claude:devin [--claude-model claude-sonnet-5]
+ *     --pair devin:devin --pair claude:devin [--claude-model claude-sonnet-5] [--pi-model openai/gpt-5.6-luna]
  *
  * --build builds the machine's copy before the first run; --claude-model is
  * a Claude chief's model (the eval's own default otherwise). --env NAME=VALUE
@@ -32,6 +32,7 @@ const { values } = parseArgs({
     scenario: { type: 'string', multiple: true },
     pair: { type: 'string', multiple: true },
     'claude-model': { type: 'string' },
+    'pi-model': { type: 'string' },
     env: { type: 'string', multiple: true, default: [] },
   },
 })
@@ -65,6 +66,9 @@ async function run({ scenario, chief, staff }, build, log) {
   // A chief switch goes to the staff's harness.
   if (scenario === 'chief-switch') args.push('--switch-to', staff)
   if (chief === 'claude' && values['claude-model']) args.push('--model', values['claude-model'])
+  // A Pi member's model, on the machine's own signed-in provider (zeewin: openai/gpt-5.6-luna).
+  if (staff.split(',').includes('pi') && values['pi-model'])
+    args.push('--pi-staff-model', values['pi-model'])
   const out = createWriteStream(log)
   const child = spawn('npm', args, { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] })
   let text = ''

@@ -65,6 +65,8 @@ const { values } = parseArgs({
     model: { type: 'string' },
     gate: { type: 'boolean', default: false },
     'claude-staff-model': { type: 'string', default: HARNESSES.claude.model },
+    // A Pi member's model, as Pi names it (provider/model): the machine's signed-in provider.
+    'pi-staff-model': { type: 'string', default: HARNESSES.pi.model },
     repeat: { type: 'string', default: '1' },
     'timeout-min': { type: 'string', default: '40' },
     effort: { type: 'string', default: 'high' },
@@ -95,7 +97,7 @@ const repeat = Number(values.repeat)
 const timeoutMs = Number(values['timeout-min']) * 60_000
 const { agents, staff } = staffFor(
   staffHarnesses,
-  { claude: values['claude-staff-model'] },
+  { claude: values['claude-staff-model'], pi: values['pi-staff-model'] },
   values['staff-effort'],
 )
 /** The chief's effort as it reached the chief: null where its harness has no switch for it. */
