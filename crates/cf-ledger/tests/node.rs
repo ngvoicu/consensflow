@@ -6,6 +6,8 @@
 // The tests start Node themselves; their helpers expect, as the tests do.
 #![allow(clippy::disallowed_methods, clippy::expect_used)]
 
+mod node_ledger;
+
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -14,35 +16,7 @@ use cf_ledger::{
     open_ledger, Ledger, NewChief, NewMember, NewNote, NewProject, NewQuestion, NewTask, Options,
     ProjectView,
 };
-
-/// Node's ledger module, beside this crate in the repository.
-fn node_ledger() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("src")
-        .join("ledger")
-        .join("index.js")
-}
-
-/// Node, running `script` (an ES module) with the ledger module and `file`
-/// as its arguments.
-fn node(script: &str, file: &Path) -> Command {
-    let program = std::env::var_os("CONSENSFLOW_NODE").unwrap_or_else(|| "node".into());
-    let mut command = Command::new(program);
-    command
-        .args(["--input-type=module", "-e"])
-        .arg(format!(
-            "import {{ pathToFileURL }} from 'node:url';\n\
-             const {{ openLedger }} = await import(pathToFileURL(process.argv[1]).href);\n\
-             const file = process.argv[2];\n{script}"
-        ))
-        .arg(node_ledger())
-        .arg(file)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
-    command
-}
+use node_ledger::{ledger_module, node, printed};
 
 /// Node's daemon on the ledger at `file`, for a window of `participant`
 /// (handle `handle`): what is next for it is delivered, and Node's own
@@ -72,7 +46,7 @@ fn node_collects(
     let mut command = Command::new(program);
     command
         .arg(driver)
-        .arg(node_ledger())
+        .arg(ledger_module())
         .arg(file)
         .arg(plan.to_string())
         .stdout(Stdio::piped())
@@ -134,13 +108,6 @@ fn id_of(project: &ProjectView, handle: &str) -> i64 {
         .find(|participant| participant.handle == handle)
         .expect("a participant")
         .id
-}
-
-/// What Node printed, whole.
-fn printed(command: &mut Command) -> String {
-    let output = command.output().expect("Node runs");
-    assert!(output.status.success(), "Node failed: {output:?}");
-    String::from_utf8(output.stdout).expect("Node prints UTF-8")
 }
 
 /// Node holding the ledger at `file` until killed, once it says so.

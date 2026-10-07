@@ -125,7 +125,10 @@ pub(crate) fn open_tasks(store: &Store, project_id: i64) -> Result<Vec<TaskView>
 /// The board: each task with the first line of its latest result, what its
 /// card shows; its brief stays out, as the drawer reads it with the task. A
 /// task of a session that has ended sits on its member's lane; one the human
-/// deleted is on no lane.
+/// deleted is on no lane. A task is drawn by its lane or, waiting for a
+/// member, among the open ones: one that left `open` before any member had
+/// it (called off, paused or failed) is on neither, and neither is a removed
+/// member's, as on Node's board (`tests/cancelled.rs` holds the two to it).
 pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError> {
     let Some(project) = project(store, project_id)? else {
         return Err(LedgerError::refused_with(

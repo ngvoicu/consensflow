@@ -12,7 +12,13 @@ import { dirname, join } from 'node:path'
  * `DISPATCH --tier standard <task>` (or `DISPATCH --review --tier standard
  * <task>`) runs `cf task add` with those words and
  * the task (`\n` in it becomes a line break), with this window's own token,
- * the way a chief hands out work. A task
+ * the way a chief hands out work. A line `CF <words>` runs any other `cf` with
+ * those words as they stand (`CF task cancel T-3`), and `CF <words> :: <text>`
+ * with the text, spaces and all, as one last word (`CF tell T-1 :: Stop now`):
+ * the chief's own verbs, as it would type them. A line `SLEEP <seconds> <words>`
+ * is a turn that works that long before it does what the words say: a window
+ * a chief can still tell, or a chief nothing is delivered to. A key pressed in
+ * a turn (the Escape that stops it) is ignored: this window is never stopped. A task
  * saying `QUOTA-OUT` is refused with a 429, Claude's way, by the window whose
  * participant `CF_TEST_QUOTA_OUT` names. A line `ASK <questions JSON>` asks
  * through Claude's question tool: the PreToolUse hook of the settings file
@@ -141,6 +147,11 @@ function askThroughHook(questions) {
 }
 
 async function replyTo(text) {
+  const slow = /^SLEEP (\d+) (.+)$/m.exec(text)
+  if (slow) {
+    await new Promise((resolve) => setTimeout(resolve, Number(slow[1]) * 1000))
+    return replyTo(slow[2])
+  }
   const ask = /^ASK (.+)$/m.exec(text)
   if (ask) return askThroughHook(JSON.parse(ask[1]))
   const asked = /^\[ConsensFlow m-(\d+)[^\]]*question from @/m.exec(text)
@@ -153,6 +164,11 @@ async function replyTo(text) {
     const words = dispatch[1].trim().split(' ')
     const task = dispatch[2].replaceAll('\\n', '\n')
     return `dispatched: ${await runCf(['task', 'add', ...words, task])}`
+  }
+  const verb = /^CF (.+)$/m.exec(text)
+  if (verb) {
+    const [words, ...said] = verb[1].split(' :: ')
+    return `ran cf: ${await runCf([...words.split(' '), ...(said.length === 0 ? [] : [said.join(' :: ')])])}`
   }
   // The refusing window is a session of the member the test names.
   const me = process.env.CONSENSFLOW_PARTICIPANT ?? ''
@@ -228,8 +244,10 @@ process.stdin.on('data', (chunk) => {
       pending = pending.slice(PASTE_END.length)
       // A real TUI draws what was pasted, and a paste's Enter waits for that.
       process.stdout.write(`[pasted, ${buffer.length} characters]\n`)
-    } else if (pending.startsWith('\u001b') && pending.length < PASTE_START.length) {
-      return
+    } else if (pending.startsWith('\u001b')) {
+      // The start of a paste marker still arriving, or a key: Escape, ignored.
+      if ([PASTE_START, PASTE_END].some((marker) => marker.startsWith(pending))) return
+      pending = pending.slice(1)
     } else {
       const char = pending[0]
       pending = pending.slice(1)
