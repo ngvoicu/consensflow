@@ -15,7 +15,6 @@ import { startIntegration } from './harness.mjs'
  * skips a cancelled answer, took the tell for unanswered.
  */
 
-const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
 
 /**
@@ -43,7 +42,6 @@ async function toldWhileWorking(app) {
 
 test("the answer a window gave the chief's tell reaches the chief once its turn is over, and stays an answer when the task is called off after", async () => {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
@@ -74,7 +72,6 @@ test("the answer a window gave the chief's tell reaches the chief once its turn 
 
 test("the answer a window gave the chief's tell is withdrawn when the chief's task is called off before the chief read it", async () => {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {

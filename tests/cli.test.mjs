@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
-import { rosterPath } from '../src/roster.js'
 import { noteRan } from './choice.mjs'
 import { cliEnv, cliTarget } from './cli-target.mjs'
 import { fakeExecutable, tempEnv } from './helpers.mjs'
@@ -14,9 +13,11 @@ import { fakeExecutable, tempEnv } from './helpers.mjs'
 const CMD = process.platform === 'win32' ? '.cmd' : ''
 
 const run = promisify(execFile)
-/** Node's own CLI, whose sources a look is taken at: `bin/cf.mjs` only starts it. */
-const CF = join(import.meta.dirname, '..', 'src', 'cli.js')
+/** The native cf's own sources, whose words a look is taken at. */
+const CF_SOURCES = join(import.meta.dirname, '..', 'crates', 'cf', 'src')
 const FIXTURES = join(import.meta.dirname, 'fixtures')
+/** Where the roster is kept in a home of a test's own. */
+const rosterPath = (env) => join(env.CONSENSFLOW_HOME, 'agents.json')
 /** A preload that has every Node process say it started: which cf ran is told by it. */
 const NODE_SPY = join(FIXTURES, 'node-spy.mjs')
 /** The cf these tests run: the native one, or Node's (tests/cli-target.mjs, `npm run test:clis`). */
@@ -186,7 +187,7 @@ describe('role files belong to pane launch, not CLI administration', () => {
   stubCli(t, 'claude')
 
   it('roster edits, setup and diagnostic reads leave role files and old manifests alone', async () => {
-    // A launch's own role file, where a window writes it (src/role-skills.js).
+    // A launch's own role file, where a window writes it (crates/cf-harness/src/shared/role.rs).
     const role = join(
       t.env.CONSENSFLOW_HOME,
       'integrations',
@@ -229,11 +230,18 @@ describe('role files belong to pane launch, not CLI administration', () => {
 })
 
 describe('the standalone switch-over (TEST-PANE-47)', () => {
-  it('removes direct conversation writes and terminal-window discovery from cf', {
-    skip: target.native && "a look at Node's sources",
-  }, () => {
-    const source = readFileSync(CF, 'utf8')
-    assert.doesNotMatch(source, /\bsaveThread\b|liveWindowElsewhere|CMUX_SURFACE_ID|cmux tree/)
+  it('removes direct conversation writes and terminal-window discovery from cf', () => {
+    const sources = readdirSync(CF_SOURCES, { recursive: true }).filter((file) =>
+      file.endsWith('.rs'),
+    )
+    assert.ok(sources.length > 0, `no source of the native cf in ${CF_SOURCES}`)
+    for (const file of sources) {
+      assert.doesNotMatch(
+        readFileSync(join(CF_SOURCES, file), 'utf8'),
+        /\bsaveThread\b|liveWindowElsewhere|CMUX_SURFACE_ID|cmux tree/,
+        file,
+      )
+    }
   })
 })
 describe('the host-integration verbs are gone, not hidden', () => {

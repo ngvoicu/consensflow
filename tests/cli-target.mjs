@@ -1,9 +1,4 @@
-import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { assertBuilt, choose, chooseHome, DEFAULT_CLI, NATIVE_CF } from './choice.mjs'
-
-/** Node's CLI, the one `node` selects: the door, which runs Node's own CLI in a home that has taken the way back. */
-const CF_MJS = join(fileURLToPath(new URL('..', import.meta.url)), 'bin', 'cf.mjs')
+import { assertBuilt, choose, chooseHome, DEFAULT_CLI, NATIVE_CF, NODE_CF } from './choice.mjs'
 
 /**
  * Which `cf` the suites of the CLI run (tests/cli.test.mjs,
@@ -33,17 +28,15 @@ export function cliTarget({
   if (chosen.kind === 'node') {
     return {
       kind: 'node',
-      native: false,
       name: "Node's bin/cf.mjs (use-node in the home)",
       command: process.execPath,
-      args: [CF_MJS],
+      args: [NODE_CF],
     }
   }
   if (chosen.command === null) assertBuilt()
   const [command, ...args] = chosen.command ?? [NATIVE_CF]
   return {
     kind: 'native',
-    native: true,
     name: 'the native cf',
     command,
     args,

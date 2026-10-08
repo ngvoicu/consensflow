@@ -1,22 +1,19 @@
 import assert from 'node:assert/strict'
+import { randomBytes } from 'node:crypto'
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
+import { createServer as createSocketServer } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { before, describe, it } from 'node:test'
-import * as javascript from '../src/channels/opencode.js'
-import { launchConfiguration } from '../src/channels.js'
 import { fakeNodeExecutable } from './helpers.mjs'
 import { cargoMissing, rustOpenCode } from './rust-channels.mjs'
 
-/** The channel's functions once in JavaScript and once in Rust, each suite below run with both. */
-const IMPLEMENTATIONS = [
-  ['JavaScript', () => javascript, false],
-  ['Rust', rustOpenCode, cargoMissing],
-]
-
-/** What Rust's seed has no caller for: it cannot be cancelled. */
-const NO_SIGNAL = "Rust's seed has no signal to cancel it by: no caller passes one"
+/**
+ * OpenCode's channel in Rust (`crates/cf-harness`), through its test binary
+ * (tests/rust-channels.mjs). Its seed has no signal to cancel it by, since no
+ * caller passes one.
+ */
 
 async function seedServer(t, mode = 'ok') {
   const calls = []
@@ -92,236 +89,186 @@ async function seedServer(t, mode = 'ok') {
   }
 }
 
-for (const [implementation, choose, skip] of IMPLEMENTATIONS) {
-  const skippedByRust = (reason) => implementation === 'Rust' && reason
-  describe(`OpenCode worker seed uses the native API after the TUI starts, run by ${implementation}`, {
-    skip,
-  }, () => {
-    let opencode
-    before(() => {
-      opencode = choose()
-    })
+describe('OpenCode worker seed uses the native API after the TUI starts, run by Rust', {
+  skip: cargoMissing,
+}, () => {
+  let opencode
+  before(() => {
+    opencode = rustOpenCode()
+  })
 
-    for (const mode of ['health-hang', 'health-body-hang']) {
-      it(`recovers from ${mode} when later readiness probes succeed`, async (t) => {
-        const server = await seedServer(t, mode)
-        server.ready()
-        await opencode.seedSession({
-          channel: server.channel,
-          sessionId: 'ses_health123',
-          cwd: os.tmpdir(),
-          text: 'Tell me a joke.',
-          timeoutMs: 2000,
-        })
-        assert.ok(server.calls.filter((call) => call.path === '/global/health').length >= 2)
-        const posts = server.calls.filter((call) => call.method === 'POST')
-        assert.equal(posts.length, 1)
-        assert.equal(JSON.parse(posts[0].body).parts[0].text, 'Tell me a joke.')
-      })
-    }
-
-    it('waits for readiness, then sends the exact task and roster model once', async (t) => {
-      const server = await seedServer(t)
-      const task = 'Only the actual task.\nKeep all of it.'
-      const ready = setTimeout(server.ready, 60)
-      t.after(() => clearTimeout(ready))
+  for (const mode of ['health-hang', 'health-body-hang']) {
+    it(`recovers from ${mode} when later readiness probes succeed`, async (t) => {
+      const server = await seedServer(t, mode)
+      server.ready()
       await opencode.seedSession({
         channel: server.channel,
-        sessionId: 'ses_native123',
+        sessionId: 'ses_health123',
         cwd: os.tmpdir(),
-        text: task,
-        model: 'opencode/model/variant',
+        text: 'Tell me a joke.',
         timeoutMs: 2000,
       })
+      assert.ok(server.calls.filter((call) => call.path === '/global/health').length >= 2)
       const posts = server.calls.filter((call) => call.method === 'POST')
       assert.equal(posts.length, 1)
-      assert.equal(posts[0].path, '/session/ses_native123/prompt_async')
-      assert.equal(posts[0].directory, await realpath(os.tmpdir()))
-      assert.deepEqual(JSON.parse(posts[0].body), {
-        parts: [{ type: 'text', text: task }],
-        model: { providerID: 'opencode', modelID: 'model/variant' },
-      })
+      assert.equal(JSON.parse(posts[0].body).parts[0].text, 'Tell me a joke.')
     })
+  }
 
-    it('does not override the existing native model on a resumed conversation', async (t) => {
+  it('waits for readiness, then sends the exact task and roster model once', async (t) => {
+    const server = await seedServer(t)
+    const task = 'Only the actual task.\nKeep all of it.'
+    const ready = setTimeout(server.ready, 60)
+    t.after(() => clearTimeout(ready))
+    await opencode.seedSession({
+      channel: server.channel,
+      sessionId: 'ses_native123',
+      cwd: os.tmpdir(),
+      text: task,
+      model: 'opencode/model/variant',
+      timeoutMs: 2000,
+    })
+    const posts = server.calls.filter((call) => call.method === 'POST')
+    assert.equal(posts.length, 1)
+    assert.equal(posts[0].path, '/session/ses_native123/prompt_async')
+    assert.equal(posts[0].directory, await realpath(os.tmpdir()))
+    assert.deepEqual(JSON.parse(posts[0].body), {
+      parts: [{ type: 'text', text: task }],
+      model: { providerID: 'opencode', modelID: 'model/variant' },
+    })
+  })
+
+  it('does not override the existing native model on a resumed conversation', async (t) => {
+    const server = await seedServer(t)
+    server.ready()
+    await opencode.seedSession({
+      channel: server.channel,
+      sessionId: 'ses_resume123',
+      cwd: os.tmpdir(),
+      text: 'follow-up',
+      resume: true,
+      model: 'wrong/edited-roster',
+      variant: 'max',
+      timeoutMs: 2000,
+    })
+    assert.deepEqual(JSON.parse(server.calls.find((call) => call.method === 'POST').body), {
+      parts: [{ type: 'text', text: 'follow-up' }],
+      model: { providerID: 'openrouter', modelID: 'native-model' },
+      variant: 'medium',
+      agent: 'review',
+    })
+  })
+
+  for (const variant of ['low', 'medium']) {
+    it(`sends selected ${variant} to the native prompt API`, async (t) => {
       const server = await seedServer(t)
       server.ready()
       await opencode.seedSession({
         channel: server.channel,
-        sessionId: 'ses_resume123',
-        cwd: os.tmpdir(),
-        text: 'follow-up',
-        resume: true,
-        model: 'wrong/edited-roster',
-        variant: 'max',
-        timeoutMs: 2000,
-      })
-      assert.deepEqual(JSON.parse(server.calls.find((call) => call.method === 'POST').body), {
-        parts: [{ type: 'text', text: 'follow-up' }],
-        model: { providerID: 'openrouter', modelID: 'native-model' },
-        variant: 'medium',
-        agent: 'review',
-      })
-    })
-
-    for (const variant of ['low', 'medium']) {
-      it(`sends selected ${variant} to the native prompt API`, async (t) => {
-        const server = await seedServer(t)
-        server.ready()
-        await opencode.seedSession({
-          channel: server.channel,
-          sessionId: 'ses_effort123',
-          cwd: os.tmpdir(),
-          text: 'task',
-          model: 'openrouter/openai/gpt-6-astra',
-          variant,
-          timeoutMs: 2000,
-        })
-        const body = JSON.parse(server.calls.find((c) => c.method === 'POST').body)
-        assert.equal(body.variant, variant)
-        assert.deepEqual(body.model, { providerID: 'openrouter', modelID: 'openai/gpt-6-astra' })
-        assert.equal(
-          server.calls.filter((c) => c.path.startsWith('/session/') && c.method === 'GET').length,
-          0,
-        )
-      })
-    }
-    it('sends explicit native default rather than falling back to roster or agent effort', async (t) => {
-      const server = await seedServer(t, 'native-default')
-      server.ready()
-      await opencode.seedSession({
-        channel: server.channel,
-        sessionId: 'ses_default123',
+        sessionId: 'ses_effort123',
         cwd: os.tmpdir(),
         text: 'task',
-        resume: true,
-        variant: 'max',
+        model: 'openrouter/openai/gpt-6-astra',
+        variant,
         timeoutMs: 2000,
       })
+      const body = JSON.parse(server.calls.find((c) => c.method === 'POST').body)
+      assert.equal(body.variant, variant)
+      assert.deepEqual(body.model, { providerID: 'openrouter', modelID: 'openai/gpt-6-astra' })
       assert.equal(
-        JSON.parse(server.calls.find((c) => c.method === 'POST').body).variant,
-        'default',
+        server.calls.filter((c) => c.path.startsWith('/session/') && c.method === 'GET').length,
+        0,
       )
     })
-    for (const mode of ['native-read-failure', 'invalid-native-model', 'native-read-hang']) {
-      it(`sends no prompt after ${mode}`, {}, async (t) => {
-        const server = await seedServer(t, mode)
-        server.ready()
-        await assert.rejects(
-          opencode.seedSession({
-            channel: server.channel,
-            sessionId: 'ses_read123',
-            cwd: os.tmpdir(),
-            text: 'task',
-            resume: true,
-            timeoutMs: 150,
-          }),
-        )
-        assert.equal(server.calls.filter((c) => c.method === 'POST').length, 0)
-      })
-    }
-
-    for (const mode of ['disconnect', 'hang']) {
-      it(`reports uncertain admission and never retries after ${mode}`, {}, async (t) => {
-        const server = await seedServer(t, mode)
-        server.ready()
-        await assert.rejects(
-          opencode.seedSession({
-            channel: server.channel,
-            sessionId: 'ses_once123',
-            cwd: os.tmpdir(),
-            text: 'send once',
-            timeoutMs: 200,
-          }),
-          /uncertain.*not retried/,
-        )
-        assert.equal(server.calls.filter((call) => call.method === 'POST').length, 1)
-      })
-    }
-
-    it('tolerates slow native startup past the old 15s budget', { timeout: 90000 }, async (t) => {
-      const server = await seedServer(t)
-      const task = 'Slow starter task.\nKeep all of it.'
-      const ready = setTimeout(server.ready, 15500)
-      t.after(() => clearTimeout(ready))
-      await opencode.seedSession({
-        channel: server.channel,
-        sessionId: 'ses_slow123',
-        cwd: os.tmpdir(),
-        text: task,
-        model: 'opencode/model/variant',
-      })
-      const posts = server.calls.filter((call) => call.method === 'POST')
-      assert.equal(posts.length, 1)
-      assert.equal(posts[0].path, '/session/ses_slow123/prompt_async')
-      assert.equal(posts[0].directory, await realpath(os.tmpdir()))
-      assert.deepEqual(JSON.parse(posts[0].body), {
-        parts: [{ type: 'text', text: task }],
-        model: { providerID: 'opencode', modelID: 'model/variant' },
-      })
+  }
+  it('sends explicit native default rather than falling back to roster or agent effort', async (t) => {
+    const server = await seedServer(t, 'native-default')
+    server.ready()
+    await opencode.seedSession({
+      channel: server.channel,
+      sessionId: 'ses_default123',
+      cwd: os.tmpdir(),
+      text: 'task',
+      resume: true,
+      variant: 'max',
+      timeoutMs: 2000,
     })
-
-    it('cancels readiness when the TUI exits and sends no task', {
-      skip: skippedByRust(NO_SIGNAL),
-    }, async (t) => {
-      const server = await seedServer(t)
-      const cancel = new AbortController()
-      const timer = setTimeout(() => cancel.abort(), 40)
-      t.after(() => clearTimeout(timer))
+    assert.equal(JSON.parse(server.calls.find((c) => c.method === 'POST').body).variant, 'default')
+  })
+  for (const mode of ['native-read-failure', 'invalid-native-model', 'native-read-hang']) {
+    it(`sends no prompt after ${mode}`, {}, async (t) => {
+      const server = await seedServer(t, mode)
+      server.ready()
       await assert.rejects(
         opencode.seedSession({
           channel: server.channel,
-          sessionId: 'ses_closed123',
+          sessionId: 'ses_read123',
           cwd: os.tmpdir(),
-          text: 'must not send',
-          signal: cancel.signal,
-          timeoutMs: 2000,
+          text: 'task',
+          resume: true,
+          timeoutMs: 150,
         }),
       )
-      assert.equal(server.calls.filter((call) => call.method === 'POST').length, 0)
+      assert.equal(server.calls.filter((c) => c.method === 'POST').length, 0)
     })
+  }
 
-    it('keeps a cancelled in-flight POST uncertain without retrying it', {
-      skip: skippedByRust(NO_SIGNAL),
-    }, async (t) => {
-      const server = await seedServer(t, 'hang')
+  for (const mode of ['disconnect', 'hang']) {
+    it(`reports uncertain admission and never retries after ${mode}`, {}, async (t) => {
+      const server = await seedServer(t, mode)
       server.ready()
-      const cancel = new AbortController()
-      const timer = setInterval(() => {
-        if (server.calls.some((call) => call.method === 'POST')) cancel.abort()
-      }, 5)
-      t.after(() => clearInterval(timer))
       await assert.rejects(
         opencode.seedSession({
           channel: server.channel,
-          sessionId: 'ses_cancel123',
+          sessionId: 'ses_once123',
           cwd: os.tmpdir(),
           text: 'send once',
-          signal: cancel.signal,
-          timeoutMs: 2000,
+          timeoutMs: 200,
         }),
         /uncertain.*not retried/,
       )
       assert.equal(server.calls.filter((call) => call.method === 'POST').length, 1)
     })
+  }
 
-    it('refuses failed authentication before sending task bytes', async (t) => {
-      const server = await seedServer(t, 'unauthorized')
-      server.ready()
-      await assert.rejects(
-        opencode.seedSession({
-          channel: server.channel,
-          sessionId: 'ses_auth123',
-          cwd: os.tmpdir(),
-          text: 'must not send',
-          timeoutMs: 2000,
-        }),
-        /unauthorized/,
-      )
-      assert.equal(server.calls.filter((call) => call.method === 'POST').length, 0)
+  it('tolerates slow native startup past the old 15s budget', { timeout: 90000 }, async (t) => {
+    const server = await seedServer(t)
+    const task = 'Slow starter task.\nKeep all of it.'
+    const ready = setTimeout(server.ready, 15500)
+    t.after(() => clearTimeout(ready))
+    await opencode.seedSession({
+      channel: server.channel,
+      sessionId: 'ses_slow123',
+      cwd: os.tmpdir(),
+      text: task,
+      model: 'opencode/model/variant',
+    })
+    const posts = server.calls.filter((call) => call.method === 'POST')
+    assert.equal(posts.length, 1)
+    assert.equal(posts[0].path, '/session/ses_slow123/prompt_async')
+    assert.equal(posts[0].directory, await realpath(os.tmpdir()))
+    assert.deepEqual(JSON.parse(posts[0].body), {
+      parts: [{ type: 'text', text: task }],
+      model: { providerID: 'opencode', modelID: 'model/variant' },
     })
   })
-}
+
+  it('refuses failed authentication before sending task bytes', async (t) => {
+    const server = await seedServer(t, 'unauthorized')
+    server.ready()
+    await assert.rejects(
+      opencode.seedSession({
+        channel: server.channel,
+        sessionId: 'ses_auth123',
+        cwd: os.tmpdir(),
+        text: 'must not send',
+        timeoutMs: 2000,
+      }),
+      /unauthorized/,
+    )
+    assert.equal(server.calls.filter((call) => call.method === 'POST').length, 0)
+  })
+})
 
 const FIXTURE = `#!/usr/bin/env node
 import http from 'node:http'
@@ -415,16 +362,39 @@ const server = http.createServer((req, res) => {
 server.listen(port, '127.0.0.1', () => {})
 `
 
+/**
+ * What a window's launch gives OpenCode to serve with, as the fixture server
+ * takes it: a free loopback port, the server's arguments, and a password of its
+ * own that the channel asks it with.
+ */
+async function launchConfiguration(launchId) {
+  const probe = createSocketServer()
+  await new Promise((resolve, reject) => {
+    probe.once('error', reject)
+    probe.listen(0, '127.0.0.1', resolve)
+  })
+  const { port } = probe.address()
+  await new Promise((resolve) => probe.close(resolve))
+  const password = randomBytes(24).toString('base64url')
+  return {
+    args: ['--port', String(port), '--hostname', '127.0.0.1'],
+    env: { OPENCODE_SERVER_PASSWORD: password, OPENCODE_SERVER_USERNAME: 'opencode' },
+    channel: {
+      kind: 'opencode-server',
+      launchId,
+      endpoint: `http://127.0.0.1:${port}`,
+      password,
+    },
+  }
+}
+
 async function setup(mode = 'ok', extraEnv = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-opencode-create-'))
   const rawWorkspace = await mkdtemp(path.join(os.tmpdir(), 'cf-opencode-ws-'))
   const workspace = await realpath(rawWorkspace)
   const exe = fakeNodeExecutable(path.join(dir, 'fake-opencode'), FIXTURE)
   const state = path.join(dir, 'state')
-  const configuration = await launchConfiguration('opencode', {
-    launchId: `t-${Date.now().toString(36)}`,
-    workspace,
-  })
+  const configuration = await launchConfiguration(`t-${Date.now().toString(36)}`)
   const env = {
     ...process.env,
     ...extraEnv,
@@ -465,179 +435,177 @@ async function startupOf(state, ms = 5000) {
   }
 }
 
-for (const [implementation, choose, skip] of IMPLEMENTATIONS) {
-  describe(`opencode createSession, run by ${implementation}`, { skip }, () => {
-    let opencode
-    before(() => {
-      opencode = choose()
-    })
+describe('opencode createSession, run by Rust', { skip: cargoMissing }, () => {
+  let opencode
+  before(() => {
+    opencode = rustOpenCode()
+  })
 
-    it('creates exactly one empty session and frees the port', async () => {
-      const s = await setup()
-      try {
-        const id = await opencode.createSession({
-          executable: s.exe,
+  it('creates exactly one empty session and frees the port', async () => {
+    const s = await setup()
+    try {
+      const id = await opencode.createSession({
+        executable: s.exe,
+        cwd: s.workspace,
+        env: s.env,
+        configuration: s.configuration,
+      })
+      assert.match(id, /^ses_[A-Za-z0-9]+$/)
+      assert.equal(await readFile(`${s.state}.creates`, 'utf8'), '1')
+      assert.equal(await readFile(`${s.state}.body`, 'utf8'), '{}')
+      assert.equal(await readFile(`${s.state}.query`, 'utf8'), s.workspace)
+      const started = await startupOf(s.state)
+      assert.deepEqual(started.argv, ['serve', ...s.configuration.args])
+      assert.equal(started.cwd, s.workspace)
+      assert.equal(started.username, 'opencode')
+      assert.equal(started.hasPassword, true)
+      assert.equal(started.ping, 'pong')
+      assert.ok(await childGone(started.pid), 'temporary server is reaped before return')
+    } finally {
+      await teardown(s)
+    }
+  })
+
+  it('mints distinct ids on two calls', async () => {
+    const a = await setup()
+    const b = await setup()
+    try {
+      const first = await opencode.createSession({
+        executable: a.exe,
+        cwd: a.workspace,
+        env: a.env,
+        configuration: a.configuration,
+      })
+      const second = await opencode.createSession({
+        executable: b.exe,
+        cwd: b.workspace,
+        env: b.env,
+        configuration: b.configuration,
+      })
+      assert.notEqual(first, second)
+    } finally {
+      await teardown(a)
+      await teardown(b)
+    }
+  })
+
+  it('refuses a missing executable without a child', async () => {
+    const s = await setup()
+    try {
+      await assert.rejects(
+        opencode.createSession({
+          executable: path.join(s.dir, 'does-not-exist'),
           cwd: s.workspace,
           env: s.env,
           configuration: s.configuration,
-        })
-        assert.match(id, /^ses_[A-Za-z0-9]+$/)
-        assert.equal(await readFile(`${s.state}.creates`, 'utf8'), '1')
-        assert.equal(await readFile(`${s.state}.body`, 'utf8'), '{}')
-        assert.equal(await readFile(`${s.state}.query`, 'utf8'), s.workspace)
-        const started = await startupOf(s.state)
-        assert.deepEqual(started.argv, ['serve', ...s.configuration.args])
-        assert.equal(started.cwd, s.workspace)
-        assert.equal(started.username, 'opencode')
-        assert.equal(started.hasPassword, true)
-        assert.equal(started.ping, 'pong')
-        assert.ok(await childGone(started.pid), 'temporary server is reaped before return')
-      } finally {
-        await teardown(s)
-      }
-    })
+          timeoutMs: 3000,
+        }),
+      )
+    } finally {
+      await teardown(s)
+    }
+  })
 
-    it('mints distinct ids on two calls', async () => {
-      const a = await setup()
-      const b = await setup()
-      try {
-        const first = await opencode.createSession({
-          executable: a.exe,
-          cwd: a.workspace,
-          env: a.env,
-          configuration: a.configuration,
-        })
-        const second = await opencode.createSession({
-          executable: b.exe,
-          cwd: b.workspace,
-          env: b.env,
-          configuration: b.configuration,
-        })
-        assert.notEqual(first, second)
-      } finally {
-        await teardown(a)
-        await teardown(b)
+  it('surfaces early exit and unauthorized without leaking secrets', async () => {
+    const dead = await setup('early-exit')
+    try {
+      await assert.rejects(
+        opencode.createSession({
+          executable: dead.exe,
+          cwd: dead.workspace,
+          env: dead.env,
+          configuration: dead.configuration,
+          timeoutMs: 3000,
+        }),
+      )
+    } finally {
+      await teardown(dead)
+    }
+    const s = await setup()
+    try {
+      const bad = {
+        ...s.configuration,
+        channel: { ...s.configuration.channel, password: 'wrong' },
       }
-    })
-
-    it('refuses a missing executable without a child', async () => {
-      const s = await setup()
-      try {
-        await assert.rejects(
-          opencode.createSession({
-            executable: path.join(s.dir, 'does-not-exist'),
-            cwd: s.workspace,
-            env: s.env,
-            configuration: s.configuration,
-            timeoutMs: 3000,
-          }),
+      const error = await opencode
+        .createSession({
+          executable: s.exe,
+          cwd: s.workspace,
+          env: s.env,
+          configuration: bad,
+          timeoutMs: 4000,
+        })
+        .then(
+          () => null,
+          (cause) => cause,
         )
-      } finally {
-        await teardown(s)
-      }
-    })
+      assert.ok(error instanceof Error)
+      assert.doesNotMatch(String(error?.message), /wrong|hunter2|SECRET/i)
+      assert.doesNotMatch(String(error?.message), new RegExp(s.configuration.channel.password))
+    } finally {
+      await teardown(s)
+    }
+  })
 
-    it('surfaces early exit and unauthorized without leaking secrets', async () => {
-      const dead = await setup('early-exit')
+  it('rejects malformed, invalid-id, wrong-dir and oversized responses', async () => {
+    for (const mode of ['bad-json', 'invalid-id', 'wrong-dir', 'oversized']) {
+      const s = await setup(mode)
       try {
-        await assert.rejects(
-          opencode.createSession({
-            executable: dead.exe,
-            cwd: dead.workspace,
-            env: dead.env,
-            configuration: dead.configuration,
-            timeoutMs: 3000,
-          }),
-        )
-      } finally {
-        await teardown(dead)
-      }
-      const s = await setup()
-      try {
-        const bad = {
-          ...s.configuration,
-          channel: { ...s.configuration.channel, password: 'wrong' },
-        }
         const error = await opencode
           .createSession({
             executable: s.exe,
             cwd: s.workspace,
             env: s.env,
-            configuration: bad,
-            timeoutMs: 4000,
+            configuration: s.configuration,
+            timeoutMs: 5000,
           })
           .then(
             () => null,
             (cause) => cause,
           )
-        assert.ok(error instanceof Error)
-        assert.doesNotMatch(String(error?.message), /wrong|hunter2|SECRET/i)
-        assert.doesNotMatch(String(error?.message), new RegExp(s.configuration.channel.password))
+        assert.ok(error instanceof Error, mode)
+        let started = null
+        try {
+          started = await startupOf(s.state)
+        } catch {}
+        if (started) assert.ok(await childGone(started.pid), `${mode}: child reaped`)
       } finally {
         await teardown(s)
       }
-    })
-
-    it('rejects malformed, invalid-id, wrong-dir and oversized responses', async () => {
-      for (const mode of ['bad-json', 'invalid-id', 'wrong-dir', 'oversized']) {
-        const s = await setup(mode)
-        try {
-          const error = await opencode
-            .createSession({
-              executable: s.exe,
-              cwd: s.workspace,
-              env: s.env,
-              configuration: s.configuration,
-              timeoutMs: 5000,
-            })
-            .then(
-              () => null,
-              (cause) => cause,
-            )
-          assert.ok(error instanceof Error, mode)
-          let started = null
-          try {
-            started = await startupOf(s.state)
-          } catch {}
-          if (started) assert.ok(await childGone(started.pid), `${mode}: child reaped`)
-        } finally {
-          await teardown(s)
-        }
-      }
-    })
-
-    it('times out on hanging endpoints and reaps an ignored SIGTERM', async () => {
-      const hanging = await setup('hang-health')
-      try {
-        await assert.rejects(
-          opencode.createSession({
-            executable: hanging.exe,
-            cwd: hanging.workspace,
-            env: hanging.env,
-            configuration: hanging.configuration,
-            timeoutMs: 5000,
-          }),
-        )
-        const started = await startupOf(hanging.state)
-        assert.ok(await childGone(started.pid), 'hanging child reaped')
-      } finally {
-        await teardown(hanging)
-      }
-      const stubborn = await setup('ignore-sigterm')
-      try {
-        const id = await opencode.createSession({
-          executable: stubborn.exe,
-          cwd: stubborn.workspace,
-          env: stubborn.env,
-          configuration: stubborn.configuration,
-          timeoutMs: 8000,
-        })
-        assert.match(id, /^ses_[A-Za-z0-9]+$/)
-        const started = await startupOf(stubborn.state)
-        assert.ok(await childGone(started.pid), 'SIGKILL fallback reaps the child')
-      } finally {
-        await teardown(stubborn)
-      }
-    })
+    }
   })
-}
+
+  it('times out on hanging endpoints and reaps an ignored SIGTERM', async () => {
+    const hanging = await setup('hang-health')
+    try {
+      await assert.rejects(
+        opencode.createSession({
+          executable: hanging.exe,
+          cwd: hanging.workspace,
+          env: hanging.env,
+          configuration: hanging.configuration,
+          timeoutMs: 5000,
+        }),
+      )
+      const started = await startupOf(hanging.state)
+      assert.ok(await childGone(started.pid), 'hanging child reaped')
+    } finally {
+      await teardown(hanging)
+    }
+    const stubborn = await setup('ignore-sigterm')
+    try {
+      const id = await opencode.createSession({
+        executable: stubborn.exe,
+        cwd: stubborn.workspace,
+        env: stubborn.env,
+        configuration: stubborn.configuration,
+        timeoutMs: 8000,
+      })
+      assert.match(id, /^ses_[A-Za-z0-9]+$/)
+      const started = await startupOf(stubborn.state)
+      assert.ok(await childGone(started.pid), 'SIGKILL fallback reaps the child')
+    } finally {
+      await teardown(stubborn)
+    }
+  })
+})

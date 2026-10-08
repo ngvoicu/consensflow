@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { NATIVE_CF } from '../choice.mjs'
 import { startIntegration } from './harness.mjs'
 
 /**
@@ -15,13 +16,10 @@ import { startIntegration } from './harness.mjs'
  * window, where the chief's own transcript shows it arrived.
  */
 
-const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
-const CF = fileURLToPath(new URL('../../bin/cf.mjs', import.meta.url))
 
 test('a chief hands a task to a worker through the board and the result lands in its window', async () => {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
@@ -86,7 +84,6 @@ test('a chief hands a task to a worker through the board and the result lands in
 
 test('one member runs two tasks at once, each in a session and window of its own', async () => {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
@@ -126,7 +123,6 @@ test('one member runs two tasks at once, each in a session and window of its own
 
 test('switching the chief opens a fresh window that gets the handoff and reads what the old one was told', async () => {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
@@ -167,7 +163,7 @@ test('switching the chief opens a fresh window that gets the handoff and reads w
     assert.equal(board.project.state, 'open', 'a switch is not a close')
 
     // The new chief reads, with its own token, what the human told the old one.
-    const history = execFileSync(process.execPath, [CF, 'history'], {
+    const history = execFileSync(NATIVE_CF, ['history'], {
       env: {
         ...app.env,
         CONSENSFLOW_URL: second.env.CONSENSFLOW_URL,
@@ -185,7 +181,6 @@ test('switching the chief opens a fresh window that gets the handoff and reads w
 
 test('a restart brings the project back on its chief’s own conversation', async () => {
   let app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   const root = app.root
@@ -213,7 +208,6 @@ test('a restart brings the project back on its chief’s own conversation', asyn
     await app.waitFor(() => app.daemonExited(), 10_000)
     await app.close({ preserveRoot: true })
     app = await startIntegration({
-      daemon: DAEMON,
       fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
       existingRoot: root,
     })

@@ -1,14 +1,16 @@
 /**
  * The daemon cases that go through a process, run against both daemons: Node's,
- * then the native one (`cf ui`, built and put in bin/ as the app ships it). Each
+ * then the native one (`cf ui`, built and put in bin/ as the app ships it).
+ * Node's is the same `cf ui`, through the door (`bin/cf.mjs`) in a home that has
+ * taken the way back, as the product runs it; its leg goes with Node. Each
  * leg names its daemon (`node`, `native`) and
  * says which leg it is (tests/legs.mjs, tests/choice.mjs): the suites refuse a
  * selection that is not the leg's own, and hold every daemon they start to it by
  * the start line in its log, which says which ran (`node v…` or `rust …`). The
  * suites say which they found to this runner, which fails a leg in which a
  * daemon started that is not its own, or none was seen to. What
- * only Node's own modules can show, and what the native daemon does not serve
- * yet, they skip for the native one with the reason. The rig's seam and its
+ * only the native daemon shows, or Node's cf does differently, they skip for
+ * Node's with the reason. No suite starts a module of `src/` by its path. The rig's seam and its
  * suites are run too: each daemon on the real headless bridge, which is built
  * here, with a stand-in harness in real windows (a task handed out and its
  * result back, a question and its answer, a chief switched, sessions, a

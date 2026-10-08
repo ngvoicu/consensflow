@@ -21,9 +21,8 @@ import { startIntegration } from './harness.mjs'
  * window's screen.
  */
 
-const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
-const NATIVE = daemonCommand([DAEMON]).kind === 'native'
+const NATIVE = daemonCommand().kind === 'native'
 
 /** The two lines the window printed, as a quote holds them. */
 const SCREEN =
@@ -38,7 +37,6 @@ const WORKER = '@worker-[a-z]+-[a-z]+'
  */
 async function aTaskThatFailed(fakeEnv) {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: {
       CF_TEST_HARNESS: FAKE_AGENT,
       CONSENSFLOW_LAUNCH_TIMEOUT_MS: '8000',

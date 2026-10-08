@@ -36,9 +36,7 @@ import { AGENTS, QUESTION_TOOL, tierFlag } from './bench-agents.mjs'
 import { CF, traceOf, useNativeDaemon, useNodeDaemon } from './native-daemon.mjs'
 import { trustForClaude } from './trust-claude.mjs'
 
-const HERE = fileURLToPath(new URL('.', import.meta.url))
 const REPO = fileURLToPath(new URL('../..', import.meta.url))
-const DAEMON = join(HERE, 'core-live-daemon.mjs')
 const FAKE_AGENT = join(REPO, 'tests', 'integration', 'fake-agent.mjs')
 export const HOME = process.env.HOME ?? homedir()
 /** Where a harness looks for its records: the live environment without what it removes. */
@@ -272,7 +270,7 @@ const WORKSPACE_BRIEF =
 const SHIM = `#!/bin/sh
 for arg in "$@"; do
   case "$arg" in
-    fake | fake-chief) CLAUDE_CONFIG_DIR="$HOME/.claude" exec "$CONSENSFLOW_NODE" "$CF_TEST_HARNESS" "$@" ;;
+    fake | fake-chief) CLAUDE_CONFIG_DIR="$HOME/.claude" exec "$CF_TEST_NODE" "$CF_TEST_HARNESS" "$@" ;;
   esac
 done
 exec "$CF_REAL_CLAUDE" "$@"
@@ -288,8 +286,8 @@ exec "$CF_REAL_CLAUDE" "$@"
  */
 export async function openRig({ folder, workers, model = {}, files = {}, daemon = 'native' }) {
   // The native daemon, which this is for; Node's only for a baseline of a case beside it.
-  if (daemon === 'node') useNodeDaemon(DAEMON)
-  else useNativeDaemon(DAEMON)
+  if (daemon === 'node') useNodeDaemon()
+  else useNativeDaemon()
   const root = mkdtempSync(join(tmpdir(), 'consensflow-receipt-'))
   const home = join(root, 'consensflow')
   mkdirSync(home, { recursive: true })
@@ -326,7 +324,7 @@ export async function openRig({ folder, workers, model = {}, files = {}, daemon 
     writeFileSync(join(workspace, path), text)
   }
 
-  const app = await startIntegration({ daemon: DAEMON, fakeEnv: env, existingRoot: root })
+  const app = await startIntegration({ fakeEnv: env, existingRoot: root })
   const events = traceOf(home)
   const closing = []
   try {

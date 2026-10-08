@@ -3,15 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PassThrough } from 'node:stream'
 import { before, describe, it } from 'node:test'
-import { admission } from '../src/adapters/shared.js'
-import { Bridge } from '../src/bridge.js'
-import { send as sendCodex } from '../src/channels/codex.js'
-import { send as sendDevin } from '../src/channels/devin.js'
-import { send as sendOpenCode } from '../src/channels/opencode.js'
-import { send as sendPi } from '../src/channels/pi.js'
-import { writePaste } from '../src/channels/pty.js'
 import { cargoMissing, rustCodex, rustOpenCode, rustPi } from './rust-channels.mjs'
 
 /**
@@ -25,12 +17,13 @@ import { cargoMissing, rustCodex, rustOpenCode, rustPi } from './rust-channels.m
  *   and the dispatcher waits for the harness's own record, sending again only
  *   if the record never shows the message in time;
  * - accepted: `admitted: true`.
- * Every channel runs every row through its real send function, against
- * stand-ins for the pane host and the harness side, and the adapters read
- * each answer the same way (`admission()`): a refusal read into an answer
- * that does not say one is a message delivered twice. Codex's, OpenCode's
- * and Pi's channels run every row twice, with the JavaScript send and with
- * the Rust one (`tests/rust-channels.mjs`).
+ * Codex's, OpenCode's and Pi's channels run every row here, through the Rust
+ * send (`tests/rust-channels.mjs`), against stand-ins for the pane host and the
+ * harness side. The channels that are pasted into their windows (Claude Code
+ * and Devin) have no test binary: their rows run in Rust, through the same
+ * `write_paste` and `Sent` the adapters read (`shared/pane/tests.rs`, and
+ * `devin/channel/tests.rs` for Devin's own refusals), where the answer is read as
+ * the adapters read it (`shared::admission`).
  */
 const ROWS = {
   refused: { says: 'refused before its handover point', admitted: false },
@@ -39,73 +32,13 @@ const ROWS = {
 }
 
 /**
- * The pane host at the other end of a real bridge: it admits a claim and
- * writes a paste, or answers either as told. A paste it never answers meets
- * the bridge's own deadline; `end` closes the host's side of the bridge.
+ * The pane host a channel claims its pane of: it answers the claim as told, and
+ * admits it by default (`rust-channels.mjs` asks it as the channel does).
  */
-function paneHost(
-  t,
-  { claim = { ok: true }, paste = () => ({ ok: true }), deadlineMs = 5_000 } = {},
-) {
-  const toHost = new PassThrough()
-  const toDaemon = new PassThrough()
-  const daemon = new Bridge({ input: toDaemon, output: toHost, defaultDeadlineMs: deadlineMs })
-  const host = new Bridge({ input: toHost, output: toDaemon, idPrefix: 'r-', peerIdPrefix: 'n-' })
-  host.on('pane.claim', () => claim)
-  host.on('pane.write_paste', () => paste({ end: () => toDaemon.end() }))
-  t.after(() => {
-    daemon.close()
-    host.close()
-  })
-  return daemon
-}
-
-/** The pane host's answer to a paste it refused before writing a byte of it. */
-const PASTE_REFUSED = {
-  ok: false,
-  admitted: false,
-  bytesWritten: 0,
-  error: 'stale-generation',
-  cause: 'p1-zeus is at generation 4 now',
-}
-/** Its answer to a paste whose write failed once bytes may have gone out. */
-const PASTE_UNCERTAIN = {
-  ok: false,
-  admitted: null,
-  error: 'uncertain',
-  cause: 'the pane input failed partway',
-}
-const never = () => new Promise(() => {})
-
-/**
- * The rows of a paste into a window (Claude Code, Devin), whose handover
- * point is its first byte.
- */
-function pasted(send, refused = {}) {
-  return {
-    refused: {
-      ...refused,
-      'the pane host refuses the paste before writing a byte': (t) =>
-        send(t, { paste: () => PASTE_REFUSED }),
-    },
-    uncertain: {
-      'the pane host fails the paste after writing bytes': (t) =>
-        send(t, { paste: () => PASTE_UNCERTAIN }),
-      "the bridge's own deadline passes before the host answers": (t) =>
-        send(t, { paste: never, deadlineMs: 50 }),
-      'the pane host goes away before it answers': (t) =>
-        send(t, {
-          paste: ({ end }) => {
-            end()
-            return never()
-          },
-        }),
-    },
-    accepted: {
-      'the pane host writes the paste': (t) => send(t, {}),
-    },
-  }
-}
+const claiming =
+  (claim = { ok: true }) =>
+  async () =>
+    claim
 
 /**
  * A harness's own server for a message (Codex's broker, OpenCode's plugin):
@@ -146,7 +79,7 @@ function posted(send, server) {
   }
 }
 
-/** The rows of Codex's channel, run through `send`: JavaScript's or Rust's. */
+/** The rows of Codex's channel, run through `send`. */
 const throughCodex =
   (send) =>
   async (t, { claim, ...server }) =>
@@ -155,8 +88,7 @@ const throughCodex =
         session: '01a0817b-e6b0-7f32-8e11-370dc000cbc0',
         pane: 'p1-diana',
         generation: 3,
-        deadlineMs: 3_000,
-        bridge: paneHost(t, { claim }),
+        claim: claiming(claim),
         launch: {
           kind: 'codex-queue',
           launchId: 'launch-codex',
@@ -166,7 +98,7 @@ const throughCodex =
       'the cache key is per conversation',
     )
 
-/** The rows of OpenCode's channel, run through `send`: JavaScript's or Rust's. */
+/** The rows of OpenCode's channel, run through `send`. */
 const throughOpenCode =
   (send) =>
   async (t, { claim, ...server }) =>
@@ -175,7 +107,7 @@ const throughOpenCode =
         session: 'ses_contract1',
         pane: 'p1-hera',
         generation: 3,
-        bridge: paneHost(t, { claim }),
+        claim: claiming(claim),
         launch: {
           channel: {
             kind: 'opencode-server',
@@ -186,30 +118,6 @@ const throughOpenCode =
       },
       'the cache key is per conversation',
     )
-
-const DEVIN_SESSION = 'b7c2a0f4-5d1e-4a8b-9c3f-1e2d3c4b5a69'
-
-/** Devin's own wire log, naming the conversation its window shows, when Devin wrote one. */
-async function sendThroughDevin(t, host, { shows = DEVIN_SESSION, logged = true } = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'cf-contract-devin-'))
-  t.after(() => rm(root, { recursive: true, force: true }))
-  const wire = join(root, 'wire.jsonl')
-  const selected = {
-    sessionId: shows,
-    update: { sessionUpdate: 'config_option_update', configOptions: [{ id: 'mode' }] },
-  }
-  if (logged) await writeFile(wire, `${JSON.stringify(selected)}\n`)
-  return sendDevin(
-    {
-      channel: { wire },
-      session: DEVIN_SESSION,
-      bridge: paneHost(t, host),
-      pane: 'p1-hera',
-      generation: 3,
-    },
-    'the cache key is per conversation',
-  )
-}
 
 /**
  * Pi's side of its inbox: ConsensFlow's extension takes each record in turn
@@ -245,7 +153,7 @@ async function piWindow(t, answer) {
   return { root, inbox, ack }
 }
 
-/** The rows of Pi's channel, run through `send`: JavaScript's or Rust's. */
+/** The rows of Pi's channel, run through `send`. */
 const throughPi =
   (send) =>
   async (t, { answer = async () => {}, claim, ackTimeoutMs = 5_000, inbox } = {}) => {
@@ -255,7 +163,7 @@ const throughPi =
         session: 'cf-1-zeus-0000abcd',
         pane: 'p1-zeus',
         generation: 3,
-        bridge: paneHost(t, { claim }),
+        claim: claiming(claim),
         launch: {
           channel: {
             kind: 'pi-extension',
@@ -273,24 +181,7 @@ const throughPi =
 const acknowledge = (fields) => async (path, id) =>
   writeFile(path, JSON.stringify({ id, ...fields }))
 
-/** The channels that are pasted into their windows, which only JavaScript has. */
-const PASTED_CHANNELS = {
-  'Claude Code, pasted into its window': pasted((t, host) =>
-    writePaste(
-      paneHost(t, host),
-      { id: 'p1-zeus', generation: 3 },
-      'the cache key is per conversation',
-    ),
-  ),
-  'Devin, pasted into its window': pasted((t, host) => sendThroughDevin(t, host), {
-    'Devin shows another conversation': (t) =>
-      sendThroughDevin(t, {}, { shows: '0e9d8c7b-6a5f-4e3d-8c2b-1a0f9e8d7c6b' }),
-    'Devin has no wire log to say which conversation it shows': (t) =>
-      sendThroughDevin(t, {}, { logged: false }),
-  }),
-}
-
-/** The channels with a Rust twin, each row run through its `send` in `senders`. */
+/** The channels that are reached by a send of their own, each row run through its `send` in `senders`. */
 function postedChannels(senders) {
   const sendThroughPi = throughPi(senders.pi)
   return {
@@ -342,7 +233,6 @@ function hold(channels) {
             const sent = await send(t)
             assert.equal(sent.admitted, ROWS[row].admitted, JSON.stringify(sent))
             if (row === 'refused') assert.equal(sent.bytesWritten, 0, JSON.stringify(sent))
-            assert.equal(admission(sent, 'refused').admitted, ROWS[row].admitted)
           })
         }
       }
@@ -350,23 +240,16 @@ function hold(channels) {
   }
 }
 
-describe("one contract for every channel's send", () => {
-  hold({
-    ...PASTED_CHANNELS,
-    ...postedChannels({ codex: sendCodex, opencode: sendOpenCode, pi: sendPi }),
+describe("one contract for every channel's send", { skip: cargoMissing }, () => {
+  let rust
+  before(() => {
+    rust = { codex: rustCodex(), opencode: rustOpenCode(), pi: rustPi() }
   })
-
-  describe("Rust's channels", { skip: cargoMissing }, () => {
-    let rust
-    before(() => {
-      rust = { codex: rustCodex(), opencode: rustOpenCode(), pi: rustPi() }
-    })
-    hold(
-      postedChannels({
-        codex: (target, text) => rust.codex.send(target, text),
-        opencode: (target, text) => rust.opencode.send(target, text),
-        pi: (target, text) => rust.pi.send(target, text),
-      }),
-    )
-  })
+  hold(
+    postedChannels({
+      codex: (target, text) => rust.codex.send(target, text),
+      opencode: (target, text) => rust.opencode.send(target, text),
+      pi: (target, text) => rust.pi.send(target, text),
+    }),
+  )
 })

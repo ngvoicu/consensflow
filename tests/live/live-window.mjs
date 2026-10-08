@@ -8,8 +8,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { findSession } from '../../evals/bare.mjs'
 import { HARNESSES, liveEnvironment, realOnPath } from '../../evals/plan.mjs'
 import { answers } from '../../hosts/lib/completion.js'
@@ -21,8 +20,6 @@ import { onWindows, paneArgv } from '../../src/harnesses.js'
 import { startIntegration } from '../integration/harness.mjs'
 import { trustForClaude } from './trust-claude.mjs'
 
-const HERE = dirname(fileURLToPath(import.meta.url))
-const DAEMON = join(HERE, 'core-live-daemon.mjs')
 const H = process.env.HOME ?? homedir()
 export const ENV = liveEnvironment({ home: H })
 /** Where a harness looks for its records: the environment without the sandbox's removals. */
@@ -56,7 +53,7 @@ export function pastedHarnesses(names) {
 }
 
 /** The app's daemon and pane host, as the live tests drive them. */
-export const startLiveApp = () => startIntegration({ daemon: DAEMON, fakeEnv: ENV })
+export const startLiveApp = () => startIntegration({ fakeEnv: ENV })
 
 /** A live test's own folder, `~/.consensflow-candidate/live/<folder>`. */
 export function liveFolder(folder) {

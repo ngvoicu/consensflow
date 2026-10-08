@@ -18,23 +18,21 @@
  *
  *   npm run bench:core [-- [--chief claude|opencode] [--daemon node|native] [--steps all|questions] opencode pi devin claude codex]
  *
- * The daemon is Node's unless `--daemon native` names the native one, which
- * this checkout builds (`npm run build:bridge`, `npm run build:cf`). On the
+ * The daemon is the native one, which this checkout builds (`npm run
+ * build:bridge`, `npm run build:cf`), unless `--daemon node` names Node's
+ * (`cf ui` through the door, in a home that has taken the way back). On the
  * native daemon a question's answer must also have been received at its
  * harness's door (see `npm run live:door`): claimed, acknowledged, and never
  * pasted.
  */
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { startIntegration } from '../integration/harness.mjs'
 import { AGENTS, BRIEF, QUESTION_TOOL, tierFlag } from './bench-agents.mjs'
-import { traceOf, useNativeDaemon } from './native-daemon.mjs'
+import { traceOf, useNativeDaemon, useNodeDaemon } from './native-daemon.mjs'
 import { trustForClaude } from './trust-claude.mjs'
 
-const HERE = dirname(fileURLToPath(import.meta.url))
-const DAEMON = join(HERE, 'core-live-daemon.mjs')
 const H = process.env.HOME
 const WORKSPACE = join(H, '.consensflow-candidate', 'bench', 'workspace')
 
@@ -43,7 +41,7 @@ const { values, positionals } = parseArgs({
   options: {
     chief: { type: 'string', default: 'opencode' },
     reviewer: { type: 'string', default: 'devin' },
-    daemon: { type: 'string', default: 'node' },
+    daemon: { type: 'string', default: 'native' },
     steps: { type: 'string', default: 'all' },
   },
 })
@@ -59,9 +57,10 @@ if (!['all', 'questions'].includes(values.steps)) {
 }
 /** Every step, or `--steps questions`: the question door's alone, with no delivery baseline, review or restart. */
 const ALL = values.steps === 'all'
-/** The native daemon is chosen here, by the driver: the receipt and stop design is its own. */
+/** The daemon is chosen here, by the driver: the receipt and stop design of the native one is its own. */
 const NATIVE = values.daemon === 'native'
-if (NATIVE) useNativeDaemon(DAEMON)
+if (NATIVE) useNativeDaemon()
+else useNodeDaemon()
 
 // A clean environment: never this shell's Claude session identity.
 const ENV = {
@@ -127,7 +126,7 @@ const writeRoster = (home) =>
     )}\n`,
   )
 
-let app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV })
+let app = await startIntegration({ fakeEnv: ENV })
 process.stdout.write(
   `trust: ${await trustForClaude(app, WORKSPACE, join(H, '.local', 'bin', 'claude'))}\n`,
 )
@@ -450,7 +449,7 @@ try {
     app.killDaemon()
     await until(() => app.daemonExited(), 10_000, 100)
     await app.close({ preserveRoot: true })
-    app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV, existingRoot: root })
+    app = await startIntegration({ fakeEnv: ENV, existingRoot: root })
     const back = await until(async () => {
       const projects = (await app.requestNode('projects.list', {})).projects
       return projects.find((s) => s.id === project)?.state === 'open'

@@ -13,7 +13,6 @@ import { startIntegration } from './harness.mjs'
  * another.
  */
 
-const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
 
 /** Four fake agents on the fake `claude`: the chief, two workers on one model, a reviewer on another. */
@@ -64,7 +63,6 @@ async function project(app, { gate, members }) {
 
 test('a review is a task the chief puts on the board: a reviewer of its tier takes it and its findings come back as the result', async () => {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
@@ -107,7 +105,6 @@ test('a review is a task the chief puts on the board: a reviewer of its tier tak
 
 test('each task runs in its own worker session: the window closes with the task, the next opens a new one', async () => {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
@@ -145,7 +142,6 @@ test('each task runs in its own worker session: the window closes with the task,
 
 test('a worker refused by its provider mid-task loses the task to the other worker of its tier', async () => {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT, CF_TEST_QUOTA_OUT: 'worker' },
   })
   try {
@@ -196,7 +192,6 @@ test('a worker refused by its provider mid-task loses the task to the other work
 
 test('with human approval required, the brief and the result each wait for the human before they move', async () => {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
@@ -241,7 +236,6 @@ test('with human approval required, the brief and the result each wait for the h
 
 test("the human opens a finished session's window on its own conversation, and it stays until the session ends", async () => {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {

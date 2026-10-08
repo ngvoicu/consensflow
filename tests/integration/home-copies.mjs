@@ -336,7 +336,8 @@ async function settled(app, seen, settle, from) {
 }
 
 /**
- * One daemon (`select`: `node` or `native`) on a copy, from its start until
+ * One daemon (`select`: `node`, `native` or a command as a JSON array, the
+ * native one's) on a copy, from its start until
  * what it shows holds still, then what `work` does with it and until that
  * holds still too, then its stop. The rig refuses a daemon whose start line
  * says it is not the one asked for. What it logged as an error is what its own
@@ -349,12 +350,11 @@ async function settled(app, seen, settle, from) {
  * shown by then, in `ran` on the error it throws: what the next look at it
  * would have been compared with is not lost to the failure.
  */
-export async function start({ copy, select, settle = SETTLE, work = null, script }) {
+export async function start({ copy, select, settle = SETTLE, work = null }) {
   const { root, home, seen } = copy
   const began = Date.now()
   const rosterBefore = rosterHash(home)
   const app = await startIntegration({
-    daemon: script,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
     existingRoot: root,
     select,
@@ -470,8 +470,8 @@ export async function parity(taken, { settle = SETTLE, before = {} } = {}) {
  * it has settled: by default the probe's chief hands a task out and its result
  * is delivered. A test plants a fault with `before` (a function per index, run
  * on the copy before that start, as a daemon that left the home in a state it
- * should not have would) and `scripts` (the Node daemon's script per index, for
- * a stand-in that is not what it says).
+ * should not have would) and `commands` (a command per index, as a JSON array
+ * the rig takes for the native daemon, for a stand-in that is not what it says).
  */
 export async function roundTrip(
   taken,
@@ -482,7 +482,7 @@ export async function roundTrip(
     work = deliverProbe,
     workAt = order.indexOf('native'),
     before = {},
-    scripts = {},
+    commands = {},
   } = {},
 ) {
   const copy = copyHome(taken, { probe })
@@ -514,9 +514,8 @@ export async function roundTrip(
     try {
       ran = await start({
         copy,
-        select,
+        select: commands[at] ?? select,
         settle,
-        script: scripts[at],
         work: at === workAt && copy.probe !== null ? work : null,
       })
     } catch (cause) {

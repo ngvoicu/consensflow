@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { createDeliveryExtension } from '../hosts/pi-extension/consensflow-delivery.mjs'
-import { send } from '../src/channels/pi.js'
+import { cargoMissing, rustPi } from './rust-channels.mjs'
 
 function fakePi() {
   const handlers = new Map()
@@ -500,10 +500,12 @@ describe('consensflow Pi extension', () => {
   })
 })
 
-it('a Pi session switch at admission reports a retryable zero-byte refusal', async () => {
+it('a Pi session switch at admission reports a retryable zero-byte refusal', {
+  skip: cargoMissing,
+}, async () => {
   const s = await setup(null)
   try {
-    const result = await send(
+    const result = await rustPi().send(
       {
         session: 'native-pi-session',
         pane: 'chief-pane',

@@ -8,6 +8,7 @@ import {
   assertStarted,
   chooseHome,
   NATIVE_CF,
+  NODE_CF,
   noteRan,
   START_WORDS,
   startLine,
@@ -17,7 +18,6 @@ import { cliEnv, cliTarget } from './cli-target.mjs'
 import { daemonCommand } from './helpers.mjs'
 import { CLI_LEGS, DAEMON_LEGS, legEnv, ranProblem, runLeg } from './legs.mjs'
 
-const CF_MJS = fileURLToPath(new URL('../bin/cf.mjs', import.meta.url))
 const CHOICE = pathToFileURL(fileURLToPath(new URL('./choice.mjs', import.meta.url))).href
 const OTHER = { node: 'native', native: 'node' }
 
@@ -37,13 +37,12 @@ function inAFolder(body) {
 }
 
 describe('which daemon a test starts, in words', () => {
-  it('starts Node’s for `node`, whatever the default is', () => {
+  it('starts Node’s for `node`, whatever the default is: `cf ui` through the door', () => {
     for (const fallback of ['node', 'native']) {
-      const started = daemonCommand(['daemon.mjs'], { named: 'node', leg: '', fallback })
+      const started = daemonCommand({ named: 'node', leg: '', fallback })
       assert.equal(started.kind, 'node')
-      assert.equal(started.native, false)
       assert.equal(started.command, process.execPath)
-      assert.deepEqual(started.args, ['daemon.mjs'])
+      assert.deepEqual(started.args, [NODE_CF, 'ui', '--json', '--no-open'])
       // The product chooses by the home, not by an environment variable.
       assert.deepEqual(started.env, { CONSENSFLOW_NODE: process.execPath })
     }
@@ -51,9 +50,8 @@ describe('which daemon a test starts, in words', () => {
 
   it('starts the native cf of this checkout for `native`, whatever the default is', () => {
     for (const fallback of ['node', 'native']) {
-      const started = daemonCommand(['daemon.mjs'], { named: 'native', leg: '', fallback })
+      const started = daemonCommand({ named: 'native', leg: '', fallback })
       assert.equal(started.kind, 'native')
-      assert.equal(started.native, true)
       assert.equal(started.command, NATIVE_CF)
       assert.deepEqual(started.args, ['ui', '--json', '--no-open'])
       assert.deepEqual(started.env, { CONSENSFLOW_NODE: process.execPath })
@@ -61,7 +59,7 @@ describe('which daemon a test starts, in words', () => {
   })
 
   it('starts the command a JSON array gives as the native daemon', () => {
-    const started = daemonCommand(['daemon.mjs'], {
+    const started = daemonCommand({
       named: '["/build/cf","ui","--json"]',
       leg: '',
       fallback: 'node',
@@ -76,14 +74,14 @@ describe('which daemon a test starts, in words', () => {
   it('makes the choice in the home it is given: the file for Node’s, none for the native one’s', () => {
     inAFolder((home) => {
       assert.equal(existsSync(join(home, WAY_BACK)), false, 'a home with no choice made')
-      daemonCommand([], { named: 'node', leg: '', fallback: 'native', home })
+      daemonCommand({ named: 'node', leg: '', fallback: 'native', home })
       assert.equal(existsSync(join(home, WAY_BACK)), true)
       // A restart of the same home on the other daemon takes the file away.
-      daemonCommand([], { named: 'native', leg: '', fallback: 'node', home })
+      daemonCommand({ named: 'native', leg: '', fallback: 'node', home })
       assert.equal(existsSync(join(home, WAY_BACK)), false)
       // The default is the native one's, and its home has no file either.
       chooseHome('node', home)
-      daemonCommand([], { named: undefined, leg: '', home })
+      daemonCommand({ named: undefined, leg: '', home })
       assert.equal(existsSync(join(home, WAY_BACK)), false)
     })
   })
@@ -106,8 +104,8 @@ describe('which daemon a test starts, in words', () => {
 
   it('starts the default for nothing, and the default is the tests’ to name', () => {
     for (const named of [undefined, '']) {
-      assert.equal(daemonCommand([], { named, leg: '', fallback: 'node' }).kind, 'node')
-      assert.equal(daemonCommand([], { named, leg: '', fallback: 'native' }).kind, 'native')
+      assert.equal(daemonCommand({ named, leg: '', fallback: 'node' }).kind, 'node')
+      assert.equal(daemonCommand({ named, leg: '', fallback: 'native' }).kind, 'native')
     }
   })
 
@@ -124,7 +122,7 @@ describe('which daemon a test starts, in words', () => {
       'native ',
     ]) {
       assert.throws(
-        () => daemonCommand([], { named, leg: '', fallback: 'node' }),
+        () => daemonCommand({ named, leg: '', fallback: 'node' }),
         /CONSENSFLOW_TEST_DAEMON is node, native, or a JSON array of strings/,
         named,
       )
@@ -135,7 +133,7 @@ describe('which daemon a test starts, in words', () => {
     const asked =
       (named, leg, fallback = 'node') =>
       () =>
-        daemonCommand([], { named, leg, fallback })
+        daemonCommand({ named, leg, fallback })
     assert.throws(
       asked('native', 'node'),
       /says this is the node leg, but CONSENSFLOW_TEST_DAEMON names native/,
@@ -180,7 +178,7 @@ describe('the legs of the dual runners', () => {
   it('name their daemon, or their cf, whatever the tests default to', () => {
     for (const fallback of ['node', 'native']) {
       for (const { selector, leg } of DAEMON_LEGS) {
-        assert.equal(daemonCommand([], { named: selector, leg, fallback }).kind, leg)
+        assert.equal(daemonCommand({ named: selector, leg, fallback }).kind, leg)
       }
       for (const { selector, leg } of CLI_LEGS) {
         assert.equal(cliTarget({ named: selector, leg, fallback }).kind, leg)
@@ -192,7 +190,7 @@ describe('the legs of the dual runners', () => {
     for (const { leg } of DAEMON_LEGS) {
       for (const named of [undefined, '']) {
         assert.throws(
-          () => daemonCommand([], { named, leg, fallback: OTHER[leg] }),
+          () => daemonCommand({ named, leg, fallback: OTHER[leg] }),
           new RegExp(`says this is the ${leg} leg, but CONSENSFLOW_TEST_DAEMON is not set`),
         )
       }
@@ -449,15 +447,9 @@ describe('which cf the suites of the CLI run, in the same words', () => {
   it('runs Node’s bin/cf.mjs for `node`, and the native cf of this checkout for `native`', () => {
     for (const fallback of ['node', 'native']) {
       const node = cliTarget({ named: 'node', leg: '', fallback })
-      assert.deepEqual(
-        [node.kind, node.native, node.command, node.args],
-        ['node', false, process.execPath, [CF_MJS]],
-      )
+      assert.deepEqual([node.kind, node.command, node.args], ['node', process.execPath, [NODE_CF]])
       const native = cliTarget({ named: 'native', leg: '', fallback })
-      assert.deepEqual(
-        [native.kind, native.native, native.command, native.args],
-        ['native', true, NATIVE_CF, []],
-      )
+      assert.deepEqual([native.kind, native.command, native.args], ['native', NATIVE_CF, []])
     }
   })
 
