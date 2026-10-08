@@ -16,8 +16,7 @@ import {
 import { buildHome } from './integration/home-fixture.mjs'
 
 /**
- * What a run on a copy of a home is made of, without a daemon (the daemons are
- * started by tests/integration/home-round-trip.test.mjs).
+ * What a copy of a home is made of (tests/integration/home-copies.mjs).
  */
 
 const seen = (more = {}) => ({

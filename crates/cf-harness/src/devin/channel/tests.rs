@@ -6,8 +6,9 @@ use std::fs;
 use serde_json::{json, Value};
 
 use super::*;
-use crate::contract::HostError;
-use crate::testing::{finished, AnsweringHost};
+use crate::contract::{Admission, HostError};
+use crate::shared::admission::admission;
+use crate::testing::{finished, paste_answers, AnsweringHost};
 
 /// The line Devin's log gains when its window configures a conversation it opens.
 fn shows(session: &str) -> String {
@@ -126,6 +127,49 @@ fn a_log_that_is_not_there_or_cannot_be_read_is_a_conversation_unavailable() {
         );
     }
     assert!(host.asked.borrow().is_empty());
+}
+
+#[test]
+fn devins_send_is_read_as_the_delivery_contract_has_it_in_every_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    // The window shows the conversation: every way a pane host can answer the paste.
+    for (way, answer, read) in paste_answers() {
+        let host = AnsweringHost::new(move |_| answer.clone());
+        let sent = send_into(&host, &wire, Some("mild-coin"), "hi");
+        assert_eq!(admission(&sent, "refused", false), read, "{way}");
+    }
+    // The ways only Devin has, each refused before the host is asked anything.
+    let host = taking();
+    for (way, log, session, reason) in [
+        (
+            "Devin shows another conversation",
+            Some(shows("another-one")),
+            "mild-coin",
+            "Devin is displaying another conversation",
+        ),
+        (
+            "Devin has no wire log to say which conversation it shows",
+            None,
+            "mild-coin",
+            "Devin conversation is unavailable",
+        ),
+    ] {
+        match log {
+            Some(text) => fs::write(&wire, text).unwrap(),
+            None => fs::remove_file(&wire).unwrap(),
+        }
+        let sent = send_into(&host, &wire, Some(session), "hi");
+        assert_eq!(
+            admission(&sent, "refused", false),
+            Admission::Refused {
+                reason: reason.to_owned()
+            },
+            "{way}"
+        );
+    }
+    assert!(host.asked.borrow().is_empty(), "nothing reached the pane");
 }
 
 #[test]

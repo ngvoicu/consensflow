@@ -2,11 +2,10 @@
  * Plants in which `cf` answers the standalone verbs: the verbs themselves, `ui`
  * (the daemon's, no verb here), the words as they came, and a reader that went
  * away. The tests of the module, of the library and of the process catch them;
- * three are given to the suites of the CLI alone, run against both CLIs, which
- * must catch them too. Which implementation answers (the home's file, a window's
- * token) is `flip.mjs`'s.
+ * three are given to the suites of the CLI alone, which must catch them too.
+ * Whether a `use-node` file left in a home changes an answer is `deletion.mjs`'s.
  */
-import { BOTH, GOLDENS, LIBRARY, lines, PROCESS, STANDALONE, UNITS } from './kit.mjs'
+import { CLIS, GOLDENS, LIBRARY, lines, PROCESS, STANDALONE, UNITS } from './kit.mjs'
 
 const MOD = `${STANDALONE}/mod.rs`
 const LIB = 'crates/cf/src/lib.rs'
@@ -17,7 +16,7 @@ export const PLANTS = [
     // answer the verb would say it is no command.
     name: 'dispatch: the catalog is an unknown command, seen by the suites of the CLI',
     edits: [[MOD, '        Some("catalog") => catalog::run(rest, out),\n', '']],
-    runs: [BOTH],
+    runs: [CLIS],
     meant: 'runs the native cf',
   },
   {
@@ -41,7 +40,7 @@ export const PLANTS = [
     // As for the catalog.
     name: 'dispatch: setup is an unknown command, seen by the suites of the CLI',
     edits: [[MOD, '        Some("setup") => setup::run(env, rest, out),\n', '']],
-    runs: [BOTH],
+    runs: [CLIS],
     meant: 'roster edits, setup and diagnostic reads leave role files and old manifests alone',
   },
   {
@@ -117,7 +116,7 @@ export const PLANTS = [
         '',
       ],
     ],
-    runs: [BOTH],
+    runs: [CLIS],
     meant: 'knows the window commands and the ones outside a window',
   },
 ]

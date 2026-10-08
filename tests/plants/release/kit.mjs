@@ -15,10 +15,8 @@ export const FEEDS = test('tests/feeds.test.mjs')
 export const PUBLISH = test('tests/publish.test.mjs', 'tests/release-publish.test.mjs')
 /** The workflow's own text: who may publish, and the steps that call the scripts. */
 export const WORKFLOW = test('tests/release-publish.test.mjs', 'tests/workflow-scripts.test.mjs')
-/** The proof of the agents screens, against Node's daemon from the checkout. */
-export const PROOF = test('tests/agents-proof.test.mjs')
-/** The proof against Node's daemon and then the native one, built from the sources as they are. */
-export const BOTH = node('tests/agents-daemons.mjs', '--offline')
+/** The proof of the agents screens against the native daemon, built from the sources as they are. */
+export const BUILT_PROOF = node('tests/agents-daemons.mjs', '--offline')
 /** The app crate's tests of the portable app's collector, built as a worktree can build it. */
 export const PORTABLE = node('tests/app-tests.mjs', 'portable::')
 

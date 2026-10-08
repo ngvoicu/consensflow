@@ -36,13 +36,13 @@ import { PLANTS as DELETION } from './cli/deletion.mjs'
 import { PLANTS as DETECT } from './cli/detect.mjs'
 import { PLANTS as DISPATCH } from './cli/dispatch.mjs'
 import { PLANTS as FLIP } from './cli/flip.mjs'
-import { BOTH, BUILD } from './cli/kit.mjs'
+import { BUILD, CLIS } from './cli/kit.mjs'
 import { PLANTS as ORACLE } from './cli/oracle.mjs'
 import { PLANTS as PARSER } from './cli/parser.mjs'
 import { PLANTS as VERBS } from './cli/verbs.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
-/** The longest one run may take, in milliseconds: the dual runner builds a release `cf`. */
+/** The longest one run may take, in milliseconds: the suites' runner builds a release `cf`. */
 const RUN_LIMIT = 10 * 60 * 1000
 
 /** Every plant, by area. */
@@ -206,7 +206,7 @@ async function trial(plant) {
   try {
     let ran = null
     for (const command of plant.runs) {
-      built = built || command === BOTH || command === BUILD
+      built = built || command === CLIS || command === BUILD
       ran = await execute(command)
       if (!ran.compiled) return { verdict: 'does not compile', ran }
       if (ran.hung) return { verdict: 'hung', ran }

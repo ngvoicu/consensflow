@@ -5,27 +5,24 @@ import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
 import { GONE, PRESENT, proveAgents } from './agents-proof.mjs'
 import { daemonCommand } from './helpers.mjs'
 
 /**
  * The proof of the agents screens (tests/agents-proof.mjs) that the packaged
  * smoke runs against the daemon a built app chose: held here to what it is
- * for, which is failing when the daemon's agents are wrong, and run against each
- * daemon from the checkout (`npm run test:daemons`: Node's, then the native
- * one `CONSENSFLOW_TEST_DAEMON` names).
+ * for, which is failing when the daemon's agents are wrong, and run against the
+ * native daemon from the checkout (`npm run test:daemons`).
  */
 
 const TOKEN = 'proof-ui-token'
-const DAEMON = fileURLToPath(new URL('./integration/core-daemon.mjs', import.meta.url))
 
 /**
  * A daemon's agents screens, as far as the proof asks, with one thing wrong
  * where `fault` says so (nothing, for a right one). Resolves to what it serves.
  */
 async function agentsApi(home, fault = '') {
-  const catalog = Array.from({ length: fault === 'catalog' ? 118 : 119 }, (_, at) => ({
+  const catalog = Array.from({ length: fault === 'catalog' ? 119 : 120 }, (_, at) => ({
     name: at === 0 ? 'pygmalion' : `catalog-${at}`,
     model: at === 0 && fault !== 'model' ? 'codex-image' : 'fake',
     harness: 'codex',
@@ -141,14 +138,13 @@ describe('the proof of the agents screens', () => {
 })
 
 describe('the daemon from the checkout', () => {
-  it('serves the agents as the packaged smoke holds the built app to', async (t) => {
+  it('serves the agents as the packaged smoke holds the built app to', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cf-agents-proof-'))
     const home = join(root, 'consensflow')
     const bin = join(root, 'bin')
     mkdirSync(home, { recursive: true })
     mkdirSync(bin)
-    const started = daemonCommand([DAEMON], { home })
-    t.diagnostic(started.native ? 'the native daemon' : "Node's daemon")
+    const started = daemonCommand()
     const env = {
       ...Object.fromEntries(
         Object.entries(process.env).filter(
@@ -162,7 +158,6 @@ describe('the daemon from the checkout', () => {
       CODEX_HOME: join(root, 'home', '.codex'),
       XDG_CONFIG_HOME: join(root, 'home', '.config'),
       PATH: bin,
-      ...started.env,
     }
     const child = spawn(started.command, started.args, {
       env,

@@ -40,9 +40,6 @@
  *   npm run live:stops                          every case, `stuck` on OpenCode
  *   npm run live:stops -- --case command --case hook
  *   npm run live:stops -- --case stuck --harness codex
- *   npm run live:stops -- --case early --daemon node     the same on Node's daemon, which
- *                                                        keeps its rules: `early` and `slowhook`
- *                                                        fail there, as the defect's baseline
  *
  * `--keep <folder>` copies each Claude transcript there. Needs `npm run
  * build:bridge` and `npm run build:cf`. The exit code is 1 when a case showed
@@ -74,8 +71,6 @@ const { values } = parseArgs({
     case: { type: 'string', multiple: true },
     hook: { type: 'string', default: 'stop' },
     harness: { type: 'string', default: 'opencode' },
-    // The native daemon is what these checks are for; Node's runs a case beside it, as its baseline.
-    daemon: { type: 'string', default: 'native' },
     // A folder to copy each watched window's Claude transcript into, for a look at what it wrote.
     keep: { type: 'string' },
   },
@@ -230,7 +225,6 @@ async function stopOf(label, brief, ready, { command, after = null, recordless =
   const rig = await openRig({
     folder: `stops-${label}`,
     workers: ['claude'],
-    daemon: values.daemon,
   })
   const lines = []
   try {
@@ -583,7 +577,7 @@ async function afterStop(asked, made, lines) {
 }
 
 async function hookCase() {
-  const rig = await openRig({ folder: 'stops-hook', workers: ['claude'], daemon: values.daemon })
+  const rig = await openRig({ folder: 'stops-hook', workers: ['claude'] })
   const lines = []
   try {
     const asked = await askingMember(rig, lines)
@@ -651,7 +645,7 @@ async function hookCase() {
 }
 
 async function escapeCase() {
-  const rig = await openRig({ folder: 'stops-escape', workers: ['claude'], daemon: values.daemon })
+  const rig = await openRig({ folder: 'stops-escape', workers: ['claude'] })
   const lines = []
   try {
     const asked = await askingMember(rig, lines)
@@ -743,7 +737,6 @@ async function ignoredCase() {
     folder: `stops-ignored-${values.hook}`,
     workers: ['claude'],
     files: { '.claude/settings.local.json': JSON.stringify(settings) },
-    daemon: values.daemon,
   })
   const lines = []
   try {
@@ -897,7 +890,6 @@ async function stuckCase() {
     folder: `stops-stuck-${name}`,
     workers: [name],
     files: STUCK_FILES,
-    daemon: values.daemon,
   })
   const lines = []
   try {
@@ -1006,7 +998,7 @@ for (const name of CASES) {
   const version = after === before ? before : `${before}, then ${after}`
   results.push({ name, version, ...result })
   process.stdout.write(
-    `\n== ${harness} ${version}, ${name} (${values.daemon} daemon): ${result.ok ? 'ok' : 'FAILED'}\n`,
+    `\n== ${harness} ${version}, ${name} (native daemon): ${result.ok ? 'ok' : 'FAILED'}\n`,
   )
   for (const line of result.lines) process.stdout.write(`   ${line}\n`)
 }

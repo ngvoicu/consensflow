@@ -9,7 +9,7 @@ command of any other home to the native `cf`, so it is no oracle), and `crates/c
 
     npm run goldens:cli                 runs every scenario against Node, writes the files
     node tests/goldens/cli/record.mjs --check    records again, says which files differ, writes nothing
-    npm run test:clis                   the suites of the CLI against Node's src/cli.js and then the native cf
+    npm run test:clis                   the suites of the CLI against the native cf
     npm run plants:cli                  plants bugs in the Rust and in the recorder, says what caught each
 
 `npm run goldens:cli` is run once on each platform the tests run on, since a path

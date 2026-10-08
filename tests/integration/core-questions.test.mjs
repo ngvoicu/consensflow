@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { daemonCommand } from '../helpers.mjs'
 import { startIntegration } from './harness.mjs'
 
 /**
@@ -13,14 +12,10 @@ import { startIntegration } from './harness.mjs'
  * the worker's window for that.
  */
 
-const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
-/** Whether the daemon under test is the native one (`npm run test:daemons` runs both). */
-const NATIVE = daemonCommand([DAEMON]).native
 
 test("a worker's question with options goes to the chief's inbox and its answer returns through the hook", async () => {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {
@@ -72,10 +67,9 @@ test("a worker's question with options goes to the chief's inbox and its answer 
       ['read', [['blue']], 'chief', 'Colour: blue'],
       'the answer is collected by the hook, never delivered as text',
     )
-    // What read it: the native daemon, the hook's own receipt once it handed the
-    // answer over (a hook that says so before its worker's turn goes on); Node's
-    // reads a choice answer as it is written, and knows no receipt.
-    assert.deepEqual(answer.receipt, NATIVE ? { door: true } : null)
+    // What read it: the hook's own receipt once it handed the answer over (a hook
+    // that says so before its worker's turn goes on).
+    assert.deepEqual(answer.receipt, { door: true })
     const { task } = await app.requestNode('task.get', { project, task: 1 })
     assert.equal(task.messages.find((m) => m.kind === 'result').body, 'answered: blue')
     await app.waitFor(

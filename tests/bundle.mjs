@@ -31,6 +31,7 @@ export function stageBundle({ cf = NATIVE_CF } = {}) {
     root,
     cf: staged,
     cfMjs: join(bin, 'cf.mjs'),
-    cleanup: () => rmSync(root, { recursive: true, force: true }),
+    // Windows holds a just-ended program's files for a moment: removal retries (EPERM, 2026-10-08).
+    cleanup: () => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }),
   }
 }

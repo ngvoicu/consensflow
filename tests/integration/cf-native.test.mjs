@@ -34,7 +34,8 @@ before(() => {
   home = join(dir, 'consensflow')
 })
 after(() => {
-  rmSync(dir, { recursive: true, force: true })
+  // Windows holds a just-ended program's files for a moment: removal retries (EPERM, 2026-10-08).
+  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 /** This process's environment without anything of a window it may itself run in, and the test's home. */

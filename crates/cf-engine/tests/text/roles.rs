@@ -383,9 +383,26 @@ fn keeps_the_authorization_boundary_in_the_chief_text_ships_no_harness_payload_a
         "no claude payload"
     );
     assert!(!root.join("hosts").join("pi").exists(), "no pi payload");
-    // The personal name must not appear in anything that ships.
-    for base in ["hosts", "bin", "src", "skill"] {
-        for file in files_under(&root.join(base)) {
+    // The personal name must not appear in anything that ships: the host
+    // extensions, the role texts, the page, and what each crate is built from
+    // (its `src` and its `data`, the unit tests among them; the tests in its
+    // `tests` folder are not built into anything, and say what they like).
+    let mut shipped = vec![
+        root.join("hosts"),
+        root.join("skill"),
+        root.join("app").join("ui"),
+    ];
+    for entry in fs::read_dir(root.join("crates")).unwrap() {
+        let krate = entry.unwrap().path();
+        shipped.extend(
+            ["src", "data"]
+                .map(|folder| krate.join(folder))
+                .into_iter()
+                .filter(|folder| folder.is_dir()),
+        );
+    }
+    for base in shipped {
+        for file in files_under(&base) {
             let content =
                 String::from_utf8_lossy(&fs::read(&file).unwrap_or_default()).into_owned();
             assert!(!content.contains("Gabriel"), "{}", file.display());

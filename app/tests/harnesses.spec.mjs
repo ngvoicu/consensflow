@@ -1,10 +1,8 @@
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
-import { CATALOG } from '../../src/catalog.js'
-import { addAgent, listAgents } from '../../src/roster.js'
 import { tempEnv } from '../../tests/helpers.mjs'
-import { agentsServer } from './agents-server.mjs'
+import { addAgent, agentsServer, catalog, listAgents } from './agents-server.mjs'
 
 /** An agent's row: every catalog agent has one, and every agent defined by hand. */
 const member = (page, name) =>
@@ -20,20 +18,13 @@ for (const [harness, label] of [
     page,
   }) => {
     const t = tempEnv()
-    mkdirSync(t.env.HOME, { recursive: true })
-    mkdirSync(t.env.PATH, { recursive: true })
     mkdirSync(t.env.CONSENSFLOW_HOME, { recursive: true })
-    writeFileSync(join(t.env.PATH, harness), '#!/bin/sh\necho 1.2.3\n')
-    chmodSync(join(t.env.PATH, harness), 0o755)
     writeFileSync(join(t.env.CONSENSFLOW_HOME, 'extensions'), 'installation blocked')
-    let checks = 0
-    const server = await agentsServer(t.env, {
-      installed: [],
-      harnessLatest: async () => {
-        checks++
-        return '1.2.4'
-      },
-    })
+    // The harness is a stand-in at 1.2.3 that counts how often it is asked its version,
+    // which a check does once. What the feeds say of a newer release is theirs, and the
+    // screen's words for it are held where a check is answered (the route test below).
+    const server = await agentsServer(t.env, { installed: [harness] })
+    const checks = () => server.runs(harness)
     const errors = []
     page.on('pageerror', (error) => errors.push(error.message))
     try {
@@ -41,8 +32,7 @@ for (const [harness, label] of [
       const pi = page
         .locator('.host')
         .filter({ has: page.locator('strong', { hasText: new RegExp(`^${harness}$`) }) })
-      await expect(pi).toContainText('Version 1.2.3, 1.2.4 is out')
-      await expect(pi).toContainText('Update it the way you installed it.')
+      await expect(pi).toContainText('Version 1.2.3')
       await expect(pi).toContainText(`${label} setup failed`)
       await expect(pi.getByText(`${label} setup failed`)).toHaveCSS('color', 'rgb(244, 119, 105)')
       await expect(page.locator('body')).not.toContainText(
@@ -50,7 +40,7 @@ for (const [harness, label] of [
       )
       rmSync(join(t.env.CONSENSFLOW_HOME, 'extensions'))
       await pi.getByRole('button', { name: `Retry ${label} setup` }).click()
-      await expect.poll(() => checks).toBe(2)
+      await expect.poll(checks).toBe(2)
       await expect(pi.getByRole('button', { name: `Retry ${label} setup` })).toHaveCount(0)
       await expect(page.locator('body')).not.toContainText(
         /Integration:|result receipt|live connection|delivery verified/,
@@ -68,7 +58,7 @@ for (const [harness, label] of [
         await expect(page.getByRole('button', { name: label, exact: true })).toHaveCount(0)
       }
       await page.getByRole('button', { name: 'Check all harnesses' }).click()
-      await expect.poll(() => checks).toBe(3)
+      await expect.poll(checks).toBe(3)
       expect(errors).toEqual([])
     } finally {
       await server.close()
@@ -86,9 +76,9 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
   page.on('request', (request) => requests.push(new URL(request.url()).pathname))
   try {
     await page.goto(`${server.url}/?token=${server.token}`)
-    await expect(page.locator('#agents-count')).toHaveText('119 of 119 shown')
+    await expect(page.locator('#agents-count')).toHaveText('120 of 120 shown')
     await expect(page.locator('#lede')).toHaveText(
-      '119 agents, the catalog’s and your own; a project’s staff is picked from them.',
+      '120 agents, the catalog’s and your own; a project’s staff is picked from them.',
     )
     await expect(page.locator('#agents .offer')).toHaveCount(0)
     await expect(page.locator('#agents').getByRole('button', { name: /^Add/ })).toHaveCount(0)
@@ -123,7 +113,7 @@ test('Agents lists every catalog agent as one row with nothing to add, and takes
     expect(listAgents(t.env).find((a) => a.name === 'custom').workTier).toBe('complex')
     await expect(form.getByLabel('Work tier')).toHaveValue('auto')
     await expect(page.locator('#lede')).toContainText('1 is yours')
-    await expect(page.locator('#agents-count')).toHaveText('120 of 120 shown')
+    await expect(page.locator('#agents-count')).toHaveText('121 of 121 shown')
     // A catalog name is not yours to define again.
     await form.locator('[name="name"]').fill('gefjon')
     await form.locator('[name="harness"]').selectOption('claude')
@@ -305,6 +295,45 @@ test('Harnesses says how each one was installed and updates it from a button', a
     await expect(codex.getByRole('button', { name: /^Update to/ })).toHaveCount(0)
     expect(asked).toEqual({ id: 'codex' })
     await expect(page.locator('.host').nth(4)).not.toContainText('next prompt')
+  } finally {
+    await server.close()
+    t.cleanup()
+  }
+})
+
+test('Harnesses tells the human to update a harness the way it was installed when no command is known', async ({
+  page,
+}) => {
+  const t = tempEnv()
+  const server = await agentsServer(t.env, { installed: [] })
+  // The check is answered here: what the real feeds say of a newer release is for no test to depend on.
+  const pi = {
+    id: 'pi',
+    path: '/usr/local/bin/pi',
+    installed: true,
+    checkedAt: Date.now(),
+    version: { state: 'checked', value: '1.2.3' },
+    distribution: null,
+    update: { state: 'available', value: '1.2.4', command: null },
+  }
+  const others = ['claude', 'codex', 'opencode', 'devin'].map((id) => ({
+    id,
+    path: null,
+    installed: false,
+    checkedAt: Date.now(),
+    version: { state: 'not-installed' },
+    update: { state: 'not-checked' },
+  }))
+  await page.route('**/api/harnesses/check', (route) =>
+    route.fulfill({ json: { harnesses: [pi, ...others] } }),
+  )
+  try {
+    await page.goto(`${server.url}/harnesses?token=${server.token}`)
+    const row = page.locator('.host').first()
+    await expect(row).toContainText('Version 1.2.3, 1.2.4 is out')
+    await expect(row).toContainText('Installed in a way ConsensFlow does not recognize')
+    await expect(row).toContainText('Update it the way you installed it.')
+    await expect(row.getByRole('button', { name: /^Update to/ })).toHaveCount(0)
   } finally {
     await server.close()
     t.cleanup()
@@ -608,13 +637,13 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
         'Work tier',
       ])
       await expect(screen.getByRole('heading', { level: 3 })).toHaveCount(0)
-      await expect(screen.locator('#agents-count')).toHaveText('127 of 127 shown')
+      await expect(screen.locator('#agents-count')).toHaveText('128 of 128 shown')
     }
     await fixture.saved(own)
     await expect(own.locator('#agents-count')).toHaveText('8 of 8 shown')
     await search.fill('Astra')
     await expect(own.locator('#agents-count')).toHaveText('5 of 8 shown')
-    await expect(page.locator('#agents-count')).toHaveText('127 of 127 shown')
+    await expect(page.locator('#agents-count')).toHaveText('128 of 128 shown')
     await expect(own.locator('.callsign')).toHaveCount(5)
     await group.selectOption('model-reasoning')
     await expect(own.getByRole('heading', { level: 3 })).toHaveCount(4)
@@ -623,7 +652,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     ).toBeVisible()
     await page.getByRole('searchbox').fill('Astra')
     await page.getByLabel('Group by').selectOption('model-reasoning')
-    await expect(page.locator('#agents-count')).toHaveText('25 of 127 shown')
+    await expect(page.locator('#agents-count')).toHaveText('25 of 128 shown')
     await expect(page.getByRole('heading', { level: 3 })).toHaveText([
       'GPT-6 Astra · Max · 4',
       'GPT-6 Astra · Xhigh · 6',
@@ -653,7 +682,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     await expect(own.locator('.callsign')).toHaveCount(5)
     await search.fill('OpenRouter')
     await expect(own.locator('#agents')).toContainText('No agents match')
-    await expect(page.locator('#agents-count')).toHaveText('25 of 127 shown')
+    await expect(page.locator('#agents-count')).toHaveText('25 of 128 shown')
     await own.getByRole('button', { name: 'Clear filters' }).click()
     await expect(search).toHaveValue('')
     await expect(group).toHaveValue('model-reasoning')
@@ -678,7 +707,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     await page.getByRole('button', { name: 'Clear filters' }).click()
     await expect(page.getByRole('searchbox')).toHaveValue('')
     await expect(page.getByLabel('Group by')).toHaveValue('model-reasoning')
-    await expect(page.getByRole('heading', { level: 3 })).toHaveCount(51)
+    await expect(page.getByRole('heading', { level: 3 })).toHaveCount(52)
     await expect(group).toHaveValue('harness')
     await group.selectOption('model-reasoning')
     for (const name of [
@@ -692,7 +721,7 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
     ]) {
       await expect(own.getByRole('heading', { name, exact: true })).toBeVisible()
     }
-    await expect(page.locator('#agents-count')).toHaveText('127 of 127 shown')
+    await expect(page.locator('#agents-count')).toHaveText('128 of 128 shown')
     await expect(member(page, 'astraeus')).toBeVisible()
     // No description of a model anywhere: its tier and scores say it all.
     await expect(page.locator('#agents')).not.toContainText('Good for')
@@ -724,11 +753,12 @@ test('Show, search and grouping work per tab, saved agents and catalog entries a
 test('shared model cards default to every model and reasoning across all harnesses and providers in both tabs', async ({
   page,
 }) => {
-  const entries = Object.entries(CATALOG).flatMap(([harness, rows]) =>
-    rows.map((p) => ({ ...p, harness })),
-  )
   const fixture = await catalogPage(page, [], null)
   try {
+    // The catalog as `cf catalog --json` has it: the page's cards are held to it.
+    const entries = Object.entries(catalog(fixture.t.env)).flatMap(([harness, rows]) =>
+      rows.map((p) => ({ ...p, harness })),
+    )
     const expected = new Map()
     for (const p of entries) {
       const effort = p.designer ? 'not-applicable' : p.effort || 'default'

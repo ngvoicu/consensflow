@@ -22,8 +22,8 @@ export const PROCESS = cargo('-p', 'cf', '--test', 'standalone')
 export const LIBRARY = cargo('-p', 'cf', '--test', 'dispatch')
 /** The checked-in recording held to what Node answers now. */
 export const HELD = [process.execPath, '--test', 'tests/cli-goldens.test.mjs']
-/** The suites of the CLI against Node's `cf.mjs` and then the native `cf`. */
-export const BOTH = [process.execPath, 'tests/clis.mjs', '--offline']
+/** The suites of the CLI against the native `cf`, built from the sources as they are. */
+export const CLIS = [process.execPath, 'tests/clis.mjs', '--offline']
 
 export const STANDALONE = 'crates/cf/src/standalone'
 
@@ -61,5 +61,3 @@ export const HOLDS = cargo('-p', 'cf-launcher', '--test', 'repair_holds')
 export const APP = [process.execPath, 'tests/app-tests.mjs']
 /** `bin/cf.mjs`, the door: forwards every command to the native `cf`. */
 export const DOOR = [process.execPath, '--test', 'tests/cf-door.test.mjs']
-/** What the tests choose in their own home (`chooseHome`, `daemonCommand`). */
-export const CHOICE = [process.execPath, '--test', 'tests/choice.test.mjs']

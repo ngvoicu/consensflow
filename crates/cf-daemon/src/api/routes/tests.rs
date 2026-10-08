@@ -181,25 +181,28 @@ fn a_path_is_matched_whole_and_as_written() {
     }
 }
 
-/// Every route `api.js` matches by its `at === 'METHOD /path'` is a route
-/// here: a route Node gains cannot be left out unseen.
+/// The nine routes `api.js` matched by its `at === 'METHOD /path'` when Node
+/// was the daemon, frozen here: every one is a route, so that none is left out
+/// unseen. A route added since is added to the table, and to the traces that
+/// play it.
 #[test]
-fn every_route_node_names_by_its_method_and_path_is_one() {
-    let source = include_str!("../../../../../src/core/api.js");
-    let mut named = 0;
-    for piece in source.split("at === '").skip(1) {
-        let Some((route, _)) = piece.split_once('\'') else {
-            continue;
-        };
+fn every_route_node_named_by_its_method_and_path_is_one() {
+    const NODE_ROUTES: [&str; 9] = [
+        "GET /api/whoami",
+        "GET /api/history",
+        "GET /api/staff",
+        "GET /api/tasks",
+        "POST /api/tasks",
+        "GET /api/inbox",
+        "POST /api/questions",
+        "POST /api/notes",
+        "POST /api/answers",
+    ];
+    for route in NODE_ROUTES {
         let (method, path) = route.split_once(' ').unwrap();
         let method = Method::from_bytes(method.as_bytes()).unwrap();
         assert!(recognize(&method, path).is_some(), "{route}");
-        named += 1;
     }
-    assert_eq!(
-        named, 9,
-        "api.js names nine routes by their method and path"
-    );
 }
 
 /// Every route has a handler that answers it, as its own and not as a route

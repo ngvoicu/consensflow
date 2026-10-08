@@ -2,8 +2,8 @@
 //! is frozen against: it refuses what hyper's server forgives, and is the
 //! kind of peer OpenCode's plugin and server are. The server writes back
 //! what it was sent, so each test reads the request as a peer read it.
-//! Node is `CONSENSFLOW_NODE`, or `node` on the PATH, as the ledger's
-//! tests find it.
+//! Node is the tests' own, as the build tooling has it, and not the
+//! product's: `CF_TEST_NODE`, or `node` on the PATH.
 
 // The test starts the peer it asks; a failure in its helpers is the test's.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -65,7 +65,7 @@ struct Peer {
 
 impl Peer {
     fn start() -> Self {
-        let program = std::env::var_os("CONSENSFLOW_NODE").unwrap_or_else(|| "node".into());
+        let program = std::env::var_os("CF_TEST_NODE").unwrap_or_else(|| "node".into());
         let mut node = Command::new(program)
             .args(["--input-type=module", "-e", SERVER])
             .stdout(Stdio::piped())

@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url'
 import { startIntegration } from './harness.mjs'
 
 /**
- * The board after a re-plan, end to end through the real pane host, the same
- * on both daemons (`npm run test:daemons`). The chief eval `six-decisions`
+ * The board after a re-plan, end to end through the real pane host
+ * (`npm run test:daemons`). The chief eval `six-decisions`
  * (2026-10-07, on the native daemon) cancelled tasks that were still open for
  * a tier, and its check "the board showed every task" counted fewer than it
  * had made: both daemons left such a task off the board, as a task paused in
@@ -16,7 +16,6 @@ import { startIntegration } from './harness.mjs'
  * both: the page draws the open ones on their requester's row.
  */
 
-const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
 
 /** Where each task the board draws is: `open T-n state`, or the lane's handle (a session's name masked) and the same. */
@@ -44,7 +43,6 @@ const printed = (record) =>
 
 test('a task no lane has stays on the board and in cf task list: called off, paused, or a removed member’s', async () => {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {

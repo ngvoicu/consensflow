@@ -22,7 +22,9 @@ import { formats } from './formats.mjs'
 const VERSION = JSON.parse(
   readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'),
 ).version
-const DAEMON = fileURLToPath(new URL('../../integration/core-daemon.mjs', import.meta.url))
+
+/** Node's own CLI, whose `ui` is Node's daemon, as the releases before the deletion ran it. */
+const CLI = fileURLToPath(new URL('../../../src/cli.js', import.meta.url))
 
 const occurrences = (text, part) => text.split(part).length - 1
 
@@ -99,7 +101,7 @@ async function daemon() {
     const env = Object.fromEntries(
       Object.entries(process.env).filter(([name]) => !/^(CONSENSFLOW_|CF_)/.test(name)),
     )
-    const child = spawn(process.execPath, [DAEMON], {
+    const child = spawn(process.execPath, [CLI, 'ui', '--json', '--no-open'], {
       env: { ...env, HOME: home, CONSENSFLOW_HOME: home, CLAUDE_CONFIG_DIR: join(home, '.claude') },
       stdio: ['pipe', 'pipe', 'pipe'],
     })

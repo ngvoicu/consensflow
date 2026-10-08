@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { daemonCommand } from '../helpers.mjs'
 import { startIntegration } from './harness.mjs'
 
 /**
@@ -17,13 +16,10 @@ import { startIntegration } from './harness.mjs'
  * a real PTY prints those words and stays (or ends with the code 3), and the
  * daemon is told to wait eight seconds, not three minutes, for its first
  * message (`CONSENSFLOW_LAUNCH_TIMEOUT_MS`): long enough for a slow machine's
- * window to have printed. The native daemon only: Node's said nothing of a
- * window's screen.
+ * window to have printed.
  */
 
-const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
-const NATIVE = daemonCommand([DAEMON]).kind === 'native'
 
 /** The two lines the window printed, as a quote holds them. */
 const SCREEN =
@@ -38,7 +34,6 @@ const WORKER = '@worker-[a-z]+-[a-z]+'
  */
 async function aTaskThatFailed(fakeEnv) {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: {
       CF_TEST_HARNESS: FAKE_AGENT,
       CONSENSFLOW_LAUNCH_TIMEOUT_MS: '8000',
@@ -69,9 +64,7 @@ async function aTaskThatFailed(fakeEnv) {
   }
 }
 
-describe('a window that does not come up says why', {
-  skip: !NATIVE && "Node's daemon says nothing of a window's screen",
-}, () => {
+describe('a window that does not come up says why', () => {
   it('quotes the screen of a window that stayed, in the failure, the chief’s window and the log', async () => {
     const { app, project, inbox, log, session } = await aTaskThatFailed({
       CF_TEST_NO_LOGIN: 'worker',

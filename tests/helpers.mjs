@@ -1,8 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { roleConfiguration } from '../src/role-skills.js'
-import { assertBuilt, choose, chooseHome, DEFAULT_DAEMON, NATIVE_CF } from './choice.mjs'
+import { assertBuilt, choose, NATIVE_CF } from './choice.mjs'
 
 /**
  * Every test runs against a throwaway CONSENSFLOW_HOME and throwaway harness
@@ -44,62 +43,19 @@ export const windowsEnv = () =>
     : {}
 
 /**
- * How a test starts a daemon, as `CONSENSFLOW_TEST_DAEMON` names it (the words
- * are tests/choice.mjs's): `node`, Node's, `node <nodeArgs>`; `native` or a JSON
- * array, a command and its arguments, the native one (`cf ui --json --no-open`
- * of the build under test); nothing, the tests' default, which is the native
- * one. The choice is marked in the home the daemon is to run on (the product
- * reads no such mark now): `home` is that folder, which the Node daemon's gets
- * the way back's file in and the native one's has none (`chooseHome`), whatever
- * else starts in it, and which `assertStarted` holds to the choice. A start that
- * names none leaves the home to its caller. Either is told the runtime the rig's
- * stand-in harness runs on (`CONSENSFLOW_NODE`): the Node daemon names its own
- * to its windows, the native one names none, and the stand-in finds the variable
- * in the environment its pane host started with. `env` is what to add to the environment
- * the test gives the daemon, and `kind` is the one chosen, `node` or `native`:
- * what `assertStarted` holds the daemon that starts to. A run labelled with
- * its leg (`CONSENSFLOW_TEST_LEG`) is refused a choice that is not its own.
- * The options are what a test sets to choose in its own words, not the
- * environment's: the selection, the leg, and the default.
+ * How a test starts the daemon: `cf ui --json --no-open` of the native `cf`
+ * this checkout builds, or the command `CONSENSFLOW_TEST_DAEMON` names (a JSON
+ * array, a command and its arguments; the words are tests/choice.mjs's). The
+ * daemon that starts is held to the native one by the start line in its log
+ * (`assertStarted`). `named` is what a test sets to choose in its own words, not
+ * the environment's.
  */
-export function daemonCommand(
-  nodeArgs,
-  {
-    named = process.env.CONSENSFLOW_TEST_DAEMON,
-    leg = process.env.CONSENSFLOW_TEST_LEG,
-    fallback = DEFAULT_DAEMON,
-    home = undefined,
-  } = {},
-) {
-  const chosen = choose('CONSENSFLOW_TEST_DAEMON', { named, leg, fallback })
-  const env = { CONSENSFLOW_NODE: process.execPath }
-  if (home !== undefined) chooseHome(chosen.kind, home)
-  if (chosen.kind === 'node') {
-    return {
-      command: process.execPath,
-      args: nodeArgs,
-      env,
-      native: false,
-      kind: 'node',
-    }
-  }
-  if (chosen.command === null) assertBuilt()
-  const [command, ...args] = chosen.command ?? [NATIVE_CF, 'ui', '--json', '--no-open']
-  return {
-    command,
-    args,
-    env,
-    native: true,
-    kind: 'native',
-  }
+export function daemonCommand({ named = process.env.CONSENSFLOW_TEST_DAEMON } = {}) {
+  const chosen = choose('CONSENSFLOW_TEST_DAEMON', named)
+  if (chosen === null) assertBuilt()
+  const [command, ...args] = chosen ?? [NATIVE_CF, 'ui', '--json', '--no-open']
+  return { command, args }
 }
-
-/** Native config resolution is a subprocess boundary, covered in role-skills.test. */
-export const testRoleConfiguration = (kind, options) =>
-  roleConfiguration(kind, {
-    ...options,
-    readInstructions: async () => '',
-  })
 
 const WINDOWS = process.platform === 'win32'
 /** The name a fake is found at: as given on POSIX, `.cmd` on Windows unless it already says so. */
@@ -110,16 +66,18 @@ function fakePath(file) {
 /**
  * A stand-in CLI for the tests, at `file`: a shell script on POSIX, a `.cmd`
  * on Windows, since Windows has no shebang. It prints `output` (or the file
- * `outputFile`), creates `touch` when asked, and exits with `exit`. Returns
- * the path the fake is found at, which is what `harnessPath` resolves.
+ * `outputFile`), creates `touch` when asked, adds a line to `log` each time it
+ * is run when asked (to count its runs), and exits with `exit`. Returns the
+ * path the fake is found at, which is what `harnessPath` resolves.
  */
 export function fakeExecutable(
   file,
-  { output = '', outputFile = null, touch = null, exit = 0 } = {},
+  { output = '', outputFile = null, touch = null, log = null, exit = 0 } = {},
 ) {
   const path = fakePath(file)
   if (WINDOWS) {
     const lines = ['@echo off']
+    if (log) lines.push(`echo run>> "${log}"`)
     for (const line of output.split('\n').filter(Boolean)) lines.push(`echo ${line}`)
     if (outputFile) lines.push(`type "${outputFile}"`)
     if (touch) lines.push(`type nul > "${touch}"`)
@@ -128,6 +86,7 @@ export function fakeExecutable(
     return path
   }
   const lines = ['#!/bin/sh']
+  if (log) lines.push(`printf 'run\\n' >> '${log}'`)
   if (output) lines.push(`printf '%s\\n' '${output.replaceAll("'", "'\\''")}'`)
   if (outputFile) lines.push(`/bin/cat "${outputFile}"`)
   if (touch) lines.push(`printf called > '${touch}'`)

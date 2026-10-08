@@ -1,9 +1,7 @@
-import { mkdirSync } from 'node:fs'
 import { chromium, expect, test } from '@playwright/test'
 
-import { addAgent } from '../../src/roster.js'
 import { tempEnv } from '../../tests/helpers.mjs'
-import { agentsServer } from './agents-server.mjs'
+import { addAgent, agentsServer } from './agents-server.mjs'
 import { serveUi } from './serve-ui.mjs'
 
 /**
@@ -2949,13 +2947,12 @@ test("lists every member under the chief, with no staff groups, on the board and
  * a page that is handed their address; `env` is the daemon's, where its
  * agents are kept.
  */
-async function agentsScreens(options) {
+async function agentsScreens() {
   const t = tempEnv()
-  // A harness's version is asked in the human's home.
-  mkdirSync(t.env.HOME, { recursive: true })
-  const server = await agentsServer(t.env, options)
+  const server = await agentsServer(t.env)
   return {
     env: t.env,
+    runs: server.runs,
     screens: { url: server.url, token: server.token },
     close: async () => {
       await server.close()
@@ -3002,13 +2999,9 @@ test('opens Agents from Settings in a dialog over the board, the daemon’s agen
 test('opens Harnesses from Settings in a dialog where a check runs against the daemon; Escape goes back to Settings', async ({
   page,
 }) => {
-  let checks = 0
-  const daemon = await agentsScreens({
-    harnessLatest: async () => {
-      checks += 1
-      return '1.2.4'
-    },
-  })
+  // The harnesses are stand-ins at 1.2.3 that count how often they are asked their version,
+  // which a check does once; what the feeds say of a newer release is theirs to say.
+  const daemon = await agentsScreens()
   try {
     await open(page, { ...model(), screens: daemon.screens })
     const harnesses = await openScreen(page, 'Harnesses')
@@ -3017,10 +3010,10 @@ test('opens Harnesses from Settings in a dialog where a check runs against the d
     await expect(screen.locator('.host')).toHaveCount(5)
     await expect(
       screen.locator('.host').filter({ has: screen.locator('strong', { hasText: /^pi$/ }) }),
-    ).toContainText('Version 1.2.3, 1.2.4 is out')
-    const before = checks
+    ).toContainText('Version 1.2.3')
+    const before = daemon.runs('pi')
     await screen.getByRole('button', { name: 'Check all harnesses' }).click()
-    await expect.poll(() => checks).toBeGreaterThan(before)
+    await expect.poll(() => daemon.runs('pi')).toBeGreaterThan(before)
     await expect(screen.locator('#check-note')).toHaveText('')
     await harnesses.getByRole('button', { name: 'Close' }).focus()
     await page.keyboard.press('Escape')
@@ -4588,6 +4581,9 @@ test('keeps every card as tall as it was when the row first scrolls, where a scr
     const taken = await page
       .locator('#stage')
       .evaluate((stage) => stage.offsetHeight - stage.clientHeight)
+    // A Mac set to overlay scrollbars (the default without a mouse) draws them over
+    // the content even here: nothing takes room, and there is nothing to hold.
+    test.skip(taken === 0, 'this machine shows overlay scrollbars, which take no room')
     expect(taken).toBeGreaterThan(0)
     expect((await cardsOf(page)).map((card) => card.height)).toEqual([
       chief.height,

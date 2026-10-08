@@ -68,17 +68,17 @@ describe('the script a Windows run is', () => {
   it('carries the variables a run names to its command, after the build steps and before it', () => {
     const text = script({
       steps: BUILD,
-      env: parseEnv(['CONSENSFLOW_TEST_DAEMON=native', 'CONSENSFLOW_TEST_LEG=native']),
+      env: parseEnv(['CONSENSFLOW_TEST_DAEMON=native', 'CONSENSFLOW_TEST_CLI=native']),
     })
-    assert.deepEqual(given(text), ['CONSENSFLOW_TEST_DAEMON', 'CONSENSFLOW_TEST_LEG'])
+    assert.deepEqual(given(text), ['CONSENSFLOW_TEST_DAEMON', 'CONSENSFLOW_TEST_CLI'])
     assert.ok(text.includes("$env:CONSENSFLOW_TEST_DAEMON = 'native'\n"))
-    assert.ok(text.includes("$env:CONSENSFLOW_TEST_LEG = 'native'\n"))
+    assert.ok(text.includes("$env:CONSENSFLOW_TEST_CLI = 'native'\n"))
     const at = (what) => text.indexOf(what)
     assert.ok(
       at('foreach ($step in') < at('$env:CONSENSFLOW_TEST_DAEMON ='),
       'not before the steps',
     )
-    assert.ok(at('$env:CONSENSFLOW_TEST_LEG =') < at("Set-Location (Join-Path $dir '.')"))
+    assert.ok(at('$env:CONSENSFLOW_TEST_CLI =') < at("Set-Location (Join-Path $dir '.')"))
     assert.ok(
       at("Set-Location (Join-Path $dir '.')") < at('$run = Join-Path'),
       'before the command',
@@ -229,11 +229,7 @@ describe('the script as the machine is sent it', () => {
     for (const env of [
       [],
       ['CONSENSFLOW_TEST_DAEMON=native'],
-      [
-        'CONSENSFLOW_TEST_DAEMON=native',
-        'CONSENSFLOW_TEST_LEG=native',
-        'CONSENSFLOW_TEST_CLI=native',
-      ],
+      ['CONSENSFLOW_TEST_DAEMON=native', 'CONSENSFLOW_TEST_CLI=native'],
     ]) {
       assert.doesNotThrow(() => encodeScript(long(env)), env.join(' '))
     }

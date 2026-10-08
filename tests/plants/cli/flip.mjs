@@ -1,15 +1,14 @@
 /**
  * Plants in what the flip release left: the repair of the terminal's command (a
- * launcher of another home rewritten, one made where there was none) and what
- * the tests choose in their own home. The tests of the launcher's repair and
- * the app's catch the first, and the one of the choice the second. (The flip's
- * own decider, which implementation writes a home, went with Node; its plants
- * are `deletion.mjs`'s now: that nothing reads what it read.)
+ * launcher of another home rewritten, one made where there was none), which the
+ * tests of the launcher's repair and the app's catch. (The flip's own decider,
+ * which implementation writes a home, went with Node, and so did the choice the
+ * tests made in their own home; its plants are `deletion.mjs`'s now: that
+ * nothing reads what it read.)
  */
-import { APP, CHOICE, HOLDS, LAUNCHER, lines } from './kit.mjs'
+import { APP, HOLDS, LAUNCHER, lines } from './kit.mjs'
 
 const REPAIR = 'crates/cf-launcher/src/repair.rs'
-const CHOICE_FILE = 'tests/choice.mjs'
 
 /** The app's tests of the launcher it repairs. */
 const app = (filter) => [...APP, filter]
@@ -95,21 +94,5 @@ export const PLANTS = [
     ],
     runs: [app('launcher')],
     meant: 'no_command_is_created_where_there_is_none',
-  },
-
-  // What the tests choose in their own home.
-  {
-    name: 'flip: the Node leg’s home has no file',
-    edits: [[CHOICE_FILE, "    writeFileSync(file, '')", '    rmSync(file, { force: true })']],
-    runs: [CHOICE],
-    meant:
-      'makes the choice in the home it is given: the file for Node’s, none for the native one’s',
-  },
-  {
-    name: 'flip: the native leg’s home keeps the file',
-    edits: [[CHOICE_FILE, '    rmSync(file, { force: true })\n  }\n}', '  }\n}']],
-    runs: [CHOICE],
-    meant:
-      'makes the choice in the home it is given: the file for Node’s, none for the native one’s',
   },
 ]

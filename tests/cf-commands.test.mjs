@@ -36,8 +36,8 @@ function commandsOf(usage, prefix) {
 }
 
 // Run here, not in a window: a window's token makes cf its board. By the cf these
-// tests run: the native one, or Node's (tests/cli-target.mjs, `npm run test:clis`),
-// in a home of its own.
+// tests run: the native one (tests/cli-target.mjs, `npm run test:clis`), in a home
+// of its own.
 const target = cliTarget()
 const outside = (() => {
   const t = tempEnv()
@@ -59,19 +59,25 @@ const COMMANDS = new Map([
 ])
 
 /**
- * The files whose words reach a model or a person: code, role texts, the eval
- * prompts, the readme. Read from the folders: the gate's tree has no .git.
+ * The files whose words reach a model or a person: the native crates' sources
+ * and texts (the daemon, the engine's role texts, the cf usages, the agents
+ * pages), the host extensions, role texts, the eval prompts, the page, the
+ * readme. Read from the folders: the gate's tree has no .git. A crate's own
+ * tests are left out, since they say what cf refuses too.
  */
 const FILES = [
   'README.md',
-  ...['src', 'hosts', 'skill', 'bin', 'app/ui', 'evals'].flatMap((root) =>
+  ...['crates', 'hosts', 'skill', 'app/ui', 'evals'].flatMap((root) =>
     readdirSync(`${REPO}${root}`, { recursive: true }).map((file) => `${root}/${file}`),
   ),
 ]
   .map((file) => file.replaceAll('\\', '/'))
   .filter(
     (file) =>
-      /\.(js|mjs|md|html)$/.test(file) &&
+      (file.startsWith('crates/')
+        ? /^crates\/[^/]+\/src\/.*\.(rs|txt|md|html)$/.test(file) &&
+          !/(^|\/)(tests|testing)(\/|\.rs$)/.test(file.slice(file.indexOf('/src/')))
+        : /\.(js|mjs|md|html)$/.test(file)) &&
       !file.includes('node_modules/') &&
       !file.startsWith('app/ui/vendor/') &&
       !file.startsWith('evals/reports/'),

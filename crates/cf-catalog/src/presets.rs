@@ -52,7 +52,7 @@ mod tests {
     #[test]
     fn the_bundled_data_reads_with_every_preset_whole() {
         let data = bundled().unwrap();
-        assert_eq!(data.presets.len(), 119);
+        assert_eq!(data.presets.len(), 120);
         assert_eq!(
             data.model_labels.get("gpt-6-astra").map(String::as_str),
             Some("GPT-6 Astra")

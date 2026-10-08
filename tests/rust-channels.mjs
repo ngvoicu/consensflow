@@ -1,15 +1,16 @@
 import { execFileSync, spawn } from 'node:child_process'
+import { chmodSync, copyFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * The channels of `crates/cf-harness` in Rust, as the suites that hold
- * JavaScript's channels call them: each function here has the signature of
- * the JavaScript one and runs the Rust one through a test binary, built once,
- * on the machine's own clock, randomness, processes and loopback. A suite
- * runs its cases with each in turn.
+ * The channels of `crates/cf-harness` in Rust, as the suites that hold them
+ * call them: each function here runs one channel through a test binary, built
+ * once, on the machine's own clock, randomness, processes and loopback.
  */
 
-/** Why the cases against Rust do not run, or false: a machine without cargo holds them against JavaScript alone. */
+/** Why the cases against Rust do not run, or false: a machine without cargo cannot build the test binaries. */
 export const cargoMissing = hasCargo() ? false : 'cargo is not installed'
 
 function hasCargo() {
@@ -21,8 +22,52 @@ function hasCargo() {
   }
 }
 
-/** The test binary `name`, built and found by the path cargo reports. */
+/** The folder this process keeps its copies of the test binaries in, made when the first is. */
+let copies = null
+/** The copies this process has made, by the binary's name. */
+const mine = new Map()
+
+/**
+ * A copy of `executable` that this process alone runs. Every suite that runs a
+ * channel builds the binary it needs, and the suites run at the same time: a
+ * `cargo build` of a binary that is built puts it in place again, and for the
+ * moment between taking the old one away and linking the new one the path it
+ * reports names nothing. A copy of the binary is not touched by any build.
+ */
+function privateCopy(name, executable) {
+  if (!mine.has(name)) {
+    if (copies === null) {
+      copies = mkdtempSync(join(tmpdir(), 'cf-rust-channels-'))
+      process.once('exit', () => {
+        try {
+          rmSync(copies, { recursive: true, force: true })
+        } catch {}
+      })
+    }
+    const copy = join(copies, basename(executable))
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        copyFileSync(executable, copy)
+        chmodSync(copy, 0o755)
+        break
+      } catch (cause) {
+        // The binary is back within the moment the build that took it away is over.
+        if (cause.code !== 'ENOENT' || attempt === 100) throw cause
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50)
+      }
+    }
+    mine.set(name, copy)
+  }
+  return mine.get(name)
+}
+
+/** The test binary `name`, built, and a copy of it to run (see `privateCopy`). */
 function build(name) {
+  return privateCopy(name, cargoBuild(name))
+}
+
+/** The path cargo reports for the test binary `name`, once it has built it. */
+function cargoBuild(name) {
   const built = execFileSync(
     'cargo',
     [

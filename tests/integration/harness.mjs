@@ -23,9 +23,8 @@ const BRIDGE =
 // at all. The page's xterm answers, and with no page this harness does.
 const CURSOR_QUERY = Buffer.from('\u001b[6n')
 const CURSOR_REPLY = [...Buffer.from('\u001b[1;1R')]
-const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fake-agent.mjs')
-/** The `cf` first on every window's PATH: the native one, beside cf.mjs. */
+/** The `cf` first on every window's PATH: the native one. */
 const CF = NATIVE_CF
 
 function parser(onLine) {
@@ -106,7 +105,8 @@ function safeEnvironment(root, fakeBin, harnessFile) {
           USERPROFILE: home,
         }
       : {}),
-    CONSENSFLOW_NODE: process.execPath,
+    // The Node the stand-in harness runs on: the tests' own, not a product's.
+    CF_TEST_NODE: process.execPath,
     CF_TEST_HARNESS: harnessFile,
     CF_TEST_WORKER_ANSWER: 'worker completed from a real PTY child',
     TERM: 'xterm-256color',
@@ -128,7 +128,7 @@ function writeFakeInstall(root, sandbox, harnessFile) {
   } else {
     writeFileSync(
       join(fakeBin, 'claude'),
-      '#!/bin/sh\nexec "$CONSENSFLOW_NODE" "$CF_TEST_HARNESS" "$@"\n',
+      '#!/bin/sh\nexec "$CF_TEST_NODE" "$CF_TEST_HARNESS" "$@"\n',
       { mode: 0o755 },
     )
   }
@@ -176,16 +176,15 @@ function waitFor(predicate, timeoutMs = 10_000, intervalMs = 25) {
  * bytes; pane.open, PTYs, input arbitration and cleanup stay native.
  *
  * The daemon is the one `CONSENSFLOW_TEST_DAEMON` names (`daemonCommand`), or the
- * one `select` names (`node` or `native`) for a start that chooses in its own
- * words whatever the environment says, as a restart on the other daemon does.
- * What starts is held to what was asked for by the start line in its log
- * (`assertStarted`), and `daemon` on what this returns says which it was.
+ * one `select` names (`native`, or a command as a JSON array) for a start that
+ * chooses in its own words whatever the environment says. What starts is held
+ * to the native daemon by the start line in its log (`assertStarted`), and
+ * `daemon` on what this returns says what it was.
  */
 export async function startIntegration({
   fakeEnv = {},
   bridgeEnv = {},
   existingRoot = null,
-  daemon = DAEMON,
   select = undefined,
 } = {}) {
   assert.equal(
@@ -210,17 +209,11 @@ export async function startIntegration({
   // agents a test wrote are still the ones its chief and staff run on.
   if (existingRoot === null) writeRoster(env)
 
-  // The daemon under test, chosen on purpose (see above), in the home it runs
-  // on: the home is marked with the way back's file for Node's daemon and
-  // has none for the native one's (the product reads it no more), and a
-  // restart of it on the other daemon takes the file away or makes it.
-  const asked = daemonCommand([daemon], {
-    ...(select === undefined ? {} : { named: select, leg: select }),
-    home: env.CONSENSFLOW_HOME,
-  })
+  // The daemon under test, chosen on purpose (see above).
+  const asked = daemonCommand(select === undefined ? {} : { named: select })
   const node = spawn(asked.command, asked.args, {
     cwd: REPO,
-    env: { ...env, ...asked.env },
+    env,
     stdio: ['pipe', 'pipe', 'pipe'],
   })
   const nodeErrors = []
@@ -228,8 +221,7 @@ export async function startIntegration({
   const nodeStderrEnded = new Promise((resolve) => node.stderr.once('close', resolve))
   const handleLine = await firstLine(node.stdout, node).catch(async (cause) => {
     // A daemon that refuses its home says why on its standard error, which may
-    // still be on its way when the process is seen to exit, and Node's says it
-    // in its log: it ends with 0, its refusal an unhandled rejection it logged.
+    // still be on its way when the process is seen to exit, and in its log.
     await Promise.race([nodeStderrEnded, new Promise((resolve) => setTimeout(resolve, 1000))])
     let logged = []
     try {
@@ -242,17 +234,12 @@ export async function startIntegration({
       .join('')
     throw cause
   })
-  // Both daemons write their start line before the handle line. One that is not
-  // the one asked for is ended, with the home it was given if it was this call's.
+  // The daemon writes its start line before the handle line. One that is not the
+  // native daemon is ended, with the home it was given if it was this call's.
   let handle
   let said
   try {
-    said = assertStarted(
-      asked,
-      readFileSync(join(env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8'),
-      node.pid,
-      env.CONSENSFLOW_HOME,
-    )
+    said = assertStarted(readFileSync(join(env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8'), node.pid)
     handle = JSON.parse(handleLine.line)
     assert.match(handle.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)
   } catch (cause) {

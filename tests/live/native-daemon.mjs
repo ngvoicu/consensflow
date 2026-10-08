@@ -1,27 +1,19 @@
 /**
  * The native daemon for a live driver, and what it writes as it goes: a driver
- * chooses the daemon itself (never the command line), as `home-parity.mjs`
- * does, by naming it where the integration rig reads it.
+ * chooses the daemon itself (never the command line), by naming it where the
+ * integration rig reads it.
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { daemonCommand } from '../helpers.mjs'
 
 const REPO = fileURLToPath(new URL('../..', import.meta.url))
 /** The native `cf` (`npm run build:cf`): the daemon is `cf ui`. */
 export const CF = join(REPO, 'bin', process.platform === 'win32' ? 'cf.exe' : 'cf')
 
 /** Chooses the native daemon for the integration rig this process starts. */
-export function useNativeDaemon(daemon) {
+export function useNativeDaemon() {
   process.env.CONSENSFLOW_TEST_DAEMON = JSON.stringify([CF, 'ui', '--json', '--no-open'])
-  if (!daemonCommand([daemon]).native) throw new Error('the native daemon was not chosen')
-}
-
-/** Chooses Node's daemon (`daemon`, the file that starts it), for a baseline beside the native one. */
-export function useNodeDaemon(daemon) {
-  delete process.env.CONSENSFLOW_TEST_DAEMON
-  if (daemonCommand([daemon]).native) throw new Error("Node's daemon was not chosen")
 }
 
 /**
