@@ -41,6 +41,7 @@ import { PLANTS as SCREENS } from './daemon/screens.mjs'
 import { PLANTS as SESSIONS } from './daemon/sessions.mjs'
 import { PLANTS as SUPPORT } from './daemon/support.mjs'
 import { PLANTS as TAKEN_BACK } from './daemon/taken-back.mjs'
+import { PLANTS as WAITING_NOTES } from './daemon/waiting-notes.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 /** The longest one run of tests may take, in milliseconds: the slowest takes a minute. */
@@ -59,6 +60,7 @@ const PLANTS = [
   ...DETECT,
   ...PAUSE,
   ...PAUSE_NOTES,
+  ...WAITING_NOTES,
   ...DECIDED,
   ...RECEIPT_A,
   ...OBLIGATIONS,

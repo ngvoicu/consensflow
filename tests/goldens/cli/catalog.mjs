@@ -95,7 +95,20 @@ export function catalogScenarios() {
     { name: 'catalog: a harness followed by --', args: ['catalog', '--harness', '--'] },
     { name: 'catalog: an option it has not', args: ['catalog', '--nope'] },
     { name: 'catalog: an option of the other verbs', args: ['catalog', '--model', 'x'] },
-    { name: 'catalog: a short option', args: ['catalog', '-h'] },
+    {
+      name: 'catalog: a short option',
+      args: ['catalog', '-h'],
+      kept: {
+        why: 'Node refused `-h` after a verb as an option the verb has not; Rust answers it with the usage of the verb, as it answers `--help`: every verb and sub-verb of `cf` answers `-h` and `--help` with its usage and exit code 0',
+        rust: (recorded) => ({
+          stdout: `${recorded('usage: help')
+            .stdout.split('\n')
+            .find((line) => line.startsWith('  catalog '))}\n`,
+          stderr: '',
+          code: 0,
+        }),
+      },
+    },
     { name: 'catalog: several short options', args: ['catalog', '-jq'] },
     { name: 'catalog: a short option past U+FFFF', args: ['catalog', '-😀'] },
     { name: 'catalog: the first of two refusals', args: ['catalog', '--json=1', '--nope'] },

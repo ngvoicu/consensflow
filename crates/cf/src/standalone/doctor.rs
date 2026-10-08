@@ -2,7 +2,8 @@
 //! machine, a line each: the version, the home, the harnesses, the agents, the
 //! roles, what the terminal command runs, and the hooks an older version left
 //! in Claude Code's settings. It reads and writes nothing of its own, and the
-//! words after it are no matter.
+//! words after it are no matter, but the one that asks for its usage (`--help`,
+//! `-h`), which `run` answers before it gets here.
 //!
 //! A line is said as soon as it is known, so what stops it later (a file of
 //! agents that cannot be read, or a command that cannot) is said after the

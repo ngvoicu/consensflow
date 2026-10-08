@@ -5,7 +5,8 @@
 //! stop redesign (`carriers`, `launch_stops`, `receipts`, `stops` and
 //! `taken_back`), and what a window that did not come up showed (`unstarted`),
 //! and the result a decision withdraws before the chief is given it
-//! (`decided_results`).
+//! (`decided_results`), and the notes of a task's wait that go when it moves
+//! on, and the word that follows a hold (`waiting_notes`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -58,6 +59,7 @@ mod undeliverable;
 mod unreadable_agents;
 mod unsent;
 mod unstarted;
+mod waiting_notes;
 mod window_closes;
 mod window_takes_long;
 mod window_traces;

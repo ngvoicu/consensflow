@@ -29,6 +29,20 @@ impl Ledger {
         messages::note_pause(&mut self.store, project_id, to, number, because)
     }
 
+    /// ConsensFlow tells `to` that T-`number` is held with `handle`, out of
+    /// quota until `until`, when it holds the task. The ledger writes the
+    /// words, and tells the requester again when the daemon resumes the task.
+    pub fn note_hold(
+        &mut self,
+        project_id: i64,
+        to: &str,
+        number: i64,
+        handle: &str,
+        until: &str,
+    ) -> Result<MessageView, LedgerError> {
+        messages::note_hold(&mut self.store, project_id, to, number, handle, until)
+    }
+
     /// A stall of the same pass adds T-`number` to the pause note `note`
     /// instead of a note of its own. None when the note cannot take it: its
     /// reader has it, or it was withdrawn.

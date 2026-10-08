@@ -36,9 +36,11 @@ import { PLANTS as DELETION } from './cli/deletion.mjs'
 import { PLANTS as DETECT } from './cli/detect.mjs'
 import { PLANTS as DISPATCH } from './cli/dispatch.mjs'
 import { PLANTS as FLIP } from './cli/flip.mjs'
+import { PLANTS as HELP } from './cli/help.mjs'
 import { BUILD, CLIS } from './cli/kit.mjs'
 import { PLANTS as ORACLE } from './cli/oracle.mjs'
 import { PLANTS as PARSER } from './cli/parser.mjs'
+import { PLANTS as RIG } from './cli/rig.mjs'
 import { PLANTS as VERBS } from './cli/verbs.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -51,10 +53,12 @@ const PLANTS = [
   ...VERBS,
   ...ADMIN,
   ...DISPATCH,
+  ...HELP,
   ...FLIP,
   ...DELETION,
   ...ORACLE,
   ...DETECT,
+  ...RIG,
 ]
 
 const args = process.argv.slice(2)

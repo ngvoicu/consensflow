@@ -107,11 +107,8 @@ export const PLANTS = [
     edits: [
       [
         `${LEDGER}/messages/pauses.rs`,
-        lines(
-          `         AND state = 'queued'",`,
-          '        params![reason, task.id, task.requester_id],',
-        ),
-        lines('",', '        params![reason, task.id, task.requester_id],'),
+        `         AND state = 'queued' AND body != ?",`,
+        `         AND body != ?",`,
       ],
     ],
     runs: [ledger],

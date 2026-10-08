@@ -19,6 +19,15 @@ const ASKED = [
   ['help before --version', ['help', '--version']],
 ]
 
+/**
+ * What Rust keeps from Node for `-h`: Node knew it for no command at all, as
+ * it knew `--help` after a verb for no option; every verb of Rust, and `cf`
+ * alone, answers `-h` and `--help` with its usage, exit code 0 (the board's
+ * commands too, which Node's CLI never had: `crates/cf/tests/help.rs`).
+ */
+const KEPT_HELP =
+  'Node knew `-h` for no command; Rust answers it with the usage, as it answers `--help`: every verb and sub-verb of `cf` answers `-h` and `--help` with its usage and exit code 0'
+
 /** What is no command, nor any spelling of the usage or the version. */
 const UNKNOWN = [
   ['a command that does not exist', ['frobnicate']],
@@ -57,7 +66,21 @@ export function helpScenarios() {
       args: ['help'],
       env: { CONSENSFLOW_TOKEN: '' },
     },
-    ...UNKNOWN.map(([name, args]) => ({ name: `unknown command: ${name}`, args })),
+    ...UNKNOWN.map(([name, args]) => ({
+      name: `unknown command: ${name}`,
+      args,
+      ...(name === '-h'
+        ? {
+            kept: {
+              why: KEPT_HELP,
+              rust: (recorded) => {
+                const usage = recorded('usage: --help')
+                return { stdout: usage.stdout, stderr: usage.stderr, code: usage.code }
+              },
+            },
+          }
+        : {}),
+    })),
     {
       name: 'unknown command: leaves a folder with agents in it as it was',
       args: ['frobnicate', '--json'],

@@ -86,7 +86,7 @@ fn ui_is_the_daemons_and_reaching_this_module_it_is_an_unknown_command() {
 
 #[test]
 fn the_usage_is_the_one_node_printed_with_this_builds_version_and_a_blank_line_at_its_end() {
-    for args in [&[][..], &["help"], &["--help"], &["help", "agent"]] {
+    for args in [&[][..], &["help"], &["--help"], &["-h"], &["help", "agent"]] {
         let (code, said, wrong) = ran(&NONE, args);
         assert_eq!((code, wrong.as_str()), (0, ""), "{args:?}");
         assert!(
@@ -120,7 +120,7 @@ fn a_command_it_has_not_is_said_as_json_writes_it_and_fails() {
         ("a\"b", r#""a\"b""#),
         ("a\nb", r#""a\nb""#),
         ("é😀", "\"é😀\""),
-        ("-h", r#""-h""#),
+        ("-H", r#""-H""#),
     ] {
         assert_eq!(
             ran(&NONE, &[word]),
@@ -260,4 +260,92 @@ fn doctor_says_what_stops_it_after_the_lines_it_has_said() {
         said.ends_with("roles:        bundled chief, worker, reviewer and advisor; prepared when a window launches\n"),
         "{said}"
     );
+}
+
+fn owned(words: &[&str]) -> Vec<String> {
+    words.iter().map(|word| (*word).to_owned()).collect()
+}
+
+#[test]
+fn help_is_asked_by_the_word_among_a_verbs_words_ahead_of_a_double_dash() {
+    for line in [
+        &["--help"][..],
+        &["-h"],
+        &["list", "--help"],
+        &["--json", "-h"],
+        &["--nope", "--help"],
+        &["--harness", "--help"],
+        &["x", "-h", "y"],
+    ] {
+        assert!(asks_for_help(&owned(line)), "{line:?}");
+    }
+    for line in [
+        &[][..],
+        &["--"],
+        &["--", "--help"],
+        &["x", "--", "-h"],
+        &["--harness=--help"],
+        &["--helpful"],
+        &["-help"],
+        &["-H"],
+        &["help"],
+    ] {
+        assert!(!asks_for_help(&owned(line)), "{line:?}");
+    }
+}
+
+#[test]
+fn the_usage_of_a_verb_is_its_lines_with_those_that_go_on_from_them() {
+    assert_eq!(
+        usage_of(&["agent", "edit"]),
+        "  agent edit <name> [--model <m>] [--effort <e>] [--description <d>]\n    [--work-tier critical|complex|standard|light|auto]"
+    );
+    assert_eq!(usage_of(&["agent", "list"]), "  agent list [--json]");
+    assert_eq!(usage_of(&["agent"]).lines().count(), 7);
+    assert_eq!(
+        usage_of(&["setup"]),
+        "  setup                                     Prepare private launcher and integrations"
+    );
+    assert_eq!(usage_of(&["frobnicate"]), "");
+    // `agent` alone is every action of it, and an action the verb has not is none.
+    assert_eq!(
+        help_path("agent", &owned(&["edit", "--help"])),
+        ["agent", "edit"]
+    );
+    assert_eq!(help_path("agent", &owned(&["--help"])), ["agent"]);
+    assert_eq!(help_path("agent", &owned(&["frob", "-h"])), ["agent"]);
+    assert_eq!(help_path("catalog", &owned(&["add", "-h"])), ["catalog"]);
+}
+
+#[test]
+fn a_verb_answers_help_before_it_reads_its_words_or_looks_at_the_home() {
+    // No folder to keep anything in, and words each verb would refuse.
+    for (args, line) in [
+        (&["setup", "--help"][..], "  setup  "),
+        (&["setup", "x", "-h"], "  setup  "),
+        (&["doctor", "-h"], "  doctor  "),
+        (&["doctor", "--anything", "--help"], "  doctor  "),
+        (&["catalog", "--harness", "--help"], "  catalog [--harness"),
+        (&["agent", "list", "--nope", "-h"], "  agent list [--json]"),
+        (&["agent", "add", "--nope", "--help"], "  agent add <name>"),
+        (&["agent", "remove", "-h"], "  agent remove <name>"),
+        (&["ui", "--help"], "  ui [--json] [--no-open]  "),
+    ] {
+        let (code, said, wrong) = ran(&NONE, args);
+        assert_eq!((code, wrong.as_str()), (0, ""), "{args:?}");
+        assert!(said.starts_with(line), "{args:?}: {said}");
+    }
+}
+
+#[test]
+fn a_double_dash_makes_the_word_a_positional_as_it_was() {
+    let (code, said, wrong) = ran(&NONE, &["catalog", "--", "--help"]);
+    assert_eq!((code, wrong.as_str()), (0, ""));
+    assert!(
+        said.contains("every one of them is in your agents already"),
+        "{said}"
+    );
+    let (code, _, wrong) = ran(&NONE, &["agent", "add", "--", "-h"]);
+    assert_eq!(code, 1);
+    assert!(wrong.contains("-h needs --harness and --model"), "{wrong}");
 }

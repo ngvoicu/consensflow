@@ -1,18 +1,54 @@
 //! The words a board command was given: its flags picked out wherever they
 //! stand, the rest its text, and the task and message numbers in it. A
 //! `--word` the command does not know is text, as it always was: a brief
-//! may well say `--force`.
+//! may well say `--force`. `--help` and `-h` are the one such word that asks
+//! for something when it stands alone (see [`Split::asks_for_help`]).
 
 use cf_base::js;
 
 use super::Failure;
+
+/// The two words that ask a command for its usage.
+const HELP: [&str; 2] = ["--help", "-h"];
+
+/// What a command takes: the flags it knows, and how many words come first
+/// that are not its text (the task or message number it works on).
+#[derive(Debug, Clone, Copy)]
+pub struct Shape {
+    pub switches: &'static [&'static str],
+    pub valued: &'static [&'static str],
+    pub leading: usize,
+}
+
+impl Shape {
+    /// A command whose words are all its text.
+    pub const TEXT: Self = Self {
+        switches: &[],
+        valued: &[],
+        leading: 0,
+    };
+
+    /// A command that works on a task or a message, named first, and says
+    /// the rest.
+    pub const NUMBERED: Self = Self {
+        leading: 1,
+        ..Self::TEXT
+    };
+}
 
 /// A command's words with its known flags taken out.
 #[derive(Debug, Default, PartialEq)]
 pub struct Split {
     switches: Vec<&'static str>,
     values: Vec<(&'static str, Option<String>)>,
-    /// The words that are no flag, joined by spaces.
+    /// The words that are no flag, in order.
+    operands: Vec<String>,
+    /// How many of the operands come before the command's text.
+    leading: usize,
+    /// Whether a `--` ended the flags: the operands after it are text, whatever
+    /// they say.
+    literal: bool,
+    /// The operands after the leading ones, joined by spaces: the command's text.
     pub text: String,
 }
 
@@ -30,24 +66,50 @@ impl Split {
             .find(|(name, _)| *name == flag)
             .and_then(|(_, value)| value.as_deref())
     }
+
+    /// Whether the words only ask for the command's usage: `--help` or `-h`
+    /// is the last word that is no flag, with no more words before it than the
+    /// command takes ahead of its text, and no `--` ended the flags before it.
+    /// `cf note --help` and `cf task done T-3 -h` ask; `cf note see --help`,
+    /// `cf note --help me` and `cf note -- --help` are text, as is the `--help`
+    /// a flag takes for its value.
+    pub fn asks_for_help(&self) -> bool {
+        !self.literal
+            && self.operands.len() <= self.leading + 1
+            && self
+                .operands
+                .last()
+                .is_some_and(|word| HELP.contains(&word.as_str()))
+    }
 }
 
-/// `words` with the switches in `switches` and the flags in `valued` (each
-/// taking the word after it, whatever that word is) picked out.
-pub fn split(words: &[String], switches: &[&'static str], valued: &[&'static str]) -> Split {
-    let mut split = Split::default();
-    let mut text = Vec::new();
+/// `words` with the flags of `shape` picked out wherever they stand, each
+/// valued one taking the word after it, whatever that word is. A `--` before
+/// any text ends the flags: the words after it are text, flags and `--help`
+/// included, and the `--` is not. A `--` after text is text, as it always was.
+pub fn split(words: &[String], shape: Shape) -> Split {
+    let mut split = Split {
+        leading: shape.leading,
+        ..Split::default()
+    };
     let mut rest = words.iter();
     while let Some(word) = rest.next() {
-        if let Some(flag) = switches.iter().find(|flag| **flag == word) {
+        if word == "--" && split.operands.len() <= shape.leading {
+            split.literal = true;
+            split.operands.extend(rest.by_ref().cloned());
+        } else if let Some(flag) = shape.switches.iter().find(|flag| **flag == word) {
             split.switches.push(flag);
-        } else if let Some(flag) = valued.iter().find(|flag| **flag == word) {
+        } else if let Some(flag) = shape.valued.iter().find(|flag| **flag == word) {
             split.values.push((flag, rest.next().cloned()));
         } else {
-            text.push(word.as_str());
+            split.operands.push(word.clone());
         }
     }
-    split.text = text.join(" ");
+    split.text = split
+        .operands
+        .get(shape.leading..)
+        .unwrap_or_default()
+        .join(" ");
     split
 }
 
@@ -116,12 +178,18 @@ mod tests {
         line.iter().map(|word| word.to_string()).collect()
     }
 
+    /// A command with a switch `--self` and a valued flag `--tier`, as `cf task add` has.
+    const FLAGS: Shape = Shape {
+        switches: &["--self", "--advice"],
+        valued: &["--tier", "--needs"],
+        leading: 0,
+    };
+
     #[test]
     fn picks_flags_out_wherever_they_stand_and_keeps_unknown_ones_as_text() {
         let split = split(
             &words(&["fix", "--tier", "light", "the", "--force", "flag", "--self"]),
-            &["--self", "--advice"],
-            &["--tier", "--needs"],
+            FLAGS,
         );
         assert_eq!(split.text, "fix the --force flag");
         assert!(split.on("--self"));
@@ -134,8 +202,11 @@ mod tests {
     fn a_flag_takes_the_next_word_whatever_it_is_and_the_last_one_counts() {
         let split = split(
             &words(&["--tier", "--self", "x", "--tier", "light", "--tier"]),
-            &["--self"],
-            &["--tier"],
+            Shape {
+                switches: &["--self"],
+                valued: &["--tier"],
+                leading: 0,
+            },
         );
         assert_eq!(split.text, "x");
         assert!(!split.on("--self"), "--self was the first --tier's value");
@@ -144,6 +215,75 @@ mod tests {
             None,
             "the last --tier ended the words"
         );
+    }
+
+    #[test]
+    fn help_is_asked_by_the_one_word_that_is_no_flag_and_by_nothing_else() {
+        for line in [
+            &["--help"][..],
+            &["-h"],
+            // The flags of the command stand beside it, wherever.
+            &["--self", "--help"],
+            &["--help", "--tier", "light"],
+            &["--tier", "light", "-h"],
+        ] {
+            assert!(split(&words(line), FLAGS).asks_for_help(), "{line:?}");
+        }
+        for line in [
+            &[][..],
+            // Text that has the word among others.
+            &["see", "--help"],
+            &["--help", "me"],
+            &["--help", "--help"],
+            &["--help", "-h"],
+            &["cf --help"],
+            &["--helpful"],
+            &["-help"],
+            &["-H"],
+            // The word a flag takes for its value.
+            &["--tier", "--help"],
+            // A `--` ahead of it: it is text.
+            &["--", "--help"],
+            &["--self", "--", "-h"],
+        ] {
+            assert!(!split(&words(line), FLAGS).asks_for_help(), "{line:?}");
+        }
+    }
+
+    #[test]
+    fn a_number_a_command_takes_first_may_stand_before_the_word_that_asks_for_help() {
+        for line in [&["--help"][..], &["T-3", "--help"], &["T-3", "-h"]] {
+            assert!(
+                split(&words(line), Shape::NUMBERED).asks_for_help(),
+                "{line:?}"
+            );
+        }
+        for line in [
+            &["T-3", "fix", "--help"][..],
+            &["T-3", "--help", "fix"],
+            &["T-3", "--", "--help"],
+            &["--", "--help"],
+        ] {
+            assert!(
+                !split(&words(line), Shape::NUMBERED).asks_for_help(),
+                "{line:?}"
+            );
+        }
+        // A command that takes no number first has the first word for its text.
+        assert!(!split(&words(&["T-3", "--help"]), Shape::TEXT).asks_for_help());
+    }
+
+    #[test]
+    fn a_double_dash_before_the_text_ends_the_flags_and_is_not_text_and_one_after_it_is() {
+        let text = |line: &[&str], shape| split(&words(line), shape).text;
+        assert_eq!(text(&["--", "--help"], FLAGS), "--help");
+        assert_eq!(text(&["--", "--self", "-h"], FLAGS), "--self -h");
+        assert!(!split(&words(&["--", "--self"]), FLAGS).on("--self"));
+        assert_eq!(text(&["fix", "--", "later"], FLAGS), "fix -- later");
+        assert_eq!(text(&["--self", "--", "x"], FLAGS), "x");
+        assert_eq!(text(&["T-3", "--", "--help"], Shape::NUMBERED), "--help");
+        assert_eq!(text(&["T-3", "x", "--", "y"], Shape::NUMBERED), "x -- y");
+        assert_eq!(text(&["T-3", "fix it"], Shape::NUMBERED), "fix it");
     }
 
     #[test]

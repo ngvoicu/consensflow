@@ -5,10 +5,9 @@
 //! none of these is held to a Node trace.
 
 use cf_engine::testing::{Context, Restarted};
-use cf_harness::records::Role;
 use cf_ledger::MessageView;
 
-use crate::fixtures::{after, exhausted, Tiers};
+use crate::fixtures::{after, exhausted, given, Tiers};
 
 /// A lone task's note, as every stall always told it.
 const ONE: &str = "T-1 is paused: @zeus's window closed. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation.";
@@ -29,18 +28,6 @@ fn pause_notes(context: &Context, project: i64) -> Vec<MessageView> {
         .collect();
     notes.reverse();
     notes
-}
-
-/// What the window of `handle` was given as messages, oldest first.
-fn given(context: &Context, handle: &str) -> Vec<String> {
-    context
-        .adapter
-        .agent(handle)
-        .items
-        .iter()
-        .filter(|item| item.role == Role::User)
-        .map(|item| item.text.to_string())
-        .collect()
 }
 
 /// The app quits and starts again while the chief is in the middle of a turn:
