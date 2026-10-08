@@ -103,8 +103,8 @@ fn every_profile_case_is_answered_or_refused_as_node_answered_it() {
             }
         }
     }
-    assert_eq!(cases.len(), 1283);
-    assert_eq!((profiles, refusals), (1277, 6));
+    assert_eq!(cases.len(), 1294);
+    assert_eq!((profiles, refusals), (1288, 6));
 }
 
 #[test]
@@ -140,7 +140,7 @@ fn the_whole_catalog_is_listed_as_node_lists_it_harness_by_harness_in_order() {
             ("codex", 15),
             ("pi", 32),
             ("opencode", 33),
-            ("claude", 12)
+            ("claude", 13)
         ]
     );
 }
@@ -167,7 +167,7 @@ fn every_lookup_by_name_answers_as_node_answered() {
             found += 1;
         }
     }
-    assert_eq!((lookups.len(), found, none), (123, 119, 4));
+    assert_eq!((lookups.len(), found, none), (124, 120, 4));
 }
 
 #[test]

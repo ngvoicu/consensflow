@@ -20,7 +20,7 @@ import { join } from 'node:path'
  */
 
 /** What the catalog holds, as the packaged build has it (every agent is in the roster as the catalog has it). */
-const CATALOG_SIZE = 119
+const CATALOG_SIZE = 120
 const MINE = 'my-maia'
 
 /** What the Agents screen has and no longer has: the controls the human browses and sorts by. */

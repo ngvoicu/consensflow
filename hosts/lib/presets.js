@@ -1027,6 +1027,21 @@ export const AGENT_PRESETS = [
     model: 'claude-sonnet-5-5',
     effort: 'medium',
   },
+  // Haiku 5.5 (2026-10-08), on Claude Code alone: Devin lists Claude only as Sonnet, and Pi and
+  // OpenCode (OpenRouter) carry Haiku 4.5 and a `~anthropic/claude-haiku-latest` alias, no 5.5.
+  // Claude Code 2.1.294 answers `claude-haiku-5-5` as itself, in a real window, at each of its five
+  // levels (`npm run live:agent -- --effort low …`). Light work at every level, so one row, at the
+  // ceiling like the other cheap models here (hermod, freya).
+  {
+    preset: 'huginn',
+    id: 'huginn',
+    name: 'Huginn',
+    label: 'Claude Code Haiku 5.5 MAX',
+    description: 'Routine coding and second opinions.',
+    kind: 'claude-code',
+    model: 'claude-haiku-5-5',
+    effort: 'max',
+  },
   {
     preset: 'nike',
     id: 'nike',
@@ -1396,6 +1411,7 @@ export const MODEL_LABELS = {
   'claude-fable-5': 'Claude Fable 5',
   'claude-opus-5.5': 'Claude Opus 5.5',
   'claude-sonnet-5.5': 'Claude Sonnet 5.5',
+  'claude-haiku-5.5': 'Claude Haiku 5.5',
   'gemini-3.8-flash': 'Gemini 3.8 Flash',
   'deepseek-v4.1-flash': 'DeepSeek V4.1 Flash',
   'deepseek-v4-pro-0813': 'DeepSeek V4 Pro (0813)',
@@ -1450,6 +1466,7 @@ export function agentProfile(agent) {
   const known = AGENT_PRESETS.some(
     (p) => (p.kind === 'claude-code' ? 'claude' : p.kind) === harness && p.model === agent.model,
   )
+  // A model the chain below does not name is light work at every effort: Haiku 5.5, Terra, Luna.
   let tier = 'light'
   if (known && /kimi-k3$/.test(profile.modelKey)) tier = 'complex'
   else if (
@@ -1508,7 +1525,7 @@ function modelProfile({ harness, kind, model, effort, thinking, designer }) {
         .split('/')
         .at(-1)
         // Anthropic's own ids spell the version with a dash; the key with the dot, as OpenRouter does.
-        .replace(/^claude-(fable|opus|sonnet)-(\d)-(\d)$/, 'claude-$1-$2.$3')
+        .replace(/^claude-(fable|haiku|opus|sonnet)-(\d)-(\d)$/, 'claude-$1-$2.$3')
         // Devin spells GPT versions with dashes too (gpt-6-1-sol).
         .replace(/^gpt-(\d)-(\d)-([a-z]+)$/, 'gpt-$1.$2-$3')
         // Contributor/free are reviewed pricing and data-use routes for Muse 1.3.

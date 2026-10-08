@@ -18,6 +18,8 @@ fn the_dash_in_an_anthropic_version_becomes_a_dot_where_the_pattern_matched() {
         ("claude-opus-5-5", "claude-opus-5.5"),
         ("claude-sonnet-5-5", "claude-sonnet-5.5"),
         ("claude-sonnet-0-9", "claude-sonnet-0.9"),
+        ("claude-haiku-5-5", "claude-haiku-5.5"),
+        ("claude-haiku-4-5", "claude-haiku-4.5"),
     ] {
         assert_eq!(claude_version_dotted(key).as_deref(), Some(dotted), "{key}");
     }
@@ -26,7 +28,8 @@ fn the_dash_in_an_anthropic_version_becomes_a_dot_where_the_pattern_matched() {
         "claude-fable-5-10",
         "claude-fable-٥-1",
         "claude-fable-5-٥",
-        "claude-haiku-4-5",
+        "claude-haiku-4-5-20251001",
+        "claude-instant-1-2",
         "claude-Fable-5-1",
         "Claude-fable-5-1",
         "claude-fable-5-1-x",
@@ -108,6 +111,7 @@ fn a_key_is_the_last_segment_with_its_version_in_the_catalog_s_spelling() {
     assert_eq!(curated_key("openrouter/openai/gpt-6.1-sol"), "gpt-6.1-sol");
     assert_eq!(curated_key("gpt-6-1-sol"), "gpt-6.1-sol");
     assert_eq!(curated_key("claude-opus-5-5"), "claude-opus-5.5");
+    assert_eq!(curated_key("claude-haiku-5-5"), "claude-haiku-5.5");
     assert_eq!(
         curated_key("openrouter/anthropic/claude-fable-5.1"),
         "claude-fable-5.1"

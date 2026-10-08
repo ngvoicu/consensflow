@@ -180,6 +180,8 @@ impl Catalog {
                     Some("low") => WorkTier::Light,
                     _ => WorkTier::Standard,
                 },
+                // A model the table leaves out is light work at every effort:
+                // Haiku 5.5, Terra, Luna.
                 _ => WorkTier::Light,
             }
         } else {
@@ -294,12 +296,12 @@ fn is_digit(text: &str) -> bool {
     matches!(text.as_bytes(), [b'0'..=b'9'])
 }
 
-/// `key.replace(/^claude-(fable|opus|sonnet)-(\d)-(\d)$/, 'claude-$1-$2.$3')`:
+/// `key.replace(/^claude-(fable|haiku|opus|sonnet)-(\d)-(\d)$/, 'claude-$1-$2.$3')`:
 /// the rewritten key, none when the pattern does not match.
 fn claude_version_dotted(key: &str) -> Option<String> {
     let (family, version) = key.strip_prefix("claude-")?.split_once('-')?;
     let (major, minor) = version.split_once('-')?;
-    (matches!(family, "fable" | "opus" | "sonnet") && is_digit(major) && is_digit(minor))
+    (matches!(family, "fable" | "haiku" | "opus" | "sonnet") && is_digit(major) && is_digit(minor))
         .then(|| format!("claude-{family}-{major}.{minor}"))
 }
 

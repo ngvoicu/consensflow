@@ -4588,6 +4588,9 @@ test('keeps every card as tall as it was when the row first scrolls, where a scr
     const taken = await page
       .locator('#stage')
       .evaluate((stage) => stage.offsetHeight - stage.clientHeight)
+    // A Mac set to overlay scrollbars (the default without a mouse) draws them over
+    // the content even here: nothing takes room, and there is nothing to hold.
+    test.skip(taken === 0, 'this machine shows overlay scrollbars, which take no room')
     expect(taken).toBeGreaterThan(0)
     expect((await cardsOf(page)).map((card) => card.height)).toEqual([
       chief.height,
