@@ -11,6 +11,9 @@
 //! JavaScript returned it, or `{"threw": message}` for a failure JavaScript
 //! threw, and the exit status is then 1.
 
+// Each test binary uses the part of this that it needs.
+#![allow(dead_code)]
+
 use std::future::Future;
 use std::io::{BufRead, Write};
 use std::process::ExitCode;

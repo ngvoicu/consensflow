@@ -14,7 +14,7 @@
  *    the native one, then Node's, each stopped before the next. The native one
  *    writes: the restart's resume, and what a probe project the trip adds to
  *    the copy has it hand out and deliver. Each start must succeed and read
- *    what the one before left, and the ledger stays at the schema Node knows.
+ *    what the one before left, and the ledger stays at the schema this build knows.
  *
  *   npm run live:home-parity [-- --home <dir>] [--only parity|trip] [--keep]
  *     [--looks <n>] [--every <ms>]

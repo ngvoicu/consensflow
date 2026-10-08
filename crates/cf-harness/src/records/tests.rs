@@ -118,6 +118,13 @@ fn a_zone_is_the_one_intl_takes_the_name_for() {
 }
 
 #[test]
+fn the_machine_has_a_zone_that_tells_an_offset() {
+    let at = jiff::Timestamp::UNIX_EPOCH;
+    // Any machine's zone is within a day of UTC.
+    assert!(machine_zone().to_offset(at).seconds().abs() <= 14 * 3600 + 1800);
+}
+
+#[test]
 fn a_transcript_is_had_where_its_harness_keeps_it_and_never_in_a_store() {
     let home = tempfile::tempdir().unwrap();
     let env = at_home(home.path());

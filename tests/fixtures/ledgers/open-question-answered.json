@@ -1,0 +1,59 @@
+{
+  "measure": {
+    "project": {
+      "id": 1,
+      "name": "site"
+    },
+    "chief": "chief",
+    "tasks": [],
+    "parallel": 0,
+    "advice": 0,
+    "reviews": 0,
+    "questionsOnBoard": 0,
+    "notesToHuman": [],
+    "notesText": "",
+    "longestResult": {
+      "worker": 0,
+      "advisor": 0,
+      "reviewer": 0
+    },
+    "taskCount": 0,
+    "chiefs": ["codex"],
+    "switches": 0,
+    "historyReads": [],
+    "chiefId": 2,
+    "chiefHarness": "codex",
+    "humanId": 1,
+    "chiefTurns": 4,
+    "chiefEdits": null,
+    "chiefLastWords": "Noted; the note is sent.",
+    "ownerMessages": [58, 11],
+    "askRefused": 0,
+    "ownerQuestions": {
+      "questions": 1,
+      "turnsAsking": 1,
+      "pickers": 0,
+      "texts": ["Tasks are out. What is the final report called?"]
+    },
+    "plumbing": {
+      "briefs": 0,
+      "briefsDelivered": 0,
+      "results": 0,
+      "resultsDelivered": 0,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 0,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "placed": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0
+    },
+    "chiefWordsNow": "Reading?\nTasks are out. What is the final report called?\nT-1 is in; waiting for the rest.\nNoted; the note is sent.",
+    "memberQuestionsBy": [],
+    "filesChanged": []
+  },
+  "chiefOpenQuestion": null
+}

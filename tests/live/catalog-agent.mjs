@@ -2,7 +2,7 @@
  * Live: does a catalog agent's window open on its model and answer?
  *
  * Each Claude Code agent named opens as the app opens it: the row the launcher
- * runs for it (`agentRow`, its model and effort as the catalog has them), in a
+ * runs for it (`cf agent list`, its model and effort as the catalog has them), in a
  * window of the app's own pane host, on real Claude Code with no MCP servers,
  * connectors or browser (`--strict-mcp-config --no-chrome`) and without
  * `CLAUDE_CONFIG_DIR`, in a folder of its own under the user's home. It is
@@ -22,10 +22,10 @@
  */
 import { readFileSync } from 'node:fs'
 import { parseArgs } from 'node:util'
-import { claudeTranscript } from '../../hosts/lib/completion/claude-code.js'
-import { agentRow } from '../../src/roster.js'
+import { listAgents } from '../../app/tests/agents-server.mjs'
 import { tempEnv } from '../helpers.mjs'
-import { ENV, lastLines, openWindow, READY_MS, send, sleep, startLiveApp } from './live-window.mjs'
+import { lastLines, openWindow, READY_MS, send, sleep, startLiveApp } from './live-window.mjs'
+import { claudeTranscript } from './receipt-rig.mjs'
 
 const { values } = parseArgs({
   options: {
@@ -34,17 +34,23 @@ const { values } = parseArgs({
   },
 })
 
-/** The catalog's row for each agent named, read in a home that holds nothing of the human's. */
+/**
+ * The catalog's row for each agent named (`cf agent list`, in a home that
+ * holds nothing of the human's), as the launcher runs it: its kind, model and
+ * effort.
+ */
 function rowsOf(names) {
   const t = tempEnv()
   try {
+    const agents = listAgents(t.env)
     return names.map((name) => {
-      const row = agentRow(name, t.env)
-      if (row === undefined) throw new Error(`${name} is no agent of the catalog`)
-      if (row.kind !== 'claude-code') {
-        throw new Error(`${name} runs on ${row.kind}: this check opens Claude Code agents`)
+      const wanted = name.replace(/^@/, '')
+      const agent = agents.find((candidate) => candidate.name === wanted)
+      if (agent === undefined) throw new Error(`${name} is no agent of the catalog`)
+      if (agent.harness !== 'claude') {
+        throw new Error(`${name} runs on ${agent.harness}: this check opens Claude Code agents`)
       }
-      return row
+      return { id: agent.name, kind: 'claude-code', model: agent.model, effort: agent.effort }
     })
   } finally {
     t.cleanup()
@@ -54,7 +60,7 @@ function rowsOf(names) {
 /** The models Claude Code recorded as answering in the session, once its transcript holds an answer. */
 async function answeredBy(session) {
   for (let tries = 0; tries < 20; tries += 1) {
-    const file = await claudeTranscript(session, ENV)
+    const file = claudeTranscript(session)
     const models = new Set()
     if (file !== null) {
       for (const line of readFileSync(file, 'utf8').split('\n')) {
@@ -91,7 +97,7 @@ try {
           results.push({ name, ok: false, detail: `did not open: ${lastLines(window.screen())}` })
           continue
         }
-        const { shown, seconds } = await send(app, window, window.given(ASK), '5555')
+        const { shown, seconds } = await send(app, window, await window.given(ASK), '5555')
         if (!shown) {
           results.push({ name, ok: false, detail: `NOT ANSWERED: ${lastLines(window.screen())}` })
           continue

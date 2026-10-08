@@ -1,0 +1,83 @@
+{
+  "measure": {
+    "project": {
+      "id": 1,
+      "name": "site"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Write it",
+        "pool": null,
+        "tier": null,
+        "state": "working",
+        "assignee": "zeus"
+      },
+      {
+        "number": 2,
+        "title": "Translate it",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "open",
+        "assignee": null
+      },
+      {
+        "number": 3,
+        "title": "Check it",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "open",
+        "assignee": null
+      }
+    ],
+    "parallel": 1,
+    "advice": 0,
+    "reviews": 0,
+    "questionsOnBoard": 0,
+    "notesToHuman": [],
+    "notesText": "",
+    "longestResult": {
+      "worker": 0,
+      "advisor": 0,
+      "reviewer": 0
+    },
+    "taskCount": 3,
+    "chiefs": ["claude-code"],
+    "switches": 0,
+    "historyReads": [],
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 0,
+    "chiefEdits": 0,
+    "chiefLastWords": "",
+    "ownerMessages": [],
+    "askRefused": 0,
+    "ownerQuestions": {
+      "questions": 0,
+      "turnsAsking": 0,
+      "pickers": 0,
+      "texts": []
+    },
+    "plumbing": {
+      "briefs": 1,
+      "briefsDelivered": 1,
+      "results": 0,
+      "resultsDelivered": 0,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 0,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "placed": 3,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0
+    },
+    "chiefWordsNow": "",
+    "memberQuestionsBy": [],
+    "filesChanged": []
+  }
+}

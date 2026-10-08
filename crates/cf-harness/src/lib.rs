@@ -32,3 +32,8 @@ pub use shared::launch_files::{forget_launch, sweep_launches};
 #[cfg(any(test, feature = "test-support"))]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 pub mod testing;
+
+// The answers the evals and the live tools put to the harness code, through
+// the test binary `harness-ask`: they ship with nothing.
+#[cfg(any(test, feature = "test-support"))]
+pub mod tooling;

@@ -1,0 +1,12 @@
+INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (1, 'u', 0, 'user', 'The codeword is TERN-4821', 1, NULL, '2026-09-19T10:00:07.000Z');
+INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (2, 'a', 0, 'assistant', 'The codeword is TERN-4821; it goes out on Friday.', 1, NULL, '2026-09-19T10:00:12.000Z');
+INSERT INTO project (id, directory, name, state, resume_on_start, gate, created_at, updated_at) VALUES (1, '/work/site', 'site', 'open', 0, 0, '2026-09-19T10:00:01.000Z', '2026-09-19T10:00:01.000Z');
+INSERT INTO participant (id, project_id, handle, role, roles, agent, harness, tier, member_id, out_until, out_since, created_at, left_at, switched_from_harness, switched_from_agent, switched_from_cut, designer) VALUES (1, 1, 'human', 'human', '[]', NULL, NULL, NULL, NULL, NULL, NULL, '2026-09-19T10:00:02.000Z', NULL, NULL, NULL, 0, 0);
+INSERT INTO participant (id, project_id, handle, role, roles, agent, harness, tier, member_id, out_until, out_since, created_at, left_at, switched_from_harness, switched_from_agent, switched_from_cut, designer) VALUES (2, 1, 'chief', 'chief', '[]', 'eval-codex-worker', 'codex', NULL, NULL, NULL, NULL, '2026-09-19T10:00:03.000Z', NULL, 'claude-code', NULL, 0, 0);
+INSERT INTO conversation (id, participant_id, harness, native_session, started_at, ended_at) VALUES (1, 2, 'claude-code', NULL, '2026-09-19T10:00:05.000Z', '2026-09-19T10:00:08.000Z');
+INSERT INTO conversation (id, participant_id, harness, native_session, started_at, ended_at) VALUES (2, 2, 'codex', NULL, '2026-09-19T10:00:10.000Z', NULL);
+INSERT INTO event (id, project_id, at, kind, data) VALUES (1, 1, '2026-09-19T10:00:04.000Z', 'project.created', '{"name":"site","directory":"/work/site"}');
+INSERT INTO event (id, project_id, at, kind, data) VALUES (2, 1, '2026-09-19T10:00:06.000Z', 'conversation.started', '{"participant":"chief","conversation":1}');
+INSERT INTO event (id, project_id, at, kind, data) VALUES (3, 1, '2026-09-19T10:00:09.000Z', 'chief.switched', '{"from":{"harness":"claude-code","agent":null},"to":{"harness":"codex","agent":"eval-codex-worker"},"cut":false}');
+INSERT INTO event (id, project_id, at, kind, data) VALUES (4, 1, '2026-09-19T10:00:11.000Z', 'conversation.started', '{"participant":"chief","conversation":2}');
+INSERT INTO event (id, project_id, at, kind, data) VALUES (5, 1, '2026-09-19T10:00:13.000Z', 'chief.history.read', '{"page":2,"find":null,"tools":false}');

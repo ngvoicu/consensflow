@@ -1,12 +1,9 @@
 //! What the daemon finds out about the machine it runs on: where the bundle it
-//! ships with is, found from its own binary's place, and what time zone the
-//! machine is in.
+//! ships with is, found from its own binary's place.
 
 use std::path::Path;
 
-use cf_harness::records;
 use cf_harness::seams::Bundle;
-use jiff::tz::TimeZone;
 
 /// The bundle beside the binary at `exe`: its `bin` is the binary's folder,
 /// first on every window's PATH, and its native `cf` is `bin/cf`
@@ -23,14 +20,6 @@ pub fn bundle_of(exe: &Path) -> Bundle {
         written
     };
     Bundle { bin, cf, pane_cf }
-}
-
-/// The machine's time zone as `Intl` names it, which a quota's reset named by
-/// a time of day alone is read in. A zone the system has no name for stays the
-/// system's own.
-pub fn zone() -> TimeZone {
-    let system = TimeZone::system();
-    system.iana_name().and_then(records::zone).unwrap_or(system)
 }
 
 #[cfg(test)]
@@ -63,13 +52,5 @@ mod tests {
             Path::new(r"C:\Program Files\ConsensFlow\bin\cf.exe")
         );
         assert_eq!(bundle.pane_cf, "C:/Program Files/ConsensFlow/bin/cf.exe");
-    }
-
-    #[test]
-    fn the_machine_has_a_zone_that_tells_an_offset() {
-        let zone = zone();
-        let at = jiff::Timestamp::UNIX_EPOCH;
-        // Any machine's zone is within a day of UTC.
-        assert!(zone.to_offset(at).seconds().abs() <= 14 * 3600 + 1800);
     }
 }

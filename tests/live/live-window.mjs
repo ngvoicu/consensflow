@@ -11,13 +11,15 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { findSession } from '../../evals/bare.mjs'
 import { HARNESSES, liveEnvironment, realOnPath } from '../../evals/plan.mjs'
-import { answers } from '../../hosts/lib/completion.js'
-import { interactiveStart } from '../../hosts/lib/windows.js'
-import { recordState, windowText } from '../../src/adapters/shared.js'
-import { prepareClaudeSettings } from '../../src/claude-install.js'
-import { consoleText } from '../../src/console-text.js'
-import { onWindows, paneArgv } from '../../src/harnesses.js'
 import { startIntegration } from '../integration/harness.mjs'
+import {
+  claudeSettings,
+  consoleText,
+  interactiveStart,
+  readRecord,
+  windowText,
+} from '../rust-harness.mjs'
+import { onWindows, paneArgv } from './harnesses.mjs'
 import { trustForClaude } from './trust-claude.mjs'
 
 const H = process.env.HOME ?? homedir()
@@ -68,15 +70,18 @@ export const windowEnv = (workspace) => ({
   CONSENSFLOW_HOME: join(workspace, '.consensflow'),
 })
 
+/** The launch the live windows' settings are written for: one id, so each is written over the last. */
+const LIVE_LAUNCH = '11111111-1111-4111-8111-111111111111'
+
 /**
  * What a scripted Claude window needs besides its command line: no MCP
  * servers, connectors or browser, and the settings file the app writes for
  * each launch, which skips the full-permission warning (here, its home is
  * the folder's own).
  */
-async function claudeExtras(workspace) {
+export async function claudeExtras(workspace) {
   return [
-    ...(await prepareClaudeSettings(windowEnv(workspace), 'live', { boardQuestions: false })),
+    ...(await claudeSettings(windowEnv(workspace), LIVE_LAUNCH, { boardQuestions: false })),
     '--strict-mcp-config',
     '--no-chrome',
   ]
@@ -98,7 +103,7 @@ export async function openWindow(
   const { kind } = agent
   // Claude and Pi open on an id they are given; the others name their own.
   const session = kind === 'claude-code' || kind === 'pi' ? randomUUID() : null
-  const start = interactiveStart(agent, session, null)
+  const start = await interactiveStart(agent, session, null)
   const executable = realOnPath(start.command, ENV.PATH)
   const trust = name === 'claude' ? await trustForClaude(app, workspace, executable) : null
   const pane = { id, generation: 1 }
@@ -128,8 +133,10 @@ export async function openWindow(
     /** The conversation the window opened on, where its harness lets the app name it (Claude, Pi). */
     session: native,
     /** The message as the app gives it to this window: Devin on Windows gets its marks in ASCII. */
-    given: (body) =>
-      name === 'devin' && onWindows(ENV) ? consoleText(windowText(body)) : windowText(body),
+    async given(body) {
+      const text = await windowText(body)
+      return name === 'devin' && onWindows(ENV) ? consoleText(text) : text
+    },
     /** What the harness's own record holds so far. */
     async recorded() {
       native ??= findSession(kind, {
@@ -139,9 +146,8 @@ export async function openWindow(
         env: RECORD_ENV,
       })
       if (native === null) return []
-      const read = await answers(kind, native, RECORD_ENV).catch(() => null)
-      if (read === null || read.unknown) return []
-      return recordState(read).items
+      const read = await readRecord(kind, native, RECORD_ENV).catch(() => null)
+      return read === null ? [] : read.items
     },
     /** Until the window has printed and then held still, or `ms` passed; whether it did. */
     async still(ms) {

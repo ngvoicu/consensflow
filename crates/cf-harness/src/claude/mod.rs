@@ -4,7 +4,7 @@
 //! hooks of ours an older version left in its settings.
 
 mod adapter;
-mod install;
+pub(crate) mod install;
 pub(crate) mod paths;
 mod question_hook;
 pub mod record;

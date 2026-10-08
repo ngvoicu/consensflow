@@ -62,7 +62,7 @@ function privateCopy(name, executable) {
 }
 
 /** The test binary `name`, built, and a copy of it to run (see `privateCopy`). */
-function build(name) {
+export function build(name) {
   return privateCopy(name, cargoBuild(name))
 }
 
@@ -116,7 +116,7 @@ function paneHost(target) {
  * thrown. What it asks of the pane host on the way is answered by `host` as it
  * asks, a host that throws as one that never answered.
  */
-function ask(executable, question, host) {
+export function ask(executable, question, host) {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'inherit'] })
     let heard = ''

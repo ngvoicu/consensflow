@@ -11,8 +11,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { devinFolders } from '../src/harnesses.js'
-import { openLedger } from '../src/ledger/index.js'
+import { devinFolders } from '../tests/live/harnesses.mjs'
 
 /**
  * What a chief did, read from the ledger of a finished eval run: the tasks it
@@ -22,28 +21,52 @@ import { openLedger } from '../src/ledger/index.js'
  * null for another chief), its last words, and which files of the fixture
  * the run changed or added (`workspace` against `fixture`, any harness).
  * The daemon must have closed the ledger first: the ledger holds its file.
+ * The file is read with SQLite and no ledger's code, whichever daemon wrote
+ * it: the board is one of the things a run checks, so it cannot be what the
+ * tasks are counted from.
  */
 export function measure(file, { fixture = null, workspace = null, pickers = 0 } = {}) {
-  // Every task, from the task table itself: the board is one of the things a
-  // run checks, so it cannot be what the tasks are counted from. Read before
-  // the ledger opens, which holds the file to itself.
-  const numbers = taskNumbers(file)
-  const ledger = openLedger(file)
+  const db = new DatabaseSync(file, { readOnly: true })
   let metrics
   try {
-    const [project] = ledger.projects()
+    const project = db.prepare('SELECT id, name FROM project ORDER BY id').get()
     if (project === undefined) throw new Error('the eval ledger holds no project')
-    const full = ledger.project(project.id)
-    const human = full.participants.find((p) => p.role === 'human')
-    const chief = full.participants.find((p) => p.role === 'chief')
-    const tasks = numbers
-      .filter((row) => row.projectId === project.id)
-      .map((row) => ledger.task(project.id, row.number))
-    // The inbox reads newest first; a report reads in order.
-    const toHuman = ledger
-      .inbox(human.id, { limit: 500 })
+    const participants = db
+      .prepare(
+        'SELECT id, handle, role, harness FROM participant WHERE project_id = ? AND left_at IS NULL ORDER BY id',
+      )
+      .all(project.id)
+    const human = participants.find((p) => p.role === 'human')
+    const chief = participants.find((p) => p.role === 'chief')
+    const messagesOf = db.prepare(
+      'SELECT kind, body, created_at AS createdAt, delivered_at AS deliveredAt FROM message WHERE task_id = ? ORDER BY id',
+    )
+    const tasks = db
+      .prepare(
+        `SELECT t.id, t.number, t.title, t.pool, t.tier, t.state, t.updated_at AS updatedAt,
+                q.handle AS requester, a.handle AS assignee
+         FROM task t
+         JOIN participant q ON q.id = t.requester_id
+         LEFT JOIN participant a ON a.id = t.assignee_id
+         WHERE t.project_id = ? ORDER BY t.number`,
+      )
+      .all(project.id)
+      .map((task) => ({ ...task, messages: messagesOf.all(task.id).map((m) => ({ ...m })) }))
+    // The human's inbox is its newest 500 messages that are not held at the gate; a report
+    // reads those the chief sent in order.
+    const toHuman = db
+      .prepare(
+        `SELECT m.id, m.kind, m.body, s.handle AS sender
+         FROM (SELECT * FROM message WHERE recipient_id = ? AND state != 'gated' ORDER BY id DESC LIMIT 500) m
+         LEFT JOIN participant s ON s.id = m.sender_id ORDER BY m.id`,
+      )
+      .all(human.id)
       .filter((message) => message.sender === chief.handle)
-      .sort((a, b) => a.id - b.id)
+    const eventsOf = (kind) =>
+      db
+        .prepare('SELECT data FROM event WHERE project_id = ? AND kind = ? ORDER BY id')
+        .all(project.id, kind)
+        .map((event) => JSON.parse(event.data))
     const spans = tasks
       .filter((task) => task.requester === chief.handle)
       .map((task) => {
@@ -109,15 +132,23 @@ export function measure(file, { fixture = null, workspace = null, pickers = 0 } 
       // A Switch chief: the harnesses the chief ran on, in order (each switch
       // starts a conversation), how many switches, and the history the chief
       // read with cf history (each read is in the ledger, whatever the harness).
-      chiefs: [...ledger.chiefHistory(project.id).map((c) => c.harness), chief.harness],
-      switches: eventsOf(ledger, project.id, 'chief.switched').length,
-      historyReads: eventsOf(ledger, project.id, 'chief.history.read').map((e) => e.data),
+      chiefs: [
+        ...db
+          .prepare(
+            'SELECT harness FROM conversation WHERE participant_id = ? AND ended_at IS NOT NULL ORDER BY id',
+          )
+          .all(chief.id)
+          .map((conversation) => conversation.harness),
+        chief.harness,
+      ],
+      switches: eventsOf('chief.switched').length,
+      historyReads: eventsOf('chief.history.read'),
       chiefId: chief.id,
       chiefHarness: chief.harness,
       humanId: human.id,
     }
   } finally {
-    ledger.close()
+    db.close()
   }
   const { turnEnds, ...seen } = chiefWindow(file, metrics.chiefId, metrics.chiefHarness)
   return {
@@ -131,11 +162,6 @@ export function measure(file, { fixture = null, workspace = null, pickers = 0 } 
   }
 }
 
-/**
- * The board's plumbing, counted from the ledger whatever the chief decided:
- * briefs delivered to members, results delivered back to the chief, questions
- * members put to the chief and the answers delivered back, tasks accepted.
- */
 /**
  * The questions members put to the chief, by the asker's role and harness:
  * how many, how many the chief answered, how many answers reached the
@@ -161,6 +187,11 @@ function memberQuestionsBy(file, chiefId, humanId) {
   }
 }
 
+/**
+ * The board's plumbing, counted from the ledger whatever the chief decided:
+ * briefs delivered to members, results delivered back to the chief, questions
+ * members put to the chief and the answers delivered back, tasks accepted.
+ */
 function plumbing(file, chiefId, humanId) {
   const db = new DatabaseSync(file, { readOnly: true })
   try {
@@ -326,19 +357,6 @@ function chiefWindow(file, chiefId, harness) {
 /** States a task ends in without a result. */
 const ENDED = new Set(['cancelled', 'failed'])
 
-/** Every task's project and number, read from the task table itself. */
-function taskNumbers(file) {
-  const db = new DatabaseSync(file, { readOnly: true })
-  try {
-    return db
-      .prepare('SELECT project_id AS projectId, number FROM task ORDER BY number')
-      .all()
-      .map((row) => ({ projectId: row.projectId, number: row.number }))
-  } finally {
-    db.close()
-  }
-}
-
 /** The most tasks whose windows had the brief and no result yet at one moment. */
 function mostAtOnce(spans) {
   const points = spans
@@ -402,24 +420,6 @@ export function ownerQuestions(turnEnds, { pickers = 0 } = {}) {
     turnsAsking: asking.length,
     pickers,
     texts: asking,
-  }
-}
-
-/**
- * The chief's newest message that ended a turn, during a run. The daemon's
- * ledger holds its file exclusively (PRAGMA locking_mode = EXCLUSIVE), so
- * another connection finds it locked: this reads a copy of the file and its
- * write-ahead log.
- */
-/** Every event of one kind in a project, oldest first. */
-function eventsOf(ledger, projectId, kind) {
-  const found = []
-  let after = 0
-  for (;;) {
-    const page = ledger.events(projectId, { after, limit: 500 })
-    found.push(...page.filter((event) => event.kind === kind))
-    if (page.length < 500) return found
-    after = page.at(-1).id
   }
 }
 
@@ -503,7 +503,12 @@ export function devinChiefQuestions(file, env) {
   })
 }
 
-/** `read(db)` on a copy of the SQLite database `file` and its log: the one in use stays shut. */
+/**
+ * `read(db)` on a copy of the SQLite database `file` and its log: the one in
+ * use stays shut. The daemon's ledger holds its file exclusively (PRAGMA
+ * locking_mode = EXCLUSIVE), so during a run another connection finds it
+ * locked, and a copy of the file and its write-ahead log is read instead.
+ */
 function onCopy(file, read) {
   const dir = mkdtempSync(join(tmpdir(), 'cf-eval-db-'))
   try {

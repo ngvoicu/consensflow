@@ -79,7 +79,10 @@ async function press(app, window, steps) {
  * that holds the word, and whether the window answered it.
  */
 async function pasteAndRead(app, window, n, word) {
-  await app.request('pane.write_paste', { ...window.pane, body: window.given(message(n, word)) })
+  await app.request('pane.write_paste', {
+    ...window.pane,
+    body: await window.given(message(n, word)),
+  })
   const arrived = await until(
     () => users(window.session).find((record) => record.text.includes(`m-${n} `)),
     60_000,
@@ -115,7 +118,7 @@ async function strategy(app, name) {
     const status = claudeStatus(window.session)
     await app.request('pane.write_paste', {
       ...window.pane,
-      body: window.given(message(1, 'FIRST')),
+      body: await window.given(message(1, 'FIRST')),
     })
     const pressed = Date.now()
     await app.request('pane.input', { ...window.pane, bytes: [27] })
