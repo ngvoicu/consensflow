@@ -8,6 +8,11 @@
 //! `cf codex-session <codex> <args…>` is what a Codex window runs in Codex's place.
 //! `cf ui` is the app's daemon, the one of `cf-daemon`.
 //!
+//! Every verb the usage names, the board's and the standalone ones, and every
+//! sub-verb, answers `--help` and `-h` with its usage and exit code 0, and asks
+//! the board nothing and reads nothing of the home. `hook` and `codex-session`
+//! are run by harnesses, never typed, and have no usage to answer with.
+//!
 //! Nothing else runs behind it: the bundle ships no Node and no sources, and a
 //! `use-node` file left in a home by the flip release, which sent the commands
 //! of that home to them, is read by nothing.
@@ -37,7 +42,9 @@ pub fn codex_session(env: &Env, args: &[OsString]) -> Option<i32> {
 
 /// Runs `cf ui [--json] [--no-open]` as the daemon when `args` ask for it: its
 /// exit code. It is matched on the first argument as it came, and tokenless (a
-/// window has its participant's token, and there `cf` is the board).
+/// window has its participant's token, and there `cf` is the board). `cf ui
+/// --help` is not asking for the daemon: it is the usage of the verb, which
+/// [`run`] answers.
 ///
 /// The daemon reads its input and writes its output from other threads, which
 /// would wait for the standard streams' locks for good if the caller held
@@ -46,7 +53,11 @@ pub fn codex_session(env: &Env, args: &[OsString]) -> Option<i32> {
 pub fn native_ui(env: &Env, args: &[OsString]) -> Option<i32> {
     let (first, rest) = args.split_first()?;
     let asked = first == "ui" && env.text("CONSENSFLOW_TOKEN").is_none();
-    asked.then(|| cf_daemon::ui(env, rest))
+    let words: Vec<String> = rest
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+    (asked && !standalone::asks_for_help(&words)).then(|| cf_daemon::ui(env, rest))
 }
 
 /// Runs the command in `args`: its exit code. Only a failure to write is an error.

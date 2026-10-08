@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value};
 use super::{
     carrier_body, delivery_body, m_list, require_task_state, task, task_by_id, task_found,
 };
-use crate::messages::{fold, leave_pause_notes, release_carried, transfer};
+use crate::messages::{fold, leave_pause_notes, release_carried, tell_goes_on, transfer};
 use crate::model::{self, LedgerError, ACTIVE_TASK_STATES, MAX_BODY};
 use crate::queue::{queue, send, Queued, Sent};
 use crate::store::Store;
@@ -327,7 +327,10 @@ pub(crate) fn told_since_paused(
 ///
 /// `by` is none when the daemon resumes a held task in its own name. Whoever
 /// resumes it, what its requester was told of the pause and has not been
-/// given yet is withdrawn: it would arrive after the pause was over.
+/// given yet is withdrawn: it would arrive after the pause was over. What the
+/// daemon resumes in the window it was held with is told to a requester who
+/// was given the note that it waits (`tell_goes_on`): the time that note named
+/// was only when the member was expected back.
 pub(crate) fn resume_task(
     store: &mut Store,
     project_id: i64,
@@ -433,6 +436,9 @@ pub(crate) fn resume_task(
             "queued",
             json!({ "by": by, "message": message_id }),
         )?;
+        if by.is_none() {
+            tell_goes_on(store, &task)?;
+        }
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,
             message: store.message(message_id)?,

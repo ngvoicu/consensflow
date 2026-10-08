@@ -12,6 +12,12 @@
 //!
 //! A verb says what it prints as it goes, and what stops it as `cf: <words>`
 //! with exit code 1: Node's `fail` and every error `main` caught.
+//!
+//! Every verb answers `--help` and `-h` with its usage and exit code 0, and
+//! reads and writes nothing of the home, as Node never did (it refused the
+//! word as an option no verb has). None of the verbs takes text of its own: a
+//! name or a value is the most it takes, so the word is a request for help
+//! wherever it stands ahead of a `--`, and a name after a `--` is a name.
 
 mod agent;
 mod catalog;
@@ -83,9 +89,14 @@ pub fn run(
             (Some(command.as_str()), rest)
         });
     let done = match command {
-        None | Some("help" | "--help") => writeln!(out, "{}", usage()).map_err(Stop::from),
+        None | Some("help" | "--help" | "-h") => writeln!(out, "{}", usage()).map_err(Stop::from),
         Some("--version" | "-v" | "version") => {
             writeln!(out, "{}", env!("CARGO_PKG_VERSION")).map_err(Stop::from)
+        }
+        // The word that asks for a verb's usage is answered before the verb
+        // reads its words or the home, whatever else follows it.
+        Some(verb @ ("catalog" | "agent" | "setup" | "doctor" | "ui")) if asks_for_help(rest) => {
+            writeln!(out, "{}", usage_of(&help_path(verb, rest))).map_err(Stop::from)
         }
         Some("catalog") => catalog::run(rest, out),
         Some("agent") => agent::run(env, rest, out),
@@ -111,6 +122,48 @@ pub fn run(
 /// and `cf help` adds another.
 fn usage() -> String {
     USAGE.replace("{version}", env!("CARGO_PKG_VERSION"))
+}
+
+/// Whether `words`, what follows a verb, ask for its usage: `--help` or `-h`
+/// stands among them ahead of any `--`.
+pub(crate) fn asks_for_help(words: &[String]) -> bool {
+    words
+        .iter()
+        .take_while(|word| *word != "--")
+        .any(|word| word == "--help" || word == "-h")
+}
+
+/// What `cf <verb> <words…> --help` is the usage of: the verb, and for
+/// `agent` the action when it names one.
+fn help_path<'a>(verb: &'a str, words: &'a [String]) -> Vec<&'a str> {
+    let action = words
+        .first()
+        .map(String::as_str)
+        .filter(|_| verb == "agent")
+        .filter(|word| ["add", "list", "edit", "remove"].contains(word));
+    std::iter::once(verb).chain(action).collect()
+}
+
+/// The lines of the usage that belong to the command `cf <path…>` (`["agent",
+/// "edit"]`), with the lines that go on from them.
+fn usage_of(path: &[&str]) -> String {
+    let usage = usage();
+    let mut kept = false;
+    let mut lines = Vec::new();
+    for line in usage.lines() {
+        match line.strip_prefix("  ") {
+            Some(command) if !command.starts_with(' ') => {
+                let mut words = command.split_whitespace();
+                kept = path.iter().all(|wanted| words.next() == Some(*wanted));
+            }
+            Some(_) => {}
+            None => kept = false,
+        }
+        if kept {
+            lines.push(line);
+        }
+    }
+    lines.join("\n")
 }
 
 /// The catalog this build ships, which a verb lists or names agents by.

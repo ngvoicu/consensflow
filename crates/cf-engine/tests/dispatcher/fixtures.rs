@@ -8,7 +8,7 @@ use std::rc::Rc;
 use cf_base::time::iso;
 use cf_engine::testing::Context;
 use cf_harness::contract::Pane;
-use cf_harness::records::{Level, Quota};
+use cf_harness::records::{Level, Quota, Role};
 use cf_harness::seams::Time;
 use cf_ledger::{LedgerError, NewTask, ParticipantView, ProjectView, TaskThread, TaskView};
 use regex::Regex;
@@ -207,6 +207,18 @@ pub fn notes(context: &Context, participant: i64) -> Vec<String> {
         .collect();
     sent.reverse();
     sent
+}
+
+/// What the window of `handle` was given as messages, oldest first.
+pub fn given(context: &Context, handle: &str) -> Vec<String> {
+    context
+        .adapter
+        .agent(handle)
+        .items
+        .iter()
+        .filter(|item| item.role == Role::User)
+        .map(|item| item.text.to_string())
+        .collect()
 }
 
 /// The native session a participant's conversation is on.

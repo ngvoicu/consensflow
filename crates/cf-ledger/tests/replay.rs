@@ -62,7 +62,10 @@ enum Outcome {
 /// the 23 that name `RESULT_ACCEPTED`, `RESULT_SENT_BACK` or
 /// `DECIDED_BEFORE_PASTED`, which the withdrawal of a decided task's result
 /// moved: Node leaves it queued, and its dispatcher pastes it after the
-/// decision it asked for.
+/// decision it asked for; and the 7 that name `TAKEN_BEFORE_GIVEN`,
+/// `LEFT_THE_PAUSE`, `WAIT_NOTE_TAKEN` or `GOES_ON`, which the notes of a
+/// task's wait moved: Node leaves one queued when another member takes the
+/// task or it is taken back, and tells its requester nothing when a hold ends.
 /// Departed traces that Node's suite records only off Windows: the test
 /// that writes `home-copies-004` is skipped there, as Windows holds an open
 /// ledger's files (`tests/home-copies.test.mjs`). Elsewhere each must be there.
@@ -73,8 +76,14 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-api-006", 15, "the door's read `answerTo` is gone (a poll claims with `claim_answer`), and a choice answer lands queued, not read"),
     ("core-dispatcher-010", 121, REASON_PAUSE),
     ("core-dispatcher-042", 72, "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, so the chief has no message waiting (`withWork`), where Node's has the note"),
+    ("core-dispatcher-055", 71, TAKEN_BEFORE_GIVEN),
     ("core-dispatcher-056", 103, DECIDED_BEFORE_PASTED),
+    ("core-dispatcher-057", 75, LEFT_THE_PAUSE),
+    ("core-dispatcher-058", 78, LEFT_THE_PAUSE),
+    ("core-dispatcher-060", 236, WAIT_NOTE_TAKEN),
     ("core-dispatcher-065", 147, KEPT_IN_BRIEF),
+    ("core-dispatcher-067", 129, GOES_ON),
+    ("core-dispatcher-071", 157, GOES_ON),
     ("core-dispatcher-074", 294, "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn (`task`), where Node leaves it queued"),
     ("core-dispatcher-081", 91, DECIDED_BEFORE_PASTED),
     ("core-dispatcher-089", 95, DECIDED_BEFORE_PASTED),
@@ -88,6 +97,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-conversations-008", 20, RESULT_ACCEPTED),
     ("ledger-conversations-013", 22, RESULT_SENT_BACK),
     ("ledger-conversations-014", 23, RESULT_SENT_BACK),
+    ("ledger-conversations-015", 19, WAIT_NOTE_TAKEN),
     ("ledger-gate-004", 17, RESULT_ACCEPTED),
     ("ledger-gate-006", 25, DOOR_READ),
     ("ledger-gate-007", 15, DOOR_READ),
@@ -152,6 +162,19 @@ const RESULT_SENT_BACK: &str =
 /// What the dispatcher asks of the ledger after such a decision.
 const DECIDED_BEFORE_PASTED: &str =
     "the chief accepts or sends back T-1 while its result is still queued for it, and the result is withdrawn: the chief has no message waiting (`withWork`), where Node's has the result, which its dispatcher pastes after the decision";
+/// A note that told a requester a task waits is withdrawn when another member
+/// takes the task before the requester is given it.
+const WAIT_NOTE_TAKEN: &str =
+    "the daemon gives the task to a member while the note that it was taken back or waits for a free member, which the chief had not been given, is queued: the note is withdrawn (`cancelled`, with the reason `T-n was taken by @member`), where Node leaves it `queued` to be pasted after the task was taken";
+/// What the dispatcher asks of the ledger after such a take-over.
+const TAKEN_BEFORE_GIVEN: &str =
+    "the daemon gives T-1 to a member while the note that T-1 was taken back is queued, and the note is withdrawn: the chief has no message waiting (`withWork`), where Node's has the note, which its dispatcher pastes after the task was taken";
+/// A release leaves the wait a task was in: what its requester was told of it goes.
+const LEFT_THE_PAUSE: &str =
+    "the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`cancelled`, with the reason `T-1 was taken back`), where Node leaves it `queued`";
+/// A requester who was given the note that a task is held is told when it goes on.
+const GOES_ON: &str =
+    "the daemon resumes T-1, and its requester, who was given the note that T-1 waits, is told it goes on (`T-1 goes on: its account has quota again.`), a note more and the clock read for it, where Node tells it nothing";
 /// The door's poll is a write now, `claim_answer`; `answerTo`, its read, went.
 const DOOR_READ: &str =
     "the door's read `answerTo` is gone: a poll claims the answer with `claim_answer`";

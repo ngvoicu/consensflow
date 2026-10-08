@@ -341,17 +341,12 @@ impl Dispatcher {
                     until,
                     "out of quota",
                 )?;
-                self.seams.ledger.borrow_mut().note(
+                self.seams.ledger.borrow_mut().note_hold(
                     project.id,
-                    &NewNote {
-                        from: None,
-                        to: task.requester.clone(),
-                        task: Some(task.number),
-                        body: format!(
-                            "T-{} waits with @{}: out of quota until {until}; it goes on by itself then.",
-                            task.number, participant.handle
-                        ),
-                    },
+                    &task.requester,
+                    task.number,
+                    &participant.handle,
+                    until,
                 )?;
             } else {
                 self.seams.ledger.borrow_mut().release_task(

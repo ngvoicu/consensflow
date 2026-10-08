@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 /**
@@ -20,7 +20,9 @@ import { dirname, join } from 'node:path'
  * a chief can still tell, or a chief nothing is delivered to. A key pressed in
  * a turn (the Escape that stops it) is ignored: this window is never stopped. A task
  * saying `QUOTA-OUT` is refused with a 429, Claude's way, by the window whose
- * participant `CF_TEST_QUOTA_OUT` names. A line `ASK <questions JSON>` asks
+ * participant `CF_TEST_QUOTA_OUT` names, for as long as the file
+ * `CF_TEST_QUOTA_FILE` names is there when it is set (taking it away is the
+ * human logging the harness into another account). A line `ASK <questions JSON>` asks
  * through Claude's question tool: the PreToolUse hook of the settings file
  * this window was launched with runs on a synthetic AskUserQuestion event, and
  * the turn answers with what the hook handed back. A question whose text says
@@ -201,7 +203,14 @@ async function replyTo(text) {
   // The refusing window is a session of the member the test names.
   const me = process.env.CONSENSFLOW_PARTICIPANT ?? ''
   const refusing = process.env.CF_TEST_QUOTA_OUT
-  if (/QUOTA-OUT/.test(text) && refusing && (me === refusing || me.startsWith(`${refusing}-`))) {
+  const account = process.env.CF_TEST_QUOTA_FILE
+  const refused = account === undefined || existsSync(account)
+  if (
+    /QUOTA-OUT/.test(text) &&
+    refusing &&
+    refused &&
+    (me === refusing || me.startsWith(`${refusing}-`))
+  ) {
     return null
   }
   const exact = /Reply with exactly: (\S+)/.exec(text)

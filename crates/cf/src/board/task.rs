@@ -9,11 +9,28 @@ use serde_json::{json, Map, Value};
 
 use super::lines::{a_pool, message_line, numbers, task_head, task_line, tasks, waiting_answers};
 use super::usage::{task_usage, ADD_USAGE};
-use super::words::{quoted, require_text, split, task_number, task_numbers, Split};
-use super::{text_of, Failure, Said};
+use super::words::{quoted, require_text, split, task_number, task_numbers, Shape, Split};
+use super::{help_of, text_of, Failure, Said};
 
 /// How much of one transcript item `cf task get --transcript` shows, in UTF-16 units.
 const ITEM_CHARS: usize = 600;
+
+/// The flags of `cf task add`.
+const ADD: Shape = Shape {
+    switches: &["--self", "--advice", "--review", "--design"],
+    valued: &["--tier", "--purpose", "--after", "--needs", "--before"],
+    leading: 0,
+};
+
+/// The flags of `cf task get`, which stand after its task.
+const GET: Shape = Shape {
+    switches: &["--transcript"],
+    valued: &["--last"],
+    leading: 0,
+};
+
+/// The commands that move a task, which stands first among their words.
+const MOVES: [&str; 6] = ["done", "accept", "cancel", "reopen", "pause", "resume"];
 
 pub fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
     let (action, rest) = match words.split_first() {
@@ -26,13 +43,24 @@ pub fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<
             return Ok(Said::new(json!({ "usage": usage }), usage));
         }
         Some("add") => return add(rest, board, input),
-        Some("list") | None => return board_list(board),
+        Some("list") | None => return board_list(rest, board),
         Some(_) => {}
+    }
+    // Asked for before the task is looked for in the words: `cf task get
+    // --help` has no task to name.
+    if let Some(verb) = action.filter(|action| *action == "get" || MOVES.contains(action)) {
+        let shape = Shape {
+            leading: 1,
+            ..if verb == "get" { GET } else { Shape::TEXT }
+        };
+        if split(rest, shape).asks_for_help() {
+            return Ok(help_of(&["task", verb]));
+        }
     }
     let number = task_number(rest.first().map(String::as_str))?;
     match action {
         Some("get") => get(number, rest.get(1..).unwrap_or_default(), board),
-        Some(action @ ("done" | "accept" | "cancel" | "reopen" | "pause" | "resume")) => {
+        Some(action) if MOVES.contains(&action) => {
             moved(action, number, rest.get(1..).unwrap_or_default(), board, input)
         }
         other => Err(Failure::Usage(format!(
@@ -43,11 +71,10 @@ pub fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<
 }
 
 fn add(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
-    let words = split(
-        rest,
-        &["--self", "--advice", "--review", "--design"],
-        &["--tier", "--purpose", "--after", "--needs", "--before"],
-    );
+    let words = split(rest, ADD);
+    if words.asks_for_help() {
+        return Ok(help_of(&["task", "add"]));
+    }
     let tier = words.value("--tier");
     let after = words
         .value("--after")
@@ -159,7 +186,10 @@ fn waits_for_a_member(task: &Value) -> bool {
 
 /// `cf task list`: what waits for a member, the other tasks no lane has, then
 /// each lane's.
-fn board_list(board: &Board) -> Result<Said, Failure> {
+fn board_list(rest: &[String], board: &Board) -> Result<Said, Failure> {
+    if split(rest, Shape::TEXT).asks_for_help() {
+        return Ok(help_of(&["task", "list"]));
+    }
     let answer = board.get("/api/tasks")?;
     let mut lines = Vec::new();
     let (waiting, apart): (Vec<&Value>, Vec<&Value>) = answer
@@ -198,7 +228,7 @@ fn board_list(board: &Board) -> Result<Said, Failure> {
 /// print it, and what its JSON carries of it is along the way). What is wrong
 /// with the command is said before the board is asked anything.
 fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
-    let words = split(rest, &["--transcript"], &["--last"]);
+    let words = split(rest, GET);
     let last = if words.on("--transcript") {
         Some(items_asked(&words)?)
     } else {
@@ -285,7 +315,7 @@ fn moved(
     board: &Board,
     input: &mut dyn Read,
 ) -> Result<Said, Failure> {
-    let text = text_of(rest.join(" "), input)?;
+    let text = text_of(split(rest, Shape::TEXT).text, input)?;
     if matches!(action, "done" | "reopen" | "resume") && js::trim(&text).is_empty() {
         let what = match action {
             "done" => "your result",
@@ -341,7 +371,9 @@ mod tests {
     /// What `cf task list` prints of a board with these open tasks and lanes.
     fn listed(open: &[Value], lanes: &Value) -> String {
         let api = scripted(vec![reply(200, json!({ "open": open, "lanes": lanes }))]);
-        board_list(&Board::new(Some(&api.url), "tok")).unwrap().text
+        board_list(&[], &Board::new(Some(&api.url), "tok"))
+            .unwrap()
+            .text
     }
 
     #[test]

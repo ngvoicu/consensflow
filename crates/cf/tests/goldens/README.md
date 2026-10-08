@@ -14,3 +14,21 @@ deleted.
 
 The words after each verb were recorded too, through Node's `util.parseArgs`:
 `crates/cf-base/tests/goldens/args.json`.
+
+## Two cases changed by hand after Node
+
+In `cli.darwin.json` and `cli.win32.json`, the cases `unknown command: -h`
+(`cf -h`) and `catalog: a short option` (`cf catalog -h`) keep what Node's CLI
+said (an unknown command, an unknown option; exit code 1) and carry a `kept`
+record, `{why, rust}`, which the player holds the binary to in its place: the
+usage of what was asked, exit code 0, nothing on the error output. They were
+added by hand, in both files alike, after Node, and not recorded.
+
+Why: every verb and sub-verb of `cf` answers `--help` and `-h` with its usage,
+and reads or posts nothing. The chief's report of 2026-10-08 found `cf note
+--help` posting a note that said "--help", and `cf task get --help` refused as
+no task; Node's CLI, which knew `--help` after a verb for no option, refused it
+too. The board's commands have no recorded case of this (Node's board answered
+the word only as `cf --help` and `cf task --help`, which `board.json` holds):
+`crates/cf/tests/help.rs` and `help_standalone.rs` hold the rest. The `why` of
+each case says the same in its file.

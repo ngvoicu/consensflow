@@ -47,7 +47,7 @@ fn holds_the_task_with_its_window_when_the_reset_is_near_and_goes_on_by_itself_w
     );
     assert_match(
         tiers.notes("chief").last().unwrap(),
-        r"^T-1 waits with @zeus-amber-pine: out of quota until .*; it goes on by itself then\.$",
+        r"^T-1 waits with @zeus-amber-pine: out of quota until .*, or sooner if its account has quota again; it goes on by itself\.$",
     );
     assert!(
         context.host.killed().is_empty(),
@@ -197,10 +197,10 @@ fn holds_the_task_of_every_one_of_a_members_windows_that_runs_into_its_quota_not
         tiers.notes("chief"),
         [
             format!(
-                "T-1 waits with @{one}: out of quota until {resets_at}; it goes on by itself then."
+                "T-1 waits with @{one}: out of quota until {resets_at}, or sooner if its account has quota again; it goes on by itself."
             ),
             format!(
-                "T-2 waits with @{two}: out of quota until {resets_at}; it goes on by itself then."
+                "T-2 waits with @{two}: out of quota until {resets_at}, or sooner if its account has quota again; it goes on by itself."
             ),
         ]
     );

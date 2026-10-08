@@ -8,11 +8,14 @@
 //! note names its tasks, and while it is queued they come and go. One that is
 //! resumed or cancelled leaves it ([`leave_pause_notes`]), and a note with
 //! none left is withdrawn. A note already pasted into a window has been read,
-//! and stays as it was.
+//! and stays as it was. The same goes for the other notes of a task's wait that
+//! ConsensFlow writes (a hold's, a release's, that it waits for a free member):
+//! they go when the task moves on, whichever way it does.
 
 use cf_proto::ledger::MessageView;
 use rusqlite::params;
 
+use super::holds::goes_on;
 use crate::model::LedgerError;
 use crate::queue::{send, withdraw, Sent};
 use crate::store::Store;
@@ -140,12 +143,12 @@ pub(crate) fn join_pause_note(
     })
 }
 
-/// A task that is no longer paused (it was resumed, or called off) is told no
-/// more. What its requester was told of it and has not been given yet is
-/// withdrawn, if it was told of the task alone, or loses the task if it was
-/// told of several. What it was given stays. Only ConsensFlow's own notes,
-/// still queued, are looked at: whatever else was said of the task is not
-/// about its pause.
+/// A task that no longer waits (it was resumed, called off, taken back to the
+/// board, or taken by a member) is told no more. What its requester was told
+/// of it and has not been given yet is withdrawn, if it was told of the task
+/// alone, or loses the task if it was told of several. What it was given
+/// stays. Only ConsensFlow's own notes, still queued, are looked at: whatever
+/// else was said of the task is not about its wait.
 pub(crate) fn leave_pause_notes(
     store: &Store,
     task: &TaskRow,
@@ -155,12 +158,14 @@ pub(crate) fn leave_pause_notes(
     // Whatever note of its own is queued for the requester about the task: a
     // stall's, a hold's, a refusal's, each says something about the pause. A
     // pause leaves what is queued for the task as it is, so one written
-    // before the pause goes with the rest.
+    // before the pause goes with the rest. All but the news that the task went
+    // on after a hold: that corrects what its requester was given, and a pause
+    // that comes after it does not take it back.
     store.db.execute(
         "UPDATE message SET state = 'cancelled', reason = ?
        WHERE task_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'
-         AND state = 'queued'",
-        params![reason, task.id, task.requester_id],
+         AND state = 'queued' AND body != ?",
+        params![reason, task.id, task.requester_id, goes_on(task.number)],
     )?;
     let several = store
         .db

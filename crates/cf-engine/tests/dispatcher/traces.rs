@@ -43,14 +43,16 @@
 //! and asserts what it holds directly.
 //!
 //! A test whose rule is Node's still, but whose trace the engine departs from
-//! on purpose (the notes that tell a requester its task is paused go once it is
-//! resumed; a result the chief decides on before it is given it is withdrawn,
-//! not pasted after the decision; a window that did not come up is asked what
-//! it shows before it is closed), is named in [`DEPARTED`], with what it does
-//! that Node does not. It is held to a trace of its own, recorded from the
-//! engine (`tests/departures/`, `npm run departures`), and fails when Node's
-//! trace is the engine's again, so the departure is taken off once Node does it
-//! too.
+//! on purpose (the notes that tell a requester its task is paused or waits go
+//! once it is resumed, taken back or taken by a member; a hold note says the
+//! member may be back before its reset, and the requester is told when the
+//! task goes on; a result the chief decides on before it is given it is
+//! withdrawn, not pasted after the decision; a window that did not come up is
+//! asked what it shows before it is closed), is named in [`DEPARTED`], with
+//! what it does that Node does not. It is held to a trace of its own, recorded
+//! from the engine (`tests/departures/`, `npm run departures`), and fails when
+//! Node's trace is the engine's again, so the departure is taken off once Node
+//! does it too.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -145,13 +147,65 @@ const INTERLEAVED: &[&str] = &[];
 /// chief's window after the decision it asked for.
 const SENT_BACK_BEFORE_GIVEN: &str = "the chief sends T-1 back while its result is still queued for it: the result is withdrawn, where Node pastes it into the chief's window after the decision";
 
+/// What the engine says in a hold note, where Node's said the task goes on at
+/// the reset.
+const HOLD_WORDS: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself (`, or sooner if its account has quota again; it goes on by itself.`), where Node's says it goes on at the reset (`; it goes on by itself then.`)";
+
+/// The same, and what the engine does when the daemon resumes a task whose
+/// requester was given the hold note.
+const HOLD_THEN_GOES_ON: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself, where Node's says it goes on at the reset; and when the daemon resumes T-1, the chief, who was given that note, is told `T-1 goes on: its account has quota again.`, where Node tells it nothing";
+
+/// What the engine does when the human reassigns a paused task whose stall
+/// has been told to its requester in a note not yet given.
+const STALL_LEFT: &str = "the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`T-1 was taken back`), where Node pastes it into the chief's window";
+
 /// The tests the engine departs from Node's trace in on purpose, each with
 /// what the engine does that Node does not. Node never withdraws a note that
 /// told a requester a task was paused, so the notes the engine withdraws when
-/// the task is resumed are in Node's traces still queued, and pasted; nor a
+/// the task is resumed or taken back to the board are in Node's traces still
+/// queued, and pasted; nor a note that told it the task waits (taken back,
+/// waiting for a free member) when another member takes the task; nor a
 /// task's result when the chief accepts or sends back the task before it is
-/// given the result, so Node pastes it after the decision it asked for.
+/// given the result, so Node pastes it after the decision it asked for. Node's
+/// hold note names the reset as the time the task goes on and never tells the
+/// requester it did.
 const DEPARTED: &[(&str, &str)] = &[
+    (
+        "tells the requester once when nobody of the tier is free, and assigns when one frees up",
+        "the daemon gives T-3 to @zeus while the note that T-3 waits for a free standard worker, which the chief had not been given, is queued: the note is withdrawn (`T-3 was taken by @zeus`), where Node leaves it queued to be pasted after the task was taken",
+    ),
+    (
+        "closes the old window of a task the human reassigned and gives the task to another member",
+        "the daemon gives T-1 to @diana before the chief was given the note that T-1 was taken back and waits for another worker: the note is withdrawn (`T-1 was taken by @diana`), so the chief is never given it, where Node pastes it into the chief's window",
+    ),
+    (
+        "stops the window of a task the human reassigns before the task leaves it, even one the human opened",
+        STALL_LEFT,
+    ),
+    (
+        "keeps a task with its window when the window would not stop, and reassigns it once it does",
+        STALL_LEFT,
+    ),
+    (
+        "holds the task when nobody else of its tier is free, whatever the reset",
+        HOLD_WORDS,
+    ),
+    (
+        "holds the task with its window when the reset is near, and goes on by itself when it passes",
+        HOLD_THEN_GOES_ON,
+    ),
+    (
+        "keeps a held task paused, its hold cleared, when the member it was given to by name left the staff, and says what the ledger refused",
+        HOLD_WORDS,
+    ),
+    (
+        "holds the task of every one of a member's windows that runs into its quota, not only the first one's",
+        HOLD_WORDS,
+    ),
+    (
+        "takes a member back once one of its windows gets a turn through, and what was held for it goes on",
+        HOLD_THEN_GOES_ON,
+    ),
     (
         "steps no session with no window and nothing for it, and steps it again once something is",
         "the chief accepts T-1 while its result is still queued for it, and no window is open after the restart: the result is withdrawn, so no window is opened for the chief, where Node opens it with the result as its first message",
@@ -174,7 +228,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "keeps a held task paused, its hold cleared, when its session was deleted before the hold ended, and tells its requester once while every other task goes on",
-        "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn, where Node leaves it queued",
+        "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn, where Node leaves it queued; and the hold notes say the member may be back before its reset, where Node's say the task goes on at the reset",
     ),
     (
         "fails a launch whose first message never arrives",

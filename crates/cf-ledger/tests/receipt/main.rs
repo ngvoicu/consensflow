@@ -2,7 +2,9 @@
 //! rides in the paste of the words that resume it, what makes a message
 //! received and what that does to its task, the doors and their claims, the
 //! stops a window owes, the result a decision withdraws before it is pasted
-//! (`queue.rs`), and what a ledger Node wrote means to this one (the
+//! (`queue.rs`), the notes of a task's wait that go when it moves on
+//! (`messages/pauses.rs`, `messages/holds.rs`), and what a ledger Node wrote
+//! means to this one (the
 //! rules are the docs of `messages/carrying.rs`, `messages/receipt.rs` and
 //! `tasks/pausing.rs`). Each test is a sequence of what the callers do, on a
 //! ticking clock, and asserts what the ledger then says.
@@ -22,3 +24,4 @@ mod questions;
 mod sessions;
 mod taken_back;
 mod transfers;
+mod waiting_notes;

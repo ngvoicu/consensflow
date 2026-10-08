@@ -11,7 +11,7 @@ use super::{
     a_pool, delivery_body, m_list, pool_name, release_ready, require_task_state, task_by_id,
     task_row_by_id,
 };
-use crate::messages::transfer;
+use crate::messages::{leave_pause_notes, transfer};
 use crate::model::{
     self, title_of, LedgerError, ACTIVE_TASK_STATES, COORDINATOR_ROLES, MAX_BODY, POOLS, PURPOSES,
 };
@@ -358,7 +358,10 @@ fn upstream(store: &Store, task_id: i64, other_id: i64) -> Result<bool, LedgerEr
 }
 
 /// The daemon's choice for an open task: a new session of that member,
-/// which the task is queued for from here on.
+/// which the task is queued for from here on. What its requester was told of
+/// the task's wait (that it was taken back, that it waits for a free member)
+/// and has not been given yet is withdrawn: it would arrive after the wait
+/// was over.
 pub(crate) fn assign_task(
     store: &mut Store,
     project_id: i64,
@@ -387,6 +390,7 @@ pub(crate) fn assign_task(
         }
         let pool = task.pool.as_deref().unwrap_or_default();
         let session = start_session(store, project_id, &member, pool)?;
+        leave_pause_notes(store, &task, &format!("was taken by @{}", member.handle))?;
         let at = store.at();
         store.db.execute(
             "UPDATE task SET assignee_id = ?, updated_at = ? WHERE id = ?",
@@ -424,7 +428,9 @@ pub(crate) fn assign_task(
 /// warning for the next member, and with the words that were on their way
 /// to the old one, an approved answer being delivered included, said once in
 /// its brief (`transfer`); what was still held at the gate for the human is
-/// withdrawn, and the requester is told so.
+/// withdrawn, and the requester is told so. What the requester was told of
+/// the wait the task leaves (a stall, a hold) and has not been given yet is
+/// withdrawn first: the note that follows says where the task is now.
 pub(crate) fn release_task(
     store: &mut Store,
     project_id: i64,
@@ -435,6 +441,7 @@ pub(crate) fn release_task(
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
         require_releasable(&task)?;
+        leave_pause_notes(store, &task, "was taken back")?;
         // A task paused before anyone took it has nobody to take it from.
         let member = task
             .assignee_id

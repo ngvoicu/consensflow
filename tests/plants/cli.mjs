@@ -35,8 +35,10 @@ import { PLANTS as ADMIN } from './cli/admin.mjs'
 import { PLANTS as DELETION } from './cli/deletion.mjs'
 import { PLANTS as DISPATCH } from './cli/dispatch.mjs'
 import { PLANTS as FLIP } from './cli/flip.mjs'
+import { PLANTS as HELP } from './cli/help.mjs'
 import { BUILD, CLIS } from './cli/kit.mjs'
 import { PLANTS as PARSER } from './cli/parser.mjs'
+import { PLANTS as RIG } from './cli/rig.mjs'
 import { PLANTS as VERBS } from './cli/verbs.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -44,7 +46,7 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const RUN_LIMIT = 10 * 60 * 1000
 
 /** Every plant, by area. */
-const PLANTS = [...PARSER, ...VERBS, ...ADMIN, ...DISPATCH, ...FLIP, ...DELETION]
+const PLANTS = [...PARSER, ...VERBS, ...ADMIN, ...DISPATCH, ...HELP, ...FLIP, ...DELETION, ...RIG]
 
 const args = process.argv.slice(2)
 const words = args.filter((arg) => !arg.startsWith('--'))

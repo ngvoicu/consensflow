@@ -6,12 +6,14 @@
 //! word to another until the human passes it on or declines it (`gate`); the
 //! one asked, told to answer again when an answer did not stand (`again`); and
 //! the note that tells a requester its tasks stalled, one for the tasks of a
-//! pass, which goes when they are resumed (`pauses`).
+//! pass, which goes when they are resumed (`pauses`); and the note that tells
+//! it a task is held for its member's quota, and that it goes on (`holds`).
 
 mod again;
 mod carrying;
 mod delivery;
 mod gate;
+mod holds;
 mod pauses;
 mod receipt;
 
@@ -33,6 +35,7 @@ pub(crate) use delivery::{
     last_pasted, next_delivery, retry_delivery, take_back, with_work,
 };
 pub(crate) use gate::{approve_message, decline_message, mark_read};
+pub(crate) use holds::{note_hold, tell_goes_on};
 pub(crate) use pauses::{join_pause_note, leave_pause_notes, note_pause};
 pub use receipt::Read;
 pub(crate) use receipt::{

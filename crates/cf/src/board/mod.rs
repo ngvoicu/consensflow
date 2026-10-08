@@ -2,7 +2,9 @@
 //! board, each a request to the daemon's API as the window's participant,
 //! answered in a sentence or, with `--json` anywhere, as the API's JSON.
 //! A command written wrong exits 2, one the board refused or could not take
-//! exits 1.
+//! exits 1. Every command, and `cf task`'s each, answers `--help` and `-h`
+//! with its usage and asks the board nothing: it tells the word from text by
+//! what else the command was given (`words::Split::asks_for_help`).
 
 mod cut;
 mod lines;
@@ -18,7 +20,20 @@ use serde_json::{json, Map, Value};
 use cf_base::js;
 use lines::{list, message_line};
 use usage::usage;
-use words::{message_id, quoted, require_text, split, task_number};
+use words::{message_id, quoted, require_text, split, task_number, Shape};
+
+/// The flags of `cf note`.
+const NOTE: Shape = Shape {
+    switches: &["--human"],
+    ..Shape::TEXT
+};
+
+/// The flags of `cf history`.
+const HISTORY: Shape = Shape {
+    switches: &["--tools"],
+    valued: &["--page", "--find"],
+    leading: 0,
+};
 
 /// Why a command did not do what it was asked.
 #[derive(Debug)]
@@ -85,6 +100,13 @@ impl Wrote {
     }
 }
 
+/// What `cf <path…> --help` answers: the usage of that command, and nothing
+/// asked of the board.
+fn help_of(path: &[&str]) -> Said {
+    let usage = usage::of(path);
+    Said::new(json!({ "usage": usage }), usage)
+}
+
 /// Runs the command in `words` against `board`, reading a `-` text from
 /// `input`, answering with the API's JSON when `json` asks: the exit code.
 /// Only a failure to write `out` or `err` is an error. The answers an output
@@ -139,9 +161,9 @@ fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<Said
         "ask" => ask(rest, board, input),
         "tell" => tell(rest, board, input),
         "answer" => answer(rest, board, input),
-        "staff" => staff(board),
+        "staff" => staff(rest, board),
         "history" => history(rest, board),
-        "whoami" => whoami(board),
+        "whoami" => whoami(rest, board),
         other => Err(Failure::Usage(format!(
             "unknown command {}: use task, inbox, ask, note, tell, answer, staff, whoami or history",
             quoted(other)
@@ -153,7 +175,21 @@ fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<Said
 /// wrote it whole. `cf inbox` lists first lines, cut, and says nothing of what
 /// it printed: no preview is a body, and a list does not know which are.
 fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
-    if rest.first().map(String::as_str) == Some("read") {
+    let reading = rest.first().map(String::as_str) == Some("read");
+    let asked = if reading {
+        Shape::NUMBERED
+    } else {
+        Shape::TEXT
+    };
+    let words = if reading {
+        rest.get(1..).unwrap_or_default()
+    } else {
+        rest
+    };
+    if split(words, asked).asks_for_help() {
+        return Ok(help_of(&["inbox"]));
+    }
+    if reading {
         let id = message_id(rest.get(1).map(String::as_str))?;
         let path = format!("/api/inbox/{id}");
         let message = board.get(&path)?.take("message")?;
@@ -175,7 +211,10 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
 }
 
 fn note(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
-    let words = split(rest, &["--human"], &[]);
+    let words = split(rest, NOTE);
+    if words.asks_for_help() {
+        return Ok(help_of(&["note"]));
+    }
     let human = words.on("--human");
     let mut body = Map::new();
     body.insert(
@@ -195,13 +234,17 @@ fn note(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fa
 }
 
 fn ask(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
+    let words = split(rest, Shape::TEXT);
+    if words.asks_for_help() {
+        return Ok(help_of(&["ask"]));
+    }
     // Nobody asks the human on the board: the chief asks them in its terminal.
     if rest.iter().any(|word| word == "--human") {
         return Err(Failure::Usage(
             "the human is not asked with cf ask: the chief asks them in its own terminal".into(),
         ));
     }
-    let question = require_text(text_of(rest.join(" "), input)?, "cf ask \"your question\"")?;
+    let question = require_text(text_of(words.text, input)?, "cf ask \"your question\"")?;
     let message = posted(board, "/api/questions", body_of(question))?;
     let text = format!(
         "m-{} asked @{}. The answer arrives as a message; end your turn now.",
@@ -212,10 +255,13 @@ fn ask(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
 }
 
 fn tell(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
+    let words = split(rest, Shape::NUMBERED);
+    if words.asks_for_help() {
+        return Ok(help_of(&["tell"]));
+    }
     let number = task_number(rest.first().map(String::as_str))?;
-    let words = rest.get(1..).unwrap_or_default().join(" ");
     let what = require_text(
-        text_of(words, input)?,
+        text_of(words.text, input)?,
         "cf tell T-<n> \"what to put to its window now\"",
     )?;
     let message = posted(board, &format!("/api/tasks/{number}/tell"), body_of(what))?;
@@ -228,13 +274,20 @@ fn tell(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fa
 }
 
 fn answer(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
+    let words = split(rest, Shape::NUMBERED);
+    if words.asks_for_help() {
+        return Ok(help_of(&["answer"]));
+    }
     let id = message_id(rest.first().map(String::as_str))?;
-    let words = rest.get(1..).unwrap_or_default().join(" ");
     let mut body = Map::new();
     body.insert("question".into(), id.into());
     body.insert(
         "body".into(),
-        require_text(text_of(words, input)?, "cf answer m-<id> \"your answer\"")?.into(),
+        require_text(
+            text_of(words.text, input)?,
+            "cf answer m-<id> \"your answer\"",
+        )?
+        .into(),
     );
     let message = posted(board, "/api/answers", body)?;
     let gated = message.get("state").and_then(Value::as_str) == Some("gated");
@@ -251,7 +304,10 @@ fn answer(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, 
     Ok(Said::new(message, text))
 }
 
-fn staff(board: &Board) -> Result<Said, Failure> {
+fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
+    if split(rest, Shape::TEXT).asks_for_help() {
+        return Ok(help_of(&["staff"]));
+    }
     let mut answer = board.get("/api/staff")?;
     let members = answer.take("members")?;
     let text = match answer.list(Some(&members), "members")? {
@@ -275,7 +331,10 @@ fn staff(board: &Board) -> Result<Said, Failure> {
 }
 
 fn history(rest: &[String], board: &Board) -> Result<Said, Failure> {
-    let words = split(rest, &["--tools"], &["--page", "--find"]);
+    let words = split(rest, HISTORY);
+    if words.asks_for_help() {
+        return Ok(help_of(&["history"]));
+    }
     let mut query = form_urlencoded::Serializer::new(String::new());
     if let Some(page) = words.value("--page") {
         query.append_pair("page", page);
@@ -297,7 +356,10 @@ fn history(rest: &[String], board: &Board) -> Result<Said, Failure> {
     Ok(Said::new(page, text))
 }
 
-fn whoami(board: &Board) -> Result<Said, Failure> {
+fn whoami(rest: &[String], board: &Board) -> Result<Said, Failure> {
+    if split(rest, Shape::TEXT).asks_for_help() {
+        return Ok(help_of(&["whoami"]));
+    }
     let answer = board.get("/api/whoami")?;
     let me = answer.value();
     let participant = me.get("participant");
