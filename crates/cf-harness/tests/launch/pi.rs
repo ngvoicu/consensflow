@@ -1,10 +1,9 @@
-//! Pi's adapter and its extension, as `tests/adapter-pi.test.mjs`,
-//! `tests/pi-install.test.mjs` and the Pi cases of
-//! `tests/role-skills.test.mjs` hold Node's (TEST-BDC-05, IMPL-BDC-07), each
-//! case under its sentence: how a Pi window is launched, how a message
+//! Pi's adapter and its extension, as Node's Pi adapter and install suites and
+//! the Pi cases of its role-skills suite held them (TEST-BDC-05, IMPL-BDC-07),
+//! each case under its sentence: how a Pi window is launched, how a message
 //! reaches it through the extension's inbox, what the extension says of the
-//! window, and what is made for it to load. Each test gets a throwaway home
-//! and a stand-in `pi` on PATH.
+//! window, and what is made for it to load. Each test gets a throwaway home and
+//! a stand-in `pi` on PATH.
 //!
 //! A window comes only from a prepare here, where Node's tests made up a
 //! launch bag: a test of a window on a known conversation prepares it as

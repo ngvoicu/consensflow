@@ -1,11 +1,9 @@
-//! A window's role text, written where its harness loads it
-//! (`roleConfiguration`, `src/role-skills.js`). Each launch writes its own,
-//! beside the rest of its files, and they go with it: a chief's text names
-//! its project's staff, and a shared file let a chief read another
+//! A window's role text, written where its harness loads it. Each launch writes
+//! its own, beside the rest of its files, and they go with it: a chief's text
+//! names its project's staff, and a shared file let a chief read another
 //! project's when two of them opened together. Role documents live outside
-//! every folder a harness discovers skills in by itself. Each harness's
-//! module says how its window loads the file; Codex is given the text
-//! itself.
+//! every folder a harness discovers skills in by itself. Each harness's module
+//! says how its window loads the file; Codex is given the text itself.
 
 use std::path::Path;
 

@@ -1,9 +1,8 @@
 //! A line of the daemon's trace, which the daemon writes as JSON, one line
-//! each (`src/core/trace.js`): what happened at a window, a project deleted,
-//! an event the ledger logged, or an error nobody caught. The engine says
-//! what happens at a window and a deleted project as it happens; the ledger
-//! says each of its events; the daemon says what it did not catch. The daemon
-//! writes them all.
+//! each: what happened at a window, a project deleted, an event the ledger
+//! logged, or an error nobody caught. The engine says what happens at a window
+//! and a deleted project as it happens; the ledger says each of its events; the
+//! daemon says what it did not catch. The daemon writes them all.
 
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde_json::Value;

@@ -24,7 +24,7 @@ pub fn golden(name: &str) -> Value {
         .join(name);
     let contents = fs::read_to_string(&file).unwrap_or_else(|error| {
         panic!(
-            "{}: {error}: record it on this system with `npm run goldens:admin`",
+            "{}: {error}: the admin goldens are fixed recordings of macOS and Windows (tests/goldens/README.md)",
             file.display()
         )
     });

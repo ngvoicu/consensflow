@@ -1,6 +1,6 @@
-//! npm's global folder on Windows (`NPM_GLOBAL`, `src/harnesses.js`): a CLI
-//! found there when PATH lacks it, and what is found started as one on PATH
-//! is. Windows is simulated, as other detection tests do: `OS` says it is.
+//! npm's global folder on Windows: a CLI found there when PATH lacks it, and
+//! what is found started as one on PATH is. Windows is simulated, as other
+//! detection tests do: `OS` says it is.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;

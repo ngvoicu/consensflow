@@ -1,13 +1,13 @@
-//! The agents' API held to what Node answers (`tests/goldens/daemon/FORMAT.md`,
+//! The agents' API held to what Node answers (`tests/goldens/FORMAT.md`,
 //! `decision-36`): every trace Node recorded of it, replayed against the
 //! daemon's own dispatch (`api::handle`, the screens mounted in front of the
 //! routes) in the daemon's own server, each step's answer compared as bytes
 //! (key order, absent against null), and the ledger left as Node left it; and
-//! every run of `cf` Node's `cf-board.test.mjs` made against the API, made
-//! again with the native `cf` built from this workspace, against this one: its
-//! arguments, its input, its output and its exit as Node's recorded them, and
-//! every request it wrote, whole, and no other, and each answer it was given as
-//! the bytes it got: its status, its type and its body.
+//! every run of `cf` Node's board suite made against the API, made again with
+//! the native `cf` built from this workspace, against this one: its arguments,
+//! its input, its output and its exit as Node's recorded them, and every
+//! request it wrote, whole, and no other, and each answer it was given as the
+//! bytes it got: its status, its type and its body.
 //!
 //! - `core-api-*`, `core-daemon-*`: the suites that held the API in Node.
 //! - `corners-api-*`: what no suite looked at (the order of the checks, how a
@@ -99,7 +99,7 @@ fn play_all(suites: &[&str], expected: usize) {
     assert_eq!(
         names.len(),
         expected,
-        "the traces of {suites:?}: npm run goldens:daemon"
+        "the traces of {suites:?} are missing: they are fixed recordings (tests/goldens/README.md)"
     );
     let to_hold = departed::held(&names, DEPARTED);
     let mut failures = Vec::new();

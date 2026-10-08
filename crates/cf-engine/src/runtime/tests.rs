@@ -1,6 +1,6 @@
-//! The rules the engine's work runs by, as `src/core/dispatcher.js` keeps
-//! them, held on the executor drained by hand (the kit's way) and on a real
-//! tokio `LocalSet` under its driver (the daemon's): each test runs on both.
+//! The rules the engine's work runs by, as Node's dispatcher kept them, held on
+//! the executor drained by hand (the kit's way) and on a real tokio `LocalSet`
+//! under its driver (the daemon's): each test runs on both.
 
 use std::cell::RefCell;
 use std::rc::Rc;

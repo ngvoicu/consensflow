@@ -1,7 +1,7 @@
-//! `cf setup` (`setup`, `bin/cf.mjs`): prepares what the app prepares when it
-//! opens, the terminal command and the extensions of Pi and OpenCode
-//! (`cf_harness::prepare::prepare_app`), and says which harnesses it found
-//! and how many agents there are.
+//! `cf setup`: prepares what the app prepares when it opens, the terminal
+//! command and the extensions of Pi and OpenCode
+//! (`cf_harness::prepare::prepare_app`), and says which harnesses it found and
+//! how many agents there are.
 //!
 //! The order is Node's, and it is what the recording holds: the words are read
 //! first (a word nobody asked for leaves the folder as it was), the

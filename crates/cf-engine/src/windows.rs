@@ -1,8 +1,8 @@
-//! A window's lifecycle (`src/core/windows.js`): launch (prepare, token,
-//! `pane.open`, conversation, `started`), look (`observe`, `drawn`), and close
-//! (`retire`, `close_if_free`, `close_own`). It owns the record's window part,
-//! the generation of each pane, and the chief's relaunch backoff. What a
-//! window owes a stop of its task, and how it is interrupted, is `stops`.
+//! A window's lifecycle: launch (prepare, token, `pane.open`, conversation,
+//! `started`), look (`observe`, `drawn`), and close (`retire`, `close_if_free`,
+//! `close_own`). It owns the record's window part, the generation of each pane,
+//! and the chief's relaunch backoff. What a window owes a stop of its task, and
+//! how it is interrupted, is `stops`.
 
 use std::cell::Cell;
 use std::rc::Rc;

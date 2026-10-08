@@ -1,8 +1,7 @@
-//! The human's screens (`agentsUi`, `src/core/agents-server.js`): the agents
-//! (`/`) and the harness diagnostics (`/harnesses`), each a page, and the
-//! routes they call. The app opens them with the UI token and puts it on every
-//! request; the agents' own tokens open none of this, and the UI token opens
-//! none of the agents' API.
+//! The human's screens: the agents (`/`) and the harness diagnostics
+//! (`/harnesses`), each a page, and the routes they call. The app opens them
+//! with the UI token and puts it on every request; the agents' own tokens open
+//! none of this, and the UI token opens none of the agents' API.
 //!
 //! [`Screens::handle`] is Node's `handle`, in its order:
 //!

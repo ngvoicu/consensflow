@@ -1,5 +1,5 @@
 //! What the human chose about the roster, kept in the file beside their own
-//! agents (`preferencesOf`, `RELAYED` and `hides`, `src/roster.js`).
+//! agents.
 
 use std::path::Path;
 

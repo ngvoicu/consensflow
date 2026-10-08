@@ -1,4 +1,4 @@
-//! The catalog (`src/catalog.js`): the ready-made agents of every harness.
+//! The catalog: the ready-made agents of every harness.
 //!
 //! **One list, derived.** The groups are the presets themselves, reshaped
 //! into the manager's vocabulary (kind to harness, thinking and effort to
@@ -10,8 +10,7 @@ use crate::presets::Preset;
 use crate::profile::Settings;
 use crate::Catalog;
 
-/// The effort levels `harness` accepts (`EFFORTS`, `src/catalog.js`), quoted
-/// from its CLI's own help output. `EFFORTS` keys them in `HARNESSES`' order.
+/// The effort levels `harness` accepts, quoted from its CLI's own help output.
 pub fn efforts(harness: Harness) -> &'static [&'static str] {
     match harness {
         // claude --help: "Effort level for the current session (low, medium, high, xhigh, max)"

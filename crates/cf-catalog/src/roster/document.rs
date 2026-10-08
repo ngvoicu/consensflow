@@ -1,7 +1,6 @@
-//! The document `agents.json` holds (`storedDocument` and `loadDocument`,
-//! `src/roster.js`): an ordered JSON object with typed readings over it,
-//! never a struct, since what the file carries beyond the agents is not
-//! this build's to drop.
+//! The document `agents.json` holds: an ordered JSON object with typed readings
+//! over it, never a struct, since what the file carries beyond the agents is
+//! not this build's to drop.
 
 use std::path::Path;
 

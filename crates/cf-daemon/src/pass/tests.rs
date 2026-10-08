@@ -1,7 +1,7 @@
 //! The pass loop and the throttles on tokio's paused clock: time passes only
 //! when everything that can run has, so a ten-minute heartbeat costs nothing
-//! and a wait that never ends fails at once. Ported from
-//! `core-daemon.test.mjs:33-155`, and held to what `daemon.js:194-266` does.
+//! and a wait that never ends fails at once. Ported from Node's daemon suite,
+//! and held to what Node's pass loop did.
 
 use std::cell::{Cell, RefCell};
 use std::future::pending;

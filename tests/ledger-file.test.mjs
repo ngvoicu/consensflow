@@ -213,7 +213,7 @@ describe('a ledger file made from the native ledger’s migrations', () => {
  * A recording of a real run holds the folder its project worked in and the
  * listings its windows made, so the home folder and the user of the machine
  * that made it: neither is a fixture's to carry. A recording names the home
- * folder `/home/user` and the user `user` (tests/goldens/evals/record.mjs).
+ * folder `/home/user` and the user `user` (tests/fixtures/ledgers/README.md).
  */
 describe('the frozen ledgers', () => {
   const folder = fileURLToPath(new URL('./fixtures/ledgers/', import.meta.url))

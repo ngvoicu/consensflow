@@ -15,7 +15,7 @@ use cf_proto::ledger::{
 };
 use serde_json::Value;
 
-/// `tests/goldens/text.json`, which `npm run goldens:engine` writes.
+/// `tests/goldens/text.json`, recorded from Node and fixed since.
 pub static GOLDEN: LazyLock<Value> = LazyLock::new(|| {
     let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/goldens/text.json");
     serde_json::from_str(&fs::read_to_string(file).unwrap()).unwrap()
@@ -50,7 +50,7 @@ pub fn assert_same_text(actual: &str, expected: &str, what: &str) {
     );
 }
 
-/// A text a row holds: its own, or what it is a repeat of (`common.mjs`).
+/// A text a row holds: its own, or what it is a repeat of.
 pub fn expand(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),

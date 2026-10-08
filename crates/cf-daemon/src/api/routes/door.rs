@@ -1,7 +1,7 @@
-//! `GET /api/questions/<id>` (`api.js:267-291`): a door waiting for the answer
-//! to the question it put on the board. It answers the question and the answer
-//! so far, `null` while there is none, after at most `wait` milliseconds
-//! (0 to 25,000, asked as `?wait=`, and a door polls again).
+//! `GET /api/questions/<id>`: a door waiting for the answer to the question it
+//! put on the board. It answers the question and the answer so far, `null`
+//! while there is none, after at most `wait` milliseconds (0 to 25,000, asked
+//! as `?wait=`, and a door polls again).
 //!
 //! A poll is a write: the answer it finds is *claimed* for the door, and the
 //! paste skips it from then on, until the door says it handed it to its

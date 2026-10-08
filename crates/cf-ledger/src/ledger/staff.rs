@@ -1,4 +1,4 @@
-//! The ledger's staff and their sessions, as its callers hold them (`index.js`, participants).
+//! The ledger's staff and their sessions, as its callers hold them.
 
 use super::Ledger;
 use crate::{

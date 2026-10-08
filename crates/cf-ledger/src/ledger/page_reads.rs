@@ -1,4 +1,5 @@
-//! What the page reads of the ledger, each in one frame, as its callers hold it (`index.js`, views).
+//! What the page reads of the ledger, each in one frame, as its callers hold
+//! it.
 
 use super::Ledger;
 use crate::{

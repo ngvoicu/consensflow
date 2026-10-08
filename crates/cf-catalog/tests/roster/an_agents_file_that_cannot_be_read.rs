@@ -1,5 +1,5 @@
-//! The tests under `describe('an agents file that cannot be read')` in
-//! `tests/roster.test.mjs`.
+//! The tests under `describe('an agents file that cannot be read')` in Node's
+//! roster suite.
 
 use super::*;
 use serde_json::json;

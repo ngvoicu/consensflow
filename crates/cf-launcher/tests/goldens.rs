@@ -1,6 +1,6 @@
-//! The terminal command as Node says it: the goldens that `npm run
-//! goldens:launcher` records from the real `src/terminal.js`
-//! (`tests/goldens/launcher/goldens.mjs` says what each holds), replayed.
+//! The terminal command as Node said it: the goldens recorded from Node's
+//! terminal command (`tests/goldens/README.md` says what each holds, and that
+//! they are fixed since), replayed.
 //!
 //! - `installs-cmd.json` and `installs-sh.json`: each case of
 //!   `installTerminalCommand`, played in the form of cmd.exe and of `sh`. What
@@ -32,7 +32,7 @@ fn golden(name: &str) -> Value {
         .join(name);
     let text = fs::read_to_string(&path).unwrap_or_else(|error| {
         panic!(
-            "{}: {error}; run `npm run goldens:launcher`",
+            "{}: {error}; the goldens are fixed recordings (tests/goldens/README.md)",
             path.display()
         )
     });

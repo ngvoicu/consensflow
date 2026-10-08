@@ -77,9 +77,10 @@ export const PLANTS = [
     edits: [
       [
         `${TESTS}/api/rig.rs`,
-        'let answer = handle(&context, &screens, request).await;',
+        'Box::pin(async move { handle(&context, &screens, request).await })',
         lines(
-          'let answer = match cf_daemon::api::callers::caller_of(&context, &request) {',
+          'Box::pin(async move {',
+          '                match cf_daemon::api::callers::caller_of(&context, &request) {',
           '                    Ok(caller) => match cf_daemon::api::routes::recognize(&request.method, &request.path) {',
           '                        Some(route) => {',
           '                            cf_daemon::api::routes::dispatch(&context, &caller, route, request).await',
@@ -87,7 +88,8 @@ export const PLANTS = [
           '                        None => Err(request.unknown_route()),',
           '                    },',
           '                    Err(failure) => Err(failure),',
-          '                };',
+          '                }',
+          '            })',
         ),
       ],
     ],

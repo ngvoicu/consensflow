@@ -4,7 +4,7 @@
 //! after a success and never after a failure, and a panic at any poll an
 //! `{ok: false}` with the bridge going on. An operation is the engine's work:
 //! begun where its frame is read, and run on the executor. What each
-//! operation answers is held to Node's recordings (`tests/page.rs`).
+//! operation answers is held to Node's recordings (`tests/page/`).
 
 use std::cell::{Cell, RefCell};
 use std::time::Duration;

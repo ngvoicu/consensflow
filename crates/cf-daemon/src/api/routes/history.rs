@@ -1,6 +1,6 @@
-//! `GET /api/history` (`api.js:96-122`): a page of the chief's history, which
-//! only a chief reads (a chief the human switched in reads what the human and
-//! the chiefs before it said), and which writes down that it was read.
+//! `GET /api/history`: a page of the chief's history, which only a chief reads
+//! (a chief the human switched in reads what the human and the chiefs before it
+//! said), and which writes down that it was read.
 
 use cf_base::js;
 use cf_base::refusal::Refusal;

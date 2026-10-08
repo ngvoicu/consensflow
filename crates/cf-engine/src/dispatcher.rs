@@ -1,8 +1,8 @@
-//! The dispatcher: the only actor in the daemon (`src/core/dispatcher.js`).
-//! Agents never open panes or type into them; they change the ledger (a
-//! task, a question, an answer), and the dispatcher makes it happen in the
-//! panes. Its rules are the long comment of `dispatcher.js`, each held by a
-//! test of `core-dispatcher.test.mjs`, ported under its sentence.
+//! The dispatcher: the only actor in the daemon. Agents never open panes or
+//! type into them; they change the ledger (a task, a question, an answer), and
+//! the dispatcher makes it happen in the panes. Its rules are the long comment
+//! of Node's dispatcher, each held by a test of Node's dispatcher suite, ported
+//! under its sentence.
 //!
 //! It answers the human's operations, steps every window on each pass, and
 //! holds each participant for one piece of work at a time ([`crate::runtime::Hold`]). What

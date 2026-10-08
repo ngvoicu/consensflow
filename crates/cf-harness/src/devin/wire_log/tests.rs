@@ -1,5 +1,5 @@
-//! Devin's wire log as the adapter follows it, as `tests/adapter-devin.test.mjs`
-//! holds Node's: what a look reads on from where the last one stopped, which
+//! Devin's wire log as the adapter follows it, as Node's Devin adapter suite
+//! held it: what a look reads on from where the last one stopped, which
 //! conversation the window shows, and Devin's word on its quota.
 
 use std::fs;

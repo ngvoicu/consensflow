@@ -1,7 +1,7 @@
-//! A harness's quota as its own record says it (`hosts/lib/quota.js`), in
-//! the dispatcher's terms. Codex reports its usage ahead of time; the
-//! others say so only once a request is refused (a 429, or a 402 for spent
-//! credit), so for them the daemon learns at the first refusal.
+//! A harness's quota as its own record says it, in the dispatcher's terms.
+//! Codex reports its usage ahead of time; the others say so only once a request
+//! is refused (a 429, or a 402 for spent credit), so for them the daemon learns
+//! at the first refusal.
 //!
 //! A reset that names a time of day and a zone is read in jiff's copy of the
 //! time zone database, bundled into the program (`tzdb-bundle-always`) and not

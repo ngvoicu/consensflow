@@ -1,9 +1,9 @@
-//! The standalone verbs of the CLI (`bin/cf.mjs`), answered here as Node
-//! answered them, word for word: the usage, the version, `catalog`,
-//! `agent add|list|edit|remove`, and `setup` and `doctor`, which wire the
-//! launcher, the stale hooks and the app's preparation
-//! (`cf_launcher`, `cf_harness`). `tests/cli_goldens` holds them to what Node
-//! said (`npm run goldens:cli`), file by file.
+//! The standalone verbs of the CLI, answered here as Node answered them, word
+//! for word: the usage, the version, `catalog`, `agent add|list|edit|remove`,
+//! and `setup` and `doctor`, which wire the launcher, the stale hooks and the
+//! app's preparation (`cf_launcher`, `cf_harness`). `tests/cli_goldens` holds
+//! them to what Node said, file by file (the recording was made from Node and
+//! is fixed since: `tests/goldens/README.md`).
 //!
 //! They are what `cf` answers for a tokenless command (a window has its
 //! participant's token, and there `cf` is the board). `ui` is the daemon's,
@@ -107,8 +107,8 @@ pub fn run(
     }
 }
 
-/// The usage, as `USAGE` of `bin/cf.mjs` reads: it ends with a line break of
-/// its own, and `cf help` adds another.
+/// The usage, as Node's CLI printed it: it ends with a line break of its own,
+/// and `cf help` adds another.
 fn usage() -> String {
     USAGE.replace("{version}", env!("CARGO_PKG_VERSION"))
 }

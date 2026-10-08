@@ -1,7 +1,6 @@
-//! Projects: each with its human, its chief and its staff, open or
-//! suspended, gated or not; brought back after a restart of the daemon,
-//! logged event by event, and deleted with everything in it once closed
-//! (`src/ledger/projects.js`).
+//! Projects: each with its human, its chief and its staff, open or suspended,
+//! gated or not; brought back after a restart of the daemon, logged event by
+//! event, and deleted with everything in it once closed.
 
 use cf_base::json::from_slice_lossy;
 use cf_proto::ledger::{DeletedProject, EventView, ProjectView};

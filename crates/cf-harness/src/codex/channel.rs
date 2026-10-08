@@ -1,9 +1,8 @@
-//! The channel to a Codex window's broker (`src/channels/codex.js`, and the
-//! `codex` branch of `launchConfiguration`, `src/channels.js`). A Codex window
-//! runs under ConsensFlow's supervisor, whose broker on loopback knows the
-//! thread the window's TUI shows and queues a message on it: the only way into
-//! the window. It answers `GET /session` with what the window shows
-//! ([`Channel::shown`]) and takes a message at `POST /deliver` ([`send`]).
+//! The channel to a Codex window's broker. A Codex window runs under
+//! ConsensFlow's supervisor, whose broker on loopback knows the thread the
+//! window's TUI shows and queues a message on it: the only way into the window.
+//! It answers `GET /session` with what the window shows ([`Channel::shown`])
+//! and takes a message at `POST /deliver` ([`send`]).
 
 mod send;
 
@@ -69,8 +68,7 @@ impl Session {
     }
 }
 
-/// Whether `text` is a thread's id: a UUID of version 1 to 8 (`UUID`,
-/// `src/channels/codex.js`), in either case.
+/// Whether `text` is a thread's id: a UUID of version 1 to 8, in either case.
 pub(crate) fn is_thread(text: &str) -> bool {
     let bytes = text.as_bytes();
     bytes.len() == 36

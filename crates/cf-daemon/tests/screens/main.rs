@@ -1,10 +1,10 @@
-//! The screens, held to what Node answers (`tests/goldens/daemon`, the traces of
-//! `core-agents-server.test.mjs` and `scenarios/corners-screens.test.mjs`, which
-//! `FORMAT.md` describes). Each trace is played step by step against the daemon's
-//! own front, the screens mounted over the agents' API on loopback, a folder of
-//! its own for the roster and the harnesses' stand-ins, and a ledger: every
-//! exchange is sent as a client sends it, and its answer compared as bytes, the
-//! roster file before and after each write, and no other file changed.
+//! The screens, held to what Node answers (`tests/goldens`, the traces of
+//! Node's screens suite and its corners, which `FORMAT.md` describes). Each
+//! trace is played step by step against the daemon's own front, the screens
+//! mounted over the agents' API on loopback, a folder of its own for the roster
+//! and the harnesses' stand-ins, and a ledger: every exchange is sent as a
+//! client sends it, and its answer compared as bytes, the roster file before
+//! and after each write, and no other file changed.
 //!
 //! The stand-ins of the harnesses the traces name are POSIX scripts (the
 //! traces' own list says so); on Windows each is the shape of an npm shim, as

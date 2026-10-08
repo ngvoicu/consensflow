@@ -1,12 +1,11 @@
-//! The event file in the home, `events.jsonl` (`src/core/trace.js`): one JSON
-//! line per ledger event, per change of a window's activity and per error
-//! nobody caught, appended as it happens, for whoever watches the daemon from
-//! outside (a tail, a reviewer reading along). The ledger's own log stays the
-//! record; this is its running copy. Append-only, one previous file kept once
-//! it passes its limit, as the daemon's log does, and never a reason for the
-//! daemon to fail. [`Trace::forget`] drops a deleted project's lines from
-//! both files: a project deleted leaves no trace but the line that says it
-//! was.
+//! The event file in the home, `events.jsonl`: one JSON line per ledger event,
+//! per change of a window's activity and per error nobody caught, appended as
+//! it happens, for whoever watches the daemon from outside (a tail, a reviewer
+//! reading along). The ledger's own log stays the record; this is its running
+//! copy. Append-only, one previous file kept once it passes its limit, as the
+//! daemon's log does, and never a reason for the daemon to fail.
+//! [`Trace::forget`] drops a deleted project's lines from both files: a project
+//! deleted leaves no trace but the line that says it was.
 //!
 //! Each line is appended with the file opened afresh, as Node did, and
 //! forgetting is done where it is asked, on the thread, so a line appended

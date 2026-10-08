@@ -1,6 +1,4 @@
-//! The reset a refusal names (`namedReset`, `resetIn`, `resetAt` and
-//! `zonedTime`, `hosts/lib/quota.js`): in a span of time, or at a time of day
-//! in a zone.
+//! The reset a refusal names: in a span of time, or at a time of day in a zone.
 
 use cf_base::js;
 use cf_base::time::{time_clip, utc_ms};

@@ -1,5 +1,5 @@
-//! `cf ui [--json] [--no-open]`: the verb that runs the daemon (`bin/cf.mjs`,
-//! `ui` at `:280-305` and the broken-pipe drain at `:15-28`).
+//! `cf ui [--json] [--no-open]`: the verb that runs the daemon, as Node's CLI
+//! ran it (with the drain for a broken pipe).
 //!
 //! `--json` prints the handle line, the first line of the output, which the
 //! app reads. A person gets the address of the agents screens instead, and the

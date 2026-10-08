@@ -1,7 +1,7 @@
-//! What a Codex window is launched with: the native queue its CLI must have
-//! (`requireNativeQueue`, `src/channels.js`), the port and token of the broker
-//! its supervisor serves (the `codex` branch of `launchConfiguration`), and
-//! the supervisor that opens the window (`withNativeBridge`).
+//! What a Codex window is launched with: the native queue its CLI must have,
+//! the port and token of the broker its supervisor serves (the `codex` branch
+//! of `launchConfiguration`), and the supervisor that opens the window
+//! (`withNativeBridge`).
 
 use std::path::Path;
 

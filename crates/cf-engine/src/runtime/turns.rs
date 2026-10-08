@@ -1,8 +1,8 @@
-//! The turns JavaScript's promises held a participant, and kept a waiter
-//! from it, in `#exclusive` and `#act` (`src/core/dispatcher.js`), counted
-//! where each turn is a trip through the executor's queue: with the executor
-//! drained by hand, as the kit does, and on a real tokio `LocalSet` under its
-//! driver, as the daemon does. The counts are the same on both.
+//! The turns JavaScript's promises held a participant, and kept a waiter from
+//! it, in `#exclusive` and `#act` of Node's dispatcher, counted where each turn
+//! is a trip through the executor's queue: with the executor drained by hand,
+//! as the kit does, and on a real tokio `LocalSet` under its driver, as the
+//! daemon does. The counts are the same on both.
 
 use std::cell::RefCell;
 use std::rc::Rc;

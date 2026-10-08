@@ -1,7 +1,6 @@
-//! Where Devin keeps its things (`devinFolders`, `src/harnesses.js`, and
-//! `readStore`, `hosts/lib/completion/devin.js`).
+//! Where Devin keeps its things.
 //!
-//! The home is `shared::paths::home`, `src/harnesses.js`'s.
+//! The home is `shared::paths::home`.
 
 use cf_base::env::Env;
 use cf_base::path;

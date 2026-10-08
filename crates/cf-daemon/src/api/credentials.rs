@@ -1,6 +1,5 @@
-//! The tokens of the windows that are open now (`Credentials`,
-//! `src/core/api.js:28-47`) and the UI token the app opens the human's
-//! screens with (`src/core/daemon.js:95`). **Frozen**.
+//! The tokens of the windows that are open now and the UI token the app opens
+//! the human's screens with. **Frozen**.
 //!
 //! Every window gets a token of its own, issued when the engine opens it and
 //! revoked when it closes, so a token names exactly one participant of one

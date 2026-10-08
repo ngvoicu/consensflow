@@ -1,7 +1,6 @@
-//! `JSON.parse` over the bytes of a line, kept as a schema says
-//! (`tables.json`, `lines`; `tests/goldens/records/lines.mjs`): what the
-//! reader that builds only some of a line holds of it, held to what Node's
-//! parse holds of the same bytes.
+//! `JSON.parse` over the bytes of a line, kept as a schema says (`tables.json`,
+//! `lines`): what the reader that builds only some of a line holds of it, held
+//! to what Node's parse holds of the same bytes.
 //!
 //! A case Node cannot parse the reader cannot either, and says it is no JSON.
 //! A case Node reads and the reader does not, on purpose, is one nested past

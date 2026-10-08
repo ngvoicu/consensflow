@@ -1,4 +1,5 @@
-//! The ledger's conversations, their copies and the chief's history, as its callers hold them (`index.js`, conversations).
+//! The ledger's conversations, their copies and the chief's history, as its
+//! callers hold them.
 
 use serde_json::Value;
 

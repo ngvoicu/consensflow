@@ -1,11 +1,11 @@
 //! The page's operations held to Node's recordings: every page trace of
 //! `tests/goldens/` (`core-page-*` and `corners-page-*`) played as
-//! `tests/goldens/daemon/FORMAT.md` says. Each operation is asked over a bridge
-//! as the app asks it, with the dispatcher of Node's tests as the engine; its
-//! reply is compared as the bytes the bridge carried, its kicks, the files it
-//! wrote (none, where the trace says none), the events its ledger calls logged
-//! and every call it made on a stand-in, with its arguments, in its place
-//! among the ledger's own; and the ledger is left as Node left it.
+//! `tests/goldens/FORMAT.md` says. Each operation is asked over a bridge as the
+//! app asks it, with the dispatcher of Node's tests as the engine; its reply is
+//! compared as the bytes the bridge carried, its kicks, the files it wrote
+//! (none, where the trace says none), the events its ledger calls logged and
+//! every call it made on a stand-in, with its arguments, in its place among the
+//! ledger's own; and the ledger is left as Node left it.
 
 // The player's own scaffolding: a failure in it is the test's.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -31,8 +31,8 @@ use cf_proto::page::PageOperation;
 use departed::Departed;
 use support::trace::{self, Tally};
 
-/// The suites of the page's traces: the 28 tests of `core-page.test.mjs` and the
-/// 8 of `corners-page.test.mjs`.
+/// The suites of the page's traces: the 28 tests of Node's page suite and the 8
+/// of its corners.
 const SUITES: [&str; 2] = ["core-page", "corners-page"];
 
 /// The traces the receipt and stop redesign moved on purpose, found by playing
@@ -69,7 +69,11 @@ fn the_traces_ask_every_operation_of_the_page() {
 #[test]
 fn every_page_trace_is_answered_as_node_answered() {
     let names = trace::names(&SUITES);
-    assert_eq!(names.len(), 36, "{names:?}: npm run goldens:daemon");
+    assert_eq!(
+        names.len(),
+        36,
+        "{names:?}: the traces are fixed recordings (tests/goldens/README.md)"
+    );
     let to_hold = departed::held(&names, DEPARTED);
     let mut held = Tally::default();
     let failed: Vec<String> = to_hold

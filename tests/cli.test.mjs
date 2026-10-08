@@ -53,7 +53,7 @@ describe('cf manages the roster', () => {
 
   // Which cf ran is told by the processes that started, not by the selection:
   // the native cf serves the catalog with no Node at all, and a selection that
-  // came to a cf that hands the verb to Node's sources starts a Node process.
+  // came to a cf that handed the verb to a Node process would start one.
   it('is the native cf: no Node process ran', async () => {
     const own = tempEnv()
     try {

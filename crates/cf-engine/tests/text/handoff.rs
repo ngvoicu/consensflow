@@ -1,6 +1,6 @@
 //! What passes to a chief the human switched in: its first message, and `cf
-//! history` in pages every harness shows whole. The cases of
-//! `tests/handoff.test.mjs`.
+//! history` in pages every harness shows whole. The cases of Node's handoff
+//! suite.
 
 use cf_base::refusal::Refusal;
 use cf_engine::handoff::{

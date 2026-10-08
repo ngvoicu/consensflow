@@ -1,5 +1,4 @@
-//! What an operation reads of the body the page sent, and how it says no
-//! (`async ({ project, task }) => …` in `src/core/page.js`).
+//! What an operation reads of the body the page sent, and how it says no.
 //!
 //! The page sends numbers for ids and text for names, and the ledger turned
 //! anything else away in the words of SQLite's bindings, which nobody reads: a

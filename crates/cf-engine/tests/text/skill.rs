@@ -1,4 +1,4 @@
-//! The staff table the chief reads: the cases of `tests/skill.test.mjs`.
+//! The staff table the chief reads: the cases of Node's skill suite.
 
 use cf_catalog::WorkTier;
 use cf_engine::roles::{team_table, work_tier_list};

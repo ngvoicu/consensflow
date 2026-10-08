@@ -25,14 +25,16 @@ the numbers that reading it with SQLite is held to, every field of the answer.
 | `eval-round-trip` | the ledger of a real run, taken as it was left: `npm run eval -- --scenario round-trip --chief claude --staff claude` on the native daemon (2026-10-08, a Sonnet chief and Haiku staff), one task out, a question back, an answer, a result, a review, both accepted |
 | `candidate-home` | a home of the Candidate's shape: open and closed projects with the history that went with them; `@WORK@` stands for the folder the projects live in |
 
-They were recorded by `node tests/goldens/evals/record.mjs` at the last commit
-that holds Node's ledger (44e1ea95, with `evals/measure.mjs` of that commit to
-answer), on a clock that moves a second a reading; `eval-round-trip` is the
-ledger file of the run as it was, recorded with `--file`, but for the home
+They were recorded from Node's ledger, which is gone, at 44e1ea95, the last
+commit whose `evals/measure.mjs` read a ledger through Node's module (that file
+of that commit answered), by a recorder that ran Node's ledger module on a clock
+that moves a second a reading;
+`eval-round-trip` is the ledger file of the run as it was, recorded whole, but for the home
 folder of the machine and its user, which a recording does not carry: they are
 `/home/user` and `user` in it, and `tests/ledger-file.test.mjs` holds every
 recording to that. On that ledger the
 run's own report, the measure that reads it with SQLite and the one that read it
-through Node's ledger gave the same answer, every field. The recorder retires
-with Node's ledger and the recordings stay as they are: a change to the measure
-that moves a number is made on purpose, in the recording with it.
+through Node's ledger gave the same answer, every field. The recorder went with
+Node's ledger (it is in that commit, and in the flip release `v3.0.0-alpha.82`),
+and the recordings are fixed: a change to the measure that moves a number is made
+on purpose, in the recording with it.

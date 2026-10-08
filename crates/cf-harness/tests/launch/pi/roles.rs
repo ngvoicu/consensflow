@@ -1,6 +1,6 @@
-//! The role a Pi window is given, as the Pi cases of
-//! `tests/role-skills.test.mjs` hold Node's: its whole text, in a file of the
-//! launch's own and in the system prompt.
+//! The role a Pi window is given, as the Pi cases of Node's role-skills suite
+//! held them: its whole text, in a file of the launch's own and in the system
+//! prompt.
 
 use super::*;
 

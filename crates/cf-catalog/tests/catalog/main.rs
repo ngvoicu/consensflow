@@ -1,7 +1,7 @@
-//! The 26 tests of `tests/catalog.test.mjs`, ported with the catalog: each
-//! keeps its sentence, as a name, and its assertions, against the catalog
-//! built into the crate. A `describe` block of the JS is a module here, in a
-//! file of its own; the tests outside one are in this file.
+//! The 26 tests of Node's catalog suite, ported with the catalog: each keeps
+//! its sentence, as a name, and its assertions, against the catalog built into
+//! the crate. A `describe` block of the JS is a module here, in a file of its
+//! own; the tests outside one are in this file.
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used)]

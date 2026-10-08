@@ -1,9 +1,8 @@
-//! ConsensFlow's engine (`src/core/`): the dispatcher, which steps every
-//! window on each pass and answers the human's operations, and the owners of
-//! what it orchestrates. Like Node's, it runs on one thread: its work
-//! interleaves where it waits, each participant held by one piece of work at
-//! a time ([`runtime`]), and a window's pane is opened, killed and ended
-//! through the pane host ([`host`]).
+//! ConsensFlow's engine: the dispatcher, which steps every window on each pass
+//! and answers the human's operations, and the owners of what it orchestrates.
+//! Like Node's, it runs on one thread: its work interleaves where it waits,
+//! each participant held by one piece of work at a time ([`runtime`]), and a
+//! window's pane is opened, killed and ended through the pane host ([`host`]).
 //!
 //! What it writes into windows is text alone, apart: how a message reads in
 //! its recipient's pane ([`delivery_text`]), what a chief the human switched

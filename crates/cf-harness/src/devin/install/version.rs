@@ -1,5 +1,5 @@
-//! Which Devin records complete worker replies (`supportedDevinVersion`,
-//! `src/devin-install.js`), judged by what it says to `--version`.
+//! Which Devin records complete worker replies, judged by what it says to
+//! `--version`.
 
 use std::sync::LazyLock;
 

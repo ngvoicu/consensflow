@@ -1,9 +1,9 @@
-//! The daemon's own log in the home, `daemon.log` (`src/core/log.js`): one
-//! line per thing worth knowing afterwards (it started, it stopped and why, a
-//! pass that failed or ran long, an error nobody caught), with the error's
-//! text indented under it. One previous file is kept once the log passes its
-//! limit. Never a reason for the daemon to fail: a home that cannot be written
-//! loses the line, not the run.
+//! The daemon's own log in the home, `daemon.log`: one line per thing worth
+//! knowing afterwards (it started, it stopped and why, a pass that failed or
+//! ran long, an error nobody caught), with the error's text indented under it.
+//! One previous file is kept once the log passes its limit. Never a reason for
+//! the daemon to fail: a home that cannot be written loses the line, not the
+//! run.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};

@@ -1,6 +1,6 @@
-//! The look at one harness's CLI (`#inspect`, `src/harness-admin.js`): its
-//! version, how it was installed, and the latest release, in that order,
-//! and the extension made for the two harnesses that load one.
+//! The look at one harness's CLI: its version, how it was installed, and the
+//! latest release, in that order, and the extension made for the two harnesses
+//! that load one.
 
 use std::path::PathBuf;
 

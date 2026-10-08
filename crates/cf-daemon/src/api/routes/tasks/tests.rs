@@ -1,7 +1,7 @@
 //! `GET /api/tasks` and `POST /api/tasks`: the board as summaries, and a task
 //! given. What the words and the order of the checks are is Node's: where a
 //! test says what Node answered, it is what the real API answered the same
-//! request: `node tests/goldens/daemon/probes/api-corners.mjs` prints it again.
+//! request (the probe that printed those answers went with Node's API).
 
 use std::rc::Rc;
 

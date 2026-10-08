@@ -1,13 +1,12 @@
-//! Codex's adapter and its channel, as `tests/adapter-codex.test.mjs`,
-//! `tests/codex-channel.test.mjs` and the Codex cases of
-//! `tests/role-skills.test.mjs` hold Node's (TEST-BDC-05, IMPL-BDC-07), each
-//! case under its sentence: how a Codex window is launched under the
-//! supervisor (here), how it is followed (`windows`), how a message reaches it
-//! through the supervisor's broker (`channel`), and the role it is given
-//! (`roles`). Each test gets a throwaway home and a stand-in `codex` on PATH,
-//! whose answers (its native queue, its version) and whose app-server are
-//! scripted. Asked anything else, the stand-in is not there: a launch that asks
-//! it more fails.
+//! Codex's adapter and its channel, as Node's Codex adapter suite,
+//! `tests/codex-channel.test.mjs` and the Codex cases of its role-skills suite
+//! held them (TEST-BDC-05, IMPL-BDC-07), each case under its sentence: how a
+//! Codex window is launched under the supervisor (here), how it is followed
+//! (`windows`), how a message reaches it through the supervisor's broker
+//! (`channel`), and the role it is given (`roles`). Each test gets a throwaway
+//! home and a stand-in `codex` on PATH, whose answers (its native queue, its
+//! version) and whose app-server are scripted. Asked anything else, the
+//! stand-in is not there: a launch that asks it more fails.
 //!
 //! A window comes only from a prepare here, where Node's tests made up a
 //! launch bag: a test of a window on a known thread prepares it as that

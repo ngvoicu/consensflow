@@ -1,6 +1,5 @@
-//! What looks read of OpenCode's store (`readWhole`, `readEvents` and
-//! `readOnward`, `hosts/lib/completion/opencode.js`): the session's messages
-//! and parts by id, and the events that name them, numbered in order.
+//! What looks read of OpenCode's store: the session's messages and parts by id,
+//! and the events that name them, numbered in order.
 
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};

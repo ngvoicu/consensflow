@@ -1,8 +1,6 @@
-//! The agents' API's wire views: what a route says of a row, in the fields
-//! and the order Node said them (`summary` and `messageSummary`,
-//! `src/core/api.js:453-482`), because `cf --json` prints an answer with its
-//! keys as they came. The views a route needs are added here as the routes
-//! land.
+//! The agents' API's wire views: what a route says of a row, in the fields and
+//! the order Node said them, because `cf --json` prints an answer with its keys
+//! as they came. The views a route needs are added here as the routes land.
 
 use cf_base::text::utf16_prefix;
 use cf_ledger::{MessageView, TaskCard, TaskView};
@@ -110,7 +108,7 @@ impl From<&MessageView> for MessageSummary {
     }
 }
 
-/// The answer to a question, as a door reads it (`api.js:287-289`).
+/// The answer to a question, as a door reads it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Answered {
     pub id: i64,

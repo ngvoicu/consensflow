@@ -1,9 +1,9 @@
-//! libuv's names and words as Node prints them: the golden of the platform
-//! this runs on (`tests/goldens/errno/<platform>.json`, which `npm run
-//! goldens:errno` writes from `util.getSystemErrorMap()`). The words of every
-//! name are held on every platform; on Unix so is the name of every errno,
-//! which must be the one Node gives it, with none named that Node leaves
-//! `UNKNOWN`. A platform with no golden fails: it is to be recorded there.
+//! libuv's names and words as Node prints them: the golden of the platform this
+//! runs on (`tests/goldens/errno/<platform>.json`, recorded from
+//! `util.getSystemErrorMap()`, and fixed since). The words of every name are
+//! held on every platform; on Unix so is the name of every errno, which must be
+//! the one Node gives it, with none named that Node leaves `UNKNOWN`. A
+//! platform with no golden fails: it is to be recorded there.
 
 // The golden's own reading: a failure in it is the test's.
 #![allow(clippy::unwrap_used)]
@@ -36,7 +36,7 @@ fn golden() -> Vec<Value> {
         .join(format!("{}.json", platform()));
     let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
         panic!(
-            "no errno golden for {}: {error}; run `node tests/goldens/errno/record.mjs` on it ({})",
+            "no errno golden for {}: {error} ({}); Node's recorder is gone, so a system with no golden is one these tests do not cover",
             platform(),
             path.display()
         )

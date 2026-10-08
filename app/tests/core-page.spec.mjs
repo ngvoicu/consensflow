@@ -1250,8 +1250,8 @@ test('draws the markdown an agent wrote in an open step: bold, italic, code, hea
         '',
         '| File | Change |',
         '| --- | --- |',
-        '| `src/lexer.js` | tokens carry their position |',
-        '| src/errors.js | a new **LexError** |',
+        '| `lib/lexer.js` | tokens carry their position |',
+        '| lib/errors.js | a new **LexError** |',
         '',
         '1. Read the tokens',
         '2. Keep their place',
@@ -1290,12 +1290,12 @@ test('draws the markdown an agent wrote in an open step: bold, italic, code, hea
   const table = drawn.locator('table')
   await expect(table.locator('th')).toHaveText(['File', 'Change'])
   await expect(table.locator('td')).toHaveText([
-    'src/lexer.js',
+    'lib/lexer.js',
     'tokens carry their position',
-    'src/errors.js',
+    'lib/errors.js',
     'a new LexError',
   ])
-  await expect(table.locator('td code')).toHaveText(['src/lexer.js'])
+  await expect(table.locator('td code')).toHaveText(['lib/lexer.js'])
   await expect(table.locator('td strong')).toHaveText(['LexError'])
   // A list nests by its indent.
   const items = drawn.locator('> ol > li')

@@ -1,8 +1,7 @@
-//! The daemon's two files, held line for line to what Node writes
-//! (`tests/goldens/daemon/record.mjs` records them, at a clock fixed at
-//! 2026-10-05T10:00:00.123Z): the lines of `daemon.log` and of
-//! `events.jsonl`, how each is moved aside past its limit, and what `forget`
-//! leaves of a trace.
+//! The daemon's two files, held line for line to what Node writes (recorded
+//! from Node, at a clock fixed at 2026-10-05T10:00:00.123Z, and fixed since):
+//! the lines of `daemon.log` and of `events.jsonl`, how each is moved aside
+//! past its limit, and what `forget` leaves of a trace.
 
 // The goldens' own reading: a failure in it is the test's.
 #![allow(clippy::unwrap_used)]

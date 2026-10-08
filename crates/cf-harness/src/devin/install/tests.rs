@@ -1,8 +1,8 @@
-//! What Devin's window runs with, as the cases of
-//! `tests/adapter-devin.test.mjs` hold Node's that reach no window: the
-//! version asked of it, the config of its launch's own, the owner's config
-//! read as Devin reads it, and the prompt file. Node's tests took any
-//! filename-safe word for a launch, and so does this.
+//! What Devin's window runs with, as the cases of Node's Devin adapter suite
+//! held that reach no window: the version asked of it, the config of its
+//! launch's own, the owner's config read as Devin reads it, and the prompt
+//! file. Node's tests took any filename-safe word for a launch, and so does
+//! this.
 
 use std::fs;
 use std::path::PathBuf;

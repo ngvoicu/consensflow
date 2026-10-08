@@ -1,9 +1,9 @@
-//! The dispatcher's tests (`tests/core-dispatcher.test.mjs`), ported under
-//! their sentences, each held to the Node trace of the same test
-//! ([`traces`]). What Node's dispatcher does not do has tests of its own,
-//! held to no trace: the notes of a pause (`pause_notes`), and the receipt and
-//! stop redesign (`carriers`, `launch_stops`, `receipts`, `stops` and
-//! `taken_back`), and what a window that did not come up showed (`unstarted`).
+//! The dispatcher's tests (Node's dispatcher suite), ported under their
+//! sentences, each held to the Node trace of the same test ([`traces`]). What
+//! Node's dispatcher does not do has tests of its own, held to no trace: the
+//! notes of a pause (`pause_notes`), and the receipt and stop redesign
+//! (`carriers`, `launch_stops`, `receipts`, `stops` and `taken_back`), and what
+//! a window that did not come up showed (`unstarted`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]

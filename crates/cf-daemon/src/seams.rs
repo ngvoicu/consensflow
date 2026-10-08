@@ -1,7 +1,7 @@
-//! The engine's seams that are the daemon's to give (`dispatcher.js`'s
-//! options, `src/core/daemon.js:137-155`): what a window starts with (its
-//! environment and its role text), the launch ids and the launch files, an
-//! adapter for each harness, and where the engine's work runs.
+//! The engine's seams that are the daemon's to give (the options Node's
+//! dispatcher was given): what a window starts with (its environment and its
+//! role text), the launch ids and the launch files, an adapter for each
+//! harness, and where the engine's work runs.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -24,11 +24,10 @@ mod boundary;
 
 pub use boundary::{DaemonRecords, DaemonTime};
 
-/// The environment a window's pane starts with before its harness's own
-/// (`paneEnv`, `daemon.js:148-154`): where the API is, which project and
-/// participant the window is, and a PATH with the bundle's `bin` first, so
-/// the `cf` of this install is the one a window finds. The token is added at
-/// launch.
+/// The environment a window's pane starts with before its harness's own (as
+/// Node's daemon gave it): where the API is, which project and participant the
+/// window is, and a PATH with the bundle's `bin` first, so the `cf` of this
+/// install is the one a window finds. The token is added at launch.
 pub struct WindowEnv {
     /// The API's address, with no slash at its end.
     pub url: String,
@@ -139,8 +138,7 @@ impl LaunchFiles for LaunchFolders {
 }
 
 /// An adapter for each harness, built once with the daemon's services, by the
-/// word the ledger names the harness with (`createAdapters`,
-/// `src/adapters/index.js`).
+/// word the ledger names the harness with.
 pub struct HarnessAdapters {
     by_harness: HashMap<Harness, Rc<dyn Adapter>>,
 }

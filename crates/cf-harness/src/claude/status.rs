@@ -1,8 +1,7 @@
-//! Claude Code's own live status of each of its running processes
-//! (`claudeStatuses`, `src/adapters/claude-code.js`), from the
-//! `sessions/<pid>.json` files it keeps: the conversation the process
-//! shows, and busy, idle or waiting, with the reason (a permission prompt,
-//! input needed, a dialog). A file whose process is gone says nothing.
+//! Claude Code's own live status of each of its running processes, from the
+//! `sessions/<pid>.json` files it keeps: the conversation the process shows,
+//! and busy, idle or waiting, with the reason (a permission prompt, input
+//! needed, a dialog). A file whose process is gone says nothing.
 
 use std::fs;
 use std::path::Path;

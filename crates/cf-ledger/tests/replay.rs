@@ -1,10 +1,10 @@
-//! Every ledger the Node suite opened, replayed against this one
-//! (`tests/goldens/ledger/`; `npm run goldens:ledger` records them into
-//! `tests/traces/`): the same file to start from, the same clock readings and
-//! the same calls, and each call's answer or refusal, the events it logged and
-//! the clock readings it took, then the database it left, compared exactly,
-//! but for the four columns of migration 0011 that Node's ledger never writes
-//! (`cf_ledger::testing`). A call this replay does not know fails its trace.
+//! Every ledger the Node suite opened, replayed against this one (recorded from
+//! Node's suites and fixed since: `tests/traces/README.md`): the same file to
+//! start from, the same clock readings and the same calls, and each call's
+//! answer or refusal, the events it logged and the clock readings it took, then
+//! the database it left, compared exactly, but for the four columns of
+//! migration 0011 that Node's ledger never writes (`cf_ledger::testing`). A
+//! call this replay does not know fails its trace.
 //!
 //! A trace this ledger departs from Node's on purpose is named in
 //! [`DEPARTED`], with the call where its answer first departs and why. It is
@@ -197,12 +197,15 @@ fn traces() -> PathBuf {
 /// Every recorded trace, by its file's name without `.json.gz`, in that order.
 fn recorded() -> Vec<(String, String)> {
     let mut names: Vec<PathBuf> = std::fs::read_dir(traces())
-        .expect("the traces: npm run goldens:ledger")
+        .expect("the traces: they are fixed recordings (tests/traces/README.md)")
         .map(|entry| entry.unwrap().path())
         .filter(|path| path.extension().is_some_and(|extension| extension == "gz"))
         .collect();
     names.sort();
-    assert!(!names.is_empty(), "no traces: npm run goldens:ledger");
+    assert!(
+        !names.is_empty(),
+        "no traces: they are fixed recordings (tests/traces/README.md)"
+    );
     names
         .iter()
         .map(|name| {

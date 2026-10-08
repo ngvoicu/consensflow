@@ -1,6 +1,6 @@
-//! The admin's calls as `tests/harness-admin.test.mjs` holds Node's, and the
-//! cache and the pending map on a clock the test moves; what Node answers,
-//! case by case, is held by the recorded goldens (`tests/admin`).
+//! The admin's calls as Node's admin suite held them, and the cache and the
+//! pending map on a clock the test moves; what Node answers, case by case, is
+//! held by the recorded goldens (`tests/admin`).
 
 use std::fs;
 use std::path::PathBuf;

@@ -1,6 +1,5 @@
-//! A roster row as the app sees it (`effortOf` and `toView`,
-//! `src/roster.js`): the agent's settings under the app's own words
-//! (`harness`, `effort`) and the profile of its model.
+//! A roster row as the app sees it: the agent's settings under the app's own
+//! words (`harness`, `effort`) and the profile of its model.
 //!
 //! The view keeps the row beside the [`Settings`] it builds the profile
 //! from, and the two read the same row differently: the view says

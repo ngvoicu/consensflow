@@ -1,7 +1,7 @@
 use super::*;
 
-/// The launcher alpha.78 wrote for `sh`, as `launcher(env)` of `src/terminal.js`
-/// made it: the pin line only when a home was pinned.
+/// The launcher alpha.78 wrote for `sh`, as Node's `launcher(env)` made it: the
+/// pin line only when a home was pinned.
 fn old_sh(runtime: &str, cli: &str, home: Option<&str>) -> String {
     let pin = home.map_or_else(String::new, |home| {
         format!("export CONSENSFLOW_HOME=\"{home}\"\n")

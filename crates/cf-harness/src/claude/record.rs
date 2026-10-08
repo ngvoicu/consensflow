@@ -1,6 +1,5 @@
-//! Claude Code's record of a session (`claudeReader` and `claudeParser`,
-//! `hosts/lib/completion/claude-code.js`): its transcript, a JSONL file in
-//! its `projects` folder. A look's answer is the transcript's alone.
+//! Claude Code's record of a session: its transcript, a JSONL file in its
+//! `projects` folder. A look's answer is the transcript's alone.
 //!
 //! The transcript says what the session did in records of several types: the
 //! user's turns, the assistant's messages (each written as one record or

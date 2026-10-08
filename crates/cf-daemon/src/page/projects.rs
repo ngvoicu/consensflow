@@ -153,9 +153,8 @@ fn basename(directory: Option<&Value>) -> Result<String, Said> {
     Ok(last_name(path, cfg!(windows)))
 }
 
-/// The last name of a path, as `basename` of Node's `path.js` writes it for
-/// `win32` or for `posix`: its trailing separators and a Windows drive's `C:`
-/// not counted.
+/// The last name of a path, as Node's `path.basename` writes it for `win32` or
+/// for `posix`: its trailing separators and a Windows drive's `C:` not counted.
 fn last_name(path: &str, windows: bool) -> String {
     let bytes = path.as_bytes();
     let separator = |byte: u8| byte == b'/' || (windows && byte == b'\\');

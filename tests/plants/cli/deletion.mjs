@@ -14,7 +14,6 @@ import {
   CF_NATIVE,
   CODEX_SESSION,
   CONSOLE_TEXT,
-  DOOR,
   HOST,
   lines,
   NPM_SHIMS,
@@ -41,7 +40,6 @@ const UPDATE_INSTALL = 'app/src-tauri/src/update_install.rs'
 const PREPARE_UPDATE = 'app/scripts/prepare-update.mjs'
 const PORTABLE_MJS = 'app/scripts/portable.mjs'
 const CONSOLE_JS = 'app/ui/core/console-text.js'
-const DOOR_FILE = 'bin/cf.mjs'
 
 /** The app's tests of the module they are about. */
 const app = (filter) => [...APP, filter]
@@ -99,12 +97,6 @@ export const PLANTS = [
     ],
     runs: [PROCESS],
     meant: 'setup_and_doctor_in_a_home_with_a_use_node_file_make_and_read_the_command_here',
-  },
-  {
-    name: 'deletion: the door forwards nothing of its first word',
-    edits: [[DOOR_FILE, 'process.argv.slice(2)', 'process.argv.slice(3)']],
-    runs: [DOOR],
-    meant: 'hands each verb to the native cf beside it whole, and its stdio and exit code back',
   },
 
   // The runtime the app named to the daemon, passed on to every window.

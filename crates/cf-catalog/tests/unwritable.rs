@@ -1,10 +1,10 @@
 //! What the roster says when it cannot save: the golden of the platform this
-//! runs on (`tests/goldens/unwritable/<platform>.json`, which `npm run
-//! goldens:unwritable` writes by playing each situation through the real
-//! `src/roster.js`). Each situation is made again under a temporary root,
-//! the same call is made, and the refusal's message is held to Node's, as
-//! text, with the root and this process's id put back. A platform with no
-//! golden fails: it is to be recorded there.
+//! runs on (`tests/goldens/unwritable/<platform>.json`, recorded by playing
+//! each situation through Node's real roster, and fixed since). Each situation
+//! is made again under a temporary root, the same call is made, and the
+//! refusal's message is held to Node's, as text, with the root and this
+//! process's id put back. A platform with no golden fails: Node's recorder is
+//! gone, so one with no golden is a system these tests do not cover.
 //!
 //! The roster reads the file before it writes it, so on Unix some failures
 //! of the write are out of its reach (a folder that is a file is refused at
@@ -53,7 +53,7 @@ fn golden() -> Vec<Value> {
         .join(format!("{}.json", platform()));
     let text = fs::read_to_string(&path).unwrap_or_else(|error| {
         panic!(
-            "no failed-save golden for {}: {error}; run `node tests/goldens/unwritable/record.mjs` on it ({})",
+            "no failed-save golden for {}: {error} ({}); Node's recorder is gone, so a system with no golden is one these tests do not cover",
             platform(),
             path.display()
         )

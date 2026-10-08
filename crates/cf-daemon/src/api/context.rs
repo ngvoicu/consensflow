@@ -1,6 +1,6 @@
 //! What a handler of the agents' API is given. **Frozen**: one type, the
-//! options of `startApi` (`src/core/api.js:57-63`) and the daemon's log and
-//! trace beside them.
+//! options Node's API was started with and the daemon's log and trace beside
+//! them.
 //!
 //! Everything in it is shared, and the daemon runs on one thread: a handler
 //! borrows the ledger for one call at a time and never across a wait, copying
@@ -28,8 +28,8 @@ pub trait AgentRows {
     fn row(&self, agent: &str) -> Result<Option<AgentRow>, Refusal>;
 }
 
-/// Whether the daemon is stopping (`closing`, `api.js:65`): a door still
-/// waiting for an answer is answered at once, and no new wait begins.
+/// Whether the daemon is stopping: a door still waiting for an answer is
+/// answered at once, and no new wait begins.
 #[derive(Clone)]
 pub struct Closing {
     state: Rc<watch::Sender<bool>>,

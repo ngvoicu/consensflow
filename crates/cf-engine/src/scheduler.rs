@@ -1,10 +1,10 @@
-//! Who takes which task, and who is out of quota (`src/core/scheduler.js`):
-//! each open tiered task goes to the best free member, its requester told
-//! once when nobody is free; a window's refusal takes its member out until
-//! the reset, its work held or given back; held work goes on, and work of a
-//! member whose agent is gone goes back to the board. The ledger says what
-//! may happen to a task; this says which, and to whom. It owns the record's
-//! quota part and the tasks whose requesters were told they wait.
+//! Who takes which task, and who is out of quota: each open tiered task goes to
+//! the best free member, its requester told once when nobody is free; a
+//! window's refusal takes its member out until the reset, its work held or
+//! given back; held work goes on, and work of a member whose agent is gone goes
+//! back to the board. The ledger says what may happen to a task; this says
+//! which, and to whom. It owns the record's quota part and the tasks whose
+//! requesters were told they wait.
 
 use std::cell::RefCell;
 use std::collections::HashMap;

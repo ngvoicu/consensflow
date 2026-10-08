@@ -1,5 +1,4 @@
-//! OpenCode's store, found where it is kept (`openOpencodeDb`,
-//! `hosts/lib/completion/opencode.js`).
+//! OpenCode's store, found where it is kept.
 
 use std::path::Path;
 

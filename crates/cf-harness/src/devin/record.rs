@@ -1,7 +1,6 @@
-//! Devin's record of a session (`devinReader`, `hosts/lib/completion/devin.js`):
-//! its store, and each launch's wire log. Devin persists revisions, including
-//! cancelled assistant text. Only its main chain plus a matching native
-//! request/complete boundary proves a reply.
+//! Devin's record of a session: its store, and each launch's wire log. Devin
+//! persists revisions, including cancelled assistant text. Only its main chain
+//! plus a matching native request/complete boundary proves a reply.
 //!
 //! A look reads the store (the `store` module) and every launch's wire log
 //! (`wires`), each on from where the last look left it. When neither said

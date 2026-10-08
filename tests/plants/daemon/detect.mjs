@@ -8,7 +8,7 @@ import { lines } from './kit.mjs'
 
 const DETECT = 'crates/cf-harness/src/detect.rs'
 const UNIT = ['-p', 'cf-harness', '--lib', 'detect::']
-/** Node's recordings of detection, played (`tests/goldens/admin`). */
+/** Node's recordings of detection, played (`crates/cf-harness/tests/goldens/admin`). */
 const GOLDENS = ['-p', 'cf-harness', '--test', 'admin']
 const FOLDERS = '        let folders = homed(harness, env).into_iter().chain(npm_global(env));'
 

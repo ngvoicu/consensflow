@@ -1,8 +1,8 @@
-//! A message to the window through ConsensFlow's plugin inside its TUI,
-//! which posts it to the conversation the TUI shows (`send`,
-//! `src/channels/opencode.js`). The pane's claim comes first: a failed claim
-//! before the request is known to have sent zero bytes, and anything after
-//! the request started is uncertain, for OpenCode's own record to decide.
+//! A message to the window through ConsensFlow's plugin inside its TUI, which
+//! posts it to the conversation the TUI shows. The pane's claim comes first: a
+//! failed claim before the request is known to have sent zero bytes, and
+//! anything after the request started is uncertain, for OpenCode's own record
+//! to decide.
 
 use cf_base::js;
 use serde_json::{json, Value};

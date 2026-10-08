@@ -1,4 +1,4 @@
-//! The staff and the work tiers as the chief reads them (`src/skill.js`).
+//! The staff and the work tiers as the chief reads them.
 
 use cf_catalog::{work_tier_info, WORK_TIERS};
 

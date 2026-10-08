@@ -1,9 +1,8 @@
-//! The instructions each window the daemon opens starts with (TEST-BDC-11):
-//! the board's commands for every role, and for coordinators the staff they
-//! choose from, the work tiers and the review rule. Nothing from the old
-//! transport. The cases of `tests/core-roles.test.mjs`, but the one that
-//! writes a role's text where each harness loads it, which is the launch's
-//! (`roleConfiguration`).
+//! The instructions each window the daemon opens starts with (TEST-BDC-11): the
+//! board's commands for every role, and for coordinators the staff they choose
+//! from, the work tiers and the review rule. Nothing from the old transport.
+//! The cases of Node's roles suite, but the one that writes a role's text where
+//! each harness loads it, which is the launch's (`roleConfiguration`).
 
 use std::fs;
 use std::path::Path;

@@ -167,10 +167,10 @@ impl Child {
         poll_fn(|context| self.poll_closing(context)).await;
     }
 
-    /// Asks or forces it to end, not waiting: on Unix the signal `how`
-    /// names, on Windows its whole tree at once whatever `how` asks
-    /// (`terminate`, `src/harnesses.js`). Nothing is sent to one that has
-    /// exited and been waited for: its pid may be another's now.
+    /// Asks or forces it to end, not waiting: on Unix the signal `how` names,
+    /// on Windows its whole tree at once whatever `how` asks. Nothing is sent
+    /// to one that has exited and been waited for: its pid may be another's
+    /// now.
     pub fn terminate(&self, how: Ending) {
         self.asked.set(true);
         if let (Some(pid), false) = (self.pid, self.exited()) {

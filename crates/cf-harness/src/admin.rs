@@ -1,9 +1,8 @@
-//! What each harness's CLI is here and whether it is up to date
-//! (`src/harness-admin.js`): its version, asked of the CLI; how it was
-//! installed, read from where it really lives ([`release_source`]); the
-//! latest release, asked of a feed ([`feed`]); and its update, run the way it
-//! was installed on request. Diagnostics never take part in a launch, a
-//! binding, a reading or a delivery.
+//! What each harness's CLI is here and whether it is up to date: its version,
+//! asked of the CLI; how it was installed, read from where it really lives
+//! ([`release_source`]); the latest release, asked of a feed ([`feed`]); and
+//! its update, run the way it was installed on request. Diagnostics never take
+//! part in a launch, a binding, a reading or a delivery.
 //!
 //! The admin asks two things of the world, each through a seam of its own
 //! that the daemon gives the system's and a test scripts: [`Latest`], the

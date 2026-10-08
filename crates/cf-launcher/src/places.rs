@@ -1,5 +1,4 @@
-//! Where a launcher is looked for and made, and what it is called there
-//! (`defaultCandidates`, `launcherNames`, `writable`, `src/terminal.js`).
+//! Where a launcher is looked for and made, and what it is called there.
 
 use std::path::{Path, PathBuf};
 

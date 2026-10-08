@@ -1,6 +1,6 @@
-//! What the ledger answers, as it crosses to the API and the page: each
-//! view with its fields in the order the Node ledger wrote them
-//! (`src/ledger/views.js`, `projects.js`), so its JSON reads as it did.
+//! What the ledger answers, as it crosses to the API and the page: each view
+//! with its fields in the order the Node ledger wrote them, so its JSON reads
+//! as it did.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

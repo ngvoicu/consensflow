@@ -1,6 +1,6 @@
-//! The daemon's HTTP front (`startApi`, `src/core/api.js`): the agents' API,
-//! which `cf` calls from inside a window, and the human's screens, which the
-//! app frames, on one loopback address.
+//! The daemon's HTTP front: the agents' API, which `cf` calls from inside a
+//! window, and the human's screens, which the app frames, on one loopback
+//! address.
 //!
 //! **Frozen** for the three landings that follow (the API's routes, the
 //! screens, the page operations): [`routes`] is the route table,
@@ -53,7 +53,7 @@ pub async fn serve(
     Api::start(handler, closing, spawn).await
 }
 
-/// One request, in Node's order (`handle`, `api.js:79-86`):
+/// One request, in Node's order:
 ///
 /// 1. the human's screens, under the UI token, before any window's: one that
 ///    is theirs is answered here, and the rest fall through;

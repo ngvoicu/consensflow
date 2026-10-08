@@ -262,6 +262,19 @@ fn after_node_left(state: &str, row: &str) -> (World, i64, i64) {
 fn a_row_left_under_a_carrier_node_delivered_cancelled_or_failed_is_a_queued_message_of_its_own() {
     for state in ["delivered", "cancelled", "failed"] {
         let (mut w, carrier, answer) = after_node_left_the_carrier(state);
+        let let_go: Vec<serde_json::Value> = w
+            .ledger
+            .events(w.project, 0, 500)
+            .expect("the log")
+            .iter()
+            .filter(|event| event.kind == "message.uncarried")
+            .map(|event| event.data.clone())
+            .collect();
+        assert_eq!(
+            let_go,
+            [serde_json::json!({ "carrier": carrier, "released": [answer] })],
+            "the start says what it let go of, from a carrier {state}"
+        );
         assert_eq!(
             w.next("zeus"),
             Some(answer),

@@ -1,5 +1,5 @@
-//! What the chief switch keeps that no test of `core-dispatcher.test.mjs`
-//! holds, so there is no Node trace to hold it to.
+//! What the chief switch keeps that no test of Node's dispatcher suite holds,
+//! so there is no Node trace to hold it to.
 
 use crate::testing::{Context, Made};
 use crate::{SwitchTo, SwitchWhen};

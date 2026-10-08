@@ -21,12 +21,12 @@ import { proveAgents } from './agents-proof.mjs'
 /**
  * The packaged smoke: the REAL `.app`, not this checkout.
  *
- * Every other suite reaches into `src/` and `app/src-tauri/`. This one is the
- * only place that asks whether the thing Gabriel double-clicks works — the
- * bundle's own page, the bundle's own `cf` (it is the daemon, and the command
- * a window runs), the production Tauri commands, and a real PTY child. So it
- * resolves NOTHING of the product from the repository, and every path it
- * asserts on has to live under `Contents/`. What it takes from the repository
+ * Every other suite reaches into the checkout's crates and `app/src-tauri/`.
+ * This one is the only place that asks whether the thing Gabriel double-clicks
+ * works — the bundle's own page, the bundle's own `cf` (it is the daemon, and
+ * the command a window runs), the production Tauri commands, and a real PTY
+ * child. So it resolves NOTHING of the product from the repository, and every
+ * path it asserts on has to live under `Contents/`. What it takes from the repository
  * is this file and the proof of the agents screens (tests/agents-proof.mjs),
  * which only speaks HTTP to the daemon the app started and reads the roster
  * that daemon wrote: it imports no module of the product. The bundle ships no
@@ -706,7 +706,7 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   // repo, so that would be trivially false. What must never be touched are
   // the checkout's live sources, which is where a path that escaped the
   // extension's folder would land.
-  const checkout = ['src', 'hosts', 'bin', 'skill'].map((part) => `file://${join(REPO, part)}/`)
+  const checkout = ['hosts', 'bin', 'skill'].map((part) => `file://${join(REPO, part)}/`)
   const leaked = resolved.filter((entry) => checkout.some((root) => entry.url.startsWith(root)))
   assert.deepEqual(
     leaked,
@@ -729,7 +729,7 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.equal(second.out, '', `the second cf ui printed a handle line: ${second.out}`)
 
   // 7. The app's own exit: stdin EOF, `RunEvent::Exit`, and nothing left.
-  //    (The bundle holds no Node, `cf.mjs`, `src` or `hosts`, and cannot run any.)
+  //    (The bundle holds no Node and no sources, and cannot run any.)
   const settled = await app.waitFor('settled')
   assert.equal(settled.data.terminalPreserved, true)
   app.quit()

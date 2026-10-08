@@ -1,7 +1,7 @@
-//! A project's staff: members who join, change roles, follow the roster's
-//! tiers and leave (`src/ledger/staff.js`), in three concerns of their own:
-//! who may take a task (`pools`), a member out of quota (`quota`), and the
-//! sessions a member's tasks run in (`sessions`).
+//! A project's staff: members who join, change roles, follow the roster's tiers
+//! and leave, in three concerns of their own: who may take a task (`pools`), a
+//! member out of quota (`quota`), and the sessions a member's tasks run in
+//! (`sessions`).
 
 mod pools;
 mod quota;

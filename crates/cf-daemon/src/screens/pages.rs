@@ -1,12 +1,11 @@
-//! The two pages, carried as text: the agents (`PAGE`, `agents-server.js:181-660`)
-//! and the harness diagnostics (`harnessPage`, `src/harness-page.js`), each
-//! with its inline style and script, and what every screen carries for the app's
-//! frame (`FRAMED`). Node builds them as template literals; here they are the
-//! files they came out as, with `$TOKEN` (inside the quotes the script's
-//! `JSON.stringify(token)` writes) and `$VERSION` where Node interpolated, which
-//! are the recorded pages (`tests/goldens/daemon/pages`) to the byte: a test
-//! holds each to its recording, so a page changed in Node is a failure here
-//! until its file is copied over.
+//! The two pages, carried as text: the agents and the harness diagnostics, each
+//! with its inline style and script, and what every screen carries for the
+//! app's frame (`FRAMED`). Node built them as template literals; here they are
+//! the files they came out as, with `$TOKEN` (inside the quotes the script's
+//! `JSON.stringify(token)` writes) and `$VERSION` where Node interpolated,
+//! which are the recorded pages (`tests/goldens/pages`) to the byte. The files
+//! are the source now, edited by hand; the screens' traces hold the page the
+//! daemon serves to the recorded copy, so a page and its copy change together.
 
 use cf_base::js;
 use serde_json::Value;

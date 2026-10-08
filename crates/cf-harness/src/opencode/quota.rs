@@ -1,11 +1,10 @@
-//! OpenCode waiting to retry a refused request (`opencodeRetryQuota`,
-//! `hosts/lib/quota.js`): the one quota its window reports of itself, where
-//! the store never sees a refused request. A retry is a spent quota when its
-//! action names one (`free_tier_limit`), or when the words say a limit and
-//! the retry is due only at a reset a minute or more away. A retry due in
-//! seconds is backoff on a rate limit or an overloaded provider: the window
-//! is working, and taking its task away would waste what it did. Anything
-//! else is not a quota.
+//! OpenCode waiting to retry a refused request: the one quota its window
+//! reports of itself, where the store never sees a refused request. A retry is
+//! a spent quota when its action names one (`free_tier_limit`), or when the
+//! words say a limit and the retry is due only at a reset a minute or more
+//! away. A retry due in seconds is backoff on a rate limit or an overloaded
+//! provider: the window is working, and taking its task away would waste what
+//! it did. Anything else is not a quota.
 
 use std::sync::LazyLock;
 

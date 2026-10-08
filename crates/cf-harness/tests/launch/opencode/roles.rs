@@ -1,7 +1,7 @@
-//! The role an OpenCode window is given, as the OpenCode cases of
-//! `tests/role-skills.test.mjs` hold Node's: its whole text, in a file of
-//! the launch's own and in the configuration OpenCode reads from its
-//! environment, merged into the one the human set.
+//! The role an OpenCode window is given, as the OpenCode cases of Node's
+//! role-skills suite held them: its whole text, in a file of the launch's own
+//! and in the configuration OpenCode reads from its environment, merged into
+//! the one the human set.
 
 use std::fs;
 use std::path::Path;

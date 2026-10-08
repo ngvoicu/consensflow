@@ -1,11 +1,10 @@
-//! A test's engine, as `setup` in `core-dispatcher.test.mjs` makes it: a
-//! real ledger on a temporary file, at a clock that moves when the test
-//! says (from 2026-09-19 12:00 UTC) and naming sessions from a fixed list;
-//! the fake pane host and adapter; the other seams' fakes; and the engine
-//! made with them, its work run to stillness by the engine's own executor,
-//! which the kit drains. What
-//! the engine asks of its seams is written down ([`Recorder`]) for the Node
-//! trace of the same test to be held against.
+//! A test's engine, as the setup of Node's dispatcher suite made it: a real
+//! ledger on a temporary file, at a clock that moves when the test says (from
+//! 2026-09-19 12:00 UTC) and naming sessions from a fixed list; the fake pane
+//! host and adapter; the other seams' fakes; and the engine made with them, its
+//! work run to stillness by the engine's own executor, which the kit drains.
+//! What the engine asks of its seams is written down ([`Recorder`]) for the
+//! Node trace of the same test to be held against.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;

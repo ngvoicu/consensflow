@@ -1,11 +1,10 @@
-//! Messages: notes, questions and their answers (`src/ledger/messages.js`),
-//! delivered into a window one at a time and oldest first, except the
-//! human's, which wait in the app until read (`delivery`); what a window
-//! keeps, which rides in the paste of the words that send it on
-//! (`carrying`); what makes a message received, and what that does to its
-//! task (`receipt`); the human's gate, which holds one agent's word to
-//! another until the human passes it on or declines it (`gate`); the one
-//! asked, told to answer again when an answer did not stand (`again`); and
+//! Messages: notes, questions and their answers, delivered into a window one at
+//! a time and oldest first, except the human's, which wait in the app until
+//! read (`delivery`); what a window keeps, which rides in the paste of the
+//! words that send it on (`carrying`); what makes a message received, and what
+//! that does to its task (`receipt`); the human's gate, which holds one agent's
+//! word to another until the human passes it on or declines it (`gate`); the
+//! one asked, told to answer again when an answer did not stand (`again`); and
 //! the note that tells a requester its tasks stalled, one for the tasks of a
 //! pass, which goes when they are resumed (`pauses`).
 

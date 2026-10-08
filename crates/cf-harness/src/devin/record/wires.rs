@@ -1,7 +1,6 @@
-//! Each launch's wire log (`visitWire` and `readWires`,
-//! `hosts/lib/completion/devin.js`): what the stock TUI and its agent said
-//! to each other, in `integrations/devin/<launch>/wire.jsonl` under
-//! ConsensFlow's home, read for one session.
+//! Each launch's wire log: what the stock TUI and its agent said to each other,
+//! in `integrations/devin/<launch>/wire.jsonl` under ConsensFlow's home, read
+//! for one session.
 //!
 //! A turn Devin is still on shows only on the wire: thoughts, messages and
 //! tool calls after the last end; its store holds the finished steps. A

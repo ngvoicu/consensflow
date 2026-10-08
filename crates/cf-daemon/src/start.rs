@@ -1,6 +1,5 @@
-//! The daemon's start (`startDaemon`, `src/core/daemon.js:42-185`), in Node's
-//! order, and what it returns: a daemon that is running, and says when it has
-//! stopped.
+//! The daemon's start, in Node's order, and what it returns: a daemon that is
+//! running, and says when it has stopped.
 //!
 //! The order matters, and is held: the home and the files with their start
 //! line; the ledger, whose lock refuses a second daemon on the same home; the
@@ -242,7 +241,7 @@ async fn run(
     let latch = Latch::new();
     let console = Rc::new(Console::to(options.stderr, {
         let latch = Rc::clone(&latch);
-        // The drain of `cf ui` (`bin/cf.mjs:15-28`): no reader, no point.
+        // The drain of `cf ui`: no reader, no point.
         move || latch.trip("asked to stop")
     }));
     let (bridge, connection) = daemon_bridge(&spawn)

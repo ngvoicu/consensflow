@@ -6,7 +6,7 @@ import { loadLedger } from '../ledger-file.mjs'
 /**
  * A home of the Candidate's shape, built here from a ledger recorded while
  * Node's ledger could still make one (tests/fixtures/ledgers/candidate-home.sql,
- * recorded by tests/goldens/evals/record.mjs): no real home is read by a test,
+ * fixed since Node went, see the README beside it): no real home is read by a test,
  * and the shape is what such a home holds by the way the ledger and the agents
  * file are written. Projects open when the app quit, which come back at the
  * next start, each with a chief on an agent of the human's own and a staff, on

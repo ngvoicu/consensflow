@@ -1,5 +1,5 @@
-//! The tests under `describe('Claude Haiku 5.5 is light work on Claude Code alone')`
-//! in `tests/catalog.test.mjs`.
+//! The tests under `describe('Claude Haiku 5.5 is light work on Claude Code
+//! alone')` of Node's catalog suite.
 //!
 //! 2026-10-08: Claude Code 2.1.294 answers claude-haiku-5-5 as itself at every level it lists.
 //! Devin lists Claude only as Sonnet, and Pi and OpenCode (OpenRouter) carry Haiku 4.5 and a

@@ -1,7 +1,7 @@
-//! The agents the human keeps: the list the screen offers
-//! (`GET /api/agents`, `agents-server.js:89-97`), and the routes that add,
-//! edit and remove an agent defined by hand and set the human's choices about
-//! the roster (`:99-108, 128-137`), each through the roster's own operations.
+//! The agents the human keeps: the list the screen offers (`GET /api/agents`),
+//! and the routes that add, edit and remove an agent defined by hand and set
+//! the human's choices about the roster, each through the roster's own
+//! operations.
 //!
 //! Every write is followed by `onRosterChange`: the members' tiers follow the
 //! agents' again, the page is told if one moved, and the dispatcher is woken.

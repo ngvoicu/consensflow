@@ -1,9 +1,7 @@
-//! What ConsensFlow's Pi extension writes beside a session
-//! (`piSettlementEvidence` and `piWorkingEvidence`,
-//! `hosts/lib/completion/pi.js`), in the folder of one launch: the
-//! `<launchId>.json` it writes when Pi settles, and the
-//! `<launchId>.working.json` it writes when a turn starts and removes when
-//! Pi settles.
+//! What ConsensFlow's Pi extension writes beside a session, in the folder of
+//! one launch: the `<launchId>.json` it writes when Pi settles, and the
+//! `<launchId>.working.json` it writes when a turn starts and removes when Pi
+//! settles.
 //!
 //! A file that is not there, or is no JSON, is no evidence. A file that
 //! cannot be read for any other reason fails the look, as it threw in Node.

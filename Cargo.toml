@@ -1,6 +1,8 @@
 # Every Rust crate of ConsensFlow in one workspace: one lockfile, shared
-# versions and lints. The Node code moves here module by module (decided
-# 2026-10-04; the plan is in the consensflow-sme brain).
+# versions and lints. The product is this workspace, the page and the two
+# harness extensions: the Node code it replaced moved here module by module
+# (decided 2026-10-04) and was deleted at step 4 (the plan is in the
+# consensflow-sme brain).
 [workspace]
 resolver = "2"
 members = ["app/src-tauri", "crates/*"]

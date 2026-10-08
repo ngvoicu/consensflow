@@ -1,8 +1,8 @@
-//! `POST /api/answers` (`api.js:292-308`): the answer to a question, in words
-//! or by choices. It reads its body first. Message numbers run across every
-//! project, and every project's chief is `@chief`, so a question is answered
-//! only in the caller's own project; the ledger decides who may answer and
-//! how, and the dispatcher is woken once the answer is written.
+//! `POST /api/answers`: the answer to a question, in words or by choices. It
+//! reads its body first. Message numbers run across every project, and every
+//! project's chief is `@chief`, so a question is answered only in the caller's
+//! own project; the ledger decides who may answer and how, and the dispatcher
+//! is woken once the answer is written.
 //!
 //! `POST /api/answers/<id>/receipt`: a door that claimed an answer for its
 //! harness says whether it handed it over (`{"received": true}`) or did not.

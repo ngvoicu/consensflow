@@ -1,4 +1,5 @@
-//! The ledger's messages, their delivery and the human's gate, as its callers hold them (`index.js`, messages).
+//! The ledger's messages, their delivery and the human's gate, as its callers
+//! hold them.
 
 use serde_json::Value;
 

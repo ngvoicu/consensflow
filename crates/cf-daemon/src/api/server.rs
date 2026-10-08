@@ -330,9 +330,9 @@ async fn respond(server: &Rc<Server>, request: hyper::Request<Incoming>) -> Resp
     response(&begun.await)
 }
 
-/// An answer as a response (`send`, `api.js:503-516`): a page as
-/// `text/html; charset=utf-8`, nothing as a status alone, anything else as
-/// `application/json`, written as `JSON.stringify` writes it.
+/// An answer as a response: a page as `text/html; charset=utf-8`, nothing as a
+/// status alone, anything else as `application/json`, written as
+/// `JSON.stringify` writes it.
 fn response(answer: &Answer) -> Response<Full<Bytes>> {
     let (kind, body) = match &answer.content {
         Content::Html(page) => (Some("text/html; charset=utf-8"), Bytes::from(page.clone())),

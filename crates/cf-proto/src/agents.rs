@@ -1,15 +1,14 @@
-//! The agents the catalog lists and the roster shows, as they cross to the
-//! CLI, the API and the page: each shape with its fields in the order the
-//! Node code builds them (`hosts/lib/presets.js`, `src/catalog.js`,
-//! `src/roster.js`), so its JSON reads as it did.
+//! The agents the catalog lists and the roster shows, as they cross to the CLI,
+//! the API and the page: each shape with its fields in the order the Node code
+//! built them, so its JSON reads as it did.
 
 use serde::Serialize;
 use serde_json::Value;
 
-/// A CLI ConsensFlow runs agents on, in the order `HARNESSES`
-/// (`src/roster.js`) lists them. The page, the CLI and the launcher speak
-/// these names; the store and the roster speak in kinds (`claude-code`).
-/// Kinds the build does not run (`image`, `kimi`) are no harness.
+/// A CLI ConsensFlow runs agents on, in the order Node's roster listed them.
+/// The page, the CLI and the launcher speak these names; the store and the
+/// roster speak in kinds (`claude-code`). Kinds the build does not run
+/// (`image`, `kimi`) are no harness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Harness {
@@ -21,8 +20,7 @@ pub enum Harness {
 }
 
 impl Harness {
-    /// Every harness, in the order the page and the roster list them
-    /// (`HARNESSES`, `src/roster.js`).
+    /// Every harness, in the order the page and the roster list them.
     pub const ALL: [Harness; 5] = [
         Harness::Claude,
         Harness::Codex,
@@ -50,10 +48,10 @@ impl Harness {
             .find(|harness| harness.as_str() == name)
     }
 
-    /// The harness behind a kind (`harnessForKind`, `src/roster.js`): the
-    /// store and the roster speak in kinds (`claude-code`), the launcher
-    /// needs the CLI to find the binary. None for a kind the build does not
-    /// run (`image`, `kimi`), and for a CLI's own name (`claude`).
+    /// The harness behind a kind: the store and the roster speak in kinds
+    /// (`claude-code`), the launcher needs the CLI to find the binary. None for
+    /// a kind the build does not run (`image`, `kimi`), and for a CLI's own
+    /// name (`claude`).
     pub fn from_kind(kind: &str) -> Option<Harness> {
         Self::ALL.into_iter().find(|harness| harness.kind() == kind)
     }
@@ -90,16 +88,14 @@ impl WorkTier {
     }
 }
 
-/// How a tier reads on the page and in the chief's text (`WORK_TIERS[tier]`,
-/// `hosts/lib/presets.js`).
+/// How a tier reads on the page and in the chief's text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct WorkTierInfo {
     pub label: &'static str,
     pub description: &'static str,
 }
 
-/// What a model and the road to it are called, and the work its agent
-/// suits (`agentProfile`, `hosts/lib/presets.js`).
+/// What a model and the road to it are called, and the work its agent suits.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
@@ -114,7 +110,7 @@ pub struct Profile {
     pub work_tier: WorkTier,
 }
 
-/// A ready-made agent as its harness's list shows it (`entryFor`, `src/catalog.js`).
+/// A ready-made agent as its harness's list shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CatalogEntry {
     /// The preset's name: the agent's handle.
@@ -145,10 +141,10 @@ pub struct FoundEntry {
     pub harness: Harness,
 }
 
-/// An agent of the roster as the page and the CLI list it (`toView`,
-/// `src/roster.js`). A key JavaScript leaves `undefined` is not written by
-/// `JSON.stringify`, so a field the row did not have is none and skipped: a
-/// row with no `id` has no `name`, one with no `kind` no `harness`.
+/// An agent of the roster as the page and the CLI list it. A key JavaScript
+/// leaves `undefined` is not written by `JSON.stringify`, so a field the row
+/// did not have is none and skipped: a row with no `id` has no `name`, one with
+/// no `kind` no `harness`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentView {
@@ -192,7 +188,7 @@ pub struct AgentView {
 }
 
 /// What the human chose about the roster, kept in the file beside their own
-/// agents (`preferences`, `src/roster.js`).
+/// agents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {

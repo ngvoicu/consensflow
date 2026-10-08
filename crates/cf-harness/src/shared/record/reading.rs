@@ -1,7 +1,6 @@
-//! What a look at a harness's own record of a conversation reads
-//! (`resultBase`, `emit`, `unreadable`, `nativeId` and `visibleText`,
-//! `hosts/lib/completion/shared.js`): the record's items in its order, and
-//! what they say of the turn, written as Node wrote a reading.
+//! What a look at a harness's own record of a conversation reads: the record's
+//! items in its order, and what they say of the turn, written as Node wrote a
+//! reading.
 
 use std::sync::Arc;
 

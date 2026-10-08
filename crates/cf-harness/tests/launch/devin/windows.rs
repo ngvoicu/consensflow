@@ -1,5 +1,5 @@
-//! How a Devin window names the conversation it opened, how a message reaches it, and what
-//! its own wire log and record say (`tests/adapter-devin.test.mjs`).
+//! How a Devin window names the conversation it opened, how a message reaches
+//! it, and what its own wire log and record say (Node's Devin adapter suite).
 
 use std::cell::Cell;
 use std::fs;

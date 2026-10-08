@@ -1,7 +1,7 @@
-//! `GET /api/staff` (`api.js:123-143`): the members of the staff, each with
-//! its roles, tier and harness, and the model and effort its saved agent has.
-//! A member is a participant who is neither the chief nor the human (it has an
-//! agent) and is not a session of one (it belongs to no member).
+//! `GET /api/staff`: the members of the staff, each with its roles, tier and
+//! harness, and the model and effort its saved agent has. A member is a
+//! participant who is neither the chief nor the human (it has an agent) and is
+//! not a session of one (it belongs to no member).
 
 use serde_json::{json, Value};
 

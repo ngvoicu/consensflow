@@ -1,5 +1,5 @@
-//! `GET /api/whoami` (`api.js:88-95`): who the window is: its project, its
-//! participant, and the task it has in progress.
+//! `GET /api/whoami`: who the window is: its project, its participant, and the
+//! task it has in progress.
 
 use serde_json::{json, Value};
 

@@ -1,6 +1,6 @@
-//! ConsensFlow's extension for Pi, made where Pi is told to load it from
-//! (`preparePiExtension`, `src/pi-install.js`): an immutable private copy of
-//! the extension's file, never an edit of Pi's own settings.
+//! ConsensFlow's extension for Pi, made where Pi is told to load it from: an
+//! immutable private copy of the extension's file, never an edit of Pi's own
+//! settings.
 
 use cf_base::env::Env;
 use cf_base::path;

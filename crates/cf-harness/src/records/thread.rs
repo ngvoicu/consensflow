@@ -4,7 +4,7 @@
 //! and the engine goes on with other work until the worker answers.
 //!
 //! - One owner of the readers. The worker holds five caches, one per harness,
-//!   as each adapter kept its own `cachedAnswers` (`hosts/lib/completion.js`),
+//!   as each adapter kept its own `cachedAnswers`,
 //!   each sweeping out the conversations nobody reads any more by a clock of
 //!   its own.
 //! - A look carries what it needs, owned: the harness, the session, its

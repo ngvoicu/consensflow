@@ -1,7 +1,7 @@
 //! `GET /api/history`: a page of what the chief before this one said, which
-//! only a chief reads and which writes down that it was read. Where a test
-//! says what Node answered, it is what the real API answered the same request:
-//! `node tests/goldens/daemon/probes/api-corners.mjs` prints it again.
+//! only a chief reads and which writes down that it was read. Where a test says
+//! what Node answered, it is what the real API answered the same request (the
+//! probe that printed those answers went with Node's API).
 
 use cf_ledger::ChiefSwitch;
 use hyper::Method;

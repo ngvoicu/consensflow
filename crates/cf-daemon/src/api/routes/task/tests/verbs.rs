@@ -2,8 +2,8 @@
 //! `resume`, `tell`): the body before who may, who may, what the ledger is
 //! asked and what it says, the wake-ups, and the view of the task a request
 //! acts on once its body is in. Where a test says what Node answered, it is
-//! what the real API answered the same request: `node
-//! tests/goldens/daemon/probes/api-corners.mjs` prints it again.
+//! what the real API answered the same request (the probe that printed those
+//! answers went with Node's API).
 
 use hyper::Method;
 use serde_json::json;

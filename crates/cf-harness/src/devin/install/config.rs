@@ -1,7 +1,6 @@
-//! The owner's own config of Devin, read as Devin reads it
-//! (`nativeConfiguration`, `src/devin-install.js`): where it is, what it may
-//! hold besides JSON, and what shape it must have. Only a copy of it is ever
-//! written, so the original is never touched.
+//! The owner's own config of Devin, read as Devin reads it: where it is, what
+//! it may hold besides JSON, and what shape it must have. Only a copy of it is
+//! ever written, so the original is never touched.
 //!
 //! Kept from Node on purpose:
 //! - an environment that names no home has no config folder, and fails with

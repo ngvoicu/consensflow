@@ -1,8 +1,7 @@
-//! How a harness got onto this machine, read from where its executable
-//! really lives (`releaseSource`, `src/harness-admin.js`): the release feed
-//! to compare against, the words for the page, and the command that brings
-//! it to the latest release the same way. None when the method is not
-//! recognized, so the human updates it as they installed it.
+//! How a harness got onto this machine, read from where its executable really
+//! lives: the release feed to compare against, the words for the page, and the
+//! command that brings it to the latest release the same way. None when the
+//! method is not recognized, so the human updates it as they installed it.
 
 use std::fs;
 use std::path::Path;
@@ -18,7 +17,7 @@ use serde_json::Value;
 use crate::shared::paths::home;
 use crate::shared::pattern::compile;
 
-/// What a release feed's answer is read as, by its name in `src/harness-admin.js`
+/// What a release feed's answer is read as, by its name in Node's admin
 /// (`source.format`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
@@ -33,7 +32,7 @@ pub enum Format {
 }
 
 impl Format {
-    /// Its name, as `src/harness-admin.js` writes it.
+    /// Its name, as Node's admin wrote it.
     pub fn as_str(self) -> &'static str {
         match self {
             Format::Npm => "npm",

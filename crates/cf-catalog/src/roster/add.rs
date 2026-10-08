@@ -1,6 +1,6 @@
-//! An agent defined by hand (`validateAdd` and `addAgent`, `src/roster.js`):
-//! the catalog's agents are there already. Each request is checked in the
-//! order Node checked it, so the sentence a request hears is Node's.
+//! An agent defined by hand: the catalog's agents are there already. Each
+//! request is checked in the order Node checked it, so the sentence a request
+//! hears is Node's.
 
 use std::path::Path;
 
