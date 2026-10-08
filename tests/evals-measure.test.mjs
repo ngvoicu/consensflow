@@ -128,6 +128,62 @@ describe('measuring a chief from the ledger', () => {
     )
   })
 
+  it('does not count a result the chief decided on before it was given it as one that never reached the chief', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-withdrawn-'))
+    const file = path.join(dir, 'consensflow.db')
+    try {
+      const ledger = openLedgerFile(file)
+      const worker = (agent) => ({
+        agent,
+        harness: 'claude-code',
+        roles: ['worker'],
+        tier: 'standard',
+      })
+      const project = addProject(ledger, {
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'claude-code', agent: null },
+        staff: [worker('zeus'), worker('diana')],
+      })
+      // The participants are the human (1), the chief (2), zeus (3) and diana (4).
+      const task = ledger.prepare(
+        `INSERT INTO task (project_id, number, title, body, requester_id, assignee_id, state, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 2, ?, ?, '2026-10-08T10:00:00.000Z', '2026-10-08T10:20:00.000Z')`,
+      )
+      const message = ledger.prepare(
+        `INSERT INTO message (project_id, recipient_id, sender_id, kind, task_id, body, state, created_at, delivered_at)
+         VALUES (?, ?, ?, ?, ?, 'x', ?, '2026-10-08T10:00:00.000Z', ?)`,
+      )
+      // T-1's result waited behind the chief's turn, which accepted the task: the
+      // decision withdrew it, never given.
+      const one = Number(
+        task.run(project, 1, 'Write it', 'Write it', 3, 'accepted').lastInsertRowid,
+      )
+      message.run(project, 3, 2, 'task', one, 'delivered', '2026-10-08T10:01:00.000Z')
+      message.run(project, 2, 3, 'result', one, 'cancelled', null)
+      // T-2's reached the chief.
+      const two = Number(task.run(project, 2, 'Check it', 'Check it', 4, 'done').lastInsertRowid)
+      message.run(project, 4, 2, 'task', two, 'delivered', '2026-10-08T10:02:00.000Z')
+      message.run(project, 2, 4, 'result', two, 'delivered', '2026-10-08T10:05:00.000Z')
+      ledger.close()
+
+      const metrics = measure(file)
+      assert.deepEqual(
+        [metrics.plumbing.results, metrics.plumbing.resultsDelivered],
+        [1, 1],
+        'the one withdrawn was not owed',
+      )
+      assert.deepEqual(
+        mechanics(metrics, 2)
+          .filter((c) => c.name.startsWith('every result'))
+          .map((c) => [c.name, c.ok]),
+        [['every result reached the chief (1/1)', true]],
+      )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('measures long messages: the longest result of each kind, the owner’s answers, the notes whole', async () => {
     const metrics = await measured('long-messages')
     assert.deepEqual(metrics.longestResult, { worker: 9010, advisor: 12, reviewer: 0 })

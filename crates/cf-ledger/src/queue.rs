@@ -11,6 +11,7 @@ use serde_json::json;
 use crate::messages::{adopt, release_carried};
 use crate::model::{self, LedgerError, MAX_BODY};
 use crate::store::Store;
+use crate::views::TaskRow;
 
 /// A message to queue: its recipient and sender by id, what kind it is, the
 /// task it is about, the question it answers, and what it says; whether it
@@ -180,6 +181,21 @@ pub(crate) fn withdraw_gated(store: &Store, task_id: i64, reason: &str) -> Resul
         params![reason, task_id],
     )?;
     release_carried(store, task_id)
+}
+
+/// The result of a task that was decided (`why`: "was accepted", "was sent
+/// back") before its requester was given it: still `queued`, it is withdrawn,
+/// with the reason `T-<number> <why>`, and never pasted, so the decision it
+/// asks for is not put again to the one who took it. A result being pasted or
+/// already given stays, as the requester has it; one held at the gate is
+/// [`withdraw_gated`]'s.
+pub(crate) fn withdraw_result(store: &Store, task: &TaskRow, why: &str) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE message SET state = 'cancelled', reason = ?
+       WHERE task_id = ? AND kind = 'result' AND state = 'queued'",
+        params![format!("T-{} {why}", task.number), task.id],
+    )?;
+    Ok(())
 }
 
 /// A cancelled or failed task's queued messages are never delivered.

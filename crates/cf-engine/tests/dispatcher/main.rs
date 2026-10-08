@@ -3,7 +3,8 @@
 //! Node's dispatcher does not do has tests of its own, held to no trace: the
 //! notes of a pause (`pause_notes`), and the receipt and stop redesign
 //! (`carriers`, `launch_stops`, `receipts`, `stops` and `taken_back`), and what
-//! a window that did not come up showed (`unstarted`).
+//! a window that did not come up showed (`unstarted`), and the result a
+//! decision withdraws before the chief is given it (`decided_results`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -16,6 +17,7 @@ mod carriers;
 mod chief_not_up;
 mod chiefs;
 mod closing;
+mod decided_results;
 mod deleted_sessions;
 mod deliveries;
 mod exit_unsettled;
