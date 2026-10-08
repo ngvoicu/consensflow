@@ -57,7 +57,8 @@ process.exitCode = args[0] === 'fail' ? 3 : 0
 })
 after(() => {
   bundle.cleanup()
-  rmSync(dir, { recursive: true, force: true })
+  // Windows holds a just-ended program's files for a moment: removal retries (EPERM, 2026-10-08).
+  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 /** The home is the test's own, with the way back's file in it; no Node is named. */
