@@ -39,6 +39,10 @@ export const NPM_SHIMS = cargo('-p', 'cf-harness', '--lib', 'detect')
 export const SEAMS = cargo('-p', 'cf-daemon', '--lib', 'seams')
 /** A Codex window's supervisor, which refuses a Codex it has no Node to run. */
 export const CODEX_SESSION = cargo('-p', 'cf-codex-session', '--lib', 'supervisor')
+/** The stand-in the tests give a window on Windows, written and opened on any system. */
+export const STAND_IN = cargo('-p', 'cf-harness', '--lib', 'testing::')
+/** The daemon's host: a window opens on an npm shim with a Node to run on, and is refused without. */
+export const HOST = cargo('-p', 'cf-daemon', '--lib', 'host::')
 /** The page's console text, held to the table the Rust one is held to. */
 export const CONSOLE_TEXT = [process.execPath, '--test', 'tests/console-text.test.mjs']
 /** The release's check of the bundle it publishes. */

@@ -15,6 +15,7 @@ import {
   CODEX_SESSION,
   CONSOLE_TEXT,
   DOOR,
+  HOST,
   lines,
   NPM_SHIMS,
   PORTABLE_PACK,
@@ -22,6 +23,7 @@ import {
   RUNNABLE,
   SEAMS,
   SIGN_MAC,
+  STAND_IN,
   UI,
   UPDATE_RELEASE,
 } from './kit.mjs'
@@ -30,6 +32,10 @@ const CF_LIB = 'crates/cf/src/lib.rs'
 const RUNNABLE_RS = 'crates/cf-process/src/runnable.rs'
 const SEAMS_RS = 'crates/cf-daemon/src/seams.rs'
 const SUPERVISOR_RS = 'crates/cf-codex-session/src/supervisor.rs'
+const TESTING_RS = 'crates/cf-harness/src/testing/mod.rs'
+/** The line that gives the stand-in of a window its Node. */
+const STAND_IN_NODE =
+  '    fs::write(file.with_file_name("node.exe"), "").expect("a stand-in\'s node written");\n'
 const DAEMON_COMMAND = 'app/src-tauri/src/daemon_command.rs'
 const UPDATE_INSTALL = 'app/src-tauri/src/update_install.rs'
 const PREPARE_UPDATE = 'app/scripts/prepare-update.mjs'
@@ -244,6 +250,22 @@ export const PLANTS = [
     ],
     runs: [CODEX_SESSION],
     meant: 'a_codex_that_is_an_npm_shim_with_no_node_to_run_on_is_refused_saying_what_to_do',
+  },
+
+  // The tests' stand-in for a window's program on Windows is an npm shim, and
+  // brings the Node it runs on: the app names none to the daemon now.
+  {
+    name: 'deletion: the Windows stand-in of a window has no Node beside it',
+    edits: [[TESTING_RS, STAND_IN_NODE, '']],
+    runs: [STAND_IN],
+    meant:
+      'a_window_opens_on_the_npm_shim_stand_in_in_an_environment_with_only_its_folder_on_the_path',
+  },
+  {
+    name: 'deletion: the Windows stand-in of a window has no Node beside it, seen at the daemon’s host',
+    edits: [[TESTING_RS, STAND_IN_NODE, '']],
+    runs: [HOST],
+    meant: 'a_window_opens_on_an_npm_shim_with_its_node_beside_it_and_is_refused_without_one',
   },
 
   // The update's check, and the portable app's collector.
