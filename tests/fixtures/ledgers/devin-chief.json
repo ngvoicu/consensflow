@@ -1,0 +1,58 @@
+{
+  "measure": {
+    "project": {
+      "id": 1,
+      "name": "site"
+    },
+    "chief": "chief",
+    "tasks": [],
+    "parallel": 0,
+    "advice": 0,
+    "reviews": 0,
+    "questionsOnBoard": 0,
+    "notesToHuman": [],
+    "notesText": "",
+    "longestResult": {
+      "worker": 0,
+      "advisor": 0,
+      "reviewer": 0
+    },
+    "taskCount": 0,
+    "chiefs": ["devin"],
+    "switches": 0,
+    "historyReads": [],
+    "chiefId": 2,
+    "chiefHarness": "devin",
+    "humanId": 1,
+    "chiefTurns": 0,
+    "chiefEdits": null,
+    "chiefLastWords": "",
+    "ownerMessages": [],
+    "askRefused": 0,
+    "ownerQuestions": {
+      "questions": 0,
+      "turnsAsking": 0,
+      "pickers": 0,
+      "texts": []
+    },
+    "plumbing": {
+      "briefs": 0,
+      "briefsDelivered": 0,
+      "results": 0,
+      "resultsDelivered": 0,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 0,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "placed": 0,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0
+    },
+    "chiefWordsNow": "",
+    "memberQuestionsBy": [],
+    "filesChanged": []
+  }
+}

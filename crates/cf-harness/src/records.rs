@@ -62,6 +62,14 @@ pub fn zone(name: &str) -> Option<TimeZone> {
     crate::shared::quota::time_zone(name)
 }
 
+/// The machine's time zone as `Intl` names it, which a quota's reset named by
+/// a time of day alone is read in. A zone the system has no name for stays the
+/// system's own.
+pub fn machine_zone() -> TimeZone {
+    let system = TimeZone::system();
+    system.iana_name().and_then(zone).unwrap_or(system)
+}
+
 /// How a [`Cache`] opens its readers: with [`reader`].
 pub fn open(local: TimeZone) -> Open {
     Box::new(move |harness, session, env| reader(harness, session, env, &local))

@@ -1,0 +1,75 @@
+{
+  "measure": {
+    "project": {
+      "id": 1,
+      "name": "site"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Sleep, then write",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "zeus-amber-pine"
+      },
+      {
+        "number": 2,
+        "title": "Add a line",
+        "pool": null,
+        "tier": null,
+        "state": "queued",
+        "assignee": "zeus-amber-pine"
+      }
+    ],
+    "parallel": 1,
+    "advice": 0,
+    "reviews": 0,
+    "questionsOnBoard": 0,
+    "notesToHuman": [],
+    "notesText": "",
+    "longestResult": {
+      "worker": 7,
+      "advisor": 0,
+      "reviewer": 0
+    },
+    "taskCount": 2,
+    "chiefs": ["claude-code"],
+    "switches": 0,
+    "historyReads": [],
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 0,
+    "chiefEdits": 0,
+    "chiefLastWords": "",
+    "ownerMessages": [],
+    "askRefused": 0,
+    "ownerQuestions": {
+      "questions": 0,
+      "turnsAsking": 0,
+      "pickers": 0,
+      "texts": []
+    },
+    "plumbing": {
+      "briefs": 3,
+      "briefsDelivered": 2,
+      "results": 1,
+      "resultsDelivered": 0,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 1,
+      "tells": 1,
+      "tellsAnswered": 1,
+      "placed": 2,
+      "pauses": 1,
+      "resumes": 1,
+      "continuations": 1
+    },
+    "chiefWordsNow": "",
+    "memberQuestionsBy": [],
+    "filesChanged": []
+  }
+}

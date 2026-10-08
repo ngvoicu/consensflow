@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::Path;
 
-use serde_json::{json, Map, Value};
+use serde_json::Value;
 
 use super::*;
 
@@ -16,19 +16,6 @@ fn tables() -> Value {
 /// A text of a row: none for null and for JavaScript's undefined.
 fn text(value: &Value) -> Option<&str> {
     value.as_str()
-}
-
-/// A window as Node wrote it: its `env` always empty, `prompt` only where given.
-fn written(window: &Invocation) -> Value {
-    let mut fields = Map::new();
-    fields.insert("command".to_owned(), json!(window.command));
-    fields.insert("args".to_owned(), json!(window.args));
-    if let Some(prompt) = &window.prompt {
-        fields.insert("prompt".to_owned(), json!(prompt));
-    }
-    fields.insert("env".to_owned(), json!({}));
-    fields.insert("dropEnv".to_owned(), json!(window.drop_env));
-    Value::Object(fields)
 }
 
 #[test]
@@ -50,7 +37,7 @@ fn every_window_opens_and_resumes_as_node_built_it() {
             _ => resume(harness, fields, session, seed),
         });
         assert_eq!(
-            window.as_ref().map_or(Value::Null, written),
+            window.as_ref().map_or(Value::Null, Invocation::written),
             row["window"],
             "{row}"
         );

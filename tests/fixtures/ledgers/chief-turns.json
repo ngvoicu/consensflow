@@ -1,0 +1,105 @@
+{
+  "measure": {
+    "project": {
+      "id": 1,
+      "name": "site"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Write it",
+        "pool": null,
+        "tier": null,
+        "state": "accepted",
+        "assignee": "zeus"
+      },
+      {
+        "number": 2,
+        "title": "Translate it",
+        "pool": null,
+        "tier": null,
+        "state": "done",
+        "assignee": "diana"
+      },
+      {
+        "number": 3,
+        "title": "Which law applies?",
+        "pool": "advisor",
+        "tier": "standard",
+        "state": "open",
+        "assignee": null
+      },
+      {
+        "number": 4,
+        "title": "Review T-1",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "open",
+        "assignee": null
+      }
+    ],
+    "parallel": 2,
+    "advice": 1,
+    "reviews": 1,
+    "questionsOnBoard": 0,
+    "notesToHuman": [
+      {
+        "id": 7,
+        "body": "The guide says 1 to 5; the site shows a colour."
+      }
+    ],
+    "notesText": "The guide says 1 to 5; the site shows a colour.",
+    "longestResult": {
+      "worker": 10,
+      "advisor": 0,
+      "reviewer": 0
+    },
+    "taskCount": 4,
+    "chiefs": ["claude-code"],
+    "switches": 0,
+    "historyReads": [],
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 4,
+    "chiefEdits": 2,
+    "chiefLastWords": "Shall I translate it? Or wait for you?",
+    "ownerMessages": [12, 4],
+    "askRefused": 1,
+    "ownerQuestions": {
+      "questions": 2,
+      "turnsAsking": 1,
+      "pickers": 0,
+      "texts": ["Shall I translate it? Or wait for you?"]
+    },
+    "plumbing": {
+      "briefs": 2,
+      "briefsDelivered": 2,
+      "results": 2,
+      "resultsDelivered": 1,
+      "memberQuestions": 1,
+      "memberQuestionsAnswered": 1,
+      "answersDelivered": 1,
+      "accepted": 1,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "placed": 4,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0
+    },
+    "chiefWordsNow": "Looking.\nNow the menu?\nDone: the page is in place.\nShall I translate it? Or wait for you?",
+    "memberQuestionsBy": [
+      {
+        "role": "worker",
+        "harness": "claude-code",
+        "asked": 1,
+        "answered": 1,
+        "delivered": 1,
+        "longest": 13
+      }
+    ],
+    "filesChanged": []
+  }
+}

@@ -14,7 +14,10 @@ import { fileURLToPath } from 'node:url'
  *
  *   B2  the deletion: the unit suites of ported modules, the recorders and the
  *       parity tools, and the tests of the hand-off between the two
- *   B4  the evals and the live tools
+ *
+ * The evals and the live tools (B4) import none of them any more: they read the
+ * ledger file with SQLite and ask the native side what a harness's window runs,
+ * says and keeps (tests/rust-harness.mjs).
  */
 const REPO = fileURLToPath(new URL('..', import.meta.url))
 const ROOTS = ['tests', 'app/tests', 'app/scripts', 'evals']
@@ -71,21 +74,6 @@ const REMOVED_BY = {
     'tests/engine/',
     'tests/goldens/',
     'tests/parity/',
-  ],
-  B4: [
-    'evals/bare.mjs',
-    'evals/measure.mjs',
-    'evals/run.mjs',
-    'tests/evals-bare.test.mjs',
-    'tests/evals-measure.test.mjs',
-    'tests/integration/home-copies.mjs',
-    'tests/integration/home-fixture.mjs',
-    'tests/live/catalog-agent.mjs',
-    'tests/live/codex-interrupted-question.mjs',
-    'tests/live/codex-resume.mjs',
-    'tests/live/interrupt-idle.mjs',
-    'tests/live/live-window.mjs',
-    'tests/live/receipt-rig.mjs',
   ],
 }
 
@@ -164,6 +152,19 @@ describe('no retained test imports the sources of Node', () => {
   it('has every importer listed with the landing that removes it', () => {
     const unlisted = importers.filter((file) => !listed.some((entry) => covers(entry, file)))
     assert.deepEqual(unlisted, [], 'a retained test imports Node’s sources: use the native side')
+  })
+
+  // A module moved or deleted under a script that still imports it fails there
+  // and then, in the landing that moved it, and not when someone runs the tool.
+  it('has every script import files that are there', () => {
+    const dangling = scripts()
+      .filter((file) => file !== SELF)
+      .flatMap((file) =>
+        importsOf(file)
+          .filter((module) => !existsSync(join(REPO, module)))
+          .map((module) => `${file} imports ${module}`),
+      )
+    assert.deepEqual(dangling, [])
   })
 
   // A landing that removes a file need not touch this list; the one that

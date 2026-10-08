@@ -13,7 +13,7 @@ import {
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { openLedger } from '../../src/ledger/index.js'
+import { addProject, openLedgerFile } from '../ledger-file.mjs'
 
 /**
  * What a copy of a home is made of, for the suite that holds it
@@ -75,19 +75,19 @@ function addProbeAgents(file) {
 
 /**
  * A project of the trip's own, open, with its chief and a worker on the agents
- * above: what the native daemon is given to hand out and deliver. Node's
- * ledger makes it on the copy, before any daemon starts.
+ * above: what the native daemon is given to hand out and deliver. It is
+ * written into the copy's ledger (brought to the schema this build knows
+ * first) before any daemon starts. The id of the project.
  */
 function addProbe(file, directory) {
-  const ledger = openLedger(file)
+  const ledger = openLedgerFile(file)
   try {
-    const project = ledger.createProject({
+    return addProject(ledger, {
       directory,
       name: 'round trip probe',
       chief: { harness: 'claude-code', agent: PROBE.chief },
       staff: [{ agent: PROBE.worker, harness: 'claude-code', roles: ['worker'], tier: PROBE.tier }],
     })
-    return project.id
   } finally {
     ledger.close()
   }

@@ -33,7 +33,7 @@ use cf_engine::seams::{Limits, Seams};
 use cf_engine::Dispatcher;
 use cf_harness::admin::feed::Feed;
 use cf_harness::admin::HarnessAdmin;
-use cf_harness::records::Thread;
+use cf_harness::records::{self, Thread};
 use cf_harness::seams::{
     Bundle, LoopbackPorts, Probes, Services, SystemEntropy, SystemLoopback, SystemProcesses,
 };
@@ -318,7 +318,7 @@ async fn run(
     );
 
     // What the engine runs windows with.
-    let zone = machine::zone();
+    let zone = records::machine_zone();
     let records = Rc::new(DaemonRecords::new(
         Rc::new(
             Thread::new(env.clone(), zone.clone(), Rc::clone(&time) as _)

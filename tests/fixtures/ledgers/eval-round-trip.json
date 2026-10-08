@@ -1,0 +1,84 @@
+{
+  "measure": {
+    "project": {
+      "id": 1,
+      "name": "workspace"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Creează un fișier nou site/notes.md (nu modifica niciun alt fișier).",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-worker-hazel-delta"
+      },
+      {
+        "number": 2,
+        "title": "Verifică rezultatul sarcinii T-1 (poți citi cu `cf task get T-1`).",
+        "pool": "reviewer",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "eval-claude-reviewer-sunny-birch"
+      }
+    ],
+    "parallel": 1,
+    "advice": 0,
+    "reviews": 1,
+    "questionsOnBoard": 0,
+    "notesToHuman": [],
+    "notesText": "",
+    "longestResult": {
+      "worker": 186,
+      "advisor": 0,
+      "reviewer": 1140
+    },
+    "taskCount": 2,
+    "chiefs": ["claude-code"],
+    "switches": 0,
+    "historyReads": [],
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 8,
+    "chiefEdits": 0,
+    "chiefLastWords": "Testul a trecut cu succes: workerul a întrebat (cf ask), am răspuns „albastru”, a scris o singură linie în `site/notes.md` fără a modifica alte fișiere, reviewerul a confirmat, iar T-1 și T-2 sunt acceptate.",
+    "ownerMessages": [443, 222, 372, 1328],
+    "askRefused": 0,
+    "ownerQuestions": {
+      "questions": 0,
+      "turnsAsking": 0,
+      "pickers": 0,
+      "texts": []
+    },
+    "plumbing": {
+      "briefs": 2,
+      "briefsDelivered": 2,
+      "results": 2,
+      "resultsDelivered": 2,
+      "memberQuestions": 1,
+      "memberQuestionsAnswered": 1,
+      "answersDelivered": 1,
+      "accepted": 2,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "placed": 2,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0
+    },
+    "chiefWordsNow": "Pun sarcina pe board pentru un worker, tier standard.\nTask T-1 e pe board. Așteptăm întrebarea workerului despre culoare — îi răspund „albastru” când apare, apoi trimit un reviewer să verifice site/notes.md și accept sarcina.\n\nAm răspuns „albastru”. Așteptăm ca workerul să scrie fișierul și să termine sarcina.\nRezultatul a venit. Trimit o cerere de review pentru site/notes.md înainte de a accepta T-1.\nT-2 (review) e pe board. Când revine rezultatul reviewerului, decid acceptarea lui T-1 și T-2.\nReviewerul confirmă totul e corect. Accept ambele sarcini.\nTestul a trecut cu succes: workerul a întrebat (cf ask), am răspuns „albastru”, a scris o singură linie în `site/notes.md` fără a modifica alte fișiere, reviewerul a confirmat, iar T-1 și T-2 sunt acceptate.",
+    "memberQuestionsBy": [
+      {
+        "role": "worker",
+        "harness": "claude-code",
+        "asked": 1,
+        "answered": 1,
+        "delivered": 1,
+        "longest": 54
+      }
+    ],
+    "filesChanged": []
+  }
+}

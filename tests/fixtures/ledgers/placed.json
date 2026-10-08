@@ -1,0 +1,116 @@
+{
+  "measure": {
+    "project": {
+      "id": 1,
+      "name": "site"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Waits",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "open",
+        "assignee": null
+      },
+      {
+        "number": 2,
+        "title": "Paused",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "paused",
+        "assignee": null
+      },
+      {
+        "number": 3,
+        "title": "Called off",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "cancelled",
+        "assignee": null
+      },
+      {
+        "number": 4,
+        "title": "Failed",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "failed",
+        "assignee": null
+      },
+      {
+        "number": 5,
+        "title": "Parser",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "done",
+        "assignee": "zeus-amber-pine"
+      },
+      {
+        "number": 6,
+        "title": "Docs",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "done",
+        "assignee": "diana-brisk-birch"
+      },
+      {
+        "number": 7,
+        "title": "Old spike",
+        "pool": "worker",
+        "tier": "standard",
+        "state": "accepted",
+        "assignee": "zeus-calm-brook"
+      }
+    ],
+    "parallel": 1,
+    "advice": 0,
+    "reviews": 0,
+    "questionsOnBoard": 0,
+    "notesToHuman": [],
+    "notesText": "",
+    "longestResult": {
+      "worker": 4,
+      "advisor": 0,
+      "reviewer": 0
+    },
+    "taskCount": 7,
+    "chiefs": ["claude-code"],
+    "switches": 0,
+    "historyReads": [],
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 0,
+    "chiefEdits": 0,
+    "chiefLastWords": "",
+    "ownerMessages": [],
+    "askRefused": 0,
+    "ownerQuestions": {
+      "questions": 0,
+      "turnsAsking": 0,
+      "pickers": 0,
+      "texts": []
+    },
+    "plumbing": {
+      "briefs": 3,
+      "briefsDelivered": 3,
+      "results": 3,
+      "resultsDelivered": 0,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 1,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "placed": 6,
+      "pauses": 1,
+      "resumes": 0,
+      "continuations": 0
+    },
+    "chiefWordsNow": "",
+    "memberQuestionsBy": [],
+    "filesChanged": []
+  },
+  "listed": 6
+}

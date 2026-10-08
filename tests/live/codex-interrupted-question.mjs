@@ -26,7 +26,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { codexIsolation } from '../../evals/plan.mjs'
-import { harnessPath, runnable } from '../../src/harnesses.js'
+import { harnessPath, runnable } from './harnesses.mjs'
 
 const MODEL = 'gpt-5.6-luna'
 const ASKED_WITHIN_MS = 180_000

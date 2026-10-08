@@ -5,7 +5,7 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, it } from 'node:test'
 import { askingTurnEnd, bareMetrics, findSession } from '../evals/bare.mjs'
-import { devinFolders } from '../src/harnesses.js'
+import { devinFolders } from './live/harnesses.mjs'
 
 const WORKSPACE = '/evals/workspace'
 

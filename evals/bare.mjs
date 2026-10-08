@@ -8,7 +8,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { devinFolders, opencodeStores } from '../src/harnesses.js'
+import { devinFolders, opencodeStores } from '../tests/live/harnesses.mjs'
 import { countQuestions, ownerQuestions } from './measure.mjs'
 
 /**

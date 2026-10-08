@@ -26,6 +26,27 @@ pub(crate) struct Invocation {
     pub(crate) drop_env: &'static [&'static str],
 }
 
+// What the goldens and the live tools (`tooling`) read; the product reads none of it.
+#[cfg(any(test, feature = "test-support"))]
+impl Invocation {
+    /// The window as `hosts/lib/windows.js` wrote it, which the goldens hold
+    /// it to and the live tools read: its `env` always empty, `prompt` only
+    /// where given.
+    pub(crate) fn written(&self) -> serde_json::Value {
+        use serde_json::{json, Map, Value};
+
+        let mut fields = Map::new();
+        fields.insert("command".to_owned(), json!(self.command));
+        fields.insert("args".to_owned(), json!(self.args));
+        if let Some(prompt) = &self.prompt {
+            fields.insert("prompt".to_owned(), json!(prompt));
+        }
+        fields.insert("env".to_owned(), json!({}));
+        fields.insert("dropEnv".to_owned(), json!(self.drop_env));
+        Value::Object(fields)
+    }
+}
+
 /// The window on a conversation that does not exist yet, `seed` its first
 /// message: none where the harness needs an id and has none (Claude and Pi
 /// take theirs from ConsensFlow).

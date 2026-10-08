@@ -24,8 +24,6 @@ getrandom.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
-# The machine's time zone, which a quota's reset named by a time of day is read in.
-jiff.workspace = true
 # The harness feed's client (`screens::network`): the HTTPS of Node's `fetch`,
 # on rustls and the platform's own trust, built on ring.
 reqwest.workspace = true

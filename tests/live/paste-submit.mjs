@@ -89,7 +89,7 @@ try {
       }
       for (const check of CASES) {
         const answer = String(check.sum[0] + check.sum[1])
-        const body = window.given(check.body(ask(check.sum)))
+        const body = await window.given(check.body(ask(check.sum)))
         const { written, shown, seconds } = await send(app, window, body, answer)
         // Its record holds what was pasted, whole: where the app looks for it.
         const whole = body.replace(/\r\n/g, '\n').trim()

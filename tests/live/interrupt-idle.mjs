@@ -7,9 +7,9 @@
  * rewind, and the next message's Enter confirmed it, cutting the conversation
  * back (poker-lab, 2026-10-03); Devin's interrupt now ends with one Escape
  * more, which closes it. Each window here answers a first message, takes its
- * harness's interrupt as the daemon presses it (`pressInterrupt`), then a
- * second message: that one must be answered, and the first must still be in
- * the record.
+ * harness's interrupt as the daemon presses it (`pressInterrupt`, the keys
+ * its adapter says), then a second message: that one must be answered, and
+ * the first must still be in the record.
  *
  *   npm run live:interrupt                      Devin
  *   npm run live:interrupt -- --harness claude --harness devin
@@ -20,12 +20,9 @@
  * command, at a question hook, a stop that is ignored) is `npm run live:stops`.
  */
 import { parseArgs } from 'node:util'
-import { claudeCodeAdapter } from '../../src/adapters/claude-code.js'
-import { devinAdapter } from '../../src/adapters/devin.js'
-import { pressInterrupt } from '../../src/core/windows.js'
+import { interruptOf } from '../rust-harness.mjs'
 import {
   ANSWER_MS,
-  ENV,
   lastLines,
   openWindow,
   pastedHarnesses,
@@ -37,13 +34,33 @@ import {
 
 const { values } = parseArgs({ options: { harness: { type: 'string', multiple: true } } })
 const harnesses = pastedHarnesses(values.harness ?? ['devin'])
-/** Each harness's interrupt, as its adapter tells the daemon to press it. */
-const INTERRUPTS = {
-  claude: claudeCodeAdapter({ env: ENV }).interrupt,
-  devin: devinAdapter({ env: ENV }).interrupt,
-}
+/** The kind of each harness the app pastes into, which its adapter is asked for the interrupt by. */
+const KINDS = { claude: 'claude-code', devin: 'devin' }
 const ask = (what, [a, b]) =>
   `${what}: reply with only the sum of ${a} and ${b}, in digits, and run no tools.`
+
+/** The key that interrupts a turn, and the gap of a double press: the daemon's (crates/cf-engine/src/windows.rs). */
+const ESCAPE = 27
+const DOUBLE_PRESS_MS = 150
+
+/**
+ * A harness's interrupt as keys into its window, as the daemon presses it
+ * (`press_interrupt`): Escape as many times in a row as it asks for and,
+ * where those presses open a dialog at a turn that ended just before them
+ * (Devin's rewind), one more after a pause, which closes it and is nothing
+ * anywhere else.
+ */
+async function pressInterrupt(host, pane, { presses, closeAfterMs }) {
+  const pressEscape = () => host.request('pane.input', { ...pane, bytes: [ESCAPE] }).catch(() => {})
+  for (let press = 0; press < presses; press += 1) {
+    if (press > 0) await sleep(DOUBLE_PRESS_MS)
+    await pressEscape()
+  }
+  if (closeAfterMs !== null) {
+    await sleep(closeAfterMs)
+    await pressEscape()
+  }
+}
 
 const app = await startLiveApp()
 const results = []
@@ -56,7 +73,7 @@ try {
         results.push({ name, ok: false, detail: `did not open: ${lastLines(window.screen())}` })
         continue
       }
-      const first = await send(app, window, window.given(ask('First', [1111, 2222])), '3333')
+      const first = await send(app, window, await window.given(ask('First', [1111, 2222])), '3333')
       if (!first.shown) {
         results.push({
           name,
@@ -66,9 +83,14 @@ try {
         continue
       }
       await window.still(ANSWER_MS)
-      await pressInterrupt(app, window.pane, INTERRUPTS[name])
+      await pressInterrupt(app, window.pane, await interruptOf(KINDS[name]))
       await sleep(2_000)
-      const second = await send(app, window, window.given(ask('Second', [4444, 1111])), '5555')
+      const second = await send(
+        app,
+        window,
+        await window.given(ask('Second', [4444, 1111])),
+        '5555',
+      )
       const users = (await window.recorded())
         .filter((item) => item.role === 'user')
         .map((item) => item.text)

@@ -25,7 +25,7 @@ const QUESTION_HOOK_SECONDS: u32 = 3600;
 /// those answers never counted as done. A member's question tool is
 /// answered from the board (`board_questions`); the chief's shows Claude's
 /// own dialog, where the human answers it.
-pub(super) fn settings(
+pub(crate) fn settings(
     env: &Env,
     launch: &LaunchId,
     board_questions: bool,

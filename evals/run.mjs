@@ -20,13 +20,10 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
-import { answers } from '../hosts/lib/completion.js'
-import { interactiveStart } from '../hosts/lib/windows.js'
-import { recordState } from '../src/adapters/shared.js'
-import { consoleText } from '../src/console-text.js'
-import { onWindows, runnable } from '../src/harnesses.js'
 import { startIntegration } from '../tests/integration/harness.mjs'
+import { onWindows, runnable } from '../tests/live/harnesses.mjs'
 import { trustForClaude } from '../tests/live/trust-claude.mjs'
+import { consoleText, interactiveStart, readRecord } from '../tests/rust-harness.mjs'
 import { askingTurnEnd, bareMetrics, findSession } from './bare.mjs'
 import {
   changed,
@@ -131,7 +128,7 @@ const wrapper = (name, real, flags) => {
     // was given, in the same console, and ends as it ends. Ctrl+C is the
     // program's to answer, not the script's.
     const relay = join(ISOLATED_BIN, `${name}.mjs`)
-    const harnesses = pathToFileURL(join(HERE, '..', 'src', 'harnesses.js')).href
+    const harnesses = pathToFileURL(join(HERE, '..', 'tests', 'live', 'harnesses.mjs')).href
     writeFileSync(
       relay,
       [
@@ -287,6 +284,22 @@ function freshWorkspace() {
   cpSync(join(HERE, 'fixtures', scenario.fixture), WORKSPACE, { recursive: true })
 }
 
+/**
+ * How the owner's answers are typed into a Devin chief's question dialog:
+ * Windows' console drops what is not ASCII, so each answer the scenario can
+ * give goes in as the console carries it (the daemon's own spelling, asked of
+ * the harness code). Elsewhere, and for any other chief, as it is.
+ */
+async function dialogSpelling() {
+  if (chief !== 'devin' || !onWindows(ENV)) return undefined
+  const spelled = new Map(
+    await Promise.all(
+      (scenario.answers ?? []).map(async ({ text }) => [text, await consoleText(text)]),
+    ),
+  )
+  return (text) => spelled.get(text) ?? text
+}
+
 /** The fresh workspace trusted for Claude, in a pane of the run's own host, when Claude is in the run. */
 async function trustWorkspace(app) {
   if (!inRun('claude')) return
@@ -319,6 +332,7 @@ async function run(index) {
   let boardTasks = 0
   const refusedApprovals = []
   let approvals = 0
+  const spell = await dialogSpelling()
   try {
     writeFileSync(
       join(app.env.CONSENSFLOW_HOME, 'agents.json'),
@@ -447,7 +461,7 @@ async function run(index) {
         const replies =
           questions === null
             ? [{ question: null, answer: null, keys: [[13]] }]
-            : devinPickerAnswers(scenario, questions, onWindows(ENV) ? consoleText : undefined)
+            : devinPickerAnswers(scenario, questions, spell)
         for (const { question, answer, keys } of replies) {
           note(
             answer === null
@@ -652,7 +666,7 @@ async function runBare(index) {
   const kind = HARNESSES[chief].kind
   // Claude and Pi open on an id they are given; the others name theirs in their stores.
   let session = kind === 'claude-code' || kind === 'pi' ? randomUUID() : null
-  const start = interactiveStart({ kind }, session, null)
+  const start = await interactiveStart({ kind }, session, null)
   const executable = ['claude', 'codex', 'pi'].includes(start.command)
     ? join(ISOLATED_BIN, start.command)
     : realOnPath(start.command, ENV.PATH)
@@ -682,8 +696,7 @@ async function runBare(index) {
         env: RECORD_ENV,
       })
       if (session === null) return null
-      const read = await answers(kind, session, RECORD_ENV).catch(() => null)
-      return read === null || read.unknown ? null : recordState(read)
+      return readRecord(kind, session, RECORD_ENV).catch(() => null)
     }
     const type = async (text) => {
       await settled(() => app.output(pane.id).length)

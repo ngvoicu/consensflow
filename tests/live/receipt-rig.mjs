@@ -29,9 +29,8 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { liveEnvironment, realOnPath } from '../../evals/plan.mjs'
-import { answers } from '../../hosts/lib/completion.js'
-import { recordState } from '../../src/adapters/shared.js'
 import { startIntegration } from '../integration/harness.mjs'
+import { readRecord } from '../rust-harness.mjs'
 import { AGENTS, QUESTION_TOOL, tierFlag } from './bench-agents.mjs'
 import { CF, traceOf, useNativeDaemon } from './native-daemon.mjs'
 import { trustForClaude } from './trust-claude.mjs'
@@ -157,20 +156,20 @@ export function runs(samples, from) {
 }
 
 /**
- * How the repo's reference record reader (`hosts/lib/completion.js`, which the
- * daemon's own reader is ported from, record for record) reads the transcript
- * of a session: whether the turn is settled, its settlement, its last item.
- * What it says is what the daemon's look at the window will say of its record.
+ * How the daemon's own record reader (`cf_harness::records`, asked through
+ * `tests/rust-harness.mjs`) reads the transcript of a session: whether the
+ * turn is settled, its settlement, its last item. What it says is what the
+ * daemon's look at the window will say of its record. `env` says where Claude
+ * keeps it: the live environment's, unless a test gives another.
  */
-export async function claudeSettlement(session) {
-  const read = await answers('claude-code', session, RECORD_ENV).catch(() => null)
-  if (read === null || read.unknown) return null
-  const state = recordState(read)
-  const last = state.items.at(-1)
+export async function claudeSettlement(session, env = RECORD_ENV) {
+  const read = await readRecord('claude-code', session, env).catch(() => null)
+  if (read === null) return null
+  const last = read.items.at(-1)
   return {
-    settled: state.settled,
-    settlement: read.settlement?.state ?? null,
-    items: state.items.length,
+    settled: read.settled,
+    settlement: read.settlement,
+    items: read.items.length,
     last: last ? `${last.role}: ${last.text.replace(/\s+/g, ' ').slice(0, 60)}` : null,
   }
 }

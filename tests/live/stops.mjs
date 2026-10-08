@@ -147,20 +147,21 @@ function recordSince(session, from, last = 14) {
 }
 
 /**
- * How the reference record reader (Node's, which keeps its rules) reads the
- * window's transcript now. The native daemon's look at the window needs
- * Claude's status idle and the record settled, as this reader says, but it
- * departs from it in two cases, and reads the window at rest where this one
- * says "not settled": an interrupt record that names no message (the
- * `slowhook` case), and a turn the daemon's own press stopped before Claude
- * wrote a word (the `early` case, which has no record of the stop). The
- * daemon's own reading is the `window.activity` line of each case.
+ * How the daemon's record reader (`cf_harness::records`, before the Claude
+ * adapter reads the window by more than its record) reads the window's
+ * transcript now. The native daemon's look at the window needs Claude's status
+ * idle and the record settled, as this reader says, but it departs from it in
+ * two cases, and reads the window at rest where this one says "not settled":
+ * an interrupt record that names no message (the `slowhook` case), and a turn
+ * the daemon's own press stopped before Claude wrote a word (the `early` case,
+ * which has no record of the stop). The daemon's own reading is the
+ * `window.activity` line of each case.
  */
 async function settlementLine(session) {
   const read = await claudeSettlement(session)
   return read === null
-    ? 'the reference record reader finds no transcript'
-    : `the reference record reader (hosts/lib/completion.js, Node's, which keeps its rules) reads its transcript as ${read.settled ? 'SETTLED' : 'NOT settled'} (settlement ${read.settlement}; ${read.items} items, the last ${JSON.stringify(read.last)})`
+    ? 'the record reader finds no transcript'
+    : `the record reader (cf_harness::records, before the adapter's own look) reads its transcript as ${read.settled ? 'SETTLED' : 'NOT settled'} (settlement ${read.settlement}; ${read.items} items, the last ${JSON.stringify(read.last)})`
 }
 
 /** What a window's screen shows now, its last lines. */

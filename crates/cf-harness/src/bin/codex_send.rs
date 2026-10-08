@@ -5,7 +5,8 @@
 //! nothing: it is built only with the `test-support` feature.
 //!
 //! The question is one JSON object on the first line of stdin, as `common`
-//! says: `{"op": "send" | "shown", "channel": {"launchId", "sessionBridge":
+//! says, and the pane host is asked as `pane_host` says: `{"op": "send" |
+//! "shown", "channel": {"launchId", "sessionBridge":
 //! {"endpoint", "token"}}}`, and for a send also `"session"`, `"pane"`,
 //! `"generation"` and `"text"`. A send answers as JavaScript's does, and
 //! the broker's word as `sessionState` does: `{"sessionId", "available"}`,
@@ -14,10 +15,13 @@
 #![forbid(unsafe_code)]
 
 mod common;
+mod pane_host;
 
 use cf_harness::codex::{send, Answer, Channel, Session, Shown, Target};
 use cf_harness::seams::{SystemLoopback, SystemTime};
-use common::{pane, serve, text, Asking};
+use cf_harness::tooling::text;
+use common::serve;
+use pane_host::{pane, Asking};
 use serde_json::{json, Map, Value};
 
 /// The broker the question names.

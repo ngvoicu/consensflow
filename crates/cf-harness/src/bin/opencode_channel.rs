@@ -5,7 +5,7 @@
 //! ships with nothing: it is built only with the `test-support` feature.
 //!
 //! The question is one JSON object on the first line of stdin, as `common`
-//! says, its `"op"` one of:
+//! says, and the pane host is asked as `pane_host` says; its `"op"` one of:
 //! - `"create"`: `{"executable", "directory", "env", "configuration":
 //!   {"args", "env", "channel"}}`, answered with the new conversation's id;
 //! - `"seed"`: `{"channel", "session", "directory", "text", "model",
@@ -21,6 +21,7 @@
 #![forbid(unsafe_code)]
 
 mod common;
+mod pane_host;
 
 use cf_base::env::Env;
 use cf_harness::opencode::{
@@ -28,7 +29,9 @@ use cf_harness::opencode::{
     Wires, LIFETIME_MS, TIMEOUT_MS,
 };
 use cf_harness::seams::{SystemLoopback, SystemProcesses, SystemTime};
-use common::{pane, serve, text, Asking};
+use cf_harness::tooling::text;
+use common::serve;
+use pane_host::{pane, Asking};
 use serde_json::{json, Map, Value};
 
 /// A text field of `object`, empty where there is none.

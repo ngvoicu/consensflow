@@ -7,107 +7,110 @@
  * opened again on its conversation for a reopened task took the task and
  * asked the chief, and the chief's answer never reached it (2026-10-03, on
  * the Mac's Codex 0.159.2 and Windows' 0.160.0): their TUI resumes with its
- * workspace roots null, where the broker looked for a list. This opens a
- * Codex window as the daemon does, waits for
- * the broker to name the thread its first message starts, closes it, opens
- * one again on that thread with a message, as the daemon does for a reopened
- * task, and needs the broker to name it again.
+ * workspace roots null, where the broker looked for a list.
+ *
+ * This is the daemon's own path to it, on the rig of the live receipt checks
+ * (`npm run live:door`): a Codex member of a project on the native daemon is
+ * given a task and ends it, and the daemon closes its window with the task.
+ * Then a follow-up for the same window (`cf task add --after`) has the daemon
+ * open the window again on its conversation, with the follow-up as its first
+ * message. It needs the window to open on the thread the first one ran in
+ * (`codex resume <thread>`), the follow-up to reach it, and its result to come
+ * back: a broker that does not name the thread again leaves the follow-up
+ * undelivered.
  *
  *   npm run live:codex-resume
+ *
+ * Needs `npm run build:bridge` and `npm run build:cf`. The exit code is 1 when
+ * the window opened again did not take its message.
  */
-import { randomUUID } from 'node:crypto'
-import { HARNESSES } from '../../evals/plan.mjs'
-import { answers } from '../../hosts/lib/completion.js'
-import { codexAdapter } from '../../src/adapters/codex.js'
-import { recordState } from '../../src/adapters/shared.js'
-import { sessionState } from '../../src/channels/codex.js'
-import { paneArgv } from '../../src/harnesses.js'
-import {
-  ANSWER_MS,
-  ENV,
-  lastLines,
-  liveFolder,
-  sleep,
-  startLiveApp,
-  windowEnv,
-} from './live-window.mjs'
+import { lastLines } from './live-window.mjs'
+import { openRig, seconds, sleep, until } from './receipt-rig.mjs'
 
-/** How long a window may take to start, and its broker to name its thread. */
-const NAMED_MS = 120_000
+/** How long a member may take to end a task, and a window to close once it has. */
+const DONE_MS = 300_000
+const CLOSED_MS = 60_000
+const ENDED = ['done', 'accepted', 'failed', 'cancelled']
 
-const workspace = liveFolder('codex-resume')
-const adapter = codexAdapter({ env: windowEnv(workspace) })
-const request = (resume, message) => ({
-  launchId: `live-${randomUUID()}`,
-  role: 'worker',
-  directory: workspace,
-  resume,
-  message,
-  agent: { model: HARNESSES.codex.model, effort: 'low' },
-  instructions: 'You are a live test window: answer in one word, and run no tools.',
-})
-
-const app = await startLiveApp()
-/** Opens a prepared window and waits for its broker to name a thread: the thread, or null. */
-async function named(plan, id) {
-  const pane = { id, generation: 1 }
-  const opened = await app.request('pane.open', {
-    ...pane,
-    cwd: workspace,
-    argv: paneArgv(plan.argv, ENV),
-    env: plan.env,
-    dropEnv: plan.dropEnv,
-    size: { rows: 40, cols: 120 },
-  })
-  if (opened?.ok !== true) throw new Error(`Codex did not open: ${JSON.stringify(opened)}`)
-  const end = Date.now() + NAMED_MS
-  let thread = null
-  while (thread === null && Date.now() < end) {
-    await sleep(500)
-    thread = (await sessionState(plan.launch.channel))?.sessionId ?? null
-  }
-  return { pane, thread, screen: () => lastLines(app.output(pane.id)) }
-}
-
-/** Until the thread's own record holds an answer (its turn is over and saved), or ANSWER_MS passed. */
-async function answered(thread) {
-  const end = Date.now() + ANSWER_MS
-  while (Date.now() < end) {
-    const read = await answers('codex', thread, windowEnv(workspace)).catch(() => null)
-    if (read && !read.unknown && recordState(read).items.some((item) => item.role === 'assistant'))
-      return true
-    await sleep(1_000)
-  }
-  return false
-}
-
+const rig = await openRig({ folder: 'codex-resume', workers: ['codex'] })
 let outcome
 try {
-  const fresh = await named(await adapter.prepare(request(null, 'Reply with only: ok')), 'resume-a')
-  const saved = fresh.thread !== null && (await answered(fresh.thread))
-  await app.request('pane.kill', fresh.pane).catch(() => {})
-  if (fresh.thread === null) {
-    outcome = { ok: false, detail: `a fresh window was never named: ${fresh.screen()}` }
-  } else if (!saved) {
-    outcome = { ok: false, detail: `a fresh window never answered: ${fresh.screen()}` }
+  // A fresh window: the task opens one, and ends with the member's result.
+  const first = await rig.give('codex', 'Reply with only: ok')
+  const opened = await until(() => rig.windowOf('codex'), DONE_MS, 500)
+  const ended = await until(
+    async () => ENDED.includes((await rig.thread(first)).state),
+    DONE_MS,
+    500,
+  )
+  if (!opened || !ended) {
+    outcome = {
+      ok: false,
+      detail: `a fresh window never ${opened ? 'ended its task' : 'opened'} in ${DONE_MS / 1000} s: ${lastLines(rig.app.output(opened?.pane?.id ?? ''))}`,
+    }
   } else {
+    // The daemon closes a window with its task; one it left open is closed here, so that
+    // the follow-up has to open it again.
+    const exited = () =>
+      rig.app.exits.some(
+        (exit) => exit.id === opened.pane.id && exit.generation === opened.pane.generation,
+      )
+    if (!(await until(exited, CLOSED_MS, 500))) {
+      await rig.app.request('pane.kill', opened.pane).catch(() => {})
+      await until(exited, CLOSED_MS, 500)
+    }
     await sleep(2_000)
+    const named = rig
+      .events()
+      .filter((event) => event.kind === 'conversation.bound')
+      .map((event) => event.data.nativeSession)
     // As the daemon opens it for a reopened task: on the thread, with the message.
-    const again = await named(
-      await adapter.prepare(request(fresh.thread, 'Reply with only: again')),
-      'resume-b',
-    )
-    await app.request('pane.kill', again.pane).catch(() => {})
-    outcome =
-      again.thread === fresh.thread
-        ? { ok: true, detail: `opened again on ${fresh.thread}, and named it` }
-        : {
-            ok: false,
-            detail: `opened again on ${fresh.thread}, named ${again.thread ?? 'nothing'}: ${again.screen()}`,
-          }
+    const started = Date.now()
+    const openedBefore = rig.app.openFrames.length
+    const follow = await rig.asChief([
+      'task',
+      'add',
+      '--after',
+      `T-${first}`,
+      '--json',
+      'Reply with only: again',
+    ])
+    const number = JSON.parse(follow.stdout || 'null')?.task?.number
+    if (follow.code !== 0 || number === undefined) {
+      outcome = { ok: false, detail: `cf task add --after T-${first}: ${JSON.stringify(follow)}` }
+    } else {
+      const done = await until(
+        async () => ENDED.includes((await rig.thread(number)).state),
+        DONE_MS,
+        500,
+      )
+      // The window the follow-up opened is the same session's: its pane has the same name.
+      const again = rig.app.openFrames
+        .slice(openedBefore)
+        .find((frame) => frame.id === opened.pane.id)
+      const argv = again?.argv ?? []
+      const thread = argv[argv.indexOf('resume') + 1]
+      const result = (await rig.thread(number)).messages.findLast((m) => m.kind === 'result')
+      if (!argv.includes('resume') || !named.includes(thread)) {
+        outcome = {
+          ok: false,
+          detail: `the window was not opened again on a thread the first one ran in (named: ${named.join(', ') || 'none'}): ${argv.join(' ') || 'no window opened'}`,
+        }
+      } else if (!done || !result?.body.toLowerCase().includes('again')) {
+        outcome = {
+          ok: false,
+          detail: `opened again on ${thread}, but its message was not taken and answered in ${DONE_MS / 1000} s (T-${number}: ${(await rig.thread(number)).state}): ${lastLines(rig.app.output(opened.pane.id))}`,
+        }
+      } else {
+        outcome = {
+          ok: true,
+          detail: `opened again on ${thread}, took its message and answered in ${seconds(Date.now() - started)} s`,
+        }
+      }
+    }
   }
 } finally {
-  await app.close()
+  await rig.close()
 }
 process.stdout.write(
   `${outcome.ok ? 'ok  ' : 'FAIL'} codex     a window opened again on its thread: ${outcome.detail}\n`,

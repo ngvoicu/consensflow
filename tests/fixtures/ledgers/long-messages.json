@@ -1,0 +1,80 @@
+{
+  "measure": {
+    "project": {
+      "id": 1,
+      "name": "site"
+    },
+    "chief": "chief",
+    "tasks": [
+      {
+        "number": 1,
+        "title": "Report",
+        "pool": null,
+        "tier": null,
+        "state": "done",
+        "assignee": "zeus"
+      },
+      {
+        "number": 2,
+        "title": "Advise",
+        "pool": "advisor",
+        "tier": "standard",
+        "state": "done",
+        "assignee": "athena-amber-pine"
+      }
+    ],
+    "parallel": 2,
+    "advice": 1,
+    "reviews": 0,
+    "questionsOnBoard": 0,
+    "notesToHuman": [
+      {
+        "id": 5,
+        "body": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+      }
+    ],
+    "notesText": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn DELTA-5530 at the end",
+    "longestResult": {
+      "worker": 9010,
+      "advisor": 12,
+      "reviewer": 0
+    },
+    "taskCount": 2,
+    "chiefs": ["claude-code"],
+    "switches": 0,
+    "historyReads": [],
+    "chiefId": 2,
+    "chiefHarness": "claude-code",
+    "humanId": 1,
+    "chiefTurns": 1,
+    "chiefEdits": 0,
+    "chiefLastWords": "Which name should it have?",
+    "ownerMessages": [11, 6000],
+    "askRefused": 0,
+    "ownerQuestions": {
+      "questions": 1,
+      "turnsAsking": 1,
+      "pickers": 0,
+      "texts": ["Which name should it have?"]
+    },
+    "plumbing": {
+      "briefs": 2,
+      "briefsDelivered": 2,
+      "results": 2,
+      "resultsDelivered": 0,
+      "memberQuestions": 0,
+      "memberQuestionsAnswered": 0,
+      "answersDelivered": 0,
+      "accepted": 0,
+      "tells": 0,
+      "tellsAnswered": 0,
+      "placed": 2,
+      "pauses": 0,
+      "resumes": 0,
+      "continuations": 0
+    },
+    "chiefWordsNow": "Which name should it have?",
+    "memberQuestionsBy": [],
+    "filesChanged": []
+  }
+}
