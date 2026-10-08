@@ -241,6 +241,9 @@ jobs:
         working-directory: ${{ runner.temp }}/dist
         run: |
           set -euo pipefail
+          # A feed just swapped can answer 404 for a few minutes while GitHub's
+          # download links catch up (alpha.83, 2026-10-08): 36 reads, 5 s apart.
           node "$GITHUB_WORKSPACE/app/scripts/feeds.mjs" check --dir . \
             --version "${GITHUB_REF_NAME#v}" \
-            --base "https://github.com/$GITHUB_REPOSITORY/releases/download"
+            --base "https://github.com/$GITHUB_REPOSITORY/releases/download" \
+            --attempts 36
