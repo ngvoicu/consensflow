@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// The pages as Node's generator wrote them (`npm run goldens:daemon`).
+/// The pages as Node's generator wrote them (recorded, and fixed since).
 const RECORDED_AGENTS: &str = include_str!("../../../tests/goldens/pages/agents.html");
 const RECORDED_HARNESSES: &str = include_str!("../../../tests/goldens/pages/harnesses.html");
 
@@ -11,11 +11,11 @@ const RECORDED_HARNESSES: &str = include_str!("../../../tests/goldens/pages/harn
 fn each_page_is_the_page_node_recorded_to_the_byte() {
     assert!(
         AGENTS == RECORDED_AGENTS,
-        "the agents page is not the recorded one: copy tests/goldens/pages/agents.html over src/screens/pages/agents.html"
+        "the agents page is not the recorded one: change src/screens/pages/agents.html and tests/goldens/pages/agents.html together"
     );
     assert!(
         HARNESSES == RECORDED_HARNESSES,
-        "the harnesses page is not the recorded one: copy tests/goldens/pages/harnesses.html over src/screens/pages/harnesses.html"
+        "the harnesses page is not the recorded one: change src/screens/pages/harnesses.html and tests/goldens/pages/harnesses.html together"
     );
 }
 

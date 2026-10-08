@@ -1,10 +1,9 @@
-//! The command ConsensFlow puts in the user's terminal (`src/terminal.js`):
-//! `consensflow` and `cf` in the `bin` folder of ConsensFlow's home, `.cmd`
-//! where Windows has them, each a small script that runs the app's own `cf`,
-//! so a terminal and a window never drift apart. The app already carries a
-//! working program, so this is a launcher pointing at it, not a second
-//! installation to keep in sync, and nothing to do with npm: the same move
-//! VS Code makes with its `code` command.
+//! The command ConsensFlow puts in the user's terminal: `consensflow` and `cf`
+//! in the `bin` folder of ConsensFlow's home, `.cmd` where Windows has them,
+//! each a small script that runs the app's own `cf`, so a terminal and a window
+//! never drift apart. The app already carries a working program, so this is a
+//! launcher pointing at it, not a second installation to keep in sync, and
+//! nothing to do with npm: the same move VS Code makes with its `code` command.
 //!
 //! - [`install`] writes it, and [`status`] says whether it is there, where,
 //!   and whether that place is on `PATH`. A command someone else put there

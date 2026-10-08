@@ -1,9 +1,9 @@
-//! A panic is what an exception was: caught where work runs, written down,
-//! and gone past. Node went on after a throw nobody caught
-//! (`uncaughtException`, `unhandledRejection`, `src/core/daemon.js:60-65`),
-//! logging it and tracing it as `daemon.error`; the daemon goes on after a
-//! panic the same way, at each place that runs work for someone: a pass, a
-//! page operation, a request, a task that goes on apart, an event of the host.
+//! A panic is what an exception was: caught where work runs, written down, and
+//! gone past. Node went on after a throw nobody caught (`uncaughtException`,
+//! `unhandledRejection`), logging it and tracing it as `daemon.error`; the
+//! daemon goes on after a panic the same way, at each place that runs work for
+//! someone: a pass, a page operation, a request, a task that goes on apart, an
+//! event of the host.
 //!
 //! The hook ([`install_hook`]) only notes where the panic was; it writes
 //! nothing and touches no ledger, which may be borrowed while the panic

@@ -1,8 +1,7 @@
-//! What Devin's window runs with (`src/devin-install.js`): a config of its
-//! launch's own, which is the owner's with the hooks that give a session its
-//! role text and answer a member's question from the board, and the first
-//! message in a prompt file. Mutable native preferences are per launch;
-//! loaded helper code is immutable.
+//! What Devin's window runs with: a config of its launch's own, which is the
+//! owner's with the hooks that give a session its role text and answer a
+//! member's question from the board, and the first message in a prompt file.
+//! Mutable native preferences are per launch; loaded helper code is immutable.
 //!
 //! Kept from Node on purpose:
 //! - the version is always asked: Node skipped the question for a call that

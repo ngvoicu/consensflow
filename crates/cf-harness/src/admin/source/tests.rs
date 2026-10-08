@@ -1,6 +1,6 @@
-//! The install layouts as `tests/harness-admin.test.mjs` holds Node's, with
-//! Windows' spellings besides; the recorded goldens (`tests/goldens/admin`)
-//! hold each to Node's answer.
+//! The install layouts as Node's admin suite held them, with Windows' spellings
+//! besides; the recorded goldens (`tests/goldens/admin`) hold each to Node's
+//! answer.
 
 use std::fs;
 

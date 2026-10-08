@@ -1,7 +1,7 @@
-//! What opening the standalone app prepares (`prepareApp`, `src/install.js`):
-//! its private launcher, the terminal command, and its Pi and OpenCode
-//! integrations. It is what `cf setup` does, and the one place that puts the
-//! launcher beside the extensions; the harnesses' own modules stay apart.
+//! What opening the standalone app prepares: its private launcher, the terminal
+//! command, and its Pi and OpenCode integrations. It is what `cf setup` does,
+//! and the one place that puts the launcher beside the extensions; the
+//! harnesses' own modules stay apart.
 //!
 //! The launcher is made by `cf-launcher`, which knows no bundle: this is
 //! given the `cf` of the bundle it runs from.

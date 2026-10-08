@@ -1,4 +1,4 @@
-//! The configurations `src/role-skills.js` merged a role into, each as Node
+//! The configurations Node's role code merged a role into, each as Node
 //! (v26.8.1) wrote the result.
 
 use std::fs;

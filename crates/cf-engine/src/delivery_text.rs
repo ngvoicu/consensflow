@@ -1,9 +1,9 @@
-//! How a message reads in its recipient's pane (`src/core/delivery-text.js`).
-//! Its header doubles as the proof that it arrived: a delivery counts once the
-//! window's own record shows the header's start ([`marker_of`]), so the two are
-//! written together. A message that carries others (what its window kept for
-//! it) reads as one paste: their words and its own, in the order of their ids,
-//! under the one header, which is the one marker that proves the paste arrived.
+//! How a message reads in its recipient's pane. Its header doubles as the proof
+//! that it arrived: a delivery counts once the window's own record shows the
+//! header's start ([`marker_of`]), so the two are written together. A message
+//! that carries others (what its window kept for it) reads as one paste: their
+//! words and its own, in the order of their ids, under the one header, which is
+//! the one marker that proves the paste arrived.
 
 use std::borrow::Cow;
 

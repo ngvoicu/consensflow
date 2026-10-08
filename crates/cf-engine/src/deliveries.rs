@@ -1,9 +1,9 @@
-//! What goes into a window and what comes back out (`src/core/deliveries.js`):
-//! into a window, ready, `beginDelivery`, the hand-over, then the record
-//! watched for the message's header to confirm it, try it again or fail it,
-//! with one more Enter for a paste left unsent; at start, what was in flight
-//! is settled. Out of a window, a worker's answer becomes its task's result.
-//! It owns the record's delivery part; the window's part it only reads.
+//! What goes into a window and what comes back out: into a window, ready,
+//! `beginDelivery`, the hand-over, then the record watched for the message's
+//! header to confirm it, try it again or fail it, with one more Enter for a
+//! paste left unsent; at start, what was in flight is settled. Out of a window,
+//! a worker's answer becomes its task's result. It owns the record's delivery
+//! part; the window's part it only reads.
 
 use std::rc::Rc;
 

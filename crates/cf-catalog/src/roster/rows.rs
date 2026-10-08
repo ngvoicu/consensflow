@@ -1,8 +1,7 @@
-//! The roster as the app sees it, in the file's shape (`CATALOG_BY_PRESET`,
-//! `catalogRow`, `entryOf` and `rows`, `src/roster.js`): every catalog agent
-//! as the catalog has it, then the agents the human defined, marked
-//! `custom`. A stored copy of a catalog entry is ignored; a custom row with
-//! a catalog agent's name hides that entry.
+//! The roster as the app sees it, in the file's shape: every catalog agent as
+//! the catalog has it, then the agents the human defined, marked `custom`. A
+//! stored copy of a catalog entry is ignored; a custom row with a catalog
+//! agent's name hides that entry.
 
 use std::collections::HashSet;
 

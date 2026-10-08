@@ -1,6 +1,5 @@
 //! What the launcher on this machine runs, whether it is still there, and
-//! whether it is the copy asking (`terminalRuntime`, `insideLiveBundle`,
-//! `src/terminal.js`; and the lines `doctor` says of it, `bin/cf.mjs`).
+//! whether it is the copy asking, and the lines `doctor` says of it.
 //!
 //! Nothing ConsensFlow installs assumes a runtime on PATH: the launcher is
 //! the one installed file that names a program at all, absolutely, so a

@@ -46,13 +46,12 @@ pub fn pad_end(text: &str, width: usize) -> String {
     padded
 }
 
-/// Text as a window can take it, for a first message and every later one
-/// (`windowText`, `src/adapters/shared.js`). The pane host refuses a paste
-/// with a control character other than tab and newline, and a harness's own
-/// API refuses some too, so a CR before a newline goes, as the host would
-/// drop it, and every other control character is shown: as its Unicode
-/// picture (ESC as \u{241B}, a lone CR as \u{240D}, DEL as \u{2421}), or as
-/// U+FFFD for the C1 ones, which have none.
+/// Text as a window can take it, for a first message and every later one. The
+/// pane host refuses a paste with a control character other than tab and
+/// newline, and a harness's own API refuses some too, so a CR before a newline
+/// goes, as the host would drop it, and every other control character is shown:
+/// as its Unicode picture (ESC as \u{241B}, a lone CR as \u{240D}, DEL as
+/// \u{2421}), or as U+FFFD for the C1 ones, which have none.
 ///
 /// Node also dropped half a surrogate pair, which the dispatcher's cut can
 /// leave; a Rust text holds none, and a cut here writes U+FFFD

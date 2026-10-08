@@ -1,6 +1,5 @@
-//! Pi's record of a session (`piReader` and `piParser`,
-//! `hosts/lib/completion/pi.js`): its JSONL session file, and what
-//! ConsensFlow's extension writes beside it (the `evidence` module).
+//! Pi's record of a session: its JSONL session file, and what ConsensFlow's
+//! extension writes beside it (the `evidence` module).
 //!
 //! Pi writes no session file until an assistant message is complete, so a
 //! first request that hangs leaves nothing to read: the extension's working

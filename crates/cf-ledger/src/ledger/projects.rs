@@ -1,4 +1,4 @@
-//! The ledger's projects, as its callers hold them (`index.js`, projects).
+//! The ledger's projects, as its callers hold them.
 
 use super::Ledger;
 use crate::{projects, DeletedProject, EventView, LedgerError, NewProject, ProjectView};

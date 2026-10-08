@@ -1,12 +1,11 @@
-//! A pane host that opens nothing real and ends panes when told to: the
-//! twin of `fakeHost` in `core-dispatcher.test.mjs`. What a call does and
-//! reads, it does when called, as the JavaScript fake's async functions did
-//! up to their first wait; each answer comes a turn later, as their promises
-//! did, and a turn more for each wait inside them (`open` waits on its hold,
-//! `kill` on each engine told of the exit); and every call is written down in
-//! the Node traces' shape. A test that held calls until it let them go
-//! (`hold`) says which, and when ([`FakeHost::open_holds`],
-//! [`FakeHost::request_holds`]).
+//! A pane host that opens nothing real and ends panes when told to: the twin of
+//! `fakeHost` in Node's dispatcher suite. What a call does and reads, it does
+//! when called, as the JavaScript fake's async functions did up to their first
+//! wait; each answer comes a turn later, as their promises did, and a turn more
+//! for each wait inside them (`open` waits on its hold, `kill` on each engine
+//! told of the exit); and every call is written down in the Node traces' shape.
+//! A test that held calls until it let them go (`hold`) says which, and when
+//! ([`FakeHost::open_holds`], [`FakeHost::request_holds`]).
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};

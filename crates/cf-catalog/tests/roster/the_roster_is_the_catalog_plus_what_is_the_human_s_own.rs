@@ -1,7 +1,7 @@
 //! The tests under `describe('the roster is the catalog plus what is the
-//! human’s own')` in `tests/roster.test.mjs`. Each starts from a home of its
-//! own: the JS ran them in order in one, the later ones on the file an
-//! earlier one put there.
+//! human’s own')` of Node's roster suite. Each starts from a home of its own:
+//! the JS ran them in order in one, the later ones on the file an earlier one
+//! put there.
 
 use super::*;
 use cf_catalog::WORK_TIERS;

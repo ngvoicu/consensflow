@@ -1,10 +1,9 @@
-//! The ledger's schema, as an ordered list of migrations (`src/ledger/schema.js`).
-//! Migration `n` takes the database from `PRAGMA user_version = n` to
-//! `n + 1`; the version is the list's length. A migration is SQL run inside
-//! one transaction, and it is never edited once it has shipped: a change is a
-//! new file at the end. The files are the JavaScript's strings byte for byte
-//! (a test there holds them equal while both exist), and each is pinned here
-//! by its SHA-256.
+//! The ledger's schema, as an ordered list of migrations. Migration `n` takes
+//! the database from `PRAGMA user_version = n` to `n + 1`; the version is the
+//! list's length. A migration is SQL run inside one transaction, and it is
+//! never edited once it has shipped: a change is a new file at the end. The
+//! files are the JavaScript's strings byte for byte (a test there holds them
+//! equal while both exist), and each is pinned here by its SHA-256.
 
 use rusqlite::Connection;
 use serde_json::json;

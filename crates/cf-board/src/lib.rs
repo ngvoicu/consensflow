@@ -141,8 +141,8 @@ impl Board {
     /// The board of the window `env` is, none outside one: the API at
     /// `CONSENSFLOW_URL`, as the participant `CONSENSFLOW_TOKEN` names. A token
     /// is any value that says something, as Node tested it, whether or not it
-    /// is UTF-8: one that is not is refused by the board rather than taken
-    /// for no window, which would hand the command to `cf.mjs`, and back.
+    /// is UTF-8: one that is not is refused by the board rather than taken for
+    /// no window, which would run the command as a standalone verb.
     pub fn from_env(env: &Env) -> Option<Self> {
         let token = env
             .os("CONSENSFLOW_TOKEN")

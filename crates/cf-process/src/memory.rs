@@ -1,5 +1,5 @@
-//! How much memory this process holds: the resident set the daemon's stop
-//! and alive lines report (`process.memoryUsage().rss`, `src/core/daemon.js`).
+//! How much memory this process holds: the resident set the daemon's stop and
+//! alive lines report (Node's `process.memoryUsage().rss`).
 
 /// The bytes of this process's memory that are in RAM now, as libuv's
 /// `uv_resident_set_memory` reads them: the resident set on Linux and macOS,

@@ -1,5 +1,5 @@
 //! The tests under `describe('every tool ships a list of ready-made agents')`
-//! in `tests/catalog.test.mjs`.
+//! of Node's catalog suite.
 
 use super::*;
 
@@ -80,8 +80,9 @@ fn uses_only_efforts_its_harness_actually_accepts() {
 // the file says why beside it.
 #[test]
 fn names_an_effort_wherever_its_harness_has_one_or_is_a_listed_exception() {
-    // The three models that take no effort parameter at all — see "Effort ceilings"
-    // in hosts/lib/presets.js for how that was established.
+    // The three models that take no effort parameter at all — see "Effort
+    // ceilings" in crates/cf-catalog/data/README.md for how that was
+    // established.
     let blank_on_purpose: HashSet<&str> = [
         "metis",  // MiniMax M3, on pi
         "mimir",  // MiniMax M3, on opencode
@@ -160,15 +161,15 @@ fn carries_the_models_verified_live_on_2026_08_21_newest_of_each_family() {
     // Added 2026-08-24, each confirmed present in `pi --list-models` and
     // `opencode models` before it was written down — two free tiers and one
     // unbadged stealth model, on both open-model harnesses. The stealth one
-    // ended its testing period on 2026-08-27 (404 naming its own model), so
-    // nyx and nott moved to it under its real name: z-ai/glm-5.3-flash,
-    // verified that day in OpenRouter's /api/v1/models and by a live one-shot
-    // on each CLI — neither harness catalog lists it yet, both run it.
-    // Added 2026-09-03, both probed live on each harness at the level the row
-    // names. Muse Spark 1.3 needed two probes: the first answered 403 on BOTH
-    // harnesses ("18+ age confirmation"), an account attestation no catalog
-    // can show, and the rows were held back until a probe answered. See the
-    // Gemini 3.8 / Muse Spark paragraph in presets.js.
+    // ended its testing period on 2026-08-27 (404 naming its own model), so nyx
+    // and nott moved to it under its real name: z-ai/glm-5.3-flash, verified
+    // that day in OpenRouter's /api/v1/models and by a live one-shot on each
+    // CLI — neither harness catalog lists it yet, both run it. Added
+    // 2026-09-03, both probed live on each harness at the level the row names.
+    // Muse Spark 1.3 needed two probes: the first answered 403 on BOTH
+    // harnesses ("18+ age confirmation"), an account attestation no catalog can
+    // show, and the rows were held back until a probe answered. See the Gemini
+    // 3.8 / Muse Spark paragraph of crates/cf-catalog/data/README.md.
     for model in [
         "openrouter/z-ai/glm-5.3-flash",
         "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",

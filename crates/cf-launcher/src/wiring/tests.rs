@@ -62,7 +62,8 @@ fn the_label_of_a_line_is_as_wide_as_doctors_other_labels() {
 #[cfg(not(windows))]
 #[test]
 fn the_folder_above_a_path_is_what_node_s_dirname_says() {
-    // What `path.posix.dirname` answered, recorded by `npm run goldens:launcher`.
+    // What `path.posix.dirname` answered, as the launcher's recording holds it
+    // (`tests/goldens/README.md`).
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("goldens")

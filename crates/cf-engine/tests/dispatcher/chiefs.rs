@@ -1,8 +1,7 @@
-//! What the suites about a project's chief share (the helpers of
-//! `core-dispatcher.test.mjs` between `a member whose saved agent is gone`
-//! and `switching the chief to another agent`): Codex's own fake, the chief
-//! of a project, the handoffs it was written, and a project replaced while
-//! something of it waits.
+//! What the suites about a project's chief share (the helpers of Node's
+//! dispatcher suite between `a member whose saved agent is gone` and `switching
+//! the chief to another agent`): Codex's own fake, the chief of a project, the
+//! handoffs it was written, and a project replaced while something of it waits.
 
 use cf_engine::seams::EngineError;
 use cf_engine::testing::{Answer, Context, Made};

@@ -1,8 +1,7 @@
-//! What the page's operations call on the engine (`dispatcher` in
-//! `src/core/page.js`): the human's operations on the dispatcher, and the five
-//! projections `board.get` adds to each lane. The operations are written
-//! against this trait, so that their tests stand a small stand-in in the
-//! engine's place (`core-page.test.mjs:42-107`), and the daemon gives
+//! What the page's operations call on the engine: the human's operations on the
+//! dispatcher, and the five projections `board.get` adds to each lane. The
+//! operations are written against this trait, so that their tests stand a small
+//! stand-in in the engine's place, and the daemon gives
 //! [`cf_engine::Dispatcher`].
 //!
 //! An operation that waits answers a [`Work`]: nothing runs until it is
@@ -11,15 +10,14 @@
 //! read. The projections and the quota's `back_from_quota` read what the
 //! engine knows now and wait for nothing.
 //!
-//! **A projection is what `page.js` copies onto the lane**, and `page.js`
-//! looks inside none of them: it is the JSON the dispatcher gives, which the
-//! lane carries as it is. [`activity`](Engine::activity),
-//! [`pane`](Engine::pane) and [`pending_switch`](Engine::pending_switch)
-//! answer it so, and the dispatcher's own typed views are written out as
-//! `dispatcher.js` writes its objects, here and nowhere else. A stand-in whose
-//! activity says more than the dispatcher's does (the scenario of
-//! `corners-page-002` gives `since`, a pane `title` and `size`) is then held
-//! to the byte too.
+//! **A projection is what Node's page copied onto the lane**, and it looked
+//! inside none of them: it is the JSON the dispatcher gives, which the lane
+//! carries as it is. [`activity`](Engine::activity), [`pane`](Engine::pane) and
+//! [`pending_switch`](Engine::pending_switch) answer it so, and the
+//! dispatcher's own typed views are written out as Node's dispatcher wrote its
+//! objects, here and nowhere else. A stand-in whose activity says more than the
+//! dispatcher's does (the scenario of `corners-page-002` gives `since`, a pane
+//! `title` and `size`) is then held to the byte too.
 
 use std::rc::Rc;
 
@@ -126,7 +124,7 @@ pub trait Engine {
     fn unstopped(&self, participant: i64) -> Option<Value>;
 }
 
-/// An activity as `dispatcher.js` writes its object: `{state}`, `{state,
+/// An activity as Node's dispatcher wrote its object: `{state}`, `{state,
 /// reason}` for a window out of quota or whose look failed, and for a window
 /// that waits, whose reason is `null` when the harness named none
 /// (`observed.waiting.reason ?? null`).

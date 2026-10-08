@@ -1,6 +1,5 @@
-//! Putting the launcher where the terminal finds it, and asking whether it
-//! is there (`installTerminalCommand` and `terminalCommandStatus`,
-//! `src/terminal.js`).
+//! Putting the launcher where the terminal finds it, and asking whether it is
+//! there.
 
 use std::path::{Path, PathBuf};
 

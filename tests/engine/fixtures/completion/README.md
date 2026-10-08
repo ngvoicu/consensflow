@@ -1,5 +1,16 @@
 # Completion fixtures — provenance
 
+These fixtures were captured from the harnesses' own stores for Node's record
+readers, which are gone, and are fixed: the Rust readers of `cf-harness` read
+them now (`crates/cf-harness/src/records/thread/fixtures/rig.rs`,
+`crates/cf-harness/src/claude/record/tests/projection.rs` and
+`crates/cf-harness/tests/records/play.rs`), and nothing changes them but a hand
+that means to. The Node suites that read them, the readers they tested and the
+recorder that played them went with Node; they are in the flip release
+`v3.0.0-alpha.82`, and in `21297242`, the commit before they were deleted. What
+follows is the provenance as it was written while the fixtures were captured, and
+a Node test or module it names is history.
+
 Prepared 2026-09-06 and extended 2026-09-07 from the native stores on this
 machine. Every JSONL line and every SQLite row selected below is a complete
 source record: records not needed by a case are omitted, but fields inside a
@@ -111,10 +122,10 @@ throwaway SQLite database. Production stores are never written.
   share one constant per pair so enqueue/remove stay replayable); native
   message, tool, request, prompt and record UUIDs, versions, timestamps,
   token counts, `cwd`, ordering and grouping are byte-identical.
-  RED state: `completion.js` SUPPORTED admits 2.1.241/247/250, so
-  `answers()` returns `unsupported version 2.1.263 for claude-code`;
-  `tests/engine/claude-v263.test.mjs` fails 7/8, exit 1. The parser also
-  settles only on `system.stop_hook_summary`, which this version never
+  RED state: Node's reader admitted 2.1.241/247/250 only, so
+  `answers()` returned `unsupported version 2.1.263 for claude-code`;
+  its test of this fixture failed 7/8, exit 1. The parser also
+  settled only on `system.stop_hook_summary`, which this version never
   emits — the final-turn settlement assertion is the BLOCKER evidence for
   IMPL-PANE-70.
 
@@ -229,7 +240,8 @@ captured from isolated ConsensFlow-owned native chief conversations. Each ran
 unready until its root `turn_duration`; OpenCode preserved `tool-calls` then
 its final `stop` and completion time. Paths were sanitized; reasoning text and
 unrelated diagnostics were omitted. Neither fixture comes from a worker's
-private thread. `current-native-versions.test.mjs` exercises the real parsers.
+private thread. Node's test of the current native versions exercised the real
+parsers.
 
 A fresh Claude 2.1.266 pane also accepted `CF_PEER266_DELIVERED` through its
 native peer queue while retaining the unsent draft `CF_UNSENT_DRAFT_266` in

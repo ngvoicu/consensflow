@@ -1,6 +1,6 @@
-//! What a screen reads of its request's body (`agents-server.js:98`): the one
-//! JSON value it holds, as JavaScript's `JSON.parse` hands it to the route, and
-//! what each route reads of that value as JavaScript reads it.
+//! What a screen reads of its request's body: the one JSON value it holds, as
+//! JavaScript's `JSON.parse` hands it to the route, and what each route reads
+//! of that value as JavaScript reads it.
 //!
 //! A screen's body is any JSON value, not an object: `null` is a body, and so
 //! is a number. A route reads the properties it needs of it, and JavaScript

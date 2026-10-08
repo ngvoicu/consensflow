@@ -1,18 +1,18 @@
 /**
  * Plants bugs in the standalone verbs of `cf`, the parser they read their words
- * with, the roster they write through, the recording that holds them to Node,
- * what the flip release left (the repair of the terminal's command) and the
- * bundle without Node (nothing reads the file the flip read, an npm shim with no
- * Node is refused, the daemon the app starts, the update's check, the page's
- * console text), one at a time, and checks that a
- * test catches each. A plant is a few pieces of
+ * with, the roster they write through, the recording that holds them to what
+ * Node's CLI said (fixed since Node went), what the flip release left (the
+ * repair of the terminal's command) and the bundle without Node (nothing reads
+ * the file the flip read, an npm shim with no Node is refused, the daemon the app
+ * starts, the update's check, the page's console text), one at a time, and checks
+ * that a test catches each. A plant is a few pieces of
  * text replaced in the sources; the tests that should notice are run (never in
  * parallel: the sources are changed under them) and each plant is reported
  * caught or missed. Every file a plant touches is first copied outside the
  * repository and is put back from that copy, byte for byte, whatever the run
  * came to, on Ctrl-C and on being terminated too; a run killed past that leaves
  * the copies in the folder it says first. The native `cf` that `bin/` holds,
- * which the suites of Node run, is built again from the sources as they are after
+ * which the test scripts run, is built again from the sources as they are after
  * each plant that had it built from its own, so that no plant's tests meet the
  * build of another's.
  *
@@ -24,7 +24,7 @@
  * mend there, not a pass. One that does not compile, and one that makes a run
  * wait for ever (it is ended after ten minutes), count as missed. Exit code 1 if
  * any plant is missed or does not apply. The same shape as `plants:daemon`, which
- * runs `cargo test` alone: a run here is any command, a Node test among them.
+ * runs `cargo test` alone: a run here is any command, a script's test among them.
  */
 import { spawn, spawnSync } from 'node:child_process'
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -33,11 +33,9 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PLANTS as ADMIN } from './cli/admin.mjs'
 import { PLANTS as DELETION } from './cli/deletion.mjs'
-import { PLANTS as DETECT } from './cli/detect.mjs'
 import { PLANTS as DISPATCH } from './cli/dispatch.mjs'
 import { PLANTS as FLIP } from './cli/flip.mjs'
 import { BUILD, CLIS } from './cli/kit.mjs'
-import { PLANTS as ORACLE } from './cli/oracle.mjs'
 import { PLANTS as PARSER } from './cli/parser.mjs'
 import { PLANTS as VERBS } from './cli/verbs.mjs'
 
@@ -46,16 +44,7 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const RUN_LIMIT = 10 * 60 * 1000
 
 /** Every plant, by area. */
-const PLANTS = [
-  ...PARSER,
-  ...VERBS,
-  ...ADMIN,
-  ...DISPATCH,
-  ...FLIP,
-  ...DELETION,
-  ...ORACLE,
-  ...DETECT,
-]
+const PLANTS = [...PARSER, ...VERBS, ...ADMIN, ...DISPATCH, ...FLIP, ...DELETION]
 
 const args = process.argv.slice(2)
 const words = args.filter((arg) => !arg.startsWith('--'))

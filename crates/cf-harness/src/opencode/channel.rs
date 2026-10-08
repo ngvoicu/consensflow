@@ -1,11 +1,9 @@
-//! The channel to an OpenCode window (`src/channels/opencode.js`, and the
-//! `opencode` branch of `launchConfiguration`, `src/channels.js`). A window
-//! runs a server of its own, on a private port with a password, and ConsensFlow's
-//! plugin inside it runs another, which says which conversation the TUI shows
-//! (`state`) and takes every message after the first (`send`). The first goes
-//! through the window's own server once it answers (`seed`), and the
-//! conversation a fresh window opens on is made before it, on a throwaway
-//! server of its own (`create`).
+//! The channel to an OpenCode window. A window runs a server of its own, on a
+//! private port with a password, and ConsensFlow's plugin inside it runs
+//! another, which says which conversation the TUI shows (`state`) and takes
+//! every message after the first (`send`). The first goes through the window's
+//! own server once it answers (`seed`), and the conversation a fresh window
+//! opens on is made before it, on a throwaway server of its own (`create`).
 
 mod create;
 mod directory;

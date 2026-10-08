@@ -1,8 +1,8 @@
-//! Claude Code's adapter, as `tests/adapter-claude.test.mjs` holds Node's
-//! (TEST-BDC-05, IMPL-BDC-06), each case under its sentence: how a Claude
-//! window is launched, how a message reaches it, and what Claude's own
-//! records say about it. Each test gets a throwaway home, Claude config
-//! folder and a stand-in `claude` on PATH.
+//! Claude Code's adapter, as Node's Claude adapter suite held it (TEST-BDC-05,
+//! IMPL-BDC-06), each case under its sentence: how a Claude window is launched,
+//! how a message reaches it, and what Claude's own records say about it. Each
+//! test gets a throwaway home, Claude config folder and a stand-in `claude` on
+//! PATH.
 //!
 //! A window comes only from a prepare here, where Node's tests made up a
 //! launch bag: a test of a window on a known conversation prepares it as

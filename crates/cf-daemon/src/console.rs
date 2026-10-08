@@ -1,9 +1,9 @@
-//! The daemon's error output (`console.error`, `src/core/daemon.js:178, 211`),
-//! which a person running `cf ui` reads and the app keeps in its log.
+//! The daemon's error output, which a person running `cf ui` reads and the app
+//! keeps in its log.
 //!
 //! A reader that has gone from it is not a failure to say: `cf ui` runs the
-//! stop then (`bin/cf.mjs:15-28`), and so does the daemon here, once, through
-//! the function it is given.
+//! stop then, and so does the daemon here, once, through the function it is
+//! given.
 
 use std::cell::RefCell;
 use std::io::{self, ErrorKind, Write};

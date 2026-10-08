@@ -1,8 +1,7 @@
-//! The connection every operation runs on, and what every concern shares:
-//! one transaction around an operation, the clock, the event log, the rows
-//! looked up by id or handle, and the one way a task changes state
-//! (`src/ledger/store.js`). The ledger holds it privately; nothing outside
-//! the crate reaches the connection.
+//! The connection every operation runs on, and what every concern shares: one
+//! transaction around an operation, the clock, the event log, the rows looked
+//! up by id or handle, and the one way a task changes state. The ledger holds
+//! it privately; nothing outside the crate reaches the connection.
 
 use std::panic::{self, AssertUnwindSafe};
 

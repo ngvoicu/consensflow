@@ -1,6 +1,6 @@
 //! The bridge's transport on one thread: the daemon's end of the JSON-lines
 //! protocol (`cf_proto::bridge`), over any tokio `AsyncRead` and `AsyncWrite`,
-//! on a `LocalSet`. It has every rule of `src/bridge.js`, which it replaces:
+//! on a `LocalSet`. It has every rule of Node's bridge, which it replaced:
 //!
 //! - [`Bridge::request`] gives the answer's body; `{ok:false, error:"deadline"}`
 //!   past the deadline (30 s when it is given none), and an answer that comes
@@ -34,26 +34,26 @@
 //! - Nothing but frames is written to the output. The handle line the app
 //!   reads first is not a frame: the daemon writes it before it connects.
 //!
-//! Where it differs from `bridge.js`, on purpose:
+//! Where it differs from Node's bridge, on purpose:
 //!
 //! - The streams belong to the bridge. [`Bridge::close`] ends the output, and
-//!   the input is dropped when the bridge stops reading it. `bridge.js` left
+//!   the input is dropped when the bridge stops reading it. Node's bridge left
 //!   both to its caller.
 //! - [`Bridge::event`] says a frame is queued, not that the stream took it: a
 //!   write that fails later fails the bridge, and the events after it are
 //!   refused.
 //! - A body is a `serde_json::Value`, which is always JSON: the answers
-//!   `bridge.js` made for a body that would not serialize cannot arise here.
+//!   Node's bridge made for a body that would not serialize cannot arise here.
 //! - A request handler is a future, not a function that may throw: it fails by
 //!   returning its words. An event handler returns nothing, so what
-//!   `bridge.js` did for one that threw, report it and go on, has no
+//!   Node's bridge did for one that threw, report it and go on, has no
 //!   counterpart. A handler of either kind that panics before its first wait
 //!   ends the reader, and with it the bridge: every request waiting is refused
 //!   with `Eof`. A request handler that panics after a wait loses its own
 //!   answer, and nothing else.
 //! - A line that is not UTF-8 is read as Node read it, lossily.
 //! - The frames waiting for the output are not bounded, as the buffer of
-//!   `bridge.js`'s stream was not. A peer that stops reading shows as requests
+//!   Node's bridge's stream was not. A peer that stops reading shows as requests
 //!   that end at their deadlines.
 //! - A handler done at its first poll is answered there, where JavaScript
 //!   answered on a later microtask: the answers to requests read together may

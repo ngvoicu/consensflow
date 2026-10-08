@@ -1,11 +1,10 @@
-//! Devin's windows (`src/adapters/devin.js`). Each launch runs on a config of
-//! its own (the owner's, plus a hook that gives a session its role
-//! instructions), in full-permission mode, with the first message in a prompt
-//! file. Devin names its session itself; its own wire log for this launch
-//! says which one the window opened, and which one it shows after a /new or
-//! /resume, so the window is followed to it. A message is pasted, behind
-//! whatever the input box holds, and only while Devin still shows the
-//! conversation we know.
+//! Devin's windows. Each launch runs on a config of its own (the owner's, plus
+//! a hook that gives a session its role instructions), in full-permission mode,
+//! with the first message in a prompt file. Devin names its session itself; its
+//! own wire log for this launch says which one the window opened, and which one
+//! it shows after a /new or /resume, so the window is followed to it. A message
+//! is pasted, behind whatever the input box holds, and only while Devin still
+//! shows the conversation we know.
 //!
 //! Kept from Node on purpose: a conversation of an empty id, which no
 //! ledger holds, is refused in a sentence of this module's own, where V8

@@ -1,9 +1,9 @@
-//! What the engine is made with (the options of `src/core/dispatcher.js`):
-//! the ledger, the pane host, an adapter for each harness, the records, the
-//! clock and the launch ids, who a window's token is for, the environment a
-//! pane starts with, the saved agents, the role texts, the trace, the log
-//! and the launch files. The daemon gives the real ones (3.6); the kit gives
-//! fakes that write down what they were asked.
+//! What the engine is made with (the options of Node's dispatcher): the ledger,
+//! the pane host, an adapter for each harness, the records, the clock and the
+//! launch ids, who a window's token is for, the environment a pane starts with,
+//! the saved agents, the role texts, the trace, the log and the launch files.
+//! The daemon gives the real ones (3.6); the kit gives fakes that write down
+//! what they were asked.
 
 use std::cell::RefCell;
 use std::rc::Rc;

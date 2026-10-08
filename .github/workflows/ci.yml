@@ -79,12 +79,6 @@ jobs:
       # taken from 2 to 7 minutes on Windows' (2026-10-06), the step 9 to 15.
       - run: cargo test --workspace --exclude app
         timeout-minutes: 25
-      # The ledger's parity while both implementations exist: the Node suite's
-      # ledgers recorded afresh from src/ledger as it is now, and replayed
-      # against cf-ledger. A change to the Node ledger that cf-ledger does not
-      # mirror fails here, whether or not anyone recorded the traces again.
-      - run: npm run parity:ledger
-        timeout-minutes: 15
       # Every crate linted, its tests included.
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # The harnesses' crate as the daemon builds it, without the test kit

@@ -1,9 +1,9 @@
-//! The human's Switch chief (`src/core/chief-switch.js`): now, or after the
-//! chief's turn, with a note first asking it where things stand when the
-//! human wants one. It takes a last look and copy, gives back what was in
-//! flight, closes the old window as the engine's own, switches the chief in
-//! the ledger and launches the new one with the handoff. It also picks a
-//! chief's first message, and owns the record's pending switch.
+//! The human's Switch chief: now, or after the chief's turn, with a note first
+//! asking it where things stand when the human wants one. It takes a last look
+//! and copy, gives back what was in flight, closes the old window as the
+//! engine's own, switches the chief in the ledger and launches the new one with
+//! the handoff. It also picks a chief's first message, and owns the record's
+//! pending switch.
 
 use std::rc::Rc;
 

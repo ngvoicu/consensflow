@@ -1,6 +1,5 @@
-//! A JSONL file read on from where an earlier look stopped (`readOn`,
-//! `hosts/lib/completion/shared.js`), without holding the file between
-//! looks.
+//! A JSONL file read on from where an earlier look stopped, without holding the
+//! file between looks.
 //!
 //! A line is a record once its newline is written. An unterminated last
 //! line that is already whole JSON is visited too, and remembered, so that

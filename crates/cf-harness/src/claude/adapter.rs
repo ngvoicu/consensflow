@@ -1,6 +1,6 @@
-//! Claude Code's windows (`src/adapters/claude-code.js`). Each launch gets
-//! its own settings file: full permission without the one-time dialog, and
-//! a Stop hook on every turn so every finished turn is recorded.
+//! Claude Code's windows. Each launch gets its own settings file: full
+//! permission without the one-time dialog, and a Stop hook on every turn so
+//! every finished turn is recorded.
 //!
 //! - The session id is ConsensFlow's: drawn for a fresh window, resumed for
 //!   a known one.

@@ -1,7 +1,6 @@
 //! ConsensFlow's plugin for OpenCode, made where OpenCode is told to load it
-//! from (`prepareOpenCodeExtension`, `src/opencode-install.js`): an immutable
-//! private copy of the plugin's files, and a `tui.json` beside them that
-//! names the plugin, never an edit of OpenCode's own settings.
+//! from: an immutable private copy of the plugin's files, and a `tui.json`
+//! beside them that names the plugin, never an edit of OpenCode's own settings.
 
 use cf_base::env::Env;
 use cf_base::home::config_root;

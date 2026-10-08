@@ -1,5 +1,5 @@
-//! Which Devin records complete worker replies, as `tests/adapter-devin.test.mjs`
-//! holds Node's: a version judged a number at a time.
+//! Which Devin records complete worker replies, as Node's Devin adapter suite
+//! held it: a version judged a number at a time.
 
 use super::*;
 

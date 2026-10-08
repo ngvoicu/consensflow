@@ -1,5 +1,5 @@
-//! How a Devin window is launched, and the role it is given (`tests/adapter-devin.test.mjs`, and the Devin cases
-//! of `tests/role-skills.test.mjs`).
+//! How a Devin window is launched, and the role it is given (Node's Devin
+//! adapter suite, and the Devin cases of its role-skills suite).
 
 use std::fs;
 use std::path::Path;
@@ -235,7 +235,7 @@ fn refuses_a_window_without_its_role_text_and_writes_it_in_a_private_file() {
         ..Request::default()
     };
     // On Windows too: the note on naming files there is added to a role
-    // text, never made one (parity:launch on zeewin, 2026-10-05).
+    // text, never made one (seen against Node's launch on zeewin, 2026-10-05).
     let refused = prepare(&home.adapter(), &empty);
     assert_eq!(
         refused.err().as_deref(),

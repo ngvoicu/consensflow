@@ -1,9 +1,8 @@
 //! What the page reads, each in the one frame the app's bridge carries an
-//! answer in: the board, a task with its thread, a participant's messages
-//! and what a task's window wrote (`src/ledger/page-reads.js`). What does
-//! not fit is cut, marked and counted; `cf` reads the same records whole.
-//! Sizes are of the JSON as the page receives it, which serde writes byte
-//! for byte as `JSON.stringify` did.
+//! answer in: the board, a task with its thread, a participant's messages and
+//! what a task's window wrote. What does not fit is cut, marked and counted;
+//! `cf` reads the same records whole. Sizes are of the JSON as the page
+//! receives it, which serde writes byte for byte as `JSON.stringify` did.
 
 use std::collections::{HashMap, HashSet};
 

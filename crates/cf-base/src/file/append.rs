@@ -1,5 +1,5 @@
-//! A file that is only ever appended to, kept to a size: what the daemon's
-//! log and its trace both do (`src/core/log.js`, `src/core/trace.js`).
+//! A file that is only ever appended to, kept to a size: what the daemon's log
+//! and its trace both do.
 
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};

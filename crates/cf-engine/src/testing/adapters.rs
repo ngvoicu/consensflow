@@ -1,7 +1,7 @@
-//! The adapters a test's engine is made with, and the records it looks at
-//! with no window open: the fake adapter or adapters ([`FakeAdapter`]) under
-//! the harnesses the test names, as `adapters` and `adapter.record` are in
-//! `core-dispatcher.test.mjs`.
+//! The adapters a test's engine is made with, and the records it looks at with
+//! no window open: the fake adapter or adapters ([`FakeAdapter`]) under the
+//! harnesses the test names, as `adapters` and `adapter.record` are in Node's
+//! dispatcher suite.
 
 use std::rc::Rc;
 use std::sync::Arc;

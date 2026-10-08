@@ -1,7 +1,7 @@
 //! `POST /api/notes`: a note, from the chief to the human, from a member to
 //! whoever gave it its task. Where a test says what Node answered, it is what
-//! the real API answered the same request: `node
-//! tests/goldens/daemon/probes/api-corners.mjs` prints it again.
+//! the real API answered the same request (the probe that printed those answers
+//! went with Node's API).
 
 use hyper::Method;
 use serde_json::{json, Value};

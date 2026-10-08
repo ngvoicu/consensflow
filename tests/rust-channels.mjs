@@ -100,8 +100,8 @@ function cargoBuild(name) {
 }
 
 /**
- * The pane host a target names, as a channel asks it (`claim`,
- * `src/channels/pty.js`): the target's own claim, or the bridge to the host.
+ * The pane host a target names, as a channel asks it (`claim`): the target's
+ * own claim, or the bridge to the host.
  */
 function paneHost(target) {
   return (op, body) =>

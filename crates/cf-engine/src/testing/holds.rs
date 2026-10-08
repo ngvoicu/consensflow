@@ -1,10 +1,9 @@
-//! What a test holds of a fake's calls: `hold` in `core-dispatcher.test.mjs`
-//! wraps a function of a fake, and each call it picks waits until the test
-//! lets it go, then is made, or something else is done in its place
-//! (`instead`). The wrapper is an `async` function that returns the fake's own
-//! promise, so every call of the method, picked or not, answers two turns
-//! after the fake's own would have, and a call picked is made a turn after the
-//! test lets it go.
+//! What a test holds of a fake's calls: `hold` in Node's dispatcher suite wraps
+//! a function of a fake, and each call it picks waits until the test lets it
+//! go, then is made, or something else is done in its place (`instead`). The
+//! wrapper is an `async` function that returns the fake's own promise, so every
+//! call of the method, picked or not, answers two turns after the fake's own
+//! would have, and a call picked is made a turn after the test lets it go.
 
 use std::cell::RefCell;
 use std::rc::Rc;

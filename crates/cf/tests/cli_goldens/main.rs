@@ -1,11 +1,11 @@
-//! The Rust `cf` held to what Node's `bin/cf.mjs` said and did, case by case:
-//! tests/goldens/cli/ (`npm run goldens:cli`, one set a platform, the system's
-//! own recorded on it) ran each case against Node, in a folder of its own,
-//! with the clock fixed and the environment given in full, and wrote down the
-//! files of the folder before and after, the output, the error output and the
-//! exit code. Here each case is made again in a folder of its own, the binary run
-//! as the case says, and all of it compared byte for byte. The
-//! format is in tests/goldens/cli/FORMAT.md.
+//! The Rust `cf` held to what Node's CLI said and did, case by case:
+//! tests/goldens/cli.<platform>.json (one set a platform, the system's own
+//! recorded on it, and fixed since) ran each case against Node, in a folder of
+//! its own, with the clock fixed and the environment given in full, and wrote
+//! down the files of the folder before and after, the output, the error output
+//! and the exit code. Here each case is made again in a folder of its own, the
+//! binary run as the case says, and all of it compared byte for byte. The
+//! format is in tests/goldens/FORMAT.md.
 //!
 //! The binary cannot be given the clock Node was: what it stamps an agent with
 //! is read as the instant the recorder fixed once it is known to be one instant,
@@ -55,7 +55,7 @@ fn golden() -> Value {
         .join(format!("cli.{PLATFORM}.json"));
     let contents = fs::read_to_string(&file).unwrap_or_else(|error| {
         panic!(
-            "{}: {error}: record it on this system with `npm run goldens:cli`",
+            "{}: {error}: the CLI goldens are fixed recordings of macOS and Windows (tests/goldens/README.md)",
             file.display()
         )
     });

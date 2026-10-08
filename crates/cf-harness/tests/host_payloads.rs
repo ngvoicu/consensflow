@@ -1,8 +1,7 @@
-//! Claude Code's settings are reported, never written, as
-//! `tests/host-payloads.test.mjs` holds Node's: the three sentences of that
-//! file, then the events Node named in every settings file the recorder
-//! played (`tests/goldens/launcher/goldens.mjs` says what it holds) and the
-//! places the file may be.
+//! Claude Code's settings are reported, never written, as Node's host-payloads
+//! suite held it: the three sentences of that suite, then the events Node named
+//! in every settings file the recorder played (`tests/goldens/README.md` says
+//! what it holds) and the places the file may be.
 
 // The goldens' own reading and a test's own folders: a failure is the test's.
 #![allow(clippy::unwrap_used)]

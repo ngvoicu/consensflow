@@ -1,5 +1,5 @@
-//! The test under `describe('the roster keeps what the human chose about
-//! it')` in `tests/roster.test.mjs`.
+//! The test under `describe('the roster keeps what the human chose about it')`
+//! of Node's roster suite.
 
 use super::*;
 use serde_json::json;

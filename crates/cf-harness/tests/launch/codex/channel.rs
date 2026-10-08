@@ -1,7 +1,7 @@
-//! A message to a Codex window, as `tests/adapter-codex.test.mjs` and
-//! `tests/codex-channel.test.mjs` hold Node's: a claim of the pane and then
-//! the supervisor's broker, which takes the exact text for the thread it
-//! names, and what is refused before either is asked.
+//! A message to a Codex window, as Node's Codex adapter suite and
+//! `tests/codex-channel.test.mjs` hold it: a claim of the pane and then the
+//! supervisor's broker, which takes the exact text for the thread it names, and
+//! what is refused before either is asked.
 
 use std::cell::RefCell;
 use std::rc::Rc;

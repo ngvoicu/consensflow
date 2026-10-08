@@ -1,7 +1,7 @@
-//! Work tiers and agent profiles (`hosts/lib/presets.js`, from `MODEL_LABELS`
-//! on): what a model and the road to it are called, and the work its agent
-//! suits. `agentProfile` and `modelProfile` are ported branch for branch, and
-//! the order of their branches is part of what they answer.
+//! Work tiers and agent profiles: what a model and the road to it are called,
+//! and the work its agent suits. `agentProfile` and `modelProfile` are ported
+//! branch for branch, and the order of their branches is part of what they
+//! answer.
 
 use std::collections::{HashMap, HashSet};
 

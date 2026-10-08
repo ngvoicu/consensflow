@@ -1,8 +1,8 @@
-//! The pane host as the engine uses it, over the bridge
-//! (`src/core/pane-host.js`): a window's pane is opened and killed by a
-//! request to the host, an adapter's own requests (`pane.snapshot`,
-//! `pane.input`, `pane.write_paste`, `pane.claim`) go straight through, and
-//! the host's `pane.exit` events are told to the engine where they are read.
+//! The pane host as the engine uses it, over the bridge: a window's pane is
+//! opened and killed by a request to the host, an adapter's own requests
+//! (`pane.snapshot`, `pane.input`, `pane.write_paste`, `pane.claim`) go
+//! straight through, and the host's `pane.exit` events are told to the engine
+//! where they are read.
 //!
 //! The protocol is the app's (`crates/cf-panes/src/pane_handlers.rs`); this
 //! adds no rules of its own, only the Windows shim a window's program may be

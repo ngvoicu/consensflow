@@ -1,5 +1,4 @@
-//! Who is asking: the window's token, checked (`callerOf`,
-//! `src/core/api.js:405-426`). **Frozen**.
+//! Who is asking: the window's token, checked. **Frozen**.
 //!
 //! The API decides who may do what; the ledger keeps the state rules. A
 //! request is a window's only if it carries the bearer token the engine issued

@@ -1,4 +1,4 @@
-//! What Devin's chain says (`devinAnswer`, `hosts/lib/completion/devin.js`).
+//! What Devin's chain says.
 //!
 //! A reply is complete only when it is its request's last, and either Devin
 //! stored it as the turn's end (`finish_reason` stop) or the wire saw that

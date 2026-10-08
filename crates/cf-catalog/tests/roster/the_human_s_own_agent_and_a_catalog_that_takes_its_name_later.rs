@@ -1,5 +1,5 @@
-//! The test under `describe("the human's own agent and a catalog that takes
-//! its name later")` in `tests/roster.test.mjs`.
+//! The test under `describe("the human's own agent and a catalog that takes its
+//! name later")` of Node's roster suite.
 
 use super::*;
 use serde_json::json;

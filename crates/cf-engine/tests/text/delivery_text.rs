@@ -1,5 +1,5 @@
 //! How a message reads in its recipient's pane, and the header that proves it
-//! arrived: the cases of `tests/core-delivery-text.test.mjs`.
+//! arrived: the cases of Node's delivery-text suite.
 
 use cf_base::text::utf16_len;
 use cf_engine::delivery_text::{delivery_text, marker_of};

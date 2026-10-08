@@ -1,7 +1,7 @@
-//! How each harness's own window opens on a conversation ConsensFlow starts
-//! or resumes (`hosts/lib/windows.js`): the command, its arguments, the
-//! first message where the harness takes it otherwise, and the keys it must
-//! not inherit. Every adapter builds its pane from here.
+//! How each harness's own window opens on a conversation ConsensFlow starts or
+//! resumes: the command, its arguments, the first message where the harness
+//! takes it otherwise, and the keys it must not inherit. Every adapter builds
+//! its pane from here.
 //!
 //! Every window, fresh or resumed, for every role, opens in full-permission
 //! ("yolo") mode (the owner's decision, 2026-09-19). Each flag is the
@@ -29,9 +29,9 @@ pub(crate) struct Invocation {
 // What the goldens and the live tools (`tooling`) read; the product reads none of it.
 #[cfg(any(test, feature = "test-support"))]
 impl Invocation {
-    /// The window as `hosts/lib/windows.js` wrote it, which the goldens hold
-    /// it to and the live tools read: its `env` always empty, `prompt` only
-    /// where given.
+    /// The window as Node's window code wrote it, which the goldens hold it to
+    /// and the live tools read: its `env` always empty, `prompt` only where
+    /// given.
     pub(crate) fn written(&self) -> serde_json::Value {
         use serde_json::{json, Map, Value};
 

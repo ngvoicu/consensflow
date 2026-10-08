@@ -1,5 +1,5 @@
 //! Each ported test held to the Node trace of the same test
-//! (`crates/cf-engine/tests/traces/`, `npm run goldens:dispatcher`): what
+//! (`crates/cf-engine/tests/traces/`, recorded from Node and fixed since): what
 //! the engine did at its seams, in order, and the database it left.
 //!
 //! Both sides are read through one projection, which keeps what is the
@@ -47,11 +47,10 @@
 //! resumed; a result the chief decides on before it is given it is withdrawn,
 //! not pasted after the decision; a window that did not come up is asked what
 //! it shows before it is closed), is named in [`DEPARTED`], with what it does
-//! that Node does not.
-//! It is held to a trace of its own, recorded from the engine
-//! (`tests/departures/`, `npm run goldens:departed`), and fails when Node's
-//! trace is the engine's again, so the departure is taken off once Node does
-//! it too.
+//! that Node does not. It is held to a trace of its own, recorded from the
+//! engine (`tests/departures/`, `npm run departures`), and fails when Node's
+//! trace is the engine's again, so the departure is taken off once Node does it
+//! too.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -89,6 +88,10 @@ fn load(folder: &Path) -> HashMap<Key, Recorded> {
     };
     for entry in entries {
         let path = entry.expect("a trace").path();
+        // The folder's README says what the traces are; it is no trace.
+        if path.extension().is_none_or(|extension| extension != "gz") {
+            continue;
+        }
         let mut text = String::new();
         GzDecoder::new(fs::File::open(&path).expect("a trace's file"))
             .read_to_string(&mut text)
@@ -119,7 +122,10 @@ fn folder(name: &str) -> PathBuf {
 /// The Node traces, by each test's suites and sentence.
 static TRACES: LazyLock<HashMap<Key, Recorded>> = LazyLock::new(|| {
     let traces = load(&folder("traces"));
-    assert!(!traces.is_empty(), "no traces: npm run goldens:dispatcher");
+    assert!(
+        !traces.is_empty(),
+        "no traces: they are fixed recordings (tests/traces/README.md)"
+    );
     traces
 });
 
@@ -196,8 +202,8 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
 ];
 
-/// The variable that asks for the departures to be recorded again, which
-/// `npm run goldens:departed` sets.
+/// The variable that asks for the departures to be recorded again, which `npm
+/// run departures` sets.
 const RERECORD: &str = "CF_RERECORD_DEPARTED";
 
 /// Holds a closed test to the Node trace of the test named `name` in `suites`,
@@ -208,7 +214,7 @@ pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
         name.to_owned(),
     );
     let node = TRACES.get(&key).unwrap_or_else(|| {
-        panic!("no Node trace of {suites:?} › {name}: npm run goldens:dispatcher")
+        panic!("no Node trace of {suites:?} › {name}: the traces are fixed recordings (tests/traces/README.md)")
     });
     let Some((_, departure)) = DEPARTED.iter().find(|(departed, _)| *departed == name) else {
         if let Some(difference) = first_difference(&closed, &node.trace, name) {
@@ -221,7 +227,7 @@ pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
     }
     let kept = DEPARTURES
         .get(&key)
-        .unwrap_or_else(|| panic!("{name}: no trace of its departure: npm run goldens:departed"));
+        .unwrap_or_else(|| panic!("{name}: no trace of its departure: npm run departures"));
     if let Some(difference) = first_difference(&closed, &kept.trace, name) {
         panic!("{difference}");
     }

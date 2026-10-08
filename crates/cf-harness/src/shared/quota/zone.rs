@@ -1,5 +1,5 @@
-//! The zone a refusal names, as `Intl.DateTimeFormat` takes a `timeZone`
-//! (`resetAt`, `hosts/lib/quota.js`): in any ASCII case, never trimmed.
+//! The zone a refusal names, as `Intl.DateTimeFormat` takes a `timeZone`: in
+//! any ASCII case, never trimmed.
 //!
 //! `Intl` reads ICU's zones. Most are the bundled database's, by the same
 //! names; ICU also keeps names tzdata has not (Java's three-letter ids, two

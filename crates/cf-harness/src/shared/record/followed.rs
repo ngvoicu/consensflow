@@ -1,6 +1,4 @@
-//! A conversation's JSONL transcript followed from look to look
-//! (`followedTranscript` and `transcriptReader`,
-//! `hosts/lib/completion/shared.js`).
+//! A conversation's JSONL transcript followed from look to look.
 //!
 //! A look locates the transcript (again, once its file is gone), reads on
 //! from where the last look stopped into the state its parser makes, and

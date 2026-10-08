@@ -1,7 +1,7 @@
 //! A window whose exit cannot be settled: a Close that made the exit itself
-//! (the kill is taken, its event has not come yet) fails with it, as
-//! `closeOwn` (`src/core/windows.js`) awaited the exit and rejected with it.
-//! The exit the pane host sends has no caller to fail: it is told to the log.
+//! (the kill is taken, its event has not come yet) fails with it, as Node's
+//! `closeOwn` awaited the exit and rejected with it. The exit the pane host
+//! sends has no caller to fail: it is told to the log.
 
 use cf_engine::testing::Context;
 

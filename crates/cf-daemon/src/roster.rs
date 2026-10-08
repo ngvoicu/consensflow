@@ -1,9 +1,7 @@
 //! The saved agents as the daemon reads them: the human's file over the
-//! catalog (`agentRow`, `listAgents`, `normalizeRoster` of `src/roster.js`),
-//! asked afresh at each use, as a launch and a page read it. This is the
-//! engine's `Roster` seam, the agents' API's rows ([`AgentRows`]), and what
-//! keeps a member's tier the tier of its agent (`followCatalog`,
-//! `src/core/daemon.js:77-82`).
+//! catalog, asked afresh at each use, as a launch and a page read it. This is
+//! the engine's `Roster` seam, the agents' API's rows ([`AgentRows`]), and what
+//! keeps a member's tier the tier of its agent.
 
 use std::path::PathBuf;
 
@@ -81,14 +79,13 @@ impl cf_engine::seams::Roster for Agents {
 #[cfg(test)]
 mod tests;
 
-/// The agents as the pickers offer them (`offerable`, `src/harnesses.js`),
-/// for the page's `agents.list` and the agents screen alike: one whose harness
-/// is not installed here is hidden, so only the Harnesses screen shows that
-/// harness, where it is installed; so is one saved for a harness this build
-/// does not run (Kimi, dropped), for no window could open on it. Each is its
-/// view with `hidden` and `notInstalled` said, in that order, as `{...agent,
-/// hidden: true, notInstalled: true}` says them: a key the view already has
-/// keeps its place, a new one comes last.
+/// The agents as the pickers offer them, for the page's `agents.list` and the
+/// agents screen alike: one whose harness is not installed here is hidden, so
+/// only the Harnesses screen shows that harness, where it is installed; so is
+/// one saved for a harness this build does not run (Kimi, dropped), for no
+/// window could open on it. Each is its view with `hidden` and `notInstalled`
+/// said, in that order, as `{...agent, hidden: true, notInstalled: true}` says
+/// them: a key the view already has keeps its place, a new one comes last.
 pub fn offerable(agents: &[AgentView], missing: &[Harness]) -> serde_json::Result<Vec<Value>> {
     agents
         .iter()

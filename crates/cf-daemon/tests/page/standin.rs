@@ -1,7 +1,6 @@
-//! The dispatcher of the Node tests (`core-page.test.mjs:42-107`,
-//! `corners-page.test.mjs:42-73`), as the engine the page is given: each call
-//! the page makes on it is the next one Node's operation made, asserted by its
-//! name and its arguments, and answered as Node's answered, with the ledger
+//! The dispatcher of Node's page tests, as the engine the page is given: each
+//! call the page makes on it is the next one Node's operation made, asserted by
+//! its name and its arguments, and answered as Node's answered, with the ledger
 //! calls its stand-in made made again on the player's ledger, in their place
 //! among the ledger's own.
 
@@ -437,8 +436,8 @@ impl Engine for Standin {
 }
 
 impl Standin {
-    /// `openWindow` and `hideWindow` of the stand-ins: the project as the ledger
-    /// has it, or what Node's threw (`corners-page.test.mjs:64`).
+    /// `openWindow` and `hideWindow` of the stand-ins: the project as the
+    /// ledger has it, or what Node's threw.
     fn window(
         &self,
         method: &str,

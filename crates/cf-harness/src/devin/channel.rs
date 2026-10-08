@@ -1,5 +1,5 @@
-//! A message pasted into Devin's window (`src/channels/devin.js`), only while
-//! the window still shows the conversation the message is for.
+//! A message pasted into Devin's window, only while the window still shows the
+//! conversation the message is for.
 
 use std::path::Path;
 

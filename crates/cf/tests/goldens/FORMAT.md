@@ -1,0 +1,118 @@
+# What Node answered on the CLI's standalone verbs: the recordings and their format
+
+Step 4 flipped the app to Rust, and the verbs Node's CLI answered by itself
+(`--help`, the version, `catalog`, `agent`, `setup`, `doctor`) went with it. They
+were recorded first, from Node's CLI as it was (the CLI a home that had taken the
+way back to Node ran; the door every other command went through handed it to the
+native `cf`, so it was no oracle), and `crates/cf` (`standalone/`) is held to the
+recording, `setup` and `doctor` too.
+
+Node's CLI and the recorder are gone, and the recordings are fixed: nothing
+records them again, and a change that moves a case is made in the file by hand,
+on purpose, with the reason in the commit (`README.md`, beside this file, says
+where the recorder is in the history). The recorder ran every scenario against
+Node's CLI once on each platform the tests run on, since a path is joined with its
+own separator and a stand-in for a harness's CLI is a script or a `.cmd`: the
+Windows file was recorded on Windows.
+
+    npm run test:clis                   the suites of the CLI against the native cf
+    npm run plants:cli                  plants bugs in the Rust, says what caught each
+
+The Rust players (`crates/cf/tests/cli_goldens/`, `crates/cf-base/tests/args.rs`)
+hold Rust to the recordings.
+
+## What is in the files
+
+| Path | What | Read by |
+|---|---|---|
+| `crates/cf/tests/goldens/cli.<platform>.json` | every scenario played: `darwin` for macOS (and any system but Windows), `win32` for Windows | `crates/cf/tests/cli_goldens/` |
+| `crates/cf-base/tests/goldens/args.json` | what `util.parseArgs` answered for the words after each verb, for lists of up to three words from the ones people get wrong; the same on every system | `crates/cf-base/tests/args.rs` |
+
+## A scenario
+
+The recorder played each scenario in a folder of its own, made afresh, with an
+environment of its own (nothing was inherited: `HOME`, `CONSENSFLOW_HOME`,
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`, `PATH` and
+`CONSENSFLOW_BIN_DIR`, all under the folder, apart from what the scenario
+changes and what Node cannot start without on Windows, `SystemRoot`, which a
+player gives alike), the clock fixed, and Node's CLI run with it and the
+scenario's words.
+
+A case of `cases` is:
+
+| Key | |
+|---|---|
+| `name` | what it does, unique |
+| `args` | the words after `cf`, each as the system gave it to the process |
+| `env` | the environment it was given, with `$ROOT` for the folder; a variable the scenario took away is not there |
+| `stdin` | the text it was given to read, or `null` (it reads nothing, and none of the verbs asks) |
+| `before` | the files of the folder before the run: `{path, text}`, with `executable: true` where the file is one (POSIX only), `{dir}` for a folder with nothing in it; the paths relative to the folder and written with `/`, in order of path |
+| `stdout`, `stderr`, `code` | what it printed, said on the error output, and exited with; for the cases of `pipe`, see below |
+| `after` | the files of the folder after the run, as `before` |
+| `pipe` | only for a case whose output goes to a pipe: `closed` (nobody reads it, the pipe is closed before the CLI starts to write: `cf … \| false`) or `first-line` (its first line is read and the pipe closed: `cf … \| head -1`). Its `stdout` is `null` for `closed` and the first line for `first-line`, and `stderr` and `code` are the CLI's. On POSIX the CLI is the first of a shell's pipeline, so that what it writes to is a pipe and not the socket Node's `spawn` makes |
+| `kept` | only where Rust keeps a difference from Node on purpose: `{why, rust}`, `rust` the `{stdout, stderr, code}` it is recorded to give, and `after` where the files are not what Node left: `"before"`, as they were |
+
+The clock the CLI read (`clock`, at the top of the file) is one instant, whenever
+it is read: the time an agent is stamped with is the same in every recording.
+
+## Names for what differs from one run to the next
+
+A recording holds nothing of the machine that made it. Where a text of it would
+have the machine's place or the build's, it has a name, and a player puts its own
+(a text with any other of the machine's places in it was refused as it was
+recorded: the recorder checked every case).
+
+| Name | Where | A player |
+|---|---|---|
+| `$ROOT` | any text: the folder the scenario was played in, as the system names it (`realpath`) | puts the folder of its own, as the platform writes a path, and writes its own back as `$ROOT` in what it reads |
+| `$VERSION` | any text: the version in `package.json` | writes the build's version as `$VERSION` in what it reads |
+| `$NODE`, `$REPO` | the files and output of `setup` and `doctor`: the runtime that ran the CLI, and this repository, which a launcher names (`$REPO/bin/cf.mjs`) | makes a launcher that names them with a program that is there (its own) and the `cf.mjs` beside the binary under test, and writes what the binary says of them back as the names (`names.rs`) |
+| `$HASH` | the folder an extension's bundle is published in (`extensions/pi/$HASH/…`) | writes the 64 hex digits of the folder as `$HASH` |
+| `$PAYLOAD` | the text of every file of an extension: its bytes are the repository's own, which the install tests of `cf-harness` hold (`tests/launch/pi/install.rs`, `tests/launch/opencode/install.rs`) | writes `$PAYLOAD` for a file whose bytes are the repository's file's at the path after the hash, as they must be; OpenCode's `tui.json`, which is made where it is put, for one that is `{"plugin":["file:///…/consensflow-session.mjs"]}` and nothing else |
+| `$CF` | not in a recording: the player's own, for the binary under test | writes the path of the binary as `$CF` in what it reads: the launcher this build writes runs it |
+
+## What the Rust player does with a recording
+
+It makes the case's folder from `before` (`$ROOT` in a file's text is the folder),
+runs the binary with exactly the environment of `env` (the binary answers by
+itself, whatever a folder holds: the flip release's `use-node` file is read by nothing), and
+compares the output, the error output, the exit code and the files after, byte
+for byte.
+
+- **The clock.** The binary cannot be given the clock Node was. Each `createdAt`
+  and `updatedAt` of an agents file that holds an instant of the run's own (as
+  `toISOString` writes it, within a few seconds of the run) is read as the
+  recorder's fixed instant, once it is known to be one instant: a run that stamps
+  two is a difference. A stamp that was in the file before the run is not touched.
+- **`kept`.** The case is held to what `rust` says, and to the files as `before`
+  where `after` says so.
+- **`setup` and `doctor`** are played as every verb is, with the names above put
+  as this run's, and two differences that step 4 makes, stated once each with
+  its reason in `paired.rs` (the recording holds Node's answer and not Rust's, so
+  nothing is re-recorded for them, and the player asserts how many cases hold each):
+  - **The launcher's new shape.** What `setup` writes names only the native `cf`
+    (step 4's decision: the bundle after the deletion has no Node and no `cf.mjs`).
+    Node's text with the two lines that name what it runs replaced by ours is
+    what is held in the files after, for every case that leaves a launcher of
+    ours.
+  - **Whose a command is.** A native `cf` has no runtime of its own to compare a
+    command's with, so it tells whose a command is by the file the command runs.
+    The recording's launcher of another runtime runs `$REPO/bin/cf.mjs`, which
+    is this copy's own: `doctor` says no more of it than it says of this
+    copy's, where Node said it was another ConsensFlow (one case).
+
+## What is not recorded
+
+- A home that no variable names (neither `CONSENSFLOW_HOME` nor `HOME`): Node asks
+  the system for the user's home, which is the machine's own and the real
+  `~/.consensflow`. Rust refuses with the daemon's words, `setup` and `doctor`
+  before they make or say anything (`crates/cf/src/standalone/tests.rs`).
+- What `doctor` says of a command in the new shape (`command:`, which Node cannot
+  read: it says nothing of such a command), and which copy a command is: the
+  process tests of `crates/cf/tests/standalone.rs` run copies of the binary.
+- A folder or a file the CLI is not allowed to write: the roster's write
+  failures are recorded at the roster
+  (`crates/cf-catalog/tests/goldens/unwritable/`), and the CLI says what the
+  roster says.
+- A window's token (`CONSENSFLOW_TOKEN`): the CLI hands everything to the native
+  `cf`, which is then the board (`board.json`).

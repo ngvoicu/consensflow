@@ -1,10 +1,9 @@
-//! The role an OpenCode window is given (`roleConfiguration`, its `opencode`
-//! branch, `src/role-skills.js`). The text is written in a file of the
+//! The role an OpenCode window is given. The text is written in a file of the
 //! launch's own (`shared::role`), and OpenCode is told of it through
 //! `OPENCODE_CONFIG_CONTENT`, the JSON configuration it reads from its
-//! environment: merged into the one the human may have set, the role's
-//! skills folder added to the paths its skills are looked for in and the
-//! file to its instructions, each once.
+//! environment: merged into the one the human may have set, the role's skills
+//! folder added to the paths its skills are looked for in and the file to its
+//! instructions, each once.
 //!
 //! Kept from Node on purpose:
 //! - a configuration that is no JSON, or is nested past 127 levels, is

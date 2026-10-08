@@ -261,11 +261,7 @@ export const PLANTS = [
   {
     name: 'process: a program run to its end does not hand over its end',
     edits: [
-      [
-        'crates/cf-process/src/capture.rs',
-        '    started(Ender::new(pid, &exited));',
-        '    let _ = started;',
-      ],
+      ['crates/cf-process/src/capture.rs', '    started(group.ender());', '    let _ = started;'],
     ],
     runs: [unit('cf-process', 'capture::')],
     meant: 'a_program_is_handed_over_to_be_ended_while_it_runs_and_let_go_of_once_it_has_ended',

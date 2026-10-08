@@ -1,8 +1,8 @@
-//! A message on its way, and off it (`src/ledger/queue.js`). `queue` writes
-//! one by participant id: queued for its recipient, read at once when it is
-//! the asker's own window that gave the answer, or held for the human when the
-//! project's gate holds it. `send` does the same by handle, and logs it. A
-//! message that no longer applies is withdrawn or dropped, and never delivered.
+//! A message on its way, and off it. `queue` writes one by participant id:
+//! queued for its recipient, read at once when it is the asker's own window
+//! that gave the answer, or held for the human when the project's gate holds
+//! it. `send` does the same by handle, and logs it. A message that no longer
+//! applies is withdrawn or dropped, and never delivered.
 
 use cf_proto::ledger::{MessageView, Question};
 use rusqlite::params;

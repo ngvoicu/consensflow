@@ -1,9 +1,9 @@
-//! `POST /api/questions` (`api.js:222-243`): a member's question for the chief,
-//! which the member's task waits on. The chief asks the human in its own
-//! terminal, and is refused here before the body is read. The door waiting for
-//! the answer is [`super::door`]. A window the pause has not stopped yet is
-//! still on its task, and its question is about it, born with its door shut
-//! when the turn that asks is an old one.
+//! `POST /api/questions`: a member's question for the chief, which the member's
+//! task waits on. The chief asks the human in its own terminal, and is refused
+//! here before the body is read. The door waiting for the answer is
+//! [`super::door`]. A window the pause has not stopped yet is still on its
+//! task, and its question is about it, born with its door shut when the turn
+//! that asks is an old one.
 
 use cf_ledger::NewQuestion;
 use serde_json::{json, Value};
@@ -53,9 +53,9 @@ pub(super) async fn ask(
 }
 
 /// A member's window with no task in progress, whose task was cancelled under
-/// it (`refuseCancelled`, `api.js:394-403`): whatever it still sends about
-/// that task goes nowhere, and it is told why. Its result is refused by the
-/// ledger, as any result for a task that is not working.
+/// it: whatever it still sends about that task goes nowhere, and it is told
+/// why. Its result is refused by the ledger, as any result for a task that is
+/// not working.
 pub(super) fn refuse_cancelled(context: &Context, caller: &Caller) -> Result<(), Failure> {
     let last = context.ledger.borrow().last_task(caller.participant.id)?;
     match last {

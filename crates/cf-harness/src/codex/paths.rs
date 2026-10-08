@@ -1,5 +1,4 @@
-//! Where Codex keeps its things (`codexTranscript`,
-//! `hosts/lib/completion/codex.js`).
+//! Where Codex keeps its things.
 
 use std::path::{Path, PathBuf};
 

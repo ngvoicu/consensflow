@@ -1,5 +1,5 @@
-//! How the engine's work runs, as Node's ran on its one thread
-//! (`#exclusive`, `#act` and `begin`, `src/core/dispatcher.js`):
+//! How the engine's work runs, as Node's ran on its one thread (`#exclusive`,
+//! `#act` and `begin` of Node's dispatcher):
 //!
 //! - All of it runs on one [`Executor`], in the daemon and in the kit's
 //!   tests, which runs what is woken in the order it was, until nothing is,
@@ -262,13 +262,13 @@ impl Future for NextTurn {
 }
 
 /// Turns a participant stays held after its work ended (`Hold::lasting`).
-/// `#exclusive` and `#act` (`src/core/dispatcher.js`) begin the work in
-/// `begin(work)`, an `async` function that adopts the work's promise, and
-/// clear `running` or `acting` in the `finally` of an `async` function that
-/// awaits `begin`'s: adopting a promise takes a turn to ask it and a turn
-/// after it settled, and the `finally` goes on a turn after that. A promise
-/// settled already when asked, as that of work that waited on nothing was,
-/// costs one turn more.
+/// `#exclusive` and `#act` of Node's dispatcher begin the work in
+/// `begin(work)`, an `async` function that adopts the work's promise, and clear
+/// `running` or `acting` in the `finally` of an `async` function that awaits
+/// `begin`'s: adopting a promise takes a turn to ask it and a turn after it
+/// settled, and the `finally` goes on a turn after that. A promise settled
+/// already when asked, as that of work that waited on nothing was, costs one
+/// turn more.
 const LET_GO_AFTER_WAIT: usize = 2;
 const LET_GO_AFTER_START: usize = 3;
 

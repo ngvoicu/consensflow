@@ -1,9 +1,7 @@
-//! The channel to ConsensFlow's extension inside a Pi window
-//! (`src/channels/pi.js`, and the `pi` branch of `launchConfiguration`,
-//! `src/channels.js`): the folders a launch's messages and evidence go
-//! through, how the window is told of them, and which conversation the
-//! extension says the window shows. A message is a file in the extension's
-//! inbox (`send`).
+//! The channel to ConsensFlow's extension inside a Pi window: the folders a
+//! launch's messages and evidence go through, how the window is told of them,
+//! and which conversation the extension says the window shows. A message is a
+//! file in the extension's inbox (`send`).
 
 mod send;
 

@@ -1,11 +1,10 @@
-//! Readers kept from look to look (`cachedAnswers`, `hosts/lib/completion.js`),
-//! for a caller that looks at the same conversations every second: the
-//! delivery watcher, over a chief's transcript of 135 MB. Each conversation
-//! keeps its reader, so a look reads only what its harness wrote since the
-//! last one, and a record that did not change answers the reading the last
-//! look did, the same one. A conversation nobody has looked at for a while
-//! (its window closed) is forgotten, so a daemon that runs for weeks keeps
-//! only what it still reads.
+//! Readers kept from look to look, for a caller that looks at the same
+//! conversations every second: the delivery watcher, over a chief's transcript
+//! of 135 MB. Each conversation keeps its reader, so a look reads only what its
+//! harness wrote since the last one, and a record that did not change answers
+//! the reading the last look did, the same one. A conversation nobody has
+//! looked at for a while (its window closed) is forgotten, so a daemon that
+//! runs for weeks keeps only what it still reads.
 //!
 //! Looks at one conversation take turns: [`Cache::look`] takes the cache
 //! whole, so one cannot start before the one before it is done.
@@ -181,7 +180,8 @@ mod tests {
 
     #[test]
     fn a_conversation_nobody_reads_any_more_is_forgotten_then_read_anew() {
-        // completion.test.mjs: "a conversation nobody reads any more is forgotten".
+        // Node's completion suite: "a conversation nobody reads any more is
+        // forgotten".
         let env = Env::default();
         let mut cache = cache(1000);
         let options = Options::default();

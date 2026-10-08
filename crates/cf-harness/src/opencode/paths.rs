@@ -1,4 +1,4 @@
-//! Where OpenCode keeps its store (`opencodeStores`, `src/harnesses.js`).
+//! Where OpenCode keeps its store.
 
 use cf_base::env::Env;
 use cf_base::path;

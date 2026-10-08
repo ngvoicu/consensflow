@@ -1,5 +1,5 @@
 //! How the ledger's rows read: the SELECTs that join a row to the handles it
-//! refers to, and the views every operation hands back (`src/ledger/views.js`).
+//! refers to, and the views every operation hands back.
 
 use cf_base::json::from_slice_lossy;
 use cf_proto::ledger::{ConversationView, MessageView, Need, ParticipantView, TaskView};

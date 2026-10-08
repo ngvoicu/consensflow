@@ -1,9 +1,8 @@
-//! What every harness's record reader shares (`hosts/lib/completion/shared.js`):
-//! the shape of a reading, a session's file found under a harness's folder,
-//! a JSONL file read on from where the last look stopped, the transcript
-//! followed from look to look, a SQLite store read as `node:sqlite` read it,
-//! the readers kept from look to look, and the user's home the stores are
-//! under.
+//! What every harness's record reader shares: the shape of a reading, a
+//! session's file found under a harness's folder, a JSONL file read on from
+//! where the last look stopped, the transcript followed from look to look, a
+//! SQLite store read as `node:sqlite` read it, the readers kept from look to
+//! look, and the user's home the stores are under.
 
 pub(crate) mod cache;
 pub(crate) mod find;

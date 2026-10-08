@@ -1,7 +1,5 @@
-//! What the engine asks of a harness (`src/adapters/`, as
-//! `src/core/windows.js` and `deliveries.js` ask it): prepare a launch,
-//! and of the window opened on it, whether it is ready, a delivery into it,
-//! and a look at it.
+//! What the engine asks of a harness: prepare a launch, and of the window
+//! opened on it, whether it is ready, a delivery into it, and a look at it.
 //!
 //! The engine runs on one thread (step 3.5: tokio's `current_thread`), so
 //! what may wait (on the pane host, a harness's server, a child, a timer) is
@@ -42,10 +40,9 @@ pub trait Adapter {
     }
 }
 
-/// A harness's interrupt as keys into its window (`pressInterrupt`,
-/// `src/core/windows.js`): Escape `presses` times in a row, and where those
-/// presses open a dialog at a turn that has just ended, once more
-/// `close_after` later, which closes it.
+/// A harness's interrupt as keys into its window: Escape `presses` times in a
+/// row, and where those presses open a dialog at a turn that has just ended,
+/// once more `close_after` later, which closes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Interrupt {
     pub presses: u8,
@@ -87,8 +84,8 @@ pub struct Agent<'a> {
     pub designer: bool,
 }
 
-/// A launch's id: a uuid in lowercase (`core/launch-files.js`), the name of
-/// the folders its files are written in.
+/// A launch's id: a uuid in lowercase, the name of the folders its files are
+/// written in.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LaunchId(String);
 
@@ -165,15 +162,15 @@ pub struct Pane {
 
 /// The pane host, as an adapter asks it: its harness's own requests
 /// (`pane.snapshot`, `pane.write_paste`, `pane.claim`), passed straight
-/// through (`core/pane-host.js`). Opening and ending panes are the engine's.
+/// through. Opening and ending panes are the engine's.
 pub trait PaneHost {
     fn request<'a>(&'a self, op: &'a str, body: Value) -> Work<'a, Result<Value, HostError>>;
 }
 
-/// A request the pane host never answered: the bridge ended first, `error`
-/// its word for it (`eof`). A passed deadline and a frame too large are
-/// answers (`{ok: false, error: 'deadline'}`, `src/bridge.js`), which the
-/// adapter reads as it reads any other.
+/// A request the pane host never answered: the bridge ended first, `error` its
+/// word for it (`eof`). A passed deadline and a frame too large are answers
+/// (`{ok: false, error: 'deadline'}`), which the adapter reads as it reads any
+/// other.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostError {
     pub error: Option<String>,
@@ -211,9 +208,9 @@ impl Held {
     }
 }
 
-/// What became of a delivery: only one refused before the harness could
-/// take it is known not to have reached it; any other failure may have, and
-/// the harness's own record decides (`admission`, `adapters/shared.js`).
+/// What became of a delivery: only one refused before the harness could take it
+/// is known not to have reached it; any other failure may have, and the
+/// harness's own record decides (`admission`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Admission {
     /// Handed over; `queued` where the harness's own queue took it.

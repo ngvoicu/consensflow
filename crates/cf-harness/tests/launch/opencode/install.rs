@@ -1,10 +1,9 @@
-//! The plugin made for OpenCode to load, as `tests/opencode-install.test.mjs`
-//! holds Node's: an immutable private bundle with a `tui.json` that names
-//! it, never an edit of OpenCode's own settings, and a launch that loads it
-//! with credentials of its own. Node's `Harnesses` case runs the app's own
-//! preparation (`HarnessAdmin`, `prepareApp`), which is not here; what is
-//! held is that the plugin is made once OpenCode is on the PATH and not
-//! before.
+//! The plugin made for OpenCode to load, as Node's OpenCode install suite held
+//! it: an immutable private bundle with a `tui.json` that names it, never an
+//! edit of OpenCode's own settings, and a launch that loads it with credentials
+//! of its own. Node's `Harnesses` case runs the app's own preparation
+//! (`HarnessAdmin`, `prepareApp`), which is not here; what is held is that the
+//! plugin is made once OpenCode is on the PATH and not before.
 
 use std::fs;
 use std::path::Path;

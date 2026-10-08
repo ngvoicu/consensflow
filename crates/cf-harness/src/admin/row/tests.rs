@@ -1,6 +1,5 @@
-//! A row and an update's outcome, written in the order and with the keys
-//! `src/harness-admin.js` builds them: absent where it left a key out, null
-//! where it wrote one.
+//! A row and an update's outcome, written in the order and with the keys Node's
+//! admin built them: absent where it left a key out, null where it wrote one.
 
 use serde_json::json;
 

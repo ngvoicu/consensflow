@@ -1,8 +1,7 @@
-//! Devin's windows, as `tests/adapter-devin.test.mjs` holds Node's that need
-//! no launch: how a window is interrupted, what its role text says, how it
-//! names the conversation it opened, and how a look is told by what its
-//! record and its log say. The cases that launch a window are
-//! `tests/launch/devin.rs`'s.
+//! Devin's windows, as Node's Devin adapter suite held the tests that need no
+//! launch: how a window is interrupted, what its role text says, how it names
+//! the conversation it opened, and how a look is told by what its record and
+//! its log say. The cases that launch a window are `tests/launch/devin.rs`'s.
 
 use std::fs;
 use std::path::Path;

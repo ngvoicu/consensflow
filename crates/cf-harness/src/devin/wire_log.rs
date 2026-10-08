@@ -1,9 +1,9 @@
-//! Devin's wire log of one launch, as its adapter follows it (`readWire`,
-//! `src/adapters/devin.js`): the conversation the window shows, and Devin's
-//! word on its quota, a refusal after the latest prompt: in its message text
-//! ("Reached overall message rate limit … reset in 35 minutes", "Usage limit
-//! reached", "Quota exhausted"), or as the prompt's own error. The log only
-//! grows, so each look reads what was appended since the last.
+//! Devin's wire log of one launch, as its adapter follows it: the conversation
+//! the window shows, and Devin's word on its quota, a refusal after the latest
+//! prompt: in its message text ("Reached overall message rate limit … reset in
+//! 35 minutes", "Usage limit reached", "Quota exhausted"), or as the prompt's
+//! own error. The log only grows, so each look reads what was appended since
+//! the last.
 //!
 //! Kept from Node on purpose:
 //! - where V8 threw (a line that is JSON `null`, or a configuration that is

@@ -1,8 +1,7 @@
 //! What the engine says in text, held to Node: the goldens of
-//! `tests/goldens/text.json` (`npm run goldens:engine`, from
-//! `tests/goldens/engine/`) played row by row, and the JavaScript tests of
-//! the same modules (`core-delivery-text`, `handoff`, `core-roles`, `skill`)
-//! ported under their sentences.
+//! `tests/goldens/text.json` (recorded from Node, and fixed since) played row
+//! by row, and the JavaScript tests of the same modules (`core-delivery-text`,
+//! `handoff`, `core-roles`, `skill`) ported under their sentences.
 
 // The goldens' own reading and the tests' own building: a failure there is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]

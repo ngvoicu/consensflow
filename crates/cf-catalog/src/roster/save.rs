@@ -1,6 +1,6 @@
-//! The file written (`STALE_FIELDS` and `saveDocument`, `src/roster.js`):
-//! whole or not at all, a write cut short leaving the previous file, as
-//! `JSON.stringify(document, null, 2)` writes it with a line break after.
+//! The file written: whole or not at all, a write cut short leaving the
+//! previous file, as `JSON.stringify(document, null, 2)` writes it with a line
+//! break after.
 
 use std::path::Path;
 

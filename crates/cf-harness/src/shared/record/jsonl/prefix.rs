@@ -1,9 +1,8 @@
-//! Whether text is whole JSON, the start of some, or neither
-//! (`jsonPrefixState`, `hosts/lib/completion/shared.js`): what tells the
-//! last line of a JSONL file a live writer has not finished from one that
-//! never will be JSON. It reads bytes: every token JSON has is ASCII, so a
-//! character of more than one byte is a string's or no JSON's, as it was a
-//! string's or no JSON's to JavaScript.
+//! Whether text is whole JSON, the start of some, or neither: what tells the
+//! last line of a JSONL file a live writer has not finished from one that never
+//! will be JSON. It reads bytes: every token JSON has is ASCII, so a character
+//! of more than one byte is a string's or no JSON's, as it was a string's or no
+//! JSON's to JavaScript.
 
 /// What some text is to JSON.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

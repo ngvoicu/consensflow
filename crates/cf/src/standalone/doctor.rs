@@ -1,8 +1,8 @@
-//! `cf doctor` (`doctor`, `bin/cf.mjs`): what ConsensFlow sees on this
-//! machine, a line each: the version, the home, the harnesses, the agents, the
-//! roles, what the terminal command runs, and the hooks an older version left
-//! in Claude Code's settings. It reads and writes nothing of its own, and the
-//! words after it are no matter.
+//! `cf doctor`: what ConsensFlow sees on this machine, a line each: the
+//! version, the home, the harnesses, the agents, the roles, what the terminal
+//! command runs, and the hooks an older version left in Claude Code's settings.
+//! It reads and writes nothing of its own, and the words after it are no
+//! matter.
 //!
 //! A line is said as soon as it is known, so what stops it later (a file of
 //! agents that cannot be read, or a command that cannot) is said after the

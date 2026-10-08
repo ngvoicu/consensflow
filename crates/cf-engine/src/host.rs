@@ -1,6 +1,6 @@
-//! The pane host as the engine uses it (`src/core/pane-host.js`): besides the
-//! requests an adapter makes of a window's pane (`PaneHost`), the engine opens
-//! a window's pane, kills it, and hears when it exits.
+//! The pane host as the engine uses it: besides the requests an adapter makes
+//! of a window's pane (`PaneHost`), the engine opens a window's pane, kills it,
+//! and hears when it exits.
 //!
 //! A host's answer is told apart from a failure to get one: a pane the host
 //! refused to open or kill says so in the host's own words (which the human

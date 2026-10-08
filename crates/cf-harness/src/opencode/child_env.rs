@@ -1,8 +1,7 @@
-//! The environment a program of a window runs with (`childEnv`,
-//! `hosts/lib/windows.js`): a base, plus what the window declares, minus what
-//! it must not see. OpenCode's is its only caller: the throwaway server that
-//! makes a fresh window's conversation runs in the engine's environment with
-//! no declared keys.
+//! The environment a program of a window runs with: a base, plus what the
+//! window declares, minus what it must not see. OpenCode's is its only caller:
+//! the throwaway server that makes a fresh window's conversation runs in the
+//! engine's environment with no declared keys.
 //!
 //! Kept from Node on purpose: on Windows a variable's name is read in upper
 //! case (`Env`), where Node copied the environment into a plain object, in

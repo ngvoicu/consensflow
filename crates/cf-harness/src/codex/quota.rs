@@ -1,6 +1,5 @@
-//! Codex's quota as its rollout reports it, ahead of time (`codexQuota`,
-//! `hosts/lib/quota.js`): the `rate_limits` of a `token_count` event, where
-//! the fullest window decides.
+//! Codex's quota as its rollout reports it, ahead of time: the `rate_limits` of
+//! a `token_count` event, where the fullest window decides.
 
 use serde_json::Value;
 

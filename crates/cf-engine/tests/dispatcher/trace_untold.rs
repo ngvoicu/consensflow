@@ -1,8 +1,7 @@
 //! A window whose trace cannot be told: what the trace says of a window is
 //! named by the project the ledger holds it in, and a ledger that cannot be
-//! read fails the step or the operation that was telling it, as
-//! `#traceWindow` (`src/core/dispatcher.js`) did, instead of a line naming no
-//! project and no participant.
+//! read fails the step or the operation that was telling it, as Node's
+//! `#traceWindow` did, instead of a line naming no project and no participant.
 
 use cf_engine::testing::Context;
 use cf_engine::ActivityState;

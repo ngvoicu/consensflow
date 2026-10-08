@@ -1,7 +1,7 @@
-//! What the launcher's tests share: a throwaway home in the shape of
-//! `tempEnv` (`tests/helpers.mjs`), the two forms of a launcher, and the
-//! old launcher alpha.78 wrote, which Node's `src/terminal.js` made and
-//! nothing but this reads now.
+//! What the launcher's tests share: a throwaway home in the shape of `tempEnv`
+//! (`tests/helpers.mjs`), the two forms of a launcher, and the old launcher
+//! alpha.78 wrote, which Node's terminal command made and nothing but this
+//! reads now.
 
 #![allow(dead_code)]
 
@@ -147,9 +147,9 @@ impl Bundle {
     }
 }
 
-/// The launcher alpha.78 and every build before it wrote (`launcher`,
-/// `src/terminal.js`), in the form of cmd.exe when `windows`: Node's own
-/// text, which the repair's cases and the goldens begin from.
+/// The launcher alpha.78 and every build before it wrote, in the form of
+/// cmd.exe when `windows`: Node's own text, which the repair's cases and the
+/// goldens begin from.
 pub fn old_launcher(windows: bool, runtime: &Path, cli: &Path, home: Option<&str>) -> String {
     let (runtime, cli) = (runtime.display(), cli.display());
     if windows {

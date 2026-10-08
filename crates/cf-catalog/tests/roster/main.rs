@@ -1,9 +1,9 @@
-//! The tests of `tests/roster.test.mjs`, ported with the roster: each keeps
-//! its sentence, as a name, and its assertions. A `describe` block of the JS
-//! is a module here, in a file of its own; the tests outside one are in this
-//! file. The JS ran a block's tests in order in one home, a later one on the
-//! file an earlier one left: here each starts from a home of its own, with
-//! what the earlier ones left written into it first.
+//! The tests of Node's roster suite, ported with the roster: each keeps its
+//! sentence, as a name, and its assertions. A `describe` block of the JS is a
+//! module here, in a file of its own; the tests outside one are in this file.
+//! The JS ran a block's tests in order in one home, a later one on the file an
+//! earlier one left: here each starts from a home of its own, with what the
+//! earlier ones left written into it first.
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used)]

@@ -44,9 +44,8 @@ pub fn on_path(command: &str, env: &Env) -> Option<PathBuf> {
     )
 }
 
-/// The first of `folders` that holds `command` as a file this user can
-/// start, by the names `env`'s system gives it (`pathOnPath`,
-/// `src/harnesses.js`), as an absolute path.
+/// The first of `folders` that holds `command` as a file this user can start,
+/// by the names `env`'s system gives it, as an absolute path.
 pub fn find_in(
     command: &str,
     folders: impl IntoIterator<Item = PathBuf>,

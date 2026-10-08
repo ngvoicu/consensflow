@@ -1,6 +1,5 @@
-//! OpenCode's record of a session (`opencodeReader`,
-//! `hosts/lib/completion/opencode.js`): its SQLite store, read on from the
-//! session's last event.
+//! OpenCode's record of a session: its SQLite store, read on from the session's
+//! last event.
 //!
 //! OpenCode writes each change to a message or a part as an event of the
 //! conversation, numbered in order, in the same transaction as the row (a

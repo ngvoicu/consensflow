@@ -1,8 +1,7 @@
-//! Where the roster is and how its file is read (`rosterPath`, `readRoster`
-//! and `unreadable`, `src/roster.js`). Only a missing file is an empty
-//! roster: one that cannot be read or parsed is said to whoever reads it,
-//! and nothing is written over it, since the next write would erase every
-//! agent in it.
+//! Where the roster is and how its file is read. Only a missing file is an
+//! empty roster: one that cannot be read or parsed is said to whoever reads it,
+//! and nothing is written over it, since the next write would erase every agent
+//! in it.
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -1,8 +1,8 @@
-//! The engine's other seams as `core-dispatcher.test.mjs` makes them: a
-//! token named after its window's handle, each window's environment naming
-//! its participant, the saved agents' models, a role text per role, and a
-//! trace, a log and launch files that keep what they are told. Every call is
-//! written down in the Node traces' shape.
+//! The engine's other seams as Node's dispatcher suite made them: a token named
+//! after its window's handle, each window's environment naming its participant,
+//! the saved agents' models, a role text per role, and a trace, a log and
+//! launch files that keep what they are told. Every call is written down in the
+//! Node traces' shape.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;

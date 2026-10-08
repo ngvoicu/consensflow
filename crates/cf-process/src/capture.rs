@@ -1,10 +1,10 @@
-//! `execFile` with both streams kept, as `harness-admin.js` runs an update:
-//! a program run to its end, its standard output and its standard error each
-//! read as text within the size and the time `execute` holds a program to,
-//! and every way it can fail said in Node's words (probed on Node v26.8.1).
-//! `execute` answers the standard output alone; an update's output is the
-//! two together, which Node's `execFile` hands over whole and `execute` has
-//! no use for, and so no field for.
+//! `execFile` with both streams kept, as Node's harness admin ran an update: a
+//! program run to its end, its standard output and its standard error each read
+//! as text within the size and the time `execute` holds a program to, and every
+//! way it can fail said in Node's words (probed on Node v26.8.1). `execute`
+//! answers the standard output alone; an update's output is the two together,
+//! which Node's `execFile` hands over whole and `execute` has no use for, and
+//! so no field for.
 
 use std::path::Path;
 use std::process::Stdio;

@@ -1,8 +1,8 @@
-//! What a window leaves in ConsensFlow's folder under its launch id
-//! (`src/core/launch-files.js`): the settings and integration files written
-//! for it, in `integrations/<harness>/<launch>`. A launch id lives as long
-//! as its window, and nothing else reads these folders, so they go when it
-//! does, and every one at a start.
+//! What a window leaves in ConsensFlow's folder under its launch id: the
+//! settings and integration files written for it, in
+//! `integrations/<harness>/<launch>`. A launch id lives as long as its window,
+//! and nothing else reads these folders, so they go when it does, and every one
+//! at a start.
 
 use std::fs;
 use std::io;
@@ -16,9 +16,8 @@ use cf_proto::agents::Harness;
 use crate::contract::LaunchId;
 use crate::shared::record::find::entries;
 
-/// The harness folders a launch's files are in, in the order Node goes
-/// through them (`HARNESSES`, `src/core/launch-files.js`): a removal that
-/// fails stops there, leaving the folders after it.
+/// The harness folders a launch's files are in, in the order Node goes through
+/// them: a removal that fails stops there, leaving the folders after it.
 const FOLDERS: [&str; 4] = ["claude", "pi", "devin", "opencode"];
 
 /// The folder under `integrations` a harness keeps its launches' files in:

@@ -1,7 +1,7 @@
-//! What a harness's refusal says about its quota, on the words harnesses
-//! really wrote: Claude Code's limits, Pi's provider errors and OpenRouter's
-//! spent credit, as this machine's records held them (2026-09/10). The
-//! sentences of `tests/quota.test.mjs`, `describe('a quota refusal')`.
+//! What a harness's refusal says about its quota, on the words harnesses really
+//! wrote: Claude Code's limits, Pi's provider errors and OpenRouter's spent
+//! credit, as this machine's records held them (2026-09/10). The sentences of
+//! Node's quota suite, `describe('a quota refusal')`.
 
 use cf_base::time::iso;
 use serde_json::json;

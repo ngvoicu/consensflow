@@ -242,14 +242,8 @@ export const PLANTS = [
     edits: [
       [
         `${DAEMON}/cli.rs`,
-        lines(
-          '                    if name == "json" {',
-          '                        flags.json = true;',
-        ),
-        lines(
-          '                    if name == "json" {',
-          '                        flags.no_open = true;',
-        ),
+        lines('        json: parsed.flag("json"),', '        no_open: parsed.flag("no-open"),'),
+        lines('        json: parsed.flag("json"),', '        no_open: parsed.flag("json"),'),
       ],
     ],
     runs: [daemon('cli::')],

@@ -1,14 +1,15 @@
-//! The presets (`AGENT_PRESETS` and `MODEL_LABELS`, `hosts/lib/presets.js`)
-//! as data: what the crate embeds, and how it reads them.
+//! The presets and the model labels as data: what the crate embeds
+//! (`data/presets.json`, their one source, edited directly; `data/README.md`
+//! says why its rows are what they are), and how it reads them.
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
-/// The presets and model labels as `presets.js` has them, built into the binary.
+/// The presets and model labels, built into the binary.
 const BUNDLED: &str = include_str!("../data/presets.json");
 
-/// A ready-made agent, as `AGENT_PRESETS` writes one. A field the JavaScript
-/// adds and this does not know fails the build's own test, not a user.
+/// A ready-made agent, as the data writes one. A field the data adds and this
+/// does not know fails the build's own test, not a user.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preset {
@@ -31,8 +32,8 @@ pub struct Preset {
     pub designer: bool,
 }
 
-/// What `data/presets.json` holds: the presets in the order the JavaScript
-/// lists them, and each model's label by its key.
+/// What `data/presets.json` holds: the presets in the order it lists them, and
+/// each model's label by its key.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct Data {

@@ -1,8 +1,7 @@
-//! A harness brought to its latest release the way it was installed
-//! (`update`, `src/harness-admin.js`): its own updater, Homebrew or npm,
-//! then a look again, and what happened: updated, unchanged, failed (with the
-//! tool's last lines) or unsupported when the install method is not
-//! recognized.
+//! A harness brought to its latest release the way it was installed: its own
+//! updater, Homebrew or npm, then a look again, and what happened: updated,
+//! unchanged, failed (with the tool's last lines) or unsupported when the
+//! install method is not recognized.
 
 use std::path::PathBuf;
 use std::time::Duration;

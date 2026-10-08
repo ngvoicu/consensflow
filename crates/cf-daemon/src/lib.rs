@@ -1,11 +1,11 @@
-//! ConsensFlow's daemon (`src/core/daemon.js` and what it runs): the one
-//! process that owns its state. It opens the ledger (whose lock refuses a
-//! second daemon on the same home), marks the projects that were open for a
-//! resume, serves the agents' API and the human's screens on loopback, prints
-//! its handle line for the app, then speaks the bridge on its standard input
-//! and output: the pane host's requests and events come in, pane operations
-//! go out, and the page's requests are answered here. The dispatcher runs once
-//! a second and whenever something changes. The end of its input stops it.
+//! ConsensFlow's daemon: the one process that owns its state. It opens the
+//! ledger (whose lock refuses a second daemon on the same home), marks the
+//! projects that were open for a resume, serves the agents' API and the human's
+//! screens on loopback, prints its handle line for the app, then speaks the
+//! bridge on its standard input and output: the pane host's requests and events
+//! come in, pane operations go out, and the page's requests are answered here.
+//! The dispatcher runs once a second and whenever something changes. The end of
+//! its input stops it.
 //!
 //! Everything runs on one thread, as Node did, on a `LocalSet` over tokio's
 //! current-thread runtime. The engine's work runs on the engine's executor

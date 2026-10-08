@@ -1,7 +1,7 @@
 //! The names the recording writes for what is of the machine that made it
 //! (`$ROOT`, `$VERSION`, `$NODE`, `$REPO`, `$HASH` and `$PAYLOAD`, and the one
 //! this player adds, `$CF`), and what this run puts in their places. The format
-//! says what each stands for: tests/goldens/cli/FORMAT.md.
+//! says what each stands for: tests/goldens/FORMAT.md.
 //!
 //! - `$NODE` and `$REPO` are what a launcher of Node's names: the runtime that
 //!   ran the CLI, and the checkout it ran from. A native `cf` has neither, so a

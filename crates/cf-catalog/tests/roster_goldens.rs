@@ -1,10 +1,9 @@
-//! The roster's golden (`tests/goldens/roster.json`, which `npm run
-//! goldens:catalog` writes from `src/roster.js`): every operation on each of
-//! its files at a fixed time, and seeded sequences of them, as Node answered.
-//! Each case starts from the same file in a home of its own, makes the same
-//! call at the same instant, and is held to Node's answer or refusal as
-//! `JSON.stringify` writes it, to the file it left, byte for byte, and to
-//! nothing left beside it.
+//! The roster's golden (`tests/goldens/roster.json`, recorded from Node's
+//! roster and fixed since): every operation on each of its files at a fixed
+//! time, and seeded sequences of them, as Node answered. Each case starts from
+//! the same file in a home of its own, makes the same call at the same instant,
+//! and is held to Node's answer or refusal as `JSON.stringify` writes it, to
+//! the file it left, byte for byte, and to nothing left beside it.
 
 // The golden's own reading: a failure in it is the test's.
 #![allow(clippy::unwrap_used)]
@@ -242,7 +241,7 @@ fn every_operation_on_the_roster_answers_as_node_answered_and_leaves_the_file_no
         cases.len()
     );
     assert_eq!(cases.len(), answers + refusals);
-    // Held, so a golden that shrinks fails: `npm run goldens:catalog` after a change.
+    // Held, so a golden that shrinks fails.
     assert_eq!(
         calls.into_iter().collect::<Vec<_>>(),
         [

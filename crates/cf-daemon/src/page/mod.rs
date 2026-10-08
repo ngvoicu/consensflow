@@ -1,17 +1,16 @@
-//! What the board page asks of the daemon, over the bridge (`pageOperations`,
-//! `src/core/page.js`, and `daemon.js:165-170`): the 28 operations of
-//! [`PageOperation`](cf_proto::page::PageOperation), and `ping`, which says
+//! What the board page asks of the daemon, over the bridge: the 28 operations
+//! of [`PageOperation`](cf_proto::page::PageOperation), and `ping`, which says
 //! the bridge is up.
 //!
 //! Every operation is registered on the bridge here ([`register`]), and
 //! [`operations::serve`] is the table of which function serves which; each
-//! concern has a module of its own: [`projects`], [`staff`] (the agents and
-//! the staff), [`sessions`], [`board`] (and the inbox), [`tasks`] and
-//! [`messages`]. What they stand on is [`Page`] and the engine they call
-//! ([`Engine`]), a small trait of what `page.js` calls on the dispatcher and
-//! its five projections, which the dispatcher is; the saved agents are read
-//! from the file at each use ([`agents`]), and the body is read as JavaScript
-//! read it ([`body`]).
+//! concern has a module of its own: [`projects`], [`staff`] (the agents and the
+//! staff), [`sessions`], [`board`] (and the inbox), [`tasks`] and [`messages`].
+//! What they stand on is [`Page`] and the engine they call ([`Engine`]), a
+//! small trait of what Node's page called on the dispatcher and its five
+//! projections, which the dispatcher is; the saved agents are read from the
+//! file at each use ([`agents`]), and the body is read as JavaScript read it
+//! ([`body`]).
 //!
 //! How an operation answers is the bridge's: `{ok: true, ...fields}` for the
 //! fields it serves, `{ok: false, error}` with the words of its failure. One
@@ -72,10 +71,9 @@ pub type Served = Result<Map<String, Value>, String>;
 /// What serves an operation: given the page, the operation and its body.
 pub type Serve = dyn Fn(Rc<Page>, PageOperation, Value) -> LocalBoxFuture<'static, Served>;
 
-/// Registers the page's 28 operations and `ping` on `bridge`, to be answered
-/// as the page expects (`daemon.js:165-170`), the engine's work run by `spawn`.
-/// Called before the connection is first polled, so no frame finds an
-/// operation missing.
+/// Registers the page's 28 operations and `ping` on `bridge`, to be answered as
+/// the page expects, the engine's work run by `spawn`. Called before the
+/// connection is first polled, so no frame finds an operation missing.
 pub fn register(bridge: &Bridge, page: &Rc<Page>, spawn: &Rc<DaemonSpawn>) {
     let serve: Rc<Serve> = Rc::new(|page, operation, body| {
         Box::pin(async move { operations::serve(&page, operation, body).await })

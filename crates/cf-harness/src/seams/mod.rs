@@ -68,7 +68,7 @@ pub trait Ports {
     fn free_loopback(&self) -> Result<u16, String>;
 }
 
-/// What ConsensFlow ships beside the daemon (`src/core/pane-cf.js`).
+/// What ConsensFlow ships beside the daemon.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bundle {
     /// Its `bin`, first on every window's PATH.
@@ -176,8 +176,7 @@ impl Entropy for SystemEntropy {
     }
 }
 
-/// A port the system hands out on loopback, let go at once
-/// (`freeLoopbackPort`, `src/channels.js`).
+/// A port the system hands out on loopback, let go at once.
 pub struct LoopbackPorts;
 
 impl Ports for LoopbackPorts {

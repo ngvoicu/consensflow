@@ -1,7 +1,6 @@
-//! `cf agent add|list|edit|remove` (`agentVerb` and `resolveAdd`,
-//! `bin/cf.mjs`): the agents of the human's own, in the roster's file, over
-//! the catalog's. A catalog agent is the catalog's, never added again, edited
-//! or removed; a refusal says why and writes nothing.
+//! `cf agent add|list|edit|remove`: the agents of the human's own, in the
+//! roster's file, over the catalog's. A catalog agent is the catalog's, never
+//! added again, edited or removed; a refusal says why and writes nothing.
 
 use std::io::Write;
 

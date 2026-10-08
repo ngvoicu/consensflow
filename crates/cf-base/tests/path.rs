@@ -1,8 +1,7 @@
-//! The goldens `npm run goldens:path` writes from Node, which the unit suite
-//! holds equal to what Node computes now: every join and every normalize,
-//! answered by both flavours as text, on whatever system this runs. A key in
-//! the file that this does not read, or a case that is left out, fails the
-//! counts.
+//! The goldens recorded from Node's `path`, fixed since Node went: every join
+//! and every normalize, answered by both flavours as text, on whatever system
+//! this runs. A key in the file that this does not read, or a case that is left
+//! out, fails the counts.
 
 // The goldens' own reading: a failure in it is the test's.
 #![allow(clippy::unwrap_used)]
@@ -10,7 +9,7 @@
 use cf_base::path::{posix, win32};
 use serde_json::Value;
 
-/// The segments `tests/goldens/path/goldens.mjs` builds its cases from.
+/// The segments the recording built its cases from.
 const SEGMENTS: usize = 60;
 /// The seeded sample of triples among its joins.
 const TRIPLES: usize = 3000;

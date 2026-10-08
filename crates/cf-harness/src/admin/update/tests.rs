@@ -1,6 +1,6 @@
-//! An update as `tests/harness-admin.test.mjs` holds Node's: run the way the
-//! CLI was installed, checked again, and said as it came out; the recorded
-//! goldens (`tests/goldens/admin`) hold the rest to Node's answer.
+//! An update as Node's admin suite held it: run the way the CLI was installed,
+//! checked again, and said as it came out; the recorded goldens
+//! (`tests/goldens/admin`) hold the rest to Node's answer.
 
 use std::rc::Rc;
 use std::time::Duration;

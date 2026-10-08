@@ -1,9 +1,8 @@
 //! The Rust `cf` held to what Node's board commands said and asked: Node's
-//! `runCoreCli` (src/core/cli.js) ran each case of goldens/board.json against
-//! a scripted API (tests/goldens/cf-board.mjs, both in the history at
-//! b54361c), and recorded it. Each case's replies are served again, the
-//! binary run as a window runs it, and its requests, output, errors and exit
-//! code compared byte for byte.
+//! `runCoreCli` ran each case of goldens/board.json against a scripted API
+//! (both in the history at b54361c), and recorded it. Each case's replies are
+//! served again, the binary run as a window runs it, and its requests, output,
+//! errors and exit code compared byte for byte.
 
 mod common;
 

@@ -1,11 +1,9 @@
-//! The agents' routes, in the order Node matches them (`handle`,
-//! `src/core/api.js:79-310`, and `taskRoute`, `:312-386`). **Frozen**: the
-//! table is [`recognize`], the order of the checks around it is
-//! [`super::handle`], and a route's place is its own module, which a landing
-//! fills in without touching this file. Its two routes that Node's has no
-//! twin of are the door's receipt (`POST /api/answers/<n>/receipt`) and `cf`'s
-//! (`POST /api/answers/read`), which the receipt and stop redesign added
-//! after the answers' own.
+//! The agents' routes, in the order Node matched them. **Frozen**: the table is
+//! [`recognize`], the order of the checks around it is [`super::handle`], and a
+//! route's place is its own module, which a landing fills in without touching
+//! this file. Its two routes that Node's has no twin of are the door's receipt
+//! (`POST /api/answers/<n>/receipt`) and `cf`'s (`POST /api/answers/read`),
+//! which the receipt and stop redesign added after the answers' own.
 //!
 //! The order of a request's checks, as Node has it:
 //!

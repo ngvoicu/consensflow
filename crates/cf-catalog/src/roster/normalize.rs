@@ -1,7 +1,6 @@
-//! The file folded into the shape it keeps now (`normalizeRoster`,
-//! `src/roster.js`), at the daemon's start: a copy of a catalog entry goes
-//! (the catalog has it), and so does stored display data; an image agent on
-//! the `image` harness is a Codex agent that designs.
+//! The file folded into the shape it keeps now, at the daemon's start: a copy
+//! of a catalog entry goes (the catalog has it), and so does stored display
+//! data; an image agent on the `image` harness is a Codex agent that designs.
 
 use std::path::Path;
 

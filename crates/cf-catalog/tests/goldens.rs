@@ -1,8 +1,8 @@
-//! The goldens `npm run goldens:catalog` writes from the JavaScript, which
-//! the unit suite holds equal to what Node computes now. Here, the catalog's
-//! and `agentProfile`'s answers are held to them, case by case and as text, so
-//! a key out of order or a word changed fails. The roster's golden has a file
-//! of its own, `roster_goldens.rs`.
+//! The goldens recorded from Node's catalog (fixed since Node went:
+//! `tests/goldens/README.md`). Here, the catalog's and `agentProfile`'s answers
+//! are held to them, case by case and as text, so a key out of order or a word
+//! changed fails. The roster's golden has a file of its own,
+//! `roster_goldens.rs`.
 
 // The goldens' own reading: a failure in it is the test's.
 #![allow(clippy::unwrap_used)]

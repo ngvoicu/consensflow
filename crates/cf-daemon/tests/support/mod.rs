@@ -1,6 +1,6 @@
 //! What the three players of Node's traces share, each piece once: the API's
-//! (`tests/api/`), the page's (`tests/page/`) and the screens' (`tests/screens/`),
-//! which `tests/goldens/daemon/FORMAT.md` describes.
+//! (`tests/api/`), the page's (`tests/page/`) and the screens'
+//! (`tests/screens/`), which `tests/goldens/FORMAT.md` describes.
 //!
 //! A test binary compiles what it includes, and what it includes and does not
 //! use is dead code in it. So the pieces all three use whole are the children

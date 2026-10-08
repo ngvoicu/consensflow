@@ -1,11 +1,10 @@
-//! Where each harness's CLI is on this machine (`harnessPath`,
-//! `src/harnesses.js`): on PATH first, then in the places each installs
-//! itself, which a Finder-launched app's PATH may lack. Every place is the
-//! user's own, under the home but for npm's folder on Windows, which the
-//! environment names: a system-wide one (`/opt/homebrew/bin`) is on every
-//! login PATH already, and a test with a home of its own then sees only the
-//! CLIs it put there. And which harnesses those are: the ones that are
-//! installed here, and the ones that are not.
+//! Where each harness's CLI is on this machine: on PATH first, then in the
+//! places each installs itself, which a Finder-launched app's PATH may lack.
+//! Every place is the user's own, under the home but for npm's folder on
+//! Windows, which the environment names: a system-wide one
+//! (`/opt/homebrew/bin`) is on every login PATH already, and a test with a home
+//! of its own then sees only the CLIs it put there. And which harnesses those
+//! are: the ones that are installed here, and the ones that are not.
 
 use std::path::PathBuf;
 
@@ -15,9 +14,9 @@ use serde::Serialize;
 
 use crate::shared::paths::{home, set};
 
-/// Every harness, in the order `src/harnesses.js` lists them (`HARNESSES`):
-/// the order detection answers in and the Harnesses page lists its rows in.
-/// It is not [`Harness::ALL`]'s, the roster's.
+/// Every harness, in the order Node's harness list had them: the order
+/// detection answers in and the Harnesses page lists its rows in. It is not
+/// [`Harness::ALL`]'s, the roster's.
 const DETECTION_ORDER: [Harness; 5] = [
     Harness::Devin,
     Harness::Claude,
@@ -69,12 +68,11 @@ fn homed(harness: Harness, env: &Env) -> Vec<PathBuf> {
         .collect()
 }
 
-/// npm's global folder on Windows, `%APPDATA%\npm` (`NPM_GLOBAL`,
-/// `src/harnesses.js`): where `npm install -g` puts the shims of a CLI, and
-/// which a terminal reaches through the shell's own setup, as an app started
-/// from the Start menu does not. It comes from the `APPDATA` of the
-/// environment given, never the machine's own; one that is missing or empty
-/// adds nothing, and so does any other system.
+/// npm's global folder on Windows, `%APPDATA%\npm`: where `npm install -g` puts
+/// the shims of a CLI, and which a terminal reaches through the shell's own
+/// setup, as an app started from the Start menu does not. It comes from the
+/// `APPDATA` of the environment given, never the machine's own; one that is
+/// missing or empty adds nothing, and so does any other system.
 fn npm_global(env: &Env) -> Option<PathBuf> {
     if !env.on_windows() {
         return None;
@@ -120,9 +118,8 @@ pub fn detect_harnesses(env: &Env) -> Vec<Detected> {
         .collect()
 }
 
-/// The program a window of `harness` opens on (`executableFor`,
-/// `src/adapters/shared.js`): its CLI's absolute path here, or the refusal
-/// that names it.
+/// The program a window of `harness` opens on: its CLI's absolute path here, or
+/// the refusal that names it.
 pub(crate) fn executable(harness: Harness, env: &Env) -> Result<String, String> {
     harness_path(harness, env)
         .map(|path| path.to_string_lossy().into_owned())

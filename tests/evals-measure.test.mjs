@@ -23,8 +23,8 @@ import { addProject, fixtureJson, loadLedger, openLedgerFile } from './ledger-fi
 /**
  * The eval's numbers come from the ledger file, read with SQLite. Each test
  * reads a ledger recorded while Node's ledger could still build one
- * (tests/fixtures/ledgers, recorded by tests/goldens/evals/record.mjs), where
- * each number is the one the sequence of operations behind it leaves.
+ * (tests/fixtures/ledgers, fixed since Node went), where each number is the one
+ * the sequence of operations behind it leaves.
  */
 const FIXTURES = fileURLToPath(new URL('./fixtures/ledgers/', import.meta.url))
 

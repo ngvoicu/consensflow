@@ -1,6 +1,5 @@
-//! The two patterns of `hosts/lib/completion/claude-code.js`, each compiled
-//! once, the first time it is used, as JavaScript reads it
-//! (`shared::pattern`).
+//! The two patterns of Node's Claude record reader, each compiled once, the
+//! first time it is used, as JavaScript reads it (`shared::pattern`).
 
 use std::sync::LazyLock;
 

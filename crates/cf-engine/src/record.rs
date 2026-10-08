@@ -1,12 +1,11 @@
-//! The engine's record of a participant (`runtime`, `dispatcher.js`), made
-//! the first time it is asked for and forgotten when the participant leaves.
-//! Each part has one owner: the window itself (`windows`), what is on its
-//! way into it (`deliveries`), what its harness said of its quota
-//! (`scheduler`), what of its conversation is copied (`transcripts`), and a
-//! Switch chief waiting for the chief's turn to end (`chief_switch`); each
-//! module adds to its part as it is ported. Who holds
-//! the participant now is its [`Hold`]. A part is borrowed for one reading
-//! or one change, never across a wait.
+//! The engine's record of a participant, made the first time it is asked for
+//! and forgotten when the participant leaves. Each part has one owner: the
+//! window itself (`windows`), what is on its way into it (`deliveries`), what
+//! its harness said of its quota (`scheduler`), what of its conversation is
+//! copied (`transcripts`), and a Switch chief waiting for the chief's turn to
+//! end (`chief_switch`); each module adds to its part as it is ported. Who
+//! holds the participant now is its [`Hold`]. A part is borrowed for one
+//! reading or one change, never across a wait.
 
 use std::cell::RefCell;
 use std::rc::Rc;
