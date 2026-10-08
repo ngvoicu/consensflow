@@ -1,10 +1,12 @@
 /**
  * What Windows' console carries of a non-ASCII character to a window that
  * reads key presses (Devin, Codex), spelled in ASCII where it would drop it.
- * One module for both sides: the daemon gives it a Devin window's messages,
- * and the page, which the build hands a copy of (app/scripts/bundle-ui.mjs),
- * gives it what the human types into a Devin or Codex window. No imports:
- * it runs as it is in both places.
+ * The page's own: it gives it what the human types into a Devin or Codex
+ * window. The daemon spells a Devin window's messages the same way in Rust
+ * (`console_text`, crates/cf-base/src/text/console.rs), and both are held to
+ * one recorded table (tests/console-text.test.mjs here,
+ * crates/cf-harness/tests/launch/tables.rs there). No imports: it runs as it
+ * is in the page.
  */
 
 /**

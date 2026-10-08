@@ -678,16 +678,28 @@ pub fn fake_executable(file: &Path) -> PathBuf {
     file.to_path_buf()
 }
 
-/// A stand-in a window can open on: on Windows the shape of an npm shim,
-/// naming node and a script beside it, the only `.cmd` `pane_argv` opens (a
-/// bare one is refused as no window could run it), as Node's rig writes its
-/// stand-in; elsewhere [`fake_executable`]'s script.
+/// A stand-in a window can open on: on Windows the shape of an npm shim
+/// ([`npm_shim_stand_in`]); elsewhere [`fake_executable`]'s script.
 pub fn fake_window_executable(file: &Path) -> PathBuf {
-    if !cfg!(windows) {
-        return fake_executable(file);
+    if cfg!(windows) {
+        npm_shim_stand_in(file)
+    } else {
+        fake_executable(file)
     }
+}
+
+/// The shape of an npm shim, written wherever the test runs so that what opens
+/// a window on it is held on every system: naming node and a script beside
+/// it, the only `.cmd` `pane_argv` opens (a bare one is refused as no window
+/// could run it), as Node's rig writes its stand-in. A shim that names node
+/// runs on the one beside it, else the one on the PATH: ConsensFlow bundles
+/// none and no variable names one, so the stand-in brings its own, an empty
+/// `node.exe` that nothing runs (a test that opens a window answers for the
+/// pane host itself). The path of the `.cmd`.
+pub fn npm_shim_stand_in(file: &Path) -> PathBuf {
     let script = file.with_extension("js");
     fs::write(&script, "").expect("a stand-in's script written");
+    fs::write(file.with_file_name("node.exe"), "").expect("a stand-in's node written");
     let name = script
         .file_name()
         .expect("a stand-in's script has a name")
@@ -832,5 +844,22 @@ mod tests {
         assert_eq!(driver.pending(), [4]);
         assert!(host.release("pane.claim", Ok(serde_json::json!({ "ok": true }))));
         assert_eq!(driver.run(), [(4, serde_json::json!({ "ok": true }))]);
+    }
+
+    #[test]
+    fn a_window_opens_on_the_npm_shim_stand_in_in_an_environment_with_only_its_folder_on_the_path()
+    {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path();
+        let shim = npm_shim_stand_in(&folder.join("claude"));
+        // The daemons of the tests are given a Windows environment of this
+        // shape: no Node named anywhere, and no other folder to look in.
+        let env = Env::from_vars([("OS", "Windows_NT"), ("PATH", folder.to_str().unwrap())]);
+        let argv = [shim.to_string_lossy().into_owned(), "--x".to_owned()];
+        let text = |file: &str| folder.join(file).to_string_lossy().into_owned();
+        assert_eq!(
+            cf_process::pane_argv(&argv, &env),
+            Ok(vec![text("node.exe"), text("claude.js"), "--x".to_owned()])
+        );
     }
 }

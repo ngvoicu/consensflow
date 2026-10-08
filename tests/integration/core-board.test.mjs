@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url'
 import { startIntegration } from './harness.mjs'
 
 /**
- * The board after a re-plan, end to end through the real pane host, the same
- * on both daemons (`npm run test:daemons`). The chief eval `six-decisions`
+ * The board after a re-plan, end to end through the real pane host
+ * (`npm run test:daemons`). The chief eval `six-decisions`
  * (2026-10-07, on the native daemon) cancelled tasks that were still open for
  * a tier, and its check "the board showed every task" counted fewer than it
  * had made: both daemons left such a task off the board, as a task paused in

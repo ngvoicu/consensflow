@@ -28,7 +28,10 @@ the numbers that reading it with SQLite is held to, every field of the answer.
 They were recorded by `node tests/goldens/evals/record.mjs` at the last commit
 that holds Node's ledger (44e1ea95, with `evals/measure.mjs` of that commit to
 answer), on a clock that moves a second a reading; `eval-round-trip` is the
-ledger file of the run as it was, recorded with `--file`. On that ledger the
+ledger file of the run as it was, recorded with `--file`, but for the home
+folder of the machine and its user, which a recording does not carry: they are
+`/home/user` and `user` in it, and `tests/ledger-file.test.mjs` holds every
+recording to that. On that ledger the
 run's own report, the measure that reads it with SQLite and the one that read it
 through Node's ledger gave the same answer, every field. The recorder retires
 with Node's ledger and the recordings stay as they are: a change to the measure

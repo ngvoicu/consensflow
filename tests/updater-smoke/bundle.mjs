@@ -23,7 +23,7 @@ import { basename, dirname, join, relative } from 'node:path'
 
 export const IDENTITY = 'dev.ngvoicu.consensflow'
 
-/** What the bundle keeps of Node's, relative to it: the sidecar, and the CLI's sources. */
+/** What a bundle of the releases before the deletion keeps of Node's, relative to it: the sidecar, and the CLI's sources. */
 const NODE_FILES = [
   ['Contents', 'MacOS', 'node'],
   ['Contents', 'Resources', 'cli', 'bin', 'cf.mjs'],

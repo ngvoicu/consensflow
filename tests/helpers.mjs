@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { assertBuilt, choose, chooseHome, DEFAULT_DAEMON, NATIVE_CF, NODE_CF } from './choice.mjs'
+import { assertBuilt, choose, NATIVE_CF } from './choice.mjs'
 
 /**
  * Every test runs against a throwaway CONSENSFLOW_HOME and throwaway harness
@@ -43,45 +43,18 @@ export const windowsEnv = () =>
     : {}
 
 /**
- * How a test starts a daemon, as `CONSENSFLOW_TEST_DAEMON` names it (the words
- * are tests/choice.mjs's): `native` or a JSON array, a command and its
- * arguments, the native one (`cf ui --json --no-open` of the build under test);
- * nothing, the tests' default, which is the native one; `node`, Node's, which
- * is that same `cf ui` through the door (`bin/cf.mjs`) in a home that has taken
- * the way back, as the product runs it. The product chooses by the file in the
- * home, not by the environment, so the choice is made in the home the daemon is
- * to run on: `home` is that folder, which the Node daemon's gets the way back's
- * file in and the native one's has none (`chooseHome`), whatever else starts in
- * it, and which `assertStarted` holds to the choice. A start that names none
- * leaves the home to its caller. Either is told the runtime to name to the
- * windows it opens (`CONSENSFLOW_NODE`): the Node daemon names its own whatever
- * this says, the native one names what it is given. `env` is what to add to
- * the environment the test gives the daemon, and `kind` is the one chosen,
- * `node` or `native`: what `assertStarted` holds the daemon that starts to. A
- * run labelled with its leg (`CONSENSFLOW_TEST_LEG`) is refused a choice that
- * is not its own. The options are what a test sets to choose in its own words,
- * not the environment's: the selection, the leg, and the default.
+ * How a test starts the daemon: `cf ui --json --no-open` of the native `cf`
+ * this checkout builds, or the command `CONSENSFLOW_TEST_DAEMON` names (a JSON
+ * array, a command and its arguments; the words are tests/choice.mjs's). The
+ * daemon that starts is held to the native one by the start line in its log
+ * (`assertStarted`). `named` is what a test sets to choose in its own words, not
+ * the environment's.
  */
-export function daemonCommand({
-  named = process.env.CONSENSFLOW_TEST_DAEMON,
-  leg = process.env.CONSENSFLOW_TEST_LEG,
-  fallback = DEFAULT_DAEMON,
-  home = undefined,
-} = {}) {
-  const chosen = choose('CONSENSFLOW_TEST_DAEMON', { named, leg, fallback })
-  const env = { CONSENSFLOW_NODE: process.execPath }
-  if (home !== undefined) chooseHome(chosen.kind, home)
-  if (chosen.kind === 'node') {
-    return {
-      command: process.execPath,
-      args: [NODE_CF, 'ui', '--json', '--no-open'],
-      env,
-      kind: 'node',
-    }
-  }
-  if (chosen.command === null) assertBuilt()
-  const [command, ...args] = chosen.command ?? [NATIVE_CF, 'ui', '--json', '--no-open']
-  return { command, args, env, kind: 'native' }
+export function daemonCommand({ named = process.env.CONSENSFLOW_TEST_DAEMON } = {}) {
+  const chosen = choose('CONSENSFLOW_TEST_DAEMON', named)
+  if (chosen === null) assertBuilt()
+  const [command, ...args] = chosen ?? [NATIVE_CF, 'ui', '--json', '--no-open']
+  return { command, args }
 }
 
 const WINDOWS = process.platform === 'win32'

@@ -28,8 +28,11 @@ const oldShape = (home) =>
  * `change` does to it; `body` is run on it, and it is removed after. `repaired`
  * names the commands of this home that serve this home: the other name, if there
  * is one, is another home's command in this home's `bin`, which stays as it was.
+ * With `flip` the installed release was the flip's, whose `cf setup` wrote the
+ * commands naming its `cf`, which is the update's path: there was nothing to
+ * repair, and the log says nothing. Else it was the bridge's, whose named Node.
  */
-function onAMachine({ repaired = ['cf'], change = () => {} }, body) {
+function onAMachine({ repaired = ['cf'], change = () => {}, flip = false }, body) {
   const root = mkdtempSync(join(tmpdir(), 'cf-launchers-evidence-'))
   try {
     const box = {
@@ -50,32 +53,35 @@ function onAMachine({ repaired = ['cf'], change = () => {} }, body) {
       writeFileSync(join(home, 'bin', name), text)
       chmodSync(join(home, 'bin', name), mode)
     }
+    const written = (home) => (flip ? launcher(home, cf) : oldShape(home))
     const planted = {
       own: Object.fromEntries(
-        NAMES.map((name) => [name, oldShape(repaired.includes(name) ? box.state : box.other)]),
+        NAMES.map((name) => [name, written(repaired.includes(name) ? box.state : box.other)]),
       ),
-      other: { cf: oldShape(box.other), consensflow: oldShape(box.other) },
+      other: { cf: written(box.other), consensflow: written(box.other) },
       repaired,
     }
     for (const name of NAMES) {
       write(box.state, name, repaired.includes(name) ? launcher(box.state, cf) : planted.own[name])
       write(box.other, name, planted.other[name])
     }
-    const log = repaired
-      .map(
-        (name) =>
-          `consensflow: the terminal command ${join(box.state, 'bin', name)} now runs ${cf}\n`,
-      )
-      .join('')
+    const log = flip
+      ? ''
+      : repaired
+          .map(
+            (name) =>
+              `consensflow: the terminal command ${join(box.state, 'bin', name)} now runs ${cf}\n`,
+          )
+          .join('')
     change({ box, cf, write })
-    return body({ box, planted, cf, log })
+    return body({ box, planted, cf, log, release: flip ? 'flip' : 'bridge' })
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
 }
 
-const check = ({ box, planted, cf, log }, over = {}) =>
-  assertRepaired({ box, planted, cf, appLogText: log, version: '3.0.0-alpha.81', ...over })
+const check = ({ box, planted, cf, log, release }, over = {}) =>
+  assertRepaired({ box, planted, cf, appLogText: log, version: '3.0.0-alpha.81', release, ...over })
 
 describe('the terminal command, once the app that replaced the installed one has started', {
   skip: POSIX_ONLY,
@@ -189,6 +195,45 @@ describe('the terminal command, once the app that replaced the installed one has
     ]
     for (const [what, change, over, words] of scenarios) {
       onAMachine({ change }, (machine) =>
+        assert.throws(() => check(machine, over(machine)), words, what),
+      )
+    }
+  })
+})
+
+describe('the terminal command of the flip release, once the update has started', {
+  skip: POSIX_ONLY,
+}, () => {
+  it('is current: it names the cf of the bundle, which the update’s is at, and is as it was', () => {
+    onAMachine({ flip: true }, (machine) => check(machine))
+    onAMachine({ flip: true, repaired: NAMES }, (machine) => check(machine))
+  })
+
+  it('is not current when the app rewrote it, or spoke of it', () => {
+    const scenarios = [
+      [
+        'a byte of it changed',
+        ({ box, cf, write }) => write(box.state, 'cf', `${launcher(box.state, cf)}# repaired\n`),
+        () => ({}),
+        /which was current, changed/,
+      ],
+      [
+        'the log says it was repaired',
+        () => {},
+        ({ box, cf }) => ({
+          appLogText: `consensflow: the terminal command ${join(box.state, 'bin', 'cf')} now runs ${cf}\n`,
+        }),
+        /speaks of a command that was current/,
+      ],
+      [
+        'it names another cf than the update’s',
+        ({ box, write }) => write(box.state, 'cf', launcher(box.state, '/elsewhere/cf')),
+        () => ({}),
+        /does not run/,
+      ],
+    ]
+    for (const [what, change, over, words] of scenarios) {
+      onAMachine({ flip: true, change }, (machine) =>
         assert.throws(() => check(machine, over(machine)), words, what),
       )
     }

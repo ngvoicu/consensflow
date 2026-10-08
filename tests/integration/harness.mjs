@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { assertStarted, errorsWithCause, KINDS, linesOf, NATIVE_CF } from '../choice.mjs'
+import { assertStarted, errorsWithCause, linesOf, NATIVE_CF } from '../choice.mjs'
 import { daemonCommand } from '../helpers.mjs'
 
 const WINDOWS = process.platform === 'win32'
@@ -24,7 +24,7 @@ const BRIDGE =
 const CURSOR_QUERY = Buffer.from('\u001b[6n')
 const CURSOR_REPLY = [...Buffer.from('\u001b[1;1R')]
 const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fake-agent.mjs')
-/** The `cf` first on every window's PATH: the native one, beside cf.mjs. */
+/** The `cf` first on every window's PATH: the native one. */
 const CF = NATIVE_CF
 
 function parser(onLine) {
@@ -176,11 +176,10 @@ function waitFor(predicate, timeoutMs = 10_000, intervalMs = 25) {
  * bytes; pane.open, PTYs, input arbitration and cleanup stay native.
  *
  * The daemon is the one `CONSENSFLOW_TEST_DAEMON` names (`daemonCommand`), or the
- * one `select` names (`node`, `native`, or a command as a JSON array, which is
- * the native one's) for a start that chooses in its own words whatever the
- * environment says, as a restart on the other daemon does. What starts is held
- * to what was asked for by the start line in its log (`assertStarted`), and
- * `daemon` on what this returns says which it was.
+ * one `select` names (`native`, or a command as a JSON array) for a start that
+ * chooses in its own words whatever the environment says. What starts is held
+ * to the native daemon by the start line in its log (`assertStarted`), and
+ * `daemon` on what this returns says what it was.
  */
 export async function startIntegration({
   fakeEnv = {},
@@ -210,19 +209,11 @@ export async function startIntegration({
   // agents a test wrote are still the ones its chief and staff run on.
   if (existingRoot === null) writeRoster(env)
 
-  // The daemon under test, chosen on purpose (see above), in the home it runs
-  // on: the product's `cf` verbs choose by the file in the home, so the home
-  // has the file for Node's daemon and none for the native one's, and a
-  // restart of it on the other daemon takes the file away or makes it.
-  const asked = daemonCommand({
-    ...(select === undefined
-      ? {}
-      : { named: select, leg: KINDS.includes(select) ? select : 'native' }),
-    home: env.CONSENSFLOW_HOME,
-  })
+  // The daemon under test, chosen on purpose (see above).
+  const asked = daemonCommand(select === undefined ? {} : { named: select })
   const node = spawn(asked.command, asked.args, {
     cwd: REPO,
-    env: { ...env, ...asked.env },
+    env,
     stdio: ['pipe', 'pipe', 'pipe'],
   })
   const nodeErrors = []
@@ -230,8 +221,7 @@ export async function startIntegration({
   const nodeStderrEnded = new Promise((resolve) => node.stderr.once('close', resolve))
   const handleLine = await firstLine(node.stdout, node).catch(async (cause) => {
     // A daemon that refuses its home says why on its standard error, which may
-    // still be on its way when the process is seen to exit, and Node's says it
-    // in its log: it ends with 0, its refusal an unhandled rejection it logged.
+    // still be on its way when the process is seen to exit, and in its log.
     await Promise.race([nodeStderrEnded, new Promise((resolve) => setTimeout(resolve, 1000))])
     let logged = []
     try {
@@ -244,17 +234,12 @@ export async function startIntegration({
       .join('')
     throw cause
   })
-  // Both daemons write their start line before the handle line. One that is not
-  // the one asked for is ended, with the home it was given if it was this call's.
+  // The daemon writes its start line before the handle line. One that is not the
+  // native daemon is ended, with the home it was given if it was this call's.
   let handle
   let said
   try {
-    said = assertStarted(
-      asked,
-      readFileSync(join(env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8'),
-      node.pid,
-      env.CONSENSFLOW_HOME,
-    )
+    said = assertStarted(readFileSync(join(env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8'), node.pid)
     handle = JSON.parse(handleLine.line)
     assert.match(handle.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)
   } catch (cause) {

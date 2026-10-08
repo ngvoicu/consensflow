@@ -51,6 +51,9 @@ pub(crate) enum SessionError {
     Endpoint(#[from] EndpointError),
     #[error("Codex server could not start: {0}")]
     Server(String),
+    /// Codex is an npm shim and no Node is to be found to run it on.
+    #[error("{0}")]
+    Unrunnable(String),
     #[error(transparent)]
     Broker(#[from] StartError),
     #[error("{program}: {cause}")]
@@ -170,7 +173,7 @@ impl Session {
         args.extend(consensflow_shell_environment(plan.env));
         args.push("app-server".into());
         args.extend(plan.endpoint.listen().iter().cloned());
-        let (mut command, program) = command(plan, &args);
+        let (mut command, program) = command(plan, &args).map_err(SessionError::Unrunnable)?;
         command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -244,7 +247,7 @@ impl Session {
             "CF_CODEX_TUI_TOKEN".into(),
         ];
         args.extend(plan.split.tui.iter().cloned());
-        let (mut command, program) = command(plan, &args);
+        let (mut command, program) = command(plan, &args).map_err(SessionError::Unrunnable)?;
         command
             .env("CF_CODEX_TUI_TOKEN", &plan.bridge.token)
             .stdin(Stdio::inherit())
@@ -298,15 +301,16 @@ fn remove_folder(folder: &Path) -> io::Result<()> {
 }
 
 /// `plan`'s program as it starts here, with `args`, and the program that
-/// starts (what a failure to start names). An OpenAI API key in this
+/// starts (what a failure to start names); or why it cannot start (a Codex
+/// that is an npm shim, with no Node to run it on). An OpenAI API key in this
 /// environment never reaches Codex, which has its own login; and a program
 /// still running when its handle is dropped is killed, not orphaned.
-fn command(plan: &Plan<'_>, args: &[OsString]) -> (Command, String) {
-    let run = runnable(plan.executable, args, plan.env);
+fn command(plan: &Plan<'_>, args: &[OsString]) -> Result<(Command, String), String> {
+    let run = runnable(plan.executable, args, plan.env)?;
     let program = run.program.display().to_string();
     let mut command = Command::from(run.command());
     command.env_remove("OPENAI_API_KEY").kill_on_drop(true);
-    (command, program)
+    Ok((command, program))
 }
 
 /// Asks `child` to end, if it has not been waited for.

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
  * The portable Windows app: one exe to run from anywhere, without installing.
- * ConsensFlow.exe carries its own Node and CLI, and the terminals' console
- * host, after its own bytes, and its first start unpacks them into
- * %LOCALAPPDATA%\dev.ngvoicu.consensflow\portable-runtime (not `runtime`,
- * which the apps before the flip release empty of every runtime whose node.exe
- * is not running).
+ * ConsensFlow.exe carries its own `cf`, the daemon and every window's command,
+ * and the terminals' console host, after its own bytes, and its first start
+ * unpacks them into %LOCALAPPDATA%\dev.ngvoicu.consensflow\portable-runtime
+ * (not `runtime`, which the apps before the flip release empty of every
+ * runtime whose node.exe is not running).
  * The file's layout, and how the app reads it, are written down once, in
  * app/src-tauri/src/portable.rs. Its data lives where the installed app's
  * does (%USERPROFILE%\.consensflow), and the app installs no update in place
@@ -37,12 +37,14 @@ const version =
   values.version ??
   JSON.parse(readFileSync(join(APP, 'src-tauri', 'tauri.conf.json'), 'utf8')).version
 
-// cli\bin\cf.exe is a pane's `cf`: without it a window has none in PowerShell.
-// conpty.dll and OpenConsole.exe are the terminals' console host
-// (scripts/conpty.mjs), which the app finds in the runtime folder, with
-// Microsoft's license for them.
-const RUNTIME = ['node.exe', 'cli', 'conpty.dll', 'OpenConsole.exe', 'OpenConsole-LICENSE.txt']
-for (const name of ['ConsensFlow.exe', ...RUNTIME, join('cli', 'bin', 'cf.exe')]) {
+// cli\bin\cf.exe is the daemon and a pane's `cf`: without it the app has no
+// daemon to start and a window has no `cf` in PowerShell. conpty.dll and
+// OpenConsole.exe are the terminals' console host (scripts/conpty.mjs), which
+// the app finds in the runtime folder, with Microsoft's license for them.
+const RUNTIME = ['cli', 'conpty.dll', 'OpenConsole.exe', 'OpenConsole-LICENSE.txt']
+// What has to be there to pack them: `cli` is a folder of the one file.
+const REQUIRED = RUNTIME.map((name) => (name === 'cli' ? join('cli', 'bin', 'cf.exe') : name))
+for (const name of ['ConsensFlow.exe', ...REQUIRED]) {
   if (!existsSync(join(values.release, name))) {
     console.error(
       `portable: ${name} is missing from ${values.release}; build first with npm --prefix app run build`,

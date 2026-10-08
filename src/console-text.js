@@ -1,10 +1,9 @@
 /**
  * What Windows' console carries of a non-ASCII character to a window that
  * reads key presses (Devin, Codex), spelled in ASCII where it would drop it.
- * One module for both sides: the daemon gives it a Devin window's messages,
- * and the page, which the build hands a copy of (app/scripts/bundle-ui.mjs),
- * gives it what the human types into a Devin or Codex window. No imports:
- * it runs as it is in both places.
+ * The Node side's: the daemon gives it a Devin window's messages. The page
+ * keeps a copy of its own (app/ui/core/console-text.js), held to the same
+ * recorded table. No imports: it runs as it is in both places.
  */
 
 /**

@@ -146,6 +146,36 @@ fn a_program_that_is_not_there_is_said_by_its_path_and_the_systems_words() {
 }
 
 #[test]
+fn a_codex_that_is_an_npm_shim_with_no_node_to_run_on_is_refused_saying_what_to_do() {
+    // npm's shim for a global package: its last line runs a node, which is the
+    // one beside it or on the PATH, and neither is here (the environment has no PATH).
+    let home = Home::new();
+    let script = ["node_modules", "@openai", "codex", "bin", "codex.js"]
+        .iter()
+        .fold(home.dir.path().to_path_buf(), |path, part| path.join(part));
+    fs::create_dir_all(script.parent().unwrap()).unwrap();
+    fs::write(&script, "").unwrap();
+    let shim = home.dir.path().join("codex.cmd");
+    fs::write(
+        &shim,
+        "@ECHO off\r\n\"%_prog%\"  \"%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js\" %*\r\n",
+    )
+    .unwrap();
+    let failed = home
+        .supervise(&shim, &[], Duration::from_secs(5))
+        .unwrap_err();
+    assert!(matches!(failed, SessionError::Unrunnable(_)), "{failed:?}");
+    let said = failed.to_string();
+    assert!(said.starts_with(&shim.display().to_string()), "{said}");
+    assert!(
+        said.contains("Make the harness's Node visible to ConsensFlow")
+            && said.contains("install the harness's own build"),
+        "{said}"
+    );
+    assert!(home.left_behind().is_empty());
+}
+
+#[test]
 fn a_bridge_that_is_missing_or_not_what_a_broker_needs_is_refused_before_anything_starts() {
     for bridge in [
         None,

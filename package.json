@@ -56,8 +56,7 @@
     "parity:launch": "node tests/parity/launch.mjs",
     "build:bridge": "cargo build --release -p cf-panes --bin consensflow-bridge",
     "build:cf": "node app/scripts/build-cf.mjs",
-    "smoke": "CONSENSFLOW_SMOKE=1 node --test tests/smoke.test.mjs",
-    "smoke:daemons": "node tests/smoke-daemons.mjs",
+    "smoke": "node tests/smoke.mjs",
     "smoke:updater": "node tests/smoke-updater.mjs",
     "load": "CONSENSFLOW_LOAD=1 node --test tests/load/*.test.mjs",
     "candidate": "node app/scripts/candidate.mjs",
@@ -74,7 +73,6 @@
     "live:asks": "node tests/live/claude-asks.mjs",
     "live:codex-resume": "node tests/live/codex-resume.mjs",
     "live:terminal": "node tests/live/devin-terminal.mjs",
-    "live:home-parity": "node tests/live/home-parity.mjs",
     "windows": "node tests/live/windows.mjs",
     "check:all": "npm run build:cf -- --offline && npm run check && cargo fmt --all --check && cargo test --offline --workspace && cargo clippy --offline --workspace --all-targets -- -D warnings && cargo test --offline -p cf-bridge --features local && cargo clippy --offline -p cf-bridge --features local --all-targets -- -D warnings && npm --prefix app run test:ui && npm run build:bridge -- --offline && npm run test:integration && npm run smoke"
   },

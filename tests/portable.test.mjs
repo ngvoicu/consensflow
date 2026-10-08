@@ -24,9 +24,7 @@ function release(dir, { missing = [] } = {}) {
   const files = {
     'ConsensFlow.exe': 'app',
     'consensflow-bridge.exe': 'bridge',
-    'node.exe': 'node',
     'cli/bin/cf.exe': 'cf',
-    'cli/src/core/daemon.js': 'cli',
     'conpty.dll': 'conpty',
     'OpenConsole.exe': 'openconsole',
     'OpenConsole-LICENSE.txt': 'MIT',
@@ -72,13 +70,12 @@ describe('the portable Windows exe', () => {
         .split(/\r?\n/) // Windows' tar ends its lines with CRLF
         .filter((line) => line !== '' && !line.endsWith('/'))
         .sort()
+      // The `cf`, the console host and its license: no Node, and no sources.
       assert.deepEqual(listed, [
         'OpenConsole-LICENSE.txt',
         'OpenConsole.exe',
         'cli/bin/cf.exe',
-        'cli/src/core/daemon.js',
         'conpty.dll',
-        'node.exe',
       ])
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -86,7 +83,7 @@ describe('the portable Windows exe', () => {
   })
 
   it('refuses a release folder missing a piece, and names the build that makes it', () => {
-    for (const piece of ['node.exe', 'cli/bin/cf.exe', 'conpty.dll', 'OpenConsole.exe']) {
+    for (const piece of ['cli/bin/cf.exe', 'conpty.dll', 'OpenConsole.exe']) {
       refusesWithout(piece)
     }
   })

@@ -4,5 +4,4 @@ test-results/
 playwright-report/
 # Staged at build time by scripts/prepare-sidecar.mjs
 .cache/
-src-tauri/binaries/
 src-tauri/resources/

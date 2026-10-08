@@ -2,11 +2,10 @@
  * Plants in which `cf` answers the standalone verbs: the verbs themselves, `ui`
  * (the daemon's, no verb here), the words as they came, and a reader that went
  * away. The tests of the module, of the library and of the process catch them;
- * three are given to the suites of the CLI alone, run against both CLIs, which
- * must catch them too. Which implementation answers (the home's file, a window's
- * token) is `flip.mjs`'s.
+ * three are given to the suites of the CLI alone, which must catch them too.
+ * Whether a `use-node` file left in a home changes an answer is `deletion.mjs`'s.
  */
-import { BOTH, GOLDENS, LIBRARY, lines, PROCESS, STANDALONE, UNITS } from './kit.mjs'
+import { CLIS, GOLDENS, LIBRARY, lines, PROCESS, STANDALONE, UNITS } from './kit.mjs'
 
 const MOD = `${STANDALONE}/mod.rs`
 const LIB = 'crates/cf/src/lib.rs'
@@ -17,7 +16,7 @@ export const PLANTS = [
     // answer the verb would say it is no command.
     name: 'dispatch: the catalog is an unknown command, seen by the suites of the CLI',
     edits: [[MOD, '        Some("catalog") => catalog::run(rest, out),\n', '']],
-    runs: [BOTH],
+    runs: [CLIS],
     meant: 'runs the native cf',
   },
   {
@@ -41,7 +40,7 @@ export const PLANTS = [
     // As for the catalog.
     name: 'dispatch: setup is an unknown command, seen by the suites of the CLI',
     edits: [[MOD, '        Some("setup") => setup::run(env, rest, out),\n', '']],
-    runs: [BOTH],
+    runs: [CLIS],
     meant: 'roster edits, setup and diagnostic reads leave role files and old manifests alone',
   },
   {
@@ -57,20 +56,19 @@ export const PLANTS = [
     meant: 'ui_is_the_daemons_and_reaching_this_module_it_is_an_unknown_command',
   },
   {
-    // The old fallthrough: a `ui` the module did not answer went to Node's
-    // sources, a daemon for a home that runs native. The test calls the
-    // library, and the Node it would start is none (the test's own folder
-    // bundles none), so what it sees is the refusal.
-    name: 'dispatch: a ui that reaches run is run on Node',
+    // `main` runs a `ui` as the daemon before the words get here (`native_ui`);
+    // one that reaches `run` has no verb to answer it, and says so.
+    name: 'dispatch: a ui that reaches run is answered as if it were a verb',
     edits: [
       [
         LIB,
-        '            None => standalone::run(env, args, out, err),\n',
+        '        None => standalone::run(env, args, out, err),\n',
         lines(
-          '            None if args.first().is_some_and(|word| word == "ui") => {',
-          '                node::run(args, std::path::Path::new("use-node"), err)',
-          '            }',
-          '            None => standalone::run(env, args, out, err),',
+          '        None if args.first().is_some_and(|word| word == "ui") => {',
+          '            writeln!(out, "ui")?;',
+          '            Ok(0)',
+          '        }',
+          '        None => standalone::run(env, args, out, err),',
           '',
         ),
       ],
@@ -118,7 +116,7 @@ export const PLANTS = [
         '',
       ],
     ],
-    runs: [BOTH],
+    runs: [CLIS],
     meant: 'knows the window commands and the ones outside a window',
   },
 ]

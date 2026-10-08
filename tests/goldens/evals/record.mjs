@@ -21,7 +21,7 @@
  * recording with it.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir, userInfo } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -355,6 +355,21 @@ const OPEN_QUESTION = [
   turn('a3', 'assistant', 'T-1 is in; waiting for the rest.'),
 ]
 
+/**
+ * A recording says nothing of who made it: the home folder of the machine is
+ * `/home/user` in it, and the name of the user `user` (a ledger of a real run
+ * holds both, in the folder its project works in and in a listing a window
+ * made). `tests/ledger-file.test.mjs` holds every recording to it.
+ */
+function neutral(text) {
+  const home = homedir()
+  const name = userInfo().username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return text
+    .replaceAll(home, '/home/user')
+    .replaceAll(home.replaceAll('\\', '/'), '/home/user')
+    .replace(new RegExp(`\\b${name}\\b`, 'g'), 'user')
+}
+
 /** The rows of the ledger file `file`, as SQL that fills a fresh ledger with them. */
 function dump(file) {
   const db = new DatabaseSync(file, { readOnly: true })
@@ -419,13 +434,13 @@ try {
       extra = BUILDS[name](ledger) ?? {}
       ledger.close()
     }
-    writeFileSync(join(OUT, `${name}.sql`), `${dump(file)}\n`)
+    writeFileSync(join(OUT, `${name}.sql`), `${neutral(dump(file))}\n`)
     if (!NOT_MEASURED.has(name)) {
       const answer = { measure: measure(file), ...extra }
       if (name.startsWith('open-question')) {
         answer.chiefOpenQuestion = chiefOpenQuestion(file) ?? null
       }
-      writeFileSync(join(OUT, `${name}.json`), `${JSON.stringify(answer, null, 2)}\n`)
+      writeFileSync(join(OUT, `${name}.json`), `${neutral(JSON.stringify(answer, null, 2))}\n`)
     }
     process.stdout.write(`recorded ${name}\n`)
   }

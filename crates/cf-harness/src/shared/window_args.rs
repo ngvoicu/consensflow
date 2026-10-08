@@ -10,7 +10,6 @@
 //! the flags a start uses: one without them ran on the harness's default.
 
 use cf_proto::agents::Harness;
-use serde_json::{json, Map, Value};
 
 use crate::contract::Agent;
 
@@ -27,11 +26,15 @@ pub(crate) struct Invocation {
     pub(crate) drop_env: &'static [&'static str],
 }
 
+// What the goldens and the live tools (`tooling`) read; the product reads none of it.
+#[cfg(any(test, feature = "test-support"))]
 impl Invocation {
     /// The window as `hosts/lib/windows.js` wrote it, which the goldens hold
     /// it to and the live tools read: its `env` always empty, `prompt` only
     /// where given.
-    pub(crate) fn written(&self) -> Value {
+    pub(crate) fn written(&self) -> serde_json::Value {
+        use serde_json::{json, Map, Value};
+
         let mut fields = Map::new();
         fields.insert("command".to_owned(), json!(self.command));
         fields.insert("args".to_owned(), json!(self.args));

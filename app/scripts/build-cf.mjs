@@ -1,11 +1,10 @@
 /**
- * The native `cf` a window runs (crates/cf), built and put in bin/ beside
- * cf.mjs: the checkout's, the integration suite's, and through
- * prepare-sidecar the app bundle's. The copy there is replaced, never
- * rewritten in place: macOS can kill the next run of a Mach-O changed in
- * place, and Windows refuses to delete a cf.exe a question hook still runs,
- * though it lets one be renamed aside. On macOS the copy is signed ad hoc,
- * as the bundle around it is.
+ * The native `cf` a window runs (crates/cf), built and put in bin/: the
+ * checkout's, the integration suite's, and through prepare-sidecar the app
+ * bundle's. The copy there is replaced, never rewritten in place: macOS can
+ * kill the next run of a Mach-O changed in place, and Windows refuses to delete
+ * a cf.exe a question hook still runs, though it lets one be renamed aside. On
+ * macOS the copy is signed ad hoc, as the bundle around it is.
  *
  *   node app/scripts/build-cf.mjs [--offline]
  */

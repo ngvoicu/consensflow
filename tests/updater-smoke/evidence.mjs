@@ -130,15 +130,16 @@ export async function daemonOf(box, { app, bundle, probes }) {
 }
 
 /**
- * What the app's error log says of the daemon it chose: the native one, because
- * the home has no `use-node` file and nothing else decides (daemon_command.rs).
- * Only the flip's app says it; the bridge's chose Node's and logged nothing.
+ * What the app's error log says of the daemon it starts: the bundle's `cf`
+ * (daemon_command.rs), by its path. Only the app that ships no Node says it; the
+ * log is written on by every app of the home, so a line of an earlier one's
+ * (the flip's, which said which daemon it chose and why) is not this one's.
  */
-export function assertChoseNative(appLogText, home) {
-  const said = `starting the native daemon: the default, there is no ${join(home, 'use-node')}`
+export function assertStartedDaemon(appLogText, cf) {
+  const said = `starting the daemon: ${cf} ui --json --no-open`
   assert.ok(
     appLogText.split('\n').some((line) => line.endsWith(said)),
-    `app.log does not say the app chose the native daemon (${said}):\n${appLogText.slice(-2000)}`,
+    `app.log does not say the app started the bundle's cf (${said}):\n${appLogText.slice(-2000)}`,
   )
 }
 

@@ -12,7 +12,6 @@ import { fileURLToPath } from 'node:url'
  * and imports them fails. The folder `hosts/` keeps what is not Node's daemon:
  * the Pi extension, the OpenCode plugin and its door.
  *
- *   B1  the bundle without Node: the app's own scripts
  *   B2  the deletion: the unit suites of ported modules, the recorders and the
  *       parity tools, and the tests of the hand-off between the two
  *
@@ -28,7 +27,6 @@ const STAYS = ['hosts/pi-extension/', 'hosts/opencode-extension/', 'hosts/lib/qu
 
 /** The files that import Node's sources and go: a file, or a folder when it ends in a slash. */
 const REMOVED_BY = {
-  B1: ['app/scripts/launcher-entry.mjs', 'tests/launcher-entry.test.mjs'],
   B2: [
     ...[
       'adapter-claude',
@@ -69,11 +67,9 @@ const REMOVED_BY = {
       'roster',
       'skill',
       'terminal',
-      'way-back',
     ].map((name) => `tests/${name}.test.mjs`),
     'tests/core-api-fixture.mjs',
     'tests/ledger-fixtures.mjs',
-    'tests/integration/home-round-trip.test.mjs',
     'tests/bench/records-node.mjs',
     'tests/engine/',
     'tests/goldens/',

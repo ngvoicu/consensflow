@@ -1,10 +1,10 @@
 /**
  * Runs the unit tests of the app crate where the app cannot be built as it
- * ships: a worktree has neither the bundled Node (the sidecar) nor the runtime
- * resources that the app's Tauri configuration names, and its build script
- * refuses to go on without them. A unit test needs neither, so both are left
- * out of the configuration for this run, as tests/windows-clippy.mjs leaves
- * them out for the app's lint. Cargo runs in the app's folder, as CI's does: on
+ * ships: a worktree may not have the resources that the app's Tauri
+ * configuration names (the bundled `cf`), and its build script refuses to go
+ * on without them. A unit test needs none, so they are left out of the
+ * configuration for this run, as tests/windows-clippy.mjs leaves them out for
+ * the app's lint. Cargo runs in the app's folder, as CI's does: on
  * Windows its test runner (`.cargo/config.toml`) gives each test binary the
  * manifest it needs.
  *
@@ -23,7 +23,7 @@ const ran = spawnSync('cargo', ['test', '--offline', '--', ...process.argv.slice
   stdio: 'inherit',
   env: {
     ...process.env,
-    TAURI_CONFIG: JSON.stringify({ bundle: { externalBin: null, resources: null } }),
+    TAURI_CONFIG: JSON.stringify({ bundle: { resources: null } }),
   },
 })
 process.exit(ran.status ?? 1)

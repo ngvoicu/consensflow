@@ -16,21 +16,19 @@
  * State lives in a throwaway home; the harnesses use the real logins. Opt-in,
  * never part of `npm test`:
  *
- *   npm run bench:core [-- [--chief claude|opencode] [--daemon node|native] [--steps all|questions] opencode pi devin claude codex]
+ *   npm run bench:core [-- [--chief claude|opencode] [--steps all|questions] opencode pi devin claude codex]
  *
  * The daemon is the native one, which this checkout builds (`npm run
- * build:bridge`, `npm run build:cf`), unless `--daemon node` names Node's
- * (`cf ui` through the door, in a home that has taken the way back). On the
- * native daemon a question's answer must also have been received at its
- * harness's door (see `npm run live:door`): claimed, acknowledged, and never
- * pasted.
+ * build:bridge`, `npm run build:cf`). A question's answer must also have been
+ * received at its harness's door (see `npm run live:door`): claimed,
+ * acknowledged, and never pasted.
  */
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { startIntegration } from '../integration/harness.mjs'
 import { AGENTS, BRIEF, QUESTION_TOOL, tierFlag } from './bench-agents.mjs'
-import { traceOf, useNativeDaemon, useNodeDaemon } from './native-daemon.mjs'
+import { traceOf, useNativeDaemon } from './native-daemon.mjs'
 import { trustForClaude } from './trust-claude.mjs'
 
 const H = process.env.HOME
@@ -41,7 +39,6 @@ const { values, positionals } = parseArgs({
   options: {
     chief: { type: 'string', default: 'opencode' },
     reviewer: { type: 'string', default: 'devin' },
-    daemon: { type: 'string', default: 'native' },
     steps: { type: 'string', default: 'all' },
   },
 })
@@ -49,18 +46,13 @@ const [CHIEF, REVIEWER] = [values.chief, values.reviewer]
 const wanted = positionals.length ? positionals : ['opencode', 'pi', 'devin']
 if (!AGENTS[REVIEWER]) throw new Error(`unsupported bench reviewer: ${REVIEWER}`)
 if (!['claude', 'opencode'].includes(CHIEF)) throw new Error(`unsupported bench chief: ${CHIEF}`)
-if (!['node', 'native'].includes(values.daemon)) {
-  throw new Error(`unsupported bench daemon: ${values.daemon}`)
-}
 if (!['all', 'questions'].includes(values.steps)) {
   throw new Error(`unsupported bench steps: ${values.steps}`)
 }
 /** Every step, or `--steps questions`: the question door's alone, with no delivery baseline, review or restart. */
 const ALL = values.steps === 'all'
-/** The daemon is chosen here, by the driver: the receipt and stop design of the native one is its own. */
-const NATIVE = values.daemon === 'native'
-if (NATIVE) useNativeDaemon()
-else useNodeDaemon()
+/** The daemon is chosen here, by the driver: the native one. */
+useNativeDaemon()
 
 // A clean environment: never this shell's Claude session identity.
 const ENV = {
@@ -358,7 +350,7 @@ try {
     // The native daemon's receipt (design §1.2, §1.6): the answer was claimed by the
     // harness's door and acknowledged `received: true`, which is what the receipt
     // `{"door": true}` is, and never pasted; its task waited, then worked, then ended.
-    if (NATIVE && answer) {
+    if (answer) {
       const seen = traceOf(app.env.CONSENSFLOW_HOME)()
       const about = (kind) =>
         seen.filter((event) => event.kind === kind && event.data?.message === answer.id)

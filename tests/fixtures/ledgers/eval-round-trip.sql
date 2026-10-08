@@ -28,7 +28,7 @@ INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at,
 INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (2, 'ebe0ca4f-227f-47ed-9b8a-ef4e82baed26', 4, 'user', '[ConsensFlow m-3 · T-1 · answer from @chief]
 albastru', 1, '2026-10-08T12:32:18.802Z', '2026-10-08T12:32:19.869Z');
 INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (2, 'msg_011CfpmuvyKKMWF4XWUKrpGe', 5, 'assistant', '', 0, '2026-10-08T12:32:21.386Z', '2026-10-08T12:32:21.868Z');
-INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (2, 'toolu_01MHPZq5bCFfnnNx2W5yA327', 6, 'tool', 'File created successfully at: /Users/gabrielvoicu/.consensflow-candidate/evals/workspace/site/notes.md (file state is current in your context — no need to Read it back)', 1, '2026-10-08T12:32:21.454Z', '2026-10-08T12:32:21.868Z');
+INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (2, 'toolu_01MHPZq5bCFfnnNx2W5yA327', 6, 'tool', 'File created successfully at: /home/user/.consensflow-candidate/evals/workspace/site/notes.md (file state is current in your context — no need to Read it back)', 1, '2026-10-08T12:32:21.454Z', '2026-10-08T12:32:21.868Z');
 INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (1, 'msg_011CfpmuvDRa6iJY9pe9y2he', 7, 'assistant', 'Am răspuns „albastru”. Așteptăm ca workerul să scrie fișierul și să termine sarcina.', 1, '2026-10-08T12:32:21.777Z', '2026-10-08T12:32:22.869Z');
 INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (2, 'msg_011Cfpmv8GU5gLkZP4JU9nx8', 7, 'assistant', 'Am creat fișierul site/notes.md cu culoarea butonului Contact pe care ați precizat-o: albastru. Fișierul conține o singură linie după cum ați cerut, și nu am modificat niciun alt fișier.', 1, '2026-10-08T12:32:24.367Z', '2026-10-08T12:32:24.870Z');
 INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (1, '9e165e1c-a972-4e91-9970-1cf79bad11ee', 8, 'user', '
@@ -98,40 +98,40 @@ INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at,
 00000025', 1, '2026-10-08T12:32:45.710Z', '2026-10-08T12:32:45.868Z');
 INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (3, 'msg_011CfpmwuqtuAuT5WQ3GNgys', 10, 'assistant', '', 0, '2026-10-08T12:32:48.452Z', '2026-10-08T12:32:48.870Z');
 INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (3, 'toolu_011jJn6uUAD694LiLN1fsayc', 11, 'tool', 'total 8
-drwxr-xr-x@ 3 gabrielvoicu  staff   96 Oct  8 15:31 content
-drwxr-xr-x@ 4 gabrielvoicu  staff  128 Oct  8 15:31 docs
--rw-r--r--@ 1 gabrielvoicu  staff  311 Oct  8 15:31 README.md
-drwxr-xr-x@ 7 gabrielvoicu  staff  224 Oct  8 15:32 site', 1, '2026-10-08T12:32:48.525Z', '2026-10-08T12:32:48.870Z');
+drwxr-xr-x@ 3 user  staff   96 Oct  8 15:31 content
+drwxr-xr-x@ 4 user  staff  128 Oct  8 15:31 docs
+-rw-r--r--@ 1 user  staff  311 Oct  8 15:31 README.md
+drwxr-xr-x@ 7 user  staff  224 Oct  8 15:32 site', 1, '2026-10-08T12:32:48.525Z', '2026-10-08T12:32:48.870Z');
 INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (3, 'msg_011Cfpmx7sSy2tPVVSHsP5DC', 12, 'assistant', '', 0, '2026-10-08T12:32:50.264Z', '2026-10-08T12:32:50.868Z');
 INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (3, 'toolu_013X8pes7PPgDUkTLbibUtJP', 13, 'tool', 'total 32
--rw-r--r--@ 1 gabrielvoicu  staff   622B Oct  8 15:31 evaluare.html
--rw-r--r--@ 1 gabrielvoicu  staff   1.0K Oct  8 15:31 index.html
--rw-r--r--@ 1 gabrielvoicu  staff   412B Oct  8 15:31 style.css
-drwxr-xr-x@ 3 gabrielvoicu  staff    96B Oct  8 15:31 en
--rw-r--r--@ 1 gabrielvoicu  staff    37B Oct  8 15:32 notes.md', 1, '2026-10-08T12:32:50.314Z', '2026-10-08T12:32:50.868Z');
+-rw-r--r--@ 1 user  staff   622B Oct  8 15:31 evaluare.html
+-rw-r--r--@ 1 user  staff   1.0K Oct  8 15:31 index.html
+-rw-r--r--@ 1 user  staff   412B Oct  8 15:31 style.css
+drwxr-xr-x@ 3 user  staff    96B Oct  8 15:31 en
+-rw-r--r--@ 1 user  staff    37B Oct  8 15:32 notes.md', 1, '2026-10-08T12:32:50.314Z', '2026-10-08T12:32:50.868Z');
 INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (3, 'msg_011CfpmxFpS7oBuLxdGu1jE4', 14, 'assistant', '', 0, '2026-10-08T12:32:53.464Z', '2026-10-08T12:32:54.869Z');
-INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (3, 'toolu_01PbqLvm7cSvjupGEi3caU6F', 15, 'tool', '-rw-r--r--@ 1 gabrielvoicu  staff   311B Oct  8 15:31 README.md
+INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (3, 'toolu_01PbqLvm7cSvjupGEi3caU6F', 15, 'tool', '-rw-r--r--@ 1 user  staff   311B Oct  8 15:31 README.md
 
 content/:
 total 8
--rw-r--r--@ 1 gabrielvoicu  staff   1.1K Oct  8 15:31 legislatie-ro.md
+-rw-r--r--@ 1 user  staff   1.1K Oct  8 15:31 legislatie-ro.md
 
 docs/:
 total 16
--rw-r--r--@ 1 gabrielvoicu  staff   569B Oct  8 15:31 document-de-referinta-hr.md
--rw-r--r--@ 1 gabrielvoicu  staff   284B Oct  8 15:31 ghidul-managerului.md
+-rw-r--r--@ 1 user  staff   569B Oct  8 15:31 document-de-referinta-hr.md
+-rw-r--r--@ 1 user  staff   284B Oct  8 15:31 ghidul-managerului.md
 ---
 site/en/:
 total 8
--rw-r--r--@ 1 gabrielvoicu  staff   968B Oct  8 15:31 index.html
+-rw-r--r--@ 1 user  staff   968B Oct  8 15:31 index.html
 
 site/:
 total 32
--rw-r--r--@ 1 gabrielvoicu  staff   622B Oct  8 15:31 evaluare.html
--rw-r--r--@ 1 gabrielvoicu  staff   1.0K Oct  8 15:31 index.html
--rw-r--r--@ 1 gabrielvoicu  staff   412B Oct  8 15:31 style.css
-drwxr-xr-x@ 3 gabrielvoicu  staff    96B Oct  8 15:31 en
--rw-r--r--@ 1 gabrielvoicu  staff    37B Oct  8 15:32 notes.md', 1, '2026-10-08T12:32:53.560Z', '2026-10-08T12:32:54.869Z');
+-rw-r--r--@ 1 user  staff   622B Oct  8 15:31 evaluare.html
+-rw-r--r--@ 1 user  staff   1.0K Oct  8 15:31 index.html
+-rw-r--r--@ 1 user  staff   412B Oct  8 15:31 style.css
+drwxr-xr-x@ 3 user  staff    96B Oct  8 15:31 en
+-rw-r--r--@ 1 user  staff    37B Oct  8 15:32 notes.md', 1, '2026-10-08T12:32:53.560Z', '2026-10-08T12:32:54.869Z');
 INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (3, 'msg_011CfpmxWrpU9StCfkRqQUWe', 16, 'assistant', 'Raportul de verificare pentru sarcina T-1:
 
 ## ✅ Verificare 1: Fișierul site/notes.md
@@ -206,7 +206,7 @@ INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at,
 INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (1, 'toolu_01SbPuX6Wuqtp7EBkJeCoqgx', 14, 'tool', 'T-1 [accepted] @eval-claude-worker-hazel-delta ← @chief: Creează un fișier nou site/notes.md (nu modifica niciun alt fișier).
 T-2 [accepted] @eval-claude-reviewer-sunny-birch ← @chief: Verifică rezultatul sarcinii T-1 (poți citi cu `cf task get T-1`).', 1, '2026-10-08T12:33:05.492Z', '2026-10-08T12:33:05.868Z');
 INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES (1, 'msg_011CfpmyNU5JerXB3KbTMWoQ', 15, 'assistant', 'Testul a trecut cu succes: workerul a întrebat (cf ask), am răspuns „albastru”, a scris o singură linie în `site/notes.md` fără a modifica alte fișiere, reviewerul a confirmat, iar T-1 și T-2 sunt acceptate.', 1, '2026-10-08T12:33:08.600Z', '2026-10-08T12:33:08.868Z');
-INSERT INTO project (id, directory, name, state, resume_on_start, gate, created_at, updated_at) VALUES (1, '/Users/gabrielvoicu/.consensflow-candidate/evals/workspace', 'workspace', 'open', 0, 0, '2026-10-08T12:31:54.212Z', '2026-10-08T12:31:54.212Z');
+INSERT INTO project (id, directory, name, state, resume_on_start, gate, created_at, updated_at) VALUES (1, '/home/user/.consensflow-candidate/evals/workspace', 'workspace', 'open', 0, 0, '2026-10-08T12:31:54.212Z', '2026-10-08T12:31:54.212Z');
 INSERT INTO participant (id, project_id, handle, role, roles, agent, harness, tier, member_id, out_until, out_since, created_at, left_at, switched_from_harness, switched_from_agent, switched_from_cut, designer) VALUES (1, 1, 'human', 'human', '[]', NULL, NULL, NULL, NULL, NULL, NULL, '2026-10-08T12:31:54.212Z', NULL, NULL, NULL, 0, 0);
 INSERT INTO participant (id, project_id, handle, role, roles, agent, harness, tier, member_id, out_until, out_since, created_at, left_at, switched_from_harness, switched_from_agent, switched_from_cut, designer) VALUES (2, 1, 'chief', 'chief', '[]', 'eval-claude-chief', 'claude-code', NULL, NULL, NULL, NULL, '2026-10-08T12:31:54.212Z', NULL, NULL, NULL, 0, 0);
 INSERT INTO participant (id, project_id, handle, role, roles, agent, harness, tier, member_id, out_until, out_since, created_at, left_at, switched_from_harness, switched_from_agent, switched_from_cut, designer) VALUES (3, 1, 'eval-claude-worker', 'worker', '["worker"]', 'eval-claude-worker', 'claude-code', 'standard', NULL, NULL, NULL, '2026-10-08T12:31:54.213Z', NULL, NULL, NULL, 0, 0);
@@ -292,7 +292,7 @@ INSERT INTO event (id, project_id, at, kind, data) VALUES (1, 1, '2026-10-08T12:
 INSERT INTO event (id, project_id, at, kind, data) VALUES (2, 1, '2026-10-08T12:31:54.213Z', 'member.added', '{"handle":"eval-claude-worker-2","role":"worker","roles":["worker"],"harness":"claude-code"}');
 INSERT INTO event (id, project_id, at, kind, data) VALUES (3, 1, '2026-10-08T12:31:54.213Z', 'member.added', '{"handle":"eval-claude-advisor","role":"advisor","roles":["advisor"],"harness":"claude-code"}');
 INSERT INTO event (id, project_id, at, kind, data) VALUES (4, 1, '2026-10-08T12:31:54.213Z', 'member.added', '{"handle":"eval-claude-reviewer","role":"reviewer","roles":["reviewer"],"harness":"claude-code"}');
-INSERT INTO event (id, project_id, at, kind, data) VALUES (5, 1, '2026-10-08T12:31:54.213Z', 'project.created', '{"name":"workspace","directory":"/Users/gabrielvoicu/.consensflow-candidate/evals/workspace"}');
+INSERT INTO event (id, project_id, at, kind, data) VALUES (5, 1, '2026-10-08T12:31:54.213Z', 'project.created', '{"name":"workspace","directory":"/home/user/.consensflow-candidate/evals/workspace"}');
 INSERT INTO event (id, project_id, at, kind, data) VALUES (6, 1, '2026-10-08T12:31:54.225Z', 'conversation.started', '{"participant":"chief","conversation":1}');
 INSERT INTO event (id, project_id, at, kind, data) VALUES (7, 1, '2026-10-08T12:31:54.225Z', 'conversation.bound', '{"conversation":1,"nativeSession":"24814e23-cd53-4bef-a986-fcc4580da8cd"}');
 INSERT INTO event (id, project_id, at, kind, data) VALUES (8, 1, '2026-10-08T12:32:09.483Z', 'task.opened', '{"task":1,"from":"chief","pool":"worker","tier":"standard"}');

@@ -130,11 +130,11 @@ test('the daemon stays up, delivers every task and logs nothing wrong while seve
     const log = readFileSync(join(app.env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8')
       .split('\n')
       .filter(Boolean)
-    // Under the daemon the run chose (CONSENSFLOW_TEST_DAEMON), whichever it is.
+    // Under the native daemon.
     assert.match(
       log[0],
-      new RegExp(`^\\S+ info start pid \\d+ ${START_WORDS[app.daemon.kind]}`),
-      `the ${app.daemon.kind} daemon was under load`,
+      new RegExp(`^\\S+ info start pid \\d+ ${START_WORDS.native}`),
+      'the native daemon was under load',
     )
     assert.deepEqual(
       log.filter((line) => / (error|warn) /.test(line)),

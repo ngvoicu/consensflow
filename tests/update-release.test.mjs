@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -22,23 +31,22 @@ function writeRepo(dir, version) {
   writeFileSync(join(dir, 'app', 'src-tauri', 'tauri.conf.json'), JSON.stringify({ version }))
 }
 
-function writeApp(parent, appName, version, cliVersion = version) {
+/**
+ * A bundle as the release has it: the app's executable and the `cf` a window
+ * runs, which here is a script that says `cfVersion` when it is asked for its
+ * version, as the native one does. Nothing of Node's travels in it.
+ */
+function writeApp(parent, appName, version, cfVersion = version) {
   const app = join(parent, appName)
   const cli = join(app, 'Contents', 'Resources', 'cli')
   mkdirSync(join(cli, 'bin'), { recursive: true })
-  mkdirSync(join(cli, 'hosts'), { recursive: true })
-  mkdirSync(join(cli, 'src'), { recursive: true })
   mkdirSync(join(app, 'Contents', 'MacOS'), { recursive: true })
   writeFileSync(
     join(app, 'Contents', 'Info.plist'),
     `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.ngvoicu.consensflow</string><key>CFBundleExecutable</key><string>ConsensFlow</string><key>CFBundleShortVersionString</key><string>${version}</string><key>CFBundleVersion</key><string>${version}</string></dict></plist>\n`,
   )
-  writeFileSync(join(cli, 'package.json'), JSON.stringify({ version: cliVersion }))
-  writeFileSync(join(cli, 'bin', 'cf.mjs'), '#!/usr/bin/env node\n')
-  writeFileSync(join(cli, 'bin', 'cf'), 'native\n')
-  writeFileSync(join(cli, 'hosts', 'probe.txt'), 'hosts\n')
+  writeFileSync(join(cli, 'bin', 'cf'), `#!/bin/sh\necho ${cfVersion}\n`)
   writeFileSync(join(app, 'Contents', 'MacOS', 'ConsensFlow'), 'binary\n')
-  chmodSync(join(cli, 'bin', 'cf.mjs'), 0o755)
   chmodSync(join(cli, 'bin', 'cf'), 0o755)
   chmodSync(join(app, 'Contents', 'MacOS', 'ConsensFlow'), 0o755)
   return app
@@ -58,7 +66,7 @@ with tarfile.open(sys.argv[1], 'w:gz') as archive:
 
 function fixture({
   version = VERSION,
-  cliVersion,
+  cfVersion,
   repoVersion,
   archiveVersion,
   tamper = false,
@@ -69,7 +77,7 @@ function fixture({
   const staged = join(root, 'staged')
   mkdirSync(staged, { recursive: true })
   const appName = 'ConsensFlow.app'
-  const bundle = writeApp(staged, appName, version, cliVersion ?? version)
+  const bundle = writeApp(staged, appName, version, cfVersion ?? version)
   const archived = join(root, 'archived')
   mkdirSync(archived, { recursive: true })
   const archivedApp = writeApp(
@@ -80,8 +88,8 @@ function fixture({
   )
   if (tamper) {
     writeFileSync(
-      join(archivedApp, 'Contents', 'Resources', 'cli', 'bin', 'cf.mjs'),
-      '#!/usr/bin/env node\n// tampered\n',
+      join(archivedApp, 'Contents', 'Resources', 'cli', 'bin', 'cf'),
+      '#!/bin/sh\necho changed after the bundle was made\n',
     )
   }
   const archiveName = `ConsensFlow-${version}_aarch64.app.tar.gz`
@@ -186,10 +194,42 @@ describe('TEST-PANE-150 prepare-update metadata', {
     }
   })
 
-  it('rejects a bundle whose plist and bundled cli versions disagree', () => {
-    const fx = fixture({ cliVersion: '3.0.0-alpha.98' })
+  it('rejects a bundle whose plist and bundled cf disagree on the version', () => {
+    const fx = fixture({ cfVersion: '3.0.0-alpha.98' })
     try {
-      assert.notEqual(run(baseArgs(fx)).code, 0)
+      const ran = run(baseArgs(fx))
+      assert.notEqual(ran.code, 0)
+      assert.match(
+        ran.stderr,
+        /bundle and its cf versions differ: 3\.0\.0-alpha\.99 != 3\.0\.0-alpha\.98/,
+      )
+    } finally {
+      rmSync(fx.root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a bundle whose cf does not say its version', () => {
+    const fx = fixture()
+    try {
+      const cf = join(fx.bundle, 'Contents', 'Resources', 'cli', 'bin', 'cf')
+      writeFileSync(cf, '#!/bin/sh\nexit 3\n')
+      const ran = run(baseArgs(fx))
+      assert.notEqual(ran.code, 0)
+      assert.match(ran.stderr, /the bundled cf did not say its version/)
+    } finally {
+      rmSync(fx.root, { recursive: true, force: true })
+    }
+  })
+
+  it('takes a bundle that ships nothing of Node’s: no package.json, cf.mjs, src or hosts', () => {
+    const fx = fixture()
+    try {
+      const cli = join(fx.bundle, 'Contents', 'Resources', 'cli')
+      assert.deepEqual(readdirSync(cli), ['bin'])
+      assert.deepEqual(readdirSync(join(cli, 'bin')), ['cf'])
+      assert.equal(existsSync(join(fx.bundle, 'Contents', 'MacOS', 'node')), false)
+      const ran = run(baseArgs(fx))
+      assert.equal(ran.code, 0, ran.stderr)
     } finally {
       rmSync(fx.root, { recursive: true, force: true })
     }

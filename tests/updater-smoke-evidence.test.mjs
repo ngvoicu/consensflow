@@ -6,9 +6,9 @@ import { DatabaseSync } from 'node:sqlite'
 import { describe, it } from 'node:test'
 import {
   assertApp,
-  assertChoseNative,
   assertLedgerHeld,
   assertOnlyProbesRefused,
+  assertStartedDaemon,
   daemonEvidence,
   daemonRows,
   kindOfCommand,
@@ -208,24 +208,37 @@ describe('the app and its daemon, as the process table shows them', () => {
   })
 })
 
-describe('the app’s log naming the daemon it chose', () => {
+describe('the app’s log naming the daemon it started', () => {
   // Paths are made as the platform makes them: the app writes them so.
-  const HOME = join('/box', 'state')
-  const said = (home) =>
-    `consensflow: starting the native daemon: the default, there is no ${join(home, 'use-node')}`
+  const CF = join(
+    '/box',
+    'Applications',
+    'ConsensFlow.app',
+    'Contents',
+    'Resources',
+    'cli',
+    'bin',
+    'cf',
+  )
+  const said = (cf) => `consensflow: starting the daemon: ${cf} ui --json --no-open`
+  const FLIPS =
+    'consensflow: starting the native daemon: the default, there is no /box/state/use-node'
 
-  it('says the native one, by default, and says it of this home', () => {
-    assertChoseNative(`${said(HOME)}\n`, HOME)
+  it('says the bundle’s cf, by its path', () => {
+    assertStartedDaemon(`${said(CF)}\n`, CF)
+    // The log is written on by every app of the home: the line of the one that started it is among them.
+    assertStartedDaemon(`${FLIPS}\n${said(CF)}\nconsensflow: something else\n`, CF)
   })
 
-  it('does not take Node’s way back, another home’s choice, or silence', () => {
+  it('does not take the flip’s sentence, another bundle’s cf, or silence', () => {
     for (const log of [
       '',
-      `consensflow: starting Node's daemon: ${join(HOME, 'use-node')} is there, the way back to Node\n`,
-      `${said(join('/box', 'another'))}\n`,
+      `${FLIPS}\n`,
+      `consensflow: starting Node's daemon: /box/state/use-node is there, the way back to Node\n`,
+      `${said(join('/box', 'Other.app', 'Contents', 'Resources', 'cli', 'bin', 'cf'))}\n`,
       'consensflow: the terminal command is not repaired\n',
     ]) {
-      assert.throws(() => assertChoseNative(log, HOME), /does not say the app chose/, log)
+      assert.throws(() => assertStartedDaemon(log, CF), /does not say the app started/, log)
     }
   })
 })

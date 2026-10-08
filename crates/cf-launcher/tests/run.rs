@@ -80,7 +80,7 @@ fn run(launcher: &Path, args: &[&str], vars: &[(&str, &str)]) -> Ran {
             .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
     );
     let arguments: Vec<_> = args.iter().map(std::ffi::OsString::from).collect();
-    let started = cf_process::runnable(launcher, &arguments, &Env::from_vars(env.clone()));
+    let started = cf_process::runnable(launcher, &arguments, &Env::from_vars(env.clone())).unwrap();
     let mut command: Command = started.command();
     let output = command.env_clear().envs(env).output().unwrap();
     Ran {

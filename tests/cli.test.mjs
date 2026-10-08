@@ -5,8 +5,7 @@ import { dirname, join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
-import { noteRan } from './choice.mjs'
-import { cliEnv, cliTarget } from './cli-target.mjs'
+import { cliTarget } from './cli-target.mjs'
 import { fakeExecutable, tempEnv } from './helpers.mjs'
 
 /** A launcher is `cf` on POSIX and `cf.cmd` on Windows. */
@@ -20,12 +19,12 @@ const FIXTURES = join(import.meta.dirname, 'fixtures')
 const rosterPath = (env) => join(env.CONSENSFLOW_HOME, 'agents.json')
 /** A preload that has every Node process say it started: which cf ran is told by it. */
 const NODE_SPY = join(FIXTURES, 'node-spy.mjs')
-/** The cf these tests run: the native one, or Node's (tests/cli-target.mjs, `npm run test:clis`). */
+/** The cf these tests run: the native one (tests/cli-target.mjs, `npm run test:clis`). */
 const target = cliTarget()
 async function cf(args, env) {
   try {
     const { stdout, stderr } = await run(target.command, [...target.args, ...args], {
-      env: cliEnv(target, env),
+      env,
       timeout: 30_000,
     })
     return { code: 0, stdout, stderr }
@@ -52,11 +51,10 @@ describe('cf manages the roster', () => {
     assert.match(out.stdout, /^pi:\n/)
   })
 
-  // Which cf ran is told by the processes that started, not by the selection,
-  // which a selector that came to the other cf agrees with: Node's cf is a Node
-  // process running bin/cf.mjs, and the native cf serves the catalog with no
-  // Node at all. The leg (tests/legs.mjs) says which it should be.
-  it('is the cf its leg names: a Node process ran bin/cf.mjs, or none did', async () => {
+  // Which cf ran is told by the processes that started, not by the selection:
+  // the native cf serves the catalog with no Node at all, and a selection that
+  // came to a cf that hands the verb to Node's sources starts a Node process.
+  it('is the native cf: no Node process ran', async () => {
     const own = tempEnv()
     try {
       const marks = join(own.root, 'node-runs')
@@ -67,16 +65,7 @@ describe('cf manages the roster', () => {
       })
       assert.equal(out.code, 0, out.stderr)
       const ran = existsSync(marks) ? readFileSync(marks, 'utf8').split('\n').filter(Boolean) : []
-      const kind = ran.length > 0 ? 'node' : 'native'
-      // Said to the runner (`npm run test:clis`), which holds the leg to it.
-      noteRan(kind)
-      assert.equal(kind, process.env.CONSENSFLOW_TEST_LEG || target.kind, JSON.stringify(ran))
-      if (kind === 'node') {
-        assert.deepEqual(
-          ran.map((line) => line.split('\t')[1].replace(/^.*[\\/]/, '')),
-          ['cf.mjs'],
-        )
-      }
+      assert.deepEqual(ran, [], 'a Node process ran')
     } finally {
       own.cleanup()
     }
@@ -168,7 +157,7 @@ describe('cf manages the roster', () => {
     // every write EPIPEs. PIPESTATUS surfaces cf's own exit code.
     const command = [target.command, ...target.args].map((word) => `"${word}"`).join(' ')
     const child = spawn('/bin/bash', ['-c', `${command} help | false; exit \${PIPESTATUS[0]}`], {
-      env: { ...cliEnv(target, t.env), PATH: `${t.env.PATH}:/usr/bin:/bin` },
+      env: { ...t.env, PATH: `${t.env.PATH}:/usr/bin:/bin` },
       stdio: ['ignore', 'ignore', 'pipe'],
     })
     let stderr = ''

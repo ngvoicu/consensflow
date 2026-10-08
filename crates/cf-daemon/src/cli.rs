@@ -139,7 +139,10 @@ fn on_out(flags: Flags, env: &Env) -> OnOut {
 /// for it, nor mind how it ends (on a system with no `open` it does not start).
 fn open(address: &str, env: &Env) {
     let program = on_path("open", env).unwrap_or_else(|| PathBuf::from("open"));
-    let run = runnable(&program, &[OsString::from(address)], env);
+    // `open` is a program and no shim, so there is always a way to start it.
+    let Ok(run) = runnable(&program, &[OsString::from(address)], env) else {
+        return;
+    };
     let env = env.clone();
     drop(tokio::task::spawn_local(async move {
         let limits = Limits {

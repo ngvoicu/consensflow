@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -206,5 +206,59 @@ describe('a ledger file made from the native ledger’s migrations', () => {
         db.close()
       }
     })
+  })
+})
+
+/**
+ * A recording of a real run holds the folder its project worked in and the
+ * listings its windows made, so the home folder and the user of the machine
+ * that made it: neither is a fixture's to carry. A recording names the home
+ * folder `/home/user` and the user `user` (tests/goldens/evals/record.mjs).
+ */
+describe('the frozen ledgers', () => {
+  const folder = fileURLToPath(new URL('./fixtures/ledgers/', import.meta.url))
+  const texts = readdirSync(folder).map((name) => [name, readFileSync(join(folder, name), 'utf8')])
+
+  /** What `pattern` finds in a text, by its first group. */
+  const found = (text, pattern) => [...text.matchAll(pattern)].map((hit) => hit[1])
+  /** A user's name: words, hyphens and dots between them, so the quote or the stop after it is not part of it. */
+  const NAME = String.raw`([\w-]+(?:\.[\w-]+)*)`
+  const HOME_OF = [
+    new RegExp(`/(?:Users|home)/${NAME}`, 'g'),
+    new RegExp(String.raw`[A-Za-z]:[\\/]+Users[\\/]+${NAME}`, 'g'),
+  ]
+  /** The owner column of an `ls -l` listing: `drwxr-xr-x@ 3 owner  group   96 Oct  8 15:31 name`. */
+  const OWNER = /(?:^|[\s'])[-dlcbps][-rwxsStT]{9}[@+.]? +\d+ +(\S+) +\S+ +\d/gm
+
+  it('has the recordings to hold', () => {
+    assert.ok(texts.length >= 20, `${texts.length} files`)
+    assert.ok(texts.some(([name]) => name === 'eval-round-trip.sql'))
+  })
+
+  it('say nothing of who made them: the home folder of a machine is /home/user, and its user is user', () => {
+    for (const [name, text] of texts) {
+      const homes = HOME_OF.flatMap((pattern) => found(text, pattern))
+      assert.deepEqual(
+        homes.filter((owner) => owner !== 'user'),
+        [],
+        `${name} holds the home folder of a person`,
+      )
+      assert.deepEqual(
+        found(text, OWNER).filter((owner) => owner !== 'user'),
+        [],
+        `${name} holds a listing made by a person`,
+      )
+    }
+  })
+
+  it('are held to that by a pattern that finds a person, a home folder and a listing', () => {
+    const real = "'/Users/someone/work', 'C:\\Users\\someone\\work', '/home/someone/x'"
+    assert.deepEqual(
+      HOME_OF.flatMap((pattern) => found(real, pattern)),
+      ['someone', 'someone', 'someone'],
+    )
+    const listing =
+      "'\ndrwxr-xr-x@ 3 someone  staff   96 Oct  8 15:31 content\n-rw-r--r-- 1 user  staff  1.0K Oct  8 15:31 a'"
+    assert.deepEqual(found(listing, OWNER), ['someone', 'user'])
   })
 })

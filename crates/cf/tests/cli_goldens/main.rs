@@ -4,8 +4,7 @@
 //! with the clock fixed and the environment given in full, and wrote down the
 //! files of the folder before and after, the output, the error output and the
 //! exit code. Here each case is made again in a folder of its own, the binary run
-//! as the case says (no home of a recording has the way back's `use-node` file
-//! in it, so the verbs are Rust's), and all of it compared byte for byte. The
+//! as the case says, and all of it compared byte for byte. The
 //! format is in tests/goldens/cli/FORMAT.md.
 //!
 //! The binary cannot be given the clock Node was: what it stamps an agent with
