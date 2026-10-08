@@ -102,7 +102,11 @@ pub fn message_line(message: &Value) -> String {
 /// The numbers of the answers among `messages` that still wait in the queue
 /// to be pasted: the ones a command that wrote every body of `messages` in
 /// full has written whole, and so says it has. An answer already read, or
-/// withheld, or any other kind of message, is not one of them.
+/// withheld, or any other kind of message, is not one of them. A result is
+/// none: it is put to its reader for a decision, which ends it (the ledger
+/// withdraws it then), and a read is no decision. Told as received, it would
+/// never be pasted, and a chief that read it and decided nothing would not be
+/// reminded that the task still waits for it.
 pub fn waiting_answers(messages: &[Value]) -> Vec<i64> {
     messages
         .iter()
@@ -165,6 +169,7 @@ mod tests {
             json!({ "id": 7, "kind": "note", "state": "queued", "body": "Mind the tests" }),
             json!({ "id": 8, "kind": "answer", "state": "delivering", "body": "TOML" }),
             json!({ "id": 9, "kind": "answer", "state": "queued", "body": "XML" }),
+            json!({ "id": 10, "kind": "result", "state": "queued", "body": "Parser done" }),
             json!({ "kind": "answer", "state": "queued", "body": "no id" }),
         ];
         assert_eq!(waiting_answers(&messages), [5, 9]);

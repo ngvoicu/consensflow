@@ -60,20 +60,31 @@ use support::trace::{self, Tally};
 /// The suites of the API's traces, and of `cf` against it.
 const SUITES: [&str; 4] = ["core-api", "core-daemon", "corners-api", "cf-board"];
 
+/// A result the chief had not been given when it accepted the task is
+/// withdrawn, never pasted after the decision it asks for.
+const RESULT_ACCEPTED: &str = "the chief accepts the task while its result is still queued for it: the result is withdrawn (`cancelled`, with the reason `T-n was accepted`), where Node leaves it `queued` to be pasted after the decision";
+
+/// The same when the chief sent the task back.
+const RESULT_SENT_BACK: &str = "the chief sends the task back while its result is still queued for it: the result is withdrawn (`cancelled`, with the reason `T-n was sent back`), where Node leaves it `queued` to be pasted after the decision";
+
 /// The traces the receipt and stop redesign moved on purpose: a choice answer
 /// is received, not read at its creation, a resume takes in what its window
 /// kept, a command written wrong asks the board nothing, and a brief that
-/// waits at the gate is not given to an agent. Found by playing them against
-/// the daemon.
+/// waits at the gate is not given to an agent; and those the decision on a
+/// result moved: the result is withdrawn, not pasted after it. Found by
+/// playing them against the daemon.
 const DEPARTED: &[Departed] = &[
+    ("core-api-003", RESULT_ACCEPTED),
     (
         "core-api-006",
         "the answer to a question with options lands `queued`: it is read when received, not when written",
     ),
+    ("corners-api-008", RESULT_SENT_BACK),
     (
         "cf-board-001",
         "`cf task get T-1 --transcript --last 0` says its usage failure before it asks the board anything: Node asked for the task first, and the board took the answers in its thread as read, though nothing of them was printed",
     ),
+    ("cf-board-002", RESULT_ACCEPTED),
     (
         "cf-board-003",
         "a resume carries the brief that never arrived and logs `message.carried`: one more clock reading, so the task's `updatedAt` is a second later",
@@ -90,6 +101,7 @@ const DEPARTED: &[Departed] = &[
         "cf-board-024",
         "the answer to a question with options lands `queued`: it is read when received, not when written",
     ),
+    ("cf-board-027", RESULT_ACCEPTED),
 ];
 
 /// Plays every trace of `suites` but the departed, each against an API of its

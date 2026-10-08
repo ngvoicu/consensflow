@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url'
 import { PLANTS as BOARD } from './daemon/board.mjs'
 import { PLANTS as CLAUDE_REST } from './daemon/claude-rest.mjs'
 import { PLANTS as CONSTANTS } from './daemon/constants.mjs'
+import { PLANTS as DECIDED } from './daemon/decided.mjs'
 import { PLANTS as DETECT } from './daemon/detect.mjs'
 import { PLANTS as FRONT } from './daemon/front.mjs'
 import { PLANTS as LAUNCHER } from './daemon/launcher.mjs'
@@ -58,6 +59,7 @@ const PLANTS = [
   ...DETECT,
   ...PAUSE,
   ...PAUSE_NOTES,
+  ...DECIDED,
   ...RECEIPT_A,
   ...OBLIGATIONS,
   ...SESSIONS,

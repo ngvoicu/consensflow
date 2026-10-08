@@ -14,8 +14,9 @@
 //! departure is taken off once Node does it too. A ledger trace is the calls
 //! Node's dispatcher made, so what a departure changes of what a dispatcher
 //! asks of the ledger is held by the engine's tests: by traces of their own for
-//! the pause notes' (`crates/cf-engine/tests/departures/`), and by what each
-//! asserts directly for the redesign's.
+//! the pause notes' and for the withdrawal of a decided task's result
+//! (`crates/cf-engine/tests/departures/`), and by what each asserts directly
+//! for the redesign's.
 
 // The replay's own scaffolding: a failure in it is the test's.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -57,22 +58,37 @@ enum Outcome {
 /// `core-dispatcher-042` and `-074`, which the pause notes' withdrawal moved:
 /// Node never withdraws a note that told a requester a task was paused, so
 /// the notes this ledger withdraws when the task is resumed are, in Node's
-/// recordings, queued still, and its dispatcher goes on to paste them.
+/// recordings, queued still, and its dispatcher goes on to paste them; and
+/// the 23 that name `RESULT_ACCEPTED`, `RESULT_SENT_BACK` or
+/// `DECIDED_BEFORE_PASTED`, which the withdrawal of a decided task's result
+/// moved: Node leaves it queued, and its dispatcher pastes it after the
+/// decision it asked for.
 /// Departed traces that Node's suite records only off Windows: the test
 /// that writes `home-copies-004` is skipped there, as Windows holds an open
 /// ledger's files (`tests/home-copies.test.mjs`). Elsewhere each must be there.
 const RECORDED_OFF_WINDOWS: &[&str] = &["home-copies-004"];
 
 const DEPARTED: &[(&str, usize, &str)] = &[
+    ("core-api-003", 19, RESULT_ACCEPTED),
     ("core-api-006", 15, "the door's read `answerTo` is gone (a poll claims with `claim_answer`), and a choice answer lands queued, not read"),
     ("core-dispatcher-010", 121, REASON_PAUSE),
     ("core-dispatcher-042", 72, "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, so the chief has no message waiting (`withWork`), where Node's has the note"),
+    ("core-dispatcher-056", 103, DECIDED_BEFORE_PASTED),
     ("core-dispatcher-065", 147, KEPT_IN_BRIEF),
     ("core-dispatcher-074", 294, "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn (`task`), where Node leaves it queued"),
+    ("core-dispatcher-081", 91, DECIDED_BEFORE_PASTED),
+    ("core-dispatcher-089", 95, DECIDED_BEFORE_PASTED),
+    ("core-dispatcher-090", 93, DECIDED_BEFORE_PASTED),
     ("core-dispatcher-107", 122, KEPT_IN_BRIEF),
     ("core-page-014", 9, REASON_RELEASE),
+    ("evals-measure-001", 20, RESULT_ACCEPTED),
+    ("evals-measure-015", 32, RESULT_ACCEPTED),
     ("home-copies-001", 34, KEPT_IN_BRIEF),
     ("home-copies-004", 34, KEPT_IN_BRIEF),
+    ("ledger-conversations-008", 20, RESULT_ACCEPTED),
+    ("ledger-conversations-013", 22, RESULT_SENT_BACK),
+    ("ledger-conversations-014", 23, RESULT_SENT_BACK),
+    ("ledger-gate-004", 17, RESULT_ACCEPTED),
     ("ledger-gate-006", 25, DOOR_READ),
     ("ledger-gate-007", 15, DOOR_READ),
     ("ledger-gate-008", 16, "the door's read `answerTo` is gone, and the choice answer the human approves lands queued, not read for the door"),
@@ -84,6 +100,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-messages-015", 11, READ_AT_ONCE),
     ("ledger-messages-017", 10, DOOR_READ),
     ("ledger-messages-022", 12, DOOR_READ),
+    ("ledger-page-reads-009", 44, RESULT_ACCEPTED),
     ("ledger-projects-002", 14, KEPT_IN_BRIEF),
     ("ledger-schema-005", 15, KEPT_IN_BRIEF),
     ("ledger-schema-006", 18, KEPT_IN_BRIEF),
@@ -102,18 +119,39 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-schema-025", 15, KEPT_IN_BRIEF),
     ("ledger-schema-027", 14, KEPT_IN_BRIEF),
     ("ledger-staff-008", 13, KEPT_BY_PAUSE),
+    ("ledger-staff-015", 25, RESULT_ACCEPTED),
+    ("ledger-staff-016", 17, RESULT_ACCEPTED),
+    ("ledger-staff-017", 20, RESULT_ACCEPTED),
+    ("ledger-staff-018", 17, RESULT_SENT_BACK),
     ("ledger-staff-019", 18, KEPT_BY_PAUSE),
+    ("ledger-staff-022", 14, RESULT_ACCEPTED),
+    ("ledger-staff-023", 13, "the chief sends T-1 back while its result is still queued for it: the result is withdrawn then, with the reason `T-1 was sent back`, where Node leaves it queued until the task is cancelled, which withdraws it as `cancelled by @chief`"),
+    ("ledger-tasks-004", 13, RESULT_ACCEPTED),
     ("ledger-tasks-005", 26, REASON_PAUSE),
+    ("ledger-tasks-010", 15, RESULT_ACCEPTED),
+    ("ledger-tasks-011", 17, RESULT_ACCEPTED),
+    ("ledger-tasks-012", 20, RESULT_ACCEPTED),
     ("ledger-tasks-016", 10, KEPT_BY_PAUSE),
     ("ledger-tasks-018", 16, KEPT_BY_PAUSE),
     ("ledger-tasks-020", 19, REASON_PAUSE),
     ("ledger-tasks-023", 10, STOP_IN_EVENT),
     ("ledger-tasks-024", 13, STOP_IN_EVENT),
+    ("ledger-tasks-025", 12, RESULT_ACCEPTED),
     ("ledger-tasks-026", 29, STOP_IN_EVENT),
     ("ledger-tiered-013", 13, KEPT_IN_BRIEF),
     ("ledger-tiered-014", 22, WINDOW_ENDED),
 ];
 
+/// A result the chief had not been given when it accepted the task is
+/// withdrawn, never pasted after the decision it asked for.
+const RESULT_ACCEPTED: &str =
+    "the chief accepts the task while its result is still queued for it: the result is withdrawn (`cancelled`, with the reason `T-n was accepted`), where Node leaves it `queued` to be pasted after the decision";
+/// The same when the chief sent the task back.
+const RESULT_SENT_BACK: &str =
+    "the chief sends the task back while its result is still queued for it: the result is withdrawn (`cancelled`, with the reason `T-n was sent back`), where Node leaves it `queued` to be pasted after the decision";
+/// What the dispatcher asks of the ledger after such a decision.
+const DECIDED_BEFORE_PASTED: &str =
+    "the chief accepts or sends back T-1 while its result is still queued for it, and the result is withdrawn: the chief has no message waiting (`withWork`), where Node's has the result, which its dispatcher pastes after the decision";
 /// The door's poll is a write now, `claim_answer`; `answerTo`, its read, went.
 const DOOR_READ: &str =
     "the door's read `answerTo` is gone: a poll claims the answer with `claim_answer`";
