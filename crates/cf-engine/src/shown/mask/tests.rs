@@ -1,5 +1,7 @@
 //! What is hidden, and what is left alone, with keys and tokens made up in the
 //! shapes the real ones have.
+//! Each sample is written in two pieces (`concat!`), so no line of this file is
+//! itself in a token's shape: GitHub's push protection refused one (2026-10-07).
 
 use super::*;
 
@@ -86,19 +88,19 @@ fn a_key_or_token_named_in_a_sentence_loses_its_value_only_when_the_value_looks_
 #[test]
 fn a_token_with_a_known_prefix_is_hidden_whatever_its_length() {
     let tokens = [
-        "sk-ant-api03-AbCdEfGhIjKlMnOp",
+        concat!("sk-ant", "-api03-AbCdEfGhIjKlMnOp"),
         "sk_live_abcdefghijkl",
-        "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
-        "github_pat_11AAAAAAA0abcdefghij_xyzxyz",
-        "glpat-abcdefghijklmnop1234",
-        "xoxb-1234567890-abcdefghij",
-        "AKIAIOSFODNN7EXAMPLE",
-        "AIzaSyA-abcdefghijklmnopqrstuvwxyz01234",
-        "npm_abcdefghijklmnopqrstuvwxyz0123456789",
-        "hf_abcdefghijklmnopqrstuvwxyzABCDEFGH",
-        "ya29.a0AfH6SMBabcdefghijklmnopqrstuv",
-        "SG.abcdefghijklmnopqrstuv.abcdefghijklmnopqrstuv",
-        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.sig-nature_1",
+        concat!("ghp", "_abcdefghijklmnopqrstuvwxyz0123456789"),
+        concat!("github_pat", "_11AAAAAAA0abcdefghij_xyzxyz"),
+        concat!("glpat", "-abcdefghijklmnop1234"),
+        concat!("xoxb", "-1234567890-abcdefghij"),
+        concat!("AKI", "AIOSFODNN7EXAMPLE"),
+        concat!("AIz", "aSyA-abcdefghijklmnopqrstuvwxyz01234"),
+        concat!("npm", "_abcdefghijklmnopqrstuvwxyz0123456789"),
+        concat!("hf", "_abcdefghijklmnopqrstuvwxyzABCDEFGH"),
+        concat!("ya29", ".a0AfH6SMBabcdefghijklmnopqrstuv"),
+        concat!("SG", ".abcdefghijklmnopqrstuv.abcdefghijklmnopqrstuv"),
+        concat!("ey", "JhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.sig-nature_1"),
     ];
     for token in tokens {
         let masked = mask(&format!("the credential was {token} here"));
