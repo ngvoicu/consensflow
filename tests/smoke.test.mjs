@@ -6,7 +6,9 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -15,22 +17,22 @@ import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { proveAgents } from './agents-proof.mjs'
-import { chooseHome, DEFAULT_DAEMON } from './choice.mjs'
 
 /**
  * The packaged smoke: the REAL `.app`, not this checkout.
  *
  * Every other suite reaches into `src/` and `app/src-tauri/`. This one is the
  * only place that asks whether the thing Gabriel double-clicks works — the
- * bundle's own page, the bundle's own Node, the bundle's own CLI copy, the
- * production Tauri commands, and a real PTY child. So it resolves NOTHING
- * of the product from the repository, and every path it asserts on has to
- * live under `Contents/`. What it takes from the repository is this file and
- * the proof of the agents screens (tests/agents-proof.mjs), which only speaks
- * HTTP to the daemon the app started and reads the roster that daemon wrote:
- * it imports no module of the product, so it holds the native daemon as it
- * holds Node's. (The extension's load below still runs on the bundle's Node,
- * until Node leaves the bundle.)
+ * bundle's own page, the bundle's own `cf` (it is the daemon, and the command
+ * a window runs), the production Tauri commands, and a real PTY child. So it
+ * resolves NOTHING of the product from the repository, and every path it
+ * asserts on has to live under `Contents/`. What it takes from the repository
+ * is this file and the proof of the agents screens (tests/agents-proof.mjs),
+ * which only speaks HTTP to the daemon the app started and reads the roster
+ * that daemon wrote: it imports no module of the product. The bundle ships no
+ * Node, so what needs one here (the paste reader a stand-in harness runs, the
+ * load of the Pi extension the bundle's `cf` installs) runs on the Node that
+ * runs this file.
  *
  * It is gated, not skipped-by-default-forever: without `CONSENSFLOW_SMOKE`
  * the tests skip so `npm test` stays a unit run, and WITH it a missing
@@ -97,17 +99,9 @@ function locateApp() {
     return { app: null, why: `the bundle at ${app} has no readable Info.plist: ${cause.message}` }
   }
   const binary = join(app, 'Contents', 'MacOS', executable)
-  // `externalBin` sidecars land beside the executable; older layouts staged
-  // them under Resources. Take whichever this bundle actually has.
-  const sidecar = join(app, 'Contents', 'MacOS', 'node')
-  const staged = join(app, 'Contents', 'Resources', 'binaries', 'node')
-  const node = existsSync(sidecar) ? sidecar : staged
-  const cli = join(app, 'Contents', 'Resources', 'cli', 'bin', 'cf.mjs')
   const cf = join(app, 'Contents', 'Resources', 'cli', 'bin', 'cf')
   for (const [what, path] of [
     ['executable', binary],
-    ['bundled node', node],
-    ['bundled CLI', cli],
     ["a window's cf", cf],
   ]) {
     if (!existsSync(path)) {
@@ -117,36 +111,14 @@ function locateApp() {
       }
     }
   }
-  return { app, binary, node, cli, cf, why: null }
+  return { app, binary, cf, why: null }
 }
 
 /**
- * What the first line of a daemon's log says of the daemon that started: Node's
- * names its runtime (`node v26…`), the native one says `rust`. Which of the two
- * the app starts is the home's to choose: the native one, unless the home has
- * taken the way back (a `use-node` file in it). The smoke reads which ran from
- * the log, and holds it to the choice it made in its box's home, which
- * `CONSENSFLOW_TEST_DAEMON` names (`node`, `native`; none is the native one,
- * the default the flip made).
+ * What the first line of the daemon's log says of the daemon that started: its
+ * pid, its runtime (`rust` and the version of the `cf` it is) and its home.
  */
-const START_LINES = {
-  node: / start pid \d+ node v\d+\.\d+\.\d+ home /,
-  native: / start pid \d+ rust \S+ home /,
-}
-
-/** The daemon the run asks for, by the tests' own selector; the default's when it names none. */
-function askedDaemon() {
-  const named = process.env.CONSENSFLOW_TEST_DAEMON || DEFAULT_DAEMON
-  if (!(named in START_LINES)) {
-    throw new Error(`CONSENSFLOW_TEST_DAEMON is ${named}: the smoke knows node and native`)
-  }
-  return named
-}
-
-/** `node`, `native`, or null where the line is neither's. */
-function daemonOf(line) {
-  return Object.entries(START_LINES).find(([, pattern]) => pattern.test(line))?.[0] ?? null
-}
+const START_LINE = / start pid \d+ rust \S+ home /
 
 /** Skips only when nobody asked for the smoke; a requested one never skips. */
 function gate(t) {
@@ -311,8 +283,6 @@ function sandbox() {
   for (const dir of [paths.home, paths.state, paths.workspace, paths.bin, paths.probe]) {
     mkdirSync(dir, { recursive: true })
   }
-  // The daemon the app starts, and every `cf` of this home, is chosen by the home.
-  chooseHome(askedDaemon(), paths.state)
   const tag = `smoke-${process.pid}-${Date.now()}`
   const harness = join(paths.bin, 'claude')
   writeFileSync(harness, FAKE_HARNESS, 'utf8')
@@ -348,6 +318,8 @@ process.stdin.on('data', chunk => {
       CONSENSFLOW_SELFTEST_DIR: paths.workspace,
       CONSENSFLOW_SELFTEST_TAG: tag,
       CFSMOKE_PIDFILE: paths.pidFile,
+      // The bundle ships no Node: the stand-in harness reads a paste on the one that runs this.
+      CFSMOKE_PASTE_NODE: process.execPath,
       CFSMOKE_PASTE_READER: pasteReader,
       CFSMOKE_TAG: tag,
     },
@@ -514,12 +486,15 @@ function withPackagedCf(cf, box, args, extraEnv = {}) {
   })
 }
 
-/** Runs a script with the BUNDLE's node, outside this checkout. */
-function withBundledNode(node, box, script, extraEnv = {}) {
+/**
+ * Runs a script with the Node that runs this file, from outside this checkout:
+ * the bundle ships none.
+ */
+function withNode(box, script, extraEnv = {}) {
   const file = join(box.probe, `probe-${Math.random().toString(36).slice(2)}.mjs`)
   writeFileSync(file, script, 'utf8')
   return new Promise((done) => {
-    const child = spawn(node, [file], {
+    const child = spawn(process.execPath, [file], {
       cwd: box.probe,
       env: { ...box.env, ...extraEnv },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -543,7 +518,6 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   if (found === null) return
 
   const box = sandbox()
-  box.env.CFSMOKE_PASTE_NODE = found.node
   const app = launch(found.binary, box)
   // A failed smoke leaves its machine behind on purpose: the harness, its pid
   // file, the state root and the app's own launchers are the evidence, and
@@ -569,21 +543,10 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   //    `project.open`, the production operation.
   const opened = await app.waitFor('project')
   assert.equal(opened.data.ok, true, `project.open refused: ${JSON.stringify(opened.data)}`)
-  // The daemon the app chose, Node's or the native one: its own log says which
-  // started, and the one the home asked for (the file in it, or the default,
-  // which is the native one) is the one that ran.
+  // The daemon the app started: its own log says what it is, the bundle's `cf`.
   const [started] = readFileSync(join(box.env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8').split('\n')
-  const ran = daemonOf(started)
-  assert.notEqual(
-    ran,
-    null,
-    `the daemon's first line is neither Node's nor the native one's: ${started}`,
-  )
-  const asked = askedDaemon()
-  assert.equal(ran, asked, `asked for the ${asked} daemon, the ${ran} one started: ${started}`)
-  t.diagnostic(
-    `the daemon that ran: ${ran} (${process.env.CONSENSFLOW_TEST_DAEMON ? 'asked for' : "the app's default"})`,
-  )
+  assert.match(started, START_LINE, `the daemon's first line is not the native one's: ${started}`)
+  t.diagnostic(`the daemon that ran: ${started}`)
 
   const rendered = await app.waitFor('rendered')
   assert.match(rendered.data.banner, new RegExp(`CFSMOKE-READY ${box.tag}`))
@@ -633,19 +596,19 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.match(screens[0].src, /^http:\/\/localhost:\d+\/\?token=/)
   assert.match(screens[1].src, /^http:\/\/localhost:\d+\/harnesses\?token=/)
 
-  // The agents behind those screens, asked of the daemon that serves them: the
-  // one this app chose, Node's or the native one, over its API and through the
-  // roster it writes. The packaged build's own catalog, an agent saved with its
-  // profile, the screens behind the UI token, and the deletion of the agent
-  // saved; nothing of the product's modules is imported to ask. The address and
-  // the token are the ones the frame was given.
+  // The agents behind those screens, asked of the daemon that serves them, the
+  // app's own, over its API and through the roster it writes. The packaged
+  // build's own catalog, an agent saved with its profile, the screens behind
+  // the UI token, and the deletion of the agent saved; nothing of the
+  // product's modules is imported to ask. The address and the token are the
+  // ones the frame was given.
   const served = new URL(screens[0].src)
   await proveAgents({
     url: served.origin,
     token: served.searchParams.get('token'),
     home: box.env.CONSENSFLOW_HOME,
   })
-  t.diagnostic(`the ${ran} daemon's agents: the catalog, a saved profile, the screens, a deletion`)
+  t.diagnostic("the daemon's agents: the catalog, a saved profile, the screens, a deletion")
 
   const pasted = await app.waitFor('large-paste')
   const expectedPaste = Buffer.from(`\x1b[200~${'漢字 résumé 🙂\r'.repeat(30_000)}\x1b[201~`)
@@ -668,17 +631,30 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   )
   assert.ok(alive(harnessPids[0]), "the chief's fake harness was not running when it answered")
 
-  // 5. The packaged pi extension loads from the bundle alone, never from this
-  //    checkout. Run by the bundle's own node, from a directory outside it.
-  const extension = join(
-    found.app,
-    'Contents',
-    'Resources',
-    'cli',
-    'hosts',
-    'pi-extension',
-    'consensflow-delivery.mjs',
-  )
+  // 5. The Pi extension the packaged `cf` installs loads from its own folder
+  //    alone, never from this checkout. The bundle holds no copy of the
+  //    extension to load: it is inside the `cf`, which writes it where Pi is
+  //    told to load it from when it finds a Pi (`cf setup`, here with a
+  //    stand-in `pi` on the PATH, and in a home of its own so the app's is not
+  //    touched). The runner's Node loads it, from a directory outside the
+  //    folder it was written to.
+  const piBin = join(box.probe, 'pi-bin')
+  mkdirSync(piBin, { recursive: true })
+  writeFileSync(join(piBin, 'pi'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+  const setupHome = join(box.probe, 'setup-home')
+  const setup = await withPackagedCf(found.cf, box, ['setup'], {
+    CONSENSFLOW_HOME: setupHome,
+    PATH: `${piBin}:${box.env.PATH}`,
+  })
+  assert.equal(setup.code, 0, `the packaged cf setup failed: ${setup.out}${setup.err}`)
+  assert.match(setup.out, /^harnesses: .*\bpi\b/m, `cf setup found no Pi: ${setup.out}`)
+  const installed = join(setupHome, 'extensions', 'pi')
+  const written = readdirSync(installed)
+  assert.equal(written.length, 1, `cf setup wrote ${written.length} Pi bundles: ${written}`)
+  // As Node resolves it: this machine's temporary folder is behind a link.
+  const extensionRoot = realpathSync(join(installed, written[0]))
+  const extension = join(extensionRoot, 'hosts', 'pi-extension', 'consensflow-delivery.mjs')
+  assert.ok(existsSync(extension), `cf setup wrote no Pi extension at ${extension}`)
   const hooks = join(box.probe, 'hooks.mjs')
   const sink = join(box.probe, 'resolved.json')
   // Node's own module-customization hooks, so the claim is what the RUNTIME
@@ -702,8 +678,7 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     `,
     'utf8',
   )
-  const resolution = await withBundledNode(
-    found.node,
+  const resolution = await withNode(
     box,
     `
     import { register } from 'node:module'
@@ -714,63 +689,35 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
     writeFileSync(1, JSON.stringify({ default: typeof module.default }) + '\\n')
     `,
   )
-  assert.equal(resolution.code, 0, `the bundled pi extension failed to load: ${resolution.err}`)
+  assert.equal(resolution.code, 0, `the installed pi extension failed to load: ${resolution.err}`)
   assert.match(resolution.out, /"default":"function"/)
 
   const resolved = JSON.parse(readFileSync(sink, 'utf8'))
-  const bundleRoot = join(found.app, 'Contents', 'Resources', 'cli')
   const outside = resolved.filter(
     (entry) =>
-      entry.url.startsWith('file://') && !fileURLToPath(entry.url).startsWith(`${bundleRoot}/`),
+      entry.url.startsWith('file://') && !fileURLToPath(entry.url).startsWith(`${extensionRoot}/`),
   )
   assert.deepEqual(
     outside,
     [],
-    `the packaged extension resolved files outside the bundle: ${JSON.stringify(outside)}`,
+    `the installed extension resolved files outside its own folder: ${JSON.stringify(outside)}`,
   )
   // Not "nothing under the repo": a locally built bundle LIVES under the
   // repo, so that would be trivially false. What must never be touched are
   // the checkout's live sources, which is where a path that escaped the
-  // bundle would land.
+  // extension's folder would land.
   const checkout = ['src', 'hosts', 'bin', 'skill'].map((part) => `file://${join(REPO, part)}/`)
   const leaked = resolved.filter((entry) => checkout.some((root) => entry.url.startsWith(root)))
   assert.deepEqual(
     leaked,
     [],
-    `the packaged extension resolved live sources from this checkout: ${JSON.stringify(leaked)}`,
+    `the installed extension resolved live sources from this checkout: ${JSON.stringify(leaked)}`,
   )
 
-  // 6. The ledger is the app's: its exclusive lock refuses the bundled node a
-  //    second opening while the app runs.
-  const lock = await withBundledNode(
-    found.node,
-    box,
-    `
-    import { openLedger } from ${JSON.stringify(join(bundleRoot, 'src', 'ledger', 'index.js'))}
-    import { join } from 'node:path'
-    import { writeFileSync } from 'node:fs'
-    try {
-      openLedger(join(process.env.CONSENSFLOW_HOME, 'consensflow.db'))
-      writeFileSync(1, 'SECOND-OWNER\\n')
-    } catch (error) {
-      writeFileSync(1, 'REFUSED ' + error.code + ' ' + error.message + '\\n')
-    }
-    `,
-  )
-  assert.equal(lock.code, 0, `the lock probe crashed: ${lock.err}`)
-  assert.match(
-    lock.out,
-    /^REFUSED ledger-locked another ConsensFlow has .*consensflow\.db open/m,
-    `the bundled node opened the running app's ledger: ${lock.out}`,
-  )
-
-  // 6b. A second packaged `cf ui` on the app's home is a second ConsensFlow,
-  //     and the same lock refuses it, whichever daemon holds the ledger. Exit 1
-  //     alone could be a dependency the bundle lacks, so it is the ledger's own
-  //     words that must be on stderr, and no handle line on stdout. It is the
-  //     daemon the home chose that is asked for, by the file in the home and by
-  //     nothing in the environment, and Node's runs on the Node `cf` finds beside
-  //     itself in the bundle: none is named to it.
+  // 6. A second packaged `cf ui` on the app's home is a second ConsensFlow, and
+  //    the ledger's exclusive lock refuses it. Exit 1 alone could be a
+  //    dependency the bundle lacks, so it is the ledger's own words that must
+  //    be on stderr, and no handle line on stdout.
   const second = await withPackagedCf(found.cf, box, ['ui', '--json', '--no-open'])
   assert.equal(second.signal, null, `the second cf ui never ended: ${second.out}${second.err}`)
   assert.equal(second.code, 1, `the second cf ui ended ${second.code}: ${second.out}${second.err}`)
@@ -782,6 +729,7 @@ test('the built app opens a pane, renders a real child, takes input and exits cl
   assert.equal(second.out, '', `the second cf ui printed a handle line: ${second.out}`)
 
   // 7. The app's own exit: stdin EOF, `RunEvent::Exit`, and nothing left.
+  //    (The bundle holds no Node, `cf.mjs`, `src` or `hosts`, and cannot run any.)
   const settled = await app.waitFor('settled')
   assert.equal(settled.data.terminalPreserved, true)
   app.quit()

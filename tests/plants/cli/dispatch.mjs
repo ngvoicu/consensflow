@@ -57,20 +57,19 @@ export const PLANTS = [
     meant: 'ui_is_the_daemons_and_reaching_this_module_it_is_an_unknown_command',
   },
   {
-    // The old fallthrough: a `ui` the module did not answer went to Node's
-    // sources, a daemon for a home that runs native. The test calls the
-    // library, and the Node it would start is none (the test's own folder
-    // bundles none), so what it sees is the refusal.
-    name: 'dispatch: a ui that reaches run is run on Node',
+    // `main` runs a `ui` as the daemon before the words get here (`native_ui`);
+    // one that reaches `run` has no verb to answer it, and says so.
+    name: 'dispatch: a ui that reaches run is answered as if it were a verb',
     edits: [
       [
         LIB,
-        '            None => standalone::run(env, args, out, err),\n',
+        '        None => standalone::run(env, args, out, err),\n',
         lines(
-          '            None if args.first().is_some_and(|word| word == "ui") => {',
-          '                node::run(args, std::path::Path::new("use-node"), err)',
-          '            }',
-          '            None => standalone::run(env, args, out, err),',
+          '        None if args.first().is_some_and(|word| word == "ui") => {',
+          '            writeln!(out, "ui")?;',
+          '            Ok(0)',
+          '        }',
+          '        None => standalone::run(env, args, out, err),',
           '',
         ),
       ],

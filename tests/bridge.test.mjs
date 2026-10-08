@@ -852,11 +852,10 @@ describe('cf ui --json --no-open speaks the bridge after its handle line', () =>
     const t = tempEnv()
     const { spawn } = await import('node:child_process')
     const { join } = await import('node:path')
-    const cf = join(import.meta.dirname, '..', 'bin', 'cf.mjs')
-    // `cf ui` as the app runs it: the native `cf`, or through cf.mjs on Node for a
-    // home that has taken the way back (CONSENSFLOW_TEST_DAEMON names which;
-    // `npm run test:daemons` runs both), and the daemon it starts is the one
-    // asked for: the start line in its log says so.
+    const cf = join(import.meta.dirname, '..', 'src', 'cli.js')
+    // `cf ui` as the app runs it: the native `cf`, or Node's CLI (CONSENSFLOW_TEST_DAEMON
+    // names which; `npm run test:daemons` runs both), and the daemon it starts is the
+    // one asked for: the start line in its log says so.
     const started = daemonCommand([cf, 'ui', '--json', '--no-open'], {
       home: t.env.CONSENSFLOW_HOME,
     })

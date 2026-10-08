@@ -1,16 +1,16 @@
 /**
- * The native `cf` a window runs (crates/cf), built and put in bin/ beside
- * cf.mjs: the checkout's, the integration suite's, and through
- * prepare-sidecar the app bundle's. The copy there is replaced, never
- * rewritten in place: macOS can kill the next run of a Mach-O changed in
- * place, and Windows refuses to delete a cf.exe a question hook still runs,
- * though it lets one be renamed aside. On macOS the copy is signed ad hoc,
- * as the bundle around it is.
+ * The native `cf` a window runs (crates/cf), built and put in bin/: the
+ * checkout's, the integration suite's, and through prepare-sidecar the app
+ * bundle's. A fresh clone has no bin/, and this makes it. The copy there is
+ * replaced, never rewritten in place: macOS can kill the next run of a Mach-O
+ * changed in place, and Windows refuses to delete a cf.exe a question hook
+ * still runs, though it lets one be renamed aside. On macOS the copy is signed
+ * ad hoc, as the bundle around it is.
  *
  *   node app/scripts/build-cf.mjs [--offline]
  */
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, readdirSync, renameSync, rmSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -27,6 +27,7 @@ export function buildCf({ offline = false } = {}) {
   // The workspace's one build folder (.cargo/config.toml) holds every crate's output.
   const built = join(REPO, 'app', 'src-tauri', 'target', 'release', NAME)
   const bin = join(REPO, 'bin')
+  mkdirSync(bin, { recursive: true })
   const placed = join(bin, NAME)
   // Copies set aside earlier go once nothing runs them any more.
   for (const old of readdirSync(bin).filter((file) => file.startsWith(`${NAME}.old-`))) {

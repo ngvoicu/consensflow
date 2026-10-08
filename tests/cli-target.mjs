@@ -1,28 +1,22 @@
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { assertBuilt, choose, chooseHome, DEFAULT_CLI, NATIVE_CF } from './choice.mjs'
+import { assertBuilt, choose, DEFAULT_CLI, NATIVE_CF } from './choice.mjs'
 
-/** Node's CLI, the one `node` selects: the door, which runs Node's own CLI in a home that has taken the way back. */
-const CF_MJS = join(fileURLToPath(new URL('..', import.meta.url)), 'bin', 'cf.mjs')
+/** Node's CLI, the one `node` selects: its sources, run by name (the door, `bin/cf.mjs`, forwards to the native `cf`). */
+const CLI_JS = join(fileURLToPath(new URL('..', import.meta.url)), 'src', 'cli.js')
 
 /**
  * Which `cf` the suites of the CLI run (tests/cli.test.mjs,
  * tests/cf-commands.test.mjs), as `CONSENSFLOW_TEST_CLI` names it (the words
- * are tests/choice.mjs's): `node`, Node's `bin/cf.mjs`; `native` or a JSON
+ * are tests/choice.mjs's): `node`, Node's `src/cli.js`; `native` or a JSON
  * array, a command and its arguments, the native `cf` of the build under
- * test; nothing, the tests' default, which is the native one. The product
- * chooses by the file in the home, not by the environment: `cliEnv` makes the
- * choice in the home a run is given (`chooseHome`), so a run never leaves to the
- * product's own default which cf answers. `kind` is the one chosen. A run
- * labelled with its leg (`CONSENSFLOW_TEST_LEG`) is refused a choice that is
- * not its own, and tests/cli.test.mjs holds the cf that runs to it by the
- * Node processes that start (Node's cf is one; the native cf starts none).
- * Either is run with the environment a test gives it and no other, and the
- * native cf is named no runtime for any verb, so that one that handed a verb
- * to Node's sources would fail (none is, now that `setup` and `doctor` are
- * answered too). `node tests/clis.mjs` runs the suites against both. The
- * options are what a test sets to choose in its own words, not the
- * environment's.
+ * test; nothing, the tests' default, which is the native one. `kind` is the
+ * one chosen. A run labelled with its leg (`CONSENSFLOW_TEST_LEG`) is refused
+ * a choice that is not its own, and tests/cli.test.mjs holds the cf that runs
+ * to it by the Node processes that start (Node's cf is one; the native cf
+ * starts none). Either is run with the environment a test gives it and no
+ * other. `node tests/clis.mjs` runs the suites against both. The options are
+ * what a test sets to choose in its own words, not the environment's.
  */
 export function cliTarget({
   named = process.env.CONSENSFLOW_TEST_CLI,
@@ -34,9 +28,9 @@ export function cliTarget({
     return {
       kind: 'node',
       native: false,
-      name: "Node's bin/cf.mjs (use-node in the home)",
+      name: "Node's src/cli.js",
       command: process.execPath,
-      args: [CF_MJS],
+      args: [CLI_JS],
     }
   }
   if (chosen.command === null) assertBuilt()
@@ -48,15 +42,4 @@ export function cliTarget({
     command,
     args,
   }
-}
-
-/**
- * The environment a run is given: the test's, and the home in it made the
- * target's choice (`chooseHome`: the file for Node's cf, none for the native
- * one). The home is the test's own: a run needs one, since the product looks in
- * it for the way back and nothing of the machine's is anybody's to look in.
- */
-export function cliEnv(target, env) {
-  chooseHome(target.kind, env.CONSENSFLOW_HOME)
-  return { ...env }
 }

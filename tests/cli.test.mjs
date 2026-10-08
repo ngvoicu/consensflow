@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { rosterPath } from '../src/roster.js'
 import { noteRan } from './choice.mjs'
-import { cliEnv, cliTarget } from './cli-target.mjs'
+import { cliTarget } from './cli-target.mjs'
 import { fakeExecutable, tempEnv } from './helpers.mjs'
 
 /** A launcher is `cf` on POSIX and `cf.cmd` on Windows. */
@@ -24,7 +24,7 @@ const target = cliTarget()
 async function cf(args, env) {
   try {
     const { stdout, stderr } = await run(target.command, [...target.args, ...args], {
-      env: cliEnv(target, env),
+      env,
       timeout: 30_000,
     })
     return { code: 0, stdout, stderr }
@@ -53,9 +53,9 @@ describe('cf manages the roster', () => {
 
   // Which cf ran is told by the processes that started, not by the selection,
   // which a selector that came to the other cf agrees with: Node's cf is a Node
-  // process running bin/cf.mjs, and the native cf serves the catalog with no
+  // process running src/cli.js, and the native cf serves the catalog with no
   // Node at all. The leg (tests/legs.mjs) says which it should be.
-  it('is the cf its leg names: a Node process ran bin/cf.mjs, or none did', async () => {
+  it('is the cf its leg names: a Node process ran src/cli.js, or none did', async () => {
     const own = tempEnv()
     try {
       const marks = join(own.root, 'node-runs')
@@ -73,7 +73,7 @@ describe('cf manages the roster', () => {
       if (kind === 'node') {
         assert.deepEqual(
           ran.map((line) => line.split('\t')[1].replace(/^.*[\\/]/, '')),
-          ['cf.mjs'],
+          ['cli.js'],
         )
       }
     } finally {
@@ -167,7 +167,7 @@ describe('cf manages the roster', () => {
     // every write EPIPEs. PIPESTATUS surfaces cf's own exit code.
     const command = [target.command, ...target.args].map((word) => `"${word}"`).join(' ')
     const child = spawn('/bin/bash', ['-c', `${command} help | false; exit \${PIPESTATUS[0]}`], {
-      env: { ...cliEnv(target, t.env), PATH: `${t.env.PATH}:/usr/bin:/bin` },
+      env: { ...t.env, PATH: `${t.env.PATH}:/usr/bin:/bin` },
       stdio: ['ignore', 'ignore', 'pipe'],
     })
     let stderr = ''

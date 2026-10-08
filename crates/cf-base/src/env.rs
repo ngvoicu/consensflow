@@ -111,7 +111,7 @@ mod tests {
         assert_eq!(env.text("CONSENSFLOW_TOKEN"), None);
         assert_eq!(env.os("CONSENSFLOW_TOKEN"), Some(OsStr::new("")));
         assert_eq!(env.text("CONSENSFLOW_URL"), Some("http://127.0.0.1:1"));
-        assert_eq!(env.text("CONSENSFLOW_NODE"), None);
+        assert_eq!(env.text("CONSENSFLOW_PROJECT"), None);
     }
 
     #[test]

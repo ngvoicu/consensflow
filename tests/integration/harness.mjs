@@ -211,8 +211,8 @@ export async function startIntegration({
   if (existingRoot === null) writeRoster(env)
 
   // The daemon under test, chosen on purpose (see above), in the home it runs
-  // on: the product's `cf` verbs choose by the file in the home, so the home
-  // has the file for Node's daemon and none for the native one's, and a
+  // on: the home is marked with the way back's file for Node's daemon and
+  // has none for the native one's (the product reads it no more), and a
   // restart of it on the other daemon takes the file away or makes it.
   const asked = daemonCommand([daemon], {
     ...(select === undefined ? {} : { named: select, leg: select }),

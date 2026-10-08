@@ -405,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn every_tauri_command_that_waits_on_node_or_a_pty_is_async() {
+    fn every_tauri_command_that_waits_on_the_daemon_or_a_pty_is_async() {
         let source = include_str!("commands.rs");
         for command in ["pane_input_enqueue", "pane_reply_enqueue"] {
             assert!(
@@ -1012,11 +1012,11 @@ mod tests {
             ),
         ];
 
-        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
-        node_stream
+        let (rust_stream, mut daemon_stream) = UnixStream::pair().expect("bridge socket pair");
+        daemon_stream
             .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
             .expect("write bridge handle");
-        node_stream.flush().expect("flush bridge handle");
+        daemon_stream.flush().expect("flush bridge handle");
         let connected = BridgeBuilder::new(Role::Host, 1024 * 1024)
             .connect(
                 rust_stream.try_clone().expect("clone bridge socket"),
@@ -1028,8 +1028,9 @@ mod tests {
             .iter()
             .map(|(_, _, operation, body)| ((*operation).to_string(), body.clone()))
             .collect::<Vec<_>>();
-        let node = thread::spawn(move || {
-            let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
+        let daemon = thread::spawn(move || {
+            let mut reader =
+                BufReader::new(daemon_stream.try_clone().expect("clone daemon reader"));
             for (operation, body) in expected {
                 let mut line = String::new();
                 reader.read_line(&mut line).expect("read command request");
@@ -1038,7 +1039,7 @@ mod tests {
                 assert_eq!(frame["op"], operation);
                 assert_eq!(frame["body"], body);
                 serde_json::to_writer(
-                    &mut node_stream,
+                    &mut daemon_stream,
                     &json!({
                         "v":1,
                         "id":frame["id"],
@@ -1048,8 +1049,8 @@ mod tests {
                     }),
                 )
                 .expect("write command response");
-                node_stream.write_all(b"\n").expect("terminate response");
-                node_stream.flush().expect("flush command response");
+                daemon_stream.write_all(b"\n").expect("terminate response");
+                daemon_stream.flush().expect("flush command response");
             }
         });
 
@@ -1116,7 +1117,7 @@ mod tests {
             assert_eq!(response, json!({"ok":true}), "{command}");
         }
 
-        node.join().expect("Node peer");
+        daemon.join().expect("daemon peer");
         drop(webview);
         drop(app);
     }

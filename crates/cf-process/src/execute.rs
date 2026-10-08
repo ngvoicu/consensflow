@@ -41,6 +41,20 @@ pub struct Failed {
     pub stdout: String,
 }
 
+impl Failed {
+    /// A program that never ran, `message` the reason: it exited with nothing
+    /// and wrote nothing.
+    #[must_use]
+    pub fn unstarted(message: String) -> Self {
+        Self {
+            message,
+            code: None,
+            killed: false,
+            stdout: String::new(),
+        }
+    }
+}
+
 /// Runs `run` in `cwd` with the environment `env`, all of it and nothing
 /// inherited, until it ends: its standard output as text, or how it failed.
 /// Its input stays open and unwritten, as Node's does. It has ended when it

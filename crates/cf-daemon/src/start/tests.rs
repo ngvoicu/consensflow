@@ -71,7 +71,6 @@ fn environment(root: &Path) -> Env {
                 home.join(".config").to_string_lossy().into_owned(),
             ),
             ("PATH", bin.to_string_lossy().into_owned()),
-            ("CONSENSFLOW_NODE", "/the/node/the/app/named".to_owned()),
         ]
         .into_iter()
         .map(|(name, value)| (name.to_owned(), value))

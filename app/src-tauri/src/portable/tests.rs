@@ -4,17 +4,17 @@ use std::sync::Arc;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 
-/// A runtime as the packer packs it: node.exe and the CLI, `cf.exe` among
-/// it, in a gzip-compressed tar.
-fn payload(node: &[u8]) -> Vec<u8> {
+/// A runtime as the packer packs it: the native `cf`, whose bytes are `cf`,
+/// and the terminals' console host, in a gzip-compressed tar.
+fn payload(cf: &[u8]) -> Vec<u8> {
     let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
-    let cli: &[(&str, &[u8])] = &[
-        ("node.exe", node),
-        ("cli/bin/cf.mjs", b"the cli"),
-        ("cli/bin/cf.exe", b"the native cf"),
-        ("cli/src/core/daemon.js", b"the core"),
+    let runtime: &[(&str, &[u8])] = &[
+        ("cli/bin/cf.exe", cf),
+        ("conpty.dll", b"the console host"),
+        ("OpenConsole.exe", b"its process"),
+        ("OpenConsole-LICENSE.txt", b"its license"),
     ];
-    for (path, body) in cli {
+    for (path, body) in runtime {
         let mut header = tar::Header::new_ustar();
         header.set_size(body.len() as u64);
         header.set_mode(0o755);
@@ -81,7 +81,7 @@ fn old_runtime(root: &Path, name: &str, present: &[&[&str]]) -> PathBuf {
 #[test]
 fn the_footer_finds_the_payload_and_names_its_folder_by_crc() {
     let dir = tempfile::tempdir().expect("dir");
-    let payload = payload(b"node");
+    let payload = payload(b"the native cf");
     let exe = packed(dir.path(), &payload);
     let found = Payload::find(&mut File::open(&exe).expect("open"))
         .expect("read")
@@ -137,29 +137,29 @@ fn a_footer_that_cannot_be_right_is_an_error() {
     }
 }
 
-/// The first start unpacks node.exe and the CLI, marker last; a later
-/// start reuses the folder without reading the payload at all.
+/// The first start unpacks the `cf` and the console host, marker last; a
+/// later start reuses the folder without reading the payload at all.
 #[test]
 fn the_first_start_unpacks_the_runtime_and_later_ones_reuse_it() {
     let dir = tempfile::tempdir().expect("dir");
     let local = dir.path().join("local");
     let root = local.join(RUNTIME_PARENT);
-    let mut payload = payload(b"node");
+    let mut payload = payload(b"the native cf");
     let exe = packed(dir.path(), &payload);
 
     let folder = unpacked_runtime(&exe, &local, "9.9.9")
         .expect("unpacked")
         .expect("a runtime");
     assert_eq!(folder, root.join(format!("9.9.9-{:08x}", crc_of(&payload))));
-    assert_eq!(fs::read(folder.join("node.exe")).expect("node"), b"node");
-    assert_eq!(
-        fs::read(folder.join("cli/bin/cf.mjs")).expect("cli"),
-        b"the cli"
-    );
     assert_eq!(
         fs::read(folder.join("cli/bin/cf.exe")).expect("cf"),
         b"the native cf"
     );
+    for host in ["conpty.dll", "OpenConsole.exe", "OpenConsole-LICENSE.txt"] {
+        assert!(folder.join(host).is_file(), "{host}");
+    }
+    // No Node is in the payload, and none is looked for.
+    assert!(!folder.join("node.exe").exists());
     assert!(folder.join(".unpacked").is_file());
     assert_eq!(
         entries(&root),
@@ -179,7 +179,7 @@ fn the_first_start_unpacks_the_runtime_and_later_ones_reuse_it() {
 fn a_payload_that_does_not_match_its_crc_unpacks_nothing() {
     let dir = tempfile::tempdir().expect("dir");
     let local = dir.path().join("local");
-    let mut payload = payload(b"node");
+    let mut payload = payload(b"the native cf");
     let trailer = payload.len() - 8;
     payload[trailer] ^= 0xff;
     let exe = packed(dir.path(), &payload);
@@ -218,7 +218,9 @@ fn copies_started_at_once_share_one_runtime() {
     assert!(folders.iter().all(|folder| *folder == folders[0]));
     assert!(folders[0].join(".unpacked").is_file());
     assert_eq!(
-        fs::read(folders[0].join("node.exe")).expect("node").len(),
+        fs::read(folders[0].join("cli/bin/cf.exe"))
+            .expect("cf")
+            .len(),
         512 * 1024
     );
     assert_eq!(
@@ -262,7 +264,7 @@ fn a_runtime_folder_without_its_marker_is_unpacked_again() {
     let dir = tempfile::tempdir().expect("dir");
     let local = dir.path().join("local");
     let root = local.join(RUNTIME_PARENT);
-    let payload = payload(b"node");
+    let payload = payload(b"the native cf");
     let exe = packed(dir.path(), &payload);
     let damaged = root.join(format!("9.9.9-{:08x}", crc_of(&payload)));
     fs::create_dir_all(damaged.join("cli")).expect("a damaged runtime");
@@ -273,7 +275,7 @@ fn a_runtime_folder_without_its_marker_is_unpacked_again() {
         .expect("a runtime");
     assert_eq!(folder, damaged);
     assert!(folder.join(".unpacked").is_file());
-    assert!(folder.join("node.exe").is_file());
+    assert!(folder.join("cli/bin/cf.exe").is_file());
     assert!(!folder.join("stray").exists());
     assert_eq!(
         entries(&root),
@@ -298,7 +300,7 @@ fn the_runtime_goes_under_a_parent_the_older_apps_collector_never_reads() {
             &[&["node.exe"], &["cli", "bin", "cf.exe"]],
         ),
     ];
-    let exe = packed(dir.path(), &payload(b"node"));
+    let exe = packed(dir.path(), &payload(b"the native cf"));
 
     let folder = unpacked_runtime(&exe, &local, "9.9.9")
         .expect("unpacked")
@@ -342,7 +344,7 @@ fn a_runtime_with_a_program_that_cannot_be_written_stays_whole_and_the_others_go
         fs::set_permissions(program, permissions).expect("read-only program");
     }
 
-    let exe = packed(dir.path(), &payload(b"node"));
+    let exe = packed(dir.path(), &payload(b"the native cf"));
     let folder = unpacked_runtime(&exe, &local, "9.9.9")
         .expect("unpacked")
         .expect("a runtime");
@@ -542,7 +544,7 @@ fn a_runtime_whose_node_or_cf_runs_stays_whole_and_goes_once_it_has_ended() {
         Running::start(&node_runs.join("node.exe")),
         Running::start(&cf_runs.join("cli").join("bin").join("cf.exe")),
     ];
-    let exe = packed(dir.path(), &payload(b"node"));
+    let exe = packed(dir.path(), &payload(b"the native cf"));
 
     let folder = unpacked_runtime(&exe, &local, "9.9.9")
         .expect("unpacked")

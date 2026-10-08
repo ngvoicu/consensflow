@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test, { after } from 'node:test'
 import { recordedPids } from './updater-smoke/box.mjs'
-import { REPO } from './updater-smoke/build.mjs'
+import { RELEASES, REPO } from './updater-smoke/build.mjs'
 import {
   copyOver,
   digestManifest,
@@ -22,8 +22,8 @@ import {
 } from './updater-smoke/case.mjs'
 import {
   appLog,
-  assertChoseNative,
   assertOnlyProbesRefused,
+  assertStartedDaemon,
   daemonLog,
   daemonOf,
   gone,
@@ -42,18 +42,24 @@ import { alive, TIMEOUT_MS, until } from './updater-smoke/processes.mjs'
 import { generateKey } from './updater-smoke/signing.mjs'
 
 /**
- * The packaged update path, end to end: an installed app (the bridge) is given
- * this checkout's app as an update by its own updater, from a feed this run serves,
- * on a machine of the case's own. `npm run smoke:updater` builds the two apps and
- * runs every case here; without that opt-in each is one skipped test, so the
+ * The packaged update path, end to end: an installed app (the bridge, or the flip
+ * release) is given this checkout's app, the release that ships no Node, as an
+ * update by its own updater, from a feed this run serves, on a machine of the
+ * case's own. `npm run smoke:updater` builds the apps and runs every case here
+ * once for each installed release (`CONSENSFLOW_UPDATER_FROM_RELEASE` names
+ * which this run is); without that opt-in each is one skipped test, so the
  * ordinary suite stays cheap, and once it is asked for a missing or unsafe input
  * fails with the command that provides it.
  *
  * The cases:
  *
- * - the update: install and restart, the native daemon by default on the same
- *   home, the ledger whole, the terminal command of the home repaired and no
- *   other's;
+ * - the update: install and restart, the daemon the bundle's `cf` on the same
+ *   home, the ledger whole, the terminal command of the home running the
+ *   update's `cf` (rewritten, if the installed release's named Node's) and no
+ *   other's changed;
+ * - the same from a home that took the flip release's way back to Node (a
+ *   `use-node` file): the installed app's daemon is Node's, the update's is the
+ *   `cf`, on the ledger Node's wrote, and the file is left as the user made it;
  * - two updates the app refuses (a signature that is not the key's, and bundles its
  *   check refuses): the installed bundle is intact and the app still runs;
  * - an app replaced by hand, as a disk image's copy does, with the app quit:
@@ -64,8 +70,9 @@ const REQUESTED = process.env.CONSENSFLOW_UPDATER_SMOKE === '1'
 const ONLY = (process.env.CONSENSFLOW_UPDATER_ONLY ?? '').split(',').filter(Boolean)
 /** The schema the bridge's ledger is at: a ledger the update touches is at it or past it. */
 const BRIDGE_SCHEMA = 10
-/** The daemon the installed app starts: the bridge's is Node's. */
-const INSTALLED_DAEMON = process.env.CONSENSFLOW_UPDATER_FROM_DAEMON ?? 'node'
+
+/** The daemon the installed app starts in a home that took no way back: the release's own. */
+const installedDaemon = () => RELEASES[inputs.release].daemon
 
 let inputs = null
 after(() => {
@@ -135,103 +142,134 @@ function offerUpdate(kase, app = inputs.to.app) {
   return update
 }
 
-updaterCase(
-  'the update installs and restarts on the native daemon, keeps the ledger and repairs its own terminal command',
-  async (kase, t) => {
-    const { box } = kase
-    // Both names of this home's, one of which serves another home, and the other home's own.
-    const planted = plantCommands(kase.installed, box, { elsewhere: true })
-    offerUpdate(kase)
-    const app = kase.start(inputs.to.version)
+/**
+ * The update from the installed app, install and restart, and what it leaves:
+ * the update's app on the bundle's `cf`, the ledger whole, and the terminal
+ * command of the home running the update's `cf`. With `wayBack` the home took
+ * the flip release's way back to Node before the installed app started (a
+ * `use-node` file in it), so the installed app's daemon is Node's whichever
+ * release it is, the terminal commands are not looked at (the `cf` that wrote
+ * them handed `setup` to Node), and the file is the user's to the end.
+ */
+async function updateFlow(kase, t, { wayBack }) {
+  const { box } = kase
+  const wayBackFile = join(box.state, 'use-node')
+  // Both names of this home's, one of which serves another home, and the other home's own.
+  const planted = wayBack
+    ? null
+    : plantCommands(kase.installed, box, { elsewhere: true, release: inputs.release })
+  if (wayBack) writeFileSync(wayBackFile, '')
+  offerUpdate(kase)
+  const app = kase.start(inputs.to.version)
 
-    // The installed app: its process, its daemon (the bridge's is Node's), ready, and holding the ledger.
-    const first = await bootEvidence(kase, app, { version: inputs.from.version })
-    assert.equal(
-      first.daemon.kind,
-      INSTALLED_DAEMON,
-      `the installed app started ${first.daemon.runtime}`,
-    )
-    const chiefs = await blockedEvidence(kase, app, first)
-    // The page has had its answers (two projects, two windows): the daemon has the ledger, and refuses a second.
-    await heldEvidence(kase)
-    t.diagnostic(
-      `installed ${inputs.from.version}: app pid ${first.app}, daemon pid ${first.daemon.pid} (${first.daemon.runtime}), ledger held`,
-    )
-    const traced = tracedEvents(readFileSync(join(box.state, 'events.jsonl'), 'utf8'))
-    assert.ok(traced.length > 0, 'the daemon traced no ledger event before the update')
+  // The installed app: its process, its daemon, ready, and holding the ledger.
+  const first = await bootEvidence(kase, app, { version: inputs.from.version })
+  assert.equal(
+    first.daemon.kind,
+    wayBack ? 'node' : installedDaemon(),
+    `the installed app started ${first.daemon.runtime}`,
+  )
+  const chiefs = await blockedEvidence(kase, app, first)
+  // The page has had its answers (two projects, two windows): the daemon has the ledger, and refuses a second.
+  await heldEvidence(kase)
+  t.diagnostic(
+    `installed ${inputs.from.version}: app pid ${first.app}, daemon pid ${first.daemon.pid} (${first.daemon.runtime}), ledger held`,
+  )
+  const traced = tracedEvents(readFileSync(join(box.state, 'events.jsonl'), 'utf8'))
+  assert.ok(traced.length > 0, 'the daemon traced no ledger event before the update')
 
-    // Both windows close, the install goes through, and the app starts again as the update.
-    await releasePanes(app, chiefs)
-    const second = await bootEvidence(kase, app, { version: inputs.to.version, pid: first.app })
-    const restarted = await app.waitFor(
-      'the update restart',
-      (event) => event.event === 'update-restarted',
-    )
-    assert.equal(
-      restarted.data.currentVersion,
-      inputs.to.version,
-      'the restart did not report the update',
-    )
-    assert.equal(restarted.data.blockers, 0, 'the restart reported open panes')
-    assert.equal(restarted.pid, second.app)
-    assert.notEqual(restarted.pid, first.app, 'the update restarted in the original process')
-    assert.ok(alive(restarted.pid), 'the restarted app was not alive when it reported ready')
-    await until('the first app exits', () => gone(first.app))
-    await until('the first daemon exits and lets go of the ledger', () => gone(first.daemon.pid))
-    // The page read the board of the update's daemon: it is ready, and has the ledger.
-    await heldEvidence(kase)
+  // Both windows close, the install goes through, and the app starts again as the update.
+  await releasePanes(app, chiefs)
+  const second = await bootEvidence(kase, app, { version: inputs.to.version, pid: first.app })
+  const restarted = await app.waitFor(
+    'the update restart',
+    (event) => event.event === 'update-restarted',
+  )
+  assert.equal(
+    restarted.data.currentVersion,
+    inputs.to.version,
+    'the restart did not report the update',
+  )
+  assert.equal(restarted.data.blockers, 0, 'the restart reported open panes')
+  assert.equal(restarted.pid, second.app)
+  assert.notEqual(restarted.pid, first.app, 'the update restarted in the original process')
+  assert.ok(alive(restarted.pid), 'the restarted app was not alive when it reported ready')
+  await until('the first app exits', () => gone(first.app))
+  await until('the first daemon exits and lets go of the ledger', () => gone(first.daemon.pid))
+  // The page read the board of the update's daemon: it is ready, and has the ledger.
+  await heldEvidence(kase)
 
-    // The update's app: its daemon is the native one, by default, chosen as the app's log says.
-    assert.equal(second.daemon.kind, 'native', `the update started ${second.daemon.runtime}`)
-    assert.notEqual(second.daemon.pid, first.daemon.pid)
-    assertChoseNative(appLog(box), box.state)
-    assert.ok(!existsSync(join(box.state, 'use-node')), 'the way back to Node was taken')
-    t.diagnostic(
-      `updated ${inputs.to.version}: app pid ${second.app}, daemon pid ${second.daemon.pid} (${second.daemon.runtime}), ledger held, the app log names the choice`,
-    )
+  // The update's app: its daemon is the bundle's cf, which the app's log names, and the way
+  // back's file, which nothing reads now, is there or not as the user left it.
+  const cf = join(box.copy, 'Contents', 'Resources', 'cli', 'bin', 'cf')
+  assert.equal(second.daemon.kind, 'native', `the update started ${second.daemon.runtime}`)
+  assert.notEqual(second.daemon.pid, first.daemon.pid)
+  assertStartedDaemon(appLog(box), cf)
+  assert.equal(existsSync(wayBackFile), wayBack, 'the way back to Node was taken or given back')
+  t.diagnostic(
+    `updated ${inputs.to.version}: app pid ${second.app}, daemon pid ${second.daemon.pid} (${second.daemon.runtime}), ledger held, the app log names the cf it started`,
+  )
 
-    // The terminal command of this home runs the update's cf; no other command changed.
-    const cf = join(box.copy, 'Contents', 'Resources', 'cli', 'bin', 'cf')
+  // The terminal command of this home runs the update's cf; no other command changed.
+  if (planted !== null) {
     assertRepaired({
       box,
       planted,
       cf,
       appLogText: appLog(box),
       version: second.daemon.runtime.split(' ')[1],
+      release: inputs.release,
     })
     t.diagnostic(
-      `the terminal command of ${box.state} now runs ${cf}; the commands of ${box.other} and the one pinned to it are as they were`,
+      `the terminal command of ${box.state} runs ${cf}; the commands of ${box.other} and the one pinned to it are as they were`,
     )
+  }
 
-    // The bundle in place is the update, byte for byte, sealed, with nothing left of the install.
-    verifySeal(box.copy)
-    assert.deepEqual(
-      digestManifest(box.copy),
-      inputs.toManifest,
-      'installed copy bytes do not equal TO_APP',
-    )
-    assert.deepEqual(
-      digestManifest(inputs.to.app),
-      inputs.toManifest,
-      'TO_APP was mutated by the smoke',
-    )
-    assert.deepEqual(stagingLeft(box), [], 'the install left staging files in the home')
+  // The bundle in place is the update, byte for byte, sealed, with nothing left of the install.
+  verifySeal(box.copy)
+  assert.deepEqual(
+    digestManifest(box.copy),
+    inputs.toManifest,
+    'installed copy bytes do not equal TO_APP',
+  )
+  assert.deepEqual(
+    digestManifest(inputs.to.app),
+    inputs.toManifest,
+    'TO_APP was mutated by the smoke',
+  )
+  assert.deepEqual(stagingLeft(box), [], 'the install left staging files in the home')
 
-    // The quit takes everything with it, and the ledger is whole.
-    const ended = await quit(kase, [first.daemon.pid, second.daemon.pid])
-    t.diagnostic(`the original app exited ${ended.code} / ${ended.signal}`)
-    assert.deepEqual(
-      app.events.filter((event) => event.event === 'update-failure'),
-      [],
-      'the successful updater smoke reported a failure',
-    )
-    const ledger = ledgerOf(kase)
-    assertSound(ledger, { atLeast: BRIDGE_SCHEMA })
-    assertProjects(ledger, projectsOf(kase))
-    assertTraced(traced, ledger)
-    t.diagnostic(
-      `the ledger: schema ${ledger.version}, sound, the ${traced.length} events traced before the update are in it`,
-    )
+  // The quit takes everything with it, and the ledger is whole.
+  const ended = await quit(kase, [first.daemon.pid, second.daemon.pid])
+  t.diagnostic(`the original app exited ${ended.code} / ${ended.signal}`)
+  assert.deepEqual(
+    app.events.filter((event) => event.event === 'update-failure'),
+    [],
+    'the successful updater smoke reported a failure',
+  )
+  const ledger = ledgerOf(kase)
+  assertSound(ledger, { atLeast: BRIDGE_SCHEMA })
+  assertProjects(ledger, projectsOf(kase))
+  assertTraced(traced, ledger)
+  t.diagnostic(
+    `the ledger: schema ${ledger.version}, sound, the ${traced.length} events traced before the update are in it`,
+  )
+}
+
+updaterCase(
+  "the update installs and restarts on the bundle's cf, keeps the ledger and repairs its own terminal command",
+  (kase, t) => updateFlow(kase, t, { wayBack: false }),
+)
+
+updaterCase(
+  "the update of a home that took the way back to Node starts the bundle's cf on the ledger Node's daemon wrote, and leaves the file",
+  async (kase, t) => {
+    // The bridge has no way back to take: its daemon is Node's in every home.
+    if (inputs.release !== 'flip') {
+      t.skip(`the ${inputs.release} release has no use-node file to take`)
+      return
+    }
+    await updateFlow(kase, t, { wayBack: true })
   },
 )
 
@@ -239,7 +277,7 @@ updaterCase(
 async function refusedFlow(kase, t, { blocked }) {
   const app = kase.start(inputs.to.version, { expected: ['update-failure'] })
   const first = await bootEvidence(kase, app, { version: inputs.from.version })
-  assert.equal(first.daemon.kind, INSTALLED_DAEMON)
+  assert.equal(first.daemon.kind, installedDaemon())
   if (blocked) await releasePanes(app, await blockedEvidence(kase, app, first))
   const failure = await app.waitFor('the refusal', (event) => event.event === 'update-failure', {
     unless: (event) =>
@@ -325,7 +363,10 @@ for (const how of ['replaced', 'copied over']) {
     async (kase, t) => {
       const { box } = kase
       // Both names of this home's serve it, and the other home has its own.
-      const planted = plantCommands(kase.installed, box, { elsewhere: false })
+      const planted = plantCommands(kase.installed, box, {
+        elsewhere: false,
+        release: inputs.release,
+      })
       // The installed app has its session, and no update is offered: two projects opened and closed, then it is quit.
       const old = kase.start(inputs.to.version, { expected: ['update-failure'] })
       const first = await bootEvidence(kase, old, { version: inputs.from.version })
@@ -364,17 +405,19 @@ for (const how of ['replaced', 'copied over']) {
       const second = await bootEvidence(kase, app, { version: inputs.to.version })
       await app.waitFor('the first start', (event) => event.event === 'update-restarted')
       await heldEvidence(kase)
+      const cf = join(box.copy, 'Contents', 'Resources', 'cli', 'bin', 'cf')
       assert.equal(second.daemon.kind, 'native', `the first start ran ${second.daemon.runtime}`)
-      assertChoseNative(appLog(box), box.state)
+      assertStartedDaemon(appLog(box), cf)
       assertRepaired({
         box,
         planted,
-        cf: join(box.copy, 'Contents', 'Resources', 'cli', 'bin', 'cf'),
+        cf,
         appLogText: appLog(box),
         version: second.daemon.runtime.split(' ')[1],
+        release: inputs.release,
       })
       t.diagnostic(
-        `first start of ${inputs.to.version}: daemon pid ${second.daemon.pid} (${second.daemon.runtime}), the terminal command repaired`,
+        `first start of ${inputs.to.version}: daemon pid ${second.daemon.pid} (${second.daemon.runtime}), the terminal command runs the update's cf`,
       )
       await quit(kase, [second.daemon.pid])
       assertKept(before, ledgerOf(kase))

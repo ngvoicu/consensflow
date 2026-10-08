@@ -45,8 +45,8 @@ jobs:
 
       - run: npm ci
       - run: npm ci --prefix app
-      # The page and the Node sidecar the Rust build expects beside it, and the
-      # native cf a window runs, built into bin/ for the integration suite.
+      # The page, and the native cf a window runs, built into bin/ for the
+      # integration suite and staged as the resource the Rust build expects.
       - run: npm --prefix app run bundle:ui
       - run: npm --prefix app run prepare-sidecar
 
@@ -58,12 +58,12 @@ jobs:
       # binary of cf-panes, which no Tauri bundle ships.
       - run: npm run build:bridge
       - run: npm run test:integration
-      # The daemon's suites and the rig's against both daemons, Node's (the way
-      # back, a home's `use-node` file) and the native cf ui, the default.
+      # The daemon's suites and the rig's against both daemons, Node's and the
+      # native cf ui, until Node's goes.
       - run: npm run test:daemons
         timeout-minutes: 20
-      # The CLI's suites against both CLIs: Node's cf.mjs (the way back), and the
-      # native cf, which answers every standalone verb by default.
+      # The CLI's suites against both CLIs: Node's src/cli.js, and the native
+      # cf, which answers every verb.
       - run: npm run test:clis
         timeout-minutes: 15
       # Cargo reads app/src-tauri/.cargo/config.toml from the folder it runs in:

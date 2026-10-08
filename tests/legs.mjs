@@ -20,7 +20,7 @@ export const DAEMON_LEGS = [
 ]
 
 export const CLI_LEGS = [
-  { label: "Node's cf.mjs", selector: 'node', leg: 'node' },
+  { label: "Node's src/cli.js", selector: 'node', leg: 'node' },
   { label: 'the native cf', selector: 'native', leg: 'native' },
 ]
 

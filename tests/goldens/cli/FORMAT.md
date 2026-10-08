@@ -9,7 +9,7 @@ command of any other home to the native `cf`, so it is no oracle), and `crates/c
 
     npm run goldens:cli                 runs every scenario against Node, writes the files
     node tests/goldens/cli/record.mjs --check    records again, says which files differ, writes nothing
-    npm run test:clis                   the suites of the CLI against Node's cf.mjs and then the native cf
+    npm run test:clis                   the suites of the CLI against Node's src/cli.js and then the native cf
     npm run plants:cli                  plants bugs in the Rust and in the recorder, says what caught each
 
 `npm run goldens:cli` is run once on each platform the tests run on, since a path
@@ -71,8 +71,8 @@ recorded: `world.mjs` checks every case).
 ## What the Rust player does with a recording
 
 It makes the case's folder from `before` (`$ROOT` in a file's text is the folder),
-runs the binary with exactly the environment of `env` (no folder of a recording
-has the way back's `use-node` file in it, so the binary answers by itself), and
+runs the binary with exactly the environment of `env` (the binary answers by
+itself, whatever a folder holds: the flip release's `use-node` file is read by nothing), and
 compares the output, the error output, the exit code and the files after, byte
 for byte.
 

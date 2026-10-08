@@ -48,14 +48,14 @@ export const windowsEnv = () =>
  * are tests/choice.mjs's): `node`, Node's, `node <nodeArgs>`; `native` or a JSON
  * array, a command and its arguments, the native one (`cf ui --json --no-open`
  * of the build under test); nothing, the tests' default, which is the native
- * one. The product chooses by the file in the home, not by the environment, so
- * the choice is made in the home the daemon is to run on: `home` is that
- * folder, which the Node daemon's gets the way back's file in and the native
- * one's has none (`chooseHome`), whatever else starts in it, and which
- * `assertStarted` holds to the choice. A start that names none leaves the home
- * to its caller. Either is told the runtime to name to the windows it opens
- * (`CONSENSFLOW_NODE`): the Node daemon names its own whatever this says, the
- * native one names what it is given. `env` is what to add to the environment
+ * one. The choice is marked in the home the daemon is to run on (the product
+ * reads no such mark now): `home` is that folder, which the Node daemon's gets
+ * the way back's file in and the native one's has none (`chooseHome`), whatever
+ * else starts in it, and which `assertStarted` holds to the choice. A start that
+ * names none leaves the home to its caller. Either is told the runtime the rig's
+ * stand-in harness runs on (`CONSENSFLOW_NODE`): the Node daemon names its own
+ * to its windows, the native one names none, and the stand-in finds the variable
+ * in the environment its pane host started with. `env` is what to add to the environment
  * the test gives the daemon, and `kind` is the one chosen, `node` or `native`:
  * what `assertStarted` holds the daemon that starts to. A run labelled with
  * its leg (`CONSENSFLOW_TEST_LEG`) is refused a choice that is not its own.

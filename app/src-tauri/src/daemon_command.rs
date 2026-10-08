@@ -1,14 +1,6 @@
-//! What the app starts as its daemon: the native one, the bundled `cf` running
-//! `cf ui --json --no-open`, on the PATH the human's login shell sets up. For
-//! the flip release alone there is a way back: a home with a `use-node` file in
-//! it (`cf_base::way_back`, which the native `cf` and `bin/cf.mjs` ask as well,
-//! so the daemon and every `cf` verb of that home are one implementation) gets
-//! the bundled runtime running the bundled CLI, `node cf.mjs ui --json
-//! --no-open`, as before. The home decides, and nothing in the environment: the
-//! app takes only the login shell's PATH, so a variable left in a shell profile
-//! would run the terminal's verbs on one implementation and the app's daemon on
-//! the other. The portable Windows app carries the runtime and the CLI inside its
-//! exe and unpacks them first.
+//! What the app starts as its daemon: the bundled `cf` running `cf ui --json
+//! --no-open`, on the PATH the human's login shell sets up. The portable
+//! Windows app carries the `cf` inside its exe and unpacks it first.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -16,8 +8,6 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use cf_base::env::Env;
-use cf_base::way_back::{self, Choice};
 use tauri::{AppHandle, Manager};
 
 use crate::daemon::DaemonFailure;
@@ -25,28 +15,23 @@ use crate::daemon::DaemonFailure;
 /// How long the human's login shell has to say its PATH.
 const LOGIN_PATH_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// The daemon the home chooses, `cf ui --json --no-open` as the native one or
-/// as Node's, on the human's login PATH. A runtime or CLI missing from the app
-/// is not worth another start. Which daemon it is, and what said so (the file
-/// in the home, or the default), is one line of the app's error log.
+/// The bundle's `cf` as its folder names it.
+const CF: &str = if cfg!(windows) { "cf.exe" } else { "cf" };
+
+/// The daemon, `cf ui --json --no-open` of the bundled `cf`, on the human's
+/// login PATH. A `cf` missing from the app is not worth another start. Which
+/// `cf` it starts is one line of the app's error log.
 pub(crate) fn daemon_command(app: &AppHandle) -> Result<Command, DaemonFailure> {
-    let missing = |cause| DaemonFailure {
+    let cf = bundled_cf(app).map_err(|cause| DaemonFailure {
         cause,
         retry: false,
-    };
-    let (node, cli) = bundled_cli(app).map_err(missing)?;
-    let (mut command, choice) = command_in(&Env::from_process(), &node, &cli);
-    eprintln!("consensflow: {}", chosen(&choice));
-    if !choice.node && !Path::new(command.get_program()).exists() {
-        return Err(missing(format!(
-            "the bundled native ConsensFlow is missing from this app ({:?})",
-            command.get_program()
-        )));
-    }
+    })?;
+    eprintln!("consensflow: {}", starting(&cf));
+    let mut command = command_for(&cf);
     if let Some(path) = login_path() {
         command.env("PATH", path);
     }
-    // node.exe is a console program: started from a windowed app it gets a
+    // cf.exe is a console program: started from a windowed app it gets a
     // console window of its own, and every console program it starts shows in
     // it. The daemon runs without one; its windows are the app's panes.
     #[cfg(windows)]
@@ -58,106 +43,53 @@ pub(crate) fn daemon_command(app: &AppHandle) -> Result<Command, DaemonFailure> 
     Ok(command)
 }
 
-/// The daemon of the home `env` names, and what chose it: the way back's file
-/// in the home or its absence, and nothing else of the environment.
-fn command_in(env: &Env, node: &Path, cli: &Path) -> (Command, Choice) {
-    let choice = way_back::choose(env);
-    (command_for(node, cli, choice.node), choice)
-}
-
-/// The daemon `node` and the CLI `cf.mjs` make: Node's, `node cf.mjs ui
-/// --json --no-open`, when the home has taken the way back; or else the
-/// native `cf` beside `cf.mjs` running `cf ui --json --no-open`, told where the
-/// bundled node is, which a window's npm shim on Windows may run on (Node's
-/// daemon names its own).
-fn command_for(node: &Path, cli: &Path, use_node: bool) -> Command {
-    if !use_node {
-        let mut command = Command::new(native_cf(cli));
-        command
-            .args(["ui", "--json", "--no-open"])
-            .env("CONSENSFLOW_NODE", node);
-        return command;
-    }
-    let mut command = Command::new(node);
-    command.arg(cli).args(["ui", "--json", "--no-open"]);
+/// The daemon `cf` makes: `cf ui --json --no-open`, with nothing of the app's
+/// own added to its environment.
+fn command_for(cf: &Path) -> Command {
+    let mut command = Command::new(cf);
+    command.args(["ui", "--json", "--no-open"]);
     command
 }
 
-/// The native `cf` of the bundle whose CLI is `cli`: beside its `cf.mjs`, which
-/// a portable runtime's own folder holds as an installed app's resources do.
-pub(crate) fn native_cf(cli: &Path) -> PathBuf {
-    cli.with_file_name(if cfg!(windows) { "cf.exe" } else { "cf" })
+/// What the app's error log says of the daemon it starts: which `cf` it runs.
+fn starting(cf: &Path) -> String {
+    format!("starting the daemon: {} ui --json --no-open", cf.display())
 }
 
-/// What the app's error log says of the daemon it starts: which one, and what
-/// chose it, the file in the home (the way back) or nothing (the default).
-fn chosen(choice: &Choice) -> String {
-    match (&choice.file, choice.node) {
-        (Some(file), true) => format!(
-            "starting Node's daemon: {} is there, the way back to Node",
-            file.display()
-        ),
-        (Some(file), false) => format!(
-            "starting the native daemon: the default, there is no {}",
-            file.display()
-        ),
-        (None, _) => "starting the native daemon: the default, there is no home to look in for \
-                      the way back to Node"
-            .to_owned(),
-    }
+/// The `cf` of the bundle whose resources, or portable runtime, are in `root`.
+fn cf_in(root: &Path) -> PathBuf {
+    root.join("cli").join("bin").join(CF)
 }
 
-/// The bundled runtime and CLI: the Node and the `cf.mjs` of this app's own bundle.
-pub(crate) fn bundled_cli(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
+/// The `cf` of this app's own bundle, when it is there.
+pub(crate) fn bundled_cf(app: &AppHandle) -> Result<PathBuf, String> {
     #[cfg(windows)]
     if let Some(runtime) = portable_runtime(app)? {
         // The terminals' console host is in the runtime; without it Windows' own serves.
         if let Err(error) = crate::portable::find_libraries_in(&plain_path(runtime.clone())) {
             eprintln!("consensflow: the runtime's console host is not found ({error}); Windows' own serves");
         }
-        return present(
-            runtime.join("node.exe"),
-            runtime.join("cli").join("bin").join("cf.mjs"),
-        );
+        return present(cf_in(&runtime));
     }
     let resources = app
         .path()
         .resource_dir()
         .map_err(|error| format!("the app could not find its own resources: {error}"))?;
-    // Tauri strips the target triple from a sidecar's name and, on Windows,
-    // keeps the `.exe`: `node` on macOS, `node.exe` beside the app there.
-    let sidecar = if cfg!(windows) { "node.exe" } else { "node" };
-    let resource_node = resources.join("binaries").join(sidecar);
-    let node = if resource_node.exists() {
-        resource_node
-    } else {
-        std::env::current_exe()
-            .map_err(|error| format!("the app could not find itself: {error}"))?
-            .parent()
-            .ok_or_else(|| "the app executable has no directory".to_string())?
-            .join(sidecar)
-    };
-    present(node, resources.join("cli").join("bin").join("cf.mjs"))
+    present(cf_in(&resources))
 }
 
-/// The runtime and the CLI, when both are there.
-fn present(node: PathBuf, cli: PathBuf) -> Result<(PathBuf, PathBuf), String> {
+/// `cf`, when it is there.
+fn present(cf: PathBuf) -> Result<PathBuf, String> {
     // Tauri may answer its folders in Windows' verbatim form (`\\?\C:\…`),
-    // which Node cannot take as a script path: it stops at the drive with
-    // `lstat 'C:'`. The plain spelling names the same file.
-    let node = plain_path(node);
-    let cli = plain_path(cli);
-    if !node.is_absolute() || !node.exists() {
+    // which cmd.exe starts nothing through, and which the terminal's command
+    // would name. The plain spelling names the same file.
+    let cf = plain_path(cf);
+    if !cf.is_absolute() || !cf.exists() {
         return Err(format!(
-            "the bundled runtime is missing from this app ({node:?})"
+            "the bundled ConsensFlow is missing from this app ({cf:?})"
         ));
     }
-    if !cli.is_absolute() || !cli.exists() {
-        return Err(format!(
-            "the bundled ConsensFlow is missing from this app ({cli:?})"
-        ));
-    }
-    Ok((node, cli))
+    Ok(cf)
 }
 
 /// The portable app's runtime (see `portable`), unpacked from its own exe by
@@ -258,28 +190,6 @@ fn login_path_in(shell: &Path, timeout: Duration) -> Option<String> {
 mod tests {
     use super::*;
 
-    const NODE: &str = "/bundle/binaries/node";
-    const CLI: &str = "/bundle/cli/bin/cf.mjs";
-
-    /// A home of this test's own, with the way back's file in it or not, and
-    /// the environment that names it, with `stray` added to it.
-    fn home_with(way_back: bool, stray: &[(&str, &str)]) -> (tempfile::TempDir, Env) {
-        let home = tempfile::tempdir().expect("a home");
-        if way_back {
-            std::fs::write(home.path().join(way_back::FILE), "").expect("the way back");
-        }
-        let mut vars = vec![(
-            "CONSENSFLOW_HOME".to_owned(),
-            home.path().to_string_lossy().into_owned(),
-        )];
-        vars.extend(
-            stray
-                .iter()
-                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
-        );
-        (home, Env::from_vars(vars))
-    }
-
     /// What a command runs, and with what: its program, words and added variables.
     fn described(command: &Command) -> (PathBuf, Vec<String>, Vec<(String, String)>) {
         (
@@ -300,100 +210,50 @@ mod tests {
         )
     }
 
-    /// The native daemon as the app starts it: the `cf` beside `cf.mjs`, told the bundled node.
-    fn native() -> (PathBuf, Vec<String>, Vec<(String, String)>) {
-        let cf = if cfg!(windows) {
-            "/bundle/cli/bin/cf.exe"
-        } else {
-            "/bundle/cli/bin/cf"
-        };
-        (
-            PathBuf::from(cf),
-            vec!["ui".into(), "--json".into(), "--no-open".into()],
-            vec![("CONSENSFLOW_NODE".into(), NODE.into())],
-        )
-    }
-
-    /// Node's: the bundled runtime running the bundled CLI, with nothing added.
-    fn node() -> (PathBuf, Vec<String>, Vec<(String, String)>) {
-        (
-            PathBuf::from(NODE),
-            vec![CLI.into(), "ui".into(), "--json".into(), "--no-open".into()],
-            vec![],
-        )
-    }
-
     #[test]
-    fn the_daemon_is_the_native_one_by_default() {
-        let (_home, env) = home_with(false, &[]);
-        let (command, choice) = command_in(&env, Path::new(NODE), Path::new(CLI));
-        assert_eq!(described(&command), native());
-        assert!(!choice.node);
-    }
-
-    #[test]
-    fn the_daemon_is_node_running_cf_mjs_when_the_home_has_the_file() {
-        let (_home, env) = home_with(true, &[]);
-        let (command, choice) = command_in(&env, Path::new(NODE), Path::new(CLI));
-        assert_eq!(described(&command), node());
-        assert!(choice.node);
-    }
-
-    #[test]
-    fn the_environment_says_nothing_of_which_daemon_it_is() {
-        // `CONSENSFLOW_DAEMON` was the switch before the flip, and a terminal does
-        // not inherit the app's environment, so the app that obeyed it would be one
-        // implementation to the home and another to its `cf`.
-        for stray in ["node", "native", "", "yes"] {
-            let (_home, env) = home_with(false, &[("CONSENSFLOW_DAEMON", stray)]);
-            let (command, _) = command_in(&env, Path::new(NODE), Path::new(CLI));
-            assert_eq!(described(&command), native(), "no file, {stray:?}");
-            let (_home, env) = home_with(true, &[("CONSENSFLOW_DAEMON", stray)]);
-            let (command, _) = command_in(&env, Path::new(NODE), Path::new(CLI));
-            assert_eq!(described(&command), node(), "the file, {stray:?}");
-        }
-    }
-
-    #[test]
-    fn a_home_with_no_folder_to_look_in_is_the_native_daemons() {
-        let (command, choice) = command_in(&Env::default(), Path::new(NODE), Path::new(CLI));
-        assert_eq!(described(&command), native());
-        assert_eq!(choice.file, None);
-    }
-
-    #[test]
-    fn the_log_says_which_daemon_and_what_chose_it() {
-        let (home, env) = home_with(false, &[]);
-        let file = home.path().join(way_back::FILE);
-        let (_, by_default) = command_in(&env, Path::new(NODE), Path::new(CLI));
+    fn the_daemon_is_the_bundled_cf_running_ui_and_nothing_of_the_apps_is_added_to_it() {
+        let cf = Path::new("/bundle/cli/bin/cf");
         assert_eq!(
-            chosen(&by_default),
-            format!(
-                "starting the native daemon: the default, there is no {}",
-                file.display()
+            described(&command_for(cf)),
+            (
+                PathBuf::from(cf),
+                vec!["ui".into(), "--json".into(), "--no-open".into()],
+                vec![]
             )
         );
-        let (home, env) = home_with(true, &[]);
-        let file = home.path().join(way_back::FILE);
-        let (_, by_file) = command_in(&env, Path::new(NODE), Path::new(CLI));
-        assert_eq!(
-            chosen(&by_file),
-            format!(
-                "starting Node's daemon: {} is there, the way back to Node",
-                file.display()
-            )
-        );
-        let (_, homeless) = command_in(&Env::default(), Path::new(NODE), Path::new(CLI));
-        assert!(chosen(&homeless).starts_with("starting the native daemon: the default, "));
     }
 
     #[test]
-    fn the_native_cf_is_the_one_beside_the_cli() {
+    fn the_cf_is_the_one_in_the_clis_folder_of_the_bundle_or_the_portable_runtime() {
         let cf = if cfg!(windows) { "cf.exe" } else { "cf" };
         assert_eq!(
-            native_cf(Path::new("/bundle/cli/bin/cf.mjs")),
-            Path::new("/bundle/cli/bin").join(cf)
+            cf_in(Path::new("/bundle")),
+            Path::new("/bundle").join("cli").join("bin").join(cf)
         );
+    }
+
+    #[test]
+    fn the_log_says_which_cf_the_daemon_is() {
+        assert_eq!(
+            starting(Path::new("/bundle/cli/bin/cf")),
+            "starting the daemon: /bundle/cli/bin/cf ui --json --no-open"
+        );
+    }
+
+    #[test]
+    fn a_cf_that_is_there_is_found_and_one_that_is_not_says_the_app_is_missing_it() {
+        let bundle = tempfile::tempdir().expect("a bundle");
+        let cf = cf_in(bundle.path());
+        let error = present(cf.clone()).expect_err("no cf is there yet");
+        assert!(
+            error.starts_with("the bundled ConsensFlow is missing from this app ("),
+            "{error}"
+        );
+        std::fs::create_dir_all(cf.parent().expect("a folder")).expect("its folder");
+        std::fs::write(&cf, "the program").expect("a cf");
+        assert_eq!(present(cf.clone()), Ok(cf));
+        // A relative name is no place the app was installed in.
+        assert!(present(PathBuf::from("cf")).is_err());
     }
 
     /// A stand-in for the human's login shell: `body` runs with the command
@@ -462,18 +322,18 @@ mod tests {
     }
 
     #[test]
-    fn a_verbatim_windows_path_is_spelled_plainly_for_node() {
+    fn a_verbatim_windows_path_is_spelled_plainly() {
         assert_eq!(
-            plain_path(PathBuf::from(r"\\?\C:\Users\me\app\cli\bin\cf.mjs")),
-            PathBuf::from(r"C:\Users\me\app\cli\bin\cf.mjs")
+            plain_path(PathBuf::from(r"\\?\C:\Users\me\app\cli\bin\cf.exe")),
+            PathBuf::from(r"C:\Users\me\app\cli\bin\cf.exe")
         );
         assert_eq!(
-            plain_path(PathBuf::from(r"\\?\UNC\server\share\cf.mjs")),
-            PathBuf::from(r"\\server\share\cf.mjs")
+            plain_path(PathBuf::from(r"\\?\UNC\server\share\cf.exe")),
+            PathBuf::from(r"\\server\share\cf.exe")
         );
         assert_eq!(
-            plain_path(PathBuf::from("/Applications/ConsensFlow.app/node")),
-            PathBuf::from("/Applications/ConsensFlow.app/node")
+            plain_path(PathBuf::from("/Applications/ConsensFlow.app/cf")),
+            PathBuf::from("/Applications/ConsensFlow.app/cf")
         );
     }
 }

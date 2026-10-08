@@ -26,15 +26,12 @@ pub use boundary::{DaemonRecords, DaemonTime};
 
 /// The environment a window's pane starts with before its harness's own
 /// (`paneEnv`, `daemon.js:148-154`): where the API is, which project and
-/// participant the window is, the runtime the daemon was given to name
-/// (`CONSENSFLOW_NODE`: whoever starts the daemon says it, the daemon passes
-/// it on and guesses nothing), and a PATH with the bundle's `bin` first, so
+/// participant the window is, and a PATH with the bundle's `bin` first, so
 /// the `cf` of this install is the one a window finds. The token is added at
 /// launch.
 pub struct WindowEnv {
     /// The API's address, with no slash at its end.
     pub url: String,
-    node: Option<String>,
     path: String,
 }
 
@@ -45,10 +42,6 @@ impl WindowEnv {
         let delimiter = if cfg!(windows) { ';' } else { ':' };
         Self {
             url: url.to_owned(),
-            node: env
-                .os("CONSENSFLOW_NODE")
-                .filter(|node| !node.is_empty())
-                .map(|node| node.to_string_lossy().into_owned()),
             path: match env.os("PATH").filter(|path| !path.is_empty()) {
                 Some(path) => format!("{bin}{delimiter}{}", path.to_string_lossy()),
                 None => bin.to_owned(),
@@ -67,9 +60,6 @@ impl PaneEnv for WindowEnv {
                 participant.handle.clone(),
             ),
         ];
-        if let Some(node) = &self.node {
-            env.push(("CONSENSFLOW_NODE".to_owned(), node.clone()));
-        }
         env.push(("PATH".to_owned(), self.path.clone()));
         env
     }

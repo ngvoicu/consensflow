@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { cliEnv, cliTarget } from './cli-target.mjs'
+import { cliTarget } from './cli-target.mjs'
 import { tempEnv } from './helpers.mjs'
 
 /**
@@ -37,7 +37,7 @@ function commandsOf(usage, prefix) {
 
 // Run here, not in a window: a window's token makes cf its board. By the cf these
 // tests run: the native one, or Node's (tests/cli-target.mjs, `npm run test:clis`),
-// in a home of its own, which a tokenless cf looks in for the way back to Node.
+// in a home of its own.
 const target = cliTarget()
 const outside = (() => {
   const t = tempEnv()
@@ -45,7 +45,7 @@ const outside = (() => {
     return execFileSync(target.command, [...target.args, 'help'], {
       cwd: REPO,
       encoding: 'utf8',
-      env: cliEnv(target, { ...process.env, ...t.env, CONSENSFLOW_TOKEN: '' }),
+      env: { ...process.env, ...t.env, CONSENSFLOW_TOKEN: '' },
     })
   } finally {
     t.cleanup()

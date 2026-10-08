@@ -23,13 +23,13 @@ import { fileURLToPath } from 'node:url'
  * file `CONSENSFLOW_TEST_RAN`), and fails a leg that ran what is not its own,
  * or did not say.
  *
- * The product chooses by the home, not by the environment: a `use-node` file in
- * ConsensFlow's home sends everything that writes that home to Node
- * (`src/use-node.js`, `crates/cf-base/src/way_back.rs`), and without it
- * everything is native. So a test's choice is made in its own home
- * (`chooseHome`): the Node leg's home has the file, the native leg's has not,
- * whatever starts in it. `CONSENSFLOW_DAEMON`, which chose before the flip, is
- * read by nothing.
+ * The product chooses nothing now: the flip release sent everything that wrote
+ * a home to Node where a `use-node` file was in it, and the app that ships no
+ * Node reads no such file. The tests' Node legs start Node's daemon and `cf` by
+ * name, and a test's choice is still marked in its own home (`chooseHome`): the
+ * Node leg's home has the file, the native leg's has not, which `assertStarted`
+ * holds the daemon to, until the Node legs go. `CONSENSFLOW_DAEMON`, which
+ * chose before the flip, is read by nothing.
  */
 
 /** The native `cf` of this checkout, where `npm run build:cf` puts it. */
@@ -60,7 +60,7 @@ export const DEFAULT_CLI = 'native'
 /** The two implementations, by the word that selects each. */
 export const KINDS = ['node', 'native']
 
-/** The file whose presence in a home is the way back to Node (`src/use-node.js`). */
+/** The file whose presence in a home marked it a Node leg's, and was the way back to Node in the flip release. */
 export const WAY_BACK = 'use-node'
 
 /**
@@ -196,10 +196,10 @@ export function noteRan(kind) {
  * suite by itself, and a stand-in that a test starts to see it refused
  * (tests/integration/liar-daemon.mjs) is not what the leg ran.
  *
- * With the `home` it ran on, the home is held to the choice as well: the
- * product's `cf` verbs choose by the file in it, so a home that says another
- * implementation than the daemon would have the daemon and the verbs differ for
- * one home.
+ * With the `home` it ran on, the home is held to the choice as well: a leg's
+ * home is marked with the way back's file (Node's) or has none (the native
+ * one's), which the product reads no more, so a home that says another
+ * implementation than the daemon is a test that mixed its legs.
  */
 export function assertStarted(asked, log, pid, home = undefined) {
   const start = startLine(log, pid)

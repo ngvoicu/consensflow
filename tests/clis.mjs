@@ -1,12 +1,14 @@
 /**
- * The suites of the CLI against both CLIs: Node's `bin/cf.mjs`, then the native
+ * The suites of the CLI against both CLIs: Node's, `src/cli.js` run by name (the
+ * door, `bin/cf.mjs`, forwards every command to the native `cf`), then the native
  * `cf` (built and put in bin/ as the app ships it, answering every standalone verb).
  * The suites choose the CLI by `CONSENSFLOW_TEST_CLI` (tests/cli-target.mjs), which
  * each leg sets itself, with `CONSENSFLOW_TEST_LEG` to say which leg it is
  * (tests/legs.mjs): a variable in the caller's shell does not choose for it, and
- * the suites refuse a selection that is not the leg's own. The product chooses by
- * the file in the home, so each run is given a home that has it (Node's leg) or has
- * none (the native leg). tests/cli.test.mjs holds the cf that runs to the leg by
+ * the suites refuse a selection that is not the leg's own. The product chooses
+ * nothing now, so each run is given a home marked as its leg's: one that has the
+ * flip release's `use-node` file (Node's leg) or none (the native leg).
+ * tests/cli.test.mjs holds the cf that runs to the leg by
  * the Node processes that start (Node's cf is one, the native cf starts none for
  * any verb), and says which it found to this runner, which fails a leg that ran
  * the other. The native cf is named no runtime for any verb, so that one that

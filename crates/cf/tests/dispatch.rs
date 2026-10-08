@@ -1,8 +1,8 @@
 //! Which `cf` answers what: the board's commands with a window's token, the
 //! hooks with or without one, and the Codex window's supervisor matched on
-//! the first word. What is handed to the CLI's Node sources is `way_back.rs`'s
-//! and `standalone.rs`'s. A `ui` that reaches the library is held by calling
-//! the library: a process never gets one there.
+//! the first word. The standalone verbs are `standalone.rs`'s. A `ui` that
+//! reaches the library is held by calling the library: a process never gets
+//! one there.
 
 mod common;
 
@@ -125,9 +125,7 @@ fn a_codex_window_says_when_codex_cannot_start_and_leaves_no_socket_behind() {
 #[test]
 fn a_ui_that_reaches_the_library_is_an_unknown_command_and_starts_nothing() {
     // `main` takes `ui` before `cf::run` (`cf::native_ui`), so no process gets
-    // one there; a caller of the library that does not would, were it handed
-    // to the CLI's Node sources, start Node's daemon on a home that runs
-    // native: two writers for one home.
+    // one there; a caller of the library that does not has no verb to answer it.
     let home = tempfile::tempdir().unwrap();
     let env = Env::from_vars([("CONSENSFLOW_HOME", home.path())]);
     for words in [&["ui"][..], &["ui", "--json", "--no-open"]] {

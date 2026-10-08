@@ -13,6 +13,7 @@ import { daemonCommand, fakeNodeExecutable } from './helpers.mjs'
 
 const DAEMON = fileURLToPath(new URL('./integration/core-daemon.mjs', import.meta.url))
 const BUNDLE_BIN = fileURLToPath(new URL('../bin', import.meta.url))
+const CLI_JS = fileURLToPath(new URL('../src/cli.js', import.meta.url))
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
@@ -37,14 +38,14 @@ function startDaemon(env, nodeFlags = []) {
 }
 
 /**
- * The verb that runs the daemon, `cf ui`, as a shell runs it: Node's `bin/cf.mjs`, or
+ * The verb that runs the daemon, `cf ui`, as a shell runs it: Node's `src/cli.js`, or
  * the native `cf`. It is the process a start that fails ends, with what that says.
  */
 function startCli(env) {
   const named = daemonCommand([], { home: env.CONSENSFLOW_HOME })
   const [command, args] = named.native
     ? [named.command, named.args]
-    : [process.execPath, [path.join(BUNDLE_BIN, 'cf.mjs'), 'ui', '--json', '--no-open']]
+    : [process.execPath, [CLI_JS, 'ui', '--json', '--no-open']]
   return spawn(command, args, { env: { ...env, ...named.env }, stdio: ['pipe', 'pipe', 'pipe'] })
 }
 
@@ -459,7 +460,7 @@ const MYBUILDER = {
 }
 
 describe('the daemon over its bridge', () => {
-  it("opens a window with the agents' API, its project and participant, its runtime, and the bundled cf first on PATH", {}, async (t) => {
+  it("opens a window with the agents' API, its project and participant, and the bundled cf first on PATH (Node's names its own runtime too)", {}, async (t) => {
     const d = await daemonOverItsBridge(t, { agents: [MYBUILDER] })
     const opened = await d.request('project.open', {
       directory: d.workspace,
@@ -485,7 +486,8 @@ describe('the daemon over its bridge', () => {
         d.handle.url.replace(/\/$/, ''),
         String(opened.project.id),
         'chief',
-        process.execPath,
+        // Node's daemon passes the runtime it runs on; the native one has none to name.
+        NATIVE ? undefined : process.execPath,
         `${BUNDLE_BIN}${path.delimiter}${d.env.PATH}`,
       ],
     )

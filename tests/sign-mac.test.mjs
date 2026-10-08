@@ -18,20 +18,19 @@ const SCRIPT = fileURLToPath(new URL('../app/scripts/sign-mac.mjs', import.meta.
 const ID = 'dev.ngvoicu.consensflow'
 const DMG = 'ConsensFlow_3.0.0-alpha.99_aarch64.dmg'
 /** Where the release's app keeps the Mach-Os it carries, by name. */
-const CODE = { app: 'MacOS/app', node: 'MacOS/node', cf: 'Resources/cli/bin/cf' }
+const CODE = { app: 'MacOS/app', cf: 'Resources/cli/bin/cf' }
 
-/** A bundle folder as Tauri leaves one: the app, with the release's three Mach-Os, and a DMG of it. */
+/** A bundle folder as Tauri leaves one: the app, with the release's two Mach-Os, and a DMG of it. */
 function writeBundle(dir) {
   const app = join(dir, 'macos', 'ConsensFlow.app')
   const contents = join(app, 'Contents')
-  for (const folder of ['MacOS', 'Resources/cli/bin', 'Resources/cli/src'])
+  for (const folder of ['MacOS', 'Resources/cli/bin'])
     mkdirSync(join(contents, folder), { recursive: true })
   writeFileSync(
     join(contents, 'Info.plist'),
     `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${ID}</string><key>CFBundleExecutable</key><string>app</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>\n`,
   )
   for (const path of Object.values(CODE)) copyFileSync('/usr/bin/true', join(contents, path))
-  writeFileSync(join(contents, 'Resources', 'cli', 'src', 'main.js'), 'export {}\n')
   const volume = join(dir, 'volume-source')
   mkdirSync(volume)
   execFileSync('ditto', [app, join(volume, 'ConsensFlow.app')])
@@ -68,9 +67,8 @@ it('signs every Mach-O of the app from the inside out, then makes the DMG again 
       assert.match(shown, /flags=0x10002\(adhoc,runtime\)/, `${name} runs hardened`)
       const identifier = name === 'app' ? ID : `${ID}.${name}`
       assert.match(shown, new RegExp(`^Identifier=${identifier}$`, 'm'))
-      // V8's JIT in node needs these; Tauri gives the app's own executable the same.
-      if (name === 'cf') assert.equal(entitlements, '')
-      else assert.match(entitlements, /com\.apple\.security\.cs\.allow-jit/, name)
+      // None needs an entitlement: the JIT ones were the bundled Node's V8's.
+      assert.equal(entitlements, '', name)
     }
     execFileSync('codesign', ['--verify', '--deep', '--strict', app])
 

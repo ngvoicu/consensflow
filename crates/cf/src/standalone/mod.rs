@@ -5,13 +5,10 @@
 //! (`cf_launcher`, `cf_harness`). `tests/cli_goldens` holds them to what Node
 //! said (`npm run goldens:cli`), file by file.
 //!
-//! They are what `cf` answers by default (the flip, step 4), for a tokenless
-//! command (a window has its participant's token, and there `cf` is the
-//! board) in a home that has not taken the way back: with the `use-node` file
-//! in it every tokenless command goes to the CLI's Node sources instead
-//! (`crate::run` asks `cf_base::way_back`, once). `ui` is the daemon's, which
-//! `main` runs before any of this (`crate::native_ui`): reaching this module it
-//! is an unknown command, like any word that is no verb.
+//! They are what `cf` answers for a tokenless command (a window has its
+//! participant's token, and there `cf` is the board). `ui` is the daemon's,
+//! which `main` runs before any of this (`crate::native_ui`): reaching this
+//! module it is an unknown command, like any word that is no verb.
 //!
 //! A verb says what it prints as it goes, and what stops it as `cf: <words>`
 //! with exit code 1: Node's `fail` and every error `main` caught.
@@ -67,8 +64,8 @@ impl From<Refusal> for Stop {
 type Done = Result<(), Stop>;
 
 /// Runs `args` as a standalone verb: its exit code, and a word that is none is
-/// an unknown command. The caller has found no window's token and no way back
-/// to Node. Only a failure to write is an error.
+/// an unknown command. The caller has found no window's token. Only a failure
+/// to write is an error.
 pub fn run(
     env: &Env,
     args: &[OsString],

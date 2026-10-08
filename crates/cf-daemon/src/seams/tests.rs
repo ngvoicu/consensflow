@@ -26,8 +26,11 @@ fn participant<'a>(project: &'a ProjectView, handle: &str) -> &'a ParticipantVie
 }
 
 #[test]
-fn a_window_starts_with_its_url_project_participant_runtime_and_the_bundle_first_on_its_path() {
+fn a_window_starts_with_its_url_project_participant_and_the_bundle_first_on_its_path() {
     let scene = scene();
+    // The app named its Node to the daemon before the deletion release, and
+    // the daemon passed it on to every window; nothing is bundled to name now,
+    // and a variable left in the environment reaches no window.
     let env = Env::from_vars([
         ("CONSENSFLOW_NODE", "/opt/consensflow/node"),
         ("PATH", "/usr/bin:/bin"),
@@ -49,37 +52,11 @@ fn a_window_starts_with_its_url_project_participant_runtime_and_the_bundle_first
             ),
             ("CONSENSFLOW_PARTICIPANT".to_owned(), "zeus".to_owned()),
             (
-                "CONSENSFLOW_NODE".to_owned(),
-                "/opt/consensflow/node".to_owned()
-            ),
-            (
                 "PATH".to_owned(),
                 format!("/opt/consensflow/bin{delimiter}/usr/bin:/bin")
             ),
         ]
     );
-}
-
-#[test]
-fn the_runtime_is_passed_on_only_when_the_daemon_was_given_one_and_never_guessed() {
-    let scene = scene();
-    for env in [
-        Env::from_vars([("PATH", "/usr/bin")]),
-        Env::from_vars([("CONSENSFLOW_NODE", ""), ("PATH", "/usr/bin")]),
-    ] {
-        let window = WindowEnv::new(&env, "http://127.0.0.1:1", "/bin-of-the-bundle");
-        let started = window.env(participant(&scene.project, "chief"), &scene.project);
-        let names: Vec<&str> = started.iter().map(|(name, _)| name.as_str()).collect();
-        assert_eq!(
-            names,
-            [
-                "CONSENSFLOW_URL",
-                "CONSENSFLOW_PROJECT",
-                "CONSENSFLOW_PARTICIPANT",
-                "PATH"
-            ]
-        );
-    }
 }
 
 #[test]

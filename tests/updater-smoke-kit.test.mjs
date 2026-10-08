@@ -15,7 +15,15 @@ import { request } from 'node:https'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
-import { assertBuiltWith, overrideConfig, REPO } from './updater-smoke/build.mjs'
+import {
+  assertBuiltWith,
+  BRIDGE_TAG,
+  earlierReleases,
+  flipRelease,
+  overrideConfig,
+  RELEASES,
+  REPO,
+} from './updater-smoke/build.mjs'
 import {
   archiveOf,
   assertAdHoc,
@@ -40,6 +48,8 @@ import {
 import { cleanEnv, generateKey, signFile, tauriCli } from './updater-smoke/signing.mjs'
 import {
   compareVersions,
+  flipTag,
+  newest,
   nextVersion,
   parseVersion,
   updateVersion,
@@ -84,12 +94,87 @@ describe('the version the update is given', () => {
     assert.throws(() => parseVersion('3.0'), /not a semantic version/)
   })
 
-  it('is the next one after the installed app’s, unless a release has moved past it', () => {
+  it('is the next one after the newest installed app’s, unless a release has moved past it', () => {
     assert.equal(nextVersion('3.0.0-alpha.81'), '3.0.0-alpha.82')
     assert.equal(nextVersion('3.0.0'), '3.0.1')
-    assert.equal(updateVersion('3.0.0-alpha.81', '3.0.0-alpha.81'), '3.0.0-alpha.82')
-    assert.equal(updateVersion('3.0.0-alpha.80', '3.0.0-alpha.81'), '3.0.0-alpha.82')
-    assert.equal(updateVersion('3.0.0-alpha.90', '3.0.0-alpha.81'), '3.0.0-alpha.90')
+    assert.equal(updateVersion('3.0.0-alpha.81', ['3.0.0-alpha.81']), '3.0.0-alpha.82')
+    assert.equal(updateVersion('3.0.0-alpha.80', ['3.0.0-alpha.81']), '3.0.0-alpha.82')
+    assert.equal(updateVersion('3.0.0-alpha.90', ['3.0.0-alpha.81']), '3.0.0-alpha.90')
+    // Two apps are installed from (the bridge and the flip), and the update is newer than both.
+    assert.equal(
+      updateVersion('3.0.0-alpha.82', ['3.0.0-alpha.81', '3.0.0-alpha.82']),
+      '3.0.0-alpha.83',
+    )
+    assert.equal(
+      updateVersion('3.0.0-alpha.83', ['3.0.0-alpha.82', '3.0.0-alpha.81']),
+      '3.0.0-alpha.83',
+    )
+    assert.equal(newest(['3.0.0-alpha.9', '3.0.0-alpha.10', '3.0.0-alpha.2']), '3.0.0-alpha.10')
+  })
+
+  it('has the flip release the newest tag after the bridge’s, and none where there is none', () => {
+    const bridge = 'v3.0.0-alpha.81'
+    assert.equal(
+      flipTag(['v3.0.0-alpha.80', bridge, 'v3.0.0-alpha.82', 'v3.0.0-alpha.9'], bridge),
+      'v3.0.0-alpha.82',
+    )
+    // Release numbers are numbers, and what is no release tag is none.
+    assert.equal(
+      flipTag([bridge, 'v3.0.0-alpha.100', 'v3.0.0-alpha.99', 'not-a-tag', 'v3.0'], bridge),
+      'v3.0.0-alpha.100',
+    )
+    assert.throws(() => flipTag([], bridge), /no release newer than the bridge/)
+    assert.throws(
+      () => flipTag(['v3.0.0-alpha.80', bridge], bridge),
+      /name the flip with --flip-ref/,
+    )
+  })
+})
+
+describe('the releases the update goes to', () => {
+  it('are the bridge, whose daemon and `cf setup` are Node’s, and the flip, whose are the native cf’s', () => {
+    assert.deepEqual(RELEASES, {
+      bridge: { daemon: 'node', setup: 'node' },
+      flip: { daemon: 'native', setup: 'native' },
+    })
+    assert.equal(BRIDGE_TAG, 'v3.0.0-alpha.81')
+  })
+
+  it('have the flip among the tags of this checkout’s history, but for the one under test', {
+    skip: process.platform === 'win32' && 'git is run as sh runs it',
+  }, () => {
+    inAFolder((folder) => {
+      const git = (...args) =>
+        execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], {
+          cwd: folder,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      const commit = (what, tag) => {
+        writeFileSync(join(folder, 'f'), what)
+        git('add', 'f')
+        git('commit', '-q', '-m', what)
+        if (tag !== undefined) git('tag', tag)
+      }
+      git('init', '-q')
+      commit('the release before the bridge', 'v3.0.0-alpha.80')
+      commit('the bridge', 'v3.0.0-alpha.81')
+      commit('the flip', 'v3.0.0-alpha.82')
+      // A tag that is no release of ours is no release.
+      git('tag', 'deploy-1')
+      commit('the release under test, tagged', 'v3.0.0-alpha.83')
+      // On its commit, that tag is the release under test and not one it follows.
+      assert.deepEqual(earlierReleases(folder).sort(), [
+        'v3.0.0-alpha.80',
+        'v3.0.0-alpha.81',
+        'v3.0.0-alpha.82',
+      ])
+      assert.equal(flipRelease(folder), 'v3.0.0-alpha.82')
+      // A commit after it, untagged: the tag is behind it, and is the newest release there is.
+      commit('after it')
+      assert.equal(earlierReleases(folder).length, 4)
+      assert.equal(flipRelease(folder), 'v3.0.0-alpha.83')
+    })
   })
 })
 

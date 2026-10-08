@@ -1,11 +1,9 @@
 /**
  * Node's own CLI: app-scoped conversation commands, saved roster administration
- * and runtime diagnostics. It is what runs when a home has taken the way back
- * to Node (`src/use-node.js`) and for the verbs the native `cf` does not answer
- * yet, and nothing else: `bin/cf.mjs`, which starts it, hands every other
- * command to the native `cf` beside it. Running this file is running the CLI:
- * it reads `process.argv`, and `bin/cf.mjs` imports it only where Node's CLI is
- * the one that answers.
+ * and runtime diagnostics. The native `cf` answers every verb now, and this file
+ * is what the tests that hold the native one to Node's answers run, until it is
+ * deleted: `bin/cf.mjs` hands every command to the native `cf` beside it. Running
+ * this file is running the CLI: it reads `process.argv`.
  */
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'

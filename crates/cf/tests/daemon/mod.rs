@@ -149,7 +149,6 @@ impl Daemon {
                 "XDG_CONFIG_HOME",
                 root.dir.path().join("home").join(".config"),
             )
-            .env("CONSENSFLOW_NODE", "/the/app/named/this/node")
             .env("PATH", root.bin())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

@@ -1,14 +1,14 @@
 //! The portable Windows app is one file: the app's own exe, then the runtime
-//! it needs (Node, the CLI, and the terminals' console host) as a payload,
-//! then a footer that finds it.
+//! it needs (the `cf` the daemon and every window run, and the terminals'
+//! console host) as a payload, then a footer that finds it.
 //! `app/scripts/portable.mjs` packs it; this module reads and unpacks it. The
 //! layout, written down here once:
 //!
 //! ```text
 //! ConsensFlow_<version>_x64-portable.exe
 //!   the built ConsensFlow.exe, byte for byte
-//!   the payload: a gzip-compressed tar of node.exe, cli/, conpty.dll and
-//!     OpenConsole.exe
+//!   the payload: a gzip-compressed tar of cli/ (its bin/cf.exe), conpty.dll,
+//!     OpenConsole.exe and OpenConsole-LICENSE.txt
 //!   the footer, 16 bytes: the payload's length in bytes, as an unsigned
 //!     64-bit little-endian integer, then the tag "CFPAYLD1"
 //! ```
@@ -28,7 +28,7 @@
 //! daemon is the native `cf.exe` never is. A collector already out cannot be
 //! taught, so the runtimes of this app, and of those after it, live in a
 //! folder of their own, out of its reach, where every start keeps a runtime
-//! while its `node.exe` or its `cf.exe` runs. The old folder is left as it
+//! while a program of it runs ([`PROGRAMS`]). The old folder is left as it
 //! is.
 
 use std::fs::{self, File, OpenOptions};
@@ -52,11 +52,13 @@ const MARKER: &str = ".unpacked";
 /// collector empties of every runtime whose `node.exe` is not running.
 const RUNTIME_PARENT: &str = "portable-runtime";
 /// The programs of a runtime that run on their own, as the parts of their
-/// paths in it: Node, which is the daemon of a home that has taken the way back
-/// (every home's before the flip), and `cf.exe`, which is the native daemon and
-/// every window's `cf`. The release that drops Node from the payload keeps
-/// `node.exe` here: a runtime of the flip release shares this parent, and its
-/// daemon may be Node's.
+/// paths in it: `node.exe`, of which this release's payload has none, and
+/// `cf.exe`, which is the daemon and every window's `cf`. The runtimes of the
+/// flip release share this parent with this release's, and the daemon of one
+/// is Node's in a home that took the way back: a start of this release must
+/// not take such a runtime from under it, so a runtime whose `node.exe` runs
+/// stays as one whose `cf.exe` does. Dropped when no flip release can be
+/// running.
 const PROGRAMS: [&[&str]; 2] = [&["node.exe"], &["cli", "bin", "cf.exe"]];
 
 /// Where an exe carries its runtime.

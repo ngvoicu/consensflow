@@ -5,7 +5,7 @@
  * `npm run test:daemons` runs it with the daemon suites; this is the quick way
  * to hold the agents' API of both to the one proof, and what the plants of the
  * agents screens (`npm run plants:release`) run. The packaged smoke runs the same
- * proof against the daemon a built app chose (`npm run smoke:daemons`).
+ * proof against the daemon a built app started (`npm run smoke`).
  *
  *   node tests/agents-daemons.mjs [--offline]
  */

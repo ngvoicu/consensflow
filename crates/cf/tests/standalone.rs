@@ -1,7 +1,7 @@
-//! Which `cf` answers the standalone verbs, as a process: by default Rust
-//! answers all of them, `setup` and `doctor` too, with no runtime named and no
-//! environment variable asked (the way back, which sends every verb to Node for
-//! a home that has taken it, is `way_back.rs`'s); and a window's token makes
+//! Which `cf` answers the standalone verbs, as a process: this binary answers
+//! all of them, `setup` and `doctor` too, with no runtime named and no
+//! environment variable asked, and in a home that still has the `use-node`
+//! file the flip release sent a home to Node by; and a window's token makes
 //! `cf` the board. What the verbs say is held to Node's recording in
 //! `cli_goldens`.
 //!
@@ -29,11 +29,11 @@ fn said(ran: &std::process::Output) -> (Option<i32>, String, String) {
 }
 
 #[test]
-fn rust_answers_by_default_whatever_the_old_switch_says_and_no_runtime_is_named_for_it() {
+fn every_verb_is_answered_here_whatever_the_old_switch_says_and_no_runtime_is_named_for_it() {
     for args in [&["help"][..], &["--version"], &["catalog"], &["bogus"]] {
         let (_, answer, expected_err) = said(&cf(args, &[], ""));
         for stray in ["native", "node", ""] {
-            // `CONSENSFLOW_DAEMON` was the switch before the flip: nothing reads it now.
+            // `CONSENSFLOW_DAEMON` was the switch before the flip: nothing reads it.
             let ran = said(&cf(args, &[("CONSENSFLOW_DAEMON", stray)], ""));
             assert_eq!(
                 ran,
@@ -155,11 +155,54 @@ fn command_line(out: &str) -> Option<&str> {
 const CLAIMS: &str =
     " — another ConsensFlow. `cf` runs that one; `cf setup` from this one claims the command.";
 
+/// The `use-node` file in `user`'s home: the flip release sent a home that had
+/// it to Node's sources, and a user who took that way back may still have it.
+fn leave_the_flip_releases_way_back(user: &User) {
+    fs::create_dir_all(user.at("consensflow")).expect("the home");
+    fs::write(user.at("consensflow").join("use-node"), "").expect("the file");
+}
+
 #[test]
-fn setup_and_doctor_are_answered_by_default_whatever_the_old_switch_says_and_name_no_runtime() {
-    // Run from the build's own folder, which is no bundle: no Node is beside it,
-    // so a verb handed on to Node's sources would be refused for want of one.
-    // `CONSENSFLOW_DAEMON` was the switch before the flip: nothing reads it now.
+fn a_use_node_file_left_in_the_home_changes_no_answer() {
+    // Nothing is bundled to send the commands to, and nothing reads the file.
+    for args in [
+        &["help"][..],
+        &["--version"],
+        &["catalog", "--harness", "pi"],
+        &["agent", "list"],
+        &["bogus"],
+    ] {
+        let plain = User::new();
+        let left = User::new();
+        leave_the_flip_releases_way_back(&left);
+        assert_eq!(left.run(args), plain.run(args), "{args:?}");
+    }
+}
+
+#[test]
+fn setup_and_doctor_in_a_home_with_a_use_node_file_make_and_read_the_command_here() {
+    let user = User::new();
+    leave_the_flip_releases_way_back(&user);
+    assert_eq!(user.run(&["setup"]).0, Some(0));
+    let text = fs::read_to_string(user.command("cf")).expect("the command");
+    assert!(
+        text.contains(&format!("\"{}\"", own_cf().display())),
+        "{text}"
+    );
+    let (code, out, err) = user.run(&["doctor"]);
+    assert_eq!((code, err.as_str()), (Some(0), ""));
+    assert_eq!(
+        command_line(&out),
+        Some(format!("command:      {}", own_cf().display()).as_str()),
+        "{out}"
+    );
+    // The file is the user's: nothing took it away.
+    assert!(user.at("consensflow").join("use-node").is_file());
+}
+
+#[test]
+fn setup_and_doctor_are_answered_whatever_the_old_switch_says_and_name_no_runtime() {
+    // `CONSENSFLOW_DAEMON` was the switch before the flip: nothing reads it.
     for verb in ["setup", "doctor"] {
         for stray in [None, Some("native"), Some("node"), Some("")] {
             let user = User::new();

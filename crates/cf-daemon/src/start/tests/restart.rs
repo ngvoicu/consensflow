@@ -66,7 +66,6 @@ async fn what_was_open_comes_back_and_its_window_opens_with_the_environment_the_
             assert_eq!(env["CONSENSFLOW_URL"], url.as_str());
             assert_eq!(env["CONSENSFLOW_PROJECT"], project.to_string());
             assert_eq!(env["CONSENSFLOW_PARTICIPANT"], "chief");
-            assert_eq!(env["CONSENSFLOW_NODE"], "/the/node/the/app/named");
             let delimiter = if cfg!(windows) { ';' } else { ':' };
             let bin = root.path().join("bundle").join("bin");
             assert_eq!(

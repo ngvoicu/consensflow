@@ -5,6 +5,12 @@
 //! argument quoted and escaped the way cmd.exe reads its line and the script
 //! then reads it again (the shape npm itself uses, through cross-spawn),
 //! which cannot carry a newline. Anything else runs as it is.
+//!
+//! An npm shim runs on a Node: the one beside it, else the one on the PATH
+//! it is started with, as npm's own shim finds it. ConsensFlow bundles none to
+//! fall back on, so a shim for which none is to be found is refused, in words
+//! that say what to do ([`runnable`], [`pane_argv`]): that is a limit, not a
+//! failure to retry.
 
 use std::ffi::OsString;
 use std::fs;
@@ -58,24 +64,29 @@ fn is_script(executable: &Path) -> bool {
         })
 }
 
-/// How to start `executable` with `args` here.
-pub fn runnable(executable: &Path, args: &[OsString], env: &Env) -> Run {
+/// How to start `executable` with `args` here, or why it cannot be started:
+/// an npm shim that runs on a Node, when none is to be found for it.
+pub fn runnable(executable: &Path, args: &[OsString], env: &Env) -> Result<Run, String> {
     let name = executable.to_string_lossy();
     if !is_script(executable) {
-        return Run {
+        return Ok(Run {
             program: executable.to_path_buf(),
             args: args.to_vec(),
             verbatim: false,
-        };
+        });
     }
-    if let Some((program, script)) = shim_target(executable, env) {
-        let mut all = vec![script.into_os_string()];
-        all.extend(args.iter().cloned());
-        return Run {
-            program,
-            args: all,
-            verbatim: false,
-        };
+    match read_shim(executable, env) {
+        Shim::Runs { program, script } => {
+            let mut all = vec![script.into_os_string()];
+            all.extend(args.iter().cloned());
+            return Ok(Run {
+                program,
+                args: all,
+                verbatim: false,
+            });
+        }
+        Shim::NeedsNode => return Err(needs_node(executable)),
+        Shim::Opaque => {}
     }
     let line = std::iter::once(caret(&name))
         .chain(args.iter().map(|arg| quoted(&arg.to_string_lossy())))
@@ -91,18 +102,19 @@ pub fn runnable(executable: &Path, args: &[OsString], env: &Env) -> Run {
         .into_iter()
         .map(OsString::from)
         .chain([format!("\"{line}\"").into()]);
-    Run {
+    Ok(Run {
         program: shell,
         args: args.collect(),
         verbatim: true,
-    }
+    })
 }
 
 /// A window's program as the pane host starts it (`paneArgv`,
 /// `src/harnesses.js`). The host starts a file with each argument quoted the
 /// way programs read them, which cmd.exe does not, so an npm-installed
 /// harness on Windows (a `.cmd` shim) opens as the shim's own node and
-/// script; a script of any other shape cannot open a window.
+/// script; a script of any other shape cannot open a window, and a shim for
+/// which no Node is to be found is refused as [`runnable`] refuses it.
 pub fn pane_argv(argv: &[String], env: &Env) -> Result<Vec<String>, String> {
     let Some((executable, args)) = argv.split_first() else {
         return Ok(Vec::new());
@@ -110,9 +122,15 @@ pub fn pane_argv(argv: &[String], env: &Env) -> Result<Vec<String>, String> {
     if !is_script(Path::new(executable)) {
         return Ok(argv.to_vec());
     }
-    let (program, script) = shim_target(Path::new(executable), env).ok_or_else(|| {
-        format!("{executable} is not an npm shim, and only cmd.exe could run it in a window")
-    })?;
+    let (program, script) = match read_shim(Path::new(executable), env) {
+        Shim::Runs { program, script } => (program, script),
+        Shim::NeedsNode => return Err(needs_node(Path::new(executable))),
+        Shim::Opaque => {
+            return Err(format!(
+                "{executable} is not an npm shim, and only cmd.exe could run it in a window"
+            ));
+        }
+    };
     let mut opened = vec![
         program.to_string_lossy().into_owned(),
         script.to_string_lossy().into_owned(),
@@ -159,13 +177,66 @@ fn quoted(arg: &str) -> String {
     caret(&caret(&format!("\"{inner}\"")))
 }
 
+/// What a `.cmd` or a `.bat` is, read for how to start it.
+enum Shim {
+    /// An npm-style shim, read: `program` runs `script`.
+    Runs { program: PathBuf, script: PathBuf },
+    /// An npm-style shim that runs on a Node, and none is to be found for it.
+    NeedsNode,
+    /// Not of the shape [`shim_target`] reads: only cmd.exe can run it.
+    Opaque,
+}
+
+/// The program an npm-style shim runs its script with.
+enum Program {
+    /// `%_prog%` or `%NODE_EXE%`, which npm's own shim sets to the node beside
+    /// it, else to the one on the PATH.
+    Node,
+    /// A program the shim names outright.
+    Named(PathBuf),
+}
+
+/// `shim` read for what it runs, and with which Node when it names none.
+fn read_shim(shim: &Path, env: &Env) -> Shim {
+    match shim_target(shim) {
+        None => Shim::Opaque,
+        Some((Program::Named(program), script)) => Shim::Runs { program, script },
+        Some((Program::Node, script)) => match node_for(shim, env) {
+            Some(program) => Shim::Runs { program, script },
+            None => Shim::NeedsNode,
+        },
+    }
+}
+
+/// The Node an npm shim runs on, as npm's own shim finds it: the `node.exe`
+/// beside it, else the node on `env`'s PATH. There is no other: ConsensFlow
+/// bundles none, and an environment variable names none.
+fn node_for(shim: &Path, env: &Env) -> Option<PathBuf> {
+    let beside = shim.parent()?.join("node.exe");
+    if beside.exists() {
+        return Some(beside);
+    }
+    on_path("node", env)
+}
+
+/// What is said of an npm shim that runs on a Node when none is to be found,
+/// for whoever has to do something about it.
+fn needs_node(shim: &Path) -> String {
+    format!(
+        "{} is an npm shim that runs on Node, and ConsensFlow finds no Node for it: none is \
+         beside it, and none is on the PATH ConsensFlow runs with. Make the harness's Node \
+         visible to ConsensFlow, or install the harness's own build instead of the npm one.",
+        shim.display()
+    )
+}
+
 /// What an npm-style shim runs, read from the last line that passes its
 /// arguments on (`%*`): `"<program>" "<script>" %*`, where the program is
-/// `%_prog%` or `%NODE_EXE%` (the node beside the shim, else the node on
-/// PATH, else the app's) and the script may begin with `%dp0%` or `%~dp0`,
-/// the shim's own folder. None when the shim is not of that shape, or names
-/// a script that is not there.
-fn shim_target(shim: &Path, env: &Env) -> Option<(PathBuf, PathBuf)> {
+/// `%_prog%` or `%NODE_EXE%` (a Node, found by [`node_for`]) or named outright,
+/// and the script may begin with `%dp0%` or `%~dp0`, the shim's own folder.
+/// None when the shim is not of that shape, or names a script that is not
+/// there.
+fn shim_target(shim: &Path) -> Option<(Program, PathBuf)> {
     let text = String::from_utf8_lossy(&fs::read(shim).ok()?).into_owned();
     let line = text
         .split('\n')
@@ -201,18 +272,14 @@ fn shim_target(shim: &Path, env: &Env) -> Option<(PathBuf, PathBuf)> {
         .iter()
         .any(|name| program.eq_ignore_ascii_case(name));
     let program = if names_node {
-        let beside = Path::new(&folder).join("node.exe");
-        if beside.exists() {
-            beside
-        } else {
-            on_path("node", env).or_else(|| env.path("CONSENSFLOW_NODE").map(Path::to_path_buf))?
-        }
+        Program::Node
     } else {
-        PathBuf::from(expand(program))
+        let program = expand(program);
+        if program.contains('%') {
+            return None;
+        }
+        Program::Named(PathBuf::from(program))
     };
-    if program.to_string_lossy().contains('%') {
-        return None;
-    }
     Some((program, PathBuf::from(script)))
 }
 
@@ -252,14 +319,16 @@ mod tests {
         );
         assert_eq!(
             run,
-            Run {
+            Ok(Run {
                 program: "/usr/local/bin/codex".into(),
                 args: args(&["app-server", "a b"]),
                 verbatim: false
-            }
+            })
         );
         assert_eq!(
-            runnable(Path::new(r"C:\x\claude.exe"), &[], &Env::default()).program,
+            runnable(Path::new(r"C:\x\claude.exe"), &[], &Env::default())
+                .unwrap()
+                .program,
             Path::new(r"C:\x\claude.exe")
         );
     }
@@ -271,7 +340,8 @@ mod tests {
             Path::new(r"C:\Program Files\nodejs\codex.cmd"),
             &args(&["-c", r#"developer_instructions="hi" & more"#, "trailing\\"]),
             &env,
-        );
+        )
+        .unwrap();
         assert_eq!(run.program, Path::new(r"C:\Windows\System32\cmd.exe"));
         assert!(run.verbatim);
         assert_eq!(&run.args[..3], &args(&["/d", "/s", "/c"])[..]);
@@ -289,7 +359,7 @@ mod tests {
 
     #[test]
     fn treats_a_bat_as_a_script_too() {
-        let run = runnable(Path::new(r"C:\x\tool.BAT"), &[], &Env::default());
+        let run = runnable(Path::new(r"C:\x\tool.BAT"), &[], &Env::default()).unwrap();
         assert!(run
             .program
             .to_string_lossy()
@@ -353,11 +423,11 @@ mod tests {
             ]);
             assert_eq!(
                 runnable(&shim, &args(&["queue", "a\nb"]), &env),
-                Run {
+                Ok(Run {
                     program: elsewhere.join("node.exe"),
                     args: vec![script.into_os_string(), "queue".into(), "a\nb".into()],
                     verbatim: false,
-                }
+                })
             );
         }
 
@@ -366,8 +436,82 @@ mod tests {
             let root = tempfile::tempdir().unwrap();
             let (bin, shim, _) = npm(root.path());
             fs::write(bin.join("node.exe"), "").unwrap();
+            // Another node is on the PATH, and the one beside the shim is still the one.
+            let elsewhere = root.path().join("elsewhere");
+            fs::create_dir_all(&elsewhere).unwrap();
+            fs::write(elsewhere.join("node.exe"), "").unwrap();
+            for path in ["", elsewhere.to_str().unwrap()] {
+                let env =
+                    Env::from_vars([("OS", "Windows_NT"), ("PATH", path), ("PATHEXT", ".EXE")]);
+                assert_eq!(
+                    runnable(&shim, &[], &env).unwrap().program,
+                    bin.join("node.exe"),
+                    "PATH {path:?}"
+                );
+            }
+        }
+
+        /// What a shim that runs on Node is refused with, whichever way it is
+        /// asked to start: the shim, and both remedies.
+        fn refusal(shim: &Path) -> String {
+            let said = shim.display();
+            format!(
+                "{said} is an npm shim that runs on Node, and ConsensFlow finds no Node for it: none is \
+                 beside it, and none is on the PATH ConsensFlow runs with. Make the harness's Node \
+                 visible to ConsensFlow, or install the harness's own build instead of the npm one."
+            )
+        }
+
+        #[test]
+        fn an_npm_shim_with_no_node_beside_it_or_on_the_path_is_refused_saying_what_to_do() {
+            let root = tempfile::tempdir().unwrap();
+            let (_, shim, _) = npm(root.path());
+            // A PATH with other programs on it, none of them a node; and a node
+            // that an environment variable names, which is nobody's to run.
+            let other = root.path().join("other");
+            fs::create_dir_all(&other).unwrap();
+            fs::write(other.join("git.exe"), "").unwrap();
+            let named = root.path().join("named").join("node.exe");
+            fs::create_dir_all(named.parent().unwrap()).unwrap();
+            fs::write(&named, "").unwrap();
+            startable(&named);
+            for vars in [vec![], vec![("CONSENSFLOW_NODE", named.to_str().unwrap())]] {
+                let mut all = vec![
+                    ("OS", "Windows_NT"),
+                    ("PATH", other.to_str().unwrap()),
+                    ("PATHEXT", ".EXE"),
+                ];
+                all.extend(vars.clone());
+                let env = Env::from_vars(all);
+                assert_eq!(
+                    runnable(&shim, &args(&["--version"]), &env),
+                    Err(refusal(&shim)),
+                    "{vars:?}"
+                );
+                let argv = [shim.to_string_lossy().into_owned()];
+                assert_eq!(pane_argv(&argv, &env), Err(refusal(&shim)), "{vars:?}");
+            }
+        }
+
+        #[test]
+        fn the_refusal_is_for_a_shim_that_runs_on_node_and_for_no_other() {
+            let root = tempfile::tempdir().unwrap();
+            let (_, _, script) = npm(root.path());
             let env = Env::from_vars([("OS", "Windows_NT"), ("PATH", "")]);
-            assert_eq!(runnable(&shim, &[], &env).program, bin.join("node.exe"));
+            // A shim that names its program outright needs no Node to be found.
+            let own = root.path().join("own.cmd");
+            fs::write(
+                &own,
+                format!("@echo off\r\n\"/opt/node\" \"{}\" %*\r\n", script.display()),
+            )
+            .unwrap();
+            assert!(runnable(&own, &[], &env).is_ok());
+            // One that cannot be read goes through cmd.exe, which is not asked for a Node.
+            let opaque = root.path().join("opaque.cmd");
+            fs::write(&opaque, "@echo off\r\nrun.exe %*\r\n").unwrap();
+            assert!(runnable(&opaque, &[], &env).unwrap().verbatim);
+            // And a program that is no script is never a shim.
+            assert!(runnable(Path::new("/usr/bin/pi"), &[], &env).is_ok());
         }
 
         #[test]
@@ -382,11 +526,11 @@ mod tests {
             .unwrap();
             assert_eq!(
                 runnable(&own, &args(&["x"]), &Env::default()),
-                Run {
+                Ok(Run {
                     program: "/opt/node".into(),
                     args: vec![script.into_os_string(), "x".into()],
                     verbatim: false
-                }
+                })
             );
         }
 
@@ -429,7 +573,7 @@ mod tests {
                 "@echo off\r\n\"%NODE_EXE%\" \"%NPM_CLI_JS%\" %*\r\n",
             )
             .unwrap();
-            assert!(runnable(&opaque, &[], &Env::default()).verbatim);
+            assert!(runnable(&opaque, &[], &Env::default()).unwrap().verbatim);
         }
     }
 }

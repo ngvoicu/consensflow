@@ -13,11 +13,11 @@ import {
   startLine,
   WAY_BACK,
 } from './choice.mjs'
-import { cliEnv, cliTarget } from './cli-target.mjs'
+import { cliTarget } from './cli-target.mjs'
 import { daemonCommand } from './helpers.mjs'
 import { CLI_LEGS, DAEMON_LEGS, legEnv, ranProblem, runLeg } from './legs.mjs'
 
-const CF_MJS = fileURLToPath(new URL('../bin/cf.mjs', import.meta.url))
+const CLI_JS = fileURLToPath(new URL('../src/cli.js', import.meta.url))
 const CHOICE = pathToFileURL(fileURLToPath(new URL('./choice.mjs', import.meta.url))).href
 const OTHER = { node: 'native', native: 'node' }
 
@@ -44,7 +44,7 @@ describe('which daemon a test starts, in words', () => {
       assert.equal(started.native, false)
       assert.equal(started.command, process.execPath)
       assert.deepEqual(started.args, ['daemon.mjs'])
-      // The product chooses by the home, not by an environment variable.
+      // No environment variable chooses the daemon; the Node is the rig's stand-in harness's.
       assert.deepEqual(started.env, { CONSENSFLOW_NODE: process.execPath })
     }
   })
@@ -383,7 +383,7 @@ describe('what a run says it ran, to the runner that labelled it', () => {
     }
     assert.match(
       ranProblem(CLI_LEGS[0], 'native\n'),
-      /^Node's cf\.mjs: a suite ran the native one$/,
+      /^Node's src\/cli\.js: a suite ran the native one$/,
     )
   })
 })
@@ -446,12 +446,12 @@ it('says what ran', () => {
 })
 
 describe('which cf the suites of the CLI run, in the same words', () => {
-  it('runs Node’s bin/cf.mjs for `node`, and the native cf of this checkout for `native`', () => {
+  it('runs Node’s src/cli.js for `node`, and the native cf of this checkout for `native`', () => {
     for (const fallback of ['node', 'native']) {
       const node = cliTarget({ named: 'node', leg: '', fallback })
       assert.deepEqual(
         [node.kind, node.native, node.command, node.args],
-        ['node', false, process.execPath, [CF_MJS]],
+        ['node', false, process.execPath, [CLI_JS]],
       )
       const native = cliTarget({ named: 'native', leg: '', fallback })
       assert.deepEqual(
@@ -481,20 +481,5 @@ describe('which cf the suites of the CLI run, in the same words', () => {
       () => cliTarget({ named: 'node', leg: 'native', fallback: 'node' }),
       /says this is the native leg, but CONSENSFLOW_TEST_CLI names node/,
     )
-  })
-
-  it('makes the choice in the home of a run, and names no runtime to either cf', () => {
-    // A runtime named to the native cf would let it hand a verb on to Node and be
-    // none the worse for it: the environment of a run is the test's own, and the
-    // home in it the only thing that says which implementation answers.
-    const native = cliTarget({ named: 'native', leg: '', fallback: 'node' })
-    const node = cliTarget({ named: 'node', leg: '', fallback: 'node' })
-    inAFolder((home) => {
-      const env = { A: '1', CONSENSFLOW_HOME: home }
-      assert.deepEqual(cliEnv(node, env), env, 'the environment is the test’s')
-      assert.equal(existsSync(join(home, WAY_BACK)), true)
-      assert.deepEqual(cliEnv(native, env), env)
-      assert.equal(existsSync(join(home, WAY_BACK)), false)
-    })
   })
 })

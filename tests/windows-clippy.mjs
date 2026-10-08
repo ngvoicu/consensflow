@@ -5,9 +5,8 @@
  * leave out) is found in seconds, though nothing is run. The crates to lint are
  * named, else all of the workspace but the app (whose build wants the Windows
  * runtime it ships with, which only a Windows build has). The app is linted
- * when it is named, with its sidecar and resources left out of its Tauri
- * configuration and a resource compiler that compiles nothing, as a check
- * needs neither:
+ * when it is named, with its resources left out of its Tauri configuration
+ * and a resource compiler that compiles nothing, as a check needs neither:
  *
  *   npm run clippy:windows
  *   npm run clippy:windows -- cf-daemon cf-process
@@ -43,15 +42,15 @@ if (args[0] === AS_ARCHIVER) {
     [`CC_${TARGET.replaceAll('-', '_')}`]: 'true',
     [`AR_${TARGET.replaceAll('-', '_')}`]: archiver,
   }
-  // The app's build script wants the sidecar and the resources a Windows build
-  // ships (left out of its configuration here), and a resource compiler for
-  // its icon and manifest (one that does nothing, found first on PATH).
+  // The app's build script wants the resources a Windows build ships (left
+  // out of its configuration here), and a resource compiler for its icon and
+  // manifest (one that does nothing, found first on PATH).
   let stand
   if (args.includes('app')) {
     stand = mkdtempSync(join(tmpdir(), 'cf-windows-clippy-'))
     writeFileSync(join(stand, 'llvm-rc'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
     env.PATH = `${stand}${delimiter}${process.env.PATH}`
-    env.TAURI_CONFIG = JSON.stringify({ bundle: { externalBin: null, resources: null } })
+    env.TAURI_CONFIG = JSON.stringify({ bundle: { resources: null } })
   }
   const ran = spawnSync(
     'cargo',

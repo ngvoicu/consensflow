@@ -2,31 +2,26 @@
 //! participant's token in `CONSENSFLOW_TOKEN`) it is the board's commands,
 //! answered here against the daemon's API; anywhere else it is the CLI's
 //! standalone commands, which `standalone` answers, and `ui`, the daemon's,
-//! which `main` runs before any of this (`native_ui`). The CLI's Node sources
-//! beside this binary answer only in a home that has taken the way back
-//! (below).
+//! which `main` runs before any of this (`native_ui`).
 //! `cf hook <harness>` is what a harness's hooks run, in a window or
 //! not; it says only what its harness reads, and never fails.
 //! `cf codex-session <codex> <args…>` is what a Codex window runs in Codex's place.
 //! `cf ui` is the app's daemon, the one of `cf-daemon`.
 //!
-//! For the flip release alone there is a way back: a `use-node` file in
-//! ConsensFlow's home (`cf_base::way_back`) sends every tokenless command,
-//! `ui` included, to the Node sources on the Node the bundle carries
-//! (`node`). A window's token still makes `cf` the board, and a hook is a hook.
+//! Nothing else runs behind it: the bundle ships no Node and no sources, and a
+//! `use-node` file left in a home by the flip release, which sent the commands
+//! of that home to them, is read by nothing.
 
 #![forbid(unsafe_code)]
 
 mod board;
 mod hook;
-mod node;
 mod standalone;
 
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
 
 use cf_base::env::Env;
-use cf_base::way_back;
 use cf_board::Board;
 
 /// Runs `cf codex-session <codex> <args…>` when `args` ask for it: its exit
@@ -40,11 +35,9 @@ pub fn codex_session(env: &Env, args: &[OsString]) -> Option<i32> {
     (first == "codex-session").then(|| cf_codex_session::run(env, rest))
 }
 
-/// Runs `cf ui [--json] [--no-open]` as the native daemon when `args` ask for
-/// it: its exit code. It is matched on the first argument as it came, tokenless
-/// (a window has its participant's token, and there `cf` is the board), and in
-/// a home that has not taken the way back: with the `use-node` file in it `ui`
-/// goes to the CLI's Node sources, as every tokenless command of that home does.
+/// Runs `cf ui [--json] [--no-open]` as the daemon when `args` ask for it: its
+/// exit code. It is matched on the first argument as it came, and tokenless (a
+/// window has its participant's token, and there `cf` is the board).
 ///
 /// The daemon reads its input and writes its output from other threads, which
 /// would wait for the standard streams' locks for good if the caller held
@@ -52,8 +45,7 @@ pub fn codex_session(env: &Env, args: &[OsString]) -> Option<i32> {
 /// [`codex_session`].
 pub fn native_ui(env: &Env, args: &[OsString]) -> Option<i32> {
     let (first, rest) = args.split_first()?;
-    let asked =
-        first == "ui" && env.text("CONSENSFLOW_TOKEN").is_none() && !way_back::choose(env).node;
+    let asked = first == "ui" && env.text("CONSENSFLOW_TOKEN").is_none();
     asked.then(|| cf_daemon::ui(env, rest))
 }
 
@@ -77,14 +69,9 @@ pub fn run(
     }
     match Board::from_env(env) {
         Some(board) => board::run(&words, json, &board, input, out, err),
-        // Tokenless: the human's own `cf`, whose home has one writing
-        // implementation, native unless it has taken the way back: the Node
-        // sources are run only with the file that sent the home there. The
-        // words as they came: a `--json` among them is the verb's own, and
-        // `ui`, which `main` ran before this (`native_ui`), is no verb here.
-        None => match way_back::choose(env).node_file() {
-            Some(file) => node::run(args, file, err),
-            None => standalone::run(env, args, out, err),
-        },
+        // Tokenless: the human's own `cf`. The words as they came: a `--json`
+        // among them is the verb's own, and `ui`, which `main` ran before this
+        // (`native_ui`), is no verb here.
+        None => standalone::run(env, args, out, err),
     }
 }

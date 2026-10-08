@@ -3,8 +3,7 @@
 //! things in, a file told apart from another renamed over it, JavaScript's
 //! readings of values and text, paths joined as Node joins them, text cut
 //! where JavaScript cut it, and JSON read and written the way Node read and
-//! wrote it, the words after a verb as Node's `parseArgs` reads them, and
-//! which implementation writes a home while Node is the way back to.
+//! wrote it, and the words after a verb as Node's `parseArgs` reads them.
 
 #![forbid(unsafe_code)]
 
@@ -18,4 +17,3 @@ pub mod path;
 pub mod refusal;
 pub mod text;
 pub mod time;
-pub mod way_back;

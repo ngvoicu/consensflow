@@ -33,13 +33,13 @@ describe('the text Devin is given on Windows', () => {
     assert.equal(consoleText(letters), letters)
   })
 
-  it("is the page's too: the build hands it the very same module", () => {
-    const at = (relative) => readFileSync(new URL(relative, import.meta.url), 'utf8')
-    assert.equal(
-      at('../app/ui/vendor/console-text.js'),
-      at('../src/console-text.js'),
-      'npm --prefix app run bundle:ui copies it',
-    )
+  it("is the page's too: the page's own module is the same code (tests/console-text.test.mjs holds it to the recorded table)", () => {
+    // Each file says in its header whose it is; the code under the header is one.
+    const code = (relative) => {
+      const text = readFileSync(new URL(relative, import.meta.url), 'utf8')
+      return text.slice(text.indexOf('*/') + 2)
+    }
+    assert.equal(code('../app/ui/core/console-text.js'), code('../src/console-text.js'))
   })
 
   it('spells what Unicode also writes plainly, and shown control characters in caret notation', () => {

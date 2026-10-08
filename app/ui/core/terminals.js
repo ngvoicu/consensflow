@@ -1,8 +1,8 @@
 import { button, element, iconButton, redraw } from '../dom.js'
 import { EmulatorRegistry, paneKey } from '../term.js'
 import { TerminalLink } from '../terminal-link.js'
-import { consoleText } from '../vendor/console-text.js'
 import { ICONS, identity, lamp, laneName, laneOrder, laneStatus, tryAgain } from './board.js'
+import { consoleText } from './console-text.js'
 
 /** The windows that read key presses on Windows, where the console drops a non-ASCII mark. */
 const KEY_READERS = new Set(['devin', 'codex'])
@@ -119,7 +119,7 @@ export class TerminalsView {
    * What the human typed, as the window can take it: on Windows a Devin or
    * Codex window reads key presses, and the console drops every non-ASCII
    * mark among them, so there those go in ASCII, as ConsensFlow's own
-   * messages to Devin do (src/console-text.js).
+   * messages to Devin do (console-text.js).
    */
   #typed(pane, data) {
     const harness = this.#cards.get(paneKey(pane))?.harness

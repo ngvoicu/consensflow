@@ -327,7 +327,7 @@ fn redirect_stderr(log: &std::path::Path) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
-    // Settled before any thread exists, so the updater and the Node process —
+    // Settled before any thread exists, so the updater and the daemon —
     // which inherits this environment, and passes it to every pane — all see
     // the one home.
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));

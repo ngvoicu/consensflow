@@ -3,10 +3,10 @@
 //! flip release (a disk image, an installer), so the deletion release's first
 //! start repairs what the flip release's would have.
 //!
-//! The command `cf setup` wrote names the bundled Node and `cf.mjs`, which the
-//! bundle after the deletion no longer holds; the repair rewrites it to name this
-//! bundle's native `cf`, keeping the home it pins. It is meant to be a thing the
-//! app does quietly, and so:
+//! The command an older `cf setup` wrote names the bundled Node and `cf.mjs`,
+//! which the bundle after the deletion no longer holds; the repair rewrites it
+//! to name this bundle's `cf`, keeping the home it pins. It is meant to be a
+//! thing the app does quietly, and so:
 //!
 //! - it repairs only the commands that serve this app's home, the one they pin or,
 //!   with no pin, the default one: the owner runs the Candidate (its own home)
@@ -28,7 +28,7 @@ use cf_base::env::Env;
 use cf_launcher::{repair, Places, Repair, Repaired};
 use tauri::AppHandle;
 
-use crate::daemon_command::{bundled_cli, native_cf, plain_path};
+use crate::daemon_command::{bundled_cf, plain_path};
 
 /// Repairs the terminal's command from a thread of its own, so that the app's
 /// window opens meanwhile: on a portable Windows app the bundle may have to be
@@ -38,8 +38,8 @@ pub(crate) fn repair_in_background(app: &AppHandle) {
     let spawned = thread::Builder::new()
         .name("consensflow-launcher-repair".to_owned())
         .spawn(move || {
-            let cf = match bundled_cli(&app) {
-                Ok((_, cli)) => native_cf(&cli),
+            let cf = match bundled_cf(&app) {
+                Ok(cf) => cf,
                 Err(cause) => {
                     eprintln!("consensflow: the terminal command is not repaired: {cause}");
                     return;
