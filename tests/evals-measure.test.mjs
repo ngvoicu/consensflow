@@ -128,6 +128,58 @@ describe('measuring a chief from the ledger', () => {
     }
   })
 
+  it('does not count a result the chief decided on before it was given it as one that never reached the chief', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-withdrawn-'))
+    const file = path.join(dir, 'consensflow.db')
+    try {
+      const ledger = openLedger(file)
+      const project = ledger.createProject({
+        directory: '/work/site',
+        name: 'site',
+        chief: { harness: 'claude-code' },
+      })
+      for (const agent of ['zeus', 'diana']) {
+        ledger.addMember(project.id, {
+          agent,
+          harness: 'claude-code',
+          role: 'worker',
+          tier: 'standard',
+        })
+      }
+      const deliver = (message) => {
+        ledger.beginDelivery(message.id)
+        ledger.confirmDelivery(message.id, { evidence: 'native' })
+      }
+      const one = ledger.createTask(project.id, { from: 'chief', to: 'zeus', body: 'Write it' })
+      const two = ledger.createTask(project.id, { from: 'chief', to: 'diana', body: 'Check it' })
+      deliver(one.message)
+      deliver(two.message)
+      // T-1's result waited behind the chief's turn, which accepted the task: the native
+      // daemon withdraws it with the decision (Node's leaves it queued, so it is done by hand).
+      const waiting = ledger.recordResult(project.id, 1, { body: 'Written' }).message
+      ledger.acceptTask(project.id, 1, { by: 'chief' })
+      ledger.cancelMessage(waiting.id, 'T-1 was accepted')
+      // T-2's reached the chief.
+      deliver(ledger.recordResult(project.id, 2, { body: 'Checked' }).message)
+      ledger.close()
+
+      const metrics = measure(file)
+      assert.deepEqual(
+        [metrics.plumbing.results, metrics.plumbing.resultsDelivered],
+        [1, 1],
+        'the one withdrawn was not owed',
+      )
+      assert.deepEqual(
+        mechanics(metrics, 2)
+          .filter((c) => c.name.startsWith('every result'))
+          .map((c) => [c.name, c.ok]),
+        [['every result reached the chief (1/1)', true]],
+      )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('measures long messages: the longest result of each kind, the owner’s answers, the notes whole', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'cf-evals-long-'))
     const file = path.join(dir, 'consensflow.db')

@@ -44,8 +44,10 @@
 //!
 //! A test whose rule is Node's still, but whose trace the engine departs from
 //! on purpose (the notes that tell a requester its task is paused go once it is
-//! resumed; a window that did not come up is asked what it shows before it is
-//! closed), is named in [`DEPARTED`], with what it does that Node does not.
+//! resumed; a result the chief decides on before it is given it is withdrawn,
+//! not pasted after the decision; a window that did not come up is asked what
+//! it shows before it is closed), is named in [`DEPARTED`], with what it does
+//! that Node does not.
 //! It is held to a trace of its own, recorded from the engine
 //! (`tests/departures/`, `npm run goldens:departed`), and fails when Node's
 //! trace is the engine's again, so the departure is taken off once Node does
@@ -132,11 +134,34 @@ static DEPARTURES: LazyLock<HashMap<Key, Recorded>> = LazyLock::new(|| load(&fol
 /// the fakes' own), so each ported test's effects come in Node's order.
 const INTERLEAVED: &[&str] = &[];
 
+/// What the engine does when the chief sends back a task whose result it has
+/// not been given: the result is withdrawn, where Node pastes it into the
+/// chief's window after the decision it asked for.
+const SENT_BACK_BEFORE_GIVEN: &str = "the chief sends T-1 back while its result is still queued for it: the result is withdrawn, where Node pastes it into the chief's window after the decision";
+
 /// The tests the engine departs from Node's trace in on purpose, each with
 /// what the engine does that Node does not. Node never withdraws a note that
 /// told a requester a task was paused, so the notes the engine withdraws when
-/// the task is resumed are in Node's traces still queued, and pasted.
+/// the task is resumed are in Node's traces still queued, and pasted; nor a
+/// task's result when the chief accepts or sends back the task before it is
+/// given the result, so Node pastes it after the decision it asked for.
 const DEPARTED: &[(&str, &str)] = &[
+    (
+        "steps no session with no window and nothing for it, and steps it again once something is",
+        "the chief accepts T-1 while its result is still queued for it, and no window is open after the restart: the result is withdrawn, so no window is opened for the chief, where Node opens it with the result as its first message",
+    ),
+    (
+        "brings a deleted session back when its task is reopened: its window opens on its own conversation",
+        SENT_BACK_BEFORE_GIVEN,
+    ),
+    (
+        "brings a deleted session back when a follow-up comes with --after: its window opens on its own conversation, and a busy session still refuses",
+        "the chief accepts T-1 while its result is still queued for it: the result is withdrawn, where Node pastes it into the chief's window after the decision",
+    ),
+    (
+        "reopens a finished task on its own session, resumed with the follow-up and nothing else",
+        SENT_BACK_BEFORE_GIVEN,
+    ),
     (
         "closes a project: its windows go, work in them pauses, and Resume brings the chief back",
         "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, where Node pastes it into the window",

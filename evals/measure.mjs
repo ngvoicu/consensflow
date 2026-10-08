@@ -174,8 +174,11 @@ function plumbing(file, chiefId, humanId) {
       briefsDelivered: count(
         "SELECT COUNT(*) AS n FROM message WHERE kind = 'task' AND state IN ('delivered', 'read')",
       ),
+      // A result withdrawn was rightly never delivered: the chief accepted or sent back
+      // its task before it was given the result (the native daemon withdraws it then), or
+      // the task was called off.
       results: count(
-        "SELECT COUNT(*) AS n FROM message WHERE kind = 'result' AND recipient_id = ?",
+        "SELECT COUNT(*) AS n FROM message WHERE kind = 'result' AND recipient_id = ? AND state != 'cancelled'",
         chiefId,
       ),
       resultsDelivered: count(

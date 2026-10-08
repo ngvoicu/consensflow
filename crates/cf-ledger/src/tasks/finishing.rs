@@ -1,6 +1,11 @@
 //! A task finished: its result recorded and accepted, or sent back; called
 //! off by a coordinator, or given up by the daemon; and taken off the board
-//! for good by the human once finished.
+//! for good by the human once finished. A result is put to its requester to
+//! decide on, so a decision taken before the requester was given it withdraws
+//! it, in the decision's own transaction: accepting and sending back do
+//! (`withdraw_result`). A cancel has no such step to take: a task is called
+//! off only before it is done, and `call_off` withdraws every message of it
+//! still on its way, a result an older build left among them.
 
 use cf_proto::ledger::{TaskMoved, TaskView};
 use rusqlite::params;
@@ -12,7 +17,7 @@ use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES,
     MAX_BODY, MEMBER_ROLES,
 };
-use crate::queue::{drop_queued, queue, send, withdraw_gated, Queued, Sent};
+use crate::queue::{drop_queued, queue, send, withdraw_gated, withdraw_result, Queued, Sent};
 use crate::staff::{bring_back, can_continue, has_task_in_hand, require_free, Giving};
 use crate::store::Store;
 use crate::views::{ParticipantRow, TaskRow};
@@ -50,7 +55,9 @@ pub(crate) fn record_result(
 }
 
 /// A coordinator accepts a task's result: the task is finished, and the
-/// tasks given by name that waited for it go to their windows.
+/// tasks given by name that waited for it go to their windows. The result is
+/// withdrawn if its requester has not been given it yet: it asks for the
+/// decision just taken.
 pub(crate) fn accept_task(
     store: &mut Store,
     project_id: i64,
@@ -63,6 +70,7 @@ pub(crate) fn accept_task(
         require_task_state(&task, &["done"], "accept")?;
         require_result_received(store, &task, by)?;
         withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;
+        withdraw_result(store, &task, "was accepted")?;
         // What is still on its way to the member (an answer that came after its
         // result, say) has no window left to take it.
         if let Some(assignee) = task.assignee_id {
@@ -167,7 +175,8 @@ pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), Le
 /// has one task to work on. The follow-up is a task message that carries what
 /// the window kept for the task (which is what delivers what a delivery that
 /// failed let go of), and the brief before it when none is received or on its
-/// way.
+/// way. A result its requester has not been given yet is withdrawn: it asks
+/// for the decision just taken, and the work it reports is sent back.
 pub(crate) fn reopen_task(
     store: &mut Store,
     project_id: i64,
@@ -199,6 +208,7 @@ pub(crate) fn reopen_task(
         };
         require_active(&assignee)?;
         withdraw_gated(store, task.id, &format!("sent back by @{by}"))?;
+        withdraw_result(store, &task, "was sent back")?;
         let words = carrier_body(store, &task, assignee.id, body)?;
         let message_id = queue(
             store,

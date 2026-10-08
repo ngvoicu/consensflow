@@ -14,7 +14,9 @@
 //! output (`{"answers": [ids], "via": "inbox" | "task"}`), once that output is
 //! complete. The ones among them that are for the caller and still queued are
 //! received. A read never receives anything by itself: a response that did
-//! not reach its reader, or an output that was cut off, says nothing.
+//! not reach its reader, or an output that was cut off, says nothing. Only an
+//! answer is received so: a result is put to its reader for a decision, which
+//! ends it (the ledger withdraws it then), and a read is no decision.
 
 use cf_base::js;
 use cf_ledger::Read;

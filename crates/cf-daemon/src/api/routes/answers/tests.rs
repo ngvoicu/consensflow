@@ -8,7 +8,9 @@ use serde_json::{json, Value};
 
 use super::*;
 use crate::api::callers::caller_of;
-use crate::api::routes::tests::support::{note_for_zeus, question_on, state_of, working_question};
+use crate::api::routes::tests::support::{
+    note_for_zeus, question_on, state_of, working_question, working_task,
+};
 use crate::testing::{request, said, scene, Scene};
 
 /// `POST /api/answers` from the window of `token`, with `body` as its text.
@@ -505,6 +507,34 @@ async fn what_is_not_a_queued_answer_for_the_caller_is_left_as_it_is_and_wakes_n
     read_from(&scene, &scene.zeus, &said_read(&[answer.id], "task")).await;
     assert_eq!(scene.logged("message.read"), 1);
     assert_eq!(scene.kicks.get(), 1);
+}
+
+#[tokio::test]
+async fn a_result_named_in_a_read_is_left_queued_for_the_decision_that_ends_it() {
+    let scene = scene();
+    let task = working_task(&scene);
+    let result = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .record_result(scene.project.id, task, "Parser done")
+        .unwrap()
+        .message
+        .unwrap();
+    assert_eq!(
+        (result.kind.as_str(), result.state.as_str()),
+        ("result", "queued")
+    );
+    // The chief printed it whole with `cf task get`, and says so.
+    let (status, said) = read_from(&scene, &scene.chief, &said_read(&[result.id], "task")).await;
+    assert_eq!((status, said), (200, json!({})));
+    assert_eq!(
+        scene.message(result.id).state,
+        "queued",
+        "a read is no decision: the paste still reminds the chief that one is due"
+    );
+    assert_eq!(scene.logged("message.read"), 0);
+    assert_eq!(scene.kicks.get(), 0);
 }
 
 #[tokio::test]

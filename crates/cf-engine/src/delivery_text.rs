@@ -121,7 +121,12 @@ fn opening(body: &str) -> &str {
 
 /// A question says how to answer it; a result says what to do with it, so the
 /// reader decides on the board even when its harness frames the message as a
-/// request.
+/// request. A result's footer is not checked against its task here: the
+/// decision on the task withdraws the result in the ledger, in its own
+/// transaction, so a result that is pasted has not been decided on (the
+/// dispatcher asks the ledger for the head of the queue again and begins the
+/// delivery before it writes this text, awaiting nothing between), and one
+/// already being pasted is in the window, where no check can take it back.
 fn footer(message: &MessageView) -> String {
     let id = message.id;
     match (message.kind.as_str(), message.task_number) {
