@@ -78,7 +78,7 @@ function bodyOf(notes, version) {
     '**Downloads.** macOS on Apple silicon: the DMG, signed with a Developer ID',
     'and notarized by Apple. Windows x64: the installer (`-setup.exe`), or the',
     'portable exe (`-portable.exe`), one file you run from anywhere: its first',
-    'start unpacks Node and the CLI into',
+    'start unpacks its `cf` into',
     '`%LOCALAPPDATA%\\dev.ngvoicu.consensflow\\portable-runtime`. Its data stays in your user',
     'folder either way. Neither Windows file is code-signed, so Windows shows its',
     'unknown-publisher warning. The Mac app updates itself through',

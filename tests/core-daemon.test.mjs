@@ -12,24 +12,18 @@ const BUNDLE_BIN = fileURLToPath(new URL('../bin', import.meta.url))
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
- * The cases that go through a process, run against the daemon
- * `CONSENSFLOW_TEST_DAEMON` names (`npm run test:daemons` runs both, until
- * Node's goes). What was a test of Node's own modules (the pass loop, the API's
- * doors, a Node preload) is held where the native daemon is: the stop and pass
- * tests of `crates/cf-daemon/src/{stop,pass,errors}`, and the recorded traces
- * (`core-daemon-001`) it plays.
+ * The cases that go through a process, run against the native daemon
+ * (`npm run test:daemons`). What was a test of Node's own modules (the pass
+ * loop, the API's doors, a Node preload) is held where the daemon is: the stop
+ * and pass tests of `crates/cf-daemon/src/{stop,pass,errors}`, and the recorded
+ * traces (`core-daemon-001`) it plays. What its start line says is `rust 3.0.0`.
  */
-const CHOSEN = daemonCommand()
-/** What the start line of the daemon under test says, and no other's does: `node v26.8.1`, `rust 3.0.0`. */
-const STARTS = START_WORDS[CHOSEN.kind]
+const STARTS = START_WORDS.native
 
-/** The daemon as a child, the one under test, started as `cf ui` is. Its home is made the choice's own. */
+/** The daemon as a child, started as `cf ui` is. */
 function startDaemon(env) {
-  const started = daemonCommand({ home: env.CONSENSFLOW_HOME })
-  return spawn(started.command, started.args, {
-    env: { ...env, ...started.env },
-    stdio: ['pipe', 'pipe', 'pipe'],
-  })
+  const started = daemonCommand()
+  return spawn(started.command, started.args, { env, stdio: ['pipe', 'pipe', 'pipe'] })
 }
 
 /** The environment of a daemon on `home`: this machine's, but for what the test's home gives. */
@@ -103,7 +97,7 @@ describe('the daemon and its log', () => {
         const code = await new Promise((resolve) => child.once('exit', resolve))
         assert.equal(code, 0, errors)
         const log = await readFile(path.join(home, 'daemon.log'), 'utf8')
-        // The runtime the start line names is the daemon's own, the one under test: Node's version, or the native one's.
+        // The runtime the start line names is the daemon's own: the native one's.
         assert.match(
           log,
           new RegExp(
@@ -195,11 +189,10 @@ describe('the daemon and its log', () => {
       assert.ok(started, `it did not start: ${errors}`)
       child.stdin.end()
       assert.equal(await exited, 0, errors)
-      // Node's log has the error's stack under the line, which begins `Error: `;
-      // the native daemon's has the roster's words alone.
+      // The roster's words are under the line.
       assert.match(
         await readFile(path.join(home, 'daemon.log'), 'utf8'),
-        /\n\S+ error the agents file could not be used\n {4}(?:Error: )?Your agents file .* is not valid JSON/,
+        /\n\S+ error the agents file could not be used\n {4}Your agents file .* is not valid JSON/,
       )
       assert.equal(await readFile(file, 'utf8'), broken, 'the file is left as the human wrote it')
     } finally {
@@ -303,8 +296,8 @@ async function daemonOverItsBridge(t, { agents = [] } = {}) {
     return until(() => answer, `answered ${op}`)
   }
   await until(() => handle, 'said it was ready')
-  // The daemon that answers is the one under test: its log's start line says so.
-  assertStarted(CHOSEN, await readFile(path.join(home, 'daemon.log'), 'utf8'), child.pid, home)
+  // The daemon that answers is the native one: its log's start line says so.
+  assertStarted(await readFile(path.join(home, 'daemon.log'), 'utf8'), child.pid)
   return {
     home,
     workspace,
@@ -329,7 +322,7 @@ const MYBUILDER = {
 }
 
 describe('the daemon over its bridge', () => {
-  it("opens a window with the agents' API, its project and participant, its runtime, and the bundled cf first on PATH", {}, async (t) => {
+  it("opens a window with the agents' API, its project and participant, and the bundled cf first on PATH, and names it no Node", {}, async (t) => {
     const d = await daemonOverItsBridge(t, { agents: [MYBUILDER] })
     const opened = await d.request('project.open', {
       directory: d.workspace,
@@ -355,7 +348,8 @@ describe('the daemon over its bridge', () => {
         d.handle.url.replace(/\/$/, ''),
         String(opened.project.id),
         'chief',
-        process.execPath,
+        // The app bundles no Node, and the daemon names none to a window.
+        undefined,
         `${BUNDLE_BIN}${path.delimiter}${d.env.PATH}`,
       ],
     )
@@ -406,11 +400,7 @@ describe('the daemon over its bridge', () => {
     assert.equal(told('roster').length, 1)
   })
 
-  it("stops itself when the app's end of the bridge breaks", {
-    skip:
-      CHOSEN.kind === 'node' &&
-      "Node's `cf ui` drains on a broken output and says it was asked to stop; the daemon alone said the bridge failed",
-  }, async (t) => {
+  it("stops itself when the app's end of the bridge breaks", async (t) => {
     const d = await daemonOverItsBridge(t)
     d.child.stdout.destroy()
     d.child.stdin.write(
@@ -419,9 +409,8 @@ describe('the daemon over its bridge', () => {
     await timed(() => d.exited, 10_000)
     assert.equal(await d.exited, 0, d.errors())
     const log = await readFile(path.join(d.home, 'daemon.log'), 'utf8')
-    // Node's log has the error's stack under the line, which begins `Error: `;
-    // the native daemon's has the bridge's own words for what broke.
-    assert.match(log, /\n\S+ error the bridge failed\n {4}(?:Error: |bridge I\/O error: )/)
+    // The bridge's own words for what broke are under the line.
+    assert.match(log, /\n\S+ error the bridge failed\n {4}bridge I\/O error: /)
     assert.match(log, /\n\S+ info stop: the bridge failed; rss \d+ MB\n\S+ info exit 0\n$/)
   })
 })

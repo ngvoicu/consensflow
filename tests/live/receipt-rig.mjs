@@ -33,7 +33,7 @@ import { answers } from '../../hosts/lib/completion.js'
 import { recordState } from '../../src/adapters/shared.js'
 import { startIntegration } from '../integration/harness.mjs'
 import { AGENTS, QUESTION_TOOL, tierFlag } from './bench-agents.mjs'
-import { CF, traceOf, useNativeDaemon, useNodeDaemon } from './native-daemon.mjs'
+import { CF, traceOf, useNativeDaemon } from './native-daemon.mjs'
 import { trustForClaude } from './trust-claude.mjs'
 
 const REPO = fileURLToPath(new URL('../..', import.meta.url))
@@ -284,10 +284,8 @@ exec "$CF_REAL_CLAUDE" "$@"
  * opens (a path under it, and its text): a Claude window reads the settings
  * there.
  */
-export async function openRig({ folder, workers, model = {}, files = {}, daemon = 'native' }) {
-  // The native daemon, which this is for; Node's only for a baseline of a case beside it.
-  if (daemon === 'node') useNodeDaemon()
-  else useNativeDaemon()
+export async function openRig({ folder, workers, model = {}, files = {} }) {
+  useNativeDaemon()
   const root = mkdtempSync(join(tmpdir(), 'consensflow-receipt-'))
   const home = join(root, 'consensflow')
   mkdirSync(home, { recursive: true })

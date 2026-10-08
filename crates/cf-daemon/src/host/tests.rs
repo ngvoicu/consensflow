@@ -204,6 +204,60 @@ async fn a_program_that_cannot_open_in_a_window_fails_the_open_with_the_sentence
 }
 
 #[tokio::test]
+async fn a_window_opens_on_an_npm_shim_with_its_node_beside_it_and_is_refused_without_one() {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let heard = Rc::clone(&seen);
+            app.on("pane.open", move |_, body| {
+                heard.borrow_mut().push(body);
+                async { Ok(json!({ "ok": true })) }
+            });
+            // A Windows environment with the folder of the shim on its PATH and
+            // no other: what the daemons of the tests are given.
+            let root = tempfile::tempdir().unwrap();
+            let folder = root.path();
+            let shim = cf_harness::testing::npm_shim_stand_in(&folder.join("claude"));
+            let env = Env::from_vars([("OS", "Windows_NT"), ("PATH", folder.to_str().unwrap())]);
+            let host = BridgeHost::new(daemon.clone(), env);
+            let window = || {
+                let mut window = open(&[]);
+                window.argv = vec![shim.to_string_lossy().into_owned(), "--x".to_owned()];
+                window
+            };
+
+            assert_eq!(host.open(window()).await, Ok(Opened::Open { pid: None }));
+            let text = |file: &str| folder.join(file).to_string_lossy().into_owned();
+            assert_eq!(
+                seen.borrow()[0]["argv"],
+                json!([text("node.exe"), text("claude.js"), "--x"])
+            );
+
+            // Its Node taken away, the same shim is a limit, said so that
+            // whoever meets it knows what to do, and nothing is sent.
+            std::fs::remove_file(folder.join("node.exe")).unwrap();
+            let failed = host.open(window()).await.unwrap_err();
+            assert_eq!(failed.error, None);
+            for said in [
+                shim.to_string_lossy().as_ref(),
+                "finds no Node for it",
+                "Make the harness's Node visible to ConsensFlow",
+                "install the harness's own build",
+            ] {
+                assert!(
+                    failed.message.contains(said),
+                    "{said:?}: {}",
+                    failed.message
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            assert_eq!(seen.borrow().len(), 1);
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn a_kill_is_asked_by_the_panes_id_and_generation() {
     LocalSet::new()
         .run_until(async {

@@ -11,9 +11,8 @@ import { daemonCommand } from './helpers.mjs'
 /**
  * The proof of the agents screens (tests/agents-proof.mjs) that the packaged
  * smoke runs against the daemon a built app chose: held here to what it is
- * for, which is failing when the daemon's agents are wrong, and run against each
- * daemon from the checkout (`npm run test:daemons`: Node's, then the native
- * one `CONSENSFLOW_TEST_DAEMON` names).
+ * for, which is failing when the daemon's agents are wrong, and run against the
+ * native daemon from the checkout (`npm run test:daemons`).
  */
 
 const TOKEN = 'proof-ui-token'
@@ -139,14 +138,13 @@ describe('the proof of the agents screens', () => {
 })
 
 describe('the daemon from the checkout', () => {
-  it('serves the agents as the packaged smoke holds the built app to', async (t) => {
+  it('serves the agents as the packaged smoke holds the built app to', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cf-agents-proof-'))
     const home = join(root, 'consensflow')
     const bin = join(root, 'bin')
     mkdirSync(home, { recursive: true })
     mkdirSync(bin)
-    const started = daemonCommand({ home })
-    t.diagnostic(started.kind === 'native' ? 'the native daemon' : "Node's daemon")
+    const started = daemonCommand()
     const env = {
       ...Object.fromEntries(
         Object.entries(process.env).filter(
@@ -160,7 +158,6 @@ describe('the daemon from the checkout', () => {
       CODEX_HOME: join(root, 'home', '.codex'),
       XDG_CONFIG_HOME: join(root, 'home', '.config'),
       PATH: bin,
-      ...started.env,
     }
     const child = spawn(started.command, started.args, {
       env,

@@ -313,7 +313,7 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Value {
         .await;
         match installed {
             Ok(Ok(_permit)) => {
-                // Admission stays closed through restart. Node has exited;
+                // Admission stays closed through restart. The daemon has exited;
                 // a stalled bridge drain cannot keep the old process alive.
                 app.restart();
             }

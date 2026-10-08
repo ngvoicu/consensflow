@@ -2,7 +2,7 @@
  * Plants bugs in what releases and the agents screens are made of, one at a
  * time, and checks that a test catches each: the rule of the feeds and its
  * checks, the publisher, the release workflow's text, the portable app's
- * collector, the agents of both daemons as the packaged smoke holds them, and the
+ * collector, the agents of the daemon as the packaged smoke holds them, and the
  * updater smoke: its readers of evidence, and the product it holds (the app's
  * daemon choice, the ledger's one holder, the check of an update). A
  * plant is a few pieces of text replaced in the sources; the tests that should
@@ -33,14 +33,14 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PLANTS as AGENTS } from './release/agents.mjs'
 import { PLANTS as FEEDS } from './release/feeds.mjs'
-import { BOTH } from './release/kit.mjs'
+import { BUILT_PROOF } from './release/kit.mjs'
 import { PLANTS as PORTABLE } from './release/portable.mjs'
 import { PLANTS as PUBLISH } from './release/publish.mjs'
 import { PLANTS as UPDATER } from './release/updater.mjs'
 import { PLANTS as WORKFLOW } from './release/workflow.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
-/** The longest one run may take, in milliseconds: the dual runner builds a release `cf`. */
+/** The longest one run may take, in milliseconds: the suites' runner builds a release `cf`. */
 const RUN_LIMIT = 10 * 60 * 1000
 
 /** Every plant, by area. */
@@ -205,7 +205,7 @@ async function trial(plant) {
   try {
     let ran = null
     for (const command of plant.runs) {
-      built = built || command === BOTH || plant.builds === true
+      built = built || command === BUILT_PROOF || plant.builds === true
       ran = await execute(command)
       if (!ran.compiled) return { verdict: 'does not compile', ran }
       if (ran.hung) return { verdict: 'hung', ran }

@@ -51,13 +51,14 @@ fn ran(vars: &[(&str, &str)], args: &[&str]) -> (u8, String, String) {
     )
 }
 
-/// An environment that says nothing: the verbs are answered by default.
+/// An environment that says nothing.
 const NONE: [(&str, &str); 0] = [];
 
 #[test]
-fn it_answers_by_default_and_the_old_switch_in_the_environment_changes_nothing() {
-    // `CONSENSFLOW_DAEMON` was the switch of the releases before the flip; the
-    // product reads no environment variable for which implementation answers.
+fn a_stale_old_switch_in_the_environment_changes_nothing() {
+    // `CONSENSFLOW_DAEMON` was the switch of the releases before the flip, and a
+    // shell profile may still set it; there is no other implementation to switch
+    // to, and nothing reads it.
     for value in ["native", "node", "NATIVE", "1", ""] {
         let vars = [("CONSENSFLOW_DAEMON", value)];
         let (code, said, wrong) = ran(&vars, &["help"]);

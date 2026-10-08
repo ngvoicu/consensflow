@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
 import { launchApp } from './app.mjs'
 import { appEnv, recordedPids, sandbox } from './box.mjs'
-import { REPO } from './build.mjs'
+import { RELEASES, REPO } from './build.mjs'
 import { assertAdHoc, copyBundle, digestManifest, inspectBundle, verifySeal } from './bundle.mjs'
 import { appLog, assertApp, daemonLog, daemonOf, gone, ledgerHeld } from './evidence.mjs'
 import { makeTls, serveUpdates } from './feed.mjs'
@@ -38,12 +38,26 @@ function builtPath(name) {
 }
 
 /**
+ * The release the installed app is, as the driver names it: one of `RELEASES`,
+ * which says what its app starts and what its `cf setup` wrote.
+ */
+function releaseOf(name) {
+  const release = process.env[name]
+  assert.ok(
+    Object.hasOwn(RELEASES, release ?? ''),
+    `${name} is ${JSON.stringify(release)}: it names the release the installed app is, one of ${Object.keys(RELEASES).join(', ')}`,
+  )
+  return release
+}
+
+/**
  * The inputs of the run: both apps, as built, checked once (identity, versions,
- * the code signature, ad hoc), and the updater key the run signs with (the
- * driver's, or one made here).
+ * the code signature, ad hoc), the release the installed one is, and the updater
+ * key the run signs with (the driver's, or one made here).
  */
 export function loadInputs() {
   const fromApp = builtPath('CONSENSFLOW_UPDATER_FROM_APP')
+  const release = releaseOf('CONSENSFLOW_UPDATER_FROM_RELEASE')
   const toApp = builtPath('CONSENSFLOW_UPDATER_TO_APP')
   assert.notEqual(fromApp, toApp, 'FROM_APP and TO_APP must be distinct source bundles')
   const from = inspectBundle(fromApp, 'FROM_APP')
@@ -68,6 +82,7 @@ export function loadInputs() {
   }
   return {
     from,
+    release,
     to,
     fromManifest: digestManifest(fromApp),
     toManifest: digestManifest(toApp),

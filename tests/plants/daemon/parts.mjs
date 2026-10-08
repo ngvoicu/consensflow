@@ -104,8 +104,7 @@ export const PLANTS = [
       ],
     ],
     runs: [daemon('seams::')],
-    meant:
-      'a_window_starts_with_its_url_project_participant_runtime_and_the_bundle_first_on_its_path',
+    meant: 'a_window_starts_with_its_url_project_participant_and_the_bundle_first_on_its_path',
   },
   {
     name: 'files: a cause is indented two spaces in the log',
@@ -330,12 +329,6 @@ export const PLANTS = [
     ],
     runs: [unit('cf-process', 'memory::')],
     meant: 'megabytes_are_rounded_as_math_round_rounds_them',
-  },
-  {
-    name: 'cf: ui is the native daemon though the home has taken the way back',
-    edits: [['crates/cf/src/lib.rs', ' && !way_back::choose(env).node;', ';']],
-    runs: [[...stop, 'with_the_way_back']],
-    meant: 'with_the_way_back_cf_ui_is_not_the_native_daemon_whatever_the_old_switch_says',
   },
   {
     name: 'cf: a window’s cf ui is the daemon',

@@ -14,13 +14,12 @@ import { daemonCommand, tempEnv } from './helpers.mjs'
 describe('cf ui --json --no-open speaks the bridge after its handle line', () => {
   it('keeps the handle line first, then answers a ping frame, then exits on EOF', async () => {
     const t = tempEnv()
-    // `cf ui` as the app runs it: the native `cf`, or through the door (bin/cf.mjs) on Node for a
-    // home that has taken the way back (CONSENSFLOW_TEST_DAEMON names which;
-    // `npm run test:daemons` runs both), and the daemon it starts is the one
-    // asked for: the start line in its log says so.
-    const started = daemonCommand({ home: t.env.CONSENSFLOW_HOME })
+    // `cf ui` as the app runs it: the native `cf` (CONSENSFLOW_TEST_DAEMON may
+    // name another build of it), and the daemon it starts is the native one: the
+    // start line in its log says so.
+    const started = daemonCommand()
     const child = spawn(started.command, started.args, {
-      env: { ...t.env, ...started.env },
+      env: t.env,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     try {
@@ -46,12 +45,7 @@ describe('cf ui --json --no-open speaks the bridge after its handle line', () =>
 
       const handleLine = await nextLine()
       const handle = JSON.parse(handleLine)
-      assertStarted(
-        started,
-        readFileSync(join(t.env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8'),
-        child.pid,
-        t.env.CONSENSFLOW_HOME,
-      )
+      assertStarted(readFileSync(join(t.env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8'), child.pid)
       assert.ok(handle.url.length > 0)
       assert.match(handle.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)
       assert.equal(typeof handle.token, 'string')

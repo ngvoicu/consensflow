@@ -4,17 +4,15 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { startLine } from '../choice.mjs'
-import { daemonCommand } from '../helpers.mjs'
 import { startIntegration } from './harness.mjs'
 
 const LIAR = fileURLToPath(new URL('./liar-daemon.mjs', import.meta.url))
 
 /**
- * The rig starts the daemon `CONSENSFLOW_TEST_DAEMON` names (`node`, `native`,
- * or the native one when it names none) and connects it to the real headless bridge
- * (`npm run test:daemons` runs this against both, each leg naming its own and
- * saying which leg it is with `CONSENSFLOW_TEST_LEG`). What else the daemon is
- * asked is the other suites' to show.
+ * The rig starts the native daemon (or the build `CONSENSFLOW_TEST_DAEMON`
+ * names, a command as a JSON array) and connects it to the real headless bridge
+ * (`npm run test:daemons`). What else the daemon is asked is the other suites'
+ * to show.
  */
 describe('the rig starts the daemon it is told to', () => {
   it('answers the page over the headless bridge', async () => {
@@ -26,17 +24,13 @@ describe('the rig starts the daemon it is told to', () => {
     }
   })
 
-  // The leg's label is its own word for which daemon this run is, not the
-  // selection's: a selection that came to the other daemon agrees with itself.
-  it("starts the daemon its leg names, and says so in its log's start line", async () => {
-    const leg = process.env.CONSENSFLOW_TEST_LEG ?? ''
+  it("starts the native daemon, and says so in its log's start line", async () => {
     const rig = await startIntegration()
     try {
       const log = readFileSync(join(rig.env.CONSENSFLOW_HOME, 'daemon.log'), 'utf8')
       const start = startLine(log, rig.daemonPid())
       assert.notEqual(start, null, `no start line of pid ${rig.daemonPid()} in ${log}`)
-      // A run no runner labelled is held to the daemon it selected.
-      assert.equal(start.kind, leg === '' ? daemonCommand().kind : leg, start.line)
+      assert.equal(start.kind, 'native', start.line)
       assert.equal(rig.daemon.kind, start.kind)
       assert.equal(rig.daemon.line, start.line)
     } finally {
@@ -44,9 +38,9 @@ describe('the rig starts the daemon it is told to', () => {
     }
   })
 
-  it('refuses a daemon whose start line says it is the other one, and ends it', async () => {
-    // Asked for the native daemon, as the command to start (a JSON array is the
-    // native one's), whatever this run's leg is: the stand-in writes Node's line.
+  it('refuses a daemon whose start line says it is not the native one, and ends it', async () => {
+    // Asked for a command that is not the native daemon: the stand-in writes
+    // the start line of a Node daemon, as the releases before the deletion ran.
     const rig = startIntegration({ select: JSON.stringify([process.execPath, LIAR]) })
     try {
       await assert.rejects(

@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url'
 import { startIntegration } from './harness.mjs'
 
 /**
- * A tell and a cancel, end to end through the real pane host, the same on
- * both daemons (`npm run test:daemons`). The chief eval `six-decisions`
+ * A tell and a cancel, end to end through the real pane host
+ * (`npm run test:daemons`). The chief eval `six-decisions`
  * (2026-10-07, on the native daemon) counted "every tell the chief sent was
  * answered (1/2)": the chief had told the window of T-2, was in a turn of its
  * own for minutes, and called T-2 off. Nothing is delivered to a window that is

@@ -22,13 +22,12 @@ fn plist_value(app: &Path, field: &str) -> Result<String, String> {
 }
 
 /// What a bundle must be to replace the installed app: this app, at the
-/// version the feed offered; the native `cf` a window runs; and a code
-/// signature that verifies. (The archive's own signature was verified before
-/// its bytes came here.) Nothing of Node's is asked for: the flip release
-/// still ships Node, `cf.mjs`, `src` and `hosts`, the release after it does
-/// not, and an installed app takes either. `cli/package.json` is not read
-/// either: the plist names the version, and what read `package.json` for it
-/// (`cf.mjs`) is Node's.
+/// version the feed offered; the `cf` a window runs; and a code signature that
+/// verifies. (The archive's own signature was verified before its bytes came
+/// here.) Nothing of Node's is asked for, and none is shipped: the releases
+/// before this one did, and an app of any of them takes a bundle that ships
+/// none by this same check. `cli/package.json` is not read either: the plist
+/// names the version.
 fn validate_bundle(app: &Path, version: &str) -> Result<(), String> {
     if plist_value(app, "CFBundleIdentifier")? != "dev.ngvoicu.consensflow"
         || plist_value(app, "CFBundleShortVersionString")? != version
@@ -150,17 +149,10 @@ mod tests {
         install_archive(app, bytes, version, &home.path().join("updates"))
     }
 
-    /// What a bundle ships besides the app and a window's `cf`: Node, the
-    /// CLI's sources and their `package.json` (the flip release still does),
-    /// or none of them (the release after it).
-    #[derive(Clone, Copy, Debug)]
-    enum Node {
-        Shipped,
-        Gone,
-    }
-
-    /// The Node-era files, relative to the bundle.
-    const NODE_FILES: [&str; 5] = [
+    /// What a bundle of the releases before this one ships besides the app and
+    /// a window's `cf`: Node, the CLI's sources and their `package.json`,
+    /// relative to the bundle. A bundle of this release has none of them.
+    const OLDER_LAYOUT: [&str; 5] = [
         "Contents/MacOS/node",
         "Contents/Resources/cli/package.json",
         "Contents/Resources/cli/bin/cf.mjs",
@@ -178,11 +170,22 @@ mod tests {
             .success());
     }
 
-    fn bundle(parent: &Path, version: &str, node: Node) -> std::path::PathBuf {
-        bundle_of(parent, version, "dev.ngvoicu.consensflow", node)
+    fn bundle(parent: &Path, version: &str) -> std::path::PathBuf {
+        bundle_of(parent, version, "dev.ngvoicu.consensflow", false)
     }
 
-    fn bundle_of(parent: &Path, version: &str, identity: &str, node: Node) -> std::path::PathBuf {
+    /// A bundle laid out as the releases before this one were: with Node, the
+    /// CLI's sources and their `package.json` beside the app and its `cf`.
+    fn older_bundle(parent: &Path, version: &str) -> std::path::PathBuf {
+        bundle_of(parent, version, "dev.ngvoicu.consensflow", true)
+    }
+
+    fn bundle_of(
+        parent: &Path,
+        version: &str,
+        identity: &str,
+        older_layout: bool,
+    ) -> std::path::PathBuf {
         let app = parent.join("ConsensFlow.app");
         for dir in ["Contents/MacOS", "Contents/Resources/cli/bin"] {
             fs::create_dir_all(app.join(dir)).unwrap();
@@ -199,18 +202,18 @@ mod tests {
             .status()
             .unwrap()
             .success());
-        if matches!(node, Node::Shipped) {
-            fs::copy("/bin/echo", app.join(NODE_FILES[0])).unwrap();
+        if older_layout {
+            fs::copy("/bin/echo", app.join(OLDER_LAYOUT[0])).unwrap();
             for dir in ["Contents/Resources/cli/hosts", "Contents/Resources/cli/src"] {
                 fs::create_dir_all(app.join(dir)).unwrap();
             }
             fs::write(
-                app.join(NODE_FILES[1]),
+                app.join(OLDER_LAYOUT[1]),
                 format!(r#"{{"name":"consensflow","version":"{version}"}}"#),
             )
             .unwrap();
-            for file in &NODE_FILES[2..] {
-                fs::write(app.join(file), "test Node-era file").unwrap();
+            for file in &OLDER_LAYOUT[2..] {
+                fs::write(app.join(file), "test file of the older layout").unwrap();
             }
         }
         sign(&app);
@@ -243,36 +246,30 @@ mod tests {
         assert_eq!(fs::read_dir(directory).unwrap().count(), 0);
     }
 
-    /// The check takes a bundle that ships Node's files and one that does not,
-    /// over an app that ships them or not: the flip release is today's layout,
-    /// the release after it has none of Node's, and an app of either installs
-    /// the other.
+    /// The bundle replaces the whole app, whichever layout the installed one
+    /// had: of this release's, or of the releases before it, which shipped
+    /// Node, the CLI's sources and their `package.json` and are replaced by
+    /// a bundle that ships none of them, leaving nothing of them behind.
     #[test]
-    fn a_signed_bundle_replaces_the_whole_app_whether_either_ships_nodes_files_or_not() {
-        for (installed, offered) in [
-            (Node::Shipped, Node::Shipped),
-            (Node::Shipped, Node::Gone),
-            (Node::Gone, Node::Gone),
-            (Node::Gone, Node::Shipped),
-        ] {
-            let case = format!("{installed:?} replaced by {offered:?}");
+    fn a_signed_bundle_replaces_the_whole_app_and_leaves_nothing_of_an_older_layout() {
+        for installed in ["this layout", "an older layout"] {
             let old = tempfile::tempdir().unwrap();
             let new = tempfile::tempdir().unwrap();
-            let app = bundle(old.path(), "3.0.0-alpha.35", installed);
-            let next = bundle(new.path(), "3.0.0-alpha.36", offered);
+            let app = if installed == "this layout" {
+                bundle(old.path(), "3.0.0-alpha.35")
+            } else {
+                older_bundle(old.path(), "3.0.0-alpha.35")
+            };
+            let next = bundle(new.path(), "3.0.0-alpha.36");
             install_fixture(&app, &archive(&next), "3.0.0-alpha.36")
-                .unwrap_or_else(|error| panic!("{case}: {error}"));
+                .unwrap_or_else(|error| panic!("{installed}: {error}"));
             assert_eq!(
                 plist_value(&app, "CFBundleShortVersionString").unwrap(),
                 "3.0.0-alpha.36",
-                "{case}"
+                "{installed}"
             );
-            for file in NODE_FILES {
-                assert_eq!(
-                    app.join(file).exists(),
-                    matches!(offered, Node::Shipped),
-                    "{file}: {case}"
-                );
+            for file in OLDER_LAYOUT {
+                assert!(!app.join(file).exists(), "{file} is left: {installed}");
             }
             assert!(
                 Command::new("/usr/bin/codesign")
@@ -281,12 +278,12 @@ mod tests {
                     .status()
                     .unwrap()
                     .success(),
-                "{case}"
+                "{installed}"
             );
             assert_eq!(
                 fs::read_dir(old.path()).unwrap().count(),
                 1,
-                "transactional staging is removed: {case}"
+                "transactional staging is removed: {installed}"
             );
         }
     }
@@ -295,9 +292,9 @@ mod tests {
     fn invalid_or_wrong_version_archives_leave_original_app_intact() {
         let old = tempfile::tempdir().unwrap();
         let new = tempfile::tempdir().unwrap();
-        let app = bundle(old.path(), "3.0.0-alpha.35", Node::Shipped);
+        let app = bundle(old.path(), "3.0.0-alpha.35");
         let before = fs::read(app.join("Contents/Info.plist")).unwrap();
-        let next = bundle(new.path(), "3.0.0-alpha.34", Node::Shipped);
+        let next = bundle(new.path(), "3.0.0-alpha.34");
         for bytes in [b"not a tar".to_vec(), archive(&next)] {
             assert!(install_fixture(&app, &bytes, "3.0.0-alpha.36").is_err());
             assert_eq!(fs::read(app.join("Contents/Info.plist")).unwrap(), before);
@@ -318,13 +315,8 @@ mod tests {
     fn a_signed_bundle_of_another_app_is_refused_for_its_identity() {
         let old = tempfile::tempdir().unwrap();
         let new = tempfile::tempdir().unwrap();
-        let app = bundle(old.path(), "3.0.0-alpha.35", Node::Shipped);
-        let next = bundle_of(
-            new.path(),
-            "3.0.0-alpha.36",
-            "dev.example.other",
-            Node::Gone,
-        );
+        let app = bundle(old.path(), "3.0.0-alpha.35");
+        let next = bundle_of(new.path(), "3.0.0-alpha.36", "dev.example.other", false);
         let error = install_fixture(&app, &archive(&next), "3.0.0-alpha.36").unwrap_err();
         assert!(error.contains("identity or version"), "{error}");
         assert_eq!(
@@ -337,8 +329,8 @@ mod tests {
     fn archive_links_are_refused_before_any_swap() {
         let old = tempfile::tempdir().unwrap();
         let new = tempfile::tempdir().unwrap();
-        let app = bundle(old.path(), "3.0.0-alpha.35", Node::Shipped);
-        let next = bundle(new.path(), "3.0.0-alpha.36", Node::Shipped);
+        let app = bundle(old.path(), "3.0.0-alpha.35");
+        let next = bundle(new.path(), "3.0.0-alpha.36");
         std::os::unix::fs::symlink("/tmp", next.join("Contents/escape")).unwrap();
         assert!(install_fixture(&app, &archive(&next), "3.0.0-alpha.36").is_err());
         assert!(!app.join("Contents/escape").exists());
@@ -346,45 +338,37 @@ mod tests {
     }
 
     /// What a window runs is `cf`: a valid signature does not make up for a
-    /// bundle that has none, with Node's files or without them.
+    /// bundle that has none.
     #[test]
     fn a_valid_signature_does_not_replace_a_bundle_without_cf() {
-        for node in [Node::Shipped, Node::Gone] {
-            let old = tempfile::tempdir().unwrap();
-            let new = tempfile::tempdir().unwrap();
-            let app = bundle(old.path(), "3.0.0-alpha.35", Node::Shipped);
-            let next = bundle(new.path(), "3.0.0-alpha.36", node);
-            fs::remove_file(next.join("Contents/Resources/cli/bin/cf")).unwrap();
-            sign(&next);
-            let error = install_fixture(&app, &archive(&next), "3.0.0-alpha.36").unwrap_err();
-            assert!(error.contains("must include cf"), "{node:?}: {error}");
-            assert_eq!(
-                plist_value(&app, "CFBundleShortVersionString").unwrap(),
-                "3.0.0-alpha.35"
-            );
-        }
+        let old = tempfile::tempdir().unwrap();
+        let new = tempfile::tempdir().unwrap();
+        let app = bundle(old.path(), "3.0.0-alpha.35");
+        let next = bundle(new.path(), "3.0.0-alpha.36");
+        fs::remove_file(next.join("Contents/Resources/cli/bin/cf")).unwrap();
+        sign(&next);
+        let error = install_fixture(&app, &archive(&next), "3.0.0-alpha.36").unwrap_err();
+        assert!(error.contains("must include cf"), "{error}");
+        assert_eq!(
+            plist_value(&app, "CFBundleShortVersionString").unwrap(),
+            "3.0.0-alpha.35"
+        );
     }
 
-    /// The bundle's seal covers every file of it: one changed after the
-    /// signing, Node's or `cf` itself, refuses the bundle.
+    /// The bundle's seal covers every file of it: `cf` changed after the
+    /// signing refuses the bundle.
     #[test]
     fn a_newer_bundle_modified_after_signing_leaves_the_old_app_intact() {
-        for (node, file) in [
-            (Node::Shipped, "Contents/Resources/cli/bin/cf.mjs"),
-            (Node::Shipped, "Contents/Resources/cli/bin/cf"),
-            (Node::Gone, "Contents/Resources/cli/bin/cf"),
-        ] {
-            let old = tempfile::tempdir().unwrap();
-            let new = tempfile::tempdir().unwrap();
-            let app = bundle(old.path(), "3.0.0-alpha.35", Node::Shipped);
-            let next = bundle(new.path(), "3.0.0-alpha.36", node);
-            fs::write(next.join(file), "tampered").unwrap();
-            let error = install_fixture(&app, &archive(&next), "3.0.0-alpha.36").unwrap_err();
-            assert!(error.contains("code-signature"), "{node:?} {file}: {error}");
-            assert_eq!(
-                plist_value(&app, "CFBundleShortVersionString").unwrap(),
-                "3.0.0-alpha.35"
-            );
-        }
+        let old = tempfile::tempdir().unwrap();
+        let new = tempfile::tempdir().unwrap();
+        let app = bundle(old.path(), "3.0.0-alpha.35");
+        let next = bundle(new.path(), "3.0.0-alpha.36");
+        fs::write(next.join("Contents/Resources/cli/bin/cf"), "tampered").unwrap();
+        let error = install_fixture(&app, &archive(&next), "3.0.0-alpha.36").unwrap_err();
+        assert!(error.contains("code-signature"), "{error}");
+        assert_eq!(
+            plist_value(&app, "CFBundleShortVersionString").unwrap(),
+            "3.0.0-alpha.35"
+        );
     }
 }

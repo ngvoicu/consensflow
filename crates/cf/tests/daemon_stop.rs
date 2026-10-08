@@ -363,81 +363,60 @@ fn a_program_the_daemon_is_waiting_for_is_ended_when_it_stops() {
     }
 }
 
-/// `cf ui --json --no-open` in `root`'s home as a process that ends on its own
-/// (it is no daemon, or it is refused one), with `extra` in its environment.
-fn ui_that_ends(root: &Root, extra: &[(&str, &str)]) -> std::process::Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
-        .args(["ui", "--json", "--no-open"])
-        .env_clear()
-        .envs(extra.iter().copied())
-        .env("CONSENSFLOW_HOME", root.home())
-        .env("HOME", root.dir.path())
-        .stdin(std::process::Stdio::null())
-        .output()
-        .expect("cf runs")
-}
-
-/// The way back's file in `root`'s home.
-fn take_the_way_back(root: &Root) {
+/// The `use-node` file in `root`'s home: the flip release started Node's daemon
+/// for a home that had it, and a user who took that way back may still have it.
+fn leave_the_flip_releases_way_back(root: &Root) {
     std::fs::create_dir_all(root.home()).expect("the home");
-    std::fs::write(root.home().join("use-node"), "").expect("the way back");
+    std::fs::write(root.home().join("use-node"), "").expect("the file");
+}
+
+/// Whether a daemon's log says the daemon that wrote it is this one.
+fn is_this_daemons_log(lines: &[String]) -> bool {
+    lines[0].starts_with("info start pid ") && lines[0].contains(" rust ")
 }
 
 #[test]
-fn with_the_way_back_cf_ui_is_not_the_native_daemon_whatever_the_old_switch_says() {
-    // The `use-node` file in the home sends `ui` to the CLI's Node sources, as it
-    // sends every tokenless command; this binary has no Node bundled beside it.
-    for stray in [&[][..], &[("CONSENSFLOW_DAEMON", "native")]] {
-        let root = Root::new();
-        take_the_way_back(&root);
-        let ran = ui_that_ends(&root, stray);
-        assert_ne!(ran.status.code(), Some(0), "{stray:?}");
-        assert!(
-            String::from_utf8_lossy(&ran.stderr).contains("sends this home's commands to Node"),
-            "{stray:?}: {}",
-            String::from_utf8_lossy(&ran.stderr)
-        );
-        assert!(!root.home().join("daemon.log").exists(), "no daemon ran");
-    }
-}
-
-#[test]
-fn without_the_way_back_cf_ui_is_the_native_daemon_whatever_the_old_switch_says() {
-    // `CONSENSFLOW_DAEMON` was the switch before the flip, and a terminal does not
-    // inherit the app's environment: nothing reads it, so the home decides alone.
+fn cf_ui_is_the_daemon_whatever_the_old_switch_says() {
+    // `CONSENSFLOW_DAEMON` was the switch before the flip, and a shell profile may
+    // still set it: there is no other daemon to switch to, and nothing reads it.
     for stray in ["node", "native", "", "yes"] {
         let root = Root::new();
         let daemon = Daemon::start_with(&root, &[("CONSENSFLOW_DAEMON", stray)]);
         assert!(daemon.handle["url"].is_string(), "{stray:?}");
         let lines = said(&root.log());
-        assert!(
-            lines[0].starts_with("info start pid ") && lines[0].contains(" rust "),
-            "{stray:?}: {lines:?}"
-        );
+        assert!(is_this_daemons_log(&lines), "{stray:?}: {lines:?}");
     }
 }
 
 #[test]
+fn cf_ui_is_the_daemon_in_a_home_the_flip_release_sent_to_node() {
+    // The `use-node` file made the flip release's `cf ui` Node's. No Node is
+    // bundled now, so nothing reads the file: the daemon starts, and the file
+    // is left as the user made it.
+    let root = Root::new();
+    leave_the_flip_releases_way_back(&root);
+    let daemon = Daemon::start(&root);
+    assert!(daemon.handle["url"].is_string());
+    let lines = said(&root.log());
+    assert!(is_this_daemons_log(&lines), "{lines:?}");
+    assert!(root.home().join("use-node").is_file());
+}
+
+#[test]
 fn a_window_s_cf_ui_is_the_board_and_never_the_daemon() {
-    // Whatever the home says of the way back, which here is both.
-    for way_back in [false, true] {
-        let root = Root::new();
-        if way_back {
-            take_the_way_back(&root);
-        }
-        let ran = std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
-            .args(["ui", "--json", "--no-open"])
-            .env_clear()
-            .env("CONSENSFLOW_TOKEN", "a-windows-token")
-            .env("CONSENSFLOW_URL", "http://127.0.0.1:9")
-            .env("CONSENSFLOW_HOME", root.home())
-            .env("HOME", root.dir.path())
-            .stdin(std::process::Stdio::null())
-            .output()
-            .expect("cf runs");
-        assert_ne!(ran.status.code(), Some(0), "the board has no such command");
-        assert!(!root.home().join("daemon.log").exists(), "no daemon ran");
-    }
+    let root = Root::new();
+    let ran = std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
+        .args(["ui", "--json", "--no-open"])
+        .env_clear()
+        .env("CONSENSFLOW_TOKEN", "a-windows-token")
+        .env("CONSENSFLOW_URL", "http://127.0.0.1:9")
+        .env("CONSENSFLOW_HOME", root.home())
+        .env("HOME", root.dir.path())
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("cf runs");
+    assert_ne!(ran.status.code(), Some(0), "the board has no such command");
+    assert!(!root.home().join("daemon.log").exists(), "no daemon ran");
 }
 
 #[test]

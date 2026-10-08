@@ -88,9 +88,9 @@ jobs:
 
       - run: npm ci
       - run: npm ci --prefix app
-      # The page, the Node sidecar and the CLI resources, then the app and its
-      # DMG. No key is in this step: a build runs every crate's build script
-      # and every tool the lockfiles name.
+      # The page and the bundled cf, then the app and its DMG. No key is in
+      # this step: a build runs every crate's build script and every tool the
+      # lockfiles name.
       - run: npm --prefix app run build
       # The Developer ID: the app signed from the inside out with hardened
       # runtime, notarized and stapled, then its DMG made again around it and
@@ -104,13 +104,15 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: node app/scripts/sign-mac.mjs --bundle app/src-tauri/target/release/bundle
-      # The app as it ships, signed: hardened runtime is what could stop its
-      # node, or its native daemon. It runs once on each daemon, Node's and the
-      # native one, and each leg says which started.
+      # The app as it ships, signed under the Developer ID with hardened
+      # runtime and no entitlement: what could stop its page or its daemon from
+      # starting under that signature is shown here and by no build signed ad
+      # hoc. It runs once, and the smoke holds the daemon that started to the
+      # bundle's own cf.
       - name: The signed app passes the packaged smoke
         env:
           CONSENSFLOW_SMOKE_APP: ${{ github.workspace }}/app/src-tauri/target/release/bundle/macos/ConsensFlow.app
-        run: npm run smoke:daemons
+        run: npm run smoke
       # The update bundle, signed in the one step that sees the key (it has no
       # password): the app as installed apps unpack it, files and folders under
       # ConsensFlow.app only, in plain ustar, as Tauri's own bundle was. Its

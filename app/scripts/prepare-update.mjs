@@ -76,13 +76,12 @@ try:
         if 'ConsensFlow.app' not in seen:
             fail('the update archive has no ConsensFlow.app root')
         archived_plist = plistlib.loads(member_bytes(archive, 'ConsensFlow.app/Contents/Info.plist'))
-        archived_package = json.loads(member_bytes(archive, 'ConsensFlow.app/Contents/Resources/cli/package.json'))
     if sorted(actual) != sorted(expected):
         fail('the archive content manifest does not match the supplied bundle')
     version = archived_plist.get('CFBundleShortVersionString')
-    if not isinstance(version, str) or not isinstance(archived_package.get('version'), str):
-        fail('the archive has no readable packaged versions')
-    print(json.dumps({'version': version, 'cliVersion': archived_package['version']}))
+    if not isinstance(version, str):
+        fail('the archive has no readable packaged version')
+    print(json.dumps({'version': version}))
 except Exception as cause:
     print(str(cause), file=sys.stderr)
     sys.exit(1)
@@ -146,15 +145,10 @@ function bundleInfo(app) {
     fail('bundle executable name is unsafe')
   }
   const binary = join(path, 'Contents', 'MacOS', executable)
-  const cli = join(path, 'Contents', 'Resources', 'cli')
-  const packagePath = join(cli, 'package.json')
+  const cf = join(path, 'Contents', 'Resources', 'cli', 'bin', 'cf')
   for (const [label, requiredPath] of [
     ['native executable', binary],
-    ['bundled CLI package', packagePath],
-    ['bundled CLI entrypoint', join(cli, 'bin', 'cf.mjs')],
-    ["a window's cf", join(cli, 'bin', 'cf')],
-    ['bundled CLI hosts', join(cli, 'hosts')],
-    ['bundled CLI source', join(cli, 'src')],
+    ["a window's cf", cf],
   ]) {
     try {
       statSync(requiredPath)
@@ -163,15 +157,23 @@ function bundleInfo(app) {
     }
   }
   const version = readPlist(path, 'CFBundleShortVersionString')
-  const cliVersion = readJson(packagePath, 'bundled CLI package').version
   semver(version, 'bundle version')
-  semver(cliVersion, 'bundled CLI version')
-  if (version !== cliVersion) fail(`bundle and bundled CLI versions differ: ${version} != ${cliVersion}`)
+  const cfVersion = versionOf(cf)
+  semver(cfVersion, "bundled cf's version")
+  if (version !== cfVersion) fail(`bundle and its cf versions differ: ${version} != ${cfVersion}`)
   return {
     path,
     version,
-    cliVersion,
   }
+}
+
+/** What the bundled `cf` says its version is (`cf --version`): the one compiled into it. */
+function versionOf(cf) {
+  const asked = spawnSync(cf, ['--version'], { encoding: 'utf8' })
+  if (asked.status !== 0) {
+    fail(`the bundled cf did not say its version (cf --version): ${asked.error?.message ?? asked.stderr.trim()}`)
+  }
+  return asked.stdout.trim()
 }
 
 function sourceVersions(repo) {
@@ -245,8 +247,7 @@ function inspectArchive(archive, bundle, version) {
     fail('archive probe returned invalid metadata')
   }
   semver(info.version, 'archived bundle version')
-  semver(info.cliVersion, 'archived CLI version')
-  if (info.version !== version || info.cliVersion !== version) fail('archive packaged versions do not match the bundle')
+  if (info.version !== version) fail('archive packaged version does not match the bundle')
 }
 
 function main(argv) {

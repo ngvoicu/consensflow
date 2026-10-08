@@ -1,10 +1,9 @@
 /**
  * Plays a scenario against the legacy CLI, `node src/cli.js` (the CLI `bin/cf.mjs`
- * runs where a home has taken the way back to Node; the door itself forwards a
- * home that has not, so the oracle is not run through it: no `use-node` file
- * may be in the folder a scenario is played in, which the recording lists), and
- * writes down what it did: the oracle `crates/cf` is held to, case by case, by
- * the Rust player (`crates/cf/tests/cli_goldens/`).
+ * ran for a home that had taken the way back to Node, in the flip release; the
+ * door now forwards every command to the native `cf`, so the oracle is not run
+ * through it), and writes down what it did: the oracle `crates/cf` is held to,
+ * case by case, by the Rust player (`crates/cf/tests/cli_goldens/`).
  *
  * A scenario is data: `{ name, args, env, stdin, files, pipe, kept }`.
  * - `args`: the words after `cf`.

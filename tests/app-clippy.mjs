@@ -1,9 +1,9 @@
 /**
  * Lints the app crate for this machine, where the app cannot be built as it ships:
- * a worktree has neither the bundled Node (the sidecar) nor the runtime resources
- * that the app's Tauri configuration names, and its build script refuses to go on
- * without them. A lint needs neither, so both are left out of the configuration
- * for this run, as tests/app-tests.mjs leaves them out for the app's tests and
+ * a worktree may not have the resources that the app's Tauri configuration names
+ * (the bundled `cf`), and its build script refuses to go on without them. A lint
+ * needs none, so they are left out of the configuration for this run, as
+ * tests/app-tests.mjs leaves them out for the app's tests and
  * tests/windows-clippy.mjs for the app's lint on Windows. Tests included, warnings
  * denied, as the gate lints the rest of the workspace:
  *
@@ -22,7 +22,7 @@ const ran = spawnSync(
     stdio: 'inherit',
     env: {
       ...process.env,
-      TAURI_CONFIG: JSON.stringify({ bundle: { externalBin: null, resources: null } }),
+      TAURI_CONFIG: JSON.stringify({ bundle: { resources: null } }),
     },
   },
 )

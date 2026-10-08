@@ -26,7 +26,7 @@ use cf_proto::bridge::Role;
 /// How long quitting, or installing an update, waits for what was admitted
 /// before the daemon stopped to finish.
 const SHUTDOWN_DRAIN: Duration = Duration::from_secs(5);
-/// The page-side name of Node's `state.changed`. No dot: Tauri rejects it.
+/// The page-side name of the daemon's `state.changed`. No dot: Tauri rejects it.
 pub(crate) const PAGE_STATE_EVENT: &str = "state-changed";
 
 type PageEventSink = Arc<dyn Fn(&str, Value) + Send + Sync>;
@@ -151,7 +151,7 @@ fn finish_before_deadline(timeout: Duration, finish: impl FnOnce() + Send + 'sta
     done.recv_timeout(timeout).is_ok()
 }
 
-/// Node's `state.changed` becomes the page's `state-changed`.
+/// The daemon's `state.changed` becomes the page's `state-changed`.
 ///
 /// The two names are not the same namespace and cannot be. Tauri 2 accepts
 /// only alphanumerics, `-`, `/`, `:` and `_` in an event name, so the dotted

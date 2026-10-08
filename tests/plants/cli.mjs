@@ -1,8 +1,10 @@
 /**
  * Plants bugs in the standalone verbs of `cf`, the parser they read their words
- * with, the roster they write through, the recording that holds them to Node, and
- * the flip (which implementation writes a home: the file every reader asks, the
- * Node `cf` finds, the door and the repair), one at a time, and checks that a
+ * with, the roster they write through, the recording that holds them to Node,
+ * what the flip release left (the repair of the terminal's command) and the
+ * bundle without Node (nothing reads the file the flip read, an npm shim with no
+ * Node is refused, the daemon the app starts, the update's check, the page's
+ * console text), one at a time, and checks that a
  * test catches each. A plant is a few pieces of
  * text replaced in the sources; the tests that should notice are run (never in
  * parallel: the sources are changed under them) and each plant is reported
@@ -30,20 +32,30 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PLANTS as ADMIN } from './cli/admin.mjs'
+import { PLANTS as DELETION } from './cli/deletion.mjs'
 import { PLANTS as DETECT } from './cli/detect.mjs'
 import { PLANTS as DISPATCH } from './cli/dispatch.mjs'
 import { PLANTS as FLIP } from './cli/flip.mjs'
-import { BOTH, BUILD } from './cli/kit.mjs'
+import { BUILD, CLIS } from './cli/kit.mjs'
 import { PLANTS as ORACLE } from './cli/oracle.mjs'
 import { PLANTS as PARSER } from './cli/parser.mjs'
 import { PLANTS as VERBS } from './cli/verbs.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
-/** The longest one run may take, in milliseconds: the dual runner builds a release `cf`. */
+/** The longest one run may take, in milliseconds: the suites' runner builds a release `cf`. */
 const RUN_LIMIT = 10 * 60 * 1000
 
 /** Every plant, by area. */
-const PLANTS = [...PARSER, ...VERBS, ...ADMIN, ...DISPATCH, ...FLIP, ...ORACLE, ...DETECT]
+const PLANTS = [
+  ...PARSER,
+  ...VERBS,
+  ...ADMIN,
+  ...DISPATCH,
+  ...FLIP,
+  ...DELETION,
+  ...ORACLE,
+  ...DETECT,
+]
 
 const args = process.argv.slice(2)
 const words = args.filter((arg) => !arg.startsWith('--'))
@@ -194,7 +206,7 @@ async function trial(plant) {
   try {
     let ran = null
     for (const command of plant.runs) {
-      built = built || command === BOTH || command === BUILD
+      built = built || command === CLIS || command === BUILD
       ran = await execute(command)
       if (!ran.compiled) return { verdict: 'does not compile', ran }
       if (ran.hung) return { verdict: 'hung', ran }

@@ -1,6 +1,6 @@
 [package]
 name = "cf"
-description = "ConsensFlow's command: the board's verbs and the harness hooks inside a window, the standalone verbs and the daemon outside one; the CLI's Node sources only for a home that has taken the way back."
+description = "ConsensFlow's command: the board's verbs and the harness hooks inside a window, the standalone verbs and the daemon outside one."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,7 +16,6 @@ cf-daemon.workspace = true
 cf-harness.workspace = true
 # The terminal command `setup` writes and `doctor` reads.
 cf-launcher.workspace = true
-cf-process.workspace = true
 cf-proto.workspace = true
 form_urlencoded.workspace = true
 serde.workspace = true
@@ -27,6 +26,8 @@ cf-board = { workspace = true, features = ["test-support"] }
 # The daemon as a process: a home of its own with a ledger and a fake `claude`.
 cf-harness = { workspace = true, features = ["test-support"] }
 cf-ledger.workspace = true
+# Whether a daemon's process is alive.
+cf-process.workspace = true
 tempfile.workspace = true
 
 [lints]

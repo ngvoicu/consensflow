@@ -41,6 +41,21 @@ pub struct CaptureFailed {
     pub stderr: String,
 }
 
+impl CaptureFailed {
+    /// A program that never ran, `message` the reason: it exited with nothing
+    /// and wrote nothing.
+    #[must_use]
+    pub fn unstarted(message: String) -> Self {
+        Self {
+            message,
+            code: None,
+            killed: false,
+            stdout: String::new(),
+            stderr: String::new(),
+        }
+    }
+}
+
 /// Runs `run` as `execute` does (in `cwd`, with the environment `env` and
 /// nothing inherited, its input open and unwritten, to the end of its
 /// streams and its exit, ended at its timeout or when a stream says more
@@ -64,13 +79,6 @@ pub async fn capture(
     limits: Limits,
     started: impl FnOnce(Ender),
 ) -> Result<Captured, CaptureFailed> {
-    let unstarted = |message: String| CaptureFailed {
-        message,
-        code: None,
-        killed: false,
-        stdout: String::new(),
-        stderr: String::new(),
-    };
     let mut command = tokio::process::Command::from(run.command());
     command
         .env_clear()
@@ -85,7 +93,7 @@ pub async fn capture(
     hide_window(&mut command);
     lead(&mut command);
     let mut child = command.spawn().map_err(|failed| {
-        unstarted(format!(
+        CaptureFailed::unstarted(format!(
             "spawn {} {}",
             run.program.to_string_lossy(),
             error_code(&failed)
@@ -98,7 +106,7 @@ pub async fn capture(
     started(group.ender());
     let _input = child.stdin.take();
     let (Some(mut stdout), Some(mut stderr)) = (child.stdout.take(), child.stderr.take()) else {
-        return Err(unstarted(
+        return Err(CaptureFailed::unstarted(
             "the program's output could not be read".to_owned(),
         ));
     };

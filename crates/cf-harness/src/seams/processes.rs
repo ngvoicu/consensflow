@@ -99,24 +99,27 @@ impl SystemProcesses {
         started.push(ender);
     }
 
-    fn start(&self, program: &Program) -> (cf_process::Run, Env) {
+    /// How `program` starts, and the environment it starts in; or why it
+    /// cannot (an npm shim with no Node to run on).
+    fn start(&self, program: &Program) -> Result<(cf_process::Run, Env), String> {
         let env = with_required(&program.env, &self.this);
         let args: Vec<OsString> = program.args.iter().map(OsString::from).collect();
-        (runnable(&program.executable, &args, &env), env)
+        Ok((runnable(&program.executable, &args, &env)?, env))
     }
 }
 
 impl Processes for SystemProcesses {
     fn run(&self, program: Program, limits: Limits) -> Work<'_, Result<String, Failed>> {
-        let (run, env) = self.start(&program);
+        let started = self.start(&program);
         Box::pin(async move {
+            let (run, env) = started.map_err(Failed::unstarted)?;
             let kept = |ender| self.keep(ender);
             cf_process::execute(&run, program.cwd.as_deref(), &env, limits, kept).await
         })
     }
 
     fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, String> {
-        let (run, env) = self.start(&program);
+        let (run, env) = self.start(&program)?;
         let child = cf_process::spawn(&run, program.cwd.as_deref(), &env, streams)?;
         self.keep(child.ender());
         Ok(Box::new(child))
@@ -131,8 +134,9 @@ impl Capture for SystemProcesses {
         program: Program,
         limits: Limits,
     ) -> Work<'_, Result<Captured, CaptureFailed>> {
-        let (run, env) = self.start(&program);
+        let started = self.start(&program);
         Box::pin(async move {
+            let (run, env) = started.map_err(CaptureFailed::unstarted)?;
             let kept = |ender| self.keep(ender);
             cf_process::capture(&run, program.cwd.as_deref(), &env, limits, kept).await
         })

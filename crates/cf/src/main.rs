@@ -14,8 +14,8 @@ fn main() -> ExitCode {
     if let Some(code) = cf::codex_session(&env, &args) {
         return exit_code(code);
     }
-    // The daemon does the same, unless the home has taken the way back to Node:
-    // it reads and writes the standard streams from threads of its own.
+    // The daemon does the same: it reads and writes the standard streams from
+    // threads of its own.
     if let Some(code) = cf::native_ui(&env, &args) {
         return exit_code(code);
     }

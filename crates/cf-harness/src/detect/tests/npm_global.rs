@@ -218,46 +218,55 @@ fn it_needs_no_home() {
 
 /// A shim found there is started as one on PATH is: nothing of how it was
 /// found reaches how it starts, so what a shim needs, node, is what it needs
-/// anywhere.
+/// anywhere: the one beside it, else the one on PATH, else none, and the shim
+/// is refused (ConsensFlow bundles no Node to run it on).
 mod started {
     use super::*;
 
-    /// A shim found in npm's folder, and its script, with `changes` made to
-    /// the environment of a machine that has no node anywhere but the app's.
-    fn found(machine: &Machine, changes: &[(&str, Option<&str>)]) -> (Env, PathBuf, PathBuf) {
+    /// A shim found in npm's folder, and its script, on a machine that has no
+    /// node anywhere, with an app's `CONSENSFLOW_NODE` of the releases that
+    /// bundled one in the environment, which names a node nobody runs.
+    fn found(machine: &Machine) -> (Env, PathBuf, PathBuf) {
         let (shim, script) = install_pi(&machine.npm());
-        let mut vars = vec![("CONSENSFLOW_NODE", Some("/the/app/node"))];
-        vars.extend_from_slice(changes);
-        let env = machine.env(&vars);
+        let env = machine.env(&[("CONSENSFLOW_NODE", Some("/the/app/node"))]);
         assert_eq!(harness_path(Harness::Pi, &env), Some(shim.clone()));
         (env, shim, script)
     }
 
     #[test]
-    fn with_the_node_beside_it_else_the_one_on_path_else_the_apps_own() {
+    fn with_the_node_beside_it_else_the_one_on_path_else_it_is_refused() {
         let machine = Machine::new();
-        let (env, shim, script) = found(&machine, &[]);
+        let (env, shim, script) = found(&machine);
         let args = [OsString::from("--version")];
-        let started = |program: PathBuf| Run {
-            program,
-            args: vec![script.clone().into_os_string(), "--version".into()],
-            verbatim: false,
+        let started = |program: PathBuf| {
+            Ok(Run {
+                program,
+                args: vec![script.clone().into_os_string(), "--version".into()],
+                verbatim: false,
+            })
         };
-        // No node on PATH and none beside the shim: the app's own, as for a PATH shim.
-        assert_eq!(
-            runnable(&shim, &args, &env),
-            started("/the/app/node".into())
-        );
+        // No node on PATH and none beside the shim: refused, in words that say
+        // what to do, and the variable of the releases that bundled one is no node.
+        let (on_path, _) = install_pi(&machine.bin());
+        for which in [&shim, &on_path] {
+            let said = runnable(which, &args, &env).unwrap_err();
+            assert!(said.starts_with(&text(which)), "{said}");
+            assert!(
+                said.contains("Make the harness's Node visible to ConsensFlow")
+                    && said.contains("install the harness's own build"),
+                "{said}"
+            );
+        }
+        // A node on PATH: both shims run on it.
         startable(&machine.bin().join("node.exe"));
         assert_eq!(
             runnable(&shim, &args, &env),
             started(machine.bin().join("node.exe"))
         );
         // The same shim, in a folder PATH names: started the same way.
-        let (on_path, _) = install_pi(&machine.bin());
         assert_eq!(
-            runnable(&on_path, &args, &env).program,
-            runnable(&shim, &args, &env).program
+            runnable(&on_path, &args, &env).unwrap().program,
+            runnable(&shim, &args, &env).unwrap().program
         );
         // And the node beside it first, as npm itself would.
         startable(&machine.npm().join("node.exe"));
@@ -268,12 +277,14 @@ mod started {
     }
 
     #[test]
-    fn a_window_opens_on_it_as_its_node_and_script() {
+    fn a_window_opens_on_it_as_its_node_and_script_or_is_refused_for_want_of_a_node() {
         let machine = Machine::new();
-        let (env, shim, script) = found(&machine, &[]);
+        let (env, shim, script) = found(&machine);
+        let argv = [text(&shim), "--model".to_owned(), "a b".to_owned()];
+        let said = pane_argv(&argv, &env).unwrap_err();
+        assert!(said.contains("finds no Node for it"), "{said}");
         let node = machine.npm().join("node.exe");
         startable(&node);
-        let argv = [text(&shim), "--model".to_owned(), "a b".to_owned()];
         assert_eq!(
             pane_argv(&argv, &env).unwrap(),
             [text(&node), text(&script), "--model".into(), "a b".into()]
@@ -284,10 +295,12 @@ mod started {
     #[test]
     fn and_the_harness_runs() {
         let machine = Machine::new();
-        // The app's own node is a shell here, which reads the script as it is.
-        let (env, shim, script) = found(&machine, &[("CONSENSFLOW_NODE", Some("/bin/sh"))]);
-        let run = runnable(&shim, &[OsString::from("--version")], &env);
-        assert_eq!(run.program, Path::new("/bin/sh"));
+        let (env, shim, script) = found(&machine);
+        // The node on PATH is a shell here, which reads the script as it is.
+        let node = machine.bin().join("node.exe");
+        startable_with(&node, "#!/bin/sh\nexec /bin/sh \"$@\"\n");
+        let run = runnable(&shim, &[OsString::from("--version")], &env).unwrap();
+        assert_eq!(run.program, node);
         assert_eq!(run.args[0], script.into_os_string());
         let output = run.command().output().unwrap();
         assert!(output.status.success(), "{output:?}");

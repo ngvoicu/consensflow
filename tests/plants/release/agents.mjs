@@ -1,20 +1,10 @@
 /**
- * Plants in what the agents screens do, in Node's daemon and in the native one:
- * the catalog, an agent saved with its profile, the screens behind the UI token,
- * and the deletion. The proof of the agents screens (tests/agents-proof.mjs),
- * which the packaged smoke runs against the daemon a built app chose, must
- * catch each.
+ * Plants in what the agents screens do, in the native daemon: the catalog, an
+ * agent saved with its profile, the screens behind the UI token, and the
+ * deletion. The proof of the agents screens (tests/agents-proof.mjs), which the
+ * packaged smoke runs against the daemon a built app started, must catch each.
  */
-import { BOTH, PROOF } from './kit.mjs'
-
-const AGENTS_SERVER = 'src/core/agents-server.js'
-const ROSTER = 'src/roster.js'
-const node = (name, edits) => ({
-  name: `agents, node: ${name}`,
-  edits,
-  runs: [PROOF],
-  meant: 'serves the agents as the packaged smoke holds the built app to',
-})
+import { BUILT_PROOF } from './kit.mjs'
 
 const EDIT_RS = 'crates/cf-catalog/src/roster/edit.rs'
 const ADD_RS = 'crates/cf-catalog/src/roster/add.rs'
@@ -25,48 +15,11 @@ const SCREENS_RS = 'crates/cf-daemon/src/screens/mod.rs'
 const native = (name, edits) => ({
   name: `agents, native: ${name}`,
   edits,
-  runs: [BOTH],
+  runs: [BUILT_PROOF],
   meant: 'serves the agents as the packaged smoke holds the built app to',
 })
 
 export const PLANTS = [
-  node('the screens open with no token', [
-    [
-      AGENTS_SERVER,
-      'if (presented.length === 0 || !tokenMatches(presented, token)) {',
-      'if (presented.length > 0 && !tokenMatches(presented, token)) {',
-    ],
-  ]),
-  node('a deleted agent is answered and kept', [
-    [AGENTS_SERVER, 'removeAgent(named[1], env)', 'void named[1]'],
-  ]),
-  node('an agent saved has not the effort it was given', [
-    [
-      ROSTER,
-      '...(input.effort ? { [effortKey(HARNESS_TO_KIND[input.harness])]: input.effort } : {}),',
-      '...{},',
-    ],
-  ]),
-  node('an agent saved keeps its profile in the file', [
-    [
-      ROSTER,
-      "const STALE_FIELDS = ['skillsPolicy', 'skillPaths', 'skills', 'skillPath', 'profile']",
-      "const STALE_FIELDS = ['skillsPolicy', 'skillPaths', 'skills', 'skillPath']",
-    ],
-    [
-      ROSTER,
-      '...(input.description ? { description: input.description } : {}),\n  }\n  document.agents.push(row)',
-      '...(input.description ? { description: input.description } : {}),\n    profile: { stored: true },\n  }\n  document.agents.push(row)',
-    ],
-  ]),
-  node('the catalog is short of an agent', [
-    [
-      ROSTER,
-      '...AGENT_PRESETS.filter((preset) => !hidden.has(preset.id)).map(catalogRow),',
-      '...AGENT_PRESETS.filter((preset) => !hidden.has(preset.id)).slice(1).map(catalogRow),',
-    ],
-  ]),
-
   native('a deleted agent is answered and kept', [
     [EDIT_RS, 'document.agents_mut().remove(at);', 'let _kept = at;'],
   ]),

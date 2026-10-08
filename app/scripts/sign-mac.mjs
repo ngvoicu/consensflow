@@ -34,7 +34,6 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
 const APP = dirname(dirname(fileURLToPath(import.meta.url)))
-const ENTITLEMENTS = join(APP, 'src-tauri', 'entitlements.plist')
 const SECRETS = [
   'APPLE_CERTIFICATE',
   'APPLE_CERTIFICATE_PASSWORD',
@@ -111,25 +110,18 @@ function codesign(path, { identity, keychain }, options) {
 
 /**
  * Signs `app` from the inside out: the Mach-Os it carries, then the bundle,
- * whose seal covers them. The executables in Contents/MacOS, the app's own
- * and its node, carry the app's entitlements, as Tauri signs them; the rest
- * carry none.
+ * whose seal covers them. All run under the hardened runtime and none carries
+ * an entitlement: nothing in the app makes executable memory of its own (the
+ * WebView's engine runs in the system's process), which the bundled Node's V8
+ * did and was given the JIT entitlements for.
  */
 function signApp(app, signing) {
   const id = plist(app, 'CFBundleIdentifier')
-  const executables = join(app, 'Contents', 'MacOS')
-  const main = join(executables, plist(app, 'CFBundleExecutable'))
+  const main = join(app, 'Contents', 'MacOS', plist(app, 'CFBundleExecutable'))
   for (const path of machOs(app).filter((path) => path !== main)) {
-    const entitled = dirname(path) === executables ? ['--entitlements', ENTITLEMENTS] : []
-    codesign(path, signing, [
-      '--options',
-      'runtime',
-      '--identifier',
-      `${id}.${basename(path)}`,
-      ...entitled,
-    ])
+    codesign(path, signing, ['--options', 'runtime', '--identifier', `${id}.${basename(path)}`])
   }
-  codesign(app, signing, ['--options', 'runtime', '--entitlements', ENTITLEMENTS])
+  codesign(app, signing, ['--options', 'runtime'])
 }
 
 /** Has Apple's notary check `target`, waits for its answer, and staples the ticket to it. */

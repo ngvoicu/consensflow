@@ -1,5 +1,4 @@
-//! `cf` as a process: a reader that went away is no failure. (What is handed to
-//! the CLI's Node sources keeps its arguments and its exit code: `way_back.rs`.)
+//! `cf` as a process: a reader that went away is no failure.
 
 // The tests start cf themselves.
 #![allow(clippy::disallowed_methods)]
