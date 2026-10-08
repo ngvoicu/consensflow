@@ -1,8 +1,8 @@
-//! ConsensFlow's copy of each window's conversation
-//! (`src/core/transcripts.js`): at every look, what is new in the window's
-//! record goes into the ledger (the last item again, and from the first when
-//! the record shrank); a window the human switched to another conversation is
-//! followed there. It owns the record's count of what is copied.
+//! ConsensFlow's copy of each window's conversation: at every look, what is new
+//! in the window's record goes into the ledger (the last item again, and from
+//! the first when the record shrank); a window the human switched to another
+//! conversation is followed there. It owns the record's count of what is
+//! copied.
 
 use cf_harness::contract::Observed;
 use cf_ledger::ParticipantView;

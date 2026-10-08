@@ -1,7 +1,6 @@
-//! The saved agents as the page reads them (`membership`, `chiefOn`,
-//! `lastStaffNow` and `agentGone` of `src/core/page.js`): each read goes to the
-//! file as it is now, so an agent the human added a moment ago is there and one
-//! they removed is gone. How the pickers offer them is the roster's
+//! The saved agents as the page reads them: each read goes to the file as it is
+//! now, so an agent the human added a moment ago is there and one they removed
+//! is gone. How the pickers offer them is the roster's
 //! ([`crate::roster::offerable`]).
 
 use cf_base::env::Env;

@@ -1,13 +1,13 @@
-//! Codex's windows (`src/adapters/codex.js`). Codex runs under ConsensFlow's
-//! supervisor, the bundle's native `cf codex-session`: an app-server, a broker
-//! that knows the thread the TUI shows and queues messages on it, and the TUI
-//! attached to both. The first message is Codex's last argument; the broker
-//! names the thread once Codex starts it, and again whenever the human starts
-//! or resumes another one in the window (/new, /resume), so the window is
-//! followed to it. A Codex too old for the native queue is refused: nothing
-//! could reach its window. Every window starts with the MCP servers Codex
-//! has, the chief's and a member's alike (the owner's choice, 2026-10-06): a
-//! launch never lists them, and its command line switches none off.
+//! Codex's windows. Codex runs under ConsensFlow's supervisor, the bundle's
+//! native `cf codex-session`: an app-server, a broker that knows the thread the
+//! TUI shows and queues messages on it, and the TUI attached to both. The first
+//! message is Codex's last argument; the broker names the thread once Codex
+//! starts it, and again whenever the human starts or resumes another one in the
+//! window (/new, /resume), so the window is followed to it. A Codex too old for
+//! the native queue is refused: nothing could reach its window. Every window
+//! starts with the MCP servers Codex has, the chief's and a member's alike (the
+//! owner's choice, 2026-10-06): a launch never lists them, and its command line
+//! switches none off.
 
 use std::cell::RefCell;
 use std::rc::Rc;

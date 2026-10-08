@@ -1,6 +1,5 @@
-//! How an OpenCode window is opened on its channel (the `opencode` branch of
-//! `launchConfiguration`, `src/channels.js`): the port its server listens on
-//! and the password it asks for, the plugin's own port and token, and the
+//! How an OpenCode window is opened on its channel: the port its server listens
+//! on and the password it asks for, the plugin's own port and token, and the
 //! arguments and environment that tell the window of them.
 //!
 //! Kept from Node on purpose: the workspace is only checked for being

@@ -1,6 +1,5 @@
-//! An agent defined by hand, edited in place or removed (`applyPatch`,
-//! `refuseEffortEdit`, `editAgent` and `removeAgent`, `src/roster.js`). A
-//! catalog agent is the catalog's: it is neither edited nor removed.
+//! An agent defined by hand, edited in place or removed. A catalog agent is the
+//! catalog's: it is neither edited nor removed.
 
 use std::path::Path;
 

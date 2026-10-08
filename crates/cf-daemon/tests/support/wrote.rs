@@ -3,11 +3,10 @@
 //! held to what Node recorded. A step with no `wrote` changed nothing: a file
 //! that appears, goes or is rewritten without the trace saying so fails it.
 //!
-//! A file is read as the recorder reads one (`tests/goldens/daemon/world.mjs`):
-//! its text, with a roster's stamps named `«now»` and nothing else of it or of
-//! any other file masked, and whether it is a program. A roster that is
-//! rewritten with no change but its stamps is not changed, for the recorder
-//! and so for the player.
+//! A file is read as the recorder read one: its text, with a roster's stamps
+//! named `«now»` and nothing else of it or of any other file masked, and
+//! whether it is a program. A roster that is rewritten with no change but its
+//! stamps is not changed, for the recorder and so for the player.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -31,11 +30,10 @@ pub struct File {
 /// Every file of the folder by its path under it, `/` between the parts.
 pub type Snapshot = BTreeMap<String, File>;
 
-/// What the recorder masks in a roster file: the time of a `createdAt` or of an
-/// `updatedAt`, which the writer took from its own clock (`maskStamps`,
-/// `tests/goldens/daemon/mask.mjs`, which takes whatever the field holds: here
-/// only a time is the clock's, so a field that holds another text stays as it
-/// is, and is held to the `«now»` Node recorded).
+/// What the recorder masked in a roster file: the time of a `createdAt` or of
+/// an `updatedAt`, which the writer took from its own clock (it took whatever
+/// the field held: here only a time is the clock's, so a field that holds
+/// another text stays as it is, and is held to the `«now»` Node recorded).
 static STAMPED: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"("(?:createdAt|updatedAt)": )"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z""#)
         .unwrap()

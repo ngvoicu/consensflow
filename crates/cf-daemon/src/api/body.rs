@@ -4,11 +4,11 @@
 //! much, never when it is all there: a body that never ends is refused at its
 //! limit, and nothing waits for the rest.
 //!
-//! - [`read_json`], for the agents' API (`readJson`, `api.js:484-501`): at
+//! - [`read_json`], for the agents' API: at
 //!   most 2 MiB of bytes; nothing is an empty object; anything but one JSON
 //!   object is refused.
-//! - [`read_text`], for the human's screens (`readBody`,
-//!   `agents-server.js:39-49`): at most 64 K UTF-16 code units of text, each
+//! - [`read_text`], for the human's screens: at
+//!   most 64 K UTF-16 code units of text, each
 //!   chunk read as text on its own as Node read it, so what is cut between
 //!   two chunks reads as U+FFFD.
 

@@ -1,5 +1,4 @@
-//! The pass loop and the throttles (`passLoop` and `throttle`,
-//! `src/core/daemon.js:187-266`).
+//! The pass loop and the throttles.
 //!
 //! [`PassLoop`] runs the engine's pass on a timer and on demand, never two at
 //! once: a kick during a pass runs one more after it. A pass that fails or

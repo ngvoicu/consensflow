@@ -1,8 +1,8 @@
 //! `cf_base::args` held to Node's `util.parseArgs`: every argument list of
-//! tests/goldens/args.json (`npm run goldens:cli`, from
-//! `tests/goldens/cli/parse-args.mjs`) read with the option set of the verb it
-//! was recorded for, and its values, positionals or message compared with
-//! what Node answered.
+//! tests/goldens/args.json (recorded from Node, fixed since:
+//! `tests/goldens/README.md`) read with the option set of the verb it was
+//! recorded for, and its values, positionals or message compared with what Node
+//! answered.
 
 // The goldens' own reading: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -10,7 +10,7 @@
 use cf_base::args::{parse, Opt, Parsed, Positionals};
 use serde_json::{json, Value};
 
-/// The option sets of the verbs of `bin/cf.mjs`, as the recording names them.
+/// The option sets of the verbs of the CLI, as the recording names them.
 fn options(verb: &str) -> (Vec<Opt>, Positionals) {
     match verb {
         "ui" => (

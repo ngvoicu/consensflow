@@ -1,9 +1,8 @@
-//! A Codex window once it is open, as the cases of
-//! `tests/adapter-codex.test.mjs` hold Node's: it learns its thread from the
-//! broker, holds a message while the broker cannot take one, follows the
-//! window to the thread a /new or /resume left it on, and passes Codex's word
-//! on its quota through. Where Node's test stood in the records of a
-//! conversation, a stand-in `Records` does here.
+//! A Codex window once it is open, as the cases of Node's Codex adapter suite
+//! held them: it learns its thread from the broker, holds a message while the
+//! broker cannot take one, follows the window to the thread a /new or /resume
+//! left it on, and passes Codex's word on its quota through. Where Node's test
+//! stood in the records of a conversation, a stand-in `Records` does here.
 
 use std::cell::RefCell;
 use std::rc::Rc;

@@ -1,11 +1,11 @@
-//! Where the harnesses keep their things, as `src/harnesses.js` finds them:
+//! Where the harnesses keep their things, as Node's harness code found them:
 //! the folders of each harness's own module start from the user's home here.
 
 use cf_base::env::Env;
 use cf_base::path;
 
-/// The user's home (`home`, `src/harnesses.js`): `HOME`, else `USERPROFILE`,
-/// whichever is set, empty or not, as `??` took them.
+/// The user's home: `HOME`, else `USERPROFILE`, whichever is set, empty or not,
+/// as `??` took them.
 ///
 /// Kept from Node on purpose: Node fell back to `os.homedir()`, which reads
 /// the process's own environment; a Rust module may not, so an environment

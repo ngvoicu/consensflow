@@ -1,11 +1,11 @@
 //! A window's first message through its own server, as `describe('OpenCode
-//! worker seed uses the native API after the TUI starts')` of
-//! `tests/opencode-launch.test.mjs` holds Node's: the task posted once, with
-//! the roster's model for a new conversation and the conversation's own for
-//! a resumed one, after the server's health answers, and never retried. A
-//! window has only the 60 s its adapter gives it, so what Node gave a short
-//! timeout runs here on the test's clock. The two cases of Node's that
-//! cancel the startup by a signal are not here: no adapter passes one.
+//! worker seed uses the native API after the TUI starts')` of Node's OpenCode
+//! launch suite: the task posted once, with the roster's model for a new
+//! conversation and the conversation's own for a resumed one, after the
+//! server's health answers, and never retried. A window has only the 60 s its
+//! adapter gives it, so what Node gave a short timeout runs here on the test's
+//! clock. The two cases of Node's that cancel the startup by a signal are not
+//! here: no adapter passes one.
 
 use std::rc::Rc;
 

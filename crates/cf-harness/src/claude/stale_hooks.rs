@@ -1,7 +1,7 @@
-//! The hooks an older version left in Claude Code's own settings
-//! (`staleClaudeHooks`, `src/host-payloads.js`): reported, never written.
-//! Claude Code's settings are not ours to write, so a hook an older version
-//! left there is named rather than removed behind the user's back.
+//! The hooks an older version left in Claude Code's own settings: reported,
+//! never written. Claude Code's settings are not ours to write, so a hook an
+//! older version left there is named rather than removed behind the user's
+//! back.
 //!
 //! A file that is not there, cannot be read, or is no JSON says nothing. So
 //! does one that is the JSON `null`, where Node's own `null.hooks` threw a

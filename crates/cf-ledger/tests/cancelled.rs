@@ -1,17 +1,17 @@
-//! What a cancel leaves behind, held to Node's ledger on the same file: the
-//! chief's re-plan of 2026-10-07 (the chief eval `six-decisions`, run on the
-//! native daemon) cancelled tasks that no member had yet and a task whose
-//! window it had told, and the eval counted fewer tasks on the board and
-//! fewer tells answered than it had made. The board then left such a task
-//! off both its lists, as it did a paused backlog task and a removed member's
-//! tasks; the owner decided (2026-10-07) that all three stay in view, and both
-//! boards place them so: each test writes the states here, has Node's ledger
-//! read or move them, and holds this one to what Node's does.
+//! What a cancel leaves behind: the chief's re-plan of 2026-10-07 (the chief
+//! eval `six-decisions`, run on the native daemon) cancelled tasks that no
+//! member had yet and a task whose window it had told, and the eval counted
+//! fewer tasks on the board and fewer tells answered than it had made. The
+//! board then left such a task off both its lists, as it did a paused backlog
+//! task and a removed member's tasks; the owner decided (2026-10-07) that all
+//! three stay in view, and the board places them so. Each test writes the
+//! states here and holds the ledger to what Node's ledger answered on the same
+//! file while Node's ledger existed (`21297242`, the last commit that held
+//! both, where the test compared the two and they agreed): the threads below
+//! are those answers, written down as this ledger gave them there, and fixed
+//! since Node went.
 
-// The tests start Node themselves; their helpers expect, as the tests do.
-#![allow(clippy::disallowed_methods, clippy::expect_used)]
-
-mod node_ledger;
+#![allow(clippy::expect_used)]
 
 use std::path::Path;
 
@@ -19,7 +19,6 @@ use cf_ledger::{
     open_ledger, Board, Ledger, NewChief, NewMember, NewProject, NewQuestion, NewTask, Options,
     ProjectView, TaskCard,
 };
-use node_ledger::{node, printed};
 use serde_json::{json, Value};
 
 /// Session names in a fixed order, so a test can say `zeus-amber-pine`.
@@ -151,7 +150,7 @@ fn listed(board: &Board) -> Vec<String> {
 ///   and waiting for T-1. Her removal cancelled T-9, the one task in her
 ///   hands (queued); the others stay as they were, and her lane and her
 ///   sessions' went.
-fn replanned(file: &Path) -> (Board, String) {
+fn replanned(file: &Path) -> Board {
     let mut ledger = open_ledger(file, options()).expect("a ledger");
     let project = project(&mut ledger);
     let (zeus, hera, athena) = (
@@ -202,16 +201,14 @@ fn replanned(file: &Path) -> (Board, String) {
         .remove_member(project.id, "athena")
         .expect("athena leaves");
     let board = ledger.board(project.id).expect("a board");
-    let json = serde_json::to_string(&board).expect("JSON");
     ledger.close().expect("the file is given up");
-    (board, json)
+    board
 }
 
 #[test]
 fn a_task_no_lane_has_is_among_the_open_ones_whatever_its_state_as_node_draws_the_board() {
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("consensflow.db");
-    let (board, here) = replanned(&file);
+    let board = replanned(&dir.path().join("consensflow.db"));
 
     assert_eq!(
         listed(&board),
@@ -234,21 +231,10 @@ fn a_task_no_lane_has_is_among_the_open_ones_whatever_its_state_as_node_draws_th
          task by its lane, and these have none, so they are among the open ones, each in the \
          order of its number. T-8 was deleted by the human: it is on neither"
     );
-    let there = printed(&mut node(
-        "const ledger = openLedger(file);\n\
-         console.log(JSON.stringify(ledger.board(1)));\n\
-         ledger.close();",
-        &file,
-    ));
-    assert_eq!(
-        there.trim_end(),
-        here,
-        "Node draws this file's board as this ledger does"
-    );
 }
 
-/// What the cancel of T-1 (`by` the chief) left of its thread, as `[task, state]`
-/// and each message as `[id, kind, state, reason]`, in the words of both ledgers.
+/// What the cancel of T-1 (`by` the chief) left of its thread, as `[task,
+/// state]` and each message as `[id, kind, state, reason]`.
 fn thread(task: &Value) -> Value {
     let messages = task["messages"].as_array().expect("its thread");
     json!([
@@ -327,9 +313,9 @@ fn told(file: &Path, received: bool, answered: bool, heard: bool) -> (i64, i64) 
     (tell, session)
 }
 
-/// The chief cancels T-1 in this ledger: the thread it leaves, and what a
-/// window's answer to the tell, given after it, is told.
-fn cancelled_here(file: &Path, tell: i64, session: i64) -> (Value, Option<&'static str>) {
+/// The chief cancels T-1: the thread it leaves, and what a window's answer to
+/// the tell, given after it, is told.
+fn cancelled(file: &Path, tell: i64, session: i64) -> (Value, Option<&'static str>) {
     let mut ledger = open_ledger(file, options()).expect("a ledger");
     ledger.cancel_task(1, 1, "chief").expect("cancelled");
     let found =
@@ -339,27 +325,6 @@ fn cancelled_here(file: &Path, tell: i64, session: i64) -> (Value, Option<&'stat
         .err()
         .and_then(|refused| refused.code());
     ledger.close().expect("the file is given up");
-    (thread(&found), late)
-}
-
-/// The same cancel in Node's ledger, on a file written the same way.
-fn cancelled_there(file: &Path, tell: i64, session: i64) -> (Value, Option<String>) {
-    let said = printed(&mut node(
-        &format!(
-            "const ledger = openLedger(file);\n\
-             ledger.cancelTask(1, 1, {{ by: 'chief' }});\n\
-             console.log(JSON.stringify(ledger.task(1, 1)));\n\
-             let late = null;\n\
-             try {{ ledger.answer({tell}, {{ from: {session}, body: 'Late' }}) }} catch (cause) {{ late = cause.code }}\n\
-             console.log(JSON.stringify(late));\n\
-             ledger.close();"
-        ),
-        file,
-    ));
-    let mut lines = said.lines();
-    let found: Value = serde_json::from_str(lines.next().expect("the task")).expect("JSON");
-    let late: Option<String> =
-        serde_json::from_str(lines.next().expect("the refusal")).expect("JSON");
     (thread(&found), late)
 }
 
@@ -377,36 +342,80 @@ fn counted_answered(thread: &Value) -> bool {
 #[test]
 fn a_cancel_withdraws_the_tell_not_yet_in_its_window_and_the_answer_not_yet_with_the_chief_as_node_does(
 ) {
-    for (received, answered, heard, tell_state, counted) in [
+    for (received, answered, heard, tell_state, counted, thread) in [
         // The window was still busy with its turn: the tell never went in.
-        (false, false, false, "cancelled", false),
+        (
+            false,
+            false,
+            false,
+            "cancelled",
+            false,
+            json!([
+                [1, "cancelled"],
+                [
+                    [1, "task", "delivered", null],
+                    [2, "question", "cancelled", "cancelled by @chief"],
+                ]
+            ]),
+        ),
         // It went in, and the window never answered it.
-        (true, false, false, "delivered", false),
+        (
+            true,
+            false,
+            false,
+            "delivered",
+            false,
+            json!([
+                [1, "cancelled"],
+                [
+                    [1, "task", "delivered", null],
+                    [2, "question", "delivered", null],
+                ]
+            ]),
+        ),
         // It answered, but the chief was in a turn of its own: the answer
         // waited in its queue, and the cancel took it back.
-        (true, true, false, "delivered", false),
+        (
+            true,
+            true,
+            false,
+            "delivered",
+            false,
+            json!([
+                [1, "cancelled"],
+                [
+                    [1, "task", "delivered", null],
+                    [2, "question", "delivered", null],
+                    [3, "answer", "cancelled", "cancelled by @chief"],
+                ]
+            ]),
+        ),
         // The chief heard the answer before it cancelled.
-        (true, true, true, "delivered", true),
+        (
+            true,
+            true,
+            true,
+            "delivered",
+            true,
+            json!([
+                [1, "cancelled"],
+                [
+                    [1, "task", "delivered", null],
+                    [2, "question", "delivered", null],
+                    [3, "answer", "delivered", null],
+                ]
+            ]),
+        ),
     ] {
         let dir = tempfile::tempdir().unwrap();
-        let (here_file, there_file) = (dir.path().join("here.db"), dir.path().join("there.db"));
-        let (tell, session) = told(&here_file, received, answered, heard);
-        assert_eq!(
-            told(&there_file, received, answered, heard),
-            (tell, session)
-        );
+        let file = dir.path().join("consensflow.db");
+        let (tell, session) = told(&file, received, answered, heard);
 
-        let (here, refused_here) = cancelled_here(&here_file, tell, session);
-        let (there, refused_there) = cancelled_there(&there_file, tell, session);
+        let (here, refused) = cancelled(&file, tell, session);
         let case = format!("received {received}, answered {answered}, heard {heard}");
-        assert_eq!(here, there, "{case}: the thread each ledger leaves");
+        assert_eq!(here, thread, "{case}: the thread the cancel leaves");
         assert_eq!(
-            refused_here.map(str::to_owned),
-            refused_there,
-            "{case}: what a late answer is told"
-        );
-        assert_eq!(
-            refused_there.as_deref(),
+            refused,
             Some("task-cancelled"),
             "{case}: nobody waits for it"
         );

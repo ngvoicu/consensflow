@@ -1,12 +1,11 @@
-//! The kit the engine's tests run it with, as `core-dispatcher.test.mjs`
-//! made its fakes: the engine's own executor, which the kit drains to
-//! stillness, the answers of the work a test starts on it, a
-//! gate, holds a test puts on the fakes' calls ([`Holds`]), the time (a clock
-//! the test moves, and timers that are the loop's),
-//! a pane host and an adapter whose agents do what the test tells them,
-//! fakes of the other seams, a test's engine made with them all
-//! ([`Context`]), and a recorder that writes down what the engine asks of
-//! its seams in the shape of the Node traces the tests are held to.
+//! The kit the engine's tests run it with, as Node's dispatcher suite made its
+//! fakes: the engine's own executor, which the kit drains to stillness, the
+//! answers of the work a test starts on it, a gate, holds a test puts on the
+//! fakes' calls ([`Holds`]), the time (a clock the test moves, and timers that
+//! are the loop's), a pane host and an adapter whose agents do what the test
+//! tells them, fakes of the other seams, a test's engine made with them all
+//! ([`Context`]), and a recorder that writes down what the engine asks of its
+//! seams in the shape of the Node traces the tests are held to.
 
 mod adapter;
 mod adapters;

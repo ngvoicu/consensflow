@@ -1,5 +1,5 @@
-//! A role's text, written for its launch, as `tests/role-skills.test.mjs`
-//! holds Node's (the cases of each harness's own loading are its module's).
+//! A role's text, written for its launch, as Node's role-skills suite held it
+//! (the cases of each harness's own loading are its module's).
 
 use std::fs;
 use std::path::Path;

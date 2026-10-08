@@ -1,9 +1,8 @@
-//! What opening the app prepares, as `tests/install.test.mjs` holds Node's:
-//! the five sentences of that file, in order. The first three are the
-//! harnesses' discovery (`src/harnesses.js`), which `detect` is the port of
-//! and holds under sentences of its own (`src/detect/tests.rs`); they are here
-//! too, as the file has them. The last two are the app's own preparation
-//! (`prepareApp`, `src/install.js`), which `prepare::prepare_app` is.
+//! What opening the app prepares, as Node's install suite held it: the five
+//! sentences of that suite, in order. The first three are the harnesses'
+//! discovery, which `detect` is the port of and holds under sentences of its
+//! own (`src/detect/tests.rs`); they are here too, as the suite had them. The
+//! last two are the app's own preparation, which `prepare::prepare_app` is.
 //!
 //! Node's `addAgent` wrote the agent the test then found untouched; this
 //! crate has no roster, and the file is written by hand and found as it was.

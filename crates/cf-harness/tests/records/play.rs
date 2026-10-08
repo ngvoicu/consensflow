@@ -1,8 +1,8 @@
 //! The player: a scenario's steps played against the Rust readers in a
-//! temporary root, as `runner.mjs` played them against Node's, each look
-//! held to the reading Node's look read. A look goes through the switch, as
-//! the daemon's will: a cached one through a [`Cache`] that [`records::open`]
-//! opens readers for, a fresh one through [`records::answers`].
+//! temporary root, as the recorder played them against Node's, each look held
+//! to the reading Node's look read. A look goes through the switch, as the
+//! daemon's will: a cached one through a [`Cache`] that [`records::open`] opens
+//! readers for, a fresh one through [`records::answers`].
 //!
 //! Like the runner, the player owns time: the clock starts at [`START`] and
 //! moves only by a step, and each file step sets the file's times to the
@@ -326,8 +326,8 @@ fn environment(root: &Path, vars: &Map<String, Value>) -> Env {
     )
 }
 
-/// `value` with every `$ROOT` path in it made real, at any depth, as
-/// `runner.mjs`'s `resolveAll` makes them.
+/// `value` with every `$ROOT` path in it made real, at any depth, as the
+/// recorder made them.
 fn resolve_all(root: &Path, value: &Value) -> Value {
     match value {
         Value::Array(items) => {

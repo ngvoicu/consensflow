@@ -1,5 +1,4 @@
-//! Devin's store of a session's messages (`readStore`,
-//! `hosts/lib/completion/devin.js`): its `sessions.db`, read as
+//! Devin's store of a session's messages: its `sessions.db`, read as
 //! `node:sqlite` read it, its rows' columns JavaScript's values.
 //!
 //! The store gains message rows (a revision is a new node), so a look reads

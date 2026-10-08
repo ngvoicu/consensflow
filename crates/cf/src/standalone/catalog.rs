@@ -1,6 +1,6 @@
-//! `cf catalog [--harness <h>] [--json]` (`catalogVerb`, `bin/cf.mjs`): the
-//! ready-made agents of every harness, or of one, as a table or as JSON. It
-//! reads nothing of the home and writes nothing.
+//! `cf catalog [--harness <h>] [--json]`: the ready-made agents of every
+//! harness, or of one, as a table or as JSON. It reads nothing of the home and
+//! writes nothing.
 
 use std::io::Write;
 

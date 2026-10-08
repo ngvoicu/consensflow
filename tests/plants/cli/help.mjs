@@ -356,16 +356,8 @@ export const PLANTS = [
     edits: [
       [
         'crates/cf/src/lib.rs',
-        lines(
-          '    let asked = first == "ui"',
-          '        && env.text("CONSENSFLOW_TOKEN").is_none()',
-          '        && !standalone::asks_for_help(&words);',
-        ),
-        lines(
-          '    let asked = first == "ui"',
-          '        && env.text("CONSENSFLOW_TOKEN").is_none();',
-          '    let _ = &words;',
-        ),
+        '    (asked && !standalone::asks_for_help(&words)).then(|| cf_daemon::ui(env, rest))',
+        '    let _ = &words;\n    asked.then(|| cf_daemon::ui(env, rest))',
       ],
     ],
     runs: [help],

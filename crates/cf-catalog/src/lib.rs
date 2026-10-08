@@ -1,11 +1,12 @@
-//! The catalog and the roster (`hosts/lib/presets.js`, `src/catalog.js`,
-//! `src/roster.js`): the ready-made agents every harness ships, each agent's
-//! profile and work tier, and the human's own agents in `agents.json`.
+//! The catalog and the roster: the ready-made agents every harness ships, each
+//! agent's profile and work tier, and the human's own agents in `agents.json`.
 //!
-//! While the JavaScript runs the app, its presets are the one source:
-//! `data/presets.json` is generated from them (`npm run goldens:catalog`)
-//! and the unit suite holds it equal, so the two cannot drift. Nothing here
-//! writes `agents.json` before the flip; the Node build is its one writer.
+//! `data/presets.json` is the one source of the presets and the model labels,
+//! and it is edited directly: it was generated from Node's presets until that
+//! code was deleted, and nothing generates it now. JSON holds no comments, so
+//! `data/README.md` keeps the reasons behind its rows (the effort ceilings,
+//! what each model was probed with), and the tests in `tests/catalog/` hold the
+//! rules a test can hold.
 //!
 //! `presets` reads the data, `profile` names a model and its road and tiers
 //! its agent, `catalog` lists the presets by harness, and `roster` reads the
@@ -37,9 +38,9 @@ pub enum CatalogError {
     Bundled(#[from] serde_json::Error),
 }
 
-/// The catalog: the presets in the order the JavaScript lists them, each
-/// model's label by its key, and what is worked out from them once: the
-/// (harness, model) pairs the presets run, and the entries of every harness.
+/// The catalog: the presets in the order the data lists them, each model's
+/// label by its key, and what is worked out from them once: the (harness,
+/// model) pairs the presets run, and the entries of every harness.
 #[derive(Debug, Clone)]
 pub struct Catalog {
     presets: Vec<Preset>,

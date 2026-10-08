@@ -9,7 +9,7 @@ use cf_harness::seams::Bundle;
 /// first on every window's PATH, and its native `cf` is `bin/cf`
 /// (`bin/cf.exe`), which a window's role text and hooks name. On Windows that
 /// path is written with forward slashes, which Git Bash keeps where it drops
-/// backslashes and PowerShell reads alike (`src/core/pane-cf.js`).
+/// backslashes and PowerShell reads alike.
 pub fn bundle_of(exe: &Path) -> Bundle {
     let bin = exe.parent().map(Path::to_path_buf).unwrap_or_default();
     let cf = bin.join(if cfg!(windows) { "cf.exe" } else { "cf" });

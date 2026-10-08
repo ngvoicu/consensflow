@@ -1,14 +1,15 @@
-//! The words after a verb, read as Node's `util.parseArgs` reads them
-//! (`bin/cf.mjs`), strictly: only the options a verb names, each a flag or a
-//! text, and positionals when the verb allows them. What it refuses it
-//! refuses in the words Node 26.8.1 used, `error.message` and nothing more
-//! (the caller says `cf: <message>`).
+//! The words after a verb, read as Node's `util.parseArgs` reads them in the
+//! CLI, strictly: only the options a verb names, each a flag or a text, and
+//! positionals when the verb allows them. What it refuses it refuses in the
+//! words Node 26.8.1 used, `error.message` and nothing more (the caller says
+//! `cf: <message>`).
 //!
-//! `cf`'s verbs have long options only, none of one letter, and `parseArgs`
-//! is called with no `short` for any, so a word that opens with one dash is
-//! an option nobody takes, and the first UTF-16 unit after the dash is named.
+//! `cf`'s verbs have long options only, none of one letter, and `parseArgs` is
+//! called with no `short` for any, so a word that opens with one dash is an
+//! option nobody takes, and the first UTF-16 unit after the dash is named.
 //! `crates/cf-base/tests/goldens/args.json` holds this to Node on three
-//! thousand lists of the words people get wrong (`npm run goldens:cli`).
+//! thousand lists of the words people get wrong (recorded from Node, fixed
+//! since: `tests/goldens/README.md`).
 
 use serde_json::Value;
 

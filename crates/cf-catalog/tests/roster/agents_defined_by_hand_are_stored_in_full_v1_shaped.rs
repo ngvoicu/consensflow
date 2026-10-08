@@ -1,5 +1,5 @@
 //! The tests under `describe('agents defined by hand are stored in full,
-//! v1-shaped')` in `tests/roster.test.mjs`.
+//! v1-shaped')` of Node's roster suite.
 
 use super::*;
 use serde_json::json;

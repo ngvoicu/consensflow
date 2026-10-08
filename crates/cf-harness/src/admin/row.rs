@@ -1,7 +1,7 @@
 //! What the admin says of a harness, as the page reads it: a row of what is
 //! known of one CLI, and what became of an update. Each is written with its
-//! fields in the order `src/harness-admin.js` builds them, absent where it
-//! left a key out, so that its JSON reads as Node's did.
+//! fields in the order Node's admin built them, absent where it left a key out,
+//! so that its JSON reads as Node's did.
 
 use std::rc::Rc;
 

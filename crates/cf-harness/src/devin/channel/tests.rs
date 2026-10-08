@@ -1,5 +1,5 @@
-//! A message pasted into Devin's window, as `tests/adapter-devin.test.mjs`
-//! holds Node's: only into the conversation it knows.
+//! A message pasted into Devin's window, as Node's Devin adapter suite held it:
+//! only into the conversation it knows.
 
 use std::fs;
 

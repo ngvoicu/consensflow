@@ -1,4 +1,4 @@
-//! The ledger's tasks, as its callers hold them (`index.js`, tasks).
+//! The ledger's tasks, as its callers hold them.
 
 use super::Ledger;
 use crate::{

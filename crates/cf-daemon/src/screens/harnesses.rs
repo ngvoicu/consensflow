@@ -1,9 +1,9 @@
-//! The harness diagnostics' routes (`agents-server.js:109-127`): what is known
-//! of each harness's CLI here, and its update. Both are the harness admin's
+//! The harness diagnostics' routes: what is known of each harness's CLI here,
+//! and its update. Both are the harness admin's
 //! ([`HarnessAdmin`](cf_harness::admin::HarnessAdmin)): the screen only checks
-//! that the harness asked about is one of the five, before the machine is
-//! asked anything, and says what the admin answered, or why it would not (a
-//! harness that is not installed is asked to update: `Claude is not installed`).
+//! that the harness asked about is one of the five, before the machine is asked
+//! anything, and says what the admin answered, or why it would not (a harness
+//! that is not installed is asked to update: `Claude is not installed`).
 
 use cf_proto::agents::Harness;
 use serde_json::{json, Value};

@@ -20,16 +20,14 @@ export const UNITS = cargo('-p', 'cf', '--lib', 'standalone')
 export const PROCESS = cargo('-p', 'cf', '--test', 'standalone')
 /** The library as a caller other than `main` has it: what no process can bring to it. */
 export const LIBRARY = cargo('-p', 'cf', '--test', 'dispatch')
-/** The checked-in recording held to what Node answers now. */
-export const HELD = [process.execPath, '--test', 'tests/cli-goldens.test.mjs']
 /** The suites of the CLI against the native `cf`, built from the sources as they are. */
 export const CLIS = [process.execPath, 'tests/clis.mjs', '--offline']
 
 export const STANDALONE = 'crates/cf/src/standalone'
 
-/** The native `cf` of bin/, built from the sources as they are: what the Node suites below run. */
+/** The native `cf` of bin/, built from the sources as they are: what the test scripts below run. */
 export const BUILD = [process.execPath, 'app/scripts/build-cf.mjs', '--offline']
-/** `cf ui` as a process: the daemon, in a home that has a `use-node` file or none, and a window's token the board. */
+/** `cf ui` as a process: the daemon, in a home that has a leftover `use-node` file or none, and a window's token the board. */
 export const UI = cargo('-p', 'cf', '--test', 'daemon_stop')
 /** How a program starts here, an npm shim with no Node to run on among them. */
 export const RUNNABLE = cargo('-p', 'cf-process', '--lib', 'runnable')
@@ -59,5 +57,3 @@ export const LAUNCHER = cargo('-p', 'cf-launcher')
 export const HOLDS = cargo('-p', 'cf-launcher', '--test', 'repair_holds')
 /** The app crate's tests, which `npm run test:app` runs where the app cannot be built as it ships. */
 export const APP = [process.execPath, 'tests/app-tests.mjs']
-/** `bin/cf.mjs`, the door: forwards every command to the native `cf`. */
-export const DOOR = [process.execPath, '--test', 'tests/cf-door.test.mjs']

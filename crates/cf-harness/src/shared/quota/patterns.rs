@@ -1,5 +1,5 @@
-//! The patterns of `hosts/lib/quota.js`, each compiled once, the first time
-//! it is used, as JavaScript reads it (`shared::pattern`).
+//! The patterns of Node's quota code, each compiled once, the first time it is
+//! used, as JavaScript reads it (`shared::pattern`).
 
 use std::sync::LazyLock;
 

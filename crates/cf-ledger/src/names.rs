@@ -1,7 +1,6 @@
 //! The name of a member's session: two plain words after the member's own
 //! handle, `diana-amber-pine`, easy to say aloud and to tell apart on the
-//! board (`src/ledger/names.js`). Thirty-two of each gives a thousand names
-//! per member.
+//! board. Thirty-two of each gives a thousand names per member.
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};

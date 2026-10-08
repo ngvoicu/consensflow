@@ -1,10 +1,9 @@
-//! What a harness's record says, in the dispatcher's terms (`recordState`,
-//! `src/adapters/shared.js`), whether its window waits on its own question
-//! dialog (`dialogWaiting`), and the two looks a window's own word makes of
-//! it: one that shows another conversation (`switchedTo`), and one that has
-//! not said which it shows (`unnamed`). A conversation with no messages and
-//! nothing in flight is idle: a window opened without a task has nothing to
-//! finish, and must still be able to receive.
+//! What a harness's record says, in the dispatcher's terms; whether its window
+//! waits on its own question dialog (`dialogWaiting`), and the two looks a
+//! window's own word makes of it: one that shows another conversation
+//! (`switchedTo`), and one that has not said which it shows (`unnamed`). A
+//! conversation with no messages and nothing in flight is idle: a window opened
+//! without a task has nothing to finish, and must still be able to receive.
 
 use std::sync::Arc;
 

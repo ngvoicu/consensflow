@@ -1,7 +1,6 @@
-//! A session's file found under a harness's folder (`findFile`,
-//! `hosts/lib/completion/shared.js`): depth first, the first match winning,
-//! every store read-only. A folder's entries are listed in the order Node's
-//! `readdir` lists them.
+//! A session's file found under a harness's folder: depth first, the first
+//! match winning, every store read-only. A folder's entries are listed in the
+//! order Node's `readdir` lists them.
 
 use std::fs;
 use std::io;

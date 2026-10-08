@@ -1,6 +1,6 @@
 //! The words the ledger's records hold: harnesses, roles, tiers, pools,
 //! purposes and the task states it counts by, the limits on text, and the
-//! checks that refuse anything else with a stable code (`src/ledger/model.js`).
+//! checks that refuse anything else with a stable code.
 //!
 //! A check comes in two halves where JavaScript had one: the value's own
 //! rule (blank, too long, not a tier), which every operation applies to what

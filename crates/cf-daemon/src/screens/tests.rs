@@ -1,4 +1,4 @@
-//! The screens' paths, and the order of their checks as `agents-server.js` has
+//! The screens' paths, and the order of their checks as Node's screens had
 //! them: which paths are theirs, how the UI token is taken, what is read of a
 //! request and when. (The routes' own answers are in `routes` and `harnesses`,
 //! and every one Node recorded is held in `tests/screens`.)
@@ -122,8 +122,8 @@ fn any_other_path_is_the_agents_api_s() {
     }
 }
 
-/// The paths `agents-server.js` routed when Node was the daemon, frozen here:
-/// every one is a path, so that none falls through unseen. They are `/`,
+/// The paths the screens routed when Node was the daemon, frozen here: every
+/// one is a path, so that none falls through unseen. They are `/`,
 /// `/harnesses`, `/api/agents`, `/api/preferences`, `/api/harnesses/check` and
 /// `/api/harnesses/update`, and an agent by its name, as a name is written
 /// (`[a-z][a-z0-9-]*`; the paths that are not names are refused above).

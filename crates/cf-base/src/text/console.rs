@@ -1,9 +1,8 @@
-//! Text as Windows' console carries it to a window that reads key presses
-//! (`consoleText`, `src/console-text.js`): a paste into Devin on Windows
-//! reaches it as key presses, and every non-ASCII punctuation mark and
-//! symbol is lost on the way while letters arrive (Devin 3000.11,
-//! 2026-10-03; Codex 0.160 the same). Unicode is ICU4X's, 17.0, the version
-//! Node 26's ICU holds.
+//! Text as Windows' console carries it to a window that reads key presses: a
+//! paste into Devin on Windows reaches it as key presses, and every non-ASCII
+//! punctuation mark and symbol is lost on the way while letters arrive (Devin
+//! 3000.11, 2026-10-03; Codex 0.160 the same). Unicode is ICU4X's, 17.0, the
+//! version Node 26's ICU holds.
 
 use icu_normalizer::{ComposingNormalizerBorrowed, DecomposingNormalizerBorrowed};
 use icu_properties::props::{GeneralCategory, GeneralCategoryGroup};
@@ -143,7 +142,7 @@ mod tests {
 
     #[test]
     fn spells_in_ascii_every_mark_the_console_dropped_and_keeps_letters_as_they_are() {
-        // tests/adapter-shared.test.mjs: what a paste into Devin lost on its way.
+        // What a paste into Devin lost on its way.
         let lost = "\u{B7}\u{2014}\u{2013}\u{2026}\u{2192}\u{2190}\u{2019}\u{2018}\u{201C}\u{201D}\u{AB}\u{BB}\u{2022}\u{B0}\u{B1}\u{D7}\u{F7}\u{20AC}\u{A3}\u{A5}\u{A9}\u{AE}\u{2122}\u{A7}\u{B6}\u{A6}\u{A8}\u{AC}\u{AF}\u{B4}\u{B8}\u{BC}\u{BD}\u{BE}\u{BF}";
         for character in lost.chars() {
             let carried = console_text(&character.to_string());

@@ -1,9 +1,9 @@
-//! What the window shows and is doing, as `tests/adapter-opencode.test.mjs`
-//! holds Node's: ready once its plugin shows the conversation, followed to
-//! another, its record read beside what OpenCode says of itself (idle, busy,
-//! waiting out a limit), and its own question dialog. The plugin answers
-//! `GET /session`, scripted by the test; the window's record is a stand-in
-//! where Node's test stood one in.
+//! What the window shows and is doing, as Node's OpenCode adapter suite held
+//! it: ready once its plugin shows the conversation, followed to another, its
+//! record read beside what OpenCode says of itself (idle, busy, waiting out a
+//! limit), and its own question dialog. The plugin answers `GET /session`,
+//! scripted by the test; the window's record is a stand-in where Node's test
+//! stood one in.
 
 use std::rc::Rc;
 use std::sync::Arc;

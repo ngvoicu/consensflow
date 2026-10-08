@@ -1,6 +1,5 @@
-//! What Claude Code's window runs with (`src/claude-install.js`, and
-//! Claude's branch of `roleConfiguration`, `src/role-skills.js`): settings
-//! of its launch's own, and its role as a system prompt of its own.
+//! What Claude Code's window runs with: settings of its launch's own, and its
+//! role as a system prompt of its own.
 
 use std::path::Path;
 

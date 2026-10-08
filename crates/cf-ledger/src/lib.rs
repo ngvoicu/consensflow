@@ -1,8 +1,8 @@
-//! The ledger: the one durable record of every project, participant, task
-//! and inbox message, in `<home>/consensflow.db`. The board and every inbox
-//! are views of it. A port of `src/ledger/`, file for file; its rules are
-//! the long comment in `index.js`, each with a test, and every ledger the
-//! Node suite opened is a trace this crate replays (`tests/replay.rs`).
+//! The ledger: the one durable record of every project, participant, task and
+//! inbox message, in `<home>/consensflow.db`. The board and every inbox are
+//! views of it. A port of Node's ledger, file for file; its rules are the long
+//! comment of its index, each with a test, and every ledger the Node suite
+//! opened is a trace this crate replays (`tests/replay.rs`).
 //!
 //! The daemon is the only process that opens the file. The connection runs
 //! in SQLite's exclusive locking mode and takes the write lock when it opens,

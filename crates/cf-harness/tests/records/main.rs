@@ -1,6 +1,6 @@
-//! The harness records' goldens (`npm run goldens:records`, from
-//! `tests/goldens/records/`): the scenarios Node played against its readers
-//! and what each look read.
+//! The harness records' goldens (`tests/goldens/records/`, recorded from Node
+//! and fixed since): the scenarios Node played against its readers and what
+//! each look read.
 //!
 //! Every scenario is read into the steps the player plays and the readings
 //! its looks are held to, and its looks are counted harness by harness, so a

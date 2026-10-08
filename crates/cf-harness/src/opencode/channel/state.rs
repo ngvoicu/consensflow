@@ -1,7 +1,6 @@
-//! Which conversation the window shows (`sessionState`,
-//! `src/channels/opencode.js`). Only the launch-owned TUI can attest it: the
-//! plugin inside answers for its launch, with the conversation (none on the
-//! home screen or the session list) and what OpenCode says it is doing,
+//! Which conversation the window shows. Only the launch-owned TUI can attest
+//! it: the plugin inside answers for its launch, with the conversation (none on
+//! the home screen or the session list) and what OpenCode says it is doing,
 //! `{type: 'idle' | 'busy'}` or `{type: 'retry', message, next, …}` while it
 //! waits to retry a refused request.
 

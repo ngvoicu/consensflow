@@ -1,5 +1,5 @@
-//! The tests under `describe('catalog presentation follows actual model and effort')`
-//! in `tests/catalog.test.mjs`.
+//! The tests under `describe('catalog presentation follows actual model and
+//! effort')` of Node's catalog suite.
 
 use super::*;
 

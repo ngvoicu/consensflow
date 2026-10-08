@@ -1,5 +1,4 @@
-//! Where Claude Code keeps its things (`claudeTranscript`,
-//! `hosts/lib/completion/claude-code.js`).
+//! Where Claude Code keeps its things.
 
 use std::path::{Path, PathBuf};
 

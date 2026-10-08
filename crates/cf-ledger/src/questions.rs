@@ -1,7 +1,7 @@
 //! Questions with options, as a harness's own question tool asks them, and
-//! their answers by choice: the checks that take them in and the text an
-//! inbox or a window shows for them (`src/ledger/questions.js`). Both come
-//! as JSON from a harness's door, and are read as JavaScript read them.
+//! their answers by choice: the checks that take them in and the text an inbox
+//! or a window shows for them. Both come as JSON from a harness's door, and are
+//! read as JavaScript read them.
 
 use cf_base::js;
 use cf_base::text::utf16_len;

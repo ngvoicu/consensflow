@@ -1,6 +1,6 @@
-//! A record replayed (`replay`, `hosts/lib/completion/claude-code.js`): what
-//! it says of the turn, by its type. A record is replayed as the projection
-//! made of it (`project`): what is read of it, and no more.
+//! A record replayed: what it says of the turn, by its type. A record is
+//! replayed as the projection made of it (`project`): what is read of it, and
+//! no more.
 
 use std::sync::Arc;
 

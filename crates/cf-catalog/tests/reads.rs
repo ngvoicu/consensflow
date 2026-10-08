@@ -1,8 +1,8 @@
-//! The roster's reads through its public face: what each of the three
-//! (`list`, `agent_row`, `preferences`) refuses, and how each answers, on
-//! files written by hand. The ported tests of `roster.test.mjs` are in
-//! `tests/roster`, the golden cases in `tests/goldens.rs`; these are the
-//! rules each of them leaves to a test of its own.
+//! The roster's reads through its public face: what each of the three (`list`,
+//! `agent_row`, `preferences`) refuses, and how each answers, on files written
+//! by hand. The ported tests of Node's roster suite are in `tests/roster`, the
+//! golden cases in `tests/goldens.rs`; these are the rules each of them leaves
+//! to a test of its own.
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used)]

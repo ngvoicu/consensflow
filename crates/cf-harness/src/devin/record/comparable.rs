@@ -1,11 +1,10 @@
-//! The text a Devin message is compared by (`devinComparable`,
-//! `hosts/lib/completion/devin.js`): its wire streams a file link as
+//! The text a Devin message is compared by: its wire streams a file link as
 //! `[name](file:///path)`, a quoted range as `[name:1-3](file:///path)`, and
 //! its store keeps `<ref_file file="/path" />` and `<ref_snippet file="/path"
 //! lines="1-3" />` (Devin 3000.11, 2026-09-26 and 10-03), so each is read as
 //! its path; on Windows the wire's `file:///C:/Users/…` and the store's
-//! `C:\Users\…` are one path. Nothing else is loosened, since the comparison
-//! is what tells a final message from a half one.
+//! `C:\Users\…` are one path. Nothing else is loosened, since the comparison is
+//! what tells a final message from a half one.
 
 use std::sync::LazyLock;
 

@@ -3,9 +3,9 @@
 //! ([`Consumer`]).
 //!
 //! The target is read as Node reads it (`new URL(request.url,
-//! 'http://127.0.0.1')`, `api.js:80`): the WHATWG URL standard, so `path` is
-//! `pathname` and `param` is `searchParams.get`. What a handler reads of the
-//! headers is the bearer token alone.
+//! 'http://127.0.0.1')`): the WHATWG URL standard, so `path` is `pathname` and
+//! `param` is `searchParams.get`. What a handler reads of the headers is the
+//! bearer token alone.
 
 use cf_base::refusal::Refusal;
 use hyper::header::AUTHORIZATION;

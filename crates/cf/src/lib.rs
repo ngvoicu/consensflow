@@ -52,14 +52,12 @@ pub fn codex_session(env: &Env, args: &[OsString]) -> Option<i32> {
 /// [`codex_session`].
 pub fn native_ui(env: &Env, args: &[OsString]) -> Option<i32> {
     let (first, rest) = args.split_first()?;
+    let asked = first == "ui" && env.text("CONSENSFLOW_TOKEN").is_none();
     let words: Vec<String> = rest
         .iter()
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
-    let asked = first == "ui"
-        && env.text("CONSENSFLOW_TOKEN").is_none()
-        && !standalone::asks_for_help(&words);
-    asked.then(|| cf_daemon::ui(env, rest))
+    (asked && !standalone::asks_for_help(&words)).then(|| cf_daemon::ui(env, rest))
 }
 
 /// Runs the command in `args`: its exit code. Only a failure to write is an error.

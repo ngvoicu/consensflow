@@ -181,7 +181,7 @@ fn a_path_is_matched_whole_and_as_written() {
     }
 }
 
-/// The nine routes `api.js` matched by its `at === 'METHOD /path'` when Node
+/// The nine routes Node's API matched by its `at === 'METHOD /path'` when Node
 /// was the daemon, frozen here: every one is a route, so that none is left out
 /// unseen. A route added since is added to the table, and to the traces that
 /// play it.

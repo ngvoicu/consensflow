@@ -1,9 +1,8 @@
-//! A bundle of ConsensFlow's own files, published where a harness loads them
-//! (`preparePrivateIntegration`, `src/private-integration.js`): verified and
-//! immutable, never replacing code a live pane may have loaded. It is made in
-//! a folder of its own, named by the hash of every file in it, and moved into
-//! place whole. A folder already there is another process's or an earlier
-//! run's, checked file by file against this build's and kept as it is.
+//! A bundle of ConsensFlow's own files, published where a harness loads them:
+//! verified and immutable, never replacing code a live pane may have loaded. It
+//! is made in a folder of its own, named by the hash of every file in it, and
+//! moved into place whole. A folder already there is another process's or an
+//! earlier run's, checked file by file against this build's and kept as it is.
 //!
 //! A generated file (OpenCode's `tui.json`) names the folder the bundle is
 //! published in, so it is hashed as it reads with the parent folder in that

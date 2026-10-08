@@ -109,12 +109,11 @@ pub fn runnable(executable: &Path, args: &[OsString], env: &Env) -> Result<Run, 
     })
 }
 
-/// A window's program as the pane host starts it (`paneArgv`,
-/// `src/harnesses.js`). The host starts a file with each argument quoted the
-/// way programs read them, which cmd.exe does not, so an npm-installed
-/// harness on Windows (a `.cmd` shim) opens as the shim's own node and
-/// script; a script of any other shape cannot open a window, and a shim for
-/// which no Node is to be found is refused as [`runnable`] refuses it.
+/// A window's program as the pane host starts it. The host starts a file with
+/// each argument quoted the way programs read them, which cmd.exe does not, so
+/// an npm-installed harness on Windows (a `.cmd` shim) opens as the shim's own
+/// node and script; a script of any other shape cannot open a window, and a
+/// shim for which no Node is to be found is refused as [`runnable`] refuses it.
 pub fn pane_argv(argv: &[String], env: &Env) -> Result<Vec<String>, String> {
     let Some((executable, args)) = argv.split_first() else {
         return Ok(Vec::new());

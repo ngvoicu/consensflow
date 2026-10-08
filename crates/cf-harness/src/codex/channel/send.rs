@@ -1,11 +1,10 @@
-//! One message sent to a Codex window's broker (`send`,
-//! `src/channels/codex.js`): the pane is claimed, then the text is handed to
-//! the broker for the thread the message is for, which admits it only while
-//! the window's TUI still shows that thread. The broker is the hand-over: a
-//! message refused before it, by the pane host or at the deadline, is known to
-//! have reached nothing, and from it on the broker may have taken the message,
-//! so any failure is uncertain and Codex's own record decides; the message is
-//! never retried automatically.
+//! One message sent to a Codex window's broker: the pane is claimed, then the
+//! text is handed to the broker for the thread the message is for, which admits
+//! it only while the window's TUI still shows that thread. The broker is the
+//! hand-over: a message refused before it, by the pane host or at the deadline,
+//! is known to have reached nothing, and from it on the broker may have taken
+//! the message, so any failure is uncertain and Codex's own record decides; the
+//! message is never retried automatically.
 
 use cf_base::js;
 use serde_json::{json, Value};

@@ -1,8 +1,6 @@
-//! A Codex window's role (the `codex` branch of `roleConfiguration` and
-//! `codexInstructions`, `src/role-skills.js`). Codex is given the role's text
-//! itself, appended to the instructions it would have read anyway: the
-//! native resolver is asked for them, so the profile and project layering is
-//! kept, and no version is read.
+//! A Codex window's role. Codex is given the role's text itself, appended to
+//! the instructions it would have read anyway: the native resolver is asked for
+//! them, so the profile and project layering is kept, and no version is read.
 
 use std::path::PathBuf;
 

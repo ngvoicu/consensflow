@@ -10,10 +10,9 @@ use crate::path;
 /// `USERPROFILE` too), joined as Node's `path.join` joins it. None when
 /// neither names a folder.
 ///
-/// This is `configRoot` of `src/roster.js` (its `rosterHome`): everything
-/// ConsensFlow owns lives under it, so a test that sets it owns the whole
-/// machine's worth. Node returns `CONSENSFLOW_HOME` untouched, with no
-/// normalization, and so does this.
+/// This is the root of the home: everything ConsensFlow owns lives under it, so
+/// a test that sets it owns the whole machine's worth. Node returns
+/// `CONSENSFLOW_HOME` untouched, with no normalization, and so does this.
 pub fn config_root(env: &Env) -> Option<PathBuf> {
     // Node reads its environment as UTF-8, and a byte that is none as U+FFFD:
     // this reads the text Node's `path.join` is given.

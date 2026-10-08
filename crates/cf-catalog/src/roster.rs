@@ -1,8 +1,8 @@
-//! The roster (`src/roster.js`): every catalog agent, exactly as the catalog
-//! has it, and the agents defined by hand. `agents.json` keeps only the
-//! latter, in full. A catalog agent is never edited or removed: a different
-//! setting is a custom agent under a name of its own. Rows an older build
-//! saved from the catalog are the catalog's again on read.
+//! The roster: every catalog agent, exactly as the catalog has it, and the
+//! agents defined by hand. `agents.json` keeps only the latter, in full. A
+//! catalog agent is never edited or removed: a different setting is a custom
+//! agent under a name of its own. Rows an older build saved from the catalog
+//! are the catalog's again on read.
 //!
 //! An image agent is a Codex agent with the designer flag (`designer:
 //! true`): its window is Codex on its own default model, whose image tool

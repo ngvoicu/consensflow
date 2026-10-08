@@ -1,13 +1,12 @@
-//! One message sent to the extension's inbox (`send`, `src/channels/pi.js`),
-//! as exact text, without a result envelope. The inbox record is strictly
-//! bounded `{id, type, launchId, session, text, expiresAt}`, with a unique
-//! `m-<hex>` id, the launch's immutable id, the target's conversation and one
-//! absolute expiry. Native admission is gated by the pane's claim immediately
-//! before the inbox rename, the hand-over: a failed claim, or any failure
-//! before the rename, is known to have written nothing ([`before`]). From the
-//! rename on, Pi may have taken the message, so a missing acknowledgement or
-//! any failure is uncertain and Pi's own record decides ([`after`]); the
-//! message is never retried automatically.
+//! One message sent to the extension's inbox, as exact text, without a result
+//! envelope. The inbox record is strictly bounded `{id, type, launchId,
+//! session, text, expiresAt}`, with a unique `m-<hex>` id, the launch's
+//! immutable id, the target's conversation and one absolute expiry. Native
+//! admission is gated by the pane's claim immediately before the inbox rename,
+//! the hand-over: a failed claim, or any failure before the rename, is known to
+//! have written nothing ([`before`]). From the rename on, Pi may have taken the
+//! message, so a missing acknowledgement or any failure is uncertain and Pi's
+//! own record decides ([`after`]); the message is never retried automatically.
 
 use std::path::Path;
 use std::time::Duration;
@@ -268,8 +267,8 @@ fn write_record(
     write_file(Path::new(temporary), text.as_bytes(), 0o666)
 }
 
-/// The pane a claim can name (`paneOf`, `src/channels/pty.js`): a generation
-/// is a whole number from 1, and one JavaScript holds exactly.
+/// The pane a claim can name: a generation is a whole number from 1, and one
+/// JavaScript holds exactly.
 fn pane_named(pane: &Pane) -> Result<(), String> {
     if (1..=MAX_SAFE_INTEGER).contains(&pane.generation) {
         Ok(())

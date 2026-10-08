@@ -1,8 +1,8 @@
 //! The instructions each window the daemon opens starts with, one text per
-//! role (`src/core/roles.js`, `src/skill.js`). The chief's is
-//! `skill/core/chief.md`, with the work tiers and the staff it has filled in.
-//! Every member's is the shared text of `skill/core/staff.md` with the role's
-//! own parts, so a rule all members keep is written once.
+//! role. The chief's is `skill/core/chief.md`, with the work tiers and the
+//! staff it has filled in. Every member's is the shared text of
+//! `skill/core/staff.md` with the role's own parts, so a rule all members keep
+//! is written once.
 //!
 //! Both files are in the program, where Node read them at each launch.
 

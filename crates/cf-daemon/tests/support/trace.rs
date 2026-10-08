@@ -1,5 +1,5 @@
-//! Node's traces, found and read as `tests/goldens/daemon/FORMAT.md` says, played
-//! on the one thread the daemon runs on, and what a player held of them.
+//! Node's traces, found and read as `tests/goldens/FORMAT.md` says, played on
+//! the one thread the daemon runs on, and what a player held of them.
 
 use std::fmt;
 use std::fs::File;
@@ -21,7 +21,7 @@ fn goldens() -> PathBuf {
 /// `core-api-001`, `core-api-002`…), in order.
 pub fn names(suites: &[&str]) -> Vec<String> {
     let mut found: Vec<String> = std::fs::read_dir(goldens())
-        .expect("the goldens: npm run goldens:daemon")
+        .expect("the goldens: they are fixed recordings (tests/goldens/README.md)")
         .filter_map(|entry| {
             let file = entry.ok()?.file_name().to_string_lossy().into_owned();
             let name = file.strip_suffix(".json.gz")?;

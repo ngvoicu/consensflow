@@ -1,4 +1,4 @@
-//! Claude's role, loaded as `tests/role-skills.test.mjs` holds Node's.
+//! Claude's role, loaded as Node's role-skills suite held it.
 
 use std::fs;
 

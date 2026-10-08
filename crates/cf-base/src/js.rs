@@ -188,10 +188,11 @@ fn enumerated(fields: &Map<String, Value>) -> Vec<(&String, &Value)> {
     entries
 }
 
-/// ASCII in the order ICU's root collation sorts it at its first level,
-/// as Node's `localeCompare` reported it (`tests/goldens/records/tables.json`):
-/// white space, punctuation and symbols, digits, then letters, a letter's
-/// two cases as one. The other control characters are ignored.
+/// ASCII in the order ICU's root collation sorts it at its first level, as
+/// Node's `localeCompare` reported it
+/// (`crates/cf-harness/tests/goldens/records/tables.json`): white space,
+/// punctuation and symbols, digits, then letters, a letter's two cases as one.
+/// The other control characters are ignored.
 const COLLATED: &str = "\t\n\u{b}\u{c}\r _-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$0123456789aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ";
 
 /// A character's place among `COLLATED` at the first level (a letter's two

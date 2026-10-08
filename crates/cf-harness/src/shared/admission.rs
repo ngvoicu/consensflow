@@ -1,8 +1,7 @@
-//! What a channel's answer to a send says of it (`admission`,
-//! `src/adapters/shared.js`): only a refusal before the channel's hand-over
-//! (`admitted: false`) says nothing reached the harness. Any other failure
-//! may have reached it, so it is uncertain, and the harness's own record
-//! decides rather than a blind second send.
+//! What a channel's answer to a send says of it: only a refusal before the
+//! channel's hand-over (`admitted: false`) says nothing reached the harness.
+//! Any other failure may have reached it, so it is uncertain, and the harness's
+//! own record decides rather than a blind second send.
 
 use cf_base::js;
 use serde_json::Value;

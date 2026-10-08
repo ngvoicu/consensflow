@@ -1,6 +1,6 @@
-//! `POST /api/notes` (`api.js:244-266`): a note, from the chief to the human or
-//! from a member to whoever gave it its task. It reads its body first, and
-//! wakes the dispatcher once it is written.
+//! `POST /api/notes`: a note, from the chief to the human or from a member to
+//! whoever gave it its task. It reads its body first, and wakes the dispatcher
+//! once it is written.
 
 use cf_ledger::NewNote;
 use serde_json::{json, Value};

@@ -1,10 +1,9 @@
 //! Where the harness feeds are asked: the platform's HTTPS, which `cf-harness`
-//! has none of ([`Network`]). It does what Node's `fetch` did of a feed
-//! (`latestRelease`, `src/harness-admin.js:124-145`) and nothing more: a GET,
-//! no redirect followed (one is an answer like another, which [`Feed`] refuses),
-//! the head as soon as it is in and then the body a chunk at a time. The rules
-//! of the feed (its five seconds, its size, its words) are [`Feed`]'s, and
-//! hold whichever network answers.
+//! has none of ([`Network`]). It does what Node's `fetch` did of a feed and
+//! nothing more: a GET, no redirect followed (one is an answer like another,
+//! which [`Feed`] refuses), the head as soon as it is in and then the body a
+//! chunk at a time. The rules of the feed (its five seconds, its size, its
+//! words) are [`Feed`]'s, and hold whichever network answers.
 //!
 //! The client is reqwest on rustls, with the platform's own trust in a
 //! feed's certificate, so that nothing of the system's TLS library is built or

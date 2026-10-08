@@ -1,5 +1,5 @@
-//! `versionOf` and `newer` as `src/harness-admin.js` has them: the answers
-//! below are Node v26.8.1's, for each text and each pair; the recorded table
+//! `versionOf` and `newer` as Node's admin had them: the answers below are Node
+//! v26.8.1's, for each text and each pair; the recorded table
 //! (`tests/goldens/admin/tables.json`) holds more, through the admin.
 
 use super::*;

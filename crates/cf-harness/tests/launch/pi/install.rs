@@ -1,5 +1,4 @@
-//! The extension made for Pi to load, as `tests/pi-install.test.mjs` holds
-//! Node's.
+//! The extension made for Pi to load, as Node's Pi install suite held it.
 
 use super::*;
 
@@ -66,9 +65,8 @@ fn a_pi_preparation_failure_is_reported_not_a_crash_or_a_false_ok() {
 
 #[test]
 fn opening_the_app_prepares_pi_only_when_its_executable_is_detected() {
-    // `prepareApp` (`src/install.js`) is the app's own, and calls exactly
-    // this for Pi: what is held here is that the extension is made once Pi
-    // is on the PATH and not before.
+    // The app's own preparation calls exactly this for Pi: what is held here is
+    // that the extension is made once Pi is on the PATH and not before.
     let home = Home::without_pi();
     assert_eq!(extension(&home), Extension::NotInstalled);
     home.install_pi();

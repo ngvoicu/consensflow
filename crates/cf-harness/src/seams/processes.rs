@@ -193,7 +193,7 @@ const PROBE: Limits = Limits {
 type Asked = Shared<LocalBoxFuture<'static, Result<Probed, Failed>>>;
 
 /// The probes asked so far, one map for the engine, as Node's was one per
-/// process (`src/harnesses.js`).
+/// process.
 #[derive(Default)]
 pub struct Probes {
     asked: RefCell<HashMap<Key, Asked>>,

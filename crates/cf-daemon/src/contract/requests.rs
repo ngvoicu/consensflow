@@ -334,9 +334,9 @@ async fn a_result_whose_body_ends_as_its_window_exits_is_recorded_before_the_exi
     assert!(recorded);
     scene(async {
         let (mut rig, context, token, pane) = zeus_at_work().await;
-        // `POST /api/tasks/1/done` as zeus's window sends it: the caller by
-        // its token, then the route (`handle`, `api.js:79-86`), whose body
-        // comes through the daemon's own pump as the test sends it.
+        // `POST /api/tasks/1/done` as zeus's window sends it: the caller by its
+        // token, then the route, whose body comes through the daemon's own pump
+        // as the test sends it.
         let (sending, incoming) = sent_body();
         let draining = Rc::clone(&rig.pieces.spawn);
         let (body, pump) = Body::pumped(incoming, move || draining.drain());

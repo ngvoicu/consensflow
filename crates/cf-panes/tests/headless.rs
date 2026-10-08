@@ -4,9 +4,7 @@
 // helpers unwrap and expect, as the tests do.
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::os::fd::{AsRawFd, RawFd};
-use std::path::Path;
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
@@ -15,9 +13,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-
-use cf_bridge::{BridgeBuilder, BridgeError};
-use cf_proto::bridge::Role;
 
 const FRAME_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -32,98 +27,6 @@ struct Headless {
     frames: Receiver<Result<Value, String>>,
     next_id: u64,
     pub handle: Value,
-}
-
-struct CoalescingReader<R> {
-    inner: R,
-    initial: Vec<u8>,
-    initial_at: usize,
-    wanted_newlines: usize,
-}
-
-struct FaultInjectingWriter<W> {
-    inner: W,
-    injected: bool,
-}
-
-impl<W> FaultInjectingWriter<W> {
-    fn new(inner: W) -> Self {
-        Self {
-            inner,
-            injected: false,
-        }
-    }
-}
-
-impl<W: Write> Write for FaultInjectingWriter<W> {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        if !self.injected
-            && bytes
-                .windows(b"\"id\":\"n-1\",\"kind\":\"res\",\"op\":\"pane.open\"".len())
-                .any(|window| window == b"\"id\":\"n-1\",\"kind\":\"res\",\"op\":\"pane.open\"")
-        {
-            self.injected = true;
-            self.inner.write_all(
-                b"not-json-from-rust\n\
-                  {\"v\":1,\"id\":\"r-wrong-response\",\"kind\":\"res\",\"op\":\"pane.open\",\"body\":{\"injected\":\"wrong-namespace\"}}\n\
-                  {\"v\":1,\"id\":\"n-1\",\"kind\":\"res\",\"op\":\"wrong.open\",\"body\":{\"injected\":\"wrong-op\"}}\n",
-            )?;
-        }
-        self.inner.write(bytes)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.inner.flush()
-    }
-}
-
-impl<W: AsRawFd> AsRawFd for FaultInjectingWriter<W> {
-    fn as_raw_fd(&self) -> RawFd {
-        self.inner.as_raw_fd()
-    }
-}
-
-impl<R> CoalescingReader<R> {
-    fn new(inner: R, wanted_newlines: usize) -> Self {
-        Self {
-            inner,
-            initial: Vec::new(),
-            initial_at: 0,
-            wanted_newlines,
-        }
-    }
-}
-
-impl<R: Read> Read for CoalescingReader<R> {
-    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
-        if self.initial_at < self.initial.len() {
-            let available = &self.initial[self.initial_at..];
-            let byte_count = available.len().min(bytes.len());
-            bytes[..byte_count].copy_from_slice(&available[..byte_count]);
-            self.initial_at += byte_count;
-            return Ok(byte_count);
-        }
-        if self.wanted_newlines > 0 {
-            let mut chunk = [0; 1024];
-            while self.initial.iter().filter(|byte| **byte == b'\n').count() < self.wanted_newlines
-            {
-                let byte_count = self.inner.read(&mut chunk)?;
-                if byte_count == 0 {
-                    break;
-                }
-                self.initial.extend_from_slice(&chunk[..byte_count]);
-            }
-            self.wanted_newlines = 0;
-            return self.read(bytes);
-        }
-        self.inner.read(bytes)
-    }
-}
-
-impl<R: AsRawFd> AsRawFd for CoalescingReader<R> {
-    fn as_raw_fd(&self) -> RawFd {
-        self.inner.as_raw_fd()
-    }
 }
 
 impl Headless {
@@ -1004,161 +907,6 @@ fn helper_is_inert_when_stdin_is_not_a_pipe() {
         .expect("run helper with non-pipe stdin");
     assert!(output.status.success());
     assert!(output.stdout.is_empty());
-}
-
-#[test]
-fn real_node_bridge_conforms_with_rust_in_the_specified_nested_roles() {
-    let _bridge_guard = serial_headless_test();
-    let bridge_module = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../src/bridge.js")
-        .canonicalize()
-        .expect("locate real Node Bridge module");
-    let script = r#"
-import { pathToFileURL } from 'node:url'
-const { Bridge } = await import(pathToFileURL(process.argv[1]).href)
-
-process.stdout.write([
-  JSON.stringify({ v: 1, kind: 'node-conformance' }),
-  '{not-json',
-  JSON.stringify({ v: 1, id: 'r-wrong', kind: 'evt', op: 'wrong.namespace', body: {} }),
-].join('\n') + '\n')
-
-const bridge = new Bridge({ input: process.stdin, output: process.stdout })
-bridge.onError((cause) => {
-  bridge.event('node.error', { message: String(cause) })
-})
-bridge.on('consult', async (body) => {
-  process.stdout.write(JSON.stringify({
-    v: 1, id: 'r-1', kind: 'res', op: 'wrong.consult', body: { ignored: true },
-  }) + '\n')
-  const opened = await bridge.request('pane.open', body.open, { deadlineMs: 2000 })
-  const rustFailure = await bridge.request('rust.fail', {}, { deadlineMs: 2000 })
-  return { ok: true, opened, rustFailure }
-})
-bridge.on('node.fail', () => { throw new Error('node-handler-error') })
-bridge.on('shutdown', () => {
-  setTimeout(() => process.exit(0), 25)
-  return { ok: true }
-})
-process.stdin.resume()
-"#;
-    let mut node = Command::new("node")
-        .args([
-            "--input-type=module",
-            "--eval",
-            script,
-            bridge_module.to_str().expect("UTF-8 Bridge path"),
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .expect("spawn real Node Bridge");
-    let node_input = node.stdin.take().expect("piped Node stdin");
-    let node_output = node.stdout.take().expect("piped Node stdout");
-
-    let (error_sender, error_receiver) = mpsc::channel();
-    let (open_sender, open_receiver) = mpsc::channel();
-    let (node_error_sender, node_error_receiver) = mpsc::channel();
-    let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
-    builder.on_error(move |error| {
-        let _ = error_sender.send(error);
-    });
-    builder.on_event("node.error", move |body| {
-        let _ = node_error_sender.send(body);
-    });
-    builder.on("pane.open", move |_bridge, body| {
-        open_sender
-            .send(body)
-            .map_err(|_| "open-observer-disconnected".to_string())?;
-        Ok(json!({"ok":true,"id":"pane-from-rust","generation":1}))
-    });
-    builder.on("rust.fail", |_bridge, _body| {
-        Err("rust-handler-error".to_string())
-    });
-    let connected = builder
-        .connect(
-            CoalescingReader::new(node_output, 3),
-            FaultInjectingWriter::new(node_input),
-        )
-        .expect("connect Rust to the real Node Bridge");
-    assert_eq!(connected.handle, json!({"v":1,"kind":"node-conformance"}));
-
-    let consult = connected
-        .bridge
-        .request(
-            "consult",
-            json!({"open":{"cwd":"/tmp","argv":["/bin/sh"]}}),
-            Some(3_000),
-        )
-        .expect("Node consult response");
-    assert_eq!(
-        open_receiver
-            .recv_timeout(FRAME_TIMEOUT)
-            .expect("Node nested pane.open reached Rust"),
-        json!({"cwd":"/tmp","argv":["/bin/sh"]})
-    );
-    assert_eq!(
-        consult,
-        json!({
-            "ok":true,
-            "opened":{"ok":true,"id":"pane-from-rust","generation":1},
-            "rustFailure":{"ok":false,"error":"rust-handler-error"}
-        })
-    );
-    assert_eq!(
-        connected
-            .bridge
-            .request("node.fail", json!({}), Some(3_000))
-            .expect("Node handler error response"),
-        json!({"ok":false,"error":"node-handler-error"})
-    );
-
-    let mut errors = Vec::new();
-    let deadline = Instant::now() + FRAME_TIMEOUT;
-    while errors.len() < 3 && Instant::now() < deadline {
-        if let Ok(error) = error_receiver.recv_timeout(Duration::from_millis(20)) {
-            errors.push(error);
-        }
-    }
-    assert_eq!(
-        errors.len(),
-        3,
-        "all protocol violations are reported: {errors:?}"
-    );
-    assert!(errors
-        .iter()
-        .any(|error| matches!(error, BridgeError::MalformedFrame(_))));
-    assert!(errors.iter().any(|error| matches!(error, BridgeError::MalformedFrame(message) if message.contains("wrong namespace"))));
-    assert!(errors.iter().any(|error| matches!(error, BridgeError::MalformedFrame(message) if message.contains("wrong.consult"))));
-
-    let mut node_errors = Vec::new();
-    let deadline = Instant::now() + FRAME_TIMEOUT;
-    while node_errors.len() < 3 && Instant::now() < deadline {
-        if let Ok(error) = node_error_receiver.recv_timeout(Duration::from_millis(20)) {
-            node_errors.push(error["message"].as_str().unwrap_or_default().to_string());
-        }
-    }
-    assert!(node_errors
-        .iter()
-        .any(|error| error.contains("Unexpected token")));
-    assert!(node_errors
-        .iter()
-        .any(|error| error.contains("wrong namespace")));
-    assert!(node_errors.iter().any(|error| error.contains("wrong.open")));
-
-    assert_eq!(
-        connected
-            .bridge
-            .request("shutdown", json!({}), Some(3_000))
-            .expect("Node shutdown response"),
-        json!({"ok":true})
-    );
-    connected
-        .bridge
-        .wait_closed()
-        .expect("Rust observes Node EOF");
-    assert!(node.wait().expect("wait for Node").success());
 }
 
 fn process_exists(pid: i32) -> bool {

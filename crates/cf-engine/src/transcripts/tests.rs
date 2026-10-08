@@ -1,4 +1,4 @@
-//! The copy of a window's conversation, as `src/core/transcripts.js` makes it.
+//! The copy of a window's conversation, as Node's dispatcher made it.
 
 use std::cell::Cell;
 use std::rc::Rc;

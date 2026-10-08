@@ -1,5 +1,4 @@
-//! Entries of the history packed into pages (`fit` and `paginate` of
-//! `src/core/handoff.js`).
+//! Entries of the history packed into pages.
 
 /// A page of `cf history` at its longest: under what Codex shows of a
 /// command's output, the least of any harness (about 10 KiB and 256 lines).

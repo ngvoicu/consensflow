@@ -1,6 +1,5 @@
-//! The stop (`stop`, `src/core/daemon.js:109-125`): one latch for every way the
-//! daemon is asked to end, one deadline for the waiting, and a tail that
-//! waits for nothing.
+//! The stop: one latch for every way the daemon is asked to end, one deadline
+//! for the waiting, and a tail that waits for nothing.
 //!
 //! - **The latch** is tripped by the first of: the bridge's input ended (the
 //!   app closed the daemon's input, or the daemon was started on a terminal

@@ -1,5 +1,5 @@
-//! The tests under `describe('a catalog agent stays as the catalog has it')`
-//! in `tests/roster.test.mjs`.
+//! The tests under `describe('a catalog agent stays as the catalog has it')` of
+//! Node's roster suite.
 
 use super::*;
 use serde_json::json;

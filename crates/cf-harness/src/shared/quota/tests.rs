@@ -1,5 +1,5 @@
 //! The shared quota against what Node answered: the tables of
-//! `tests/goldens/records/tables.json`, the sentences of `tests/quota.test.mjs`,
+//! `tests/goldens/records/tables.json`, the sentences of Node's quota suite,
 //! and the readings no table has a row for.
 
 use super::zone::time_zone;

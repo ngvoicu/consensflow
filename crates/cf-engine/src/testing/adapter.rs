@@ -1,15 +1,15 @@
-//! A harness adapter whose agents do exactly what the test tells them: the
-//! twin of `fakeAdapter` in `core-dispatcher.test.mjs`. One adapter answers
-//! for any harness the test names it under ([`super::FakeAdapters`]); each
-//! window is an agent, found by its launch, and by the handle it is for.
-//! What a call does and reads, it does when called, as the JavaScript fake's
-//! async functions did, and is written down in the Node traces' shape, under
-//! the harness it was asked as. The turn an `await` of the call costs is the
-//! engine's, whether or not the call waited ([`crate::runtime::returning`]);
-//! the fake takes only the turns of its own promises. A test that replaced one of the fake's functions, or set
-//! what it reads, says what it did in its place ([`FakeAdapter::prepare`],
-//! [`FakeAdapter::after_prepare`], [`FakeAdapter::started`],
-//! [`FakeAdapter::deliver`], [`FakeAdapter::ready`],
+//! A harness adapter whose agents do exactly what the test tells them: the twin
+//! of `fakeAdapter` in Node's dispatcher suite. One adapter answers for any
+//! harness the test names it under ([`super::FakeAdapters`]); each window is an
+//! agent, found by its launch, and by the handle it is for. What a call does
+//! and reads, it does when called, as the JavaScript fake's async functions
+//! did, and is written down in the Node traces' shape, under the harness it was
+//! asked as. The turn an `await` of the call costs is the engine's, whether or
+//! not the call waited ([`crate::runtime::returning`]); the fake takes only the
+//! turns of its own promises. A test that replaced one of the fake's functions,
+//! or set what it reads, says what it did in its place
+//! ([`FakeAdapter::prepare`], [`FakeAdapter::after_prepare`],
+//! [`FakeAdapter::started`], [`FakeAdapter::deliver`], [`FakeAdapter::ready`],
 //! [`FakeAdapter::interrupt`]); one that held calls until it let them go
 //! (`hold`) says which, and when ([`FakeAdapter::prepare_holds`],
 //! [`FakeAdapter::observe_holds`], [`FakeAdapter::start_holds`],

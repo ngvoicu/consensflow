@@ -1,5 +1,5 @@
 //! The tests under `describe('what older builds wrote is read the same, and
-//! folded at start')` in `tests/roster.test.mjs`.
+//! folded at start')` of Node's roster suite.
 
 use super::*;
 use serde_json::json;

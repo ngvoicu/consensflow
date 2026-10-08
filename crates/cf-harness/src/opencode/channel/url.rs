@@ -1,8 +1,7 @@
-//! The URLs the channel asks OpenCode's server (`seedSession` and
-//! `createSession`, `src/channels/opencode.js`), written as `new URL` and
-//! `searchParams` write them. The server's origin is its own, never given
-//! in anything that needs escaping, but the working folder the requests name
-//! is a path, and the two builders write it differently:
+//! The URLs the channel asks OpenCode's server, written as `new URL` and
+//! `searchParams` write them. The server's origin is its own, never given in
+//! anything that needs escaping, but the working folder the requests name is a
+//! path, and the two builders write it differently:
 //! - `searchParams.set` writes it as a form does: a space as `+`, and
 //!   everything but a letter, a digit and `*-._` as percent-encoded;
 //! - `` `session?directory=${encodeURIComponent(…)}` `` keeps `!~*'()` as

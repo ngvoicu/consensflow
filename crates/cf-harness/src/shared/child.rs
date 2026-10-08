@@ -1,7 +1,6 @@
-//! Ending a child process as OpenCode's throwaway server is ended (`stop`,
-//! `src/channels/opencode.js`): asked to end, forced once it has had long
-//! enough, and given up on, in a sentence of its own, when it will not close
-//! at all.
+//! Ending a child process as OpenCode's throwaway server is ended: asked to
+//! end, forced once it has had long enough, and given up on, in a sentence of
+//! its own, when it will not close at all.
 
 use crate::seams::processes::{Child, Ending};
 use crate::seams::{arm, Time};

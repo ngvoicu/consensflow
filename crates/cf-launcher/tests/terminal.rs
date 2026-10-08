@@ -1,7 +1,7 @@
-//! The app can put its own CLI on your PATH, as `tests/terminal.test.mjs`
-//! holds Node's: the eight sentences of that file, each in the form of a
-//! launcher `sh` runs and in the form cmd.exe does (`OS=Windows_NT` makes
-//! it, on any system), where Node's ran the form of the system it was on.
+//! The app can put its own CLI on your PATH, as Node's terminal suite held it:
+//! the eight sentences of that suite, each in the form of a launcher `sh` runs
+//! and in the form cmd.exe does (`OS=Windows_NT` makes it, on any system),
+//! where Node's ran the form of the system it was on.
 //!
 //! Where a sentence names the runtime Node's launcher ran (`process.execPath`
 //! and its `cf.mjs`) the new one names the native `cf`, and says so.

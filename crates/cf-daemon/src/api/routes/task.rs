@@ -1,10 +1,10 @@
-//! One task (`taskRoute`, `api.js:312-386`): `GET /api/tasks/<n>`, its
-//! `/transcript`, and the `POST`s that move it (`done`, `accept`, `reopen`,
-//! `cancel`, `pause`, `resume`, `tell`). It reads the task first, so an
-//! unknown one is 404 before anything else is asked; and it takes the task as
-//! it was then, awaiting the body after: who may do what is decided on the
-//! task as it was read, and the ledger decides on it as it is. The number is
-//! the digits as the path had them, read as `Number(...)` reads them.
+//! One task: `GET /api/tasks/<n>`, its `/transcript`, and the `POST`s that move
+//! it (`done`, `accept`, `reopen`, `cancel`, `pause`, `resume`, `tell`). It
+//! reads the task first, so an unknown one is 404 before anything else is
+//! asked; and it takes the task as it was then, awaiting the body after: who
+//! may do what is decided on the task as it was read, and the ledger decides on
+//! it as it is. The number is the digits as the path had them, read as
+//! `Number(...)` reads them.
 //!
 //! A read changes nothing: an answer in the thread that `cf` printed is
 //! received when `cf` says it wrote it whole (`POST /api/answers/read`), not

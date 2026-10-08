@@ -11,14 +11,12 @@
  * lines. Nothing reaches the network, and nothing is written but the
  * synthetic transcript, in a temporary folder.
  *
- *   npm run bench:records-memory [-- --runs 3 --lines 125000 --transcript FILE --node --repo DIR]
+ *   npm run bench:records-memory [-- --runs 3 --lines 125000 --transcript FILE --repo DIR]
  *
  * `--transcript` names a real one to read instead (read only; its file name
- * is its session). `--node` has Node's reader take a first look at it too, for
- * its time and memory to be read beside (`records-node.mjs`). `--runs`
- * repeats the first look. `--repo` names another checkout of this repository
- * to measure, one from before a change: it needs this module's files
- * (`tests/memory.rs`, `tests/synthetic.rs`, and their `mod` lines in
+ * is its session). `--runs` repeats the first look. `--repo` names another
+ * checkout of this repository to measure, one from before a change: it needs
+ * this module's files (`tests/memory.rs`, `tests/synthetic.rs`, and their `mod` lines in
  * `tests.rs`), and the line `read_on_with(… Transcript::parse …)` of
  * `first_look_parts` read as `read_on(…)` where the code is from before the
  * parser of a line was chosen.
@@ -37,7 +35,6 @@ const { values } = parseArgs({
     lines: { type: 'string' },
     transcript: { type: 'string' },
     repo: { type: 'string' },
-    node: { type: 'boolean', default: false },
   },
 })
 const REPO = values.repo ?? HERE
@@ -64,21 +61,6 @@ function measure(name) {
   return run.stdout
     .split('\n')
     .filter((line) => line !== '' && !line.startsWith('running') && !line.startsWith('test '))
-}
-
-if (values.node) {
-  if (values.transcript === undefined) throw new Error('--node needs --transcript FILE')
-  const run = spawnSync(
-    process.execPath,
-    [join(HERE, 'tests', 'bench', 'records-node.mjs'), values.transcript],
-    {
-      cwd: HERE,
-      encoding: 'utf8',
-    },
-  )
-  if (run.status !== 0) throw new Error(run.stderr)
-  console.log("node's first look:")
-  for (const line of run.stdout.trimEnd().split('\n')) console.log(`  ${line}`)
 }
 
 const runs = Number(values.runs)

@@ -1,6 +1,5 @@
-//! What Devin's main chain says (`devinChain`, `hosts/lib/completion/devin.js`):
-//! the messages from the chain's head up to its first, oldest first, and
-//! whether Devin's question tool waits for an answer.
+//! What Devin's main chain says: the messages from the chain's head up to its
+//! first, oldest first, and whether Devin's question tool waits for an answer.
 //!
 //! A message's fields are read as Node read them: what V8 threw on (a
 //! message that is null, tool calls that are no list) fails the look here

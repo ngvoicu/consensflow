@@ -1,7 +1,6 @@
-//! What a handler answers with, and how a failure is said (`ok`, `send` and
-//! the error shape of `startApi`, `src/core/api.js`). **Frozen**: the routes
-//! of the three landings that follow answer with these and nothing of their
-//! own.
+//! What a handler answers with, and how a failure is said. **Frozen**: the
+//! routes of the three landings that follow answer with these and nothing of
+//! their own.
 //!
 //! An answer is a status and what goes with it: a JSON body, a page of HTML,
 //! or nothing. A failure is a [`Refusal`] (or the ledger's), said with its

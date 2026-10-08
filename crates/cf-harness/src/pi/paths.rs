@@ -1,7 +1,6 @@
-//! Where Pi keeps its things (`piSessionDir`, `piPath` and `piAgentDir`,
-//! `src/harnesses.js`, and `piTranscript`, `hosts/lib/completion/pi.js`).
+//! Where Pi keeps its things.
 //!
-//! The home is `shared::paths::home`, `src/harnesses.js`'s.
+//! The home is `shared::paths::home`.
 
 use std::path::{Path, PathBuf};
 

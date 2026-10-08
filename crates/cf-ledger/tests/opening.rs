@@ -1,7 +1,7 @@
-//! The ledger as a file (`tests/ledger.test.mjs`, "opening the ledger"):
-//! the daemon is the only process that holds it, and a file that is no
-//! ledger, or a newer build's, is named rather than failed on. Another
-//! process is this test binary run again, as a child that opens the file.
+//! The ledger as a file (Node's ledger suite, "opening the ledger"): the daemon
+//! is the only process that holds it, and a file that is no ledger, or a newer
+//! build's, is named rather than failed on. Another process is this test binary
+//! run again, as a child that opens the file.
 
 // The tests start the child process themselves, and the child reads what to
 // do from its environment; their helpers expect, as the tests do.

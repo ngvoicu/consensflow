@@ -1,8 +1,8 @@
-//! The role a Codex window is given, as the Codex cases of
-//! `tests/role-skills.test.mjs` hold Node's: its whole text, appended to the
-//! instructions Codex itself has, which are read through its configuration
-//! and nothing else. Node's cases also held the text a role is made of
-//! (`roleInstructions`), which the engine writes and an adapter is given.
+//! The role a Codex window is given, as the Codex cases of Node's role-skills
+//! suite held them: its whole text, appended to the instructions Codex itself
+//! has, which are read through its configuration and nothing else. Node's cases
+//! also held the text a role is made of (`roleInstructions`), which the engine
+//! writes and an adapter is given.
 
 use super::*;
 

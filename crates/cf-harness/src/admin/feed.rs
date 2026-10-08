@@ -1,8 +1,7 @@
-//! What the admin asks of a release feed and what it reads from the answer
-//! (`latestRelease`, `src/harness-admin.js`), all of it but the network, so
-//! that the client the daemon gives (the HTTPS of the platform, which this
-//! crate has none of) holds to Node's rules by doing nothing but move bytes
-//! ([`Network`]):
+//! What the admin asks of a release feed and what it reads from the answer, all
+//! of it but the network, so that the client the daemon gives (the HTTPS of the
+//! platform, which this crate has none of) holds to Node's rules by doing
+//! nothing but move bytes ([`Network`]):
 //!
 //! - a GET of [`Source::url`] ([`request`]), answered within [`TIMEOUT`] as
 //!   a whole, head and body together, with no redirect followed: one is

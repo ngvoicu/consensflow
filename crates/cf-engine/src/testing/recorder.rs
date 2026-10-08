@@ -1,12 +1,11 @@
 //! What the engine asked of its seams, in order, written as the Node traces
-//! write it (`tests/goldens/engine/dispatcher/`), so that one projection
-//! reads both sides: `{op, args, answer}` where one of the engine's
-//! operations begins (its answer, or `threw`, once it ends),
-//! `{seam, method?, args, answer}` for each call of a seam (a call
-//! that waits gets its answer once it has one), and `{seam: "event", event}`
-//! for each event the ledger logs. The engine's sleeps are written down too,
-//! as `{seam: "time", method: "sleep", args: [ms]}`, which the Node traces
-//! have none of, and no projection keeps.
+//! wrote it, so that one projection reads both sides: `{op, args, answer}`
+//! where one of the engine's operations begins (its answer, or `threw`, once it
+//! ends), `{seam, method?, args, answer}` for each call of a seam (a call that
+//! waits gets its answer once it has one), and `{seam: "event", event}` for
+//! each event the ledger logs. The engine's sleeps are written down too, as
+//! `{seam: "time", method: "sleep", args: [ms]}`, which the Node traces have
+//! none of, and no projection keeps.
 
 use std::cell::RefCell;
 use std::rc::Rc;

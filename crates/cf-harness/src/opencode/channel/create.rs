@@ -1,12 +1,11 @@
-//! The empty conversation a fresh window opens on (`createSession`,
-//! `src/channels/opencode.js`), made on a throwaway `serve` before the window
-//! opens, so its id is known. The child serves the launch's own endpoint just
-//! long enough to answer an authenticated `/global/health` and a single
-//! `POST /session` with `{}`: no model task, no title. It is stopped BEFORE
-//! the id returns, so the window's own server can take the port, and on every
-//! failure too. The whole of it, from the start, is bounded by 15 s; only the
-//! health polls are tried again. What the child says on its error stream is
-//! never kept.
+//! The empty conversation a fresh window opens on, made on a throwaway `serve`
+//! before the window opens, so its id is known. The child serves the launch's
+//! own endpoint just long enough to answer an authenticated `/global/health`
+//! and a single `POST /session` with `{}`: no model task, no title. It is
+//! stopped BEFORE the id returns, so the window's own server can take the port,
+//! and on every failure too. The whole of it, from the start, is bounded by 15
+//! s; only the health polls are tried again. What the child says on its error
+//! stream is never kept.
 //!
 //! Node learns nothing of its child before its first wait: a start that
 //! failed is an `error` event that comes after the code that follows the

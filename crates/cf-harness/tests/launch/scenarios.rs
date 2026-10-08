@@ -1,10 +1,10 @@
 //! The scenarios of `tests/goldens/launch/scenarios.<platform>.json`, played
-//! against the Rust adapters step by step as `tests/goldens/launch/runner.mjs`
-//! played them against Node's, each step's record held to Node's. The
-//! runner's comment says what a step is, how its record is written so that
-//! it is the same on every run, and what a step's `kept` says: a difference
-//! Rust keeps on purpose, where Rust's settlement is held to it and must
-//! still differ from Node's.
+//! against the Rust adapters step by step as the recorder played them against
+//! Node's, each step's record held to Node's. The goldens' README
+//! (`tests/goldens/README.md`) says what a step is, how its record is written
+//! so that it is the same on every run, and what a step's `kept` says: a
+//! difference Rust keeps on purpose, where Rust's settlement is held to it and
+//! must still differ from Node's.
 //!
 //! Every wait an adapter makes is on a fake of `cf_harness::testing`: the
 //! clock moves only when a step advances it, a look or a host request a
@@ -40,7 +40,7 @@ use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 use url::form_urlencoded::byte_serialize;
 
-/// A process id no process has (`DEAD`, runner.mjs).
+/// A process id no process has (`DEAD` of the recorder).
 const DEAD: u32 = 999_999;
 
 /// The platform's name as Node's `process.platform` says it.
@@ -65,9 +65,9 @@ struct Names {
     hashes: RefCell<Vec<String>>,
 }
 
-/// The ways the root reads in the text a step records, each written as a
-/// name of its own (`rootForms`, runner.mjs): itself, a file URL, as JSON
-/// writes it, and as a URL's query holds it.
+/// The ways the root reads in the text a step records, each written as a name
+/// of its own (`rootForms` of the recorder): itself, a file URL, as JSON writes
+/// it, and as a URL's query holds it.
 struct RootForms {
     file_url: String,
     /// Each form and its name, a form spelled as one before it left out.
@@ -261,7 +261,7 @@ fn answer(names: &Names, given: &Value) -> Answer {
     Answer::Now(response(names, given))
 }
 
-/// A program's path as a test names it (`programOf`, runner.mjs): the
+/// A program's path as a test names it (`programOf` of the recorder): the
 /// extension a Windows stand-in has taken off.
 fn path_of(program: &Program) -> String {
     let path = program.executable.to_string_lossy();
@@ -832,11 +832,11 @@ fn pending(played: &Played) -> Vec<Value> {
         .collect()
 }
 
-/// What the stand-in at `file` answers to `args` (`standIn`'s `answers`,
-/// `runner.mjs`): its output; a failure in `execFile`'s sentence for the
-/// program Node runs (the stand-in itself, or on Windows Node and the
-/// stand-in's script, `$NODE`, as Node's runner writes it), when it names an
-/// exit other than 0; or more output than any buffer holds.
+/// What the stand-in at `file` answers to `args` (`standIn`'s `answers` of the
+/// recorder): its output; a failure in `execFile`'s sentence for the program
+/// Node runs (the stand-in itself, or on Windows Node and the stand-in's
+/// script, `$NODE`, as Node's runner writes it), when it names an exit other
+/// than 0; or more output than any buffer holds.
 fn stand_in_answer(file: &str, args: &str, answer: &Value) -> Result<String, Failed> {
     let text = |field: &str| answer[field].as_str().unwrap_or_default().to_owned();
     if let Value::String(stdout) = answer {
@@ -866,9 +866,9 @@ fn stand_in_answer(file: &str, args: &str, answer: &Value) -> Result<String, Fai
     })
 }
 
-/// A stand-in CLI that answers by its arguments (`standIn: {name,
-/// answers}`, `standIn` in `runner.mjs`): its file there to be found and
-/// probed, and each answer scripted, as often as it is asked.
+/// A stand-in CLI that answers by its arguments (`standIn: {name, answers}` of
+/// the recorder): its file there to be found and probed, and each answer
+/// scripted, as often as it is asked.
 fn stand_in(played: &mut Played, given: &Value) {
     let file = path::join(&[&played.names.root, "bin", given["name"].as_str().unwrap()]);
     let found = fake_executable(Path::new(&file));
@@ -1166,8 +1166,8 @@ fn adapter(harness: &str, services: &Services) -> Rc<dyn Adapter> {
     launch::adapter(harness, services)
 }
 
-/// `path` as the system names it, a Windows name as libuv writes it: the
-/// root a scenario is played in (`fs.realpath`, runner.mjs), so that a
+/// `path` as the system names it, a Windows name as libuv writes it: the root a
+/// scenario is played in (`fs.realpath`, as the recorder had it), so that a
 /// folder's real name is under it.
 pub(crate) fn real_name(path: &Path) -> PathBuf {
     let real = fs::canonicalize(path).unwrap();
@@ -1185,9 +1185,9 @@ pub(crate) fn real_name(path: &Path) -> PathBuf {
     real
 }
 
-/// The mask the files of a scenario are made under (`UMASK`, `runner.mjs`),
-/// held for as long as this is: what a default mode comes out as is then
-/// the same on every machine. Windows has no mask.
+/// The mask the files of a scenario are made under (`UMASK` of the recorder),
+/// held for as long as this is: what a default mode comes out as is then the
+/// same on every machine. Windows has no mask.
 struct Umask(#[cfg(unix)] nix::sys::stat::Mode);
 
 impl Umask {
@@ -1305,7 +1305,7 @@ fn every_scenario_plays_as_node_played_it() {
     ));
     let text = fs::read_to_string(&file).unwrap_or_else(|_| {
         panic!(
-            "{}: npm run goldens:launch on this platform",
+            "{}: the launch goldens are fixed recordings of macOS and Windows (tests/goldens/README.md)",
             file.display()
         )
     });

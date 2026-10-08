@@ -1,6 +1,6 @@
-//! `GET /api/tasks` (`api.js:144-154`), the open tasks and each lane's, and
-//! `POST /api/tasks` (`api.js:155-202`), a task given: the chief's alone,
-//! refused before its body is read. One task is [`super::task`].
+//! `GET /api/tasks`, the open tasks and each lane's, and `POST /api/tasks`, a
+//! task given: the chief's alone, refused before its body is read. One task is
+//! [`super::task`].
 
 use cf_base::js;
 use cf_ledger::NewTask;

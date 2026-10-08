@@ -1,9 +1,9 @@
-//! The standalone verbs of the CLI (`bin/cf.mjs`), answered here as Node
-//! answered them, word for word: the usage, the version, `catalog`,
-//! `agent add|list|edit|remove`, and `setup` and `doctor`, which wire the
-//! launcher, the stale hooks and the app's preparation
-//! (`cf_launcher`, `cf_harness`). `tests/cli_goldens` holds them to what Node
-//! said (`npm run goldens:cli`), file by file.
+//! The standalone verbs of the CLI, answered here as Node answered them, word
+//! for word: the usage, the version, `catalog`, `agent add|list|edit|remove`,
+//! and `setup` and `doctor`, which wire the launcher, the stale hooks and the
+//! app's preparation (`cf_launcher`, `cf_harness`). `tests/cli_goldens` holds
+//! them to what Node said, file by file (the recording was made from Node and
+//! is fixed since: `tests/goldens/README.md`).
 //!
 //! They are what `cf` answers for a tokenless command (a window has its
 //! participant's token, and there `cf` is the board). `ui` is the daemon's,
@@ -93,14 +93,15 @@ pub fn run(
         Some("--version" | "-v" | "version") => {
             writeln!(out, "{}", env!("CARGO_PKG_VERSION")).map_err(Stop::from)
         }
+        // The word that asks for a verb's usage is answered before the verb
+        // reads its words or the home, whatever else follows it.
         Some(verb @ ("catalog" | "agent" | "setup" | "doctor" | "ui")) if asks_for_help(rest) => {
             writeln!(out, "{}", usage_of(&help_path(verb, rest))).map_err(Stop::from)
         }
         Some("catalog") => catalog::run(rest, out),
         Some("agent") => agent::run(env, rest, out),
         Some("setup") => setup::run(env, rest, out),
-        // Whatever words follow it are no matter, as in Node, but the one that
-        // asks for its usage (answered above).
+        // Whatever words follow it are no matter, as in Node.
         Some("doctor") => doctor::run(env, out),
         Some(other) => Err(Stop::Said(format!(
             "unknown command {} — run `cf help`",
@@ -117,8 +118,8 @@ pub fn run(
     }
 }
 
-/// The usage, as `USAGE` of `bin/cf.mjs` reads: it ends with a line break of
-/// its own, and `cf help` adds another.
+/// The usage, as Node's CLI printed it: it ends with a line break of its own,
+/// and `cf help` adds another.
 fn usage() -> String {
     USAGE.replace("{version}", env!("CARGO_PKG_VERSION"))
 }

@@ -1,6 +1,5 @@
-//! A bundle published as `tests/opencode-install.test.mjs` and
-//! `tests/pi-install.test.mjs` hold Node's, and as Node's hash names its
-//! folder.
+//! A bundle published as Node's OpenCode and Pi install suites held it, and as
+//! Node's hash names its folder.
 
 use std::fs;
 

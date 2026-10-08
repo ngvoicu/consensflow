@@ -2,15 +2,14 @@
 //!
 //! The page names an operation and its body; the app forwards the 28 names
 //! below and nothing else (`DAEMON_OPERATIONS` in `commands.rs`), and the
-//! daemon answers each over the bridge (`pageOperations`, `src/core/page.js`).
-//! The daemon's first line on its standard output is the [`HandleLine`] the
-//! app reads to find it.
+//! daemon answers each over the bridge. The daemon's first line on its standard
+//! output is the [`HandleLine`] the app reads to find it.
 
 use serde::{Deserialize, Serialize};
 
-/// One of the page's operations, in the order `src/core/page.js` lists them.
-/// `ping`, which the daemon also answers, is no operation of the page's: the
-/// app's check that the bridge is up.
+/// One of the page's operations, in the order Node's page listed them. `ping`,
+/// which the daemon also answers, is no operation of the page's: the app's
+/// check that the bridge is up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PageOperation {
     ProjectsList,
@@ -44,7 +43,7 @@ pub enum PageOperation {
 }
 
 impl PageOperation {
-    /// Every operation, in the order `page.js` lists them.
+    /// Every operation, in the order Node's page listed them.
     pub const ALL: [PageOperation; 28] = [
         Self::ProjectsList,
         Self::ProjectOpen,
@@ -117,10 +116,10 @@ impl PageOperation {
             .find(|operation| operation.as_str() == name)
     }
 
-    /// Whether the operation changes what the dispatcher acts on, so that
-    /// once it has succeeded the daemon wakes the dispatcher (`change` in
-    /// `page.js`): the human's change shows in the panes at once. One that
-    /// only reads, or that failed, wakes nothing.
+    /// Whether the operation changes what the dispatcher acts on, so that once
+    /// it has succeeded the daemon wakes the dispatcher: the human's change
+    /// shows in the panes at once. One that only reads, or that failed, wakes
+    /// nothing.
     pub const fn kicks(self) -> bool {
         !matches!(
             self,

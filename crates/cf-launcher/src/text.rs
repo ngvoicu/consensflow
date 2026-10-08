@@ -1,6 +1,5 @@
 //! What a launcher says: the text this build writes, and what a command found
-//! in the home's bin reads as (`launcher` and `terminalRuntime`,
-//! `src/terminal.js`).
+//! in the home's bin reads as.
 //!
 //! Two shapes are read and one is written. The old shape, which alpha.78 and
 //! every build before it wrote, names the runtime and the `cf.mjs` it runs:
@@ -72,9 +71,9 @@ pub(crate) fn is_ours(text: &str) -> bool {
 ///
 /// On Windows that is the plain spelling: Tauri may answer its folders in the
 /// verbatim form (`\\?\C:\…`, `\\?\UNC\server\…`), which cmd.exe does not
-/// start a program through. The app strips it the same way before it hands a
-/// path to Node (`plain_path`, `app/src-tauri/src/daemon_command.rs`); a caller
-/// that did not is not left with a command that cannot run.
+/// start a program through. The app strips it the same way before it hands the
+/// bundle's `cf` to a launcher (`plain_path`, `app/src-tauri/src/daemon_command.rs`);
+/// a caller that did not is not left with a command that cannot run.
 pub(crate) fn spelled(path: &Path, windows: bool) -> String {
     let text = path.to_string_lossy();
     if !windows {

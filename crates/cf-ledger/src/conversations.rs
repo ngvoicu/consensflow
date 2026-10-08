@@ -1,8 +1,7 @@
-//! Conversations: each participant's native conversations, one current at
-//! a time and followed when the human switches its window to another
-//! (`src/ledger/conversations.js`); the copy ConsensFlow keeps of each, item
-//! by item (`transcripts`); and the chief's across a Switch chief, with what
-//! a chief that takes over reads (`chief`).
+//! Conversations: each participant's native conversations, one current at a
+//! time and followed when the human switches its window to another; the copy
+//! ConsensFlow keeps of each, item by item (`transcripts`); and the chief's
+//! across a Switch chief, with what a chief that takes over reads (`chief`).
 
 mod chief;
 mod transcripts;

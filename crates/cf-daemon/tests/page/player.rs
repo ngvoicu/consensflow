@@ -222,7 +222,7 @@ impl Player {
 }
 
 /// What the test's own ledger said the last staff was, when the test gave the
-/// operations a ledger that only knows that (`core-page.test.mjs:399`).
+/// operations a ledger that only knows that.
 fn page_staff(steps: &[Value]) -> Option<Vec<Value>> {
     steps
         .iter()

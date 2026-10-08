@@ -1,6 +1,5 @@
-//! Codex's record of a thread (`codexReader` and `codexParser`,
-//! `hosts/lib/completion/codex.js`): its rollout, a JSONL file in its
-//! `sessions` folder. A look's answer is the rollout's alone.
+//! Codex's record of a thread: its rollout, a JSONL file in its `sessions`
+//! folder. A look's answer is the rollout's alone.
 //!
 //! The rollout says what the thread did in two kinds of record:
 //! - `response_item`: the model's messages, its tool calls, their output;

@@ -1,7 +1,7 @@
 //! What passes to a chief the human switched in (2026-10-01): its first
 //! message, written from the ledger without a model (so it works when the old
-//! chief is out of quota), and `cf history`, the chief's earlier
-//! conversations in pages (`src/core/handoff.js`).
+//! chief is out of quota), and `cf history`, the chief's earlier conversations
+//! in pages.
 //!
 //! Pages run newest first, each in the order things were said, and each is
 //! small enough for every harness to show its model whole: Codex shows the

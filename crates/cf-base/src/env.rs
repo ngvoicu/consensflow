@@ -50,9 +50,9 @@ impl Env {
             .filter(|value| !value.is_empty())
     }
 
-    /// Whether this is Windows's environment (`onWindows`, `src/harnesses.js`):
-    /// built for Windows, or saying so in its `OS` variable, read as Node read
-    /// it, a byte that is no UTF-8 as U+FFFD.
+    /// Whether this is Windows's environment: built for Windows, or saying so
+    /// in its `OS` variable, read as Node read it, a byte that is no UTF-8 as
+    /// U+FFFD.
     pub fn on_windows(&self) -> bool {
         cfg!(windows)
             || self

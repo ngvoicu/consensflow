@@ -1,5 +1,5 @@
-//! The windows of `tests/goldens/launch/tables.json`, each as Node's
-//! `hosts/lib/windows.js` built it.
+//! The windows of `tests/goldens/launch/tables.json`, each as Node's window
+//! code built it.
 
 use std::fs;
 use std::path::Path;

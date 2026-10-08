@@ -1,6 +1,5 @@
-//! A scenario as `tests/goldens/records/runner.mjs` writes one: its steps,
-//! the readings its looks read, and what tells a reason ConsensFlow's own
-//! from a platform's.
+//! A scenario as the recording writes one: its steps, the readings its looks
+//! read, and what tells a reason ConsensFlow's own from a platform's.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -8,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-/// A scenario as `tests/goldens/records/runner.mjs` writes one.
+/// A scenario as the recording writes one.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scenario {
@@ -166,7 +165,8 @@ pub fn scenarios(group: &str) -> Vec<Scenario> {
     let file = goldens().join(format!("{group}.json.gz"));
     let mut text = String::new();
     flate2::read::GzDecoder::new(
-        std::fs::File::open(&file).expect("the goldens: npm run goldens:records"),
+        std::fs::File::open(&file)
+            .expect("the goldens: they are fixed recordings (tests/goldens/README.md)"),
     )
     .read_to_string(&mut text)
     .unwrap();

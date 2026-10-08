@@ -1,11 +1,10 @@
-//! A window's first message, through its own server (`seedSession`,
-//! `src/channels/opencode.js`): OpenCode ignores a prompt on a `--session`
-//! launch, so once the server answers, the task is posted to the
-//! conversation, once. New and reopened workers occasionally need more
-//! than 15 s for the server under load, so the readiness polls and the one
-//! post share 60 s, counted from the first request. Once the post starts,
-//! neither a transport failure nor a timeout proves non-admission: a
-//! visible failure is left, and the task is never retried here.
+//! A window's first message, through its own server: OpenCode ignores a prompt
+//! on a `--session` launch, so once the server answers, the task is posted to
+//! the conversation, once. New and reopened workers occasionally need more than
+//! 15 s for the server under load, so the readiness polls and the one post
+//! share 60 s, counted from the first request. Once the post starts, neither a
+//! transport failure nor a timeout proves non-admission: a visible failure is
+//! left, and the task is never retried here.
 //!
 //! Kept from Node on purpose: the settings of a resumed conversation that
 //! are no JSON, or are JSON of null, are refused in sentences of this

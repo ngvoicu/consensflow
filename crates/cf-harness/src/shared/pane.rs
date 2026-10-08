@@ -1,6 +1,5 @@
-//! What an adapter asks of a window's pane (`src/channels/pty.js`): a
-//! paste, written as the human would type it, and a snapshot of what the
-//! window shows and holds.
+//! What an adapter asks of a window's pane: a paste, written as the human would
+//! type it, and a snapshot of what the window shows and holds.
 
 use serde_json::{json, Value};
 

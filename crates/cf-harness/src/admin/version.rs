@@ -1,5 +1,4 @@
-//! The version a CLI says and whether a release is newer than it
-//! (`versionOf` and `newer`, `src/harness-admin.js`).
+//! The version a CLI says and whether a release is newer than it.
 
 use std::sync::LazyLock;
 

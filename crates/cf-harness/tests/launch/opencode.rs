@@ -1,11 +1,11 @@
-//! OpenCode's adapter and its channel, as `tests/adapter-opencode.test.mjs`,
-//! `tests/opencode-install.test.mjs`, `tests/opencode-launch.test.mjs` and
-//! the OpenCode cases of `tests/role-skills.test.mjs` hold Node's
-//! (TEST-BDC-05, IMPL-BDC-07), each case under its sentence: how an OpenCode
-//! window is launched, the conversation made for it first, its first message
-//! through its own server, how a message reaches it through the plugin, what
-//! the plugin says of the window, and what is made for it to load. Each test
-//! gets a throwaway home and a stand-in `opencode` on PATH.
+//! OpenCode's adapter and its channel, as Node's OpenCode adapter and install
+//! suites, `tests/opencode-launch.test.mjs` and the OpenCode cases of its
+//! role-skills suite held them (TEST-BDC-05, IMPL-BDC-07), each case under its
+//! sentence: how an OpenCode window is launched, the conversation made for it
+//! first, its first message through its own server, how a message reaches it
+//! through the plugin, what the plugin says of the window, and what is made for
+//! it to load. Each test gets a throwaway home and a stand-in `opencode` on
+//! PATH.
 //!
 //! A window comes only from a prepare here, where Node's tests made up a
 //! launch bag: a test of a window on a known conversation prepares it as that

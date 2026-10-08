@@ -1,11 +1,10 @@
-//! Pi's windows (`src/adapters/pi.js`). Pi takes the session name we give it
-//! (`--session-id` creates it the first time and resumes it after) and the
-//! first message as its last argument. ConsensFlow's extension runs inside
-//! Pi: a message is a file in its inbox, which it hands to Pi only when Pi is
-//! idle, and acknowledges only once Pi shows it as a user message. The same
-//! extension marks each settled turn, which Pi's own log cannot, and says
-//! which conversation the window shows, so a /new or /resume in it is
-//! followed.
+//! Pi's windows. Pi takes the session name we give it (`--session-id` creates
+//! it the first time and resumes it after) and the first message as its last
+//! argument. ConsensFlow's extension runs inside Pi: a message is a file in its
+//! inbox, which it hands to Pi only when Pi is idle, and acknowledges only once
+//! Pi shows it as a user message. The same extension marks each settled turn,
+//! which Pi's own log cannot, and says which conversation the window shows, so
+//! a /new or /resume in it is followed.
 
 use std::cell::RefCell;
 use std::rc::Rc;

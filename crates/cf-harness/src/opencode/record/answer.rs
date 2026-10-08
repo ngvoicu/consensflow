@@ -1,5 +1,4 @@
-//! What OpenCode's rows and events, as read so far, say (`opencodeAnswer`,
-//! `hosts/lib/completion/opencode.js`).
+//! What OpenCode's rows and events, as read so far, say.
 //!
 //! The parts of each message are in the order of their events, and the
 //! messages too; an item's place in the reading is its event's seq. The

@@ -1,9 +1,9 @@
 //! A task whose window went away mid-work is paused, not given up: the chief
-//! resumes it into the same window, with its memory (`stall` in
-//! `src/core/dispatcher.js`). Its requester is told in a pause note, one note
-//! for the tasks that stall together. A restart that finds a dozen windows
-//! gone, or a project that closes with a dozen open, is one message in the
-//! chief's window and one turn, not a dozen.
+//! resumes it into the same window, with its memory (`stall` in Node's
+//! dispatcher). Its requester is told in a pause note, one note for the tasks
+//! that stall together. A restart that finds a dozen windows gone, or a project
+//! that closes with a dozen open, is one message in the chief's window and one
+//! turn, not a dozen.
 //!
 //! The tasks that stall together are the stalls of one burst: a pass, or the
 //! closing of a project's windows. The first stall of a burst for a requester

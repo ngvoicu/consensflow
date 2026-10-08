@@ -1,10 +1,9 @@
-//! OpenCode's windows (`src/adapters/opencode.js`). A fresh conversation is
-//! created on a throwaway `opencode serve` first, so its id is known before
-//! the window opens; the TUI then runs its own server on a private port and
-//! password, with ConsensFlow's plugin loaded. OpenCode ignores a prompt on
-//! a `--session` launch, so the first message goes through that server once
-//! it answers, and every later one through the plugin, which posts it to the
-//! session the TUI is showing.
+//! OpenCode's windows. A fresh conversation is created on a throwaway `opencode
+//! serve` first, so its id is known before the window opens; the TUI then runs
+//! its own server on a private port and password, with ConsensFlow's plugin
+//! loaded. OpenCode ignores a prompt on a `--session` launch, so the first
+//! message goes through that server once it answers, and every later one
+//! through the plugin, which posts it to the session the TUI is showing.
 //!
 //! An empty conversation says nothing about the window: until the plugin
 //! reports that the TUI shows this conversation, OpenCode is still loading

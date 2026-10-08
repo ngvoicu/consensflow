@@ -1,7 +1,7 @@
-//! Files and folders made as Node makes them, each failure said as the call
-//! of Node's that failed: a folder with every level above it, a file written
-//! in place, and a file written whole or not at all, step by step as
-//! `saveDocument` (`src/roster.js`) writes it.
+//! Files and folders made as Node makes them, each failure said as the call of
+//! Node's that failed: a folder with every level above it, a file written in
+//! place, and a file written whole or not at all, step by step as Node's roster
+//! wrote it.
 
 use std::ffi::OsString;
 use std::fs::{self, File};
