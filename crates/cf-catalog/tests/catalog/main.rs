@@ -1,4 +1,4 @@
-//! The 23 tests of `tests/catalog.test.mjs`, ported with the catalog: each
+//! The 26 tests of `tests/catalog.test.mjs`, ported with the catalog: each
 //! keeps its sentence, as a name, and its assertions, against the catalog
 //! built into the crate. A `describe` block of the JS is a module here, in a
 //! file of its own; the tests outside one are in this file.
@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use cf_catalog::{efforts, Catalog, CatalogEntry, FoundEntry, Harness, Preset, Settings, WorkTier};
 
 mod catalog_presentation_follows_actual_model_and_effort;
+mod claude_haiku_5_5_is_light_work_on_claude_code_alone;
 mod every_tool_ships_a_list_of_ready_made_agents;
 
 fn catalog() -> Catalog {
@@ -122,7 +123,7 @@ fn ships_all_compatible_low_medium_choices_with_stable_identities_and_pi_openrou
             assert_eq!(entry.entry.effort.as_deref(), Some(effort), "{name}");
         }
     }
-    assert_eq!(entries(&catalog).count(), 119);
+    assert_eq!(entries(&catalog).count(), 120);
     for name in ["orpheus", "linus", "erato", "kronos", "atlas"] {
         let entry = found(&catalog, name);
         assert!(
@@ -247,6 +248,7 @@ fn assigns_four_work_tiers_by_model_and_effort_across_routes_without_agent_name_
         ("hemera", "light"),
         ("phaethon", "light"),
         ("asterope", "light"),
+        ("huginn", "light"),
     ] {
         let entry = found(&catalog, name);
         assert_eq!(entry.entry.profile.work_tier.as_str(), tier, "{name}");

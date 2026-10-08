@@ -1,8 +1,9 @@
 /**
  * A real harness's window in the app's own pane host, opened as the app opens
- * one, for the live tests (`npm run live:paste`, `npm run live:interrupt`):
- * in a folder of its own under the user's home, on its cheap eval model, with
- * its screen and its own record to read.
+ * one, for the live tests (`npm run live:paste`, `npm run live:interrupt`,
+ * `npm run live:agent`): in a folder of its own under the user's home, on its
+ * cheap eval model or the agent a test names, with its screen and its own
+ * record to read.
  */
 import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
@@ -87,14 +88,20 @@ async function claudeExtras(workspace) {
 /**
  * Opens `name`'s window (claude or devin) in its own folder under
  * `~/.consensflow-candidate/live/<folder>`, as pane `id`, `env` added to
- * what its harness starts with and `dropEnv` taken from it.
+ * what its harness starts with and `dropEnv` taken from it. `agent` is what
+ * the window runs (its kind, model and effort), the harness's cheap eval model
+ * unless a test names another.
  */
-export async function openWindow(app, name, { folder, id, env = {}, dropEnv = [] }) {
+export async function openWindow(
+  app,
+  name,
+  { folder, id, env = {}, dropEnv = [], agent = HARNESSES[name] },
+) {
   const workspace = liveFolder(folder)
-  const { kind, model } = HARNESSES[name]
+  const { kind } = agent
   // Claude and Pi open on an id they are given; the others name their own.
   const session = kind === 'claude-code' || kind === 'pi' ? randomUUID() : null
-  const start = interactiveStart({ kind, model }, session, null)
+  const start = interactiveStart(agent, session, null)
   const executable = realOnPath(start.command, ENV.PATH)
   const trust = name === 'claude' ? await trustForClaude(app, workspace, executable) : null
   const pane = { id, generation: 1 }

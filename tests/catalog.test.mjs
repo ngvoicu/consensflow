@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { interactiveStart } from '../hosts/lib/windows.js'
 import { agentProfile, CATALOG, catalogEntry, EFFORTS } from '../src/catalog.js'
-import { HARNESSES } from '../src/roster.js'
+import { agentRow, HARNESSES } from '../src/roster.js'
+import { tempEnv } from './helpers.mjs'
 
 describe('every tool ships a list of ready-made agents', () => {
   it('covers every harness, each with a real list, the image agent among Codex’s', () => {
@@ -290,7 +292,7 @@ it('ships all compatible low/medium choices with stable identities and Pi OpenRo
       assert.equal(entry.effort, effort)
     }
   }
-  assert.equal(Object.values(CATALOG).flat().length, 119)
+  assert.equal(Object.values(CATALOG).flat().length, 120)
   for (const name of ['orpheus', 'linus', 'erato', 'kronos', 'atlas']) {
     assert.match(catalogEntry(name).model, /^openrouter\/anthropic\//)
     assert.equal(catalogEntry(name).profile.routeLabel, 'OpenRouter · API')
@@ -383,6 +385,7 @@ it('assigns four work tiers by model and effort across routes, without agent-nam
     ['hemera', 'light'],
     ['phaethon', 'light'],
     ['asterope', 'light'],
+    ['huginn', 'light'],
   ]) {
     const entry = catalogEntry(name)
     assert.equal(entry.profile.workTier, tier, name)
@@ -508,4 +511,82 @@ it("offers Devin's flagship models as presets, each on its twin's tier", () => {
     ['claude-opus-5-5', 'critical'],
   )
   assert.deepEqual([catalogEntry('ra').model, catalogEntry('ra').effort], ['gpt-6-1-sol', 'max'])
+})
+
+// 2026-10-08: Claude Code 2.1.294 answers claude-haiku-5-5 as itself at every level it lists.
+// Devin lists Claude only as Sonnet, and Pi and OpenCode (OpenRouter) carry Haiku 4.5 and a
+// `~anthropic/claude-haiku-latest` alias, no 5.5: no other harness has a row for it.
+describe('Claude Haiku 5.5 is light work on Claude Code alone', () => {
+  it('is the one Haiku of the catalog, with its label, its route and its effort', () => {
+    const haiku = Object.entries(CATALOG).flatMap(([harness, entries]) =>
+      entries
+        .filter((entry) => entry.model.includes('haiku'))
+        .map((entry) => [harness, entry.name]),
+    )
+    assert.deepEqual(haiku, [['claude', 'huginn']])
+    const entry = catalogEntry('huginn')
+    assert.deepEqual(
+      [entry.harness, entry.model, entry.effort, entry.description, entry.detail],
+      [
+        'claude',
+        'claude-haiku-5-5',
+        'max',
+        'Claude Code Haiku 5.5 MAX',
+        'Routine coding and second opinions.',
+      ],
+    )
+    assert.deepEqual(entry.profile, {
+      modelKey: 'claude-haiku-5.5',
+      modelLabel: 'Claude Haiku 5.5',
+      routeLabel: 'Claude Code account',
+      workTier: 'light',
+    })
+    // Only on Claude Code is the id the catalog's: elsewhere it is called by what it says.
+    assert.equal(
+      agentProfile({ harness: 'pi', model: 'claude-haiku-5-5' }).modelLabel,
+      'claude-haiku-5-5',
+    )
+  })
+
+  it('opens a Claude Code window on its model and effort', () => {
+    const t = tempEnv()
+    try {
+      const row = agentRow('huginn', t.env)
+      assert.deepEqual(
+        [row.kind, row.model, row.effort],
+        ['claude-code', 'claude-haiku-5-5', 'max'],
+      )
+      assert.ok(EFFORTS.claude.includes(row.effort), 'an effort Claude Code takes')
+      const window = interactiveStart(row, 'uuid-1', 'the packet text')
+      assert.equal(window.command, 'claude')
+      const flags = window.args.indexOf('--model')
+      assert.deepEqual(window.args.slice(flags, flags + 4), [
+        '--model',
+        'claude-haiku-5-5',
+        '--effort',
+        'max',
+      ])
+    } finally {
+      t.cleanup()
+    }
+  })
+
+  it('is light work at every effort, and the tier the human chose still comes last', () => {
+    // A bogus or an absent effort too: the tier follows the model alone.
+    for (const effort of [...EFFORTS.claude, undefined, '', 'bogus']) {
+      const profile = agentProfile({ harness: 'claude', model: 'claude-haiku-5-5', effort })
+      assert.deepEqual(
+        [profile.workTier, profile.modelLabel],
+        ['light', 'Claude Haiku 5.5'],
+        `Haiku 5.5 ${effort}`,
+      )
+    }
+    const chosen = {
+      harness: 'claude',
+      model: 'claude-haiku-5-5',
+      effort: 'max',
+      workTier: 'standard',
+    }
+    assert.equal(agentProfile(chosen).workTier, 'standard')
+  })
 })

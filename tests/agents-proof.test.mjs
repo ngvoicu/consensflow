@@ -25,7 +25,7 @@ const DAEMON = fileURLToPath(new URL('./integration/core-daemon.mjs', import.met
  * where `fault` says so (nothing, for a right one). Resolves to what it serves.
  */
 async function agentsApi(home, fault = '') {
-  const catalog = Array.from({ length: fault === 'catalog' ? 118 : 119 }, (_, at) => ({
+  const catalog = Array.from({ length: fault === 'catalog' ? 119 : 120 }, (_, at) => ({
     name: at === 0 ? 'pygmalion' : `catalog-${at}`,
     model: at === 0 && fault !== 'model' ? 'codex-image' : 'fake',
     harness: 'codex',

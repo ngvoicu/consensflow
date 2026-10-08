@@ -64,6 +64,7 @@
     "bench:core": "node tests/live/core-bench.mjs",
     "bench:records-memory": "node tests/bench/records-memory.mjs",
     "live:paste": "node tests/live/paste-submit.mjs",
+    "live:agent": "node tests/live/catalog-agent.mjs",
     "live:interrupt": "node tests/live/interrupt-idle.mjs",
     "live:stops": "node tests/live/stops.mjs",
     "live:input-box": "node tests/live/claude-input-box.mjs",

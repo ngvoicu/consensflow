@@ -1666,6 +1666,20 @@
           "workTier": "standard"
         },
         "preset": "ullr"
+      },
+      {
+        "name": "huginn",
+        "model": "claude-haiku-5-5",
+        "effort": "max",
+        "description": "Claude Code Haiku 5.5 MAX",
+        "detail": "Routine coding and second opinions.",
+        "profile": {
+          "modelKey": "claude-haiku-5.5",
+          "modelLabel": "Claude Haiku 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "light"
+        },
+        "preset": "huginn"
       }
     ]
   },
@@ -3267,6 +3281,24 @@
           "workTier": "standard"
         },
         "preset": "ullr",
+        "harness": "claude"
+      }
+    },
+    {
+      "name": "huginn",
+      "entry": {
+        "name": "huginn",
+        "model": "claude-haiku-5-5",
+        "effort": "max",
+        "description": "Claude Code Haiku 5.5 MAX",
+        "detail": "Routine coding and second opinions.",
+        "profile": {
+          "modelKey": "claude-haiku-5.5",
+          "modelLabel": "Claude Haiku 5.5",
+          "routeLabel": "Claude Code account",
+          "workTier": "light"
+        },
+        "preset": "huginn",
         "harness": "claude"
       }
     },
