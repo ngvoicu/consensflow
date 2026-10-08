@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { assertStarted, errorsWithCause, linesOf, NATIVE_CF } from '../choice.mjs'
+import { assertStarted, errorsWithCause, KINDS, linesOf, NATIVE_CF } from '../choice.mjs'
 import { daemonCommand } from '../helpers.mjs'
 
 const WINDOWS = process.platform === 'win32'
@@ -23,7 +23,6 @@ const BRIDGE =
 // at all. The page's xterm answers, and with no page this harness does.
 const CURSOR_QUERY = Buffer.from('\u001b[6n')
 const CURSOR_REPLY = [...Buffer.from('\u001b[1;1R')]
-const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fake-agent.mjs')
 /** The `cf` first on every window's PATH: the native one, beside cf.mjs. */
 const CF = NATIVE_CF
@@ -106,7 +105,8 @@ function safeEnvironment(root, fakeBin, harnessFile) {
           USERPROFILE: home,
         }
       : {}),
-    CONSENSFLOW_NODE: process.execPath,
+    // The Node the stand-in harness runs on: the tests' own, not a product's.
+    CF_TEST_NODE: process.execPath,
     CF_TEST_HARNESS: harnessFile,
     CF_TEST_WORKER_ANSWER: 'worker completed from a real PTY child',
     TERM: 'xterm-256color',
@@ -128,7 +128,7 @@ function writeFakeInstall(root, sandbox, harnessFile) {
   } else {
     writeFileSync(
       join(fakeBin, 'claude'),
-      '#!/bin/sh\nexec "$CONSENSFLOW_NODE" "$CF_TEST_HARNESS" "$@"\n',
+      '#!/bin/sh\nexec "$CF_TEST_NODE" "$CF_TEST_HARNESS" "$@"\n',
       { mode: 0o755 },
     )
   }
@@ -176,16 +176,16 @@ function waitFor(predicate, timeoutMs = 10_000, intervalMs = 25) {
  * bytes; pane.open, PTYs, input arbitration and cleanup stay native.
  *
  * The daemon is the one `CONSENSFLOW_TEST_DAEMON` names (`daemonCommand`), or the
- * one `select` names (`node` or `native`) for a start that chooses in its own
- * words whatever the environment says, as a restart on the other daemon does.
- * What starts is held to what was asked for by the start line in its log
- * (`assertStarted`), and `daemon` on what this returns says which it was.
+ * one `select` names (`node`, `native`, or a command as a JSON array, which is
+ * the native one's) for a start that chooses in its own words whatever the
+ * environment says, as a restart on the other daemon does. What starts is held
+ * to what was asked for by the start line in its log (`assertStarted`), and
+ * `daemon` on what this returns says which it was.
  */
 export async function startIntegration({
   fakeEnv = {},
   bridgeEnv = {},
   existingRoot = null,
-  daemon = DAEMON,
   select = undefined,
 } = {}) {
   assert.equal(
@@ -214,8 +214,10 @@ export async function startIntegration({
   // on: the product's `cf` verbs choose by the file in the home, so the home
   // has the file for Node's daemon and none for the native one's, and a
   // restart of it on the other daemon takes the file away or makes it.
-  const asked = daemonCommand([daemon], {
-    ...(select === undefined ? {} : { named: select, leg: select }),
+  const asked = daemonCommand({
+    ...(select === undefined
+      ? {}
+      : { named: select, leg: KINDS.includes(select) ? select : 'native' }),
     home: env.CONSENSFLOW_HOME,
   })
   const node = spawn(asked.command, asked.args, {

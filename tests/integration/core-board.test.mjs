@@ -16,7 +16,6 @@ import { startIntegration } from './harness.mjs'
  * both: the page draws the open ones on their requester's row.
  */
 
-const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
 
 /** Where each task the board draws is: `open T-n state`, or the lane's handle (a session's name masked) and the same. */
@@ -44,7 +43,6 @@ const printed = (record) =>
 
 test('a task no lane has stays on the board and in cf task list: called off, paused, or a removed member’s', async () => {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {

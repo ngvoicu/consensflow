@@ -122,25 +122,26 @@ fn any_other_path_is_the_agents_api_s() {
     }
 }
 
-/// Every path `agents-server.js` routes is one here: a path Node gains is not
-/// left to fall through unseen.
+/// The paths `agents-server.js` routed when Node was the daemon, frozen here:
+/// every one is a path, so that none falls through unseen. They are `/`,
+/// `/harnesses`, `/api/agents`, `/api/preferences`, `/api/harnesses/check` and
+/// `/api/harnesses/update`, and an agent by its name, as a name is written
+/// (`[a-z][a-z0-9-]*`; the paths that are not names are refused above).
 #[test]
-fn every_path_node_routes_is_one() {
-    let source = include_str!("../../../../src/core/agents-server.js");
-    let handle = source
-        .split("async handle(request, url) {")
-        .nth(1)
-        .and_then(|rest| rest.split("if (!page && !api) return null").next())
-        .unwrap();
-    let mut seen = 0;
-    for piece in handle.split("'/").skip(1) {
-        let path = format!("/{}", piece.split('\'').next().unwrap());
-        assert!(recognize(&path).is_some(), "{path}");
-        seen += 1;
+fn every_path_node_routed_is_one() {
+    for path in [
+        "/",
+        "/harnesses",
+        "/api/agents",
+        "/api/preferences",
+        "/api/harnesses/check",
+        "/api/harnesses/update",
+        "/api/agents/a",
+        "/api/agents/my-maia",
+        "/api/agents/pi-2-draw",
+    ] {
+        assert!(recognize(path).is_some(), "{path}");
     }
-    // `/`, `/harnesses`, `/api/agents`, `/api/preferences`, `/api/harnesses/check`, `/api/harnesses/update`.
-    assert_eq!(seen, 6);
-    assert!(handle.contains(r"/^\/api\/agents\/([a-z][a-z0-9-]*)$/"));
 }
 
 #[tokio::test]

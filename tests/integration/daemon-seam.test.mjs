@@ -11,7 +11,7 @@ const LIAR = fileURLToPath(new URL('./liar-daemon.mjs', import.meta.url))
 
 /**
  * The rig starts the daemon `CONSENSFLOW_TEST_DAEMON` names (`node`, `native`,
- * or Node's when it names none) and connects it to the real headless bridge
+ * or the native one when it names none) and connects it to the real headless bridge
  * (`npm run test:daemons` runs this against both, each leg naming its own and
  * saying which leg it is with `CONSENSFLOW_TEST_LEG`). What else the daemon is
  * asked is the other suites' to show.
@@ -36,7 +36,7 @@ describe('the rig starts the daemon it is told to', () => {
       const start = startLine(log, rig.daemonPid())
       assert.notEqual(start, null, `no start line of pid ${rig.daemonPid()} in ${log}`)
       // A run no runner labelled is held to the daemon it selected.
-      assert.equal(start.kind, leg === '' ? daemonCommand([]).kind : leg, start.line)
+      assert.equal(start.kind, leg === '' ? daemonCommand().kind : leg, start.line)
       assert.equal(rig.daemon.kind, start.kind)
       assert.equal(rig.daemon.line, start.line)
     } finally {
@@ -45,13 +45,13 @@ describe('the rig starts the daemon it is told to', () => {
   })
 
   it('refuses a daemon whose start line says it is the other one, and ends it', async () => {
-    // Asked for Node's, in its own words whatever this run's leg is: the stand-in
-    // writes the native daemon's line.
-    const rig = startIntegration({ daemon: LIAR, select: 'node' })
+    // Asked for the native daemon, as the command to start (a JSON array is the
+    // native one's), whatever this run's leg is: the stand-in writes Node's line.
+    const rig = startIntegration({ select: JSON.stringify([process.execPath, LIAR]) })
     try {
       await assert.rejects(
         rig,
-        /Node's daemon was asked for, but the start line in its log says rust 0\.0\.0/,
+        /the native daemon was asked for, but the start line in its log says node v0\.0\.0/,
       )
     } finally {
       // A rig that took it holds the stand-in and a pane host: ended here, so that

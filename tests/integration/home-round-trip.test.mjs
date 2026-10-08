@@ -176,11 +176,16 @@ describe('a copy of a home that goes Node, then native, then Node again', () => 
   })
 
   it('refuses a start whose daemon is not the one it names', async () => {
-    const ran = await trip({ order: ['node'], probe: false, scripts: { 0: LIAR }, settle: BRIEF })
+    const ran = await trip({
+      order: ['native'],
+      probe: false,
+      commands: { 0: JSON.stringify([process.execPath, LIAR]) },
+      settle: BRIEF,
+    })
     assert.equal(ran.problems.length, 1)
     assert.match(
       ran.problems[0],
-      /^start 1 \(node\) did not succeed: .*Node's daemon was asked for, but the start line in its log says rust 0\.0\.0/,
+      /^start 1 \(native\) did not succeed: .*the native daemon was asked for, but the start line in its log says node v0\.0\.0/,
     )
   })
 

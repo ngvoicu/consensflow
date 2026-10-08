@@ -8,7 +8,10 @@ import { fileURLToPath } from 'node:url'
  * which one did. `CONSENSFLOW_TEST_DAEMON` and `CONSENSFLOW_TEST_CLI` choose,
  * each in the same words:
  *
- *   node      Node's daemon (`src/core`), Node's cf (`bin/cf.mjs`)
+ *   node      Node's daemon and cf, as the product has them since the flip: the
+ *             door `bin/cf.mjs` (NODE_CF) in a home that has taken the way back
+ *             runs Node's own CLI, and `cf ui` there is Node's daemon. No test
+ *             starts a module of `src/` by its path.
  *   native    the native `cf` this checkout builds into bin/ (`npm run build:cf`):
  *             `cf ui --json --no-open` as the daemon
  *   [...]     a JSON array of strings, a command and its arguments, as the native one
@@ -32,12 +35,17 @@ import { fileURLToPath } from 'node:url'
  * read by nothing.
  */
 
+const REPO = fileURLToPath(new URL('..', import.meta.url))
+
 /** The native `cf` of this checkout, where `npm run build:cf` puts it. */
-export const NATIVE_CF = join(
-  fileURLToPath(new URL('..', import.meta.url)),
-  'bin',
-  process.platform === 'win32' ? 'cf.exe' : 'cf',
-)
+export const NATIVE_CF = join(REPO, 'bin', process.platform === 'win32' ? 'cf.exe' : 'cf')
+
+/**
+ * Node's `cf`, the door of the flip release (`bin/cf.mjs`): it hands a command to
+ * the native `cf` beside it, unless the home has taken the way back (`chooseHome`),
+ * where it runs Node's own CLI in its place. Removed with Node.
+ */
+export const NODE_CF = join(REPO, 'bin', 'cf.mjs')
 
 /**
  * Says the native `cf` of this checkout is built, which every suite that runs

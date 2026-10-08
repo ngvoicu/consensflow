@@ -13,15 +13,15 @@ const REPO = fileURLToPath(new URL('../..', import.meta.url))
 export const CF = join(REPO, 'bin', process.platform === 'win32' ? 'cf.exe' : 'cf')
 
 /** Chooses the native daemon for the integration rig this process starts. */
-export function useNativeDaemon(daemon) {
+export function useNativeDaemon() {
   process.env.CONSENSFLOW_TEST_DAEMON = JSON.stringify([CF, 'ui', '--json', '--no-open'])
-  if (!daemonCommand([daemon]).native) throw new Error('the native daemon was not chosen')
+  if (daemonCommand().kind !== 'native') throw new Error('the native daemon was not chosen')
 }
 
-/** Chooses Node's daemon (`daemon`, the file that starts it), for a baseline beside the native one. */
-export function useNodeDaemon(daemon) {
-  delete process.env.CONSENSFLOW_TEST_DAEMON
-  if (daemonCommand([daemon]).native) throw new Error("Node's daemon was not chosen")
+/** Chooses Node's daemon, for a baseline beside the native one: `cf ui` through the door, in a home that has taken the way back. */
+export function useNodeDaemon() {
+  process.env.CONSENSFLOW_TEST_DAEMON = 'node'
+  if (daemonCommand().kind !== 'node') throw new Error("Node's daemon was not chosen")
 }
 
 /**

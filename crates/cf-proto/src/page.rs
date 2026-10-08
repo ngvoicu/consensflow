@@ -178,19 +178,43 @@ mod tests {
         }
     }
 
+    /// The order Node's `pageOperations` listed them in, frozen when Node was
+    /// the daemon: the page and the traces name the operations in it. A change
+    /// to the list is a change to this one, made on purpose.
     #[test]
-    fn the_list_is_page_js_s_order_and_holds_each_operation_once() {
-        let source = include_str!("../../../src/core/page.js");
-        let body = source.split_once("return {").unwrap().1;
-        let in_page: Vec<&str> = body
-            .lines()
-            .filter_map(|line| {
-                let line = line.strip_prefix("    '")?;
-                line.split_once("':").map(|(name, _)| name)
-            })
-            .collect();
+    fn the_list_is_the_order_node_listed_them_in_and_holds_each_operation_once() {
+        const RECORDED: [&str; 28] = [
+            "projects.list",
+            "project.open",
+            "project.resume",
+            "project.close",
+            "project.delete",
+            "agents.list",
+            "staff.last",
+            "chief.switch",
+            "member.add",
+            "member.roles",
+            "session.open",
+            "session.hide",
+            "session.end",
+            "member.remove",
+            "board.get",
+            "inbox.get",
+            "task.get",
+            "task.transcript",
+            "project.gate",
+            "task.cancel",
+            "task.pause",
+            "task.reassign",
+            "member.back",
+            "task.resume",
+            "tasks.delete",
+            "message.read",
+            "message.approve",
+            "message.decline",
+        ];
         let listed: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(listed, in_page);
+        assert_eq!(listed, RECORDED);
     }
 
     #[test]

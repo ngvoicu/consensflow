@@ -13,14 +13,12 @@ import { startIntegration } from './harness.mjs'
  * the worker's window for that.
  */
 
-const DAEMON = fileURLToPath(new URL('./core-daemon.mjs', import.meta.url))
 const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
-/** Whether the daemon under test is the native one (`npm run test:daemons` runs both). */
-const NATIVE = daemonCommand([DAEMON]).native
+/** Whether the daemon under test is the native one (`npm run test:daemons` runs both, until Node's goes). */
+const NATIVE = daemonCommand().kind === 'native'
 
 test("a worker's question with options goes to the chief's inbox and its answer returns through the hook", async () => {
   const app = await startIntegration({
-    daemon: DAEMON,
     fakeEnv: { CF_TEST_HARNESS: FAKE_AGENT },
   })
   try {

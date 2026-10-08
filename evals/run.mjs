@@ -50,7 +50,6 @@ import {
 } from './plan.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const DAEMON = join(HERE, '..', 'tests', 'live', 'core-live-daemon.mjs')
 // A Windows terminal names no HOME; the user's profile is the home there.
 const H = process.env.HOME ?? homedir()
 // One fixed workspace, trusted once per run: Claude asks about an unknown folder.
@@ -298,7 +297,7 @@ async function trustWorkspace(app) {
 async function run(index) {
   const started = Date.now()
   freshWorkspace()
-  const app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV })
+  const app = await startIntegration({ fakeEnv: ENV })
   // Which daemon the run is on (CONSENSFLOW_TEST_DAEMON, tests/choice.mjs): what
   // the Windows matrix reads back to say what it ran against.
   process.stdout.write(`daemon: ${app.daemon.kind} (${app.daemon.runtime})\n`)
@@ -639,7 +638,7 @@ const RECORD_ENV = Object.fromEntries(Object.entries(ENV).filter(([, value]) => 
 async function runBare(index) {
   const started = Date.now()
   freshWorkspace()
-  const app = await startIntegration({ daemon: DAEMON, fakeEnv: ENV })
+  const app = await startIntegration({ fakeEnv: ENV })
   // Which daemon the run is on (CONSENSFLOW_TEST_DAEMON, tests/choice.mjs): what
   // the Windows matrix reads back to say what it ran against.
   process.stdout.write(`daemon: ${app.daemon.kind} (${app.daemon.runtime})\n`)

@@ -5,7 +5,6 @@ import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
 import { GONE, PRESENT, proveAgents } from './agents-proof.mjs'
 import { daemonCommand } from './helpers.mjs'
 
@@ -18,7 +17,6 @@ import { daemonCommand } from './helpers.mjs'
  */
 
 const TOKEN = 'proof-ui-token'
-const DAEMON = fileURLToPath(new URL('./integration/core-daemon.mjs', import.meta.url))
 
 /**
  * A daemon's agents screens, as far as the proof asks, with one thing wrong
@@ -147,8 +145,8 @@ describe('the daemon from the checkout', () => {
     const bin = join(root, 'bin')
     mkdirSync(home, { recursive: true })
     mkdirSync(bin)
-    const started = daemonCommand([DAEMON], { home })
-    t.diagnostic(started.native ? 'the native daemon' : "Node's daemon")
+    const started = daemonCommand({ home })
+    t.diagnostic(started.kind === 'native' ? 'the native daemon' : "Node's daemon")
     const env = {
       ...Object.fromEntries(
         Object.entries(process.env).filter(

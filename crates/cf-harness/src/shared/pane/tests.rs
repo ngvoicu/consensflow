@@ -1,7 +1,8 @@
 use std::cell::RefCell;
 
 use super::*;
-use crate::testing::{finished, AnsweringHost};
+use crate::shared::admission::admission;
+use crate::testing::{finished, paste_answers, AnsweringHost};
 
 fn pane() -> Pane {
     Pane {
@@ -64,6 +65,34 @@ fn keys_go_in_as_the_daemons_own_and_a_refusal_is_said_in_the_hosts_word_else_th
         message: "bridge ended".to_owned(),
     });
     assert_eq!(pressed(&host), Err("bridge ended".to_owned()));
+}
+
+#[test]
+fn a_paste_into_a_window_is_read_as_the_delivery_contract_has_it_whatever_the_host_does() {
+    // Claude Code's channel: every way a pane host can answer a paste (the
+    // refusal before a byte, an error after bytes, the bridge's deadline, the
+    // host gone, the paste written) and how the adapters read what it says.
+    for (way, answer, read) in paste_answers() {
+        let host = AnsweringHost::new(move |_| answer.clone());
+        let sent = finished(Box::pin(write_paste(
+            &host,
+            &pane(),
+            "the cache key is per conversation",
+        )));
+        assert_eq!(admission(&sent, "refused", false), read, "{way}");
+        assert_eq!(
+            *host.asked.borrow(),
+            [(
+                "pane.write_paste".to_owned(),
+                json!({
+                    "id": "s1-zeus",
+                    "generation": 7,
+                    "body": "the cache key is per conversation",
+                })
+            )],
+            "{way}: one paste, as the human would type it"
+        );
+    }
 }
 
 #[test]
