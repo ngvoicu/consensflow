@@ -10,7 +10,6 @@
  */
 import {
   APP,
-  BUILD,
   CF_NATIVE,
   CODEX_SESSION,
   CONSOLE_TEXT,
@@ -349,8 +348,9 @@ export const PLANTS = [
         '            input.insert(key.to_owned(), Value::from(text.lines().next().unwrap_or("")));',
       ],
     ],
-    runs: [BUILD, CF_NATIVE],
-    meant: 'are given every argument whole: line breaks, quotes, % and & and ^, diacritics',
+    runs: [CF_NATIVE],
+    builds: true,
+    meant: 'are_given_every_argument_whole_line_breaks_quotes_and_and_diacritics',
   },
 
   // The page's console text.

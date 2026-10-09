@@ -1,23 +1,71 @@
 [package]
 name = "cf-e2e"
-description = "ConsensFlow's black-box suites: the built `cf` run as a process and judged by what it prints, writes and exits with. Test support and tests only; it depends on no crate of the product."
+description = "ConsensFlow's black-box suites: the built `cf` and pane host run as processes and judged by what they print, write, answer and exit with. Test support and tests only; it depends on no crate of the product."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+# The programs the suites run in place of what ConsensFlow runs: the stand-in
+# for a harness's terminal program (`fake-agent`), a Codex (`fake-codex`) and a
+# daemon that is not the native one (`liar-daemon`). The crate's own tests turn
+# it on through the dev-dependency below.
+test-support = []
+
+# The stand-in for the `claude` a window runs: it speaks Claude's launch
+# arguments, writes Claude's transcript and status, reads its terminal as a TUI
+# does, and runs `cf` as an agent does.
+[[bin]]
+name = "fake-agent"
+path = "src/bin/fake_agent.rs"
+required-features = ["test-support"]
+
+# The stand-in for the `codex` that `cf codex-session` starts: Codex's server
+# on a socket, and its TUI through the broker.
+[[bin]]
+name = "fake-codex"
+path = "src/bin/fake_codex.rs"
+required-features = ["test-support"]
+
+# A daemon that says it is Node's, for the case that holds the rig to refusing
+# a daemon that is not the native one.
+[[bin]]
+name = "liar-daemon"
+path = "src/bin/liar_daemon.rs"
+required-features = ["test-support"]
+
 [dependencies]
-# What a case reads of a command's JSON answer.
+# The time the stand-in agent writes in its records.
+jiff.workspace = true
+# The patterns the support and the stand-ins read text by.
+regex.workspace = true
+# What a case reads of a command's JSON answer, and the frames of the bridge.
 serde_json.workspace = true
+# The hash of the token the stand-in Codex lets in on loopback.
+sha2.workspace = true
 # The home of a case, removed with it.
 tempfile.workspace = true
 thiserror.workspace = true
+# Plain HTTP to the daemon on loopback, as the proof of the agents screens and
+# the cases that ask the API directly make it.
+ureq.workspace = true
+# The WebSocket the stand-in Codex speaks, on a socket or on loopback.
+tungstenite.workspace = true
 
 [dev-dependencies]
-# The cases that read the repository's words for the commands it names.
-regex.workspace = true
+cf-e2e = { path = ".", features = ["test-support"] }
 # Node's `--import` takes a module as a file URL, on Windows as anywhere.
 url.workspace = true
+
+# Signals by process id, whether a process is there, and the terminal's raw
+# mode, which std does not give (and this crate forbids unsafe code).
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["signal", "term"] }
+
+# The console's raw mode for the stand-in agent, which std does not give.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Console"] }
 
 [lints]
 workspace = true

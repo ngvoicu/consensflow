@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -34,21 +33,6 @@ export const NATIVE_CF = join(REPO, 'bin', process.platform === 'win32' ? 'cf.ex
  */
 export function assertBuilt(file = NATIVE_CF) {
   assert.ok(existsSync(file), `missing built cf: ${file}; build it with npm run build:cf`)
-}
-
-/**
- * Builds the native `cf` of this checkout and puts it in bin/ (`cargo xtask
- * build-cf`, which `npm run build:cf` is), for the drivers that run a suite
- * against it. `offline` is handed to cargo as it is. The path it is at, said to
- * be there.
- */
-export function buildNativeCf({ offline = false } = {}) {
-  execFileSync('cargo', ['xtask', 'build-cf', ...(offline ? ['--offline'] : [])], {
-    cwd: REPO,
-    stdio: 'inherit',
-  })
-  assertBuilt()
-  return NATIVE_CF
 }
 
 /**
@@ -131,7 +115,8 @@ export const errorsWithCause = (lines) =>
  * Says the daemon that started is the native one: `log` is the daemon's log and
  * `pid` its process. Returns its start line. A daemon that is not, whatever a
  * selector named, is refused, which fails the suite by itself; and a stand-in
- * that a test starts to see it refused is tests/integration/liar-daemon.mjs.
+ * that a test starts to see it refused is the `liar-daemon` binary of
+ * crates/cf-e2e, whose rig holds itself to the same rule.
  */
 export function assertStarted(log, pid) {
   const start = startLine(log, pid)

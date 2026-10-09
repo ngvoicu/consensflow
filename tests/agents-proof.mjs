@@ -9,7 +9,8 @@ import { join } from 'node:path'
  * token, and the deletion of the agent saved. It imports no module of the
  * product, so it holds whichever daemon answers: the packaged smoke
  * (tests/smoke.test.mjs) runs it against the daemon the built app chose, and
- * tests/agents-proof.test.mjs against each daemon from the checkout.
+ * the `agents_proof` cases of crates/cf-e2e (its Rust twin, `cf_e2e::agents_proof`)
+ * against the daemon from the checkout.
  *
  *   await proveAgents({ url, token, home })
  *

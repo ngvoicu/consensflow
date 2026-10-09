@@ -34,6 +34,17 @@ pub enum Error {
         text: String,
         source: serde_json::Error,
     },
+    /// A request to a server on this machine got no answer.
+    #[error("could not ask {url}: {message}")]
+    Http { url: String, message: String },
+    /// The daemon under test is not the one asked for, did not start, or did
+    /// not answer as a daemon does: what it says, with what the daemon said.
+    #[error("{0}")]
+    Daemon(String),
+    /// Something a case waited for did not happen in time: what, and what the
+    /// programs said meanwhile.
+    #[error("{0}")]
+    Timeout(String),
 }
 
 impl Error {

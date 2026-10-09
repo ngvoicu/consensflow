@@ -2,7 +2,9 @@
  * Plants in what the agents screens do, in the native daemon: the catalog, an
  * agent saved with its profile, the screens behind the UI token, and the
  * deletion. The proof of the agents screens (tests/agents-proof.mjs), which the
- * packaged smoke runs against the daemon a built app started, must catch each.
+ * packaged smoke runs against the daemon a built app started, must catch each:
+ * here it is run against the daemon from the checkout, by the `agents_proof`
+ * cases of the daemon test of crates/cf-e2e (`cargo xtask test agents`).
  */
 import { BUILT_PROOF } from './kit.mjs'
 
@@ -16,7 +18,7 @@ const native = (name, edits) => ({
   name: `agents, native: ${name}`,
   edits,
   runs: [BUILT_PROOF],
-  meant: 'serves the agents as the packaged smoke holds the built app to',
+  meant: 'serves_the_agents_as_the_packaged_smoke_holds_the_built_app_to',
 })
 
 export const PLANTS = [

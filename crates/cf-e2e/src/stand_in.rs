@@ -3,10 +3,9 @@
 //! needs one found has no use for it to run: it exits 0 and says nothing. A
 //! shell script on POSIX, a `.cmd` on Windows, which has no shebang.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{Error, Result};
+use crate::{files, Result};
 
 /// What the script says on POSIX.
 #[cfg(unix)]
@@ -19,38 +18,27 @@ const SCRIPT: &[u8] = b"@echo off\r\nexit /b 0\r\n";
 /// Puts a stand-in for the command `name` in `dir` (made if it is not there):
 /// the path it is found at, `name` itself on POSIX and `name.cmd` on Windows.
 pub fn install(dir: &Path, name: &str) -> Result<PathBuf> {
-    fs::create_dir_all(dir).map_err(Error::file("make", dir))?;
-    let path = dir.join(if cfg!(windows) {
-        format!("{name}.cmd")
-    } else {
-        name.to_owned()
-    });
-    write(&path).map_err(Error::file("write", &path))?;
+    let path = dir.join(program_name(name));
+    files::write_executable(&path, SCRIPT)?;
     Ok(path)
 }
 
-#[cfg(windows)]
-fn write(path: &Path) -> std::io::Result<()> {
-    fs::write(path, SCRIPT)
-}
-
-#[cfg(unix)]
-fn write(path: &Path) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o755)
-        .open(path)?;
-    file.write_all(SCRIPT)
+/// The file a command `name` is found at: `name` itself on POSIX, `name.cmd`
+/// on Windows, which has no shebang and starts a script by its extension.
+pub fn program_name(name: &str) -> String {
+    if cfg!(windows) {
+        format!("{name}.cmd")
+    } else {
+        name.to_owned()
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
+    use crate::Error;
 
     #[test]
     fn a_stand_in_is_made_in_a_folder_that_is_made_for_it_under_the_name_a_system_finds_it_by() {
@@ -63,6 +51,7 @@ mod tests {
             "claude"
         };
         assert_eq!(path, dir.join(name));
+        assert_eq!(program_name("claude"), name);
         assert_eq!(fs::read(&path).unwrap(), SCRIPT);
     }
 
