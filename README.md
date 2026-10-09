@@ -110,10 +110,10 @@ its download page.
   and, if you turn it on, your approval. Use ConsensFlow on projects kept in
   version control.
 - Every agent, the chief and its staff alike, starts with its harness's MCP
-  servers and connectors (your browser, your accounts, your IDE), as it would
-  if you ran it yourself. The staff use them with full permissions while you
-  aren't watching, so keep in a harness only the servers you would let any
-  agent use.
+  servers and connectors (your browser, your accounts, your IDE), skills,
+  settings and customizations, as it would if you ran it yourself. The staff
+  use them with full permissions while you aren't watching, so keep in a
+  harness only what you would let any agent use.
 
 ## License
 
