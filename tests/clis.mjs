@@ -10,15 +10,13 @@
  */
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { buildCf } from '../app/scripts/build-cf.mjs'
-import { NATIVE_CF } from './choice.mjs'
+import { buildNativeCf } from './choice.mjs'
 
 const REPO = fileURLToPath(new URL('..', import.meta.url))
 const SUITES = ['tests/cli.test.mjs', 'tests/cf-commands.test.mjs']
 
-const cf = buildCf({ offline: process.argv.includes('--offline') })
 // The suites run the cf they find in bin/: the one just built.
-if (cf !== NATIVE_CF) throw new Error(`the suites run ${NATIVE_CF}, and ${cf} was built`)
+buildNativeCf({ offline: process.argv.includes('--offline') })
 // The suites are a test runner of their own, even when a test runs this.
 const env = { ...process.env }
 delete env.NODE_TEST_CONTEXT

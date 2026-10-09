@@ -110,20 +110,6 @@ fn a_command_runs_its_script_from_the_root_with_every_word_as_it_was_given() {
 }
 
 #[test]
-fn stage_runs_its_script_from_app_as_the_apps_package_ran_it() {
-    let node = programs(&["node"]);
-    let ran = xtask(&checkout(), node.path(), &[], &["stage"]);
-    assert!(ran.status.success(), "{}", err(&ran));
-    let report = out(&ran);
-    assert_ran_in(&report, &checkout().join("app"));
-    let script = checkout()
-        .join("app")
-        .join("scripts")
-        .join("prepare-sidecar.mjs");
-    assert_eq!(arg_lines(&report), [arg_line(script.into_os_string())]);
-}
-
-#[test]
 fn the_exit_status_of_what_it_ran_is_its_own() {
     let node = programs(&["node"]);
     for status in [0, 1, 2, 3, 42, 101, 255] {
@@ -161,9 +147,6 @@ fn a_help_and_a_refusal_start_nothing() {
     // No program on the PATH: whatever is started fails, and these do not.
     let no_programs = tempfile::tempdir().unwrap();
     for (command, script) in [
-        ("build-cf", "app/scripts/build-cf.mjs"),
-        ("stage", "app/scripts/prepare-sidecar.mjs"),
-        ("conpty", "app/scripts/conpty.mjs"),
         ("portable", "app/scripts/portable.mjs"),
         ("smoke", "tests/smoke.mjs"),
         ("smoke-updater", "tests/smoke-updater.mjs"),
@@ -192,6 +175,55 @@ fn a_help_and_a_refusal_start_nothing() {
             format!("{said}see `cargo xtask --help`\n"),
             "{args:?}"
         );
+    }
+}
+
+/// The commands that run in Rust, asked for what they do not take, are refused
+/// with the status 2 before anything is started, from `app/` as from the root.
+/// (What they do when they run is for the unit tests, which give them a system of
+/// their own: here it would be this checkout's `bin/` and resources.)
+#[test]
+fn the_commands_that_run_in_rust_refuse_the_words_they_do_not_take_and_start_nothing() {
+    let no_programs = tempfile::tempdir().unwrap();
+    for (args, said) in [
+        (
+            vec!["build-cf", "--ofline"],
+            "xtask: build-cf takes --offline or nothing, not --ofline\n",
+        ),
+        (
+            vec!["stage", "--offline"],
+            "xtask: stage takes no arguments\n",
+        ),
+        (
+            vec!["conpty"],
+            "xtask: conpty takes --into DIR, the folder for the console host's files\n",
+        ),
+    ] {
+        let ran = xtask(&checkout().join("app"), no_programs.path(), &[], &args);
+        assert_eq!(ran.status.code(), Some(2), "{args:?}");
+        assert_eq!(out(&ran), "", "{args:?}");
+        assert_eq!(
+            err(&ran),
+            format!("{said}see `cargo xtask --help`\n"),
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
+fn the_commands_that_run_in_rust_say_so_in_their_help() {
+    let no_programs = tempfile::tempdir().unwrap();
+    for command in ["build-cf", "stage", "conpty"] {
+        let ran = xtask(&checkout(), no_programs.path(), &[], &[command, "--help"]);
+        assert!(ran.status.success(), "{command}: {}", err(&ran));
+        let help = out(&ran);
+        assert!(
+            help.starts_with(&format!("Usage: cargo xtask {command}")),
+            "{help}"
+        );
+        assert!(help.contains("It runs in Rust."), "{help}");
+        assert!(!help.contains("node "), "{help}");
+        assert_eq!(err(&ran), "");
     }
 }
 
