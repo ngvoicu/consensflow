@@ -2,6 +2,6 @@ node_modules
 src-tauri/target/
 test-results/
 playwright-report/
-# Staged at build time by scripts/prepare-sidecar.mjs
+# Staged at build time by `cargo xtask stage`
 .cache/
 src-tauri/resources/

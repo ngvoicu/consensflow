@@ -7,7 +7,7 @@
  * opens one must not say it; one opened with the name taken away must, or
  * this test could not see it. And the console host under each window is
  * Microsoft's OpenConsole.exe the app ships beside its pane host
- * (`app/scripts/conpty.mjs`), not the system's conhost. Nothing is sent, no
+ * (`cargo xtask conpty`), not the system's conhost. Nothing is sent, no
  * model is asked.
  *
  *   npm run windows -- --host <ssh host> --build -- npm run live:terminal

@@ -10,10 +10,10 @@
  */
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { buildCf } from '../app/scripts/build-cf.mjs'
+import { buildNativeCf } from './choice.mjs'
 
 const REPO = fileURLToPath(new URL('..', import.meta.url))
-buildCf({ offline: process.argv.includes('--offline') })
+buildNativeCf({ offline: process.argv.includes('--offline') })
 
 // The suite is a test runner of its own, even when a test runs this.
 const env = { ...process.env }

@@ -264,7 +264,7 @@ fn remove_aside(root: &Path, path: &Path) {
 
 /// Names the runtime folder to Windows' search for libraries: the terminals'
 /// console host is there (`conpty.dll`, which runs `OpenConsole.exe` beside
-/// it; `app/scripts/conpty.mjs`), and Windows looks beside the exe first,
+/// it; `cargo xtask conpty`), and Windows looks beside the exe first,
 /// which for a portable exe is wherever it was saved. Called before the
 /// first terminal opens, which loads the console host once for the app.
 #[cfg(windows)]

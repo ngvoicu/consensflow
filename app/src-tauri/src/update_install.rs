@@ -193,7 +193,7 @@ mod tests {
         fs::copy("/bin/echo", app.join("Contents/MacOS/app")).unwrap();
         fs::write(app.join("Contents/Info.plist"), format!(r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>{identity}</string><key>CFBundleExecutable</key><string>app</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>{version}</string><key>CFBundleShortVersionString</key><string>{version}</string></dict></plist>"#)).unwrap();
         // A window's cf: native code under Resources, signed ad hoc before the
-        // bundle around it is, as app/scripts/build-cf.mjs signs it.
+        // bundle around it is, as `cargo xtask build-cf` signs it.
         let cf = app.join("Contents/Resources/cli/bin/cf");
         fs::copy("/bin/echo", &cf).unwrap();
         assert!(Command::new("/usr/bin/codesign")

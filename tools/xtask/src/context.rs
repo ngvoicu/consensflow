@@ -125,10 +125,10 @@ mod tests {
             root: PathBuf::from("checkout"),
             env: Env::default(),
         };
-        let expected: PathBuf = ["checkout", "app", "scripts", "build-cf.mjs"]
+        let expected: PathBuf = ["checkout", "app", "scripts", "bundle-ui.mjs"]
             .iter()
             .collect();
-        assert_eq!(context.path("app/scripts/build-cf.mjs"), expected);
+        assert_eq!(context.path("app/scripts/bundle-ui.mjs"), expected);
         assert_eq!(context.path(""), PathBuf::from("checkout"));
         assert_eq!(context.path("app/"), PathBuf::from("checkout").join("app"));
     }

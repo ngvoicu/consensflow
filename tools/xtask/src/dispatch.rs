@@ -86,6 +86,9 @@ pub enum Failure {
     /// A program it had to run could not be started.
     #[error(transparent)]
     Process(#[from] process::Failure),
+    /// A step of the build, the staging or the console host could not be done.
+    #[error(transparent)]
+    Sidecar(#[from] sidecar::Error),
     /// What it had to say could not be written.
     #[error(transparent)]
     Io(#[from] io::Error),
@@ -378,27 +381,44 @@ mod tests {
             assert!(all.contains(command.about), "{all}");
         }
         assert_eq!(parsed("-h"), all);
-        // A command's own help says what it takes and what it runs for now.
+        // A command's own help says what it takes and what it runs.
         let help = parsed("build-cf --help");
         assert!(
             help.starts_with("help\nUsage: cargo xtask build-cf [--offline]\n"),
             "{help}"
         );
-        assert!(
-            help.contains("node app/scripts/build-cf.mjs (from the checkout's root)"),
-            "{help}"
-        );
-        let help = parsed("stage --help");
-        assert!(
-            help.contains("node app/scripts/prepare-sidecar.mjs (from app)"),
-            "{help}"
-        );
+        assert!(help.contains("It runs in Rust."), "{help}");
         assert!(parsed("check --help").contains("It runs in Rust."));
         // A help that is not the first word is the command's own argument.
         assert_eq!(
             parsed("build-cf --offline --help"),
             r#"run build-cf ["--offline", "--help"]"#
         );
+    }
+
+    /// A command that hands its arguments to a script, whichever the real ones
+    /// still do: the landings that port them each take one from the table.
+    #[test]
+    fn the_help_of_a_command_that_hands_over_names_its_script_and_where_it_runs_from() {
+        let command = |from| Command {
+            words: &["stand-in"],
+            about: "A stand-in",
+            usage: "[--x]",
+            run: Run::Node(Script {
+                file: "scripts/stand-in.mjs",
+                from,
+            }),
+        };
+        let help = command_help(&command(""));
+        assert!(
+            help.starts_with("Usage: cargo xtask stand-in [--x]\n"),
+            "{help}"
+        );
+        assert!(
+            help.contains("node scripts/stand-in.mjs (from the checkout's root)"),
+            "{help}"
+        );
+        assert!(command_help(&command("app")).contains("node scripts/stand-in.mjs (from app)"));
     }
 
     #[test]
