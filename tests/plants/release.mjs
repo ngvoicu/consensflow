@@ -3,7 +3,9 @@
  * time, and checks that a test catches each: the rule of the feeds and its
  * checks, the publisher, the release workflow's text, the tool that makes the
  * update feed's entry (`cf-release prepare-update`), the portable app's
- * collector, the agents of the daemon as the packaged smoke holds them, and the
+ * collector, the agents of the daemon as the packaged smoke holds them, the
+ * thin drivers of xtask (the app's tests and lint, the lint for Windows and its
+ * archiver, the departures, the bench) and the gate that runs them, and the
  * updater smoke: its readers of evidence, and the product it holds (the app's
  * daemon choice, the ledger's one holder, the check of an update). A
  * plant is a few pieces of text replaced in the sources; the tests that should
@@ -33,6 +35,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PLANTS as AGENTS } from './release/agents.mjs'
+import { PLANTS as DRIVERS } from './release/drivers.mjs'
 import { PLANTS as FEEDS } from './release/feeds.mjs'
 import { BUILT_PROOF } from './release/kit.mjs'
 import { PLANTS as PORTABLE } from './release/portable.mjs'
@@ -58,6 +61,7 @@ const PLANTS = [
   ...UPDATER,
   ...TOOLING,
   ...SIDECAR,
+  ...DRIVERS,
   ...UPDATE,
   ...SIGN_MAC,
 ]

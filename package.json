@@ -48,7 +48,7 @@
     "live:codex-resume": "node tests/live/codex-resume.mjs",
     "live:terminal": "node tests/live/devin-terminal.mjs",
     "windows": "node tests/live/windows.mjs",
-    "check:all": "npm run build:cf -- --offline && npm run check && cargo fmt --all --check && cargo test --offline --workspace && cargo clippy --offline --workspace --all-targets -- -D warnings && cargo test --offline -p cf-bridge --features local && cargo clippy --offline -p cf-bridge --features local --all-targets -- -D warnings && npm --prefix app run test:ui && npm run build:bridge -- --offline && npm run test:integration && npm run smoke"
+    "check:all": "cargo xtask check"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.8",
