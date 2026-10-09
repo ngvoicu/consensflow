@@ -1,7 +1,8 @@
 /**
  * Plants bugs in what releases and the agents screens are made of, one at a
  * time, and checks that a test catches each: the rule of the feeds and its
- * checks, the publisher, the release workflow's text, the portable app's
+ * checks, the publisher, the release workflow's text, the tool that makes the
+ * update feed's entry (`cf-release prepare-update`), the portable app's
  * collector, the agents of the daemon as the packaged smoke holds them, and the
  * updater smoke: its readers of evidence, and the product it holds (the app's
  * daemon choice, the ledger's one holder, the check of an update). A
@@ -38,6 +39,7 @@ import { PLANTS as PORTABLE } from './release/portable.mjs'
 import { PLANTS as PUBLISH } from './release/publish.mjs'
 import { PLANTS as SIDECAR } from './release/sidecar.mjs'
 import { PLANTS as TOOLING } from './release/tooling.mjs'
+import { PLANTS as UPDATE } from './release/update.mjs'
 import { PLANTS as UPDATER } from './release/updater.mjs'
 import { PLANTS as WORKFLOW } from './release/workflow.mjs'
 
@@ -55,6 +57,7 @@ const PLANTS = [
   ...UPDATER,
   ...TOOLING,
   ...SIDECAR,
+  ...UPDATE,
 ]
 
 const args = process.argv.slice(2)

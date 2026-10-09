@@ -8,7 +8,7 @@ use std::io::{self, ErrorKind, Write};
 
 use cf_base::env::Env;
 
-use crate::{prepare_update, sign_mac, version};
+use crate::{sign_mac, update, version};
 
 /// A step of the release.
 pub struct Command {
@@ -44,11 +44,7 @@ pub enum Failure {
 }
 
 /// Every step, in the order the release runs them.
-pub const COMMANDS: [&Command; 3] = [
-    &version::COMMAND,
-    &prepare_update::COMMAND,
-    &sign_mac::COMMAND,
-];
+pub const COMMANDS: [&Command; 3] = [&version::COMMAND, &update::COMMAND, &sign_mac::COMMAND];
 
 /// Runs the command line `args` (without the program's name) and answers the
 /// exit status: 0 when the step finished, 1 when it could not, 2 when the
@@ -185,14 +181,26 @@ mod tests {
 
     #[test]
     fn a_step_not_built_yet_says_so_and_fails() {
-        for step in ["prepare-update", "sign-mac"] {
-            let (status, out, err) = answer(step);
-            assert_eq!((status, out.as_str()), (1, ""), "{step}");
-            assert!(
-                err.starts_with(&format!("cf-release {step}: not built yet")),
-                "{err}"
-            );
-        }
+        let (status, out, err) = answer("sign-mac");
+        assert_eq!((status, out.as_str()), (1, ""));
+        assert!(
+            err.starts_with("cf-release sign-mac: not built yet"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_step_that_is_built_refuses_arguments_it_does_not_take_as_a_usage_error() {
+        let (status, out, err) = answer("prepare-update --url x");
+        assert_eq!((status, out.as_str()), (2, ""));
+        assert!(
+            err.starts_with("cf-release prepare-update: unknown argument: --url\n"),
+            "{err}"
+        );
+        assert!(
+            err.contains("see `cf-release prepare-update --help`"),
+            "{err}"
+        );
     }
 
     #[test]

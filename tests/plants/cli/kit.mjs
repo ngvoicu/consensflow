@@ -43,8 +43,8 @@ export const STAND_IN = cargo('-p', 'cf-harness', '--lib', 'testing::')
 export const HOST = cargo('-p', 'cf-daemon', '--lib', 'host::')
 /** The page's console text, held to the table the Rust one is held to. */
 export const CONSOLE_TEXT = [process.execPath, '--test', 'tests/console-text.test.mjs']
-/** The release's check of the bundle it publishes. */
-export const UPDATE_RELEASE = [process.execPath, '--test', 'tests/update-release.test.mjs']
+/** The release's check of the bundle it publishes (`cf-release prepare-update`, run on bundles and archives made in the test). */
+export const UPDATE_RELEASE = cargo('-p', 'cf-release', '--test', 'prepare_update')
 /** The portable exe's packing. */
 export const PORTABLE_PACK = [process.execPath, '--test', 'tests/portable.test.mjs']
 /** The Developer ID signing of the app: every Mach-O hardened, none entitled. */
