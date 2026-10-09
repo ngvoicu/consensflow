@@ -464,6 +464,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cf-e2e"
+version = "3.0.0-alpha.83"
+dependencies = [
+ "regex",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "url",
+]
+
+[[package]]
 name = "cf-engine"
 version = "3.0.0-alpha.83"
 dependencies = [

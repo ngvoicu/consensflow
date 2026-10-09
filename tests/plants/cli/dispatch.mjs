@@ -17,7 +17,7 @@ export const PLANTS = [
     name: 'dispatch: the catalog is an unknown command, seen by the suites of the CLI',
     edits: [[MOD, '        Some("catalog") => catalog::run(rest, out),\n', '']],
     runs: [CLIS],
-    meant: 'runs the native cf',
+    meant: 'runs_the_native_cf',
   },
   {
     name: 'dispatch: setup and doctor are answered as unknown commands',
@@ -41,7 +41,7 @@ export const PLANTS = [
     name: 'dispatch: setup is an unknown command, seen by the suites of the CLI',
     edits: [[MOD, '        Some("setup") => setup::run(env, rest, out),\n', '']],
     runs: [CLIS],
-    meant: 'roster edits, setup and diagnostic reads leave role files and old manifests alone',
+    meant: 'roster_edits_setup_and_diagnostic_reads_leave_role_files_and_old_manifests_alone',
   },
   {
     name: 'dispatch: ui is answered by the module as a verb',
@@ -117,6 +117,6 @@ export const PLANTS = [
       ],
     ],
     runs: [CLIS],
-    meant: 'knows the window commands and the ones outside a window',
+    meant: 'knows_the_window_commands_and_the_ones_outside_a_window',
   },
 ]

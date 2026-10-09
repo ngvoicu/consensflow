@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { assertStarted, choose, NATIVE_CF, START_WORDS, startLine } from './choice.mjs'
-import { cliTarget } from './cli-target.mjs'
 import { daemonCommand } from './helpers.mjs'
 
 /** A daemon's log, as each daemon writes its first line (crates/cf-daemon/src/start.rs; Node's, which the releases before the deletion ran). */
@@ -48,9 +47,9 @@ describe('which daemon a test starts, in words', () => {
   })
 
   it('names the variable it was asked for in what it refuses', () => {
-    assert.equal(choose('CONSENSFLOW_TEST_CLI', 'native'), null)
-    assert.deepEqual(choose('CONSENSFLOW_TEST_CLI', '["/x","y"]'), ['/x', 'y'])
-    assert.throws(() => choose('CONSENSFLOW_TEST_CLI', 'node'), /^Error: CONSENSFLOW_TEST_CLI is /)
+    assert.equal(choose('A_SELECTOR', 'native'), null)
+    assert.deepEqual(choose('A_SELECTOR', '["/x","y"]'), ['/x', 'y'])
+    assert.throws(() => choose('A_SELECTOR', 'node'), /^Error: A_SELECTOR is /)
   })
 })
 
@@ -107,29 +106,5 @@ describe('which daemon started, from its log', () => {
       /the native daemon was asked for, and its log holds no start line of pid 1/,
     )
     assert.throws(() => assertStarted('', 4242), /holds no start line of pid 4242/)
-  })
-})
-
-describe('which cf the suites of the CLI run, in the same words', () => {
-  it('runs the native cf of this checkout for `native`, and for nothing at all', () => {
-    for (const named of ['native', undefined, '']) {
-      const target = cliTarget({ named })
-      assert.deepEqual([target.command, target.args], [NATIVE_CF, []], String(named))
-    }
-  })
-
-  it('runs the command a JSON array gives', () => {
-    const given = cliTarget({ named: '["/build/cf","--x"]' })
-    assert.deepEqual([given.command, given.args], ['/build/cf', ['--x']])
-  })
-
-  it('refuses a selector that is none of the words', () => {
-    for (const named of ['nope', 'node', '[]']) {
-      assert.throws(
-        () => cliTarget({ named }),
-        /CONSENSFLOW_TEST_CLI is native, or a JSON array of strings/,
-        named,
-      )
-    }
   })
 })

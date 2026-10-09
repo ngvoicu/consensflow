@@ -8,6 +8,7 @@
       "app/ui/core/**",
       "app/tests/**",
       "hosts/**",
+      "crates/cf-e2e/fixtures/**",
       "*.ts",
       "*.json",
       "!!**/node_modules",

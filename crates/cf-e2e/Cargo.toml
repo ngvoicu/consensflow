@@ -1,0 +1,23 @@
+[package]
+name = "cf-e2e"
+description = "ConsensFlow's black-box suites: the built `cf` run as a process and judged by what it prints, writes and exits with. Test support and tests only; it depends on no crate of the product."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+# What a case reads of a command's JSON answer.
+serde_json.workspace = true
+# The home of a case, removed with it.
+tempfile.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# The cases that read the repository's words for the commands it names.
+regex.workspace = true
+# Node's `--import` takes a module as a file URL, on Windows as anywhere.
+url.workspace = true
+
+[lints]
+workspace = true

@@ -11,10 +11,11 @@
  * caught or missed. Every file a plant touches is first copied outside the
  * repository and is put back from that copy, byte for byte, whatever the run
  * came to, on Ctrl-C and on being terminated too; a run killed past that leaves
- * the copies in the folder it says first. The native `cf` that `bin/` holds,
- * which the test scripts run, is built again from the sources as they are after
- * each plant that had it built from its own, so that no plant's tests meet the
- * build of another's.
+ * the copies in the folder it says first. The native `cf` that the test scripts
+ * and the suites of the CLI (crates/cf-e2e, which builds the `cf` it runs) run,
+ * the build folder's and `bin/`'s, is built again from the sources as they are
+ * after each plant that had it built from its own, so that no plant's tests meet
+ * the build of another's.
  *
  *   npm run plants:cli                  # every plant
  *   npm run plants:cli -- parser dispatch   # the plants whose names hold a word
@@ -84,12 +85,16 @@ process.stdout.write(`copies of what is planted are kept in ${saved}\n`)
 /** What is planted now: its files, with the copies they go back from. */
 let planting = null
 let running = null
-/** Whether a run built the native `cf` of `bin/` from planted sources, which stays there until `rebuild`. */
+/**
+ * Whether a run built the native `cf` from planted sources (a `BUILD` puts it in
+ * `bin/`, the suites of the CLI build their own in the build folder), which stays
+ * there until `rebuild`.
+ */
 let built = false
 
 /**
- * Builds the native `cf` of `bin/` again from the sources as they are, if a run
- * built it from planted ones: whether it is as the sources say.
+ * Builds the native `cf` of the build folder and of `bin/` again from the sources
+ * as they are, if a run built it from planted ones: whether it is as the sources say.
  */
 function rebuild() {
   if (!built) return true
