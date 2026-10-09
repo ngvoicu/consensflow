@@ -22,6 +22,8 @@ mod launcher;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod portable;
 pub mod runtime;
+#[cfg(test)]
+mod test_manifest;
 #[cfg(target_os = "macos")]
 mod update_install;
 mod update_page;

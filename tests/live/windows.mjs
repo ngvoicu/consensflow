@@ -12,8 +12,8 @@
  *   npm run windows -- --host <ssh host> -- npm run eval -- --scenario round-trip --chief devin --staff devin
  *
  * --build installs the packages and builds the page, a pane's cf.exe and the
- * pane host first: on a fresh machine, and after any change to the Rust. --in runs the
- * command in a folder of the copy (cargo reads app/src-tauri/.cargo there).
+ * pane host first: on a fresh machine, and after any change to the Rust. --in
+ * runs the command in a folder of the copy.
  *
  *   npm run windows -- --host <ssh host> --in app/src-tauri -- cargo test
  *

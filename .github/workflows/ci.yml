@@ -64,19 +64,19 @@ jobs:
       # The CLI's suites against the native cf, which answers every verb.
       - run: npm run test:clis
         timeout-minutes: 15
-      # Cargo reads app/src-tauri/.cargo/config.toml from the folder it runs in:
-      # on Windows its runner gives each test binary the manifest it needs.
+      # The app's own tests. On Windows the library's test binary carries the
+      # manifest it needs, put there at link time (app/src-tauri/build.rs).
       # The PTY tests read their children with no time limit of their own; a
       # stuck read on a runner (seen once on macOS) ends here.
       - run: cargo test
         working-directory: app/src-tauri
         timeout-minutes: 15
       # The workspace's other crates, the pane host's tests among them, from
-      # its root, where the app's Windows runner does not apply: they link no
-      # dialog code. The headless tests (cf-panes/tests/headless.rs) drive the
-      # helper; they are Unix-only and build empty on Windows. A limit for the
-      # same reason, with room for a slow runner: the ledger's replay alone has
-      # taken from 2 to 7 minutes on Windows' (2026-10-06), the step 9 to 15.
+      # its root: they link no dialog code, so they need no manifest. The
+      # headless tests (cf-panes/tests/headless.rs) drive the helper; they are
+      # Unix-only and build empty on Windows. A limit for the same reason, with
+      # room for a slow runner: the ledger's replay alone has taken from 2 to 7
+      # minutes on Windows' (2026-10-06), the step 9 to 15.
       - run: cargo test --workspace --exclude app
         timeout-minutes: 25
       # Every crate linted, its tests included.
