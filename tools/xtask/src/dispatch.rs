@@ -89,6 +89,12 @@ pub enum Failure {
     /// A step of the build, the staging or the console host could not be done.
     #[error(transparent)]
     Sidecar(#[from] sidecar::Error),
+    /// The portable exe could not be packed, or a file could not be read as one.
+    #[error("portable: {0}")]
+    Portable(#[from] cf_portable::Error),
+    /// The sources have no one version to name a build by.
+    #[error(transparent)]
+    Version(#[from] cf_release::version::VersionError),
     /// What it had to say could not be written.
     #[error(transparent)]
     Io(#[from] io::Error),
@@ -320,7 +326,8 @@ mod tests {
                 "build-cf",
                 "stage",
                 "conpty",
-                "portable",
+                "portable pack",
+                "portable inspect",
                 "app test",
                 "app clippy",
                 "clippy-windows",
@@ -439,6 +446,14 @@ mod tests {
             "usage test takes a command: daemons, clis, agents"
         );
         assert_eq!(parsed("app tests"), "usage unknown command: app tests");
+        assert_eq!(
+            parsed("portable"),
+            "usage portable takes a command: pack, inspect"
+        );
+        assert_eq!(
+            parsed("portable pack --out here"),
+            r#"run portable pack ["--out", "here"]"#
+        );
     }
 
     #[test]

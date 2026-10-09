@@ -1,0 +1,18 @@
+[package]
+name = "cf-portable"
+description = "The portable Windows exe: the app, its runtime as a gzip-compressed tar, and the footer that finds it. One library packs it, reads it and unpacks it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+flate2.workspace = true
+tar.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -45,8 +45,8 @@ export const HOST = cargo('-p', 'cf-daemon', '--lib', 'host::')
 export const CONSOLE_TEXT = [process.execPath, '--test', 'tests/console-text.test.mjs']
 /** The release's check of the bundle it publishes. */
 export const UPDATE_RELEASE = [process.execPath, '--test', 'tests/update-release.test.mjs']
-/** The portable exe's packing. */
-export const PORTABLE_PACK = [process.execPath, '--test', 'tests/portable.test.mjs']
+/** The portable exe's packing, in the library that writes it and reads it back (every test binary: cargo stops at the first that fails). */
+export const PORTABLE_PACK = cargo('-p', 'cf-portable', '--no-fail-fast')
 /** The Developer ID signing of the app: every Mach-O hardened, none entitled. */
 export const SIGN_MAC = [process.execPath, '--test', 'tests/sign-mac.test.mjs']
 /** A verb of the native `cf` run outside a window, given its arguments whole (the build of bin/ first). */

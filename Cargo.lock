@@ -55,6 +55,7 @@ dependencies = [
  "cf-bridge",
  "cf-launcher",
  "cf-panes",
+ "cf-portable",
  "cf-proto",
  "flate2",
  "libc",
@@ -555,6 +556,16 @@ dependencies = [
  "serde",
  "serde_json",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "cf-portable"
+version = "3.0.0-alpha.83"
+dependencies = [
+ "flate2",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -5678,6 +5689,7 @@ name = "xtask"
 version = "3.0.0-alpha.83"
 dependencies = [
  "cf-base",
+ "cf-portable",
  "cf-process",
  "cf-release",
  "sha2",

@@ -24,6 +24,9 @@ path = "src/bin/fake_child.rs"
 cf-base.workspace = true
 # Where a command is on the PATH, with the extensions Windows starts programs by.
 cf-process.workspace = true
+# The portable exe: `portable pack` writes it and `portable inspect` reads its
+# footer, by the library the app unpacks it with.
+cf-portable.workspace = true
 thiserror.workspace = true
 # What the landings that port the scripts use, named here already so that none
 # of them touches the lockfile: S1 the console host's package (its SHA-256 and

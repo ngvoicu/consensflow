@@ -7,10 +7,10 @@
 mod common;
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::path::Path;
+use std::process::Command;
 
-use common::{arg_line, arg_lines, assert_ran_in, FAKE};
+use common::{arg_line, arg_lines, assert_ran_in, checkout, err, out, xtask, FAKE};
 use xtask::process::Invocation;
 
 /// The line `.cargo/config.toml` has to carry for `cargo xtask` to be this.
@@ -20,14 +20,6 @@ const ALIAS: &str =
 const EXPANDED: &str =
     "`xtask` is aliased to `run --locked --quiet --package xtask --bin xtask --`";
 
-fn checkout() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .unwrap()
-        .to_path_buf()
-}
-
 /// A folder holding the fake child under each of `names`, as the programs xtask starts.
 fn programs(names: &[&str]) -> tempfile::TempDir {
     let folder = tempfile::tempdir().unwrap();
@@ -36,26 +28,6 @@ fn programs(names: &[&str]) -> tempfile::TempDir {
         fs::copy(FAKE, folder.path().join(file)).unwrap();
     }
     folder
-}
-
-/// xtask run in `cwd` with `args`, finding programs in `path` alone, and the
-/// fake child's instructions in `vars`.
-fn xtask(cwd: &Path, path: &Path, vars: &[(&str, &str)], args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_xtask"))
-        .current_dir(cwd)
-        .env("PATH", path)
-        .envs(vars.iter().copied())
-        .args(args)
-        .output()
-        .unwrap()
-}
-
-fn out(ran: &Output) -> String {
-    String::from_utf8(ran.stdout.clone()).unwrap()
-}
-
-fn err(ran: &Output) -> String {
-    String::from_utf8(ran.stderr.clone()).unwrap()
 }
 
 #[test]
@@ -147,7 +119,6 @@ fn a_help_and_a_refusal_start_nothing() {
     // No program on the PATH: whatever is started fails, and these do not.
     let no_programs = tempfile::tempdir().unwrap();
     for (command, script) in [
-        ("portable", "app/scripts/portable.mjs"),
         ("smoke", "tests/smoke.mjs"),
         ("smoke-updater", "tests/smoke-updater.mjs"),
         ("candidate", "app/scripts/candidate.mjs"),
@@ -213,8 +184,16 @@ fn the_commands_that_run_in_rust_refuse_the_words_they_do_not_take_and_start_not
 #[test]
 fn the_commands_that_run_in_rust_say_so_in_their_help() {
     let no_programs = tempfile::tempdir().unwrap();
-    for command in ["build-cf", "stage", "conpty"] {
-        let ran = xtask(&checkout(), no_programs.path(), &[], &[command, "--help"]);
+    for command in [
+        "build-cf",
+        "stage",
+        "conpty",
+        "portable pack",
+        "portable inspect",
+    ] {
+        let mut words: Vec<&str> = command.split(' ').collect();
+        words.push("--help");
+        let ran = xtask(&checkout(), no_programs.path(), &[], &words);
         assert!(ran.status.success(), "{command}: {}", err(&ran));
         let help = out(&ran);
         assert!(

@@ -47,27 +47,22 @@ jobs:
       # runtime folder of the apps before the flip release, whose collector
       # would empty it), and the daemon comes up from that runtime, with a home
       # of its own: the cf.exe of the runtime, which has no Node beside it. The
-      # folder is read off the exe itself: the gzip trailer's CRC32 ends 24
-      # bytes before the file does.
+      # folder is read off the exe itself, by the library that wrote its footer
+      # (cargo xtask portable inspect, crates/cf-portable), not worked out here
+      # from its bytes.
       - name: The portable exe unpacks its runtime and its daemon starts
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $exe = (Get-Item app/src-tauri/target/release/bundle/portable/*-portable.exe).FullName
           $version = node -p "require('./app/src-tauri/tauri.conf.json').version"
-          $file = [IO.File]::OpenRead($exe)
-          try {
-            $end = [byte[]]::new(24)
-            [void]$file.Seek(-24, [IO.SeekOrigin]::End)
-            [void]$file.Read($end, 0, 24)
-          } finally {
-            $file.Dispose()
-          }
-          if ([Text.Encoding]::ASCII.GetString($end, 16, 8) -ne 'CFPAYLD1') {
-            throw "$exe does not end with the portable footer"
-          }
-          $runtime = Join-Path $env:LOCALAPPDATA ('dev.ngvoicu.consensflow\portable-runtime\{0}-{1:x8}' -f $version, [BitConverter]::ToUInt32($end, 0))
-          "payload: $([BitConverter]::ToUInt64($end, 8)) bytes; runtime: $runtime"
+          # A file without the footer is said by the command itself, on stderr.
+          $inspected = cargo xtask portable inspect $exe --version $version
+          if ($LASTEXITCODE -ne 0) { throw "cargo xtask portable inspect $exe ended with status $LASTEXITCODE" }
+          $inspected
+          $folder = ($inspected | Select-String '^runtime: (.+)$').Matches[0].Groups[1].Value
+          $runtime = Join-Path $env:LOCALAPPDATA "dev.ngvoicu.consensflow\portable-runtime\$folder"
+          "runtime folder: $runtime"
 
           $cfHome = Join-Path $env:RUNNER_TEMP 'portable-home'
           New-Item -ItemType Directory -Force $cfHome | Out-Null

@@ -1,6 +1,8 @@
 use super::*;
+use std::io::Read;
 use std::sync::Arc;
 
+use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 
@@ -32,8 +34,7 @@ fn packed(dir: &Path, payload: &[u8]) -> PathBuf {
     let exe = dir.join("ConsensFlow_9.9.9_x64-portable.exe");
     let mut bytes = b"MZ the app".to_vec();
     bytes.extend_from_slice(payload);
-    bytes.extend_from_slice(&(payload.len() as u64).to_le_bytes());
-    bytes.extend_from_slice(b"CFPAYLD1");
+    bytes.extend_from_slice(&cf_portable::footer(payload.len() as u64));
     fs::write(&exe, bytes).expect("write the exe");
     exe
 }
@@ -78,28 +79,6 @@ fn old_runtime(root: &Path, name: &str, present: &[&[&str]]) -> PathBuf {
     folder
 }
 
-#[test]
-fn the_footer_finds_the_payload_and_names_its_folder_by_crc() {
-    let dir = tempfile::tempdir().expect("dir");
-    let payload = payload(b"the native cf");
-    let exe = packed(dir.path(), &payload);
-    let found = Payload::find(&mut File::open(&exe).expect("open"))
-        .expect("read")
-        .expect("a payload");
-    assert_eq!(
-        found,
-        Payload {
-            offset: 10,
-            length: payload.len() as u64,
-            crc: crc_of(&payload),
-        }
-    );
-    assert_eq!(
-        found.folder("9.9.9"),
-        format!("9.9.9-{:08x}", crc_of(&payload))
-    );
-}
-
 /// The installed app, and the Mac's, carry nothing: they find their
 /// runtime beside them, and nothing is unpacked.
 #[test]
@@ -125,8 +104,7 @@ fn a_footer_that_cannot_be_right_is_an_error() {
     let exe = dir.path().join("ConsensFlow.exe");
     for length in [5_u64, 1_000] {
         let mut bytes = b"MZ the app and some".to_vec();
-        bytes.extend_from_slice(&length.to_le_bytes());
-        bytes.extend_from_slice(b"CFPAYLD1");
+        bytes.extend_from_slice(&cf_portable::footer(length));
         fs::write(&exe, bytes).expect("write");
         let error =
             unpacked_runtime(&exe, &dir.path().join("local"), "9.9.9").expect_err("a damaged exe");
@@ -312,6 +290,48 @@ fn the_runtime_goes_under_a_parent_the_older_apps_collector_never_reads() {
     for old in before {
         assert!(old.join("node.exe").is_file(), "{}", old.display());
     }
+}
+
+/// What the build's packer writes is what the app unpacks: the exe is made by
+/// `cf_portable::pack` from a release folder, not laid out here.
+#[test]
+fn the_app_unpacks_the_exe_the_packer_wrote() {
+    let dir = tempfile::tempdir().expect("dir");
+    let local = dir.path().join("local");
+    let release = dir.path().join("release");
+    for (path, body) in [
+        ("ConsensFlow.exe", "MZ the app"),
+        ("cli/bin/cf.exe", "the native cf"),
+        ("conpty.dll", "the console host"),
+        ("OpenConsole.exe", "its process"),
+        ("OpenConsole-LICENSE.txt", "its license"),
+    ] {
+        let file = release.join(path);
+        fs::create_dir_all(file.parent().expect("a folder")).expect("its folder");
+        fs::write(file, body).expect("its file");
+    }
+    let exe = dir.path().join("ConsensFlow_9.9.9_x64-portable.exe");
+    let packed =
+        cf_portable::pack(&release.join("ConsensFlow.exe"), &release, &exe).expect("packed");
+
+    let folder = unpacked_runtime(&exe, &local, "9.9.9")
+        .expect("unpacked")
+        .expect("a runtime");
+
+    assert_eq!(
+        folder,
+        local
+            .join(RUNTIME_PARENT)
+            .join(packed.payload.folder("9.9.9"))
+    );
+    assert_eq!(
+        fs::read(folder.join("cli/bin/cf.exe")).expect("cf"),
+        b"the native cf"
+    );
+    for host in ["conpty.dll", "OpenConsole.exe", "OpenConsole-LICENSE.txt"] {
+        assert!(folder.join(host).is_file(), "{host}");
+    }
+    assert!(folder.join(".unpacked").is_file());
 }
 
 /// What the cleanup sees of "running" is a program that cannot be opened for
