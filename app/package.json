@@ -5,12 +5,13 @@
   "main": "index.js",
   "scripts": {
     "bundle:ui": "node scripts/bundle-ui.mjs",
-    "prepare-sidecar": "node scripts/prepare-sidecar.mjs",
+    "prepare-sidecar": "cargo xtask stage",
+    "prepare:app": "npm run bundle:ui && npm run prepare-sidecar",
     "smoke:windows": "node scripts/windows-smoke.mjs",
-    "portable": "node scripts/portable.mjs",
+    "portable": "cargo xtask portable",
     "test:ui": "npm run bundle:ui && playwright test tests/core-page.spec.mjs tests/updates.spec.mjs tests/harnesses.spec.mjs",
-    "build": "npm run bundle:ui && npm run prepare-sidecar && tauri build",
-    "dev": "npm run bundle:ui && npm run prepare-sidecar && tauri dev"
+    "build": "tauri build",
+    "dev": "tauri dev"
   },
   "keywords": [],
   "author": "",

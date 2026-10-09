@@ -2,10 +2,13 @@
 # versions and lints. The product is this workspace, the page and the two
 # harness extensions: the Node code it replaced moved here module by module
 # (decided 2026-10-04) and was deleted at step 4 (the plan is in the
-# consensflow-sme brain).
+# consensflow-sme brain). `tools/*` is what builds, tests and releases it
+# (`cargo xtask`, `cf-release`): neither depends on the app, the daemon, the
+# engine, the ledger or the harness, so both build with no staged resources
+# and no GUI toolchain.
 [workspace]
 resolver = "2"
-members = ["app/src-tauri", "crates/*"]
+members = ["app/src-tauri", "crates/*", "tools/*"]
 
 [workspace.package]
 version = "3.0.0-alpha.83"
@@ -29,6 +32,7 @@ cf-codex-session = { path = "crates/cf-codex-session" }
 cf-daemon = { path = "crates/cf-daemon" }
 cf-ledger = { path = "crates/cf-ledger" }
 cf-launcher = { path = "crates/cf-launcher" }
+cf-release = { path = "tools/cf-release" }
 base64 = "0.22"
 bytes = "1"
 flate2 = "1"
@@ -59,6 +63,9 @@ libc = "0.2"
 memchr = "2"
 # A checked close, which std does not give (cf-base forbids unsafe code).
 nix = { version = "0.28", default-features = false }
+# Info.plist, read by the release tool that checks an update's bundle. Already
+# in the build, through Tauri.
+plist = "1"
 portable-pty = "0.9"
 regex = "1"
 # HTTPS for the harness feed (`cf-daemon`'s `screens::network`): rustls, so no
@@ -80,6 +87,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order", "float_roundtrip"] }
 sha2 = "0.10"
 subtle = "2"
+# Archives, read and written by the tools (an update's tar.gz, the portable exe's
+# runtime). Already in the build, through the app.
+tar = "0.4"
 tempfile = "3"
 thiserror = "2"
 # One thread, as Node is: a crate adds the features it needs. Only the Codex
@@ -96,6 +106,10 @@ url = "2"
 windows-sys = "0.61"
 # A file's index on Windows, the identity std keeps unstable, with no unsafe of ours.
 winapi-util = "0.1"
+# The console host's NuGet package is a zip, deflated. Only that codec, through
+# flate2, which is in the build already: the `deflate` feature adds zopfli and
+# zlib-rs, which nothing here needs.
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

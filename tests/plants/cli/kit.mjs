@@ -21,12 +21,12 @@ export const PROCESS = cargo('-p', 'cf', '--test', 'standalone')
 /** The library as a caller other than `main` has it: what no process can bring to it. */
 export const LIBRARY = cargo('-p', 'cf', '--test', 'dispatch')
 /** The suites of the CLI against the native `cf`, built from the sources as they are. */
-export const CLIS = [process.execPath, 'tests/clis.mjs', '--offline']
+export const CLIS = ['cargo', 'xtask', 'test', 'clis', '--offline']
 
 export const STANDALONE = 'crates/cf/src/standalone'
 
 /** The native `cf` of bin/, built from the sources as they are: what the test scripts below run. */
-export const BUILD = [process.execPath, 'app/scripts/build-cf.mjs', '--offline']
+export const BUILD = ['cargo', 'xtask', 'build-cf', '--offline']
 /** `cf ui` as a process: the daemon, in a home that has a leftover `use-node` file or none, and a window's token the board. */
 export const UI = cargo('-p', 'cf', '--test', 'daemon_stop')
 /** How a program starts here, an npm shim with no Node to run on among them. */
@@ -56,4 +56,4 @@ export const LAUNCHER = cargo('-p', 'cf-launcher')
 /** What the repair leaves as it is, and says (cargo stops at the first test binary that fails, so the whole crate may not reach it). */
 export const HOLDS = cargo('-p', 'cf-launcher', '--test', 'repair_holds')
 /** The app crate's tests, which `npm run test:app` runs where the app cannot be built as it ships. */
-export const APP = [process.execPath, 'tests/app-tests.mjs']
+export const APP = ['cargo', 'xtask', 'app', 'test']

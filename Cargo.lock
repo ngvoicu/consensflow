@@ -579,6 +579,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cf-release"
+version = "3.0.0-alpha.83"
+dependencies = [
+ "cf-base",
+ "flate2",
+ "plist",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "cfb"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5660,6 +5674,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "xtask"
+version = "3.0.0-alpha.83"
+dependencies = [
+ "cf-base",
+ "cf-process",
+ "cf-release",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.20",
+ "zip",
+]
+
+[[package]]
 name = "yoke"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5750,6 +5777,7 @@ checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
 dependencies = [
  "arbitrary",
  "crc32fast",
+ "flate2",
  "indexmap 2.14.0",
  "memchr",
 ]

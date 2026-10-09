@@ -36,6 +36,7 @@ import { PLANTS as FEEDS } from './release/feeds.mjs'
 import { BUILT_PROOF } from './release/kit.mjs'
 import { PLANTS as PORTABLE } from './release/portable.mjs'
 import { PLANTS as PUBLISH } from './release/publish.mjs'
+import { PLANTS as TOOLING } from './release/tooling.mjs'
 import { PLANTS as UPDATER } from './release/updater.mjs'
 import { PLANTS as WORKFLOW } from './release/workflow.mjs'
 
@@ -44,7 +45,7 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const RUN_LIMIT = 10 * 60 * 1000
 
 /** Every plant, by area. */
-const PLANTS = [...FEEDS, ...PUBLISH, ...WORKFLOW, ...PORTABLE, ...AGENTS, ...UPDATER]
+const PLANTS = [...FEEDS, ...PUBLISH, ...WORKFLOW, ...PORTABLE, ...AGENTS, ...UPDATER, ...TOOLING]
 
 const args = process.argv.slice(2)
 const words = args.filter((arg) => !arg.startsWith('--'))
@@ -246,11 +247,10 @@ for (const plant of chosen) {
 rmSync(saved, { recursive: true, force: true })
 if (built) {
   process.stdout.write('the native cf of bin/ is built again from the sources as they are\n')
-  const again = spawnSync(
-    process.execPath,
-    [join(REPO, 'app', 'scripts', 'build-cf.mjs'), '--offline'],
-    { cwd: REPO, stdio: 'inherit' },
-  )
+  const again = spawnSync('cargo', ['xtask', 'build-cf', '--offline'], {
+    cwd: REPO,
+    stdio: 'inherit',
+  })
   if (again.status !== 0) wrong += 1
 }
 process.stdout.write(`${chosen.length - wrong} of ${chosen.length} plants caught\n`)

@@ -6,7 +6,7 @@
  * of the agents screens (`npm run plants:release`) run. The packaged smoke runs
  * the same proof against the daemon a built app started (`npm run smoke`).
  *
- *   node tests/agents-daemons.mjs [--offline]
+ *   cargo xtask test agents [--offline]
  */
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'

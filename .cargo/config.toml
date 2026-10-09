@@ -2,3 +2,8 @@
 # release workflows and the portable build read app/src-tauri/target.
 [build]
 target-dir = "app/src-tauri/target"
+
+# `cargo xtask <command>`: the build, test and release tooling (tools/xtask),
+# from any folder of the checkout.
+[alias]
+xtask = ["run", "--locked", "--quiet", "--package", "xtask", "--bin", "xtask", "--"]

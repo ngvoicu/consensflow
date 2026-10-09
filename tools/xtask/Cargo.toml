@@ -1,0 +1,39 @@
+[package]
+name = "xtask"
+description = "ConsensFlow's build, test and driver commands: `cargo xtask <command>`."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+# What the tests start where xtask starts `node`, `cargo` or `npm`: it says where
+# it was started and with what, and ends as the environment tells it. Not behind a
+# feature, on purpose: a feature of this package that only the tests turn on would
+# build `xtask` again for them, and `cargo xtask check` runs those tests while the
+# one built for it is running, which Windows does not let a build replace.
+[[bin]]
+name = "fake-child"
+path = "src/bin/fake_child.rs"
+
+[dependencies]
+# The environment, read once in `main` and handed to whatever starts a program.
+cf-base.workspace = true
+# Where a command is on the PATH, with the extensions Windows starts programs by.
+cf-process.workspace = true
+thiserror.workspace = true
+# What the landings that port the scripts use, named here already so that none
+# of them touches the lockfile: S1 the console host's package (its SHA-256 and
+# its zip), S2 and the drivers the sources' version.
+cf-release.workspace = true
+sha2.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

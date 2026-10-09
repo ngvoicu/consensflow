@@ -6,7 +6,7 @@
  * none for any verb, and is named no runtime, so one that handed a verb to Node
  * would fail.
  *
- *   node tests/clis.mjs [--offline]
+ *   cargo xtask test clis [--offline]
  */
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'

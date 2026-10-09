@@ -94,11 +94,10 @@ let built = false
 function rebuild() {
   if (!built) return true
   built = false
-  const again = spawnSync(
-    process.execPath,
-    [join(REPO, 'app', 'scripts', 'build-cf.mjs'), '--offline'],
-    { cwd: REPO, encoding: 'utf8' },
-  )
+  const again = spawnSync('cargo', ['xtask', 'build-cf', '--offline'], {
+    cwd: REPO,
+    encoding: 'utf8',
+  })
   if (again.status !== 0) {
     process.stdout.write(
       `the native cf of bin/ is not built again:\n${again.stdout}${again.stderr}\n`,

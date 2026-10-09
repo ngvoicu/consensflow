@@ -16,9 +16,9 @@ export const PUBLISH = test('tests/publish.test.mjs', 'tests/release-publish.tes
 /** The workflow's own text: who may publish, and the steps that call the scripts. */
 export const WORKFLOW = test('tests/release-publish.test.mjs', 'tests/workflow-scripts.test.mjs')
 /** The proof of the agents screens against the native daemon, built from the sources as they are. */
-export const BUILT_PROOF = node('tests/agents-daemons.mjs', '--offline')
+export const BUILT_PROOF = ['cargo', 'xtask', 'test', 'agents', '--offline']
 /** The app crate's tests of the portable app's collector, built as a worktree can build it. */
-export const PORTABLE = node('tests/app-tests.mjs', 'portable::')
+export const PORTABLE = ['cargo', 'xtask', 'app', 'test', 'portable::']
 
 /** The updater smoke's readers of evidence (processes, daemon, ledger), and of the terminal command. */
 export const EVIDENCE = test('tests/updater-smoke-evidence.test.mjs')
@@ -26,7 +26,7 @@ export const LAUNCHERS = test('tests/updater-smoke-launchers.test.mjs')
 /** What the smoke is made of apart from the apps: its versions, keys, feed and bundles. */
 export const SMOKE_KIT = test('tests/updater-smoke-kit.test.mjs')
 /** The smoke on the apps it builds or takes, as `npm run smoke:updater` is. */
-export const smoke = (...args) => node('tests/smoke-updater.mjs', ...args)
+export const smoke = (...args) => ['cargo', 'xtask', 'smoke-updater', ...args]
 
 /** The test of a release run again after a later one went out: the feed it left alone must stay. */
 export const RERUN = 'leaves feed-alpha at alpha.82 when alpha.81'

@@ -16,10 +16,10 @@ export const BUILD_STEPS = [
   'npm ci --no-audit --no-fund',
   'npm ci --prefix app --no-audit --no-fund',
   'npm --prefix app run bundle:ui',
-  'npm --prefix app run prepare-sidecar',
+  'cargo xtask stage',
   'npm run build:bridge',
   // The console host the app ships, beside the pane host, as the app has it.
-  'node app/scripts/conpty.mjs --into app/src-tauri/target/release',
+  'cargo xtask conpty --into app/src-tauri/target/release',
 ]
 
 /**
