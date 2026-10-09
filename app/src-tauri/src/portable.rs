@@ -1,25 +1,17 @@
 //! The portable Windows app is one file: the app's own exe, then the runtime
 //! it needs (the `cf` the daemon and every window run, and the terminals'
-//! console host) as a payload, then a footer that finds it.
-//! `app/scripts/portable.mjs` packs it; this module reads and unpacks it. The
-//! layout, written down here once:
+//! console host) as a payload, then a footer that finds it. The layout is
+//! written down once, in `cf-portable`, which packs the file, reads its footer
+//! and unpacks its payload; this module decides where the runtime is kept and
+//! looks after it there.
 //!
-//! ```text
-//! ConsensFlow_<version>_x64-portable.exe
-//!   the built ConsensFlow.exe, byte for byte
-//!   the payload: a gzip-compressed tar of cli/ (its bin/cf.exe), conpty.dll,
-//!     OpenConsole.exe and OpenConsole-LICENSE.txt
-//!   the footer, 16 bytes: the payload's length in bytes, as an unsigned
-//!     64-bit little-endian integer, then the tag "CFPAYLD1"
-//! ```
-//!
-//! An exe that ends with the tag carries its runtime; one that does not (the
-//! installed app, the Mac's) finds its runtime beside it, as before. The
-//! first start unpacks the payload into `<root>/<version>-<crc>`, the crc
-//! being the CRC32 of the tar, in eight hex digits, from the gzip trailer: a
-//! folder per build, which every later start reuses once the marker written
-//! last into it says it is complete. gzip's own CRC checks the payload as it
-//! is unpacked.
+//! An exe that carries no runtime (the installed app, the Mac's) finds its
+//! runtime beside it, as before. The first start of one that does unpacks the
+//! payload into `<root>/<version>-<crc>` ([`Payload::folder`]), the crc being
+//! the CRC32 of the tar, in eight hex digits, from the gzip trailer: a folder
+//! per build, which every later start reuses once the marker written last into
+//! it says it is complete. gzip's own CRC checks the payload as it is
+//! unpacked.
 //!
 //! `<root>` is [`RUNTIME_PARENT`] under the app's local data folder
 //! (`%LOCALAPPDATA%\<identifier>`). The apps before the flip release kept
@@ -32,19 +24,13 @@
 //! is.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
-use flate2::read::GzDecoder;
+use cf_portable::Payload;
 
-/// The footer's tag: the last eight bytes of an exe that carries its runtime.
-const TAG: &[u8; 8] = b"CFPAYLD1";
-/// The footer: the payload's length, then the tag.
-const FOOTER_BYTES: u64 = 16;
-/// The smallest gzip stream there is: its header and its trailer.
-const SMALLEST_GZIP: u64 = 18;
 /// Written last into a runtime folder: everything else is there.
 const MARKER: &str = ".unpacked";
 /// Where, under the app's local data folder, the runtimes are unpacked: not
@@ -60,54 +46,6 @@ const RUNTIME_PARENT: &str = "portable-runtime";
 /// stays as one whose `cf.exe` does. Dropped when no flip release can be
 /// running.
 const PROGRAMS: [&[&str]; 2] = [&["node.exe"], &["cli", "bin", "cf.exe"]];
-
-/// Where an exe carries its runtime.
-#[derive(Debug, PartialEq)]
-struct Payload {
-    offset: u64,
-    length: u64,
-    /// The CRC32 of the tar inside, from the gzip trailer.
-    crc: u32,
-}
-
-impl Payload {
-    /// The payload `file` carries, read from its footer; `None` when it does
-    /// not end with the tag.
-    fn find(file: &mut File) -> io::Result<Option<Self>> {
-        let size = file.metadata()?.len();
-        if size < FOOTER_BYTES {
-            return Ok(None);
-        }
-        let mut footer = [0; FOOTER_BYTES as usize];
-        file.seek(SeekFrom::Start(size - FOOTER_BYTES))?;
-        file.read_exact(&mut footer)?;
-        let (length, tag) = footer.split_at(8);
-        if tag != TAG {
-            return Ok(None);
-        }
-        let length = u64::from_le_bytes(length.try_into().expect("eight bytes"));
-        if length < SMALLEST_GZIP || length > size - FOOTER_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("its footer names {length} bytes of payload in a file of {size}"),
-            ));
-        }
-        let offset = size - FOOTER_BYTES - length;
-        let mut crc = [0; 4];
-        file.seek(SeekFrom::Start(offset + length - 8))?;
-        file.read_exact(&mut crc)?;
-        Ok(Some(Self {
-            offset,
-            length,
-            crc: u32::from_le_bytes(crc),
-        }))
-    }
-
-    /// The runtime folder's name: this version's, and this payload's.
-    fn folder(&self, version: &str) -> String {
-        format!("{version}-{:08x}", self.crc)
-    }
-}
 
 /// The runtime `exe` carries, unpacked under `local_data`'s
 /// [`RUNTIME_PARENT`] by its first start and reused by every later one;
@@ -148,7 +86,9 @@ fn unpack(file: &mut File, payload: &Payload, root: &Path, folder: &Path) -> io:
     let staging = tempfile::Builder::new()
         .prefix(".unpacking-")
         .tempdir_in(root)?;
-    let unpacked = extract(file, payload, staging.path())
+    let unpacked = payload
+        .extract(file, staging.path())
+        .map_err(io::Error::from)
         .and_then(|()| File::create(staging.path().join(MARKER)).map(drop));
     if let Err(error) = unpacked {
         return if complete(folder) { Ok(()) } else { Err(error) };
@@ -190,29 +130,6 @@ fn place(staged: &Path, folder: &Path) -> io::Result<()> {
             placed => return placed,
         }
     }
-}
-
-/// The payload's tar, into `into`: its files and folders, nothing else.
-/// Reading the gzip stream to its end checks its CRC, which unpacking alone
-/// would not: tar stops reading at the archive's end marker.
-fn extract(file: &mut File, payload: &Payload, into: &Path) -> io::Result<()> {
-    file.seek(SeekFrom::Start(payload.offset))?;
-    let mut archive = tar::Archive::new(GzDecoder::new(file.by_ref().take(payload.length)));
-    for entry in archive.entries()? {
-        let mut entry = entry?;
-        let kind = entry.header().entry_type();
-        if kind.is_pax_global_extensions() {
-            continue;
-        }
-        if !(kind.is_file() || kind.is_dir()) || !entry.unpack_in(into)? {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "the payload holds a link, or a path outside its folder",
-            ));
-        }
-    }
-    io::copy(&mut archive.into_inner(), &mut io::sink())?;
-    Ok(())
 }
 
 /// Every runtime under `root` but `keep` goes, best effort: an older one, and
@@ -285,5 +202,7 @@ pub(crate) fn find_libraries_in(runtime: &Path) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod named;
 #[cfg(test)]
 mod tests;

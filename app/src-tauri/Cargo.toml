@@ -20,7 +20,9 @@ cf-panes.workspace = true
 # The environment the app runs in, and the terminal's command repaired at the start.
 cf-base.workspace = true
 cf-launcher.workspace = true
-tauri = { version = "2.11.3", features = [] }
+# The portable exe's format, which the app reads and unpacks at its start.
+cf-portable.workspace = true
+tauri ={ version = "2.11.3", features = [] }
 tauri-plugin-dialog = "2.7.3"
 tauri-plugin-updater = "~2.11.0"
 semver = "1"

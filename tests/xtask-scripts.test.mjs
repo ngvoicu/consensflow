@@ -63,7 +63,7 @@ describe('the app package.json', () => {
       {
         'prepare-sidecar': 'cargo xtask stage',
         'prepare:app': 'npm run bundle:ui && npm run prepare-sidecar',
-        portable: 'cargo xtask portable',
+        portable: 'cargo xtask portable pack',
         build: 'tauri build',
         dev: 'tauri dev',
       },

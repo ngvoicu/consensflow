@@ -38,7 +38,7 @@ const STAND_IN_NODE =
 const DAEMON_COMMAND = 'app/src-tauri/src/daemon_command.rs'
 const UPDATE_INSTALL = 'app/src-tauri/src/update_install.rs'
 const RELEASE_BUNDLE_RS = 'tools/cf-release/src/update/bundle.rs'
-const PORTABLE_MJS = 'app/scripts/portable.mjs'
+const PORTABLE_PACK_RS = 'crates/cf-portable/src/pack.rs'
 const CONSOLE_JS = 'app/ui/core/console-text.js'
 
 /** The app's tests of the module they are about. */
@@ -295,13 +295,14 @@ export const PLANTS = [
     name: 'deletion: the portable exe is packed with a node.exe again',
     edits: [
       [
-        PORTABLE_MJS,
-        "const RUNTIME = ['cli', 'conpty.dll', 'OpenConsole.exe', 'OpenConsole-LICENSE.txt']",
-        "const RUNTIME = ['node.exe', 'cli', 'conpty.dll', 'OpenConsole.exe', 'OpenConsole-LICENSE.txt']",
+        PORTABLE_PACK_RS,
+        lines('const RUNTIME: [&str; 4] = [', '    "cli",'),
+        lines('const RUNTIME: [&str; 5] = [', '    "node.exe",', '    "cli",'),
       ],
     ],
     runs: [PORTABLE_PACK],
-    meant: 'is the app, then its runtime as a gzip-compressed tar, then the length and the tag',
+    meant:
+      'a_packed_exe_is_the_app_then_its_runtime_as_a_gzip_compressed_tar_then_the_length_and_the_tag',
   },
   {
     name: 'deletion: the release does not ask the bundled cf its version',

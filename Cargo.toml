@@ -32,6 +32,7 @@ cf-codex-session = { path = "crates/cf-codex-session" }
 cf-daemon = { path = "crates/cf-daemon" }
 cf-ledger = { path = "crates/cf-ledger" }
 cf-launcher = { path = "crates/cf-launcher" }
+cf-portable = { path = "crates/cf-portable" }
 cf-release = { path = "tools/cf-release" }
 base64 = "0.22"
 bytes = "1"
