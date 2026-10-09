@@ -61,7 +61,8 @@ jobs:
       # The daemon's suites and the rig's against the native cf ui.
       - run: npm run test:daemons
         timeout-minutes: 20
-      # The CLI's suites against the native cf, which answers every verb.
+      # The CLI's suites (the cli test of crates/cf-e2e, which builds the native
+      # cf it runs) against the native cf, which answers every verb.
       - run: npm run test:clis
         timeout-minutes: 15
       # The app's own tests. On Windows the library's test binary carries the

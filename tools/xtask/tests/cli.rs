@@ -118,7 +118,7 @@ fn the_exit_status_of_what_it_ran_is_its_own() {
             &checkout(),
             node.path(),
             &[("FAKE_CHILD_EXIT", &said)],
-            &["test", "clis"],
+            &["test", "daemons"],
         );
         assert_eq!(ran.status.code(), Some(status), "{}", err(&ran));
         // What the child wrote is its own to write: nothing of xtask's is added on a failure.

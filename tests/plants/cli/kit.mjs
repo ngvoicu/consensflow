@@ -20,7 +20,10 @@ export const UNITS = cargo('-p', 'cf', '--lib', 'standalone')
 export const PROCESS = cargo('-p', 'cf', '--test', 'standalone')
 /** The library as a caller other than `main` has it: what no process can bring to it. */
 export const LIBRARY = cargo('-p', 'cf', '--test', 'dispatch')
-/** The suites of the CLI against the native `cf`, built from the sources as they are. */
+/**
+ * The suites of the CLI (the `cli` test of crates/cf-e2e) against the native `cf`,
+ * which they build from the sources as they are, in the build folder: `bin/` is not touched.
+ */
 export const CLIS = ['cargo', 'xtask', 'test', 'clis', '--offline']
 
 export const STANDALONE = 'crates/cf/src/standalone'

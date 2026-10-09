@@ -10,8 +10,9 @@ import { fileURLToPath } from 'node:url'
  * implementation there is: `cf ui --json --no-open` is the daemon, and the
  * product chooses nothing (the flip release sent a home to Node by a `use-node`
  * file, and the app that ships no Node reads none). `CONSENSFLOW_TEST_DAEMON`
- * and `CONSENSFLOW_TEST_CLI` can name another build of it, each in the same
- * words:
+ * can name another build of it, in these words (the suites of the CLI, which
+ * `CONSENSFLOW_TEST_CLI` named another build for, are Rust's now: crates/cf-e2e
+ * builds the `cf` it runs, and chooses nothing):
  *
  *   native    the native `cf` this checkout builds: what nothing at all selects too
  *   [...]     a JSON array of strings, a command and its arguments
