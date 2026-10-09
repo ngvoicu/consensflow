@@ -246,3 +246,26 @@ describe('the script as the machine is sent it', () => {
     )
   })
 })
+
+describe('the build a Windows run starts with', () => {
+  it('stages the bundle and fetches the console host through cargo xtask, not through the scripts', () => {
+    assert.ok(BUILD_STEPS.includes('cargo xtask stage'))
+    assert.ok(BUILD_STEPS.includes('cargo xtask conpty --into app/src-tauri/target/release'))
+    for (const step of BUILD_STEPS) {
+      assert.doesNotMatch(step, /app\/scripts\/(conpty|prepare-sidecar|build-cf|portable)/, step)
+      assert.doesNotMatch(step, /prepare-sidecar/, step)
+    }
+  })
+
+  it('keeps the page before the bundle it is staged into, and the pane host before the console host beside it', () => {
+    const at = (step) => BUILD_STEPS.indexOf(step)
+    assert.ok(at('npm --prefix app run bundle:ui') < at('cargo xtask stage'))
+    assert.ok(
+      at('npm run build:bridge') < at('cargo xtask conpty --into app/src-tauri/target/release'),
+    )
+  })
+
+  it('is a line the machine’s shell reads whole, as the lines of the other steps are', () => {
+    for (const step of BUILD_STEPS) assert.equal(commandLine(step.split(' ')), step)
+  })
+})

@@ -9,7 +9,7 @@
  * re-plan, a tell and a cancel, a window with no login whose screen the
  * failure quotes).
  *
- *   node tests/daemons.mjs [--offline]
+ *   cargo xtask test daemons [--offline]
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'

@@ -4,7 +4,12 @@
   "version": "3.0.0-alpha.83",
   "identifier": "dev.ngvoicu.consensflow",
   "build": {
-    "frontendDist": "../ui"
+    "frontendDist": "../ui",
+    "beforeBuildCommand": "npm run prepare:app",
+    "beforeDevCommand": {
+      "script": "npm run prepare:app",
+      "wait": true
+    }
   },
   "app": {
     "withGlobalTauri": true,

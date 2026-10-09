@@ -1,0 +1,25 @@
+[package]
+name = "cf-release"
+description = "The release's steps as one command: the version the sources agree on, an update's feed entry, and the Developer ID signing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+# The environment, read once in `main` and handed to whatever starts a program.
+cf-base.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# What `prepare-update` reads (the update's tar.gz, its hashes, Info.plist): named
+# here already, so that landing leaves the lockfile alone.
+flate2.workspace = true
+plist.workspace = true
+sha2.workspace = true
+tar.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
