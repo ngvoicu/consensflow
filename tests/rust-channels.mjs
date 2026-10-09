@@ -5,9 +5,11 @@ import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * The channels of `crates/cf-harness` in Rust, as the suites that hold them
- * call them: each function here runs one channel through a test binary, built
- * once, on the machine's own clock, randomness, processes and loopback.
+ * `crates/cf-harness` as the JavaScript suites that stay call it: Pi's channel
+ * (`rustPi`), for the tests of the Pi extension, and the test binaries those
+ * and `tests/rust-harness.mjs` run, built once (`build`) and asked (`ask`), on
+ * the machine's own clock, randomness and processes. The other channels' cases
+ * are Rust tests (`crates/cf-harness/tests/channels`).
  */
 
 /** Why the cases against Rust do not run, or false: a machine without cargo cannot build the test binaries. */
@@ -111,51 +113,30 @@ function paneHost(target) {
 }
 
 /**
- * A question put to a test binary (`crates/cf-harness/src/bin/common/mod.rs`
- * says how): what it answered, or the failure it says JavaScript would have
- * thrown. What it asks of the pane host on the way is answered by `host` as it
- * asks, a host that throws as one that never answered.
+ * A question put to a test binary (`crates/cf-harness/src/bin/harness_ask.rs`
+ * says how): what it answered, which is the last line it wrote, or the failure
+ * it says JavaScript would have thrown.
  */
-export function ask(executable, question, host) {
+export function ask(executable, question) {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'inherit'] })
     let heard = ''
-    let last
-    const hear = (line) => {
-      const message = JSON.parse(line)
-      if (message.ask === undefined) {
-        last = message
-        return
-      }
-      const reply = (answer) => child.stdin.write(`${JSON.stringify(answer)}\n`)
-      host(message.ask.op, message.ask.body).then(
-        (answer) => reply({ answer }),
-        (cause) => reply({ throws: cause.message, error: cause.error }),
-      )
-    }
     child.on('error', reject)
     child.stdin.on('error', reject)
     child.stdout.setEncoding('utf8')
     child.stdout.on('data', (chunk) => {
       heard += chunk
-      try {
-        for (let end = heard.indexOf('\n'); end !== -1; end = heard.indexOf('\n')) {
-          const line = heard.slice(0, end)
-          heard = heard.slice(end + 1)
-          hear(line)
-        }
-      } catch (cause) {
-        reject(cause)
-      }
     })
     child.on('close', (code) => {
-      if (last === undefined) {
+      let last
+      try {
+        last = JSON.parse(heard.trimEnd().split('\n').at(-1))
+      } catch {
         reject(new Error(`${executable} ended with ${code} and said ${JSON.stringify(heard)}`))
-      } else if (last.threw !== undefined) {
-        reject(new Error(last.threw))
-      } else {
-        resolve(last.answered)
+        return
       }
+      if (last.threw !== undefined) reject(new Error(last.threw))
+      else resolve(last.answered)
     })
     child.stdin.write(`${JSON.stringify(question)}\n`)
   })
@@ -201,78 +182,6 @@ export function rustPi() {
       })
       if (answered.threw !== undefined) throw new Error(answered.threw)
       return answered
-    },
-  }
-}
-
-/** Codex's channel, through `codex-send`: a send, and the broker's word on the window. */
-export function rustCodex() {
-  const executable = build('codex-send')
-  return {
-    send: (target, text) => {
-      const { launchId, sessionBridge } = target.launch
-      return ask(
-        executable,
-        {
-          op: 'send',
-          channel: { launchId, sessionBridge },
-          session: target.session,
-          pane: target.pane,
-          generation: target.generation,
-          text,
-        },
-        paneHost(target),
-      )
-    },
-    sessionState: async ({ launchId, sessionBridge }) =>
-      (await ask(executable, { op: 'shown', channel: { launchId, sessionBridge } })) ?? undefined,
-  }
-}
-
-/**
- * OpenCode's channel, through `opencode-channel`. A `timeoutMs` is carried
- * (a window's are 15 s to create a session and 60 s to seed one); no caller
- * can cancel a seed, so a `signal` is not.
- */
-export function rustOpenCode() {
-  const executable = build('opencode-channel')
-  return {
-    send: (target, text) => {
-      const { launchId, sessionBridge } = target.launch.channel
-      return ask(
-        executable,
-        {
-          op: 'send',
-          channel: { launchId, sessionBridge },
-          session: target.session,
-          pane: target.pane,
-          generation: target.generation,
-          text,
-        },
-        paneHost(target),
-      )
-    },
-    createSession: ({ executable: opencode, cwd, env, configuration, timeoutMs }) =>
-      ask(executable, {
-        op: 'create',
-        executable: opencode,
-        directory: cwd,
-        env,
-        configuration,
-        timeoutMs,
-      }),
-    seedSession: async ({ channel, sessionId, cwd, text, model, variant, resume, timeoutMs }) => {
-      await ask(executable, {
-        op: 'seed',
-        channel,
-        session: sessionId,
-        directory: cwd,
-        text,
-        model,
-        variant,
-        resume,
-        timeoutMs,
-      })
     },
   }
 }

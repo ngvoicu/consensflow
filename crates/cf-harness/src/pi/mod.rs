@@ -9,7 +9,9 @@ pub(crate) mod paths;
 pub mod record;
 
 pub use adapter::PiAdapter;
-// What `pi-send` plays the channel's cases through (`src/bin/pi_send.rs`).
+// What the channel's cases against the system's own clock call
+// (`tests/channels/contract.rs`), and what `pi-send` plays the Pi extension's
+// tests through (`src/bin/pi_send.rs`).
 #[cfg(feature = "test-support")]
 pub use channel::{send, Answer, Target};
 pub use install::{prepare_extension, Extension};

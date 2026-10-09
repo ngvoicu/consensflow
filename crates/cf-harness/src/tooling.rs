@@ -47,9 +47,8 @@ pub fn answer(question: &Value) -> Result<Value, String> {
     }
 }
 
-/// A text field of `object`: how the test binaries (`src/bin`) read the
-/// question they are put.
-pub fn text<'a>(object: &'a Value, name: &str) -> Result<&'a str, String> {
+/// A text field of `object`: how a question is read.
+fn text<'a>(object: &'a Value, name: &str) -> Result<&'a str, String> {
     object
         .get(name)
         .and_then(Value::as_str)

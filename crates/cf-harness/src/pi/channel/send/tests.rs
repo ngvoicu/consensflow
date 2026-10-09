@@ -3,8 +3,9 @@
 //! verdict and each failure after the hand-over make of the answer
 //! (`verdicts`), and what is refused before it (`refusals`). Node's
 //! `tests/pi-message.test.mjs` holds the same channel against the real
-//! extension on the machine's own clock (and against this one's build,
-//! through `pi-send`).
+//! extension on the machine's own clock (through `pi-send`), and
+//! `tests/channels/contract.rs` its rows of the delivery contract against a
+//! stand-in for the extension.
 
 mod record;
 mod refusals;

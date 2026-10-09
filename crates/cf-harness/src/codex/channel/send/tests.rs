@@ -2,8 +2,8 @@
 //! test moves it: what is asked of the pane host and of the broker and in
 //! what order (here), what is refused before either is asked and what the
 //! deadline leaves (`refusals`), and what each reply of the broker makes of
-//! the message (`verdicts`). `tests/codex-channel.test.mjs` holds the same
-//! channel against a broker of its own on the machine's clock.
+//! the message (`verdicts`). `tests/channels/codex.rs` holds the same channel
+//! against a broker of its own on the machine's clock.
 
 mod refusals;
 mod verdicts;

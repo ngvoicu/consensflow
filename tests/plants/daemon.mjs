@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PLANTS as BOARD } from './daemon/board.mjs'
+import { PLANTS as CHANNELS } from './daemon/channels.mjs'
 import { PLANTS as CLAUDE_REST } from './daemon/claude-rest.mjs'
 import { PLANTS as CONSTANTS } from './daemon/constants.mjs'
 import { PLANTS as DECIDED } from './daemon/decided.mjs'
@@ -69,6 +70,7 @@ const PLANTS = [
   ...CLAUDE_REST,
   ...TAKEN_BACK,
   ...BOARD,
+  ...CHANNELS,
 ]
 
 const args = process.argv.slice(2)

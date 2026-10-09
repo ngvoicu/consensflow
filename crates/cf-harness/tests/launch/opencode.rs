@@ -1,19 +1,19 @@
 //! OpenCode's adapter and its channel, as Node's OpenCode adapter and install
-//! suites, `tests/opencode-launch.test.mjs` and the OpenCode cases of its
-//! role-skills suite held them (TEST-BDC-05, IMPL-BDC-07), each case under its
-//! sentence: how an OpenCode window is launched, the conversation made for it
-//! first, its first message through its own server, how a message reaches it
-//! through the plugin, what the plugin says of the window, and what is made for
-//! it to load. Each test gets a throwaway home and a stand-in `opencode` on
-//! PATH.
+//! suites, its launch suite and the OpenCode cases of its role-skills suite held
+//! them (TEST-BDC-05, IMPL-BDC-07), each case under its sentence: how an
+//! OpenCode window is launched, the conversation made for it first, its first
+//! message through its own server, how a message reaches it through the plugin,
+//! what the plugin says of the window, and what is made for it to load. Each
+//! test gets a throwaway home and a stand-in `opencode` on PATH.
 //!
 //! A window comes only from a prepare here, where Node's tests made up a
 //! launch bag: a test of a window on a known conversation prepares it as that
 //! conversation resumed. The servers are scripted by route
 //! (`ScriptedLoopback`), and the throwaway `serve` a scripted child. What Node
 //! ran as real children (a stand-in server that answered for real, a process
-//! checked to be gone) stays in Node; what a window passes its child is kept
-//! here by a wrapper of the scripted programs (`stage`).
+//! checked to be gone) is in `tests/channels`, on the system's own clock,
+//! loopback and processes; what a window passes its child is kept here by a
+//! wrapper of the scripted programs (`stage`).
 
 use std::path::Path;
 use std::rc::Rc;
