@@ -1,7 +1,7 @@
 //! The ways a pane host can answer a paste into a window, for the channels that
-//! are pasted (Claude Code and Devin). The other channels have a test binary
-//! each (`tests/delivery-contract.test.mjs` runs them); these have the rows of
-//! the same contract here.
+//! are pasted (Claude Code and Devin). The other channels have their rows of the
+//! contract in `tests/channels/contract.rs`, against servers of their own; these
+//! have the rows of the same contract here.
 
 use serde_json::{json, Value};
 

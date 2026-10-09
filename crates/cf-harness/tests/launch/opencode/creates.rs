@@ -1,9 +1,9 @@
-//! The conversation a fresh window opens on, as `describe('opencode
-//! createSession')` of `tests/opencode-launch.test.mjs` holds Node's: one
-//! empty session made on a throwaway `serve`, which is stopped before the id
-//! returns and on every failure. The throwaway server is scripted: what
-//! Node ran as a real child (a process checked to be gone, a stand-in server
-//! answering for real) is a scripted child whose end the test reads.
+//! The conversation a fresh window opens on, as Node's `describe('opencode
+//! createSession')` held it: one empty session made on a throwaway `serve`,
+//! which is stopped before the id returns and on every failure. The throwaway
+//! server is scripted: what Node ran as a real child (a process checked to be
+//! gone, a stand-in server answering for real) is a scripted child whose end the
+//! test reads. `tests/channels/create.rs` runs the same cases on a real child.
 
 use std::path::Path;
 

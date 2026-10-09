@@ -10,7 +10,7 @@ use cf_base::file::FileError;
 /// `path` with its links followed, as the system writes it, or why it could
 /// not be made, in Node's words (`ENOENT: no such file or directory,
 /// realpath '…'`).
-pub(super) fn real_path(path: &str) -> Result<String, String> {
+pub fn real_path(path: &str) -> Result<String, String> {
     let real = std::fs::canonicalize(path)
         .map_err(|failed| FileError::call(failed, "realpath", Some(Path::new(path))).to_string())?;
     let named = real.to_string_lossy();

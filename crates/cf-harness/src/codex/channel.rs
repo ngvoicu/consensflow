@@ -15,7 +15,7 @@ use crate::seams::loopback::{Loopback, Method, Request};
 use crate::seams::{arm, Time};
 
 pub use send::{send, Target};
-// For the binary that plays the channel's cases (`test-support`).
+// For the cases that call the channel directly (`test-support`).
 #[cfg(feature = "test-support")]
 pub use send::Answer;
 

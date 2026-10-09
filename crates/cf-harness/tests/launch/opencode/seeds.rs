@@ -5,7 +5,8 @@
 //! server's health answers, and never retried. A window has only the 60 s its
 //! adapter gives it, so what Node gave a short timeout runs here on the test's
 //! clock. The two cases of Node's that cancel the startup by a signal are not
-//! here: no adapter passes one.
+//! here: no adapter passes one. `tests/channels/seed.rs` runs the cases against
+//! a server on real sockets, on the machine's own clock.
 
 use std::rc::Rc;
 

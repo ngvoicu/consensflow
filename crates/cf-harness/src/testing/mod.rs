@@ -5,7 +5,10 @@
 //! that
 //! runs begun work until it waits on one of them. Nothing here starts a
 //! runtime: a wait an adapter makes on anything but these never ends, and
-//! the driver says so.
+//! the driver says so. The one thing here that is not a fake is `server`: a
+//! server on real sockets, for a test that holds a channel against the
+//! system's own clock, loopback and processes, and which runs in the runtime
+//! that test starts.
 //!
 //! Unit tests in `src/` name these `crate::testing::…`; the crate's own
 //! `tests/` and other crates reach them through the `test-support` feature.
@@ -34,6 +37,7 @@ mod admin;
 mod children;
 mod paste;
 mod peer;
+pub mod server;
 
 pub use admin::{
     Asked, BodyEnding, Delivery, Response, Said, ScriptedCapture, ScriptedLatest, ScriptedNetwork,

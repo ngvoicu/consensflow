@@ -16,7 +16,7 @@ use crate::contract::{LaunchId, Pane, PaneHost};
 use crate::shared::launch_files::launch_folder;
 
 pub use send::{send, Target};
-// For the binary that plays the channel's cases (`test-support`).
+// For the cases that call the channel (`test-support`).
 #[cfg(feature = "test-support")]
 pub use send::Answer;
 
