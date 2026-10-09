@@ -88,6 +88,12 @@ jobs:
 
       - run: npm ci
       - run: npm ci --prefix app
+      # The release's own tool (tools/cf-release), built here where no key is,
+      # and run by its path in the steps below. A step that holds a key never
+      # builds anything: `cargo run` there would build and run whatever the
+      # lockfile names with the key in reach. --locked: the lockfile's build, or none.
+      - name: Build the release tool
+        run: cargo build --release --locked -p cf-release
       # The page and the bundled cf, then the app and its DMG. No key is in
       # this step: a build runs every crate's build script and every tool the
       # lockfiles name.
@@ -129,10 +135,14 @@ jobs:
             -czf ConsensFlow.app.tar.gz ConsensFlow.app
           "$GITHUB_WORKSPACE/app/node_modules/.bin/tauri" signer sign ConsensFlow.app.tar.gz
 
+      # The tool built above reads the version the three sources agree on, and
+      # checks the bundle, the archive and the signature before it writes the
+      # feed's entry (tools/cf-release, `prepare-update`).
       - name: Notes, and the update feed for this build
         run: |
           set -euo pipefail
-          version=$(node -p "require('./package.json').version")
+          release_tool="$GITHUB_WORKSPACE/app/src-tauri/target/release/cf-release"
+          version=$("$release_tool" version)
           tag="v$version"
           bundle=app/src-tauri/target/release/bundle
           out="$RUNNER_TEMP/release"
@@ -157,7 +167,7 @@ jobs:
           cp "$bundle/macos/ConsensFlow.app.tar.gz.sig" "$out/$archive.sig"
           cp "$bundle/dmg/ConsensFlow_${version}_aarch64.dmg" "$out/"
           case "$version" in *-*) channel=alpha ;; *) channel=stable ;; esac
-          node app/scripts/prepare-update.mjs --repo "$PWD" \
+          "$release_tool" prepare-update --repo "$PWD" \
             --bundle "$bundle/macos/ConsensFlow.app" \
             --archive "$out/$archive" --signature "$out/$archive.sig" \
             --notes "$out/notes.txt" --output "$out/latest.json" \

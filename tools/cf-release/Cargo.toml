@@ -11,8 +11,9 @@ publish = false
 cf-base.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-# What `prepare-update` reads (the update's tar.gz, its hashes, Info.plist): named
-# here already, so that landing leaves the lockfile alone.
+# What `prepare-update` reads: the update's tar.gz, its hashes, Info.plist, and the
+# signature's outer base64.
+base64.workspace = true
 flate2.workspace = true
 plist.workspace = true
 sha2.workspace = true

@@ -5,3 +5,6 @@
 *.cmd text eol=crlf
 # The ledger's migrations are pinned byte for byte (crates/cf-ledger/src/schema.rs): never converted.
 crates/cf-ledger/migrations/*.sql -text
+# The files the script that made the update feed's entry read and wrote, which its Rust port is
+# held to byte for byte (notes with a byte order mark, a NEL and controls in them): never converted.
+tools/cf-release/tests/fixtures/** -text

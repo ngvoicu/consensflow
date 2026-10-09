@@ -37,7 +37,7 @@ const STAND_IN_NODE =
   '    fs::write(file.with_file_name("node.exe"), "").expect("a stand-in\'s node written");\n'
 const DAEMON_COMMAND = 'app/src-tauri/src/daemon_command.rs'
 const UPDATE_INSTALL = 'app/src-tauri/src/update_install.rs'
-const PREPARE_UPDATE = 'app/scripts/prepare-update.mjs'
+const RELEASE_BUNDLE_RS = 'tools/cf-release/src/update/bundle.rs'
 const PORTABLE_MJS = 'app/scripts/portable.mjs'
 const CONSOLE_JS = 'app/ui/core/console-text.js'
 
@@ -307,25 +307,25 @@ export const PLANTS = [
     name: 'deletion: the release does not ask the bundled cf its version',
     edits: [
       [
-        PREPARE_UPDATE,
-        '  if (version !== cfVersion) fail(`bundle and its cf versions differ: ${version} != ${cfVersion}`)\n',
-        '',
+        RELEASE_BUNDLE_RS,
+        '    if version != cf_version {',
+        '    if false && version != cf_version {',
       ],
     ],
     runs: [UPDATE_RELEASE],
-    meant: 'rejects a bundle whose plist and bundled cf disagree on the version',
+    meant: 'rejects_a_bundle_whose_plist_and_bundled_cf_disagree_on_the_version',
   },
   {
     name: 'deletion: the release asks for the package.json of a CLI again',
     edits: [
       [
-        PREPARE_UPDATE,
-        '    ["a window\'s cf", cf],\n  ]) {',
-        "    [\"a window's cf\", cf],\n    ['bundled CLI package', join(path, 'Contents', 'Resources', 'cli', 'package.json')],\n  ]) {",
+        RELEASE_BUNDLE_RS,
+        'for (what, required) in [("native executable", &binary), ("a window\'s cf", &cf)] {',
+        'for (what, required) in [("native executable", &binary), ("a window\'s cf", &cf), ("bundled CLI package", &path.join("Contents").join("Resources").join("cli").join("package.json"))] {',
       ],
     ],
     runs: [UPDATE_RELEASE],
-    meant: 'takes a bundle that ships nothing of Node’s: no package.json, cf.mjs, src or hosts',
+    meant: 'takes_a_bundle_that_ships_nothing_of_nodes',
   },
 
   {

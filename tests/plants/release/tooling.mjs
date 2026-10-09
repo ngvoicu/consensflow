@@ -104,8 +104,8 @@ export const PLANTS = [
       ],
       [
         'Cargo.lock',
-        'name = "cf-release"\nversion = "3.0.0-alpha.83"\ndependencies = [\n "cf-base",\n',
-        'name = "cf-release"\nversion = "3.0.0-alpha.83"\ndependencies = [\n "cf-base",\n "cf-harness",\n',
+        'name = "cf-release"\nversion = "3.0.0-alpha.83"\ndependencies = [\n "base64 0.22.1",\n "cf-base",\n',
+        'name = "cf-release"\nversion = "3.0.0-alpha.83"\ndependencies = [\n "base64 0.22.1",\n "cf-base",\n "cf-harness",\n',
       ],
     ],
     runs: [CLOSURE],

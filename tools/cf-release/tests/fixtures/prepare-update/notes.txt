@@ -1,0 +1,10 @@
+﻿  
+
+ConsensFlow 3.0.0-alpha.99, the changes since 3.0.0-alpha.98:
+
+- Fixes "delivery" races: a \ backslash, a tab	here, a trailing space 
+- Opens https://example.com/a?b=1&c=<2>#frag/ without escaping the slash
+- Unicode: café, 日本語, 😀, a line separator   and a paragraph one  
+- Controls: a bell , an escape  and a delete ; a NEL  stays inside
+	 
+
