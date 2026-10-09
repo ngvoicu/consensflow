@@ -180,16 +180,6 @@ mod tests {
     }
 
     #[test]
-    fn a_step_not_built_yet_says_so_and_fails() {
-        let (status, out, err) = answer("sign-mac");
-        assert_eq!((status, out.as_str()), (1, ""));
-        assert!(
-            err.starts_with("cf-release sign-mac: not built yet"),
-            "{err}"
-        );
-    }
-
-    #[test]
     fn a_step_that_is_built_refuses_arguments_it_does_not_take_as_a_usage_error() {
         let (status, out, err) = answer("prepare-update --url x");
         assert_eq!((status, out.as_str()), (2, ""));

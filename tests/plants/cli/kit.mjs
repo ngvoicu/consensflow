@@ -47,8 +47,8 @@ export const CONSOLE_TEXT = [process.execPath, '--test', 'tests/console-text.tes
 export const UPDATE_RELEASE = cargo('-p', 'cf-release', '--test', 'prepare_update')
 /** The portable exe's packing. */
 export const PORTABLE_PACK = [process.execPath, '--test', 'tests/portable.test.mjs']
-/** The Developer ID signing of the app: every Mach-O hardened, none entitled. */
-export const SIGN_MAC = [process.execPath, '--test', 'tests/sign-mac.test.mjs']
+/** The Developer ID signing of the app (`cf-release sign-mac`): every Mach-O hardened, none entitled. */
+export const SIGN_MAC = cargo('-p', 'cf-release', '--lib', 'sign_mac::')
 /** A verb of the native `cf` run outside a window, given its arguments whole (the build of bin/ first). */
 export const CF_NATIVE = [process.execPath, '--test', 'tests/integration/cf-native.test.mjs']
 /** The launcher's repair, which commands it rewrites and which it leaves. */

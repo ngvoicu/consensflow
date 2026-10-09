@@ -332,13 +332,13 @@ export const PLANTS = [
     name: 'deletion: the app is signed without the hardened runtime',
     edits: [
       [
-        'app/scripts/sign-mac.mjs',
-        "  codesign(app, signing, ['--options', 'runtime'])",
-        '  codesign(app, signing, [])',
+        'tools/cf-release/src/sign_mac/signing.rs',
+        '    codesign(tools, signing, app, &["--options", "runtime"])\n}',
+        '    codesign(tools, signing, app, &[])\n}',
       ],
     ],
     runs: [SIGN_MAC],
-    meant: 'signs every Mach-O of the app from the inside out, then makes the DMG again around it',
+    meant: 'an_ad_hoc_release_signs_the_code_then_the_app_then_makes_the_dmg_again_with_no_notary',
   },
   {
     name: 'deletion: a verb is given the first line of an argument',

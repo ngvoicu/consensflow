@@ -38,6 +38,7 @@ import { BUILT_PROOF } from './release/kit.mjs'
 import { PLANTS as PORTABLE } from './release/portable.mjs'
 import { PLANTS as PUBLISH } from './release/publish.mjs'
 import { PLANTS as SIDECAR } from './release/sidecar.mjs'
+import { PLANTS as SIGN_MAC } from './release/sign-mac.mjs'
 import { PLANTS as TOOLING } from './release/tooling.mjs'
 import { PLANTS as UPDATE } from './release/update.mjs'
 import { PLANTS as UPDATER } from './release/updater.mjs'
@@ -58,6 +59,7 @@ const PLANTS = [
   ...TOOLING,
   ...SIDECAR,
   ...UPDATE,
+  ...SIGN_MAC,
 ]
 
 const args = process.argv.slice(2)
