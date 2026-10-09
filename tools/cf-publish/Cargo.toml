@@ -1,0 +1,39 @@
+[package]
+name = "cf-publish"
+description = "The release's publisher, one binary: the update feeds' rule and its checks (`feeds plan|prerequisites|check`), and `publish`, which makes a version's release and moves its feeds through `gh`."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# The tests' kit: GitHub on this machine (`testing`), and a `gh` that asks it.
+# Off in the build the release workflow makes and runs under the write token;
+# the crate's own tests turn it on through the dev-dependency below.
+[features]
+test-support = []
+
+[[bin]]
+name = "cf-publish"
+path = "src/main.rs"
+
+# A `gh` that does what the simulator of GitHub tells it, for the tests that run
+# the workflow's steps as written: those find `gh` on their PATH.
+[[bin]]
+name = "fake-gh"
+path = "src/bin/fake_gh.rs"
+required-features = ["test-support"]
+
+# These two are the whole of what this crate is built with, and
+# tests/closure.rs holds the lockfile's closure of them to a list: this binary
+# runs where the repository's write token is. Nothing else may be added,
+# dev-dependencies included (Cargo.lock lists those too): the tests make their
+# own temporary folders, and the errors are written by hand.
+[dependencies]
+serde_json.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+cf-publish = { path = ".", features = ["test-support"] }
+
+[lints]
+workspace = true

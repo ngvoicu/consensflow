@@ -28,9 +28,10 @@
 # moves anything when they do not. Nothing deletes the release the old feeds
 # name. No run moves a feed backward: the job of a release that is run again
 # from the Actions page after a later one went out does what is left of it and
-# leaves a feed that names the later release as it is, and says so. The rule and
-# its checks are app/scripts/feeds.mjs's, the moving is app/scripts/publish.mjs's,
-# which a run that died is finished by running again.
+# leaves a feed that names the later release as it is, and says so. The rule, its
+# checks and the moving are cf-publish's (tools/cf-publish), which a run that died
+# is finished by running again; what runs under the repository's write token is
+# said at the jobs below, `publisher` and `publish`.
 name: Release
 
 on:
@@ -73,6 +74,14 @@ jobs:
       - name: The tag names the source version
         if: github.ref_type == 'tag'
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+      # The rule of the feeds is cf-publish's, the crate the publish job runs. It
+      # is built here by itself, with `--locked`, in a step that has no key in its
+      # environment (a build runs every build script the lockfile names), and
+      # called by its path below: it asks the questions that come before the
+      # build, and plans the feeds. The binary that publishes is the publisher
+      # job's.
+      - name: Build cf-publish, the rule of the feeds
+        run: cargo build --release --locked -p cf-publish
       # A release after the bridge finds out here, before an hour of building,
       # that the old feeds serve the bridge with its files; the publish job asks
       # again before it moves anything. A hand run says what a tag would be
@@ -82,7 +91,7 @@ jobs:
           set -euo pipefail
           dry=()
           if [ "$GITHUB_EVENT_NAME" != push ]; then dry=(--dry-run); fi
-          node app/scripts/feeds.mjs prerequisites \
+          app/src-tauri/target/release/cf-publish feeds prerequisites \
             --version "$(node -p "require('./package.json').version")" \
             --base "https://github.com/$GITHUB_REPOSITORY/releases/download" ${dry[@]+"${dry[@]}"}
 
@@ -177,7 +186,7 @@ jobs:
           # refuse, or a release before the bridge; a hand run says so instead.
           dry=()
           if [ "$GITHUB_EVENT_NAME" != push ]; then dry=(--dry-run); fi
-          node app/scripts/feeds.mjs plan --version "$version" \
+          app/src-tauri/target/release/cf-publish feeds plan --version "$version" \
             --archive "$out/$archive" ${dry[@]+"${dry[@]}"}
       - uses: actions/upload-artifact@v7
         with:
@@ -193,67 +202,125 @@ jobs:
   gate:
     uses: ./.github/workflows/ci.yml
 
+  # What runs under the repository's write token is built here, where there is no
+  # token and no secret, and does not run here: one binary of one crate,
+  # cf-publish (tools/cf-publish), built with `--locked` from Cargo.lock's
+  # versions of its two dependencies, serde_json and sha2, and what those bring,
+  # which tools/cf-publish/tests/closure.rs lists, so that a dependency added
+  # later fails the gate until someone has read it. The binary's SHA-256 is this
+  # job's output. Any job of a run can replace an artifact of it (the Mac job
+  # runs every build script and every tool the lockfiles name), but no job can
+  # forge another's output, and the publish job checks the binary it downloads
+  # against this one before it runs it.
+  #
+  # It runs on a hand run too, which publishes nothing: that is the trial of its
+  # build, its hash and its upload.
+  publisher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      # The whole tree: cargo reads the manifest of every member of the
+      # workspace. Only cf-publish's crate is built.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: rustup update stable --no-self-update && rustup default stable
+      - name: Build cf-publish, and say what it hashes to
+        id: build
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p cf-publish
+          sha256=$(shasum -a 256 app/src-tauri/target/release/cf-publish | cut -d' ' -f1)
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "cf-publish hashes to $sha256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cf-publish
+          path: app/src-tauri/target/release/cf-publish
+          if-no-files-found: error
+
   publish:
     # Only the push of a tag publishes. A hand run is a workflow_dispatch, and
     # is on a tag whenever someone picks one to run it on.
     if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: [mac, windows, gate]
+    needs: [mac, windows, gate, publisher]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
+    # Nothing of the tree, nothing from npm or crates.io and no installer runs
+    # here: no checkout, no setup-node. The code under the write token is the one
+    # binary the publisher job built (cf-publish, see there), checked against the
+    # hash that job reported before it is run, and the runner's own gh, curl, tar
+    # and shasum; the only action is GitHub's own download-artifact, which fetches
+    # the files. The token reaches the two steps that run the binary, and no other.
     steps:
-      # The feed rule's script, the publisher and the manifest, nothing else of
-      # the tree: they run below, and hold no credential of their own (the
-      # publisher is given gh's, by the job's environment).
-      - uses: actions/checkout@v7
-        with:
-          sparse-checkout: |
-            app/scripts/feeds.mjs
-            app/scripts/publish.mjs
-            app/feeds.json
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
+      # The files the Mac and Windows jobs built.
       - uses: actions/download-artifact@v8
         with:
+          pattern: ConsensFlow-*
           path: ${{ runner.temp }}/dist
           merge-multiple: true
-      # Versioned files first, then the rolling feeds installed apps read: a
-      # feed naming an archive that is not up yet would fail every check. It is
-      # app/scripts/publish.mjs's, in this order: the rule's refusals before
-      # anything moves (a later release is refused until the old feeds serve the
-      # bridge with its files), the versioned release, whose files are held to
-      # the ones built here (a release made by a run that died is finished, not
-      # refused for existing), then each feed the rule names, its latest.json
-      # swapped in without a moment spent deleted, and left alone where it
-      # already names a later release. Run again after a failure, it finishes
-      # the work; it leaves feeds-before.json in this folder, what each new feed
-      # named before it changed any, for the check below.
-      - name: Publish the release, then its update feeds
-        working-directory: ${{ runner.temp }}/dist
+      # The publisher, in a folder of its own: it is not one of the release's files.
+      - uses: actions/download-artifact@v8
+        with:
+          name: cf-publish
+          path: ${{ runner.temp }}/publisher
+      # An artifact comes without the bit that makes a file run, and can have
+      # been replaced since it was uploaded; the hash is the publisher job's.
+      - name: The publisher is the binary that was built
+        env:
+          PUBLISHER_SHA256: ${{ needs.publisher.outputs.sha256 }}
         run: |
           set -euo pipefail
-          node "$GITHUB_WORKSPACE/app/scripts/publish.mjs" --dir . --tag "$GITHUB_REF_NAME" \
+          publisher="$RUNNER_TEMP/publisher/cf-publish"
+          got=$(shasum -a 256 "$publisher" | cut -d' ' -f1)
+          if [ -z "$PUBLISHER_SHA256" ] || [ "$got" != "$PUBLISHER_SHA256" ]; then
+            echo "the publisher downloaded hashes to $got, and the job that built it says ${PUBLISHER_SHA256:-nothing}" >&2
+            exit 1
+          fi
+          echo "the publisher is the binary that was built: $got"
+          chmod +x "$publisher"
+      # Versioned files first, then the rolling feeds installed apps read: a
+      # feed naming an archive that is not up yet would fail every check. It is
+      # cf-publish's, in this order: the rule's refusals before anything moves
+      # (a later release is refused until the old feeds serve the bridge with its
+      # files), the versioned release, whose files are held to the ones built
+      # here (a release made by a run that died is finished, not refused for
+      # existing), then each feed the rule names, its latest.json swapped in
+      # without a moment spent deleted, and left alone where it already names a
+      # later release. Run again after a failure, it finishes the work; it leaves
+      # feeds-before.json in this folder, what each new feed named before it
+      # changed any, for the check below.
+      - name: Publish the release, then its update feeds
+        working-directory: ${{ runner.temp }}/dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/publisher/cf-publish" publish --dir . --tag "$GITHUB_REF_NAME" \
             --base "https://github.com/$GITHUB_REPOSITORY/releases/download"
       # What the rule says, read back from where installed apps read it: every
       # file of the release downloads as the one built, every new feed of its
       # channels serves its latest.json (or names a later release, which the
       # publisher left it at, and never one that went back), and the old feeds
       # in use serve the bridge, with the archive, installer and portable the
-      # old apps need (app/scripts/feeds.mjs).
+      # old apps need (cf-publish feeds check).
       - name: The feeds serve this release, and its archive downloads
         working-directory: ${{ runner.temp }}/dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           # A feed just swapped can answer 404 for a few minutes while GitHub's
           # download links catch up (alpha.83, 2026-10-08): 36 reads, 5 s apart.
-          node "$GITHUB_WORKSPACE/app/scripts/feeds.mjs" check --dir . \
+          "$RUNNER_TEMP/publisher/cf-publish" feeds check --dir . \
             --version "${GITHUB_REF_NAME#v}" \
             --base "https://github.com/$GITHUB_REPOSITORY/releases/download" \
             --attempts 36
