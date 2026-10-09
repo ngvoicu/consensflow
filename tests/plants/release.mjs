@@ -36,6 +36,7 @@ import { PLANTS as FEEDS } from './release/feeds.mjs'
 import { BUILT_PROOF } from './release/kit.mjs'
 import { PLANTS as PORTABLE } from './release/portable.mjs'
 import { PLANTS as PUBLISH } from './release/publish.mjs'
+import { PLANTS as SIGN_MAC } from './release/sign-mac.mjs'
 import { PLANTS as TOOLING } from './release/tooling.mjs'
 import { PLANTS as UPDATER } from './release/updater.mjs'
 import { PLANTS as WORKFLOW } from './release/workflow.mjs'
@@ -45,7 +46,16 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const RUN_LIMIT = 10 * 60 * 1000
 
 /** Every plant, by area. */
-const PLANTS = [...FEEDS, ...PUBLISH, ...WORKFLOW, ...PORTABLE, ...AGENTS, ...UPDATER, ...TOOLING]
+const PLANTS = [
+  ...FEEDS,
+  ...PUBLISH,
+  ...WORKFLOW,
+  ...PORTABLE,
+  ...AGENTS,
+  ...UPDATER,
+  ...TOOLING,
+  ...SIGN_MAC,
+]
 
 const args = process.argv.slice(2)
 const words = args.filter((arg) => !arg.startsWith('--'))

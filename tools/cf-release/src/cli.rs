@@ -185,14 +185,12 @@ mod tests {
 
     #[test]
     fn a_step_not_built_yet_says_so_and_fails() {
-        for step in ["prepare-update", "sign-mac"] {
-            let (status, out, err) = answer(step);
-            assert_eq!((status, out.as_str()), (1, ""), "{step}");
-            assert!(
-                err.starts_with(&format!("cf-release {step}: not built yet")),
-                "{err}"
-            );
-        }
+        let (status, out, err) = answer("prepare-update");
+        assert_eq!((status, out.as_str()), (1, ""));
+        assert!(
+            err.starts_with("cf-release prepare-update: not built yet"),
+            "{err}"
+        );
     }
 
     #[test]
