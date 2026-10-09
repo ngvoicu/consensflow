@@ -31,6 +31,7 @@ describe('the root package.json', () => {
         'smoke',
         'smoke:updater',
         'candidate',
+        'check:all',
       ]),
       {
         'build:cf': 'cargo xtask build-cf',
@@ -45,6 +46,7 @@ describe('the root package.json', () => {
         smoke: 'cargo xtask smoke',
         'smoke:updater': 'cargo xtask smoke-updater',
         candidate: 'cargo xtask candidate',
+        'check:all': 'cargo xtask check',
       },
     )
   })

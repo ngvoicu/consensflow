@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use common::{arg_line, arg_lines, assert_ran_in, checkout, err, out, xtask, FAKE};
+use common::{arg_line, arg_lines, assert_ran_in, checkout, cwds, err, out, programs, xtask};
 use xtask::process::Invocation;
 
 /// The line `.cargo/config.toml` has to carry for `cargo xtask` to be this.
@@ -19,16 +19,6 @@ const ALIAS: &str =
 /// What `cargo help xtask` says that line makes of the word.
 const EXPANDED: &str =
     "`xtask` is aliased to `run --locked --quiet --package xtask --bin xtask --`";
-
-/// A folder holding the fake child under each of `names`, as the programs xtask starts.
-fn programs(names: &[&str]) -> tempfile::TempDir {
-    let folder = tempfile::tempdir().unwrap();
-    for name in names {
-        let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
-        fs::copy(FAKE, folder.path().join(file)).unwrap();
-    }
-    folder
-}
 
 #[test]
 fn the_checkout_is_the_same_from_the_root_from_app_and_from_anywhere_else() {
@@ -60,13 +50,13 @@ fn the_checkout_is_the_same_from_the_root_from_app_and_from_anywhere_else() {
 #[test]
 fn a_command_runs_its_script_from_the_root_with_every_word_as_it_was_given() {
     let node = programs(&["node"]);
-    let words = ["departures", "a b", "--", "c", "", "--help"];
+    let words = ["smoke-updater", "a b", "--", "c", "", "--help"];
     // From `app/`, as a developer would: it is the checkout's root that counts.
     let ran = xtask(&checkout().join("app"), node.path(), &[], &words);
     assert!(ran.status.success(), "{}", err(&ran));
     let report = out(&ran);
     assert_ran_in(&report, &checkout());
-    let script = checkout().join("tests").join("departures.mjs");
+    let script = checkout().join("tests").join("smoke-updater.mjs");
     assert_eq!(
         arg_lines(&report),
         [
@@ -106,7 +96,7 @@ fn a_script_that_cannot_be_started_is_one_error_with_status_1() {
     let folder = tempfile::tempdir().unwrap();
     let name = format!("node{}", std::env::consts::EXE_SUFFIX);
     fs::write(folder.path().join(name), "not a program").unwrap();
-    let ran = xtask(&checkout(), folder.path(), &[], &["app", "test"]);
+    let ran = xtask(&checkout(), folder.path(), &[], &["smoke-updater"]);
     assert_eq!(ran.status.code(), Some(1));
     assert_eq!(out(&ran), "");
     let said = err(&ran);
@@ -190,6 +180,13 @@ fn the_commands_that_run_in_rust_say_so_in_their_help() {
         "conpty",
         "portable pack",
         "portable inspect",
+        "app test",
+        "app clippy",
+        "clippy-windows",
+        "--as-archiver",
+        "departures",
+        "bench records-memory",
+        "check",
     ] {
         let mut words: Vec<&str> = command.split(' ').collect();
         words.push("--help");
@@ -206,11 +203,9 @@ fn the_commands_that_run_in_rust_say_so_in_their_help() {
     }
 }
 
-#[test]
-fn check_says_each_step_and_ends_when_all_have_passed() {
-    let tools = programs(&["cargo", "npm"]);
-    let ran = xtask(&checkout(), tools.path(), &[], &["check"]);
-    assert!(ran.status.success(), "{}", err(&ran));
+/// The steps `check` says, as the words of each, for the machine these tests run
+/// on: the lint for Windows is a step of every machine but Windows.
+fn check_steps() -> Vec<String> {
     // xtask's own tests are built in a folder of their own, beside the workspace's.
     let own_tests = Invocation::new("cargo", ".")
         .args(["test", "--package", "xtask", "--target-dir"])
@@ -222,22 +217,60 @@ fn check_says_each_step_and_ends_when_all_have_passed() {
                 .join("xtask-check"),
         )
         .display();
-    assert_eq!(
-        err(&ran),
-        format!(
-            "xtask check [1/6]: cargo fmt --all --check\n\
-             xtask check [2/6]: cargo clippy --workspace --exclude app --all-targets -- -D warnings\n\
-             xtask check [3/6]: cargo test --workspace --exclude app --exclude xtask\n\
-             xtask check [4/6]: {own_tests}\n\
-             xtask check [5/6]: npm run lint\n\
-             xtask check [6/6]: npm test\n\
-             xtask check: all 6 steps passed\n"
-        )
-    );
-    // Each step ran from the checkout's root.
-    let report = out(&ran);
-    assert_eq!(report.matches("cwd: ").count(), 6);
-    assert_ran_in(&report, &checkout());
+    let for_windows = "cargo clippy --offline --target x86_64-pc-windows-msvc --all-targets \
+                       --workspace --exclude app -- -D warnings";
+    let mut steps = vec![
+        "cargo fmt --all --check".to_string(),
+        "cargo clippy --workspace --exclude app --all-targets -- -D warnings".to_string(),
+        "cargo clippy --offline --all-targets -- -D warnings".to_string(),
+    ];
+    if !cfg!(windows) {
+        steps.push(for_windows.to_string());
+    }
+    steps.extend([
+        "cargo test --workspace --exclude app --exclude xtask".to_string(),
+        own_tests,
+        "cargo test --offline --".to_string(),
+        "npm run lint".to_string(),
+        "cargo xtask build-cf --offline".to_string(),
+        "npm test".to_string(),
+    ]);
+    steps
+}
+
+/// What `check` says before its first step, on a machine that has no step of the lint for Windows.
+const NO_LINT_FOR_WINDOWS: &str = "xtask check: no clippy-windows step: on Windows the clippy of the workspace is clippy for Windows\n";
+
+#[test]
+fn check_says_each_step_and_ends_when_all_have_passed() {
+    let tools = programs(&["cargo", "npm"]);
+    let ran = xtask(&checkout(), tools.path(), &[], &["check"]);
+    assert!(ran.status.success(), "{}", err(&ran));
+    let steps = check_steps();
+    let total = steps.len();
+    let mut said = String::from(if cfg!(windows) {
+        NO_LINT_FOR_WINDOWS
+    } else {
+        ""
+    });
+    for (index, step) in steps.iter().enumerate() {
+        said += &format!("xtask check [{}/{total}]: {step}\n", index + 1);
+    }
+    said += &format!("xtask check: all {total} steps passed\n");
+    assert_eq!(err(&ran), said);
+
+    // Each step ran in the folder its own command runs in: the app's two in the
+    // app's, the rest in the checkout's root.
+    let (root, app) = (checkout(), checkout().join("app").join("src-tauri"));
+    let expected: Vec<_> = steps
+        .iter()
+        .map(|step| {
+            let in_the_app = step == "cargo clippy --offline --all-targets -- -D warnings"
+                || step == "cargo test --offline --";
+            fs::canonicalize(if in_the_app { &app } else { &root }).unwrap()
+        })
+        .collect();
+    assert_eq!(cwds(&out(&ran)), expected);
 }
 
 #[test]
@@ -250,10 +283,18 @@ fn check_stops_at_the_first_step_that_fails_and_answers_its_status() {
         &["check"],
     );
     assert_eq!(ran.status.code(), Some(3));
+    let total = check_steps().len();
     assert_eq!(
         err(&ran),
-        "xtask check [1/6]: cargo fmt --all --check\n\
-         xtask check: step 1 of 6 ended with status 3: cargo fmt --all --check\n"
+        format!(
+            "{}xtask check [1/{total}]: cargo fmt --all --check\n\
+             xtask check: step 1 of {total} ended with status 3: cargo fmt --all --check\n",
+            if cfg!(windows) {
+                NO_LINT_FOR_WINDOWS
+            } else {
+                ""
+            }
+        )
     );
     assert_eq!(out(&ran).matches("cwd: ").count(), 1);
 }
@@ -306,8 +347,8 @@ fn every_npm_script_that_hands_over_to_xtask_names_a_command_it_has() {
     let nowhere = tempfile::tempdir().unwrap();
     let mut scripts = xtask_scripts(&checkout().join("package.json"));
     scripts.extend(xtask_scripts(&checkout().join("app").join("package.json")));
-    // The ones that moved at step 5's first landing are there.
-    assert!(scripts.len() >= 14, "{scripts:?}");
+    // The ones that moved at step 5's first landing are there, and `check:all`.
+    assert!(scripts.len() >= 15, "{scripts:?}");
     for (name, words) in scripts {
         let mut args: Vec<&str> = words.split(' ').collect();
         args.push("--help");

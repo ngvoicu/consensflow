@@ -331,6 +331,7 @@ mod tests {
                 "app test",
                 "app clippy",
                 "clippy-windows",
+                "--as-archiver",
                 "test daemons",
                 "test clis",
                 "test agents",
