@@ -579,6 +579,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cf-publish"
+version = "3.0.0-alpha.83"
+dependencies = [
+ "cf-publish",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "cf-release"
 version = "3.0.0-alpha.83"
 dependencies = [

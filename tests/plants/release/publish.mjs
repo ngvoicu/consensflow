@@ -1,196 +1,267 @@
 /**
- * Plants in the publisher (app/scripts/publish.mjs): the versioned release made
- * a draft and published whole, a run cut short finished by running it again,
- * a feed's latest.json never deleted for its replacement, and only the push of
- * a tag publishing. The tests of the publisher, against GitHub as
- * tests/github-sim.mjs has it, and the workflow's steps run as written, must
- * catch each.
+ * Plants in the publisher (tools/cf-publish: `publish`, `gh` and `cli`): the
+ * versioned release made a draft and published whole, a run cut short finished
+ * by running it again, a feed's latest.json never deleted for its replacement,
+ * and only the push of a tag publishing. The publisher's tests, against GitHub
+ * as its simulator (`cf_publish::testing`) has it, and the workflow's steps run
+ * as written, must catch each.
  */
-// biome-ignore-all lint/suspicious/noTemplateCurlyInString: a plant's text is the source it replaces, `${...}` and all, not a template
-import { PUBLISH, PUBLISH_JS, RERUN } from './kit.mjs'
+import { CLI_RS, FEED_RS, GH_RS, PUBLISH, PUBLISH_RS, RERUN } from './kit.mjs'
 
-const plant = (name, from, to, meant) => ({
+const plant = (name, file, from, to, meant) => ({
   name: `publish: ${name}`,
-  edits: [[PUBLISH_JS, from, to]],
+  edits: [[file, from, to]],
   runs: [PUBLISH],
   meant,
 })
 
+/** The guard on the environment of the run: the event and the kind of ref. */
+const GUARD =
+  'if env.event_name.as_deref() != Some("push") || env.ref_type.as_deref() != Some("tag") {'
+/** Where a feed's latest.json is read to tell whether it cannot be, or is not served at all. */
+const UNREAD = 'if refusal.status != Some(404) {'
+/** Where a feed's latest.json is read, for the release it names. */
+const SERVED = 'let served = reads.file(&format!("{}/{feed}/{LATEST}", run.base));'
+
 export const PLANTS = [
   plant(
     'the old latest.json is deleted before the new one is uploaded',
-    'async function swap({ gh, dir, repo, feed, log }) {\n',
-    "async function swap({ gh, dir, repo, feed, log }) {\n  await gh.must(['release', 'delete-asset', feed, LATEST, '--yes'], 'deleting')\n",
-    'leaves the old latest.json where it was when the upload',
+    FEED_RS,
+    `fn swap(run: &Run, feed: &str) -> Result<(), Failure> {
+    let runner = &run.runner;
+`,
+    `fn swap(run: &Run, feed: &str) -> Result<(), Failure> {
+    let runner = &run.runner;
+    runner.must(&["release", "delete-asset", feed, LATEST, "--yes"], "deleting")?;
+`,
+    'leaves_the_old_latest_json_where_it_was_when_the_upload',
   ),
   plant(
     'the old latest.json is deleted, not set aside, so it cannot be put back',
-    'await rename({ gh, repo }, held.get(LATEST), PREVIOUS)',
-    "await gh.must(['release', 'delete-asset', feed, LATEST, '--yes'], 'deleting')",
-    'puts the old latest.json back when the second rename fails',
+    FEED_RS,
+    'if let Err(cause) = runner.rename(run.repo, held.asset(LATEST), PREVIOUS) {',
+    'if let Err(cause) = runner.must(&["release", "delete-asset", feed, LATEST, "--yes"], "deleting").map(drop) {',
+    'puts_the_old_latest_json_back_when_the_second_rename_fails',
   ),
   plant(
     'the previous latest.json is not put back when the second rename fails',
-    'await rename({ gh, repo }, { ...held.get(LATEST), name: PREVIOUS }, LATEST)',
-    'void held',
-    'puts the old latest.json back when the second rename fails',
+    FEED_RS,
+    'if let Err(again) = runner.rename(run.repo, aside.as_ref(), LATEST) {',
+    'if let Err(again) = Ok::<(), Failure>(drop(aside)) {',
+    'puts_the_old_latest_json_back_when_the_second_rename_fails',
   ),
   plant(
     'a rename of a file that is not there is tried all the same',
-    'if (asset === undefined) fail(`there is no file to rename to ${to}`)',
-    'void asset',
-    'says what is missing when the live latest.json is gone',
+    GH_RS,
+    `        let Some(asset) = asset else {
+            return Err(Failure::new(format!("there is no file to rename to {to}")));
+        };`,
+    `        let missing = Asset {
+            name: String::new(),
+            size: None,
+            state: None,
+            api_url: Some("/releases/assets/1".to_string()),
+        };
+        let asset = asset.unwrap_or(&missing);`,
+    'says_what_is_missing_when_the_live_latest_json_is_gone',
   ),
   plant(
     'a feed that already serves this latest.json is swapped all the same',
-    'if (!served.ok || !served.body.equals(readFileSync(join(dir, LATEST)))) {',
-    'if (true) {',
-    'leaves a feed that already serves this latest.json untouched',
+    FEED_RS,
+    'if differs {',
+    'if differs || true {',
+    'leaves_a_feed_that_already_serves_this_latest_json_untouched',
   ),
   plant(
     'a previous latest.json left by a cut swap is not put back first',
-    'if (!has(LATEST) && has(PREVIOUS)) {',
-    'if (false) {',
-    'puts the previous latest.json back first',
+    FEED_RS,
+    'if !state.has(LATEST) && state.has(PREVIOUS) {',
+    'if false {',
+    'puts_the_previous_latest_json_back_first',
   ),
   plant(
     'the versioned release is made public, not as a draft',
-    "...['release', 'create', tag, '--draft', '--verify-tag'],",
-    "...['release', 'create', tag, '--verify-tag'],",
-    'makes the release a draft, and publishes it only once every file is there',
+    PUBLISH_RS,
+    'let mut args = vec!["release", "create", tag, "--draft", "--verify-tag"];',
+    'let mut args = vec!["release", "create", tag, "--verify-tag"];',
+    'makes_the_release_a_draft_and_publishes_it_only_once_every_file_is_there',
   ),
   plant(
     'the release is not made a prerelease',
-    "...(version.includes('-') ? ['--prerelease'] : []),",
-    '...[],',
-    'makes the release a draft, and publishes it only once every file is there',
+    PUBLISH_RS,
+    `            if run.version.is_prerelease() {
+                args.push("--prerelease");`,
+    `            if false {
+                args.push("--prerelease");`,
+    'makes_the_release_a_draft_and_publishes_it_only_once_every_file_is_there',
   ),
   plant(
     'a draft is published without looking at its files',
-    "if (asset === undefined || asset.size !== size || (asset.state ?? 'uploaded') !== 'uploaded') {",
-    'if (false) {',
-    'does not publish a draft whose file is short',
+    PUBLISH_RS,
+    'if !whole {',
+    'if false {',
+    'does_not_publish_a_draft_whose_file_is_short',
   ),
   plant(
     'a draft left by a run that died is not emptied',
-    "await gh.must(['release', 'delete-asset', tag, asset.name, '--yes'], `emptying the draft ${tag}`)",
-    'void asset',
-    'empties a draft that holds some of the files',
+    PUBLISH_RS,
+    'runner.must(&args, &format!("emptying the draft {tag}"))?;',
+    'let _ = args;',
+    'empties_a_draft_that_holds_some_of_the_files',
   ),
   plant(
     'a published release that lacks a file is kept as it is',
-    "if (lacking.length === 0) return 'kept'",
-    "return 'kept'",
-    'adds what a published release lacks',
+    PUBLISH_RS,
+    'if lacking.is_empty() {',
+    'if true {',
+    'adds_what_a_published_release_lacks',
   ),
   plant(
     "a published release's files are not held to the files built",
-    'if (wrong.length > 0) {',
-    'if (false) {',
-    'refuses a published release whose file is not the one built',
+    PUBLISH_RS,
+    'if !wrong.is_empty() {',
+    'if false {',
+    'refuses_a_published_release_whose_file_is_not_the_one_built',
   ),
   plant(
     'the rule is not asked before anything moves',
-    'if (problems.length > 0) {\n    fail(`${version} may not move a feed',
-    'if (false) {\n    fail(`${version} may not move a feed',
-    'is refused while the old feed still serves the release before the bridge',
+    PUBLISH_RS,
+    `    if !problems.is_empty() {
+        return Err(Failure::new(format!(
+            "{version} may not move a feed`,
+    `    if false {
+        return Err(Failure::new(format!(
+            "{version} may not move a feed`,
+    'is_refused_while_the_old_feed_still_serves_the_release_before_the_bridge',
   ),
   plant(
     'a failure to look at a release is taken for its absence',
-    'return fail(`could not look at the release ${tag}: ${answer.stderr.trim()}`)',
-    'return null',
-    'stops where gh cannot tell whether a release is there',
+    GH_RS,
+    `        Err(Failure::new(format!(
+            "could not look at the release {tag}: {}",
+            answer.stderr.trim()
+        )))`,
+    '        Ok(None)',
+    'stops_where_gh_cannot_tell_whether_a_release_is_there',
   ),
   plant(
     'the old feed is not marked as pinned',
-    'if (pinned) {',
-    'if (false) {',
-    'marks the old feed as pinned to the bridge',
+    FEED_RS,
+    'if pinned {',
+    'if false {',
+    'marks_the_old_feed_as_pinned_to_the_bridge',
   ),
   plant(
     'a hand run on a tag publishes: only the ref type is asked',
-    "if (env.GITHUB_EVENT_NAME !== 'push' || env.GITHUB_REF_TYPE !== 'tag') {",
-    "if (env.GITHUB_REF_TYPE !== 'tag') {",
-    'refuses a hand run, though it is on a tag',
+    CLI_RS,
+    GUARD,
+    'if env.ref_type.as_deref() != Some("tag") {',
+    'refuses_a_hand_run_though_it_is_on_a_tag',
   ),
   plant(
     'any run publishes',
-    "if (env.GITHUB_EVENT_NAME !== 'push' || env.GITHUB_REF_TYPE !== 'tag') {",
-    'if (false) {',
-    'refuses a push of a branch, a run outside a workflow',
+    CLI_RS,
+    GUARD,
+    'if false {',
+    'refuses_a_push_of_a_branch_a_run_outside_a_workflow',
   ),
   plant(
     'a tag other than the one pushed is published',
-    'if (env.GITHUB_REF_NAME !== values.tag) {',
-    'if (false) {',
-    'refuses a push of a branch, a run outside a workflow',
+    CLI_RS,
+    'if env.ref_name.as_deref() != Some(tag) {',
+    'if false {',
+    'refuses_a_push_of_a_branch_a_run_outside_a_workflow',
   ),
   // No feed is moved backward: a run again after a later release went out leaves its feed at that release.
   plant(
     'a feed is swapped whatever release it names: the feed is not asked',
-    'if (later !== null) {',
-    'if (false) {',
+    FEED_RS,
+    'if let Some(later) = later {',
+    'if let Some(later) = later.filter(|_| false) {',
     RERUN,
   ),
   plant(
     'a feed that names a later release fails the run instead of being left alone',
-    'did = `superseded by ${later}`',
-    "fail('superseded')",
+    FEED_RS,
+    'did = FeedDone::Superseded(later);',
+    'return Err(Failure::new("superseded"));',
     RERUN,
   ),
   plant(
     'a feed that was left alone is said to be kept',
-    'did = `superseded by ${later}`',
-    "did = 'kept'",
+    FEED_RS,
+    'did = FeedDone::Superseded(later);',
+    'did = FeedDone::Kept;',
     RERUN,
   ),
   plant(
     'a feed that is left alone is not said to be, in the log',
-    'log(\n        `${feed} names ${later}, which comes after ${version}: it is left alone, and nothing is moved backward`,\n      )',
-    'void log',
+    FEED_RS,
+    `            runner.log(&format!(
+                "{feed} names {later}, which comes after {}: it is left alone, and nothing is moved backward",
+                run.version
+            ));`,
+    '            let _ = runner;',
     RERUN,
   ),
   plant(
     'a feed that cannot be read is swapped all the same',
-    'if (!served.ok && served.status !== 404) {',
-    'if (false) {',
-    'changes no feed it cannot read',
+    FEED_RS,
+    UNREAD,
+    'if false {',
+    'changes_no_feed_it_cannot_read',
   ),
   plant(
     'a feed that is listed and not served is left as it is, not mended',
-    'if (!served.ok && served.status !== 404) {',
-    'if (!served.ok) {',
-    'swaps a latest.json that is listed and not served at all',
+    FEED_RS,
+    UNREAD,
+    'if true {',
+    'swaps_a_latest_json_that_is_listed_and_not_served_at_all',
   ),
   plant(
     'a feed that is listed and not served is taken for one that names a later release',
-    'const later = served.ok ? laterRelease(served.body, version) : null',
-    "const later = served.ok ? laterRelease(served.body, version) : 'unknown'",
-    'swaps a latest.json that is listed and not served at all',
+    FEED_RS,
+    `        let later = served
+            .as_ref()
+            .ok()
+            .and_then(|body| later_release(body, run.version));`,
+    `        let later = served.as_ref().map_or_else(
+            |_| Some(run.version.clone()),
+            |body| later_release(body, run.version),
+        );`,
+    'swaps_a_latest_json_that_is_listed_and_not_served_at_all',
   ),
   plant(
     'a feed is read once, not again past a blip',
-    'const served = await reads.file(`${base}/${feed}/${LATEST}`)',
-    'const served = await reads.once(`${base}/${feed}/${LATEST}`)',
-    'reads a feed again past a blip',
+    FEED_RS,
+    SERVED,
+    'let served = reads.once(&format!("{}/{feed}/{LATEST}", run.base));',
+    'reads_a_feed_again_past_a_blip',
   ),
   // What the check that follows is left to hold the new feeds to.
   plant(
     'the check is left no record of what the feeds named',
-    'writeFileSync(join(dir, FEEDS_BEFORE), `${JSON.stringify(before)}\\n`)',
-    'void before',
-    'leaves the check a record of what each new feed named',
+    PUBLISH_RS,
+    `    write(
+        dir,
+        FEEDS_BEFORE,
+        format!("{}\\n", Value::Object(before)).as_bytes(),
+    )?;`,
+    '    let _ = before;',
+    'leaves_the_check_a_record_of_what_each_new_feed_named',
   ),
   plant(
     'the record says what the run publishes, not what the feed named',
-    'named = served.ok ? namedRelease(served.body) : null',
-    'named = version',
-    'leaves the check a record of what each new feed named',
+    FEED_RS,
+    'named = served.as_ref().ok().and_then(|body| named_release(body));',
+    'named = Some(run.version.clone());',
+    'leaves_the_check_a_record_of_what_each_new_feed_named',
   ),
   plant(
     'the record holds the old feed too',
-    'if (!pinned) before[feed] = named',
-    'before[feed] = named',
-    'leaves the check a record of what each new feed named',
+    PUBLISH_RS,
+    'if !pinned {',
+    'if true {',
+    'leaves_the_check_a_record_of_what_each_new_feed_named',
   ),
 ]

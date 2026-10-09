@@ -99,7 +99,7 @@ describe('the portable Windows exe', () => {
     // The release page tells where the portable exe unpacks; its text is the publisher's.
     for (const file of [
       '.github/workflows/windows-build.yml',
-      'app/scripts/publish.mjs',
+      'tools/cf-publish/src/publish.rs',
       'app/scripts/portable.mjs',
     ]) {
       const text = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')

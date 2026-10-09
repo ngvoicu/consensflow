@@ -17,10 +17,10 @@ pub enum Channel {
 impl Channel {
     /// The feed this channel's apps read: the `latest.json` of a rolling
     /// GitHub release, which the macOS updater and the Windows page both read
-    /// here. `app/feeds.json` names the feeds and `app/scripts/feeds.mjs`
-    /// moves them. The apps before the flip release read `update-alpha` and
-    /// `update-stable`; those stay pinned to the flip release, with its assets,
-    /// for the apps that read them still.
+    /// here. `app/feeds.json` names the feeds and `cf-publish`
+    /// (`tools/cf-publish`) moves them. The apps before the flip release read
+    /// `update-alpha` and `update-stable`; those stay pinned to the flip
+    /// release, with its assets, for the apps that read them still.
     fn endpoint(self) -> url::Url {
         let tag = if self == Self::Alpha {
             "feed-alpha"
@@ -677,7 +677,7 @@ mod tests {
 
     /// What an installed app reads is a promise to it for as long as it is
     /// installed: the two feeds, pinned here, and the same two the release
-    /// workflow moves (`app/feeds.json`, which `app/scripts/feeds.mjs` reads).
+    /// workflow moves (`app/feeds.json`, which `cf-publish` holds as it was built).
     /// The macOS updater and the Windows page both take their address from
     /// `Channel::endpoint`. The feeds of the apps before the flip release are
     /// not among them.

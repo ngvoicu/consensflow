@@ -87,16 +87,16 @@ const NAMED =
  * Node and from the harnesses, fixed since (and the one test that gives the
  * dispatcher the text of a task a recorded trace holds, `src/parse.js`, a file
  * of an imagined project); the layout of the bundles older releases shipped,
- * which the updater and its smoke still meet; and the command an older build
- * wrote, which names a `cf.mjs` and is read and repaired.
+ * which the updater and its smoke still meet, and the publisher holds the
+ * bridge to; and the command an older build wrote, which names a `cf.mjs` and
+ * is read and repaired.
  */
 const SAYS_THEM = [
   /^crates\/[^/]+\/tests\/(?:goldens|traces)\//,
   /^crates\/cf-engine\/tests\/dispatcher\/review\.rs$/,
   /^tests\/(?:engine\/)?fixtures\//,
-  /^app\/scripts\/feeds\.mjs$/,
+  /^tools\/cf-publish\//,
   /^app\/src-tauri\/src\/update_install\.rs$/,
-  /^tests\/(?:feeds|publish|release-publish)\.test\.mjs$/,
   /^tests\/updater-smoke/,
   /^crates\/cf-launcher\//,
   /^crates\/cf\/tests\/cli_goldens\//,
