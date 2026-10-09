@@ -4,9 +4,7 @@
  * configuration names (the bundled `cf`), and its build script refuses to go
  * on without them. A unit test needs none, so they are left out of the
  * configuration for this run, as tests/windows-clippy.mjs leaves them out for
- * the app's lint. Cargo runs in the app's folder, as CI's does: on
- * Windows its test runner (`.cargo/config.toml`) gives each test binary the
- * manifest it needs.
+ * the app's lint. Cargo runs in the app's folder, as CI's does.
  *
  *   npm run test:app
  *   npm run test:app -- portable::

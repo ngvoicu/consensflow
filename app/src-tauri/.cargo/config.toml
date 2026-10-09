@@ -1,8 +1,0 @@
-# A test binary on Windows gets no manifest from cargo, and one is needed: the
-# dialog code it links imports TaskDialogIndirect, which only Common Controls 6
-# exports, and a program asks for that version through its manifest. The app
-# has Tauri's; cargo's link-arg keys reach integration tests but not a
-# library's unit tests. So the runner puts tests.manifest beside the binary as
-# its external manifest, which the loader reads when none is embedded.
-[target.x86_64-pc-windows-msvc]
-runner = ["node", "scripts/with-manifest.mjs"]
