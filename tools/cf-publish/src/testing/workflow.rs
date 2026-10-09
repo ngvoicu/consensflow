@@ -280,9 +280,13 @@ pub fn bash(script: &str, cwd: &Path, env: &[(&str, &str)], path_first: &[&Path]
 }
 
 /// Whether bash is here to run a script.
+///
+/// Never on Windows: there a program is looked for in the system folder before
+/// `PATH`, so `bash` is WSL's launcher, not Git's bash, and parses nothing. A
+/// script parses alike everywhere, and the Mac's run of these tests checks it.
 #[allow(clippy::disallowed_methods)] // The test starts what it tests.
 pub fn has_bash() -> bool {
-    Command::new("bash").arg("--version").output().is_ok()
+    cfg!(unix) && Command::new("bash").arg("--version").output().is_ok()
 }
 
 /// Parses `script` with `bash -n`: whether it does, and what bash said if not.
