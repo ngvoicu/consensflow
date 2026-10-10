@@ -4,7 +4,9 @@
 //! arguments to `cargo test`: the CLI's (`cli`), the daemon's as a process
 //! (`daemon`), the rig's, with the daemon and the pane host in real terminals
 //! (`rig`), and the daemon under load (`load`, which is ignored unless asked
-//! for).
+//! for). The packaged smoke (`smoke`) is a test of the same crate, ignored the
+//! same way, and is run by its own command, [`crate::smoke`], which takes the
+//! app to run it on.
 
 use std::ffi::OsString;
 
@@ -48,7 +50,7 @@ pub const COMMANDS: &[Command] = &[
 /// A set of the tests of `cf-e2e`: which test files, which cases of them, and
 /// whether they are the ones `cargo test` ignores.
 #[derive(Debug, Clone, Copy)]
-struct Suite {
+pub(crate) struct Suite {
     /// The test files, by name: `cargo test --test <name>` for each.
     tests: &'static [&'static str],
     /// The cases, by the start of their names, when not all of the files'.
@@ -79,6 +81,13 @@ const AGENTS: Suite = Suite {
 };
 const LOAD: Suite = Suite {
     tests: &["load"],
+    filter: None,
+    ignored: true,
+};
+/// The packaged smoke (`smoke`'s command): the one case of the smoke test, which
+/// runs on a built app and which `cargo test` ignores for there being none.
+pub(crate) const SMOKE: Suite = Suite {
+    tests: &["smoke"],
     filter: None,
     ignored: true,
 };
@@ -114,7 +123,7 @@ fn run(context: &Context, suite: Suite, args: &[OsString]) -> Result<i32, Failur
 /// suite's cases named, followed by the arguments as they came. For the
 /// ignored cases, `--ignored` is among the arguments for the test program: after
 /// the `--` the caller gave, or after one this puts.
-fn cargo_test(context: &Context, suite: Suite, args: &[OsString]) -> Invocation {
+pub(crate) fn cargo_test(context: &Context, suite: Suite, args: &[OsString]) -> Invocation {
     let mut given: Vec<OsString> = args.to_vec();
     if suite.ignored {
         match given.iter().position(|word| word == "--") {

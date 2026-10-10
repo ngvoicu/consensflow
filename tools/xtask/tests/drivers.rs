@@ -1,5 +1,6 @@
 //! The thin drivers that run cargo as processes: `app test`, `app clippy`,
-//! `clippy-windows` (and the archiver it has cc-rs run) and `departures`, started
+//! `clippy-windows` (and the archiver it has cc-rs run), `departures` and
+//! `smoke` (where there is a bundle to run it on: macOS), started
 //! the way `cargo xtask` starts them, from the folders a developer is in, against
 //! a stand-in for `cargo`: the fake child, copied under that name into a folder
 //! that is all the PATH it has. What each runs, in which folder, with which words
@@ -379,4 +380,83 @@ fn departures_takes_no_arguments_and_is_refused_with_status_2_before_anything_is
         err(&ran),
         "xtask: departures takes no arguments\nsee `cargo xtask --help`\n"
     );
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn smoke_runs_the_smoke_test_from_the_root_asking_for_its_ignored_case_and_the_app_it_is_given() {
+    for from in [checkout().join("app"), checkout()] {
+        let tools = programs(&["cargo"]);
+        let ran = xtask(
+            &from,
+            tools.path(),
+            &[("FAKE_CHILD_REPORT", "CONSENSFLOW_SMOKE_APP")],
+            &["smoke", "--app", "dist/ConsensFlow.app"],
+        );
+        assert!(ran.status.success(), "{}", err(&ran));
+        let report = out(&ran);
+        assert_ran_in(&report, &checkout());
+        assert_eq!(
+            arg_lines(&report),
+            [
+                "test",
+                "-p",
+                "cf-e2e",
+                "--test",
+                "smoke",
+                "--",
+                "--ignored",
+                "--nocapture"
+            ]
+            .map(arg_line)
+        );
+        // A relative path is from the checkout's root, wherever the command was run.
+        let app = checkout().join("dist/ConsensFlow.app");
+        assert_eq!(
+            var_line(&report, "CONSENSFLOW_SMOKE_APP"),
+            Some(shown(app.to_str().unwrap()).as_str())
+        );
+        assert_eq!(err(&ran), "");
+    }
+    // With no app named it is the test's to find the one a build leaves.
+    let ran = with_cargo("", &["smoke"]);
+    assert!(ran.status.success(), "{}", err(&ran));
+    assert_eq!(
+        arg_lines(&out(&ran))[..5],
+        ["test", "-p", "cf-e2e", "--test", "smoke"].map(arg_line)
+    );
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn smoke_answers_the_status_of_cargo_and_says_when_there_is_none() {
+    let tools = programs(&["cargo"]);
+    for status in [0, 1, 101] {
+        let said = status.to_string();
+        let ran = xtask(
+            &checkout(),
+            tools.path(),
+            &[("FAKE_CHILD_EXIT", &said), ("FAKE_CHILD_QUIET", "1")],
+            &["smoke"],
+        );
+        assert_eq!(ran.status.code(), Some(status));
+        assert_eq!((out(&ran), err(&ran)), (String::new(), String::new()));
+    }
+    let no_programs = tempfile::tempdir().unwrap();
+    let ran = xtask(&checkout(), no_programs.path(), &[], &["smoke"]);
+    assert_eq!(ran.status.code(), Some(1));
+    assert_eq!(
+        err(&ran),
+        "xtask: `cargo` was not found: is it installed, and on the PATH?\n"
+    );
+}
+
+#[test]
+#[cfg(not(target_os = "macos"))]
+fn smoke_is_refused_where_there_is_no_bundle_to_run_and_starts_nothing() {
+    let no_programs = tempfile::tempdir().unwrap();
+    let ran = xtask(&checkout(), no_programs.path(), &[], &["smoke"]);
+    assert_eq!(ran.status.code(), Some(1));
+    assert_eq!(out(&ran), "");
+    assert!(err(&ran).starts_with("smoke: the packaged smoke runs a macOS app bundle"));
 }

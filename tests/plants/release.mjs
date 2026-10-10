@@ -7,7 +7,8 @@
  * thin drivers of xtask (the app's tests and lint, the lint for Windows and its
  * archiver, the departures, the bench) and the gate that runs them, and the
  * updater smoke: its readers of evidence, and the product it holds (the app's
- * daemon choice, the ledger's one holder, the check of an update). A
+ * daemon choice, the ledger's one holder, the check of an update), and the
+ * packaged smoke and the candidate builder (`cargo xtask smoke` and `candidate`). A
  * plant is a few pieces of text replaced in the sources; the tests that should
  * notice are run (never in parallel: the sources are changed under them) and
  * each plant is reported caught or missed. A plant may name commands to run
@@ -38,6 +39,7 @@ import { PLANTS as AGENTS } from './release/agents.mjs'
 import { PLANTS as DRIVERS } from './release/drivers.mjs'
 import { PLANTS as FEEDS } from './release/feeds.mjs'
 import { BUILT_PROOF } from './release/kit.mjs'
+import { PLANTS as PACKAGED } from './release/packaged.mjs'
 import { PLANTS as PORTABLE } from './release/portable.mjs'
 import { PLANTS as PUBLISH } from './release/publish.mjs'
 import { PLANTS as SIDECAR } from './release/sidecar.mjs'
@@ -64,6 +66,7 @@ const PLANTS = [
   ...DRIVERS,
   ...UPDATE,
   ...SIGN_MAC,
+  ...PACKAGED,
 ]
 
 const args = process.argv.slice(2)

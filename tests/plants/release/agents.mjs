@@ -1,10 +1,11 @@
 /**
  * Plants in what the agents screens do, in the native daemon: the catalog, an
  * agent saved with its profile, the screens behind the UI token, and the
- * deletion. The proof of the agents screens (tests/agents-proof.mjs), which the
- * packaged smoke runs against the daemon a built app started, must catch each:
- * here it is run against the daemon from the checkout, by the `agents_proof`
- * cases of the daemon test of crates/cf-e2e (`cargo xtask test agents`).
+ * deletion. The proof of the agents screens (`cf_e2e::agents_proof`), which the
+ * packaged smoke (crates/cf-e2e/tests/smoke.rs) runs against the daemon a built
+ * app started, must catch each: here it is run against the daemon from the
+ * checkout, by the `agents_proof` cases of the daemon test of crates/cf-e2e
+ * (`cargo xtask test agents`).
  */
 import { BUILT_PROOF } from './kit.mjs'
 
