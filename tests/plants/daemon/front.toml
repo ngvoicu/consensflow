@@ -1,0 +1,251 @@
+# The HTTP front and the page: the door, the tokens, the bodies, the server, the page’s operations, the verb.
+
+[run]
+daemon-lib-credentials = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "credentials::"]
+daemon-lib-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::"]
+proto-page = ["cargo", "test", "--offline", "-p", "cf-proto", "page::"]
+
+[[plant]]
+name = "door: it does not hear the daemon stopping"
+meant = "the_daemon_stopping_answers_a_waiting_door_at_once_with_what_there_is"
+runs = ["daemon-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/door.rs"
+find = '''
+        if context.closing.is_set()
+            || request.consumer().has_left()
+            || context.credentials.resolve(request.bearer()).is_none()
+        {'''
+replace = '''
+        if request.consumer().has_left()
+            || context.credentials.resolve(request.bearer()).is_none()
+        {'''
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/door.rs"
+find = "            () = context.closing.wait() => {}"
+replace = "            () = std::future::pending::<()>() => {}"
+
+[[plant]]
+name = "door: it does not look again after a wait"
+meant = "an_answer_that_comes_while_it_waits_is_found_at_the_next_poll"
+runs = ["daemon-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/door.rs"
+find = '''
+            () = request.consumer().left() => {}
+        }
+    }'''
+replace = '''
+            () = request.consumer().left() => {}
+        }
+        return unanswered(&asked);
+    }'''
+
+[[plant]]
+name = "door: it waits as long as it is asked"
+meant = "it_holds_no_more_than_25_seconds_however_much_is_asked"
+runs = ["daemon-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/door.rs"
+find = "const MAX_WAIT_MS: f64 = 25_000.0;"
+replace = "const MAX_WAIT_MS: f64 = 250_000.0;"
+
+[[plant]]
+name = "credentials: a token revoked still acts"
+meant = "a_token_names_one_participant_of_one_project_until_it_is_revoked"
+runs = ["daemon-lib-credentials"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/credentials.rs"
+find = "        self.by_digest.borrow_mut().remove(&digest(token));"
+replace = "        let _ = token;"
+
+[[plant]]
+name = "credentials: any word is the UI token"
+meant = "the_ui_token_matches_itself_only"
+runs = ["daemon-lib-credentials"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/credentials.rs"
+find = "    bool::from(presented.ct_eq(&token))"
+replace = "    bool::from(presented.ct_eq(&presented))"
+
+[[plant]]
+name = "body: two mebibytes exactly is too large"
+meant = "a_body_of_exactly_two_mebibytes_is_read_and_one_byte_more_is_too_large"
+runs = ["daemon-lib-body"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/body.rs"
+find = "if bytes.len() + chunk.len() > MAX_JSON_BYTES {"
+replace = "if bytes.len() + chunk.len() >= MAX_JSON_BYTES {"
+
+[[plant]]
+name = "body: a screen’s text is counted in bytes"
+meant = "a_screens_body_is_counted_in_utf16_units_not_in_bytes"
+runs = ["daemon-lib-body"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/body.rs"
+find = "        units += read.encode_utf16().count();"
+replace = "        units += read.len();"
+
+[[plant]]
+name = "body: the end of a body is not a callback of its own"
+meant = "a_handler_goes_on_from_the_end_of_its_body_before_a_task_that_was_runnable_already"
+runs = ["daemon-lib-body"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/body.rs"
+find = '''
+            drop(sender);
+            arrived();'''
+replace = "            drop(sender);"
+
+[[plant]]
+name = "body: a result whose body ends as its window exits is refused"
+meant = "a_result_whose_body_ends_as_its_window_exits_is_recorded_before_the_exit"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "contract::requests"],
+]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/body.rs"
+find = '''
+            drop(sender);
+            arrived();'''
+replace = "            drop(sender);"
+
+[[plant]]
+name = "body: a body that broke is not closed and drained"
+meant = "a_handler_goes_on_from_the_end_of_its_body_before_a_task_that_was_runnable_already"
+runs = ["daemon-lib-body"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/body.rs"
+find = '''
+                if broke {
+                    break;'''
+replace = '''
+                if broke {
+                    return;'''
+
+[[plant]]
+name = "server: a panic in a request is not contained"
+meant = "a_handler_that_panics_is_a_500_internal_and_the_front_goes_on"
+runs = ["daemon-lib-server"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = "        let outcome = contain(async {"
+replace = "        let outcome = Ok::<_, crate::errors::Panicked>(async {"
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = '''
+        })
+        .await;
+        match outcome {'''
+replace = '''
+        }.await);
+        match outcome {'''
+
+[[plant]]
+name = "server: a client that leaves drops its handler"
+meant = "a_client_that_leaves_does_not_drop_its_handler"
+runs = ["daemon-lib-server"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = "    let begun = begin(&*server.spawn, async move {"
+replace = "    let begun = (async move {"
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = '''
+    })
+    .await;
+    server.spawn.drain();'''
+replace = '''
+    });
+    server.spawn.drain();'''
+
+[[plant]]
+name = "server: what a request’s first part woke is not run before the next callback"
+meant = "a_requests_engine_work_is_begun_in_its_first_part_and_its_chain_ends_before_the_next_callback"
+runs = ["daemon-lib-server"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = '''
+    server.spawn.drain();
+    response(&begun.await)'''
+replace = "    response(&begun.await)"
+
+[[plant]]
+name = "page: an operation that panics is not contained"
+meant = "an_operation_that_panics_at_its_first_poll_answers_not_ok_and_the_bridge_goes_on"
+runs = ["daemon-lib-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/mod.rs"
+find = "        contain(async move { serve(page, operation, body).await }),"
+replace = "        async move { Ok::<_, crate::errors::Panicked>(serve(page, operation, body).await) },"
+
+[[plant]]
+name = "page: an operation is not begun on the executor"
+meant = "an_operation_is_begun_where_its_frame_is_read_and_its_turns_end_before_the_next_frame"
+runs = ["daemon-lib-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/mod.rs"
+find = '''
+    let begun = begin(
+        spawn,
+        contain(async move { serve(page, operation, body).await }),
+    )
+    .await;
+    match begun.await {'''
+replace = "    match contain(async move { serve(page, operation, body).await }).await {"
+
+[[plant]]
+name = "page: an operation that only reads wakes the dispatcher"
+meant = "the_operations_that_only_read_wake_nothing"
+runs = ["proto-page", "daemon-lib-page"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/page.rs"
+find = '''
+                | Self::BoardGet
+'''
+replace = ""
+
+[[plant]]
+name = "page: an operation is named otherwise than the page names it"
+meant = "the_operations_are_the_twenty_eight_the_app_forwards"
+runs = ["proto-page"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/page.rs"
+find = '            Self::StaffLast => "staff.last",'
+replace = '            Self::StaffLast => "staff.latest",'
+
+[[plant]]
+name = "cli: --json reads as --no-open"
+meant = "the_two_options_and_positionals_are_read_as_parse_args_reads_them"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "cli::"],
+]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/cli.rs"
+find = '''
+        json: parsed.flag("json"),
+        no_open: parsed.flag("no-open"),'''
+replace = '''
+        json: parsed.flag("json"),
+        no_open: parsed.flag("json"),'''

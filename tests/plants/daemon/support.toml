@@ -1,0 +1,245 @@
+# What the three players of Node's recordings share (`crates/cf-daemon/tests/support`):
+# a bug in it is one the players must catch, each that uses what it breaks, so each
+# bug is one plant for each of them.
+#
+# What no plant can show is what no recorded trace can see: the `«now»` a world's
+# file is written with (the recorder masks the stamps of a roster, so nothing
+# compares them: `players.toml` holds the mask itself), the queues and the events an operation
+# held while a stand-in made a call of its own (the recorder refuses an operation
+# that reads the clock itself and through a stand-in too, and none logs an event
+# before one), and what only Windows reads (the shims of the programs, `PATHEXT`).
+
+[[plant]]
+name = "support: the dump lists the schema backwards (api)"
+meant = "every_trace_of_the_api_is_answered_as_node_answered_it"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/compare.rs"
+find = 'AND sql IS NOT NULL ORDER BY name")'
+replace = 'AND sql IS NOT NULL ORDER BY name DESC")'
+
+[[plant]]
+name = "support: the dump lists the schema backwards (page)"
+meant = "every_page_trace_is_answered_as_node_answered"
+runs = ["daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/compare.rs"
+find = 'AND sql IS NOT NULL ORDER BY name")'
+replace = 'AND sql IS NOT NULL ORDER BY name DESC")'
+
+[[plant]]
+name = "support: the dump lists the schema backwards (screens)"
+meant = "corners_screens_001"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/compare.rs"
+find = 'AND sql IS NOT NULL ORDER BY name")'
+replace = 'AND sql IS NOT NULL ORDER BY name DESC")'
+
+[[plant]]
+name = "support: the dump lists the rows backwards (api)"
+meant = "every_trace_of_the_api_is_answered_as_node_answered_it"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/compare.rs"
+find = 'FROM \"{name}\" ORDER BY rowid"))'
+replace = 'FROM \"{name}\" ORDER BY rowid DESC"))'
+
+[[plant]]
+name = "support: the dump lists the rows backwards (page)"
+meant = "every_page_trace_is_answered_as_node_answered"
+runs = ["daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/compare.rs"
+find = 'FROM \"{name}\" ORDER BY rowid"))'
+replace = 'FROM \"{name}\" ORDER BY rowid DESC"))'
+
+[[plant]]
+name = "support: the dump lists the rows backwards (screens)"
+meant = "corners_screens_001"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/compare.rs"
+find = 'FROM \"{name}\" ORDER BY rowid"))'
+replace = 'FROM \"{name}\" ORDER BY rowid DESC"))'
+
+[[plant]]
+name = "support: the path after «root» is lost (page)"
+meant = "every_page_trace_is_answered_as_node_answered"
+runs = ["daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/world.rs"
+find = ".fold(self.path().to_path_buf(), |path, part| path.join(part));"
+replace = ".fold(self.path().to_path_buf(), |path, _part| path);"
+
+[[plant]]
+name = "support: the path after «root» is lost (screens)"
+meant = "corners_screens_001"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/world.rs"
+find = ".fold(self.path().to_path_buf(), |path, part| path.join(part));"
+replace = ".fold(self.path().to_path_buf(), |path, _part| path);"
+
+[[plant]]
+name = "support: a program on the path is not executable (page)"
+meant = "every_page_trace_is_answered_as_node_answered"
+runs = ["daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/world.rs"
+find = "fs::Permissions::from_mode(0o755)"
+replace = "fs::Permissions::from_mode(0o644)"
+
+[[plant]]
+name = "support: a program on the path is not executable (screens)"
+meant = "corners_screens_001"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/world.rs"
+find = "fs::Permissions::from_mode(0o755)"
+replace = "fs::Permissions::from_mode(0o644)"
+
+[[plant]]
+name = "support: a task is assigned the other way round (api)"
+meant = "every_run_of_cf_against_the_api_prints_what_it_printed_against_node"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/ledger.rs"
+find = "encode(ledger.assign_task(id(), integer(arg(args, 1)), integer(arg(args, 2))))"
+replace = "encode(ledger.assign_task(id(), integer(arg(args, 2)), integer(arg(args, 1))))"
+
+[[plant]]
+name = "support: a task is assigned the other way round (page)"
+meant = "every_page_trace_is_answered_as_node_answered"
+runs = ["daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/ledger.rs"
+find = "encode(ledger.assign_task(id(), integer(arg(args, 1)), integer(arg(args, 2))))"
+replace = "encode(ledger.assign_task(id(), integer(arg(args, 2)), integer(arg(args, 1))))"
+
+[[plant]]
+name = "support: a session name is drawn in capitals (api)"
+meant = "every_run_of_cf_against_the_api_prints_what_it_printed_against_node"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/ledger.rs"
+find = '.map(|name| name.as_str().expect("a name").to_owned()),'
+replace = '.map(|name| name.as_str().expect("a name").to_uppercase()),'
+
+[[plant]]
+name = "support: a session name is drawn in capitals (page)"
+meant = "every_page_trace_is_answered_as_node_answered"
+runs = ["daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/ledger.rs"
+find = '.map(|name| name.as_str().expect("a name").to_owned()),'
+replace = '.map(|name| name.as_str().expect("a name").to_uppercase()),'
+
+[[plant]]
+name = "support: the bearer is sent in a header nobody reads (api)"
+meant = "every_trace_of_the_api_is_answered_as_node_answered_it"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/front.rs"
+find = 'head.push_str(&format!("Authorization: {authorization}\r\n"));'
+replace = 'head.push_str(&format!("X-Authorization: {authorization}\r\n"));'
+
+[[plant]]
+name = "support: the bearer is sent in a header nobody reads (screens)"
+meant = "corners_screens_001"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/front.rs"
+find = 'head.push_str(&format!("Authorization: {authorization}\r\n"));'
+replace = 'head.push_str(&format!("X-Authorization: {authorization}\r\n"));'
+
+[[plant]]
+name = "support: the wake-ups are counted one too many (api)"
+meant = "every_trace_of_the_api_is_answered_as_node_answered_it"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/daemon.rs"
+find = "total - self.counted.replace(total)"
+replace = "total - self.counted.replace(total) + 1"
+
+[[plant]]
+name = "support: the wake-ups are counted one too many (page)"
+meant = "every_page_trace_is_answered_as_node_answered"
+runs = ["daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/daemon.rs"
+find = "total - self.counted.replace(total)"
+replace = "total - self.counted.replace(total) + 1"
+
+[[plant]]
+name = "support: the wake-ups are counted one too many (screens)"
+meant = "corners_screens_001"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/daemon.rs"
+find = "total - self.counted.replace(total)"
+replace = "total - self.counted.replace(total) + 1"
+
+[[plant]]
+name = "support: the last trace of a suite is not found (api)"
+meant = "every_trace_of_the_api_is_answered_as_node_answered_it"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/trace.rs"
+find = '''
+    found.sort();
+    found'''
+replace = '''
+    found.sort();
+    found.pop();
+    found'''
+
+[[plant]]
+name = "support: the last trace of a suite is not found (page)"
+meant = "every_page_trace_is_answered_as_node_answered"
+runs = ["daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/trace.rs"
+find = '''
+    found.sort();
+    found'''
+replace = '''
+    found.sort();
+    found.pop();
+    found'''
+
+[[plant]]
+name = "support: the last trace of a suite is not found (screens)"
+meant = "every_trace_of_the_screens_there_is_has_a_test_and_no_test_is_for_none"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/trace.rs"
+find = '''
+    found.sort();
+    found'''
+replace = '''
+    found.sort();
+    found.pop();
+    found'''

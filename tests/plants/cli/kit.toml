@@ -1,0 +1,56 @@
+# The plants of the CLI: bugs planted in the standalone verbs of `cf`, the parser they read
+# their words with, the roster they write through, the recording that holds them to what Node's
+# CLI said (fixed since Node went), what the flip release left (the repair of the terminal's
+# command) and the bundle without Node (nothing reads the file the flip read, an npm shim with
+# no Node is refused, the daemon the app starts, the update's check, the page's console text).
+# A run here is any command, a script’s test among them.
+#
+# What a plant is, and what this file and the tables beside it hold, is told in
+# tools/xtask/src/plants/kit.rs; `cargo xtask plants` runs them.
+
+run_limit_minutes = 10
+rebuild = ["cargo", "xtask", "build-cf", "--offline"]
+tables = ["parser", "verbs", "admin", "dispatch", "help", "flip", "deletion", "rig"]
+
+[run]
+# The parser held to Node's `parseArgs` on three thousand lists of words.
+args = ["cargo", "test", "--offline", "-p", "cf-base", "--test", "args"]
+# A verb of the native `cf` run outside a window, given its arguments whole (the rig test's `cf_native` cases, which build the `cf` they run).
+cf-native = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "cf_native::"]
+# The suites of the CLI (the `cli` test of crates/cf-e2e) against the native `cf`,
+# which they build from the sources as they are, in the build folder: `bin/` is not touched.
+clis = { command = ["cargo", "xtask", "test", "clis", "--offline"], builds = true }
+# A Codex window's supervisor, which refuses a Codex it has no Node to run.
+codex-session = ["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "supervisor"]
+# The page's console text, held to the table the Rust one is held to.
+console-text = ["node", "--test", "tests/console-text.test.mjs"]
+# The recording replayed against the native `cf`, case by case.
+goldens = ["cargo", "test", "--offline", "-p", "cf", "--test", "cli_goldens"]
+# What the repair leaves as it is, and says (cargo stops at the first test binary that fails, so the whole crate may not reach it).
+holds = ["cargo", "test", "--offline", "-p", "cf-launcher", "--test", "repair_holds"]
+# The daemon's host: a window opens on an npm shim with a Node to run on, and is refused without.
+host = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::"]
+# The launcher's repair, which commands it rewrites and which it leaves.
+launcher = ["cargo", "test", "--offline", "-p", "cf-launcher"]
+# The library as a caller other than `main` has it: what no process can bring to it.
+library = ["cargo", "test", "--offline", "-p", "cf", "--test", "dispatch"]
+# An npm shim found in npm's folder on Windows, started as one on PATH is.
+npm-shims = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "detect"]
+# The portable exe's packing, in the library that writes it and reads it back (every test binary: cargo stops at the first that fails).
+portable-pack = ["cargo", "test", "--offline", "-p", "cf-portable", "--no-fail-fast"]
+# Which `cf` answers, as a process.
+process = ["cargo", "test", "--offline", "-p", "cf", "--test", "standalone"]
+# How a program starts here, an npm shim with no Node to run on among them.
+runnable = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "runnable"]
+# What a window starts with: no Node named to it.
+seams = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "seams"]
+# The Developer ID signing of the app (`cf-release sign-mac`): every Mach-O hardened, none entitled.
+sign-mac = ["cargo", "test", "--offline", "-p", "cf-release", "--lib", "sign_mac::"]
+# The stand-in the tests give a window on Windows, written and opened on any system.
+stand-in = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "testing::"]
+# `cf ui` as a process: the daemon, in a home that has a leftover `use-node` file or none, and a window's token the board.
+ui = ["cargo", "test", "--offline", "-p", "cf", "--test", "daemon_stop"]
+# Which words the standalone module answers.
+units = ["cargo", "test", "--offline", "-p", "cf", "--lib", "standalone"]
+# The release's check of the bundle it publishes (`cf-release prepare-update`, run on bundles and archives made in the test).
+update-release = ["cargo", "test", "--offline", "-p", "cf-release", "--test", "prepare_update"]

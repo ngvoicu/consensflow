@@ -1,0 +1,416 @@
+# Plants in the rule of the feeds and its checks (tools/cf-publish: `rule`,
+# `checks`, `version`, `assets` and `read`): which release is the bridge, what a
+# later release finds true before it moves a feed, what the feeds serve once it
+# has, and that no feed is moved backward (the comparison of what a feed names
+# with the release run, and what the check accepts of a feed left alone). The
+# publisher's tests of the rule, against GitHub as its simulator
+# (`cf_publish::testing`) has it, must catch each.
+
+[[plant]]
+name = "feeds: the bridge is taken for a later release"
+meant = "moves_the_bridge_to_the_new_feed_and_the_old_feed"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/rule.rs"
+find = '''
+    Ok(if order == Ordering::Equal {
+        Role::Bridge
+    } else {
+        Role::Later
+    })'''
+replace = "    Ok(Role::Later)"
+
+[[plant]]
+name = "feeds: a release before the bridge is let through"
+meant = "refuses_a_release_before_the_bridge"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/rule.rs"
+find = "if order == Ordering::Less {"
+replace = "if order == Ordering::Less && false {"
+
+[[plant]]
+name = "feeds: a later release moves the old feeds too"
+meant = "moves_a_later_release_to_the_new_feeds_only"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/rule.rs"
+find = "if role_of(version, manifest)? == Role::Later {"
+replace = "if role_of(version, manifest)? == Role::Later && false {"
+
+[[plant]]
+name = "feeds: an old feed is held to the bridge by what it names, not byte for byte"
+meant = "refuses_where_the_old_feed_still_serves_the_release_before_the_bridge"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "if found == published {"
+replace = "if found == published || true {"
+
+[[plant]]
+name = "feeds: an old feed that cannot be read is taken for absent"
+meant = "refuses_a_feed_that_is_not_there_a_required_feed_is_not_absent"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = '''
+                problems.push(format!(
+                    "{feed} cannot be read ({}): the apps before the bridge read it",
+                    refusal.why
+                ));'''
+replace = "                let _ = refusal;"
+
+[[plant]]
+name = "feeds: the bridge's archive is asked to be served, not to be the one published"
+meant = "refuses_a_bridge_archive_that_serves_junk"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "Ok(got) if got != *wanted => problems.push(format!("
+replace = "Ok(got) if got != *wanted && false => problems.push(format!("
+
+[[plant]]
+name = "feeds: the bridge's Windows files are not asked for"
+meant = "refuses_the_bridges_windows_installer_or_portable_that_is_gone"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/assets.rs"
+find = "vec![&self.archive, &self.installer, &self.portable]"
+replace = "vec![&self.archive]"
+
+[[plant]]
+name = "feeds: the bridge is not looked for after the release is published"
+meant = "finds_the_bridge_not_carried_to_the_old_feed"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "problems.extend(bridge_problems(base, manifest, &mut reads));"
+replace = "let _ = bridge_problems;"
+
+[[plant]]
+name = "feeds: a later release finds nothing to check before it moves"
+meant = "refuses_where_the_old_feed_still_serves_the_release_before_the_bridge"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "Ok(Role::Later) => bridge_problems(base, manifest, &mut Reader::new(patience)),"
+replace = "Ok(Role::Later) => Vec::new(),"
+
+[[plant]]
+name = "feeds: only the archive of the release is held to the file built"
+meant = "finds_a_file_of_the_release_that_does_not_download_as_the_one_built"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = 'for path in assets.all().into_iter().chain(["SHA256SUMS"]) {'
+replace = "for path in [assets.archive.as_str()] {"
+
+[[plant]]
+name = "feeds: a feed served stale is read once"
+meant = "waits_out_an_old_feed_served_stale_for_a_moment"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/read.rs"
+find = '''
+        until(
+            self.patience,
+            || fetch_body(url),
+            |found| match found {'''
+replace = '''
+        until(
+            Patience::new(1, self.patience.wait),
+            || fetch_body(url),
+            |found| match found {'''
+
+[[plant]]
+name = "feeds: the old feed of a channel not in use may not be absent"
+meant = "lets_the_old_feed_of_a_channel_not_in_use_be_absent"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "Err(refusal) if refusal.status == Some(404) => continue,"
+replace = "Err(refusal) if false && refusal.status == Some(404) => continue,"
+
+[[plant]]
+name = "feeds: versions are compared as text"
+meant = "orders_versions_as_semantic_versioning_does"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/version.rs"
+find = "a.len().cmp(&b.len()).then_with(|| a.cmp(b))"
+replace = "a.cmp(b)"
+
+[[plant]]
+name = "feeds: the bridge's latest.json is not asked to name the bridge"
+meant = "refuses_a_bridge_whose_latest_json_names_another_release"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = '''
+    if document.get("version").and_then(Value::as_str) != Some(version.as_str()) {
+        problems.push(format!(
+            "the bridge's {tag}/latest.json names {}, not {version}",'''
+replace = '''
+    if false {
+        problems.push(format!(
+            "the bridge's {tag}/latest.json names {}, not {version}",'''
+
+[[plant]]
+name = "feeds: a release's latest.json is not asked to name its own archive"
+meant = "finds_a_latest_json_that_names_no_archive_of_this_release"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "if archive_named(&document).and_then(Value::as_str) != Some(wanted.as_str()) {"
+replace = "if false {"
+
+[[plant]]
+name = "feeds: a missing SHA256SUMS is let pass"
+meant = "refuses_where_sha256sums_is_gone"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = '''
+            problems.push(format!(
+                "the bridge's {tag}/SHA256SUMS cannot be read ({})",
+                refusal.why
+            ));
+            return problems;'''
+replace = '''
+            let _ = refusal;
+            return problems;'''
+
+# No feed is moved backward: the comparison of what a feed names with the release run, planted wrong.
+[[plant]]
+name = "feeds: no feed is ever taken for one that names a later release (asked of the rule)"
+meant = "says_which_release_a_feed_names_where_that_one_is_after_a_given_release"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/version.rs"
+find = "named_release(body).filter(|named| named > version)"
+replace = "named_release(body).filter(|named| named > version && false)"
+
+[[plant]]
+name = "feeds: no feed is ever taken for one that names a later release (a run again, end to end)"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+runs = ["publish"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/version.rs"
+find = "named_release(body).filter(|named| named > version)"
+replace = "named_release(body).filter(|named| named > version && false)"
+
+[[plant]]
+name = "feeds: every feed that names a release is taken for one that names a later release (asked of the rule)"
+meant = "says_which_release_a_feed_names_where_that_one_is_after_a_given_release"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/version.rs"
+find = "named_release(body).filter(|named| named > version)"
+replace = "named_release(body).filter(|named| named > version || true)"
+
+[[plant]]
+name = "feeds: every feed that names a release is taken for one that names a later release (a run again, end to end)"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+runs = ["publish"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/version.rs"
+find = "named_release(body).filter(|named| named > version)"
+replace = "named_release(body).filter(|named| named > version || true)"
+
+[[plant]]
+name = "feeds: the comparison is reversed: an earlier release is taken for a later one (asked of the rule)"
+meant = "says_which_release_a_feed_names_where_that_one_is_after_a_given_release"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/version.rs"
+find = "named_release(body).filter(|named| named > version)"
+replace = "named_release(body).filter(|named| named < version)"
+
+[[plant]]
+name = "feeds: the comparison is reversed: an earlier release is taken for a later one (a run again, end to end)"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+runs = ["publish"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/version.rs"
+find = "named_release(body).filter(|named| named > version)"
+replace = "named_release(body).filter(|named| named < version)"
+
+[[plant]]
+name = "feeds: the very same release is taken for a later one (asked of the rule)"
+meant = "says_which_release_a_feed_names_where_that_one_is_after_a_given_release"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/version.rs"
+find = "named_release(body).filter(|named| named > version)"
+replace = "named_release(body).filter(|named| named >= version)"
+
+[[plant]]
+name = "feeds: the very same release is taken for a later one (a run again, end to end)"
+meant = "for_equal_is_not_later"
+runs = ["publish"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/version.rs"
+find = "named_release(body).filter(|named| named > version)"
+replace = "named_release(body).filter(|named| named >= version)"
+
+[[plant]]
+name = "feeds: a version that is not a semantic one is compared all the same"
+meant = "moves_a_feed_whose_latest_json_names_a_version_that_is_not_a_semantic_one"
+runs = ["publish"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/version.rs"
+find = 'Version::parse(document.get("version")?.as_str()?).ok()'
+replace = 'Version::parse(document.get("version")?.as_str()?).ok().or_else(|| Version::parse("99.0.0").ok())'
+
+[[plant]]
+name = "feeds: what is not a latest.json is taken for one that names a later release"
+meant = "moves_a_feed_whose_latest_json_is_not_a_latest_json"
+runs = ["publish"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/version.rs"
+find = "let document: Value = serde_json::from_slice(body).ok()?;"
+replace = 'let document: Value = serde_json::from_slice(body).unwrap_or_else(|_| serde_json::json!({ "version": "99.0.0" }));'
+
+# What the check accepts of a feed that a run left alone.
+[[plant]]
+name = "feeds: the check does not accept a feed left at a later release"
+meant = "accepts_a_new_feed_that_names_a_later_release"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "Ok(body) if *body == latest || later_release(body, version).is_some() => body,"
+replace = "Ok(body) if *body == latest => body,"
+
+[[plant]]
+name = "feeds: the check accepts what is not a later release instead of what is"
+meant = "does_not_approve_a_feed_that_names_an_earlier_release_this_one_with_other_bytes_or_none"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "Ok(body) if *body == latest || later_release(body, version).is_some() => body,"
+replace = "Ok(body) if *body == latest || later_release(body, version).is_none() => body,"
+
+[[plant]]
+name = "feeds: the check approves any feed it can read"
+meant = "does_not_approve_a_feed_that_names_an_earlier_release_this_one_with_other_bytes_or_none"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "Ok(body) if *body == latest || later_release(body, version).is_some() => body,"
+replace = "Ok(body) => body,"
+
+# What the check holds a feed to that the publisher left a record of: that it did not go back.
+[[plant]]
+name = "feeds: the check does not look at what a feed named before (asked of the check)"
+meant = "an_earlier_release_than_it_did_when_the_publisher_read_it"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "if now < *was {"
+replace = "if false {"
+
+[[plant]]
+name = "feeds: the check does not look at what a feed named before (a run again, end to end)"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+runs = ["publish"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "if now < *was {"
+replace = "if false {"
+
+[[plant]]
+name = "feeds: a feed that is as it was is taken for one that went backward (asked of the check)"
+meant = "an_earlier_release_than_it_did_when_the_publisher_read_it"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "if now < *was {"
+replace = "if now <= *was {"
+
+[[plant]]
+name = "feeds: a feed that is as it was is taken for one that went backward (a run again, end to end)"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+runs = ["publish"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "if now < *was {"
+replace = "if now <= *was {"
+
+[[plant]]
+name = "feeds: a feed that moved forward is taken for one that went backward (asked of the check)"
+meant = "an_earlier_release_than_it_did_when_the_publisher_read_it"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "if now < *was {"
+replace = "if now > *was {"
+
+[[plant]]
+name = "feeds: a feed that moved forward is taken for one that went backward (a run again, end to end)"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+runs = ["publish"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = "if now < *was {"
+replace = "if now > *was {"
+
+[[plant]]
+name = "feeds: a record is trusted whatever it holds"
+meant = "an_earlier_release_than_it_did_when_the_publisher_read_it"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/checks.rs"
+find = ".filter_map(|(feed, named)| Some((feed, Version::parse(named.as_str()?).ok()?)))"
+replace = '.filter_map(|(feed, named)| Some((feed, Version::parse(named.as_str()?).ok().or_else(|| Version::parse("99.0.0").ok())?)))'
+
+[[plant]]
+name = "feeds: a feed that names a later release is waited for as if it were served stale"
+meant = "and_does_not_wait_for_it"
+runs = ["feeds"]
+
+[[plant.edit]]
+file = "tools/cf-publish/src/read.rs"
+find = '''
+                Ok(body) => {
+                    body == expected
+                        || own
+                            .as_ref()
+                            .is_some_and(|own| later_release(body, own).is_some())
+                }'''
+replace = "                Ok(body) => body == expected,"

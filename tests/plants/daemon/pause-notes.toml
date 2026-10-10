@@ -1,0 +1,206 @@
+# The note that tells a requester its tasks are paused: one note for the
+# tasks that stall together (a pass, the closing of a project's windows),
+# withdrawn when its task is resumed or called off, or narrowed when it names
+# several, however the resume goes. One plant takes one rule out; a test of it
+# fails.
+
+[run]
+# The ledger's tests of the notes: their words, and what a resume and a cancel do to them.
+pause-notes-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "pause_notes"]
+# The same on each way a resume goes: back on the board, and as the task nobody holds yet.
+ledger-resumes = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "pause_notes"]
+# The words of a pause note, and what is taken for one.
+pause-notes-words = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::pauses"]
+# The engine's tests of a restart, a close and a resume, on the fake windows.
+pause-notes-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "pause_notes"]
+
+[[plant]]
+name = "pause notes: a resume leaves the notes of its pause"
+meant = "a_resume_withdraws_what_its_requester_was_told_of_the_pause_and_has_not_been_given"
+runs = ["pause-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+        // A refusal below writes nothing, this withdrawal with it.
+        leave_pause_notes(store, &task, "resumed")?;'''
+replace = ""
+
+[[plant]]
+name = "pause notes: a cancel leaves a note of several as it was"
+meant = "a_task_called_off_leaves_the_note_of_several_and_a_refused_resume_withdraws_nothing"
+runs = ["pause-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''
+    // A note of several that names it, still queued, names it no more.
+    leave_pause_notes(store, &task, "cancelled")?;'''
+replace = ""
+
+[[plant]]
+name = "pause notes: a resume withdraws only when its words go into a window"
+meant = "a_resume_after_its_session_ended_withdraws_the_pause_note_and_keeps_its_own"
+runs = ["ledger-resumes"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+        // A refusal below writes nothing, this withdrawal with it.
+        leave_pause_notes(store, &task, "resumed")?;'''
+replace = ""
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '        let words = carrier_body(store, &task, assignee.id, &format!("Resumed: {body}"))?;'
+replace = '''
+        leave_pause_notes(store, &task, "resumed")?;
+        let words = carrier_body(store, &task, assignee.id, &format!("Resumed: {body}"))?;'''
+
+[[plant]]
+name = "pause notes: a resume withdraws in a step of its own, though it is refused"
+meant = "a_task_called_off_leaves_the_note_of_several_and_a_refused_resume_withdraws_nothing"
+runs = ["pause-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+    model::require_text(body, "body", MAX_BODY)?;
+    store.write(|store| {
+        let author = by'''
+replace = '''
+    model::require_text(body, "body", MAX_BODY)?;
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        require_task_state(&task, &["paused"], "resume")?;
+        leave_pause_notes(store, &task, "resumed")
+    })?;
+    store.write(|store| {
+        let author = by'''
+
+[[plant]]
+name = "pause notes: a resume withdraws a note the chief wrote"
+meant = "a_resume_withdraws_what_its_requester_was_told_of_the_pause_and_has_not_been_given"
+runs = ["pause-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "       WHERE task_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'"
+replace = "       WHERE task_id = ? AND recipient_id = ? AND kind = 'note'"
+
+[[plant]]
+name = "pause notes: a resume withdraws a note its reader has been given"
+meant = "a_resume_withdraws_what_its_requester_was_told_of_the_pause_and_has_not_been_given"
+runs = ["pause-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''         AND state = 'queued' AND body != ?",'''
+replace = '         AND body != ?",'
+
+[[plant]]
+name = "pause notes: a resume leaves a note of several naming the task"
+meant = "a_resume_takes_its_task_out_of_a_note_of_several_and_a_last_one_leaves_it_a_note_of_the_task"
+runs = ["pause-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "    for (id, body) in several {"
+replace = "    for (id, body) in several.into_iter().take(0) {"
+
+[[plant]]
+name = "pause notes: a note that is no pause note is taken for one"
+meant = "no_other_note_is_taken_for_a_pause_note"
+runs = ["pause-notes-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "    (render(&paused) == body).then_some(paused)"
+replace = "    Some(paused)"
+
+[[plant]]
+name = "pause notes: a note takes a task whatever state it is in"
+meant = "a_note_that_was_given_or_withdrawn_or_is_no_pause_note_takes_no_task"
+runs = ["pause-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = 'note.sender.is_none() && note.state == "queued")'
+replace = "note.sender.is_none())"
+
+[[plant]]
+name = "pause notes: a note names its tasks out of order"
+meant = "a_stall_of_the_same_pass_joins_the_note_and_it_names_them_all_in_order"
+runs = ["pause-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "            paused.sort_by_key(|named| named.number);"
+replace = ""
+
+[[plant]]
+name = "pause notes: a narrowed note is tied to none"
+meant = "a_resume_takes_its_task_out_of_a_note_of_several_and_a_last_one_leaves_it_a_note_of_the_task"
+runs = ["pause-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "        [one] => Some(store.task_row(project_id, one.number)?.id),"
+replace = "        [_] => None::<i64>,"
+
+[[plant]]
+name = "pause notes: a stall never joins the note of its pass"
+meant = "tells_a_chief_once_of_all_the_tasks_a_restart_pauses"
+runs = ["pause-notes-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stalls.rs"
+find = "        let earlier = self.stalls.told.borrow().get(&key).copied();"
+replace = "        let earlier: Option<i64> = None;"
+
+[[plant]]
+name = "pause notes: a pass is no burst"
+meant = "tells_a_chief_once_of_all_the_tasks_a_restart_pauses"
+runs = ["pause-notes-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        let _burst = self.stalls.begin_burst();
+        self.resume_held()?;'''
+replace = "        self.resume_held()?;"
+
+[[plant]]
+name = "pause notes: closing windows is no burst"
+meant = "tells_a_chief_once_of_all_the_tasks_a_closed_project_pauses"
+runs = ["pause-notes-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        let _burst = self.stalls.begin_burst();
+        let mut closing = Vec::new();'''
+replace = "        let mut closing = Vec::new();"
+
+[[plant]]
+name = "pause notes: what a burst told outlives it"
+meant = "tells_a_stall_after_a_close_in_a_note_of_its_own_though_the_close_left_a_note_queued"
+runs = ["pause-notes-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stalls.rs"
+find = '''
+        if left == 0 {
+            self.0.told.borrow_mut().clear();
+        }'''
+replace = "        let _ = left;"
+
+[[plant]]
+name = "pause notes: a departed trace departs at another call"
+meant = "every_departed_trace_is_there_and_still_departs"
+runs = ["ledger-replay"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/tests/replay.rs"
+find = '("core-dispatcher-042", 72, '
+replace = '("core-dispatcher-042", 73, '

@@ -1,0 +1,400 @@
+# The receipt and stop redesign's rules: a pause keeps what a window kept and
+# stops its window until it has paid the stop; a message is received by proof
+# and not by being withdrawn; a door's claim is a write and its answer is
+# read only when the door says it handed it over. One plant puts back what
+# one rule took out, or takes one rule out, and a test of the rule fails.
+
+[run]
+# What the engine writes a window, and reads of it, as text.
+engine-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text"]
+codex-session-lib-broker-tests-questions = ["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "broker::tests::questions"]
+
+[[plant]]
+name = "pause: a hold withdraws what was on its way"
+meant = "a_hold_ends_in_one_carrier_with_what_was_kept_in_the_order_of_its_ids_and_its_confirm_settles_every_row"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+        pause(store, &task, detail)?;
+        store.db.execute(
+            "UPDATE task SET held_until = ? WHERE id = ?",'''
+replace = '''
+        pause(store, &task, detail)?;
+        store.db.execute(
+            "UPDATE message SET state = 'cancelled', reason = 'held' WHERE task_id = ? AND state IN ('queued', 'gated')",
+            [task.id],
+        )?;
+        store.db.execute(
+            "UPDATE task SET held_until = ? WHERE id = ?",'''
+
+[[plant]]
+name = "pause: a pause cancels an answer"
+meant = "the_chiefs_pause_keeps_an_answer_and_takes_back_the_chiefs_words_and_notes"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''                   AND kind IN ('task', 'note') AND state IN ('queued', 'gated')",'''
+replace = '''                   AND kind IN ('task', 'note', 'answer') AND state IN ('queued', 'gated')",'''
+
+[[plant]]
+name = "pause: a pause is not counted as a stop"
+meant = "two_pauses_on_a_clock_that_never_moves_are_two_stops"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '"UPDATE task SET paused_at = updated_at, stop_seq = stop_seq + 1 WHERE id = ?",'
+replace = '"UPDATE task SET paused_at = updated_at WHERE id = ?",'
+
+[[plant]]
+name = "pause: a door is left open by a pause"
+meant = "a_pause_voids_the_claim_and_shuts_the_door_and_the_resume_carries_the_answer"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''AND kind = 'question' AND door_closed_at IS NULL",'''
+replace = '''AND kind = 'question' AND door_closed_at IS NULL AND 0",'''
+
+[[plant]]
+name = "pause: a claim stands through a pause"
+meant = "a_pause_voids_the_claim_and_shuts_the_door_and_the_resume_carries_the_answer"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '               AND claimed_at IS NOT NULL ORDER BY id",'
+replace = '               AND claimed_at IS NOT NULL AND 0 ORDER BY id",'
+
+[[plant]]
+name = "pause: the task-message bypass is back in the head of a queue"
+meant = "a_task_paused_before_its_brief_arrived_keeps_the_brief_and_its_window_is_given_nothing"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "         AND (?2 = 0 OR m.urgent = 1 OR m.task_id IN ("
+replace = "         AND (?2 = 0 OR m.urgent = 1 OR m.kind = 'task' OR m.task_id IN ("
+
+[[plant]]
+name = "pause: a confirm moves the task past the words that resume it"
+meant = "a_confirm_of_what_was_on_its_way_when_the_task_was_paused_leaves_it_queued_behind_the_words"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "            if barrier(store, task.id, window)? || !arrived(store, task.id, window)? {"
+replace = "            if !arrived(store, task.id, window)? {"
+
+[[plant]]
+name = "pause: an answer received ignores a second open question"
+meant = "one_answer_received_leaves_the_task_waiting_for_the_other_question_and_the_second_makes_it_work"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '        "waiting" if !outstanding(store, task.id, window)? => "working",'
+replace = '        "waiting" => "working",'
+
+[[plant]]
+name = "pause: a claim marks the answer read"
+meant = "a_poll_claims_the_answer_and_the_same_answer_comes_again_to_a_second_poll"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '"UPDATE message SET claimed_at = ? WHERE id = ?",'
+replace = '''"UPDATE message SET claimed_at = ?, state = 'read' WHERE id = ?",'''
+
+[[plant]]
+name = "pause: a question is born with its door open"
+meant = "a_question_asked_while_its_task_is_paused_or_queued_behind_the_words_that_resume_it_is_born_with_its_door_shut"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '"paused" => true,'
+replace = '"paused" => false,'
+
+[[plant]]
+name = "pause: a receipt is taken at a door that was shut"
+meant = "a_receipt_at_a_door_a_pause_shut_is_refused_and_the_answer_stays_to_come_as_a_message"
+runs = ["daemon-lib-routes-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = 'WHERE a.id = ? AND a.carried_by IS NULL AND q.door_closed_at IS NULL",'
+replace = 'WHERE a.id = ? AND a.carried_by IS NULL",'
+
+[[plant]]
+name = "pause: a fold takes a row held for the human"
+meant = "a_row_still_held_for_the_human_is_not_folded_and_goes_on_its_own_once_passed_on"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''     AND kind IN ('task', 'answer', 'note') AND state = 'queued'";'''
+replace = '''     AND kind IN ('task', 'answer', 'note') AND state IN ('queued', 'gated')";'''
+
+[[plant]]
+name = "pause: a carrier stores the text of what it carries"
+meant = "a_hold_ends_in_one_paste_with_what_was_kept_and_then_the_words_and_one_marker"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''
+            "UPDATE message SET carried_by = ? WHERE id = ?",
+            params![carrier, id],
+        )?;
+    }'''
+replace = '''
+            "UPDATE message SET carried_by = ? WHERE id = ?",
+            params![carrier, id],
+        )?;
+    }
+    store.db.execute(
+        "UPDATE message SET body = body || char(10) || (SELECT group_concat(body, char(10)) FROM message WHERE carried_by = ?1) WHERE id = ?1 AND EXISTS (SELECT 1 FROM message WHERE carried_by = ?1)",
+        [carrier],
+    )?;'''
+
+[[plant]]
+name = "pause: a claim is not voided when its window is seen at rest"
+meant = "an_unacknowledged_claim_is_voided_at_the_look_that_finds_the_window_at_rest_and_the_answer_is_pasted_once"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '            Look::Rest => Some("its window is at rest"),'
+replace = "            Look::Rest => None,"
+
+[[plant]]
+name = "pause: a claim is not voided when its window exits"
+meant = "an_unacknowledged_claim_is_voided_when_the_window_exits_and_the_answer_comes_with_the_words"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        self.seams
+            .ledger
+            .borrow_mut()
+            .release_claims(record.id, "its window exited")?;'''
+replace = ""
+
+[[plant]]
+name = "pause: a claim is not voided when the daemon starts"
+meant = "an_unacknowledged_claim_is_voided_when_the_daemon_starts"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        self.seams.ledger.borrow_mut().release_all_claims()?;"
+replace = ""
+
+[[plant]]
+name = "pause: payment of a stop is forgiven at launch"
+meant = "a_pause_while_the_pane_opens_stays_owed_and_the_first_look_interrupts"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            part.stopped = planned.stop.map(|stop| (stop.task_id, stop.seq));"
+replace = '''
+            part.stopped = self
+                .seams
+                .ledger
+                .borrow()
+                .stop_of(participant.id)
+                .ok()
+                .flatten()
+                .map(|stop| (stop.task_id, stop.seq));'''
+
+[[plant]]
+name = "pause: a pause while a launch is prepared is not seen"
+meant = "a_pause_during_a_launchs_preparation_opens_no_pane_and_the_message_is_given_back_and_carried"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        Ok(on_its_way && ledger.stop_of(participant.id)? == captured)"
+replace = "        Ok(on_its_way)"
+
+[[plant]]
+name = "pause: a delivery withdrawn while its window got ready is handed over"
+meant = "a_pause_while_the_window_gets_ready_hands_it_nothing"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        let next = self.seams.ledger.borrow().next_delivery(record.id)?;
+        if next.is_none_or(|next| next.id != message.id) {
+            return Ok(());
+        }'''
+replace = '''
+        let next = self.seams.ledger.borrow().next_delivery(record.id)?;
+        let _ = next;'''
+
+[[plant]]
+name = "pause: what the activity says gates the interrupt again"
+meant = "a_window_out_of_quota_and_still_at_work_is_interrupted_while_its_activity_says_it_is_out"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '''
+                Look::Work => {
+                    self.interrupt_for(project, participant, record, &stop)
+                        .await
+                }'''
+replace = '''
+                Look::Work if self.activity(participant.id).state != crate::ActivityState::Working => Ok(()),
+                Look::Work => {
+                    self.interrupt_for(project, participant, record, &stop)
+                        .await
+                }'''
+
+[[plant]]
+name = "pause: a stop is tried once, not in three rounds"
+meant = "three_rounds_ignored_exhaust_the_stop_which_is_said_once_tried_again_every_minute_and_paid_at_rest"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "const ROUNDS: u32 = 3;"
+replace = "const ROUNDS: u32 = 1;"
+
+[[plant]]
+name = "pause: a launch prepends a brief nobody received"
+meant = "a_gated_first_launch_gives_its_window_nothing_until_the_human_passes_the_brief_on_and_then_one_paste"
+runs = ["engine-dispatcher", "engine-text"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "         AND m.kind = 'task' AND m.state IN ('delivered', 'read') AND m.carried_by IS NULL"
+replace = "         AND m.kind = 'task' AND m.state IN ('queued', 'gated', 'delivering', 'delivered', 'read') AND m.carried_by IS NULL"
+
+[[plant]]
+name = "pause: the door claims before it asks whether its daemon is stopping or its window gone"
+meant = "an_answer_that_came_as_the_daemon_stops_is_not_claimed_and_stays_the_ledgers_to_deliver"
+runs = ["daemon-lib-routes-door"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/door.rs"
+find = '''
+        if context.closing.is_set()
+            || request.consumer().has_left()
+            || context.credentials.resolve(request.bearer()).is_none()
+        {
+            return unanswered(&asked);
+        }
+        let claimed = context
+            .ledger
+            .borrow_mut()
+            .claim_answer(asked.id, caller.participant.id)?;'''
+replace = '''
+        let claimed = context
+            .ledger
+            .borrow_mut()
+            .claim_answer(asked.id, caller.participant.id)?;
+        if context.closing.is_set()
+            || request.consumer().has_left()
+            || context.credentials.resolve(request.bearer()).is_none()
+        {
+            return unanswered(&asked);
+        }'''
+
+[[plant]]
+name = "pause: a thread shows and receives what waits for the human"
+meant = "a_gated_answer_is_left_out_of_the_thread_and_is_not_received"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '        task.messages.retain(|message| message.state != "gated");'
+replace = "        task.messages.retain(|_| true);"
+
+[[plant]]
+name = "pause: a lane says nothing of a stop its window ignores"
+meant = "a_lane_has_unstopped_while_its_window_ignores_a_stop_and_in_no_other_lane_or_time"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::stopping"],
+]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/board.rs"
+find = '''
+        if let Some(ignored) = page.engine.unstopped(id) {
+            fields.insert("unstopped".to_owned(), ignored);
+        }'''
+replace = ""
+
+[[plant]]
+name = "pause: a door shut by the board is wrapped for the model"
+meant = "a_door_the_board_shut_is_refused_in_the_boards_own_words_and_any_other_refusal_is_wrapped"
+runs = ["board-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-board/src/door.rs"
+find = "        Err(cause) if cause.code() == Some(DOOR_CLOSED) => Reply::Refused(cause.to_string()),"
+replace = "        Err(cause) if cause.code() == Some(DOOR_CLOSED) => Reply::Refused(refusal_reason(&cause)),"
+
+[[plant]]
+name = "pause: a hook tells the board before it writes the answer"
+meant = "an_answer_is_written_and_flushed_before_the_board_is_told_it_was_handed_over"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf", "--lib", "hook::"],
+]
+
+[[plant.edit]]
+file = "crates/cf/src/hook.rs"
+find = '''
+    if let Some(said) = said {
+        write!(out, "{said}")?;
+        out.flush()?;
+    }
+    // The answer is the harness's now: the board is told it was handed over.
+    if let Some((board, answer)) = handed {
+        door::acknowledge(&board, &answer, true);
+    }'''
+replace = '''
+    if let Some((board, answer)) = &handed {
+        door::acknowledge(board, answer, true);
+    }
+    if let Some(said) = said {
+        write!(out, "{said}")?;
+        out.flush()?;
+    }'''
+
+[[plant]]
+name = "pause: a turn that ends leaves the question it asked held at the board"
+meant = "a_turn_that_completes_ends_the_poll_of_the_question_it_asked_and_the_answer_is_given_back"
+runs = ["codex-session-lib-broker-tests-questions"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/pair.rs"
+find = "            let turn_ended = turn_over && thread.is_some() && held.thread.as_deref() == thread;"
+replace = "            let turn_ended = false && thread.is_some() && held.thread.as_deref() == thread;"
+
+# The writer's own check of it is a second hold on the answer: both go.
+[[plant]]
+name = "pause: an answer that outlived its turn is handed to Codex"
+meant = "a_turn_that_completes_ends_the_poll_of_the_question_it_asked_and_the_answer_is_given_back"
+runs = ["codex-session-lib-broker-tests-questions"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/pair.rs"
+find = "            let ended = ending.is_raised();"
+replace = "            let ended = false;"
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/transport.rs"
+find = '''
+        let wanted = watch
+            .as_ref()
+            .is_none_or(|watch| !watch.ended.load(Ordering::SeqCst));'''
+replace = "        let wanted = true;"

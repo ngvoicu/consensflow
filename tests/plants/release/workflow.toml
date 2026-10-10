@@ -1,0 +1,340 @@
+# Plants in the release workflow's text (.github/workflows/release.yml): who
+# may publish, what a hand run is told and not failed by, what holds the write
+# token, how the publisher is built and checked before it runs, and the steps
+# that call it. The tests that read the workflow and run its steps as written
+# must catch each.
+
+[[plant]]
+name = "workflow: a hand run on a tag publishes: the job asks only for a tag"
+meant = "is_the_push_of_a_tag_not_a_hand_run_though_it_is_on_a_tag"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = "    if: github.event_name == 'push' && github.ref_type == 'tag'"
+replace = "    if: github.ref_type == 'tag'"
+
+[[plant]]
+name = "workflow: a hand run on a tag takes the group of the releases"
+meant = "is_the_push_of_a_tag_for_the_group_of_releases_that_go_out_one_at_a_time"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = "group: ${{ github.event_name == 'push' && github.ref_type == 'tag' && 'release' ||"
+replace = "group: ${{ github.ref_type == 'tag' && 'release' ||"
+
+[[plant]]
+name = "workflow: a hand run is failed by what a tag would be refused for, before the build"
+meant = "asks_the_old_feeds_before_the_build_a_tag_is_refused_a_hand_run_is_told"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+if [ "$GITHUB_EVENT_NAME" != push ]; then dry=(--dry-run); fi
+          app/src-tauri/target/release/cf-publish feeds prerequisites'''
+replace = "app/src-tauri/target/release/cf-publish feeds prerequisites"
+
+[[plant]]
+name = "workflow: a hand run is failed by the plan of the feeds"
+meant = "plans_the_feeds_from_the_archive_a_tag_is_refused_for_a_release_before_the_bridge"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+if [ "$GITHUB_EVENT_NAME" != push ]; then dry=(--dry-run); fi
+          app/src-tauri/target/release/cf-publish feeds plan'''
+replace = "app/src-tauri/target/release/cf-publish feeds plan"
+
+[[plant]]
+name = "workflow: the Mac job asks the rule without having built it"
+meant = "builds_the_rule_in_the_mac_job_before_it_asks_it"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+      - name: Build cf-publish, the rule of the feeds
+        run: cargo build --release --locked -p cf-publish
+'''
+replace = ""
+
+[[plant]]
+name = "workflow: the Mac job builds the rule with a signing key in reach"
+meant = "builds_the_rule_in_the_mac_job_before_it_asks_it"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+      - name: Build cf-publish, the rule of the feeds
+        run: cargo build --release --locked -p cf-publish'''
+replace = '''
+      - name: Build cf-publish, the rule of the feeds
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        run: cargo build --release --locked -p cf-publish'''
+
+[[plant]]
+name = "workflow: the tree is checked out in the publish job"
+meant = "has_the_publish_job_run_the_publisher_that_was_built_and_nothing_of_the_tree"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+    steps:
+      # The files the Mac and Windows jobs built.'''
+replace = '''
+    steps:
+      - uses: actions/checkout@v7
+      # The files the Mac and Windows jobs built.'''
+
+[[plant]]
+name = "workflow: Node is set up in the publish job"
+meant = "has_the_publish_job_run_the_publisher_that_was_built_and_nothing_of_the_tree"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+    steps:
+      # The files the Mac and Windows jobs built.'''
+replace = '''
+    steps:
+      - uses: actions/setup-node@v7
+      # The files the Mac and Windows jobs built.'''
+
+[[plant]]
+name = "workflow: the publish job does not wait for the publisher"
+meant = "has_the_publish_job_run_the_publisher_that_was_built_and_nothing_of_the_tree"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = "needs: [mac, windows, gate, publisher]"
+replace = "needs: [mac, windows, gate]"
+
+[[plant]]
+name = "workflow: the publisher is downloaded into the folder of the release"
+meant = "has_the_publish_job_run_the_publisher_that_was_built_and_nothing_of_the_tree"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+          name: cf-publish
+          path: ${{ runner.temp }}/publisher'''
+replace = '''
+          name: cf-publish
+          path: ${{ runner.temp }}/dist'''
+
+[[plant]]
+name = "workflow: the publisher is checked against the hash of another job"
+meant = "has_the_publish_job_run_the_publisher_that_was_built_and_nothing_of_the_tree"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = "PUBLISHER_SHA256: ${{ needs.publisher.outputs.sha256 }}"
+replace = "PUBLISHER_SHA256: ${{ needs.mac.outputs.sha256 }}"
+
+[[plant]]
+name = "workflow: the publisher is run without its hash being checked"
+meant = "runs_the_publisher_only_once_it_is_the_binary_the_job_that_built_it_reported"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = 'if [ -z "$PUBLISHER_SHA256" ] || [ "$got" != "$PUBLISHER_SHA256" ]; then'
+replace = "if false; then"
+
+[[plant]]
+name = "workflow: the publisher that was downloaded is not made to run"
+meant = "runs_the_publisher_only_once_it_is_the_binary_the_job_that_built_it_reported"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+          chmod +x "$publisher"
+'''
+replace = ""
+
+[[plant]]
+name = "workflow: the publisher job holds the write permission"
+meant = "builds_the_publisher_where_no_secret_is"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+    permissions:
+      contents: read
+    outputs:'''
+replace = '''
+    permissions:
+      contents: write
+    outputs:'''
+
+[[plant]]
+name = "workflow: the publisher is built by a third-party action"
+meant = "builds_the_publisher_where_no_secret_is"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+      - run: rustup update stable --no-self-update && rustup default stable
+      - name: Build cf-publish, and say what it hashes to'''
+replace = '''
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build cf-publish, and say what it hashes to'''
+
+[[plant]]
+name = "workflow: the publisher is built from versions Cargo.lock does not pin"
+meant = "builds_the_publisher_where_no_secret_is"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+          cargo build --release --locked -p cf-publish
+          sha256='''
+replace = '''
+          cargo build --release -p cf-publish
+          sha256='''
+
+[[plant]]
+name = "workflow: the token is the publish job again"
+meant = "gives_the_write_token_to_the_two_steps_that_run_the_publisher_and_to_no_other"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+    permissions:
+      contents: write
+    # Nothing of the tree'''
+replace = '''
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    # Nothing of the tree'''
+
+[[plant]]
+name = "workflow: the token reaches the check of the hash"
+meant = "gives_the_write_token_to_the_two_steps_that_run_the_publisher_and_to_no_other"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+        env:
+          PUBLISHER_SHA256: ${{ needs.publisher.outputs.sha256 }}'''
+replace = '''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISHER_SHA256: ${{ needs.publisher.outputs.sha256 }}'''
+
+[[plant]]
+name = "workflow: the step that publishes is given no token"
+meant = "gives_the_write_token_to_the_two_steps_that_run_the_publisher_and_to_no_other"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/publisher/cf-publish" publish --dir . --tag "$GITHUB_REF_NAME" \'''
+replace = '''
+        env:
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/publisher/cf-publish" publish --dir . --tag "$GITHUB_REF_NAME" \'''
+
+[[plant]]
+name = "workflow: the step that publishes is given no repository"
+meant = "publishes_the_bridge_and_moves_its_feeds"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/publisher/cf-publish" publish --dir . --tag "$GITHUB_REF_NAME" \'''
+replace = '''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/publisher/cf-publish" publish --dir . --tag "$GITHUB_REF_NAME" \'''
+
+[[plant]]
+name = "workflow: the step that checks the feeds is gone"
+meant = "checks_the_feeds_after_it_publishes_them"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = "- name: The feeds serve this release, and its archive downloads"
+replace = "- name: The feeds are not looked at"
+
+[[plant]]
+name = "workflow: a file is replaced by deleting it first, in a step"
+meant = "keeps_every_call_of_gh_in_the_publisher_which_is_tested_the_workflow_only_runs_it"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '          "$RUNNER_TEMP/publisher/cf-publish" publish --dir . --tag "$GITHUB_REF_NAME" \'
+replace = '''
+          gh release upload feed-alpha latest.json --clobber
+          "$RUNNER_TEMP/publisher/cf-publish" publish --dir . --tag "$GITHUB_REF_NAME" \'''
+
+[[plant]]
+name = "workflow: the publisher is given the tag without its v"
+meant = "publishes_the_bridge_and_moves_its_feeds"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '--dir . --tag "$GITHUB_REF_NAME" \'
+replace = '--dir . --tag "${GITHUB_REF_NAME#v}" \'
+
+[[plant]]
+name = "workflow: a step of the publisher job is not shell: a bracket is left open"
+meant = "every_workflow_is_valid_yaml"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = "needs: [mac, windows, gate, publisher]"
+replace = "needs: [mac, windows, gate, publisher"
+
+[[plant]]
+name = "workflow: the check of the hash has no end"
+meant = "all_parse_as_bash_bash_n"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+            exit 1
+          fi
+'''
+replace = '''
+            exit 1
+'''

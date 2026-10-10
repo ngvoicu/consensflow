@@ -15,8 +15,9 @@
 //! `Run::Native`: `sidecar` (build-cf, stage, conpty) is S1's, `portable` is
 //! S2's, `app`, `clippy_windows`, `departures` and `bench` are S10's (the thin
 //! drivers, which run cargo and nothing else), `suites`, `smoke` and
-//! `candidate` are S6's, and `updater_smoke` is S12's: the updater smoke in
-//! Rust, which `smoke` lists as `smoke-updater`. The lead's are this list of
+//! `candidate` are S6's, `updater_smoke` is S12's: the updater smoke in
+//! Rust, which `smoke` lists as `smoke-updater`, and `plants` is S13's: the
+//! mutation tests, with their data in `tests/plants`. The lead's are this list of
 //! modules, `dispatch`, `process`, `context`, `check`, the manifests and the
 //! lockfile, the alias, and the call sites (the npm scripts, the workflows, the
 //! drivers that run a command).
@@ -31,6 +32,7 @@ mod clippy_windows;
 pub mod context;
 mod departures;
 mod dispatch;
+mod plants;
 mod portable;
 pub mod process;
 mod sidecar;

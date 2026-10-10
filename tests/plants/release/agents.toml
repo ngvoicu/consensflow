@@ -1,0 +1,114 @@
+# Plants in what the agents screens do, in the native daemon: the catalog, an
+# agent saved with its profile, the screens behind the UI token, and the
+# deletion. The proof of the agents screens (tests/agents-proof.mjs), which the
+# packaged smoke runs against the daemon a built app started, must catch each:
+# here it is run against the daemon from the checkout, by the `agents_proof`
+# cases of the daemon test of crates/cf-e2e (`cargo xtask test agents`).
+
+[[plant]]
+name = "agents, native: a deleted agent is answered and kept"
+meant = "serves_the_agents_as_the_packaged_smoke_holds_the_built_app_to"
+runs = ["agents-proof"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/edit.rs"
+find = "document.agents_mut().remove(at);"
+replace = "let _kept = at;"
+
+[[plant]]
+name = "agents, native: a catalog agent can be deleted"
+meant = "serves_the_agents_as_the_packaged_smoke_holds_the_built_app_to"
+runs = ["agents-proof"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/edit.rs"
+find = '''
+let at = self.own_row(&document, name, || {
+            format!("{name} is a catalog agent: it is not yours to remove")
+        })?;'''
+replace = '''
+let Ok(at) = self.own_row(&document, name, || {
+            format!("{name} is a catalog agent: it is not yours to remove")
+        }) else {
+            return Ok(());
+        };'''
+
+[[plant]]
+name = "agents, native: an agent saved has not the effort it was given"
+meant = "serves_the_agents_as_the_packaged_smoke_holds_the_built_app_to"
+runs = ["agents-proof"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/add.rs"
+find = "row.insert(effort_key(Some(harness.kind())).to_owned(), effort.clone());"
+replace = "let _ = effort;"
+
+[[plant]]
+name = "agents, native: an agent saved keeps its profile in the file"
+meant = "serves_the_agents_as_the_packaged_smoke_holds_the_built_app_to"
+runs = ["agents-proof"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/save.rs"
+find = "pub(super) const STALE_FIELDS: [&str; 5] = ["
+replace = "pub(super) const STALE_FIELDS: [&str; 4] = ["
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/save.rs"
+find = '''
+    "skillPath",
+    "profile",
+];'''
+replace = '''
+    "skillPath",
+];'''
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/add.rs"
+find = 'row.insert("model".to_owned(), Value::from(model));'
+replace = '''
+row.insert("model".to_owned(), Value::from(model));
+        row.insert("profile".to_owned(), Value::Null);'''
+
+[[plant]]
+name = "agents, native: an agent on gpt-6-astra at low effort is standard work"
+meant = "serves_the_agents_as_the_packaged_smoke_holds_the_built_app_to"
+runs = ["agents-proof"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/profile.rs"
+find = '''
+Some("medium") => WorkTier::Standard,
+                    _ => WorkTier::Light,
+                },
+                "claude-opus-5.5"'''
+replace = '''
+Some("medium") => WorkTier::Standard,
+                    _ => WorkTier::Standard,
+                },
+                "claude-opus-5.5"'''
+
+[[plant]]
+name = "agents, native: the screens open to an empty token"
+meant = "serves_the_agents_as_the_packaged_smoke_holds_the_built_app_to"
+runs = ["agents-proof"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/mod.rs"
+find = "!presented.is_empty() && token_matches(presented, &self.token)"
+replace = "presented.is_empty() || token_matches(presented, &self.token)"
+
+[[plant]]
+name = "agents, native: the catalog is short of an agent"
+meant = "serves_the_agents_as_the_packaged_smoke_holds_the_built_app_to"
+runs = ["agents-proof"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/rows.rs"
+find = '''
+            .map(catalog_row)
+            .collect();'''
+replace = '''
+            .skip(1)
+            .map(catalog_row)
+            .collect();'''

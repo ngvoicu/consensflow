@@ -1,0 +1,154 @@
+# The receipt and stop redesign's fix round, part B: a question's obligation
+# does not end with its answer's transport, one task is a session's at a time
+# and a window's stop is its own task's, and the way back to Node's daemon and
+# forward again strands nothing. One plant puts back what one rule took out;
+# a test of the rule fails.
+
+[run]
+engine-dispatcher-stops = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "stops"]
+# The ledger and the Node daemon on one file: the way back, and forward again.
+ledger-node = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "node"]
+
+[[plant]]
+name = "pause: a withdrawn question stops obliging when its answer ends unreceived"
+meant = "an_answer_whose_delivery_failed_leaves_a_question_withdrawn_at_the_gate_obliging"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''
+                    OR EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id
+                               AND a.kind = 'answer'))'''
+replace = '''
+                    OR EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id
+                               AND a.kind = 'answer'
+                               AND a.state IN ('gated', 'queued', 'delivering')))'''
+
+[[plant]]
+name = "pause: a task is reopened onto a session that is on another"
+meant = "a_task_is_not_reopened_onto_a_session_that_has_another_and_is_told_what_a_reopen_can_do"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''
+        require_free(store, &found, Giving::SentBack(number))?;
+        let assignee = match found.member_id {'''
+replace = "        let assignee = match found.member_id {"
+
+[[plant]]
+name = "pause: a window is stopped for the paused task it holds before the one it works on"
+meant = "a_pause_of_a_task_the_window_was_never_given_is_not_a_stop_of_its_window"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+            "SELECT t.id, t.number, t.stop_seq FROM task t
+             WHERE t.assignee_id = ?1 AND t.state IN ('queued', 'working', 'waiting', 'paused')
+               AND t.id = (SELECT m.task_id FROM message m
+                           WHERE m.recipient_id = ?1 AND m.kind = 'task' AND m.task_id IS NOT NULL
+                             AND m.state IN ('delivering', 'delivered', 'read')
+                           ORDER BY m.id DESC LIMIT 1)",'''
+replace = '''
+            "SELECT id, number, stop_seq FROM task
+             WHERE assignee_id = ?1 AND state IN ('queued', 'working', 'waiting', 'paused')
+             ORDER BY state = 'paused' DESC, stop_seq DESC, id LIMIT 1",'''
+
+[[plant]]
+name = "pause: a window at work is pressed for a paused task it holds and does not work on"
+meant = "a_pause_of_a_task_the_window_holds_but_does_not_work_on_presses_no_key_and_its_own_task_is_stopped"
+runs = ["engine-dispatcher-stops"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+            "SELECT t.id, t.number, t.stop_seq FROM task t
+             WHERE t.assignee_id = ?1 AND t.state IN ('queued', 'working', 'waiting', 'paused')
+               AND t.id = (SELECT m.task_id FROM message m
+                           WHERE m.recipient_id = ?1 AND m.kind = 'task' AND m.task_id IS NOT NULL
+                             AND m.state IN ('delivering', 'delivered', 'read')
+                           ORDER BY m.id DESC LIMIT 1)",'''
+replace = '''
+            "SELECT id, number, stop_seq FROM task
+             WHERE assignee_id = ?1 AND state IN ('queued', 'working', 'waiting', 'paused')
+             ORDER BY state = 'paused' DESC, stop_seq DESC, id LIMIT 1",'''
+
+[[plant]]
+name = "pause: a launch reads the stop its window owes before its first message begins"
+meant = "a_pause_during_a_launchs_preparation_opens_no_pane_and_the_message_is_given_back_and_carried"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "launch_stops"],
+  "engine-dispatcher",
+]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+        let begun = first
+            .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
+            .transpose()?;
+        // The stops this window owes are those asked before this look: a pause
+        // that comes while it is prepared or opened is asked after it, and is
+        // owed. Read in this turn, with the first message begun: the window
+        // works on the task that message is about.
+        let stop = self.seams.ledger.borrow().stop_of(participant.id)?;'''
+replace = '''
+        let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
+        let begun = first
+            .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
+            .transpose()?;'''
+
+[[plant]]
+name = "pause: the words that first reach a window do not answer a pause asked before them"
+meant = "the_words_that_first_reach_a_window_for_a_task_paused_before_they_came_answer_that_pause"
+runs = ["engine-dispatcher-stops"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if begun.message.kind == "task" {
+            self.pay_with_words(record)?;'''
+replace = '''
+        if begun.message.kind == "task" && false {
+            self.pay_with_words(record)?;'''
+
+[[plant]]
+name = "pause: this ledger opens with rows still under a carrier Node delivered"
+meant = "a_carrier_node_delivered_leaves_a_late_answer_that_this_ledger_delivers_when_it_starts_again"
+runs = ["ledger-node", "ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = "    release_stranded(&mut store)?;"
+replace = "    let _ = release_stranded;"
+
+[[plant]]
+name = "pause: this ledger opens leaving a task working that Node moved on for a queued answer"
+meant = "a_carrier_node_delivered_leaves_a_late_answer_that_this_ledger_delivers_when_it_starts_again"
+runs = ["ledger-node", "ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "            reconcile(store, task)?;"
+replace = "            let _ = (task, reconcile);"
+
+[[plant]]
+name = "pause: a carrier that was delivered or is being pasted keeps its rows at the start"
+meant = "a_carrier_node_delivered_leaves_a_late_answer_that_this_ledger_delivers_when_it_starts_again"
+runs = ["ledger-node", "ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')"
+replace = "                 WHERE m.state = 'queued' AND c.state IN ('cancelled', 'failed')"
+
+[[plant]]
+name = "pause: a carrier Node began to paste has its rows settled with it at the start"
+meant = "a_row_left_under_a_carrier_node_began_to_paste_is_not_taken_for_received_with_it"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')"
+replace = "                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')"
