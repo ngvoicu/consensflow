@@ -26,7 +26,9 @@ use cf_harness::contract::{
 use cf_harness::pi::{prepare_extension, Extension, PiAdapter};
 use cf_harness::records::{Item, Options, PiSettlement, Quota, Reading, Record, Role, Settlement};
 use cf_harness::seams::Time;
-use cf_harness::testing::{fake_executable, finished, AnsweringHost, Driver, Fakes};
+use cf_harness::testing::{
+    fake_executable, finished, AnsweringHost, Driver, Fakes, FIRST_MESSAGE_MS,
+};
 use cf_proto::agents::Harness;
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -136,6 +138,7 @@ fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
             designer: false,
         }),
         instructions: &request.instructions,
+        first_message_ms: FIRST_MESSAGE_MS,
     };
     finished(adapter.prepare(&launch))
 }

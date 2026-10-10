@@ -302,13 +302,11 @@ impl Rig {
     }
 
     /// What the conversation `session` of the stand-in agent recorded, one
-    /// JSON record to a line; nothing if it has recorded none.
+    /// JSON record to a line; nothing if it has recorded none. Only whole
+    /// records: the agent writes while the case reads, and the line it is in the
+    /// middle of is left for the next read ([`files::read_finished_lines`]).
     pub fn transcript(&self, session: &str) -> String {
-        let file = Path::new(self.var("CLAUDE_CONFIG_DIR").unwrap_or_default())
-            .join("projects")
-            .join("integration")
-            .join(format!("{session}.jsonl"));
-        files::read_string(&file).unwrap_or_default()
+        recorded(self.var("CLAUDE_CONFIG_DIR").unwrap_or_default(), session)
     }
 
     /// The processes the stand-in agent recorded starting, in order. The
@@ -422,5 +420,39 @@ impl Drop for Rig {
         if !self.keep_root {
             let _ = std::fs::remove_dir_all(&self.root);
         }
+    }
+}
+
+/// The records of the conversation `session` that the stand-in agent wrote
+/// under the Claude config folder `config`, whole ones only.
+fn recorded(config: &str, session: &str) -> String {
+    let file = Path::new(config)
+        .join("projects")
+        .join("integration")
+        .join(format!("{session}.jsonl"));
+    files::read_finished_lines(&file).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_conversation_is_read_a_whole_record_at_a_time_while_the_agent_is_still_writing_it() {
+        let config = tempfile::tempdir().unwrap();
+        let file = config
+            .path()
+            .join("projects")
+            .join("integration")
+            .join("s-1.jsonl");
+        let whole = "{\"type\":\"user\"}\n{\"type\":\"assistant\"}\n";
+        // The agent is in the middle of the third: a case that reads now must not
+        // meet it, as a case once met `EOF while parsing a string`.
+        let torn = "{\"type\":\"assistant\",\"message\":{\"content\":[{\"text\":\"ran cf: Wai";
+        files::write(&file, format!("{whole}{torn}")).unwrap();
+        let config = config.path().to_string_lossy().into_owned();
+        assert_eq!(recorded(&config, "s-1"), whole);
+        // A conversation nothing has been written of is nothing.
+        assert_eq!(recorded(&config, "s-2"), "");
     }
 }

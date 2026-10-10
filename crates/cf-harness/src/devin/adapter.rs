@@ -40,8 +40,9 @@ use crate::shared::{pane, window_args};
 /// What a window that has not said yet which conversation it shows is held for.
 const HOLD: &str = "Devin has not said yet which conversation its window shows";
 
-/// How often the wire log is asked which conversation Devin opened, and how
-/// long before it is given up on.
+/// How often the wire log is asked which conversation Devin opened, and the
+/// most it is waited on before it is given up on: a minute, or less where the
+/// launch has less time ([`Launch::first_message_ms`]).
 const DISCOVER_EVERY: Duration = Duration::from_millis(250);
 const DISCOVER_FOR_MS: i64 = 60_000;
 
@@ -124,6 +125,7 @@ impl Adapter for DevinAdapter {
                     time: Rc::clone(&self.services.time),
                     session: RefCell::new(launch.resume.map(str::to_owned)),
                     wire: WireLog::new(&integration.wire, self.services.zone.clone()),
+                    discover_for_ms: DISCOVER_FOR_MS.min(launch.first_message_ms),
                 }),
             })
         })
@@ -151,6 +153,9 @@ struct DevinWindow {
     /// itself, or the one it was followed to.
     session: RefCell<Option<String>>,
     wire: WireLog,
+    /// How long the wire log has to name the conversation of a window that has
+    /// none yet, in milliseconds.
+    discover_for_ms: i64,
 }
 
 impl DevinWindow {
@@ -173,7 +178,7 @@ impl Window for DevinWindow {
             if self.session.borrow().is_some() {
                 return Ok(None);
             }
-            let deadline = self.time.wall_ms() + DISCOVER_FOR_MS;
+            let deadline = self.time.wall_ms() + self.discover_for_ms;
             while self.time.wall_ms() < deadline {
                 if let Ok(Some(session)) = selected_session(self.wire.path()) {
                     *self.session.borrow_mut() = Some(session.clone());

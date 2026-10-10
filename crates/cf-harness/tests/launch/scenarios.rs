@@ -30,7 +30,7 @@ use cf_harness::seams::processes::{Failed, Program, Streams};
 use cf_harness::seams::{Services, Time};
 use cf_harness::testing::{
     called, fake_executable, name, route, Answer, ChildScript, Driver, Ends, Fakes, OtherProcess,
-    ScriptedHost, Sent, Served,
+    ScriptedHost, Sent, Served, FIRST_MESSAGE_MS,
 };
 use cf_proto::agents::Harness;
 use regex::Regex;
@@ -557,6 +557,9 @@ fn begin_prepare(played: &mut Played, id: usize, given: &Value) {
             message: message.as_deref(),
             agent,
             instructions: &instructions,
+            // Node's adapters waited a fixed minute for a thread to be named: the
+            // daemon's wait for a first message is three, so the minute holds.
+            first_message_ms: FIRST_MESSAGE_MS,
         };
         match adapter.prepare(&launch).await {
             Ok(prepared) => {

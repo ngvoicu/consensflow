@@ -79,7 +79,7 @@ impl Records {
             .append(true)
             .create(true)
             .open(&self.transcript)?;
-        writeln!(file, "{}", Value::Object(record))
+        write_line(&mut file, &Value::Object(record))
     }
 
     /// Writes the status the window is in: `idle` or `busy`.
@@ -90,6 +90,15 @@ impl Records {
                 .to_string(),
         )
     }
+}
+
+/// Writes `record` and its line break to `out`. `writeln!` of a value writes it
+/// a token at a time, and a case that reads the record while the agent writes
+/// it meets a line cut inside a string; so it is one write.
+fn write_line(out: &mut impl Write, record: &Value) -> io::Result<()> {
+    let mut line = record.to_string();
+    line.push('\n');
+    out.write_all(line.as_bytes())
 }
 
 /// Writes down that the window's process `pid` runs `session`, in the two
@@ -156,6 +165,33 @@ mod tests {
             "{at}"
         );
         assert_eq!(records.ordinal(), 2);
+    }
+
+    /// What a file is given, a write at a time.
+    #[derive(Default)]
+    struct Writes(Vec<Vec<u8>>);
+
+    impl Write for Writes {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.push(bytes.to_vec());
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_record_is_one_write_so_a_reader_never_meets_a_line_cut_inside_a_string() {
+        let mut file = Writes::default();
+        let record = json!({
+            "type": "assistant",
+            "message": { "content": [{ "type": "text", "text": "ran cf: Waiting for a member" }] }
+        });
+        write_line(&mut file, &record).unwrap();
+        assert_eq!(file.0.len(), 1, "{:?}", file.0);
+        assert_eq!(file.0[0], format!("{record}\n").into_bytes());
     }
 
     #[test]

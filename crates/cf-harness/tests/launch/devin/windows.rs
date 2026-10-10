@@ -9,7 +9,8 @@ use std::time::Duration;
 use cf_base::text::console_text;
 use cf_harness::contract::{Adapter, Admission, Held, Interrupt, Readiness, Records, Waiting};
 use cf_harness::records::{Record, Settlement};
-use cf_harness::testing::{finished, AnsweringHost, Driver, EPOCH_MS};
+use cf_harness::seams::Time;
+use cf_harness::testing::{finished, AnsweringHost, Driver, EPOCH_MS, FIRST_MESSAGE_MS};
 use serde_json::{json, Value};
 
 use super::fixtures::*;
@@ -33,6 +34,43 @@ fn learns_the_session_this_window_opened_from_its_own_wire_log() {
     // The window is on that conversation from then on: its record is read there.
     assert!(finished(window.observe()).unwrap().settled);
     assert_eq!(*looked.looked.borrow(), ["mild-coin"]);
+}
+
+/// How many milliseconds a window opened on `request` waits for Devin's wire
+/// log to name a conversation before it says that none was named.
+fn waits_for_the_session(request: &Request) -> i64 {
+    let home = Home::new();
+    let adapter = home.adapter();
+    let window = window(&adapter, request);
+    let mut driver = Driver::default();
+    driver.begin(0, async move { window.started().await });
+    let began = home.fakes.time.wall_ms();
+    let mut settled = driver.run();
+    while settled.is_empty() {
+        assert!(
+            home.fakes.time.fire_next(began + 120_000),
+            "no answer in two minutes"
+        );
+        settled = driver.run();
+    }
+    let said = "Devin never said which session it opened (its wire log stayed empty)";
+    assert_eq!(settled, [(0, Err(said.to_owned()))]);
+    home.fakes.time.wall_ms() - began
+}
+
+#[test]
+fn a_session_never_named_is_an_error_after_a_minute_or_the_time_the_launch_has_if_that_is_less() {
+    let for_launch = |first_message_ms| {
+        waits_for_the_session(&Request {
+            first_message_ms,
+            ..Request::default()
+        })
+    };
+    assert_eq!(for_launch(2_000), 2_000);
+    assert_eq!(for_launch(30_000), 30_000);
+    for launch in [60_000, FIRST_MESSAGE_MS, 3_600_000] {
+        assert_eq!(for_launch(launch), 60_000, "{launch}");
+    }
 }
 
 #[test]

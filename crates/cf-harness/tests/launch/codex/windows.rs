@@ -11,7 +11,7 @@ use std::sync::Arc;
 use cf_harness::contract::{Held, Readiness, Work};
 use cf_harness::records::{Item, Options, Quota, Reading, Record, Role, Settlement};
 use cf_harness::seams::Time;
-use cf_harness::testing::{finished, AnsweringHost, Driver};
+use cf_harness::testing::{finished, AnsweringHost, Driver, FIRST_MESSAGE_MS};
 use cf_proto::agents::Harness;
 
 use super::*;
@@ -70,6 +70,47 @@ fn learns_the_thread_from_its_broker() {
     assert_eq!(driver.run(), [(0, Ok(Some(THREAD.to_owned())))]);
     // The thread is now the window's own: it has nothing more to learn.
     assert_eq!(finished(window.started()), Ok(None));
+}
+
+/// How many milliseconds a window opened on `request` waits for its broker to
+/// name a thread before it says that none was named.
+fn waits_for_the_thread(request: &Request) -> i64 {
+    let home = Home::new();
+    let (adapter, fakes) = adapter(&home);
+    let window = prepare(&adapter, request).unwrap().window;
+    let mut driver = Driver::default();
+    driver.begin(0, async move { window.started().await });
+    let began = fakes.time.wall_ms();
+    let mut settled = driver.run();
+    while settled.is_empty() {
+        assert!(
+            fakes.time.fire_next(began + 120_000),
+            "no answer in two minutes"
+        );
+        settled = driver.run();
+    }
+    let said = "the Codex broker never named the thread it opened";
+    assert_eq!(settled, [(0, Err(said.to_owned()))]);
+    fakes.time.wall_ms() - began
+}
+
+#[test]
+fn a_thread_never_named_is_an_error_after_a_minute_or_the_time_the_launch_has_if_that_is_less() {
+    let for_launch = |first_message_ms| {
+        waits_for_the_thread(&Request {
+            first_message_ms,
+            ..Request::default()
+        })
+    };
+    // The launch's wait (`CONSENSFLOW_LAUNCH_TIMEOUT_MS`) cuts the minute short.
+    assert_eq!(for_launch(2_000), 2_000);
+    assert_eq!(for_launch(30_000), 30_000);
+    // A minute is as long as the broker is given, however long the launch is:
+    // Codex that has not started a thread in a minute is waiting on something
+    // (a login, a prompt) that more time does not give.
+    for launch in [60_000, FIRST_MESSAGE_MS, 3_600_000] {
+        assert_eq!(for_launch(launch), 60_000, "{launch}");
+    }
 }
 
 #[test]

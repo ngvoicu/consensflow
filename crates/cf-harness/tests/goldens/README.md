@@ -15,6 +15,27 @@ The recorders ran Node's modules and went with them; they are in the flip releas
 | `admin/` | `tables.json`: the layouts that are no more than a text, which hold on every system. `scenarios.<platform>.json`: each scenario played, one set a platform, since a CLI is found at the platform's own places under its own names and a path is joined with its own separator; the Windows one was recorded on Windows | `../admin/` |
 | `claude/` | `stale-hooks.json`: what `staleClaudeHooks` reported over settings files given as `text`, as the `hex` of bytes that are no text, or as neither for none: the `events` it named, or what it `throws` | `../host_payloads.rs` |
 
+## Where the Rust code departs from what Node answered
+
+A departure is kept on purpose, and the recordings it moves are moved by hand,
+once, with the reason here and in the commit.
+
+- **A Codex input told twice** (2026-10-10, found by the live image-designer
+  test). Codex writes the input of a turn twice, in the same turn and with the
+  same words: as the model's message (`response_item`, a user's message with an
+  id like `msg_…`) and as the item it completes itself (`item_completed`, a
+  `UserMessage` under an id of its own). Node's reader listed both (its case was
+  named "native ids survive duplicate text"), so a task's transcript showed the
+  brief twice. The Rust reader lists the input once, as the telling that came first
+  and under its id, and counts: two inputs that say the same words are two
+  items, the same words in another turn are another item, and a message with
+  no twin (the environment Codex adds, a fork's inherited message) stays.
+  `records/` moved for it in 39 of its 399 scenarios, all of them Codex's, in
+  every reading that lists such an input: 6 of `sequences`, 13 of `suite`, 20 of
+  `sweep`. Each such reading lost the repeated user item and nothing else (its
+  other items, their order, `inFlight`, `failed`, `quota` and `settlement` are
+  Node's); no look was added or taken, so the counts in `../records/main.rs` stand.
+
 ## The launch scenarios
 
 A scenario of `launch/scenarios.<platform>.json` is data, and the Rust player
