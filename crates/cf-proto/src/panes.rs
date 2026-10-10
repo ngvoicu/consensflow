@@ -7,12 +7,45 @@
 //! Every field is optional on the wire, and a body without one is a host that
 //! does not say (an older one, or a test's): "does not say" is not "said
 //! nothing". A screen that showed nothing is an empty `tail`.
+//!
+//! The host also says what a window's program started and left running: the
+//! processes of the window's tree that began after the turn did, which
+//! `pane.mark` fixes the start of and `pane.background` answers
+//! ([`BackgroundProcess`]), and which `pane.exit` lists for a window that
+//! closed with some of it running.
 
 use serde::{Deserialize, Serialize};
 
 /// The most lines of a screen the host sends as its tail, and so the most a
 /// request for it gets. Empty lines are not counted: they are not sent.
 pub const TAIL_LINES: usize = 12;
+
+/// The most processes the host names when it says what a window left running
+/// (it says how many there are besides): a note quotes a few, and a frame is
+/// no place for a build's hundred processes.
+pub const BACKGROUND_PROCESSES: usize = 16;
+/// The most characters of a process's command line the host sends, a mark of
+/// where it was cut at the end: a frame is no place for a build's whole one.
+pub const COMMAND_CHARS: usize = 512;
+
+/// A process the window's program started and left running past its turn: its
+/// number, and the command line it was started with, as far as the host could
+/// read it (`COMMAND_CHARS` at most; the program alone where it could read no more).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackgroundProcess {
+    pub pid: u32,
+    pub command: String,
+}
+
+/// `pane.background`'s answer: what the window's tree has running that began
+/// after the window's last `pane.mark`, `total` of it and the first `processes`
+/// of it by how long ago they began. A window with no mark has none: nothing
+/// says where its turn began.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Background {
+    pub total: usize,
+    pub processes: Vec<BackgroundProcess>,
+}
 
 /// `pane.exit`'s body: the pane that ended, and what the host kept of its end.
 /// The pane must be named; a field of the rest that is not what it should be
@@ -45,6 +78,25 @@ pub struct PaneExit {
         skip_serializing_if = "Option::is_none"
     )]
     pub tail: Option<Vec<String>>,
+    /// What the window's program started and left running when the window
+    /// closed, which the close ended: the processes of its tree that began after
+    /// its last `pane.mark`. Empty for a window with none, and for a host that
+    /// does not say.
+    #[serde(
+        default,
+        deserialize_with = "or_none_said",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub background: Vec<BackgroundProcess>,
+}
+
+/// A list as it should be, or an empty one: what is not a list of `T` was not said.
+fn or_none_said<'de, D, T>(field: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    Ok(or_unsaid(field)?.unwrap_or_default())
 }
 
 /// A field as it should be, or none: what is not a `T` was not said.
@@ -98,6 +150,7 @@ mod tests {
                 exit_code: None,
                 signal: None,
                 tail: None,
+                background: Vec::new(),
             }
         );
         assert_eq!(
@@ -127,6 +180,30 @@ mod tests {
     }
 
     #[test]
+    fn an_exit_lists_what_the_window_left_running_and_an_older_host_lists_nothing() {
+        let body = json!({
+            "id": "p1-zeus",
+            "generation": 4,
+            "background": [{ "pid": 4242, "command": "python3 lock.py record --run 7" }],
+        });
+        let exit: PaneExit = serde_json::from_value(body.clone()).unwrap();
+        assert_eq!(
+            exit.background,
+            vec![BackgroundProcess {
+                pid: 4242,
+                command: "python3 lock.py record --run 7".to_owned()
+            }]
+        );
+        assert_eq!(serde_json::to_value(&exit).unwrap(), body);
+        // Not a list of processes: not said, and the exit stands.
+        let unsaid: PaneExit = serde_json::from_value(
+            json!({ "id": "p", "generation": 1, "background": [{ "pid": "4242" }] }),
+        )
+        .unwrap();
+        assert_eq!(unsaid.background, Vec::new());
+    }
+
+    #[test]
     fn a_screen_that_showed_nothing_is_an_empty_tail_and_not_an_absent_one() {
         let said: PaneExit =
             serde_json::from_value(json!({ "id": "p", "generation": 1, "tail": [] })).unwrap();
@@ -152,6 +229,7 @@ mod tests {
                 exit_code: None,
                 signal: None,
                 tail: None,
+                background: Vec::new(),
             }
         );
         // The pane is the one thing an exit must name.

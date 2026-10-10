@@ -22,6 +22,7 @@ import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from '
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { PLANTS as BACKGROUND } from './daemon/background.mjs'
 import { PLANTS as BOARD } from './daemon/board.mjs'
 import { PLANTS as CHANNELS } from './daemon/channels.mjs'
 import { PLANTS as CLAUDE_REST } from './daemon/claude-rest.mjs'
@@ -71,6 +72,7 @@ const PLANTS = [
   ...TAKEN_BACK,
   ...BOARD,
   ...CHANNELS,
+  ...BACKGROUND,
 ]
 
 const args = process.argv.slice(2)
@@ -141,11 +143,15 @@ function leave(code) {
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => leave(130))
 
 /**
- * One run of tests: a `cargo test` of the arguments a run is, or `node --test`
- * of the files of a run written `{ node: [...] }`.
+ * One run of tests: a `cargo test` of the arguments a run is, the app crate's
+ * tests (`cargo xtask app test`, which leaves out the resources its build needs)
+ * of the filter of a run written `{ app: [...] }`, or `node --test` of the
+ * files of a run written `{ node: [...] }`.
  */
 function testRun(run) {
-  return Array.isArray(run) ? cargoTest(run) : nodeTest(run.node)
+  if (Array.isArray(run)) return cargoTest(['test', '--offline', ...run], run)
+  if (run.app) return cargoTest(['xtask', 'app', 'test', ...run.app], ['app', 'test', ...run.app])
+  return nodeTest(run.node)
 }
 
 /**
@@ -185,13 +191,14 @@ function nodeTest(files) {
 }
 
 /**
- * One `cargo test`: its output, and what caught the plant if anything did: the
- * tests it says failed, or the run itself where a test binary died with no
- * test left to say so (a signal nothing was ready for).
+ * One `cargo` of `cargoArgs` that runs tests, said as `runArgs`: its output, and
+ * what caught the plant if anything did: the tests it says failed, or the run
+ * itself where a test binary died with no test left to say so (a signal nothing
+ * was ready for).
  */
-function cargoTest(runArgs) {
+function cargoTest(cargoArgs, runArgs) {
   return new Promise((resolve) => {
-    const child = spawn('cargo', ['test', '--offline', ...runArgs], {
+    const child = spawn('cargo', cargoArgs, {
       cwd: REPO,
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],

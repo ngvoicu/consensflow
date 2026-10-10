@@ -16,6 +16,7 @@ fn shown(code: Option<u32>, signal: Option<&str>, tail: Option<&[&str]>) -> Show
         code,
         signal: signal.map(str::to_owned),
         tail: tail.map(|lines| lines.iter().map(|line| (*line).to_owned()).collect()),
+        background: Vec::new(),
     }
 }
 

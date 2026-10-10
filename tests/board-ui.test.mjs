@@ -96,3 +96,17 @@ describe('a lane whose window did not stop', () => {
     assert.deepEqual(laneStatus(paid, board, Date.now()), ['working', 'Working'])
   })
 })
+
+describe('a lane whose agent ended its turn with its work still running', () => {
+  it('says that the window works, and on what', () => {
+    const waiting = lane(
+      { state: 'working', reason: 'background work running (2 processes)' },
+      [],
+      {},
+    )
+    assert.deepEqual(laneStatus(waiting, board, Date.now()), [
+      'working',
+      'Working — background work running (2 processes)',
+    ])
+  })
+})

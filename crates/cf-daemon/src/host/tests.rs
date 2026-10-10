@@ -390,6 +390,7 @@ async fn an_exit_tells_how_the_window_ended_and_what_its_screen_showed_where_the
                 exit_code: None,
                 signal: None,
                 tail: None,
+                background: Vec::new(),
             };
             assert_eq!(
                 *heard.borrow(),
@@ -470,6 +471,79 @@ async fn an_exit_that_names_no_pane_exits_nothing() {
             assert_eq!(told.get(), 0);
         })
         .await;
+}
+
+#[tokio::test]
+async fn a_turn_is_marked_and_the_work_it_left_asked_for_by_the_pane_the_engine_names() {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let (marked, asked) = (Rc::clone(&seen), Rc::clone(&seen));
+            app.on("pane.mark", move |_, body| {
+                marked.borrow_mut().push(("pane.mark", body));
+                async { Ok(json!({ "ok": true })) }
+            });
+            app.on("pane.background", move |_, body| {
+                asked.borrow_mut().push(("pane.background", body));
+                async {
+                    Ok(json!({
+                        "ok": true,
+                        "total": 3,
+                        "processes": [{ "pid": 4242, "command": "python3 lock.py record" }],
+                    }))
+                }
+            });
+            let host = host_over(&daemon);
+
+            host.mark(&pane("p1-zeus-amber-pine", 7)).await;
+            let left = host.running(&pane("p1-zeus-amber-pine", 7)).await;
+
+            assert_eq!(
+                *seen.borrow(),
+                [
+                    (
+                        "pane.mark",
+                        json!({ "id": "p1-zeus-amber-pine", "generation": 7 })
+                    ),
+                    (
+                        "pane.background",
+                        json!({ "id": "p1-zeus-amber-pine", "generation": 7 })
+                    ),
+                ]
+            );
+            assert_eq!(left.total, 3, "more than it names");
+            assert_eq!(
+                left.processes,
+                [cf_proto::panes::BackgroundProcess {
+                    pid: 4242,
+                    command: "python3 lock.py record".to_owned()
+                }]
+            );
+        })
+        .await;
+}
+
+#[test]
+fn a_host_that_refuses_or_does_not_say_has_no_background_work_to_tell_of() {
+    assert_eq!(running(None), Background::default());
+    assert_eq!(
+        running(Some(
+            json!({ "ok": false, "error": "pane p1 generation 1 is not open" })
+        )),
+        Background::default()
+    );
+    assert_eq!(running(Some(json!({}))), Background::default());
+    assert_eq!(
+        running(Some(json!({ "ok": true, "total": "many" }))),
+        Background::default(),
+        "an answer that is not one is no answer"
+    );
+    assert_eq!(
+        running(Some(json!({ "ok": true }))),
+        Background::default(),
+        "an answer with nothing in it says none"
+    );
 }
 
 #[tokio::test]

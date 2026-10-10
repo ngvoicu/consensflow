@@ -11,7 +11,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
-use cf_proto::panes::PaneExit;
+use cf_proto::panes::{BackgroundProcess, PaneExit};
 use serde_json::{json, Map, Value};
 
 use super::executor::Gate;
@@ -75,6 +75,7 @@ struct ExitSays {
     code: Option<u32>,
     signal: Option<String>,
     tail: Option<Vec<String>>,
+    background: Vec<BackgroundProcess>,
 }
 
 impl FakeHost {
@@ -104,11 +105,23 @@ impl FakeHost {
     /// that showed nothing. `None` says nothing of it, as a host that does not
     /// say.
     pub fn exits_showing(&self, code: Option<u32>, signal: Option<&str>, tail: Option<&[&str]>) {
-        *self.exit_says.borrow_mut() = ExitSays {
-            code,
-            signal: signal.map(str::to_owned),
-            tail: tail.map(|lines| lines.iter().map(|line| (*line).to_owned()).collect()),
-        };
+        let mut says = self.exit_says.borrow_mut();
+        says.code = code;
+        says.signal = signal.map(str::to_owned);
+        says.tail = tail.map(|lines| lines.iter().map(|line| (*line).to_owned()).collect());
+    }
+
+    /// What every exit from now on says its window left running when it
+    /// closed: these commands, which the close ended.
+    pub fn exits_leaving(&self, commands: &[&str]) {
+        self.exit_says.borrow_mut().background = commands
+            .iter()
+            .zip(1u32..)
+            .map(|(command, pid)| BackgroundProcess {
+                pid: 1000 + pid,
+                command: (*command).to_owned(),
+            })
+            .collect();
     }
 
     /// The panes opened, in order.
@@ -164,6 +177,7 @@ impl FakeHost {
             exit_code: says.code,
             signal: says.signal,
             tail: says.tail,
+            background: says.background,
         };
         for engine in engines {
             if let Some(rest) = engine.pane_exited(exit.clone()) {

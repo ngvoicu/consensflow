@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /**
  * A stand-in for the `claude` CLI in the integration tests. It
@@ -17,7 +18,15 @@ import { dirname, join } from 'node:path'
  * with the text, spaces and all, as one last word (`CF tell T-1 :: Stop now`):
  * the chief's own verbs, as it would type them. A line `SLEEP <seconds> <words>`
  * is a turn that works that long before it does what the words say: a window
- * a chief can still tell, or a chief nothing is delivered to. A key pressed in
+ * a chief can still tell, or a chief nothing is delivered to. A line
+ * `BACKGROUND <seconds> <words>` starts a job (`background-job.mjs`) that runs
+ * that long and answers <words> at once, as an agent does that leaves a job in
+ * the background and ends its turn; with `--wake` before the seconds the window
+ * begins a turn of its own when the job ends, as a harness does that its job's
+ * notification wakes (it answers `woken: <words>`), and with `--deaf` the job
+ * ignores the signals that ask it to end. With `CF_TEST_MCP_SERVER` set, every
+ * window starts such a job as it opens, before any turn: a server the harness
+ * started with it. A key pressed in
  * a turn (the Escape that stops it) is ignored: this window is never stopped. A task
  * saying `QUOTA-OUT` is refused with a 429, Claude's way, by the window whose
  * participant `CF_TEST_QUOTA_OUT` names, for as long as the file
@@ -118,6 +127,32 @@ const status = (value) =>
     JSON.stringify({ pid: process.pid, sessionId, kind: 'interactive', status: value }),
   )
 
+const JOB = fileURLToPath(new URL('./background-job.mjs', import.meta.url))
+const jobsFolder = join(dirname(process.env.CONSENSFLOW_HOME), 'jobs')
+let jobs = 0
+/**
+ * How long the agent thinks before it starts a job: well past the daemon's pass
+ * (a second), which is how late it may say a launch's turn has begun.
+ */
+const THINKING_MS = 4_000
+
+/**
+ * A job left running past a turn, as a harness's background shell is: a
+ * process of a session of its own on POSIX, where it is not in the window's
+ * process group, and on the window's console on Windows, where a detached
+ * process has none and would never be sent a Break. Its files are
+ * `jobs/<label>-<this window's pid>-<n>.*` (`background-job.mjs` says which).
+ */
+function startJob(label, seconds, { deaf = false } = {}) {
+  mkdirSync(jobsFolder, { recursive: true })
+  jobs += 1
+  const file = join(jobsFolder, `${label}-${process.pid}-${jobs}`)
+  return spawn(process.execPath, [JOB, String(seconds), file, ...(deaf ? ['--deaf'] : [])], {
+    detached: process.platform !== 'win32',
+    stdio: 'ignore',
+  })
+}
+
 /** `cf` as an agent runs it: the one first on the window's PATH, whichever ConsensFlow installed there. */
 function runCf(words) {
   return new Promise((resolve) => {
@@ -182,6 +217,18 @@ async function replyTo(text) {
     await new Promise((resolve) => setTimeout(resolve, Number(slow[1]) * 1000))
     return replyTo(slow[2])
   }
+  const background = /^BACKGROUND ((?:--(?:wake|deaf) )*)(\d+) (.+)$/m.exec(text)
+  if (background) {
+    const options = background[1].split(' ')
+    // An agent thinks before it runs a tool: the daemon marks where a launch's turn begins when
+    // the message shows in the record, up to a pass (a second) after the agent began.
+    await new Promise((resolve) => setTimeout(resolve, THINKING_MS))
+    const job = startJob('job', Number(background[2]), { deaf: options.includes('--deaf') })
+    if (options.includes('--wake')) job.on('exit', () => turn(`WOKEN ${background[3]}`))
+    return background[3]
+  }
+  const woken = /^WOKEN (.+)$/m.exec(text)
+  if (woken) return `woken: ${woken[1]}`
   const ask = /^ASK (.+)$/m.exec(text)
   if (ask) return askThroughHook(JSON.parse(ask[1]))
   const asked = /^\[ConsensFlow m-(\d+)[^\]]*question from @/m.exec(text)
@@ -262,6 +309,8 @@ function turn(text) {
 
 status('idle')
 process.stdout.write(`fake agent ${resuming ? 'resumed' : 'started'} on ${sessionId}\n`)
+// A server the harness starts with its window, before any turn, as an MCP server is.
+if (process.env.CF_TEST_MCP_SERVER) startJob('server', 600)
 if (seed !== null) turn(seed)
 
 // Raw input, like a real TUI: a bracketed paste is text, Enter outside one submits.

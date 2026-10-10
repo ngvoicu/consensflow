@@ -1584,3 +1584,113 @@ fn pane_does_not_inherit_a_launchers_disabled_colors() {
     );
     helper.close_input_and_wait();
 }
+
+/// What the window's tree has running that its turn started, once `command` is
+/// among it: the program says it started a job as it forks it, and until the job
+/// is executed it shows the command line of the program that forked it.
+#[cfg(target_os = "macos")]
+fn background_with(
+    helper: &mut Headless,
+    events: &mut Vec<Value>,
+    pane: &Value,
+    command: &str,
+) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let left = helper.request("pane.background", pane.clone(), events);
+        let listed = left["processes"].as_array().is_some_and(|processes| {
+            processes
+                .iter()
+                .any(|process| process["command"] == command)
+        });
+        if listed {
+            return left;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{command} was never listed: {left}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// The daemon says where a window's turn begins and asks what the turn left
+/// running; a window it closes with some of it running says so in its exit.
+/// (On macOS the helper looks at the window's process tree; elsewhere it has
+/// none to look at.)
+#[cfg(target_os = "macos")]
+#[test]
+fn a_turn_marked_over_the_wire_lists_what_it_left_and_the_exit_of_the_window_closed_says_so() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body(
+            "sleep 33 & printf ready; read go; sleep 31 & printf started; wait",
+            4096,
+        ),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let pane = json!({"id":pane_id,"generation":generation});
+    output_until(&helper, &mut events, &pane_id, generation, b"ready");
+
+    assert_eq!(
+        helper.request("pane.background", pane.clone(), &mut events),
+        json!({"ok":true,"total":0,"processes":[]}),
+        "a window never marked has no background work: nothing says where its turn began"
+    );
+    assert_eq!(
+        helper.request("pane.mark", pane.clone(), &mut events),
+        json!({"ok":true})
+    );
+    assert_eq!(
+        helper.request(
+            "pane.input",
+            json!({"id":pane_id,"generation":generation,"bytes":[103,111,10]}),
+            &mut events,
+        ),
+        json!({"ok":true})
+    );
+    output_until(&helper, &mut events, &pane_id, generation, b"started");
+
+    let left = background_with(&mut helper, &mut events, &pane, "sleep 31");
+    assert_eq!(left["ok"], true, "{left}");
+    assert_eq!(
+        left["total"], 1,
+        "the server it had before the mark is not the turn's: {left}"
+    );
+    assert_eq!(left["processes"][0]["command"], "sleep 31", "{left}");
+    assert!(left["processes"][0]["pid"].as_u64().is_some(), "{left}");
+
+    assert_eq!(
+        helper.request("pane.kill", pane, &mut events),
+        json!({"ok":true})
+    );
+    let exit = exit_of(&helper, &mut events, &opened);
+    assert_eq!(
+        exit["background"].as_array().map(Vec::len),
+        Some(1),
+        "{exit}"
+    );
+    assert_eq!(exit["background"][0]["command"], "sleep 31", "{exit}");
+    helper.close_input_and_wait();
+}
+
+/// A window that is not open has nothing to mark, and says so as any request
+/// about a pane that is not there does.
+#[test]
+fn a_mark_or_a_look_at_a_window_that_is_not_open_is_refused() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let nobody = json!({"id":"nobody","generation":1});
+    for op in ["pane.mark", "pane.background"] {
+        let refused = helper.request(op, nobody.clone(), &mut events);
+        assert_eq!(refused["ok"], false, "{op}: {refused}");
+    }
+    helper.close_input_and_wait();
+}

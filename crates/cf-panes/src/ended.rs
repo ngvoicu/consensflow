@@ -2,10 +2,13 @@
 //! from a listing, a retirement or a kill, `wait` from the thread that reaps
 //! it) keeps it here, because it can be read only once on some systems and
 //! because the pane has left the table by the time the output thread, which
-//! tells the daemon the pane ended, wants it.
+//! tells the daemon the pane ended, wants it. What the window left running when
+//! it closed is kept here too, by the close that ended it: once it has, there is
+//! nothing left to look at.
 
 use std::sync::{Mutex, PoisonError};
 
+use cf_proto::panes::BackgroundProcess;
 use portable_pty::ExitStatus;
 
 /// How a program ended: the exit code it returned, and the signal that ended
@@ -20,9 +23,30 @@ pub struct Ended {
 #[derive(Debug, Default)]
 pub struct EndedSlot {
     ended: Mutex<Option<Ended>>,
+    background: Mutex<Option<Vec<BackgroundProcess>>>,
 }
 
 impl EndedSlot {
+    /// What the window left running as it closed. The first one kept stays: a
+    /// later look would find less of it, which the close itself ended.
+    pub(crate) fn keep_background(&self, left: Vec<BackgroundProcess>) {
+        let mut kept = self
+            .background
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if kept.is_none() {
+            *kept = Some(left);
+        }
+    }
+
+    /// What the window left running as it closed, if a look at it was kept.
+    pub fn background(&self) -> Option<Vec<BackgroundProcess>> {
+        self.background
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     /// The program's status was read. The first reading stays: a later one
     /// of the same program says the same.
     pub(crate) fn record(&self, status: &ExitStatus) {

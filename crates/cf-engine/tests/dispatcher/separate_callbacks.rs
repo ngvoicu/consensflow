@@ -58,6 +58,7 @@ fn finishes_the_task_of_a_worker_whose_look_found_its_answer_before_the_exit_tha
                 exit_code: None,
                 signal: None,
                 tail: None,
+                background: Vec::new(),
             };
             if let Some(rest) = dispatcher.pane_exited(exit) {
                 executor.spawn(rest);

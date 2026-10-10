@@ -32,6 +32,7 @@ use cf_ledger::{
 use cf_proto::panes::PaneExit;
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
+use crate::background::{quote, Left};
 use crate::chief_switch::SwitchTo;
 use crate::record::Record;
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
@@ -781,9 +782,21 @@ impl Dispatcher {
             }
         } else {
             let task = self.seams.ledger.borrow().active_task(record.id, false)?;
+            let left = shown.left_running();
             if let Some(thread) = task {
-                let because = format!("@{}'s window closed", participant.handle);
+                // The pause note says what the close ended, where there was any.
+                let because = if left.is_empty() {
+                    format!("@{}'s window closed", participant.handle)
+                } else {
+                    format!(
+                        "@{}'s window closed with background work still running: {}",
+                        participant.handle,
+                        quote(left)
+                    )
+                };
                 self.stall(&project, &thread.task, &because)?;
+            } else {
+                self.tell_left_running(&project, &participant, left)?;
             }
         }
         self.changed();
@@ -879,6 +892,21 @@ impl Dispatcher {
             return Ok(());
         }
         let starting = drawing || (unnamed && !record.window.borrow().named);
+        // A worker's turn that ended with work it started still running is not
+        // at rest: its window works on, and its task has no result yet.
+        let left = if participant.role == "chief" || self.is_out(&owner) {
+            Left::Nothing
+        } else {
+            let left = self
+                .left_running(participant, record, &observed, starting)
+                .await?;
+            // The participant may have been forgotten, or the window closed,
+            // while the host answered.
+            if self.forgotten(record) || record.window.borrow().pane.is_none() {
+                return Ok(());
+            }
+            left
+        };
         // An out member's window says so, and nothing else, until the reset.
         if !self.is_out(&owner) {
             let activity = if starting {
@@ -888,6 +916,8 @@ impl Dispatcher {
                     state: ActivityState::Waiting,
                     reason: waiting.reason.clone(),
                 }
+            } else if let Some(reason) = left.reason() {
+                Activity::because(ActivityState::Working, reason)
             } else if observed.settled {
                 Activity::of(ActivityState::Idle)
             } else {
@@ -939,7 +969,7 @@ impl Dispatcher {
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
             if self.cut_short(&observed) {
                 self.go_on(project, participant)?;
-            } else {
+            } else if left == Left::Nothing {
                 self.collect(project, participant, &observed)?;
             }
             if self.close_if_free(record).await? {

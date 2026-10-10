@@ -21,7 +21,7 @@ use crate::pty::{validate_drop_env, PaneEnvironment, PaneKey, PaneTable, Streame
 use crate::screen::PaneScreen;
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
-use cf_proto::panes::{PaneExit, SnapshotRequest, TAIL_LINES};
+use cf_proto::panes::{BackgroundProcess, PaneExit, SnapshotRequest, TAIL_LINES};
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
 
@@ -227,6 +227,26 @@ pub fn register_pane_handlers(
         Ok(json!({"ok":true}))
     });
 
+    // A turn is about to begin in a window: what its tree has now came before it.
+    let mark_panes = Arc::clone(&panes);
+    builder.on("pane.mark", move |_bridge, body| {
+        let request: PaneRequest = parse_body(body)?;
+        let key = pane_key(&request.id, request.generation)?;
+        mark_panes.mark(&key).map_err(|error| error.to_string())?;
+        Ok(json!({"ok":true}))
+    });
+
+    // What the window's tree has running that began after its last mark.
+    let background_panes = Arc::clone(&panes);
+    builder.on("pane.background", move |_bridge, body| {
+        let request: PaneRequest = parse_body(body)?;
+        let key = pane_key(&request.id, request.generation)?;
+        let background = background_panes
+            .background(&key)
+            .map_err(|error| error.to_string())?;
+        Ok(json!({"ok":true,"total":background.total,"processes":background.processes}))
+    });
+
     let list_panes = Arc::clone(&panes);
     builder.on("pane.list", move |_bridge, body| {
         let _: EmptyBody = parse_body(body)?;
@@ -298,8 +318,11 @@ fn stream_to_page(
             screen.feed(&message.bytes);
             output.publish(message.into());
         }
-        let ended = panes.wait_ended(&key, &ended, ENDED_WAIT);
-        let _ = bridge.event("pane.exit", exit_body(&key, &screen, ended));
+        let status = panes.wait_ended(&key, &ended, ENDED_WAIT);
+        // What the program left running goes with the exit, before the close
+        // that follows ends it.
+        let background = panes.left_running_at_exit(&key, &ended);
+        let _ = bridge.event("pane.exit", exit_body(&key, &screen, status, background));
         if matches!(panes.retire_exited(&key), Ok(true)) {
             inputs.retire(&key);
         }
@@ -307,14 +330,20 @@ fn stream_to_page(
 }
 
 /// `pane.exit`'s body: the pane, how its program ended where that was read,
-/// and the last lines its screen showed.
-fn exit_body(key: &PaneKey, screen: &PaneScreen, ended: Option<Ended>) -> Value {
+/// the last lines its screen showed, and what it left running.
+fn exit_body(
+    key: &PaneKey,
+    screen: &PaneScreen,
+    ended: Option<Ended>,
+    background: Vec<BackgroundProcess>,
+) -> Value {
     let exit = PaneExit {
         id: key.id.clone(),
         generation: key.generation,
         exit_code: ended.as_ref().map(|ended| ended.code),
         signal: ended.and_then(|ended| ended.signal),
         tail: Some(screen.tail(TAIL_LINES)),
+        background,
     };
     serde_json::to_value(&exit).unwrap_or_else(|_| json!({"id":key.id,"generation":key.generation}))
 }

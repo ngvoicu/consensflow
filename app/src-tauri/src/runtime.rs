@@ -4,7 +4,7 @@
 
 use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tauri::{AppHandle, Emitter};
@@ -20,12 +20,16 @@ use cf_panes::headless::{reap_all, ENTER, MAX_FRAME_BYTES};
 use cf_panes::input_queue::InputQueue;
 use cf_panes::output_hub::OutputHub;
 use cf_panes::pane_handlers::register_pane_handlers;
-use cf_panes::pty::PaneTable;
+use cf_panes::pty::{PaneTable, CLOSE_GRACE};
 use cf_proto::bridge::Role;
 
 /// How long quitting, or installing an update, waits for what was admitted
 /// before the daemon stopped to finish.
 const SHUTDOWN_DRAIN: Duration = Duration::from_secs(5);
+/// How long quitting waits for every window's programs, asked to end, to have:
+/// they are given [`CLOSE_GRACE`] before what is left is killed, and a moment
+/// more to be.
+const SHUTDOWN_REAP: Duration = CLOSE_GRACE.saturating_add(Duration::from_secs(5));
 /// The page-side name of the daemon's `state.changed`. No dot: Tauri rejects it.
 pub(crate) const PAGE_STATE_EVENT: &str = "state-changed";
 
@@ -108,23 +112,32 @@ impl AppRuntime {
 
     /// Waits for what was admitted before the stop (launches, pane input, the
     /// bridge's last handlers) and reaps every pane, for `SHUTDOWN_DRAIN` at
-    /// most: quitting had no limit, and a launch that never finished kept the
-    /// app from quitting. `false` when the drain did not finish in time; the
-    /// quit or the update's restart goes on without it.
+    /// most besides the time the panes take: quitting had no limit, and a
+    /// launch that never finished kept the app from quitting. The reap, which
+    /// asks each window's programs to end and gives them their grace, has a
+    /// time of its own (`SHUTDOWN_REAP`) that a launch that never finished does
+    /// not spend. `false` when the drain did not finish in time; the quit or
+    /// the update's restart goes on without it.
     pub(crate) fn finish_shutdown(&self) -> bool {
         let bridge = self.daemon.bridge();
-        let panes = Arc::clone(&self.panes);
-        let inputs = Arc::clone(&self.inputs);
-        finish_before_deadline(SHUTDOWN_DRAIN, move || {
-            if let Some(bridge) = &bridge {
+        let admitted = bridge.clone();
+        let waited = Instant::now();
+        let launches = finish_before_deadline(SHUTDOWN_DRAIN, move || {
+            if let Some(bridge) = &admitted {
                 let _ = bridge.wait_launches_closed();
             }
-            reap_all(&panes);
+        });
+        let spent = waited.elapsed();
+        let panes = Arc::clone(&self.panes);
+        let reaped = finish_before_deadline(SHUTDOWN_REAP, move || reap_all(&panes));
+        let inputs = Arc::clone(&self.inputs);
+        let drained = finish_before_deadline(SHUTDOWN_DRAIN.saturating_sub(spent), move || {
             inputs.close_and_drain();
             if let Some(bridge) = &bridge {
                 let _ = bridge.wait_closed();
             }
-        })
+        });
+        launches && reaped && drained
     }
 }
 
@@ -347,6 +360,52 @@ mod tests {
         assert!(!finish_before_deadline(Duration::from_secs(1), || panic!(
             "drain failed"
         )));
+    }
+
+    /// Quitting closes each window the way a terminal does: its programs are
+    /// asked to end and given their grace, which is longer than the drain waits
+    /// on a launch, and what ignores the request is killed once it is over.
+    #[test]
+    fn quitting_gives_the_windows_programs_their_grace_before_it_kills_them() {
+        use std::io::Read;
+
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        // Longer than the drain, shorter than a real grace.
+        let grace = SHUTDOWN_DRAIN + Duration::from_secs(1);
+        let panes = Arc::new(PaneTable::closing_within(grace));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
+        let mut reader = panes
+            .open_at(
+                PaneKey::new("deaf-pane", 1),
+                Path::new("/tmp"),
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "trap '' TERM HUP; printf ready; while :; do sleep 1; done".to_string(),
+                ],
+                &HashMap::new(),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("open a pane whose program ignores the request to end");
+        let mut ready = [0_u8; 5];
+        reader.read_exact(&mut ready).expect("its program is up");
+        let runtime = test_runtime(Arc::clone(&panes), inputs, None, None);
+
+        let started = Instant::now();
+        runtime.shutdown();
+
+        assert!(
+            started.elapsed() >= grace,
+            "its program was given its grace: {:?}",
+            started.elapsed()
+        );
+        assert!(panes.list().expect("pane list after shutdown").is_empty());
     }
 
     /// Quitting waits for the drain no longer than installing an update does:
