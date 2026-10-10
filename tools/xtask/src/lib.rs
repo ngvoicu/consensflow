@@ -14,11 +14,12 @@
 //! it and that module's tests, and turns the command's row from `Run::Node` into
 //! `Run::Native`: `sidecar` (build-cf, stage, conpty) is S1's, `portable` is
 //! S2's, `app`, `clippy_windows`, `departures` and `bench` are S10's (the thin
-//! drivers, which run cargo and nothing else), and `suites`, `smoke` and
-//! `candidate` are S6's. The lead's are this list of modules, `dispatch`,
-//! `process`, `context`, `check`, the manifests and the lockfile, the alias, and
-//! the call sites (the npm scripts, the workflows, the drivers that run a
-//! command).
+//! drivers, which run cargo and nothing else), `suites`, `smoke` and
+//! `candidate` are S6's, and `updater_smoke` is S12's: the updater smoke in
+//! Rust, which `smoke` lists as `smoke-updater`. The lead's are this list of
+//! modules, `dispatch`, `process`, `context`, `check`, the manifests and the
+//! lockfile, the alias, and the call sites (the npm scripts, the workflows, the
+//! drivers that run a command).
 
 #![forbid(unsafe_code)]
 
@@ -37,5 +38,6 @@ mod smoke;
 mod suites;
 #[cfg(test)]
 mod testing;
+mod updater_smoke;
 
 pub use dispatch::run;

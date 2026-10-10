@@ -50,13 +50,13 @@ fn the_checkout_is_the_same_from_the_root_from_app_and_from_anywhere_else() {
 #[test]
 fn a_command_runs_its_script_from_the_root_with_every_word_as_it_was_given() {
     let node = programs(&["node"]);
-    let words = ["smoke-updater", "a b", "--", "c", "", "--help"];
+    let words = ["candidate", "a b", "--", "c", "", "--help"];
     // From `app/`, as a developer would: it is the checkout's root that counts.
     let ran = xtask(&checkout().join("app"), node.path(), &[], &words);
     assert!(ran.status.success(), "{}", err(&ran));
     let report = out(&ran);
     assert_ran_in(&report, &checkout());
-    let script = checkout().join("tests").join("smoke-updater.mjs");
+    let script = checkout().join("app").join("scripts").join("candidate.mjs");
     assert_eq!(
         arg_lines(&report),
         [
@@ -96,7 +96,7 @@ fn a_script_that_cannot_be_started_is_one_error_with_status_1() {
     let folder = tempfile::tempdir().unwrap();
     let name = format!("node{}", std::env::consts::EXE_SUFFIX);
     fs::write(folder.path().join(name), "not a program").unwrap();
-    let ran = xtask(&checkout(), folder.path(), &[], &["smoke-updater"]);
+    let ran = xtask(&checkout(), folder.path(), &[], &["candidate"]);
     assert_eq!(ran.status.code(), Some(1));
     assert_eq!(out(&ran), "");
     let said = err(&ran);
@@ -110,7 +110,6 @@ fn a_help_and_a_refusal_start_nothing() {
     let no_programs = tempfile::tempdir().unwrap();
     for (command, script) in [
         ("smoke", "tests/smoke.mjs"),
-        ("smoke-updater", "tests/smoke-updater.mjs"),
         ("candidate", "app/scripts/candidate.mjs"),
     ] {
         let ran = xtask(&checkout(), no_programs.path(), &[], &[command, "--help"]);
@@ -159,6 +158,18 @@ fn the_commands_that_run_in_rust_refuse_the_words_they_do_not_take_and_start_not
             vec!["conpty"],
             "xtask: conpty takes --into DIR, the folder for the console host's files\n",
         ),
+        (
+            vec!["smoke-updater", "--nope"],
+            "xtask: unknown option: --nope\n",
+        ),
+        (
+            vec!["smoke-updater", "--only"],
+            "xtask: --only takes a value (to start one with a dash: --only=-value)\n",
+        ),
+        (
+            vec!["smoke-updater", "refused"],
+            "xtask: unexpected argument: refused\n",
+        ),
     ] {
         let ran = xtask(&checkout().join("app"), no_programs.path(), &[], &args);
         assert_eq!(ran.status.code(), Some(2), "{args:?}");
@@ -187,6 +198,7 @@ fn the_commands_that_run_in_rust_say_so_in_their_help() {
         "departures",
         "bench records-memory",
         "check",
+        "smoke-updater",
     ] {
         let mut words: Vec<&str> = command.split(' ').collect();
         words.push("--help");
