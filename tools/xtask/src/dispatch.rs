@@ -3,12 +3,11 @@
 //!
 //! A command is a row in the table of the module that owns it
 //! (`sidecar::COMMANDS`, `check::COMMANDS`, ...), and [`commands`] joins the
-//! tables. A row either runs in Rust ([`Run::Native`]) or, until the landing
-//! that ports it, hands its arguments to the Node script it replaces
-//! ([`Run::Node`]): `node <script> <arguments>`, from the folder the script
-//! was run from, with the script's exit status as its own. The arguments after
-//! a command's words go to it as they are, `--` and words with spaces in them
-//! included; only a first one that is `--help` (or `-h`) is xtask's.
+//! tables. A row runs in Rust ([`Run::Native`]): the scripts the commands
+//! replaced handed their words and their exit status to Node, and the last of
+//! them is gone. The arguments after a command's words go to it as they are,
+//! `--` and words with spaces in them included; only a first one that is
+//! `--help` (or `-h`) is xtask's.
 
 use std::ffi::{OsStr, OsString};
 use std::io::{self, ErrorKind, Write};
@@ -17,7 +16,7 @@ use std::path::Path;
 use cf_base::env::Env;
 
 use crate::context::{self, Context};
-use crate::process::{self, Invocation};
+use crate::process;
 use crate::{
     app, bench, candidate, check, clippy_windows, departures, portable, sidecar, smoke, suites,
 };
@@ -37,35 +36,9 @@ pub struct Command {
 /// How a command runs.
 #[derive(Debug)]
 pub enum Run {
-    /// By the Node script it replaces, until the landing that ports it.
-    Node(Script),
     /// In Rust: given the arguments after its words, and the two streams, it
     /// answers the exit status.
     Native(fn(&Context, &[OsString], &mut Console) -> Result<i32, Failure>),
-}
-
-/// A Node script a command hands its arguments to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Script {
-    /// The script, from the checkout's root, with `/` between folders.
-    pub file: &'static str,
-    /// The folder it runs from, from the checkout's root; empty for the root
-    /// itself, where `npm run` ran a script of the root's `package.json`.
-    pub from: &'static str,
-}
-
-impl Script {
-    /// A script that runs from the checkout's root.
-    pub const fn at_root(file: &'static str) -> Self {
-        Self { file, from: "" }
-    }
-
-    /// `node <script> <args>`, as it runs.
-    pub fn invocation(&self, context: &Context, args: &[OsString]) -> Invocation {
-        Invocation::new("node", context.path(self.from))
-            .arg(context.path(self.file))
-            .args(args.iter().cloned())
-    }
 }
 
 /// The two streams a command speaks on: its result on `out`, how it is getting
@@ -150,13 +123,10 @@ fn dispatch(context: &Context, args: &[OsString], console: &mut Console) -> Resu
             Ok(0)
         }
         Parsed::Usage(message) => Err(Failure::Usage(message)),
-        Parsed::Run { command, args } => match &command.run {
-            Run::Node(script) => {
-                let status = process::run(&script.invocation(context, args), &context.env)?;
-                Ok(status)
-            }
-            Run::Native(run) => run(context, args, console),
-        },
+        Parsed::Run { command, args } => {
+            let Run::Native(run) = &command.run;
+            run(context, args, console)
+        }
     }
 }
 
@@ -276,22 +246,8 @@ fn command_help(command: &Command) -> String {
     } else {
         format!("{words} {}", command.usage)
     };
-    let runs = match &command.run {
-        Run::Node(script) => {
-            let from = if script.from.is_empty() {
-                "the checkout's root"
-            } else {
-                script.from
-            };
-            format!(
-                "For now it runs node {} (from {from}) and hands it the arguments as they are.",
-                script.file
-            )
-        }
-        Run::Native(_) => "It runs in Rust.".to_string(),
-    };
     format!(
-        "Usage: cargo xtask {usage}\n\n{}\n\n{runs}\n",
+        "Usage: cargo xtask {usage}\n\n{}\n\nIt runs in Rust.\n",
         command.about
     )
 }
@@ -405,31 +361,6 @@ mod tests {
             parsed("build-cf --offline --help"),
             r#"run build-cf ["--offline", "--help"]"#
         );
-    }
-
-    /// A command that hands its arguments to a script, whichever the real ones
-    /// still do: the landings that port them each take one from the table.
-    #[test]
-    fn the_help_of_a_command_that_hands_over_names_its_script_and_where_it_runs_from() {
-        let command = |from| Command {
-            words: &["stand-in"],
-            about: "A stand-in",
-            usage: "[--x]",
-            run: Run::Node(Script {
-                file: "scripts/stand-in.mjs",
-                from,
-            }),
-        };
-        let help = command_help(&command(""));
-        assert!(
-            help.starts_with("Usage: cargo xtask stand-in [--x]\n"),
-            "{help}"
-        );
-        assert!(
-            help.contains("node scripts/stand-in.mjs (from the checkout's root)"),
-            "{help}"
-        );
-        assert!(command_help(&command("app")).contains("node scripts/stand-in.mjs (from app)"));
     }
 
     #[test]

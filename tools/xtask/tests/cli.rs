@@ -1,7 +1,7 @@
 //! xtask as a process, the way `cargo xtask` starts it: from the folders a
-//! developer is in, handing its arguments to a stand-in for `node` (the fake
-//! child, copied under that name into a folder that is all the PATH it has),
-//! and answering that stand-in's exit status.
+//! developer is in, with a stand-in for `cargo` and `npm` (the fake child,
+//! copied under those names into a folder that is all the PATH it has), what
+//! it says of itself and what it refuses.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
 mod common;
@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use common::{arg_line, arg_lines, assert_ran_in, checkout, cwds, err, out, programs, xtask};
+use common::{checkout, cwds, err, out, programs, xtask};
 use xtask::process::Invocation;
 
 /// The line `.cargo/config.toml` has to carry for `cargo xtask` to be this.
@@ -48,80 +48,9 @@ fn the_checkout_is_the_same_from_the_root_from_app_and_from_anywhere_else() {
 }
 
 #[test]
-fn a_command_runs_its_script_from_the_root_with_every_word_as_it_was_given() {
-    let node = programs(&["node"]);
-    let words = ["candidate", "a b", "--", "c", "", "--help"];
-    // From `app/`, as a developer would: it is the checkout's root that counts.
-    let ran = xtask(&checkout().join("app"), node.path(), &[], &words);
-    assert!(ran.status.success(), "{}", err(&ran));
-    let report = out(&ran);
-    assert_ran_in(&report, &checkout());
-    let script = checkout().join("app").join("scripts").join("candidate.mjs");
-    assert_eq!(
-        arg_lines(&report),
-        [
-            script.into_os_string(),
-            "a b".into(),
-            "--".into(),
-            "c".into(),
-            "".into(),
-            "--help".into()
-        ]
-        .map(arg_line)
-    );
-}
-
-#[test]
-fn the_exit_status_of_what_it_ran_is_its_own() {
-    let node = programs(&["node"]);
-    for status in [0, 1, 2, 3, 42, 101, 255] {
-        let said = status.to_string();
-        let ran = xtask(
-            &checkout(),
-            node.path(),
-            &[("FAKE_CHILD_EXIT", &said)],
-            &["candidate"],
-        );
-        assert_eq!(ran.status.code(), Some(status), "{}", err(&ran));
-        // What the child wrote is its own to write: nothing of xtask's is added on a failure.
-        assert_eq!(err(&ran), "");
-    }
-}
-
-/// A `node` that the system will not start: a file of that name which is no program.
-/// (One that is not there would do, but Windows also looks for it on the PATH of whoever
-/// runs the test, which may have a real one.)
-#[test]
-fn a_script_that_cannot_be_started_is_one_error_with_status_1() {
-    let folder = tempfile::tempdir().unwrap();
-    let name = format!("node{}", std::env::consts::EXE_SUFFIX);
-    fs::write(folder.path().join(name), "not a program").unwrap();
-    let ran = xtask(&checkout(), folder.path(), &[], &["candidate"]);
-    assert_eq!(ran.status.code(), Some(1));
-    assert_eq!(out(&ran), "");
-    let said = err(&ran);
-    assert!(said.starts_with("xtask: could not run `node`: "), "{said}");
-    assert!(said.ends_with('\n') && said.lines().count() == 1, "{said}");
-}
-
-#[test]
 fn a_help_and_a_refusal_start_nothing() {
     // No program on the PATH: whatever is started fails, and these do not.
     let no_programs = tempfile::tempdir().unwrap();
-    for (command, script) in [
-        ("smoke", "tests/smoke.mjs"),
-        ("candidate", "app/scripts/candidate.mjs"),
-    ] {
-        let ran = xtask(&checkout(), no_programs.path(), &[], &[command, "--help"]);
-        assert!(ran.status.success(), "{command}: {}", err(&ran));
-        let help = out(&ran);
-        assert!(
-            help.starts_with(&format!("Usage: cargo xtask {command}")),
-            "{help}"
-        );
-        assert!(help.contains(&format!("node {script}")), "{help}");
-        assert_eq!(err(&ran), "");
-    }
     for (args, said) in [
         (vec![], "xtask: a command is required\n"),
         (vec!["deploy"], "xtask: unknown command: deploy\n"),
@@ -170,6 +99,19 @@ fn the_commands_that_run_in_rust_refuse_the_words_they_do_not_take_and_start_not
             vec!["smoke-updater", "refused"],
             "xtask: unexpected argument: refused\n",
         ),
+        (vec!["smoke", "--nope"], "xtask: unknown option: --nope\n"),
+        (
+            vec!["smoke", "dist/ConsensFlow.app"],
+            "xtask: unexpected argument: dist/ConsensFlow.app\n",
+        ),
+        (
+            vec!["smoke", "--app"],
+            "xtask: --app takes a value (to start one with a dash: --app=-value)\n",
+        ),
+        (
+            vec!["candidate", "--fast"],
+            "xtask: candidate takes no arguments\n",
+        ),
     ] {
         let ran = xtask(&checkout().join("app"), no_programs.path(), &[], &args);
         assert_eq!(ran.status.code(), Some(2), "{args:?}");
@@ -198,7 +140,9 @@ fn the_commands_that_run_in_rust_say_so_in_their_help() {
         "departures",
         "bench records-memory",
         "check",
+        "smoke",
         "smoke-updater",
+        "candidate",
     ] {
         let mut words: Vec<&str> = command.split(' ').collect();
         words.push("--help");
