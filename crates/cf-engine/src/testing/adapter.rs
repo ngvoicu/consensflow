@@ -99,6 +99,10 @@ pub struct FakeAdapter {
     /// fake's `prepared`: its launch id, participant's handle, role,
     /// project, folder, resume, message, agent and instructions.
     prepared: RefCell<Vec<Value>>,
+    /// The time each of those launches was given for its first message, in
+    /// milliseconds: kept apart from `prepared`, which is what Node's fake
+    /// was asked and is held to Node's traces.
+    first_message_ms: RefCell<Vec<i64>>,
     /// The test's items are numbered across its adapters.
     items: Rc<Cell<u64>>,
     /// A `ready` of the test's own; without one a window is ready, and
@@ -149,6 +153,7 @@ impl FakeAdapter {
             recorder,
             agents: RefCell::new(Vec::new()),
             prepared: RefCell::new(Vec::new()),
+            first_message_ms: RefCell::new(Vec::new()),
             items,
             ready: RefCell::new(None),
             started: RefCell::new(None),
@@ -170,6 +175,12 @@ impl FakeAdapter {
     /// The launches prepared, in order.
     pub fn prepared(&self) -> Vec<Value> {
         self.prepared.borrow().clone()
+    }
+
+    /// The time each launch prepared was given for its first message, in
+    /// milliseconds, in the order they were prepared.
+    pub fn first_message_waits(&self) -> Vec<i64> {
+        self.first_message_ms.borrow().clone()
     }
 
     /// An item of a conversation, numbered as the test's own: `i-1`, `i-2`…
@@ -363,6 +374,9 @@ impl Asked {
             });
         }
         fake.prepared.borrow_mut().push(asked);
+        fake.first_message_ms
+            .borrow_mut()
+            .push(launch.first_message_ms);
         let id = launch.id.as_str().to_owned();
         let native = launch
             .resume

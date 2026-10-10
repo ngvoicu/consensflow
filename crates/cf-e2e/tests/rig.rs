@@ -8,7 +8,8 @@
 //! JavaScript suites `tests/integration/*.test.mjs` (gone with the port); the
 //! module of a case is the JavaScript file it came from, and its name the
 //! JavaScript test's. (`stand_ins` is new: the stand-in Codex's own transport
-//! on Windows, which the supervisor's cases here do not reach.)
+//! on Windows, which the supervisor's cases here do not reach. So is
+//! `live_support`: what the opt-in live tests stand on.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -37,6 +38,8 @@ mod daemon_seam;
 mod decided_result;
 #[path = "rig/help.rs"]
 mod help;
+#[path = "rig/live_support.rs"]
+mod live_support;
 #[path = "rig/stand_ins.rs"]
 mod stand_ins;
 #[path = "rig/waiting_notes.rs"]

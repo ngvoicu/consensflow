@@ -170,18 +170,21 @@ fn mybuilder() -> Value {
     })
 }
 
-/// The folder the `cf` under test is in: the daemon's bundle, first on every
-/// window's `PATH`.
-fn bundle_bin() -> cf_e2e::Result<std::path::PathBuf> {
-    let binary = cf::binary()?;
-    // The daemon finds its folder from its own path, as the system gives it.
-    #[cfg(unix)]
-    let binary = &std::fs::canonicalize(binary).map_err(|source| cf_e2e::Error::File {
-        action: "resolve",
-        path: binary.to_path_buf(),
-        source,
-    })?;
-    Ok(binary.parent().map(Path::to_path_buf).unwrap_or_default())
+/// Whether `folder` holds the `cf` under test: the daemon's bundle, first on
+/// every window's `PATH`. The daemon finds its folder from its own path as the
+/// system gives it, and macOS gives a program's path by any link that last
+/// reached its file (the gate's exported trees link to this build folder), so
+/// the file is compared, not the words.
+fn holds_the_cf_under_test(folder: &Path) -> cf_e2e::Result<bool> {
+    let resolve = |path: &Path| {
+        std::fs::canonicalize(path).map_err(|source| cf_e2e::Error::File {
+            action: "resolve",
+            path: path.to_path_buf(),
+            source,
+        })
+    };
+    let named = folder.join(format!("cf{}", std::env::consts::EXE_SUFFIX));
+    Ok(resolve(&named)? == resolve(cf::binary()?)?)
 }
 
 #[test]
@@ -215,15 +218,11 @@ fn opens_a_window_with_the_agents_api_its_project_and_participant_and_the_bundle
     // The app bundles no Node, and the daemon names none to a window.
     assert!(env.get("CONSENSFLOW_NODE").is_none(), "{env}");
     let path_delimiter = if cfg!(windows) { ";" } else { ":" };
-    assert_eq!(
-        env["PATH"],
-        format!(
-            "{}{path_delimiter}{}",
-            bundle_bin()?.display(),
-            d.home.path_dir().display()
-        )
-        .as_str()
-    );
+    let path = env["PATH"].as_str().unwrap_or_default();
+    let (bundle, rest) = path.split_once(path_delimiter).unwrap_or((path, ""));
+    let bundle = Path::new(bundle);
+    assert!(holds_the_cf_under_test(bundle)?, "{path}");
+    assert_eq!(rest, d.home.path_dir().display().to_string(), "{path}");
     assert!(
         Regex::new(r"^\S+$")?.is_match(env["CONSENSFLOW_TOKEN"].as_str().unwrap_or_default()),
         "{env}"
@@ -250,12 +249,9 @@ fn opens_a_window_with_the_agents_api_its_project_and_participant_and_the_bundle
     );
     // On Windows, cf.exe, its path in forward slashes: Git Bash drops backslashes.
     let cf_path = if cfg!(windows) {
-        format!(
-            "{}/cf.exe",
-            bundle_bin()?.display().to_string().replace('\\', "/")
-        )
+        format!("{}/cf.exe", bundle.display().to_string().replace('\\', "/"))
     } else {
-        bundle_bin()?.join("cf").display().to_string()
+        bundle.join("cf").display().to_string()
     };
     assert!(
         role.contains(&format!("Here `cf` is {cf_path}.")),

@@ -8,9 +8,10 @@ publish = false
 
 [features]
 # The programs the suites run in place of what ConsensFlow runs: the stand-in
-# for a harness's terminal program (`fake-agent`), a Codex (`fake-codex`) and a
-# daemon that is not the native one (`liar-daemon`). The crate's own tests turn
-# it on through the dev-dependency below.
+# for a harness's terminal program (`fake-agent`), a Codex (`fake-codex`), a
+# daemon that is not the native one (`liar-daemon`) and the reader of a large
+# paste that the packaged smoke's harness runs (`smoke-paste-reader`). The
+# crate's own tests turn it on through the dev-dependency below.
 test-support = []
 
 # The stand-in for the `claude` a window runs: it speaks Claude's launch
@@ -33,6 +34,14 @@ required-features = ["test-support"]
 [[bin]]
 name = "liar-daemon"
 path = "src/bin/liar_daemon.rs"
+required-features = ["test-support"]
+
+# What the packaged smoke's stand-in harness runs to read a large paste off its
+# terminal and say its size and hash: a program of ours, so that the smoke runs
+# no Node (the bundle ships none).
+[[bin]]
+name = "smoke-paste-reader"
+path = "src/bin/smoke_paste_reader.rs"
 required-features = ["test-support"]
 
 [dependencies]

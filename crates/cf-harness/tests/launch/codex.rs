@@ -32,7 +32,7 @@ use cf_base::path;
 use cf_harness::codex::CodexAdapter;
 use cf_harness::contract::{Adapter, Agent, Launch, LaunchId, Pane, Prepared, Records};
 use cf_harness::testing::{
-    fake_executable, finished, named, ChildScript, Ends, Fakes, Sent, Served,
+    fake_executable, finished, named, ChildScript, Ends, Fakes, Sent, Served, FIRST_MESSAGE_MS,
 };
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -99,6 +99,7 @@ struct Request {
     message: Option<String>,
     agent: Option<Agent<'static>>,
     instructions: String,
+    first_message_ms: i64,
 }
 
 impl Default for Request {
@@ -109,6 +110,7 @@ impl Default for Request {
             message: Some(TASK.to_owned()),
             agent: Some(LUNA),
             instructions: ROLE.to_owned(),
+            first_message_ms: FIRST_MESSAGE_MS,
         }
     }
 }
@@ -145,6 +147,7 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
         message: request.message.as_deref(),
         agent: request.agent,
         instructions: &request.instructions,
+        first_message_ms: request.first_message_ms,
     };
     finished(adapter.prepare(&launch))
 }

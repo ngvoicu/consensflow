@@ -37,13 +37,9 @@ pub(super) fn environment(root: &Path, fake_bin: &Path, config: &Config) -> Vec<
         ("CLAUDE_CONFIG_DIR".to_owned(), text(&home.join(".claude"))),
         ("CODEX_HOME".to_owned(), text(&home.join(".codex"))),
         ("XDG_CONFIG_HOME".to_owned(), text(&home.join(".config"))),
+        ("PATH".to_owned(), path(fake_bin, config)),
     ];
     if cfg!(windows) {
-        let system = own_var("SystemRoot").unwrap_or_else(|| "C:\\Windows".to_owned());
-        env.push((
-            "PATH".to_owned(),
-            format!("{};{system}\\System32", fake_bin.display()),
-        ));
         // What Windows itself needs to start a process, and the home it reads there.
         for name in ["SystemRoot", "ComSpec", "PATHEXT"] {
             if let Some(value) = own_var(name) {
@@ -54,16 +50,30 @@ pub(super) fn environment(root: &Path, fake_bin: &Path, config: &Config) -> Vec<
         env.push(("TEMP".to_owned(), temp.clone()));
         env.push(("TMP".to_owned(), temp));
         env.push(("USERPROFILE".to_owned(), text(&home)));
-    } else {
-        env.push((
-            "PATH".to_owned(),
-            format!("{}:/usr/local/bin:/usr/bin:/bin", fake_bin.display()),
-        ));
     }
     env.push(("CF_TEST_HARNESS".to_owned(), text(&config.stand_in)));
     env.push(("TERM".to_owned(), "xterm-256color".to_owned()));
     env.extend(config.vars.iter().cloned());
     env
+}
+
+/// The `PATH` of the rig: the folder of the stand-in `claude` first, then the
+/// folders a case added ([`Config::also_on_path`]), then the system's.
+fn path(fake_bin: &Path, config: &Config) -> String {
+    let system: Vec<String> = if cfg!(windows) {
+        let root = own_var("SystemRoot").unwrap_or_else(|| "C:\\Windows".to_owned());
+        vec![format!("{root}\\System32")]
+    } else {
+        ["/usr/local/bin", "/usr/bin", "/bin"]
+            .map(str::to_owned)
+            .into()
+    };
+    std::iter::once(fake_bin)
+        .chain(config.path.iter().map(PathBuf::as_path))
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .chain(system)
+        .collect::<Vec<_>>()
+        .join(if cfg!(windows) { ";" } else { ":" })
 }
 
 /// The stand-in `claude` the windows find on their `PATH`, and the folder
@@ -147,6 +157,25 @@ mod tests {
         assert_eq!(get("CF_TEST_NO_SUCH"), "");
         // Nothing of the machine's own gets in.
         assert!(!env.iter().any(|(name, _)| name == "CONSENSFLOW_URL"));
+    }
+
+    #[test]
+    fn a_folder_a_case_adds_to_the_path_comes_after_the_stand_ins_and_before_the_systems() {
+        let root = Path::new("root");
+        let fake_bin = root.join("fake-bin");
+        let delimiter = if cfg!(windows) { ';' } else { ':' };
+        let added = config()
+            .also_on_path("/real/codex")
+            .also_on_path("/real/node");
+        let env = environment(root, &fake_bin, &added);
+        let folders: Vec<&str> = var(&env, "PATH").split(delimiter).collect();
+        assert_eq!(folders[0], fake_bin.to_string_lossy());
+        assert_eq!(folders[1..3], ["/real/codex", "/real/node"]);
+        // What follows is what a rig that adds none ends with.
+        let plain = environment(root, &fake_bin, &config());
+        let plain: Vec<&str> = var(&plain, "PATH").split(delimiter).collect();
+        assert_eq!(plain.len(), folders.len() - 2);
+        assert_eq!(folders[3..], plain[1..]);
     }
 
     #[test]

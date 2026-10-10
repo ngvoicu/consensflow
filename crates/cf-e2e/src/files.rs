@@ -2,8 +2,8 @@
 //! written, read and copied with the path in whatever goes wrong, and the
 //! folders above a file made when it is written.
 
-use std::fs;
 use std::path::Path;
+use std::{fs, io};
 
 use crate::{Error, Result};
 
@@ -60,6 +60,24 @@ pub fn read_string(path: &Path) -> Result<String> {
     fs::read_to_string(path).map_err(Error::file("read", path))
 }
 
+/// The text of the file `path` up to its last line break: the lines of a file
+/// another program is still appending to that it has finished. Read while it
+/// writes, the file may end in the start of a line (a JSON record cut inside a
+/// string, or inside a letter's bytes); that tail is left out, and the next read
+/// has the line whole.
+pub fn read_finished_lines(path: &Path) -> Result<String> {
+    let mut bytes = read(path)?;
+    bytes.truncate(
+        bytes
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map_or(0, |at| at + 1),
+    );
+    String::from_utf8(bytes).map_err(|invalid| {
+        Error::file("read", path)(io::Error::new(io::ErrorKind::InvalidData, invalid))
+    })
+}
+
 /// Copies the file `from` to `to`, in a folder made for it if it is not there.
 pub fn copy(from: &Path, to: &Path) -> Result {
     write(to, read(from)?)
@@ -101,6 +119,37 @@ mod tests {
         let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o111;
         assert_eq!(mode(&program), 0o111);
         assert_eq!(mode(&plain), 0);
+    }
+
+    #[test]
+    fn only_the_lines_a_writer_has_finished_are_read_and_a_torn_end_waits_for_the_next_read() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("record.jsonl");
+        let finished = "{\"a\":1}\n{\"b\":\"é\"}\n";
+        // A line cut inside a string, as a reader that came between two of its
+        // writes meets it: the lines before it are read, it is not.
+        write(&file, format!("{finished}{{\"c\":\"tor")).unwrap();
+        assert_eq!(read_finished_lines(&file).unwrap(), finished);
+        // Cut inside the bytes of a letter: no text at all, but the lines before it.
+        let mut cut = format!("{finished}{{\"c\":\"").into_bytes();
+        cut.push(0xC3);
+        write(&file, cut).unwrap();
+        assert_eq!(read_finished_lines(&file).unwrap(), finished);
+        // The writer ends the line: the next read has it whole.
+        let whole = format!("{finished}{{\"c\":\"torn\"}}\n");
+        write(&file, &whole).unwrap();
+        assert_eq!(read_finished_lines(&file).unwrap(), whole);
+        // No line is finished yet, or none is written.
+        write(&file, "{\"a\":").unwrap();
+        assert_eq!(read_finished_lines(&file).unwrap(), "");
+        write(&file, "").unwrap();
+        assert_eq!(read_finished_lines(&file).unwrap(), "");
+        // A file that is not there is named, as any read names it.
+        let missing = root.path().join("missing.jsonl");
+        assert!(matches!(
+            read_finished_lines(&missing),
+            Err(Error::File { action: "read", .. })
+        ));
     }
 
     #[test]

@@ -609,6 +609,7 @@ impl Dispatcher {
             message: text.as_deref(),
             agent: saved.as_ref().map(SavedAgent::agent),
             instructions: &instructions,
+            first_message_ms: self.seams.limits.launch_ms,
         };
         // An `async` function: its answer, or its failure, reaches this
         // step a turn after it was made, though Pi's never waits.

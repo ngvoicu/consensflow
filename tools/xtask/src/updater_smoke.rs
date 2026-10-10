@@ -83,7 +83,8 @@ macro_rules! args {
 
 mod app;
 mod build;
-mod bundle;
+// What a bundle holds and the process table say are read by the candidate (landing S11) too.
+pub(crate) mod bundle;
 mod case;
 mod cases;
 mod evidence;
@@ -91,7 +92,7 @@ mod feed;
 mod launchers;
 mod ledger;
 mod options;
-mod processes;
+pub(crate) mod processes;
 mod sandbox;
 mod say;
 mod signing;

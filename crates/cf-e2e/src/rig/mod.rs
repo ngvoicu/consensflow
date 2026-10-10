@@ -55,6 +55,7 @@ const IDLE: Duration = Duration::from_secs(60);
 pub struct Config {
     stand_in: PathBuf,
     vars: Vec<(String, String)>,
+    path: Vec<PathBuf>,
     existing_root: Option<PathBuf>,
     daemon: Option<PathBuf>,
 }
@@ -66,6 +67,7 @@ impl Config {
         Self {
             stand_in: stand_in.into(),
             vars: Vec::new(),
+            path: Vec::new(),
             existing_root: None,
             daemon: None,
         }
@@ -76,6 +78,16 @@ impl Config {
     #[must_use]
     pub fn var(mut self, name: &str, value: impl Into<String>) -> Self {
         self.vars.push((name.to_owned(), value.into()));
+        self
+    }
+
+    /// With the folder `dir` on the `PATH` of the daemon and so of every window,
+    /// after the folder of the stand-in `claude` and before the system's: for a
+    /// case that runs a real program of the machine (its own `codex`) beside the
+    /// stand-in. The stand-in is still the first `claude` found.
+    #[must_use]
+    pub fn also_on_path(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.path.push(dir.into());
         self
     }
 
@@ -114,7 +126,7 @@ pub struct Rig {
     daemon: Daemon,
     host: Spawned,
     /// Whether the home is left when the rig ends: it is not, unless a rig is
-    /// to resume on it.
+    /// to resume on it or a case asked to keep it ([`Rig::keep_home`]).
     keep_root: bool,
     closed: bool,
     _turn: MutexGuard<'static, ()>,
@@ -220,6 +232,13 @@ impl Rig {
         find().ok_or_else(|| Error::Daemon(format!("the window {id} was opened, and is gone")))
     }
 
+    /// Every `pane.exit` the pane host told so far, in order: which window
+    /// ended (`id`, `generation`), how (`exitCode`, `signal`) and the last lines
+    /// its screen showed (`tail`).
+    pub fn exits(&self) -> Vec<Value> {
+        self.shared.seen().exits.clone()
+    }
+
     /// The human types into the chief's terminal, the one way work reaches the
     /// chief: a bracketed paste of `text`, then Enter, once the chief is idle (it
     /// is waited for a minute).
@@ -283,13 +302,11 @@ impl Rig {
     }
 
     /// What the conversation `session` of the stand-in agent recorded, one
-    /// JSON record to a line; nothing if it has recorded none.
+    /// JSON record to a line; nothing if it has recorded none. Only whole
+    /// records: the agent writes while the case reads, and the line it is in the
+    /// middle of is left for the next read ([`files::read_finished_lines`]).
     pub fn transcript(&self, session: &str) -> String {
-        let file = Path::new(self.var("CLAUDE_CONFIG_DIR").unwrap_or_default())
-            .join("projects")
-            .join("integration")
-            .join(format!("{session}.jsonl"));
-        files::read_string(&file).unwrap_or_default()
+        recorded(self.var("CLAUDE_CONFIG_DIR").unwrap_or_default(), session)
     }
 
     /// The processes the stand-in agent recorded starting, in order. The
@@ -331,6 +348,14 @@ impl Rig {
                 self.what_they_said()
             )))
         }
+    }
+
+    /// Leaves the home where it is when the rig ends, however it ends (closed,
+    /// or dropped by a case that failed), for a person to look at what the case
+    /// did: where it is.
+    pub fn keep_home(&mut self) -> PathBuf {
+        self.keep_root = true;
+        self.root.clone()
     }
 
     /// Ends the rig: both programs' input is ended, both are waited for, and
@@ -395,5 +420,39 @@ impl Drop for Rig {
         if !self.keep_root {
             let _ = std::fs::remove_dir_all(&self.root);
         }
+    }
+}
+
+/// The records of the conversation `session` that the stand-in agent wrote
+/// under the Claude config folder `config`, whole ones only.
+fn recorded(config: &str, session: &str) -> String {
+    let file = Path::new(config)
+        .join("projects")
+        .join("integration")
+        .join(format!("{session}.jsonl"));
+    files::read_finished_lines(&file).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_conversation_is_read_a_whole_record_at_a_time_while_the_agent_is_still_writing_it() {
+        let config = tempfile::tempdir().unwrap();
+        let file = config
+            .path()
+            .join("projects")
+            .join("integration")
+            .join("s-1.jsonl");
+        let whole = "{\"type\":\"user\"}\n{\"type\":\"assistant\"}\n";
+        // The agent is in the middle of the third: a case that reads now must not
+        // meet it, as a case once met `EOF while parsing a string`.
+        let torn = "{\"type\":\"assistant\",\"message\":{\"content\":[{\"text\":\"ran cf: Wai";
+        files::write(&file, format!("{whole}{torn}")).unwrap();
+        let config = config.path().to_string_lossy().into_owned();
+        assert_eq!(recorded(&config, "s-1"), whole);
+        // A conversation nothing has been written of is nothing.
+        assert_eq!(recorded(&config, "s-2"), "");
     }
 }
