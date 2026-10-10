@@ -1,10 +1,14 @@
 //! What every command is told about where it works: the checkout, and the
 //! environment xtask was started with.
 //!
-//! The checkout is where this xtask was built, found from where its own
+//! The checkout is the one whose xtask this is, found from where its own
 //! manifest is (`<checkout>/tools/xtask`), never from the folder it was run
 //! in: `cargo xtask` runs the same from the root, from `app/` or from any
-//! folder below.
+//! folder below. `cargo run` names that manifest's folder to the program it
+//! starts (`CARGO_MANIFEST_DIR`), and that is taken first: the folder xtask was
+//! compiled in can be another checkout's, as when two trees share one target
+//! folder (the gate's exported tree links to this one's) and the program was
+//! last built in the other.
 
 use std::path::{Path, PathBuf};
 
@@ -29,9 +33,13 @@ pub enum Error {
 }
 
 impl Context {
-    /// The checkout this xtask was built in.
+    /// The checkout of this xtask: the one `cargo run` names, or else the one
+    /// it was built in.
     pub fn new(env: &Env) -> Result<Self, Error> {
-        Self::at(Path::new(env!("CARGO_MANIFEST_DIR")), env)
+        let manifest_dir = env
+            .path("CARGO_MANIFEST_DIR")
+            .unwrap_or(Path::new(env!("CARGO_MANIFEST_DIR")));
+        Self::at(manifest_dir, env)
     }
 
     /// The checkout whose xtask has its manifest in `manifest_dir`.
@@ -85,6 +93,16 @@ mod tests {
             .join("src-tauri")
             .join("tauri.conf.json")
             .is_file());
+    }
+
+    #[test]
+    fn the_manifest_cargo_run_names_is_taken_before_the_one_xtask_was_built_in() {
+        let other = tempfile::tempdir().unwrap();
+        let manifest = other.path().join("tools").join("xtask");
+        std::fs::create_dir_all(&manifest).unwrap();
+        std::fs::write(other.path().join("Cargo.toml"), "").unwrap();
+        let env = Env::from_vars([("CARGO_MANIFEST_DIR", manifest.as_os_str())]);
+        assert_eq!(Context::new(&env).unwrap().root, other.path());
     }
 
     #[test]

@@ -159,25 +159,31 @@ pub(crate) fn null_record(index: usize) -> String {
 }
 
 /// `visibleText`: what a value shows as text. Text is itself, nothing is
-/// nothing, a list is its parts on lines of their own (a part's own `text`
-/// when it has one), and anything else is its JSON.
+/// nothing, a list is its parts on lines of their own (see [`visible_part`]),
+/// and anything else is its JSON.
 pub(crate) fn visible_text(value: Option<&Value>) -> String {
     match value {
         Some(Value::String(text)) => text.clone(),
         None | Some(Value::Null) => String::new(),
         Some(Value::Array(parts)) => parts
             .iter()
-            .map(|part| match part {
-                Value::String(text) => text.clone(),
-                Value::Object(fields) => match fields.get("text") {
-                    Some(Value::String(text)) => text.clone(),
-                    _ => js::stringify(part),
-                },
-                other => js::stringify(other),
-            })
+            .map(visible_part)
             .collect::<Vec<_>>()
             .join("\n"),
         Some(other) => js::stringify(other),
+    }
+}
+
+/// A part of a list as [`visible_text`] shows it: text is itself, an object
+/// its own `text` when it has one, anything else its JSON.
+pub(crate) fn visible_part(part: &Value) -> String {
+    match part {
+        Value::String(text) => text.clone(),
+        Value::Object(fields) => match fields.get("text") {
+            Some(Value::String(text)) => text.clone(),
+            _ => js::stringify(part),
+        },
+        other => js::stringify(other),
     }
 }
 

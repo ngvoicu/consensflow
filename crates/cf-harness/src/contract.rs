@@ -68,6 +68,11 @@ pub struct Launch<'a> {
     pub agent: Option<Agent<'a>>,
     /// The role's text.
     pub instructions: &'a str,
+    /// How long the window has to show its first message, in milliseconds: the
+    /// engine's limit for a launch (`CONSENSFLOW_LAUNCH_TIMEOUT_MS`). What a
+    /// window waits for before that message can show, such as the conversation
+    /// its harness names, ends by it.
+    pub first_message_ms: i64,
 }
 
 /// The model a window runs on and the levels its harness reads, as the
@@ -125,7 +130,9 @@ pub trait Window {
     /// looks follow it there.
     fn follow(&self, session: &str);
     /// The conversation the window started on, where its harness says it
-    /// itself; none where ConsensFlow named it.
+    /// itself; none where ConsensFlow named it. A window that waits for its
+    /// harness to say it gives up by [`Launch::first_message_ms`], if not
+    /// before.
     fn started(&self) -> Work<'_, Result<Option<String>, String>>;
     /// Whether a delivery may go in now, or why that could not be told.
     fn ready<'a>(

@@ -21,6 +21,7 @@ fn window(fakes: &Fakes, wire: &Path, session: Option<&str>) -> Rc<DevinWindow> 
         time: Rc::clone(&fakes.time) as Rc<dyn Time>,
         session: RefCell::new(session.map(str::to_owned)),
         wire: WireLog::new(&wire.to_string_lossy(), jiff::tz::TimeZone::UTC),
+        discover_for_ms: MINUTE_MS,
     })
 }
 
@@ -220,6 +221,7 @@ fn a_look_takes_the_wires_word_on_the_quota_never_the_records_and_the_rest_from_
         time: Rc::clone(&fakes.time) as Rc<dyn Time>,
         session: RefCell::new(Some("mild-coin".to_owned())),
         wire: WireLog::new(&wire.to_string_lossy(), jiff::tz::TimeZone::UTC),
+        discover_for_ms: MINUTE_MS,
     });
     let observed = finished(window.observe()).unwrap();
     assert_eq!(observed.quota, None, "the log says nothing of the quota");

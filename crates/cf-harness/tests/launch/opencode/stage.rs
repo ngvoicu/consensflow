@@ -20,6 +20,7 @@ use cf_harness::seams::processes::{Child, Ending, Failed, Limits, Processes, Pro
 use cf_harness::seams::Services;
 use cf_harness::testing::{
     fake_executable, ChildScript, Driver, Ends, Fakes, ScriptedProcesses, Sent, Served,
+    FIRST_MESSAGE_MS,
 };
 use cf_proto::agents::Harness;
 use serde_json::{json, Value};
@@ -297,6 +298,7 @@ impl Stage {
                 message: wanted.message.as_deref(),
                 agent: Some(agent),
                 instructions: &wanted.instructions,
+                first_message_ms: FIRST_MESSAGE_MS,
             };
             adapter.prepare(&launch).await
         }

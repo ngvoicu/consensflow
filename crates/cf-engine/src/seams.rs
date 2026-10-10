@@ -145,7 +145,9 @@ pub trait LaunchIds {
 pub struct Limits {
     /// For a delivered message's header to show in the window's record.
     pub arrival_ms: i64,
-    /// For a launch's first message to show.
+    /// For a launch's first message to show. Every adapter is told it
+    /// (`Launch::first_message_ms`): what its window waits for before that
+    /// message can show ends by it.
     pub launch_ms: i64,
     /// Attempts at a delivery before it fails.
     pub max_attempts: u32,

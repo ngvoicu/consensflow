@@ -61,7 +61,10 @@ const HOLD: &str =
 /// How often the broker is asked for the thread a new window opened.
 const DISCOVER_EVERY: Duration = Duration::from_millis(250);
 
-/// How long the broker has to name it, in milliseconds.
+/// The most the broker has to name it, in milliseconds. A Codex that has
+/// started no thread in a minute is waiting on something more time does not
+/// give (a login, a prompt); a launch with less time than that gives it less
+/// ([`Launch::first_message_ms`]).
 const DISCOVER_FOR_MS: i64 = 60_000;
 
 /// Codex, as the engine launches its windows.
@@ -129,6 +132,7 @@ impl Adapter for CodexAdapter {
                     loopback: Rc::clone(&services.loopback),
                     channel: launched.channel,
                     thread: RefCell::new(launch.resume.map(str::to_owned)),
+                    discover_for_ms: DISCOVER_FOR_MS.min(launch.first_message_ms),
                 }),
             })
         })
@@ -145,6 +149,9 @@ struct CodexWindow {
     /// when Codex started it, or the one it was followed to. None until the
     /// broker has named it.
     thread: RefCell<Option<String>>,
+    /// How long the broker has to name the thread of a window that has none
+    /// yet, in milliseconds.
+    discover_for_ms: i64,
 }
 
 impl CodexWindow {
@@ -168,7 +175,7 @@ impl Window for CodexWindow {
             if named {
                 return Ok(None);
             }
-            let deadline = self.time.wall_ms().saturating_add(DISCOVER_FOR_MS);
+            let deadline = self.time.wall_ms().saturating_add(self.discover_for_ms);
             while self.time.wall_ms() < deadline {
                 if let Some(Shown {
                     session: Session::Thread(thread),
