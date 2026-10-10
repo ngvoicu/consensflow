@@ -333,8 +333,10 @@ mod tests {
                 "clippy-windows",
                 "--as-archiver",
                 "test daemons",
+                "test integration",
                 "test clis",
                 "test agents",
+                "test load",
                 "departures",
                 "bench records-memory",
                 "smoke",
@@ -444,7 +446,7 @@ mod tests {
         assert_eq!(parsed("app"), "usage app takes a command: test, clippy");
         assert_eq!(
             parsed("test"),
-            "usage test takes a command: daemons, clis, agents"
+            "usage test takes a command: daemons, integration, clis, agents, load"
         );
         assert_eq!(parsed("app tests"), "usage unknown command: app tests");
         assert_eq!(

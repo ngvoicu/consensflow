@@ -12,10 +12,10 @@
  * repository and is put back from that copy, byte for byte, whatever the run
  * came to, on Ctrl-C and on being terminated too; a run killed past that leaves
  * the copies in the folder it says first. The native `cf` that the test scripts
- * and the suites of the CLI (crates/cf-e2e, which builds the `cf` it runs) run,
- * the build folder's and `bin/`'s, is built again from the sources as they are
- * after each plant that had it built from its own, so that no plant's tests meet
- * the build of another's.
+ * and the suites of crates/cf-e2e (the CLI's and the rig's, which build the `cf`
+ * they run) run, the build folder's and `bin/`'s, is built again from the
+ * sources as they are after each plant that had it built from its own, so that
+ * no plant's tests meet the build of another's.
  *
  *   npm run plants:cli                  # every plant
  *   npm run plants:cli -- parser dispatch   # the plants whose names hold a word
@@ -87,8 +87,8 @@ let planting = null
 let running = null
 /**
  * Whether a run built the native `cf` from planted sources (a `BUILD` puts it in
- * `bin/`, the suites of the CLI build their own in the build folder), which stays
- * there until `rebuild`.
+ * `bin/`, the suites of the CLI build their own in the build folder, and so do
+ * the rig's, which a plant says by `builds`), which stays there until `rebuild`.
  */
 let built = false
 
@@ -201,7 +201,7 @@ async function trial(plant) {
   try {
     let ran = null
     for (const command of plant.runs) {
-      built = built || command === CLIS || command === BUILD
+      built = built || command === CLIS || command === BUILD || plant.builds === true
       ran = await execute(command)
       if (!ran.compiled) return { verdict: 'does not compile', ran }
       if (ran.hung) return { verdict: 'hung', ran }

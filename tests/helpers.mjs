@@ -94,38 +94,3 @@ export function fakeExecutable(
   writeFileSync(path, `${lines.join('\n')}\n`, { mode: 0o755 })
   return path
 }
-
-/**
- * A stand-in CLI written in JavaScript, run by this very Node: on POSIX the
- * script itself with a shebang, on Windows the script beside a `.cmd` that
- * hands it the arguments. Returns the path the fake is found at.
- */
-export function fakeNodeExecutable(file, source) {
-  const body = source.replace(/^#!.*\n/, '')
-  if (WINDOWS) {
-    const script = `${file}.mjs`
-    writeFileSync(script, body)
-    const path = fakePath(file)
-    writeFileSync(path, `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`)
-    return path
-  }
-  writeFileSync(file, `#!${process.execPath}\n${body}`, { mode: 0o755 })
-  return file
-}
-
-/**
- * Where `actual` first differs from `expected`, a line of each around it: a
- * golden file is megabytes, often one long line per scenario, which an
- * assertion's own message cuts off before the difference.
- */
-export function firstDifference(actual, expected) {
-  const lines = actual.split('\n')
-  const wanted = expected.split('\n')
-  const line = lines.findIndex((text, at) => text !== wanted[at])
-  const at = line === -1 ? lines.length : line
-  const [got, want] = [lines[at] ?? '', wanted[at] ?? '']
-  let column = 0
-  while (column < got.length && got[column] === want[column]) column += 1
-  const around = (text) => text.slice(Math.max(0, column - 300), column + 300)
-  return `line ${at + 1}, column ${column + 1}:\n  actual   …${around(got)}…\n  expected …${around(want)}…`
-}

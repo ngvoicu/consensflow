@@ -3,7 +3,10 @@
  * what is wrong with the code once planted; `edits`, the text replaced, each
  * in one file where it is found exactly once; `runs`, the commands that should
  * fail, tried in order until one does; `meant`, the test that was written for
- * it (the driver says when another caught it). `lines` is the daemon's.
+ * it (the driver says when another caught it); `builds`, true for a plant whose
+ * runs build the native `cf` themselves (the suites of crates/cf-e2e do), so
+ * that the driver builds it again from the sources as they are once the plant
+ * is done. `lines` is the daemon's.
  */
 export { lines } from '../daemon/kit.mjs'
 
@@ -25,6 +28,19 @@ export const LIBRARY = cargo('-p', 'cf', '--test', 'dispatch')
  * which they build from the sources as they are, in the build folder: `bin/` is not touched.
  */
 export const CLIS = ['cargo', 'xtask', 'test', 'clis', '--offline']
+/**
+ * The cases of the rig's suites (the `rig` test of crates/cf-e2e) whose module is
+ * `module` (`waiting_notes::`): the daemon and the pane host in real terminals,
+ * with the `cf` they build from the sources as they are, in the build folder.
+ * A plant that runs one says it `builds`.
+ */
+export const RIG = (module) => cargo('-p', 'cf-e2e', '--test', 'rig', module)
+/**
+ * The cases of the daemon's suite (the `daemon` test of crates/cf-e2e) whose module
+ * is `module` (`core_daemon::`): `cf ui` as a process, with the `cf` they build
+ * from the sources as they are. A plant that runs one says it `builds`.
+ */
+export const DAEMON_PROCESS = (module) => cargo('-p', 'cf-e2e', '--test', 'daemon', module)
 
 export const STANDALONE = 'crates/cf/src/standalone'
 
@@ -52,8 +68,8 @@ export const UPDATE_RELEASE = cargo('-p', 'cf-release', '--test', 'prepare_updat
 export const PORTABLE_PACK = cargo('-p', 'cf-portable', '--no-fail-fast')
 /** The Developer ID signing of the app (`cf-release sign-mac`): every Mach-O hardened, none entitled. */
 export const SIGN_MAC = cargo('-p', 'cf-release', '--lib', 'sign_mac::')
-/** A verb of the native `cf` run outside a window, given its arguments whole (the build of bin/ first). */
-export const CF_NATIVE = [process.execPath, '--test', 'tests/integration/cf-native.test.mjs']
+/** A verb of the native `cf` run outside a window, given its arguments whole (the rig test's `cf_native` cases, which build the `cf` they run). */
+export const CF_NATIVE = RIG('cf_native::')
 /** The launcher's repair, which commands it rewrites and which it leaves. */
 export const LAUNCHER = cargo('-p', 'cf-launcher')
 /** What the repair leaves as it is, and says (cargo stops at the first test binary that fails, so the whole crate may not reach it). */

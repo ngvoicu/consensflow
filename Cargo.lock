@@ -468,11 +468,18 @@ dependencies = [
 name = "cf-e2e"
 version = "3.0.0-alpha.83"
 dependencies = [
+ "cf-e2e",
+ "jiff",
+ "nix",
  "regex",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.20",
+ "tungstenite",
+ "ureq",
  "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

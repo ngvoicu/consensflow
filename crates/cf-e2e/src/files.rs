@@ -21,6 +21,35 @@ pub fn write(path: &Path, contents: impl AsRef<[u8]>) -> Result {
     fs::write(path, contents).map_err(Error::file("write", path))
 }
 
+/// Writes `contents` to the file `path` as [`write`] does, and makes it a
+/// program a system will start: executable on Unix, where a script is no
+/// program without that. Windows starts a file by its name's extension.
+pub fn write_executable(path: &Path, contents: impl AsRef<[u8]>) -> Result {
+    if let Some(dir) = path.parent() {
+        make_dir(dir)?;
+    }
+    executable(path, contents.as_ref()).map_err(Error::file("write", path))
+}
+
+#[cfg(unix)]
+fn executable(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o755)
+        .open(path)?;
+    file.write_all(contents)
+}
+
+#[cfg(not(unix))]
+fn executable(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    fs::write(path, contents)
+}
+
 /// The bytes of the file `path`.
 pub fn read(path: &Path) -> Result<Vec<u8>> {
     fs::read(path).map_err(Error::file("read", path))
@@ -48,6 +77,30 @@ mod tests {
         write(&file, b"second").unwrap();
         assert_eq!(read(&file).unwrap(), b"second");
         assert_eq!(read_string(&file).unwrap(), "second");
+    }
+
+    #[test]
+    fn a_program_is_written_in_folders_made_for_it_and_over_what_it_held() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("bin").join("claude");
+        write_executable(&file, "first").unwrap();
+        write_executable(&file, "second").unwrap();
+        assert_eq!(read_string(&file).unwrap(), "second");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_written_here_is_executable_for_all_and_a_file_is_not() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let program = root.path().join("program");
+        let plain = root.path().join("plain");
+        write_executable(&program, "#!/bin/sh\n").unwrap();
+        write(&plain, "text").unwrap();
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o111;
+        assert_eq!(mode(&program), 0o111);
+        assert_eq!(mode(&plain), 0);
     }
 
     #[test]
