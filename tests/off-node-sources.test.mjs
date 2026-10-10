@@ -97,7 +97,7 @@ const SAYS_THEM = [
   /^tests\/(?:engine\/)?fixtures\//,
   /^tools\/cf-publish\//,
   /^app\/src-tauri\/src\/update_install\.rs$/,
-  /^tests\/updater-smoke/,
+  /^tools\/xtask\/src\/updater_smoke\//,
   /^crates\/cf-launcher\//,
   /^crates\/cf\/tests\/cli_goldens\//,
   /^tests\/plants\/cli\/admin\.mjs$/,

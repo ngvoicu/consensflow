@@ -2,7 +2,7 @@
 //! real pipes, as the app ends it: its
 //! input ended; SIGTERM with its input left open (Windows delivers none);
 //! its output broken with its input left open. Each ends the daemon with exit
-//! 0, and its log as `core-daemon.test.mjs:186-191` reads it.
+//! 0, and its log as `crates/cf-e2e/tests/daemon/core_daemon.rs` reads it.
 //!
 //! Each is held twice: with nothing going on, where the stop is prompt, and
 //! with everything open at once that a stop has to get past, which takes the

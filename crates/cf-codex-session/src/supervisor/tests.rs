@@ -1,7 +1,7 @@
 //! The supervisor against Codex programs that are shell scripts: what it does
 //! when Codex cannot be started, or never comes up, with nothing real to talk
 //! to. Whole windows, with a TUI and a server that speaks, are the process
-//! tests (`tests/integration/codex-session.test.mjs`).
+//! tests (`crates/cf-e2e/tests/rig/codex_session.rs`).
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

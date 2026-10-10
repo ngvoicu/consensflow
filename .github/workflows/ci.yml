@@ -1,5 +1,6 @@
 # The gate on both platforms the app ships for: lint and the Node suite, the
-# integration suite on a real pane host (the release bridge), the page's
+# black-box suites of crates/cf-e2e (the daemon, and the rig on a real pane
+# host, with stand-in agents in real terminals; the CLI), the page's
 # Playwright suite (on macOS: it needs no app, and once is enough), and the
 # Rust host's tests, headless ones included, and clippy. The packaged smoke
 # needs a built app and stays with the release build. Rust comes from the
@@ -45,8 +46,8 @@ jobs:
 
       - run: npm ci
       - run: npm ci --prefix app
-      # The page, and the native cf a window runs, built into bin/ for the
-      # integration suite and staged as the resource the Rust build expects.
+      # The page, and the native cf a window runs, built into bin/ for the Node
+      # suite and staged as the resource the Rust build expects.
       - run: npm --prefix app run bundle:ui
       - run: npm --prefix app run prepare-sidecar
 
@@ -54,15 +55,14 @@ jobs:
       - if: runner.os == 'macOS'
         working-directory: app
         run: npx playwright install chromium && npm run test:ui
-      # The pane host the integration suite drives, consensflow-bridge: a
-      # binary of cf-panes, which no Tauri bundle ships.
-      - run: npm run build:bridge
-      - run: npm run test:integration
-      # The daemon's suites and the rig's against the native cf ui.
+      # The black-box suites of crates/cf-e2e. Each builds the programs it runs
+      # (the native cf, and the pane host consensflow-bridge, a binary of
+      # cf-panes which no Tauri bundle ships). The daemon's, as a process, and
+      # the rig's: the daemon and the pane host in real terminals, with
+      # stand-in agents in the windows.
       - run: npm run test:daemons
-        timeout-minutes: 20
-      # The CLI's suites (the cli test of crates/cf-e2e, which builds the native
-      # cf it runs) against the native cf, which answers every verb.
+        timeout-minutes: 30
+      # The CLI's suites against the native cf, which answers every verb.
       - run: npm run test:clis
         timeout-minutes: 15
       # The app's own tests. On Windows the library's test binary carries the
@@ -77,9 +77,13 @@ jobs:
       # headless tests (cf-panes/tests/headless.rs) drive the helper; they are
       # Unix-only and build empty on Windows. A limit for the same reason, with
       # room for a slow runner: the ledger's replay alone has taken from 2 to 7
-      # minutes on Windows' (2026-10-06), the step 9 to 15.
-      - run: cargo test --workspace --exclude app
+      # minutes on Windows' (2026-10-06), the step 9 to 15. The black-box suites
+      # of crates/cf-e2e ran above, each with a limit of its own; what is left
+      # of that crate is its support and the stand-in agents' own tests.
+      - run: cargo test --workspace --exclude app --exclude cf-e2e
         timeout-minutes: 25
+      - run: cargo test -p cf-e2e --lib --bins
+        timeout-minutes: 10
       # Every crate linted, its tests included.
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # The harnesses' crate as the daemon builds it, without the test kit

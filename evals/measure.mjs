@@ -253,7 +253,7 @@ function plumbing(file, chiefId, humanId) {
       // task of its participant (or of its member, once the session ended); every other,
       // whatever its state (waiting for a member, paused or called off before any had
       // it, a removed member's), is among the open ones, on both daemons alike
-      // (tests/integration/core-board.test.mjs).
+      // (crates/cf-e2e/tests/rig/core_board.rs).
       placed: count('SELECT COUNT(*) AS n FROM task WHERE deleted_at IS NULL'),
       pauses: count(
         "SELECT COUNT(*) AS n FROM event WHERE kind = 'task.state' AND json_extract(data, '$.to') = 'paused'",

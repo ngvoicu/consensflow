@@ -15,13 +15,20 @@
 //! The rollout's ids key the reader's maps as they keyed Node's (see
 //! [`Key`]), so a record that says something odd is read as Node read it.
 
+mod fields;
+mod images;
+mod inputs;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cf_base::env::Env;
 use cf_base::js;
-use serde_json::{Number, Value};
+use serde_json::Value;
 
+use self::fields::{content_text, field, is_whole, nullish_or, or_empty};
+use self::images::output_text;
+use self::inputs::{Inputs, Telling};
 use super::paths::transcript;
 use super::quota::codex_quota;
 use crate::shared::quota::Quota;
@@ -29,9 +36,7 @@ use crate::shared::record::cache::Look;
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::key::{Key, Keys};
-use crate::shared::record::reading::{
-    native_id, null_record, visible_text, Item, Record, Role, Settlement,
-};
+use crate::shared::record::reading::{native_id, null_record, Item, Record, Role, Settlement};
 
 /// The reader of the thread `session`, in the Codex home `env` names.
 pub fn reader(session: &str, env: &Env) -> Box<dyn Look + Send> {
@@ -55,8 +60,8 @@ struct Rollout {
     /// Where each item is among them, by its native id (`items`).
     places: HashMap<Arc<str>, usize>,
     turns: HashMap<Key, Turn>,
-    /// The turn each tool call was made in.
-    calls: HashMap<Key, Key>,
+    /// Each tool call, by its id.
+    calls: HashMap<Key, Call>,
     /// The turn each subagent was started in.
     subagents: HashMap<Key, Key>,
     /// The turn the last `task_started` began, as it named it.
@@ -74,6 +79,14 @@ struct Kept {
     final_text: Option<Arc<str>>,
 }
 
+/// A tool call as the rollout told it.
+struct Call {
+    /// The turn it was made in.
+    turn: Key,
+    /// The tool it called (`name`), when the call named one.
+    tool: Option<Arc<str>>,
+}
+
 /// A turn as the rollout told it.
 #[derive(Default)]
 struct Turn {
@@ -83,6 +96,8 @@ struct Turn {
     answers: Vec<Arc<str>>,
     tools: HashSet<Key>,
     subagents: HashSet<Key>,
+    /// The user's inputs the rollout told once so far.
+    inputs: Inputs,
 }
 
 /// How a turn ended (`terminal`).
@@ -160,11 +175,12 @@ impl Rollout {
                 if js::trim(&text).is_empty() {
                     return Ok(());
                 }
-                let complete = role == Role::User;
-                let place = self.add_item(field(payload, "id"), role, text, complete, at, seq)?;
-                if role == Role::Assistant {
-                    self.answered_in(&turn, place);
+                if role == Role::User {
+                    let id = field(payload, "id");
+                    return self.add_input(id, Telling::Model, &turn, text, at, seq);
                 }
+                let place = self.add_item(field(payload, "id"), role, text, false, at, seq)?;
+                self.answered_in(&turn, place);
             }
             (Some("function_call" | "custom_tool_call"), _) => {
                 let call = self
@@ -174,19 +190,24 @@ impl Rollout {
                     if let Some(open) = self.turn(&turn) {
                         open.tools.insert(call.clone());
                     }
-                    self.calls.insert(call, turn);
+                    let tool = field(payload, "name")
+                        .and_then(Value::as_str)
+                        .map(Arc::from);
+                    self.calls.insert(call, Call { turn, tool });
                 }
             }
             (Some("function_call_output" | "custom_tool_call_output"), _) => {
                 let call = self.keys.of(field(payload, "call_id"));
-                let owner = match self.calls.get(&call) {
-                    Some(owner) if !owner.is_nullish() => owner.clone(),
+                let called = self.calls.get(&call);
+                let tool = called.and_then(|called| called.tool.clone());
+                let owner = match called {
+                    Some(called) if !called.turn.is_nullish() => called.turn.clone(),
                     _ => turn,
                 };
                 if let Some(open) = self.turn(&owner) {
                     open.tools.remove(&call);
                 }
-                let output = visible_text(field(payload, "output"));
+                let output = output_text(field(payload, "output"), tool.as_deref());
                 self.add_item(field(payload, "id"), Role::Tool, output, true, at, seq)?;
             }
             _ => {}
@@ -266,7 +287,8 @@ impl Rollout {
             Some("UserMessage") if completed => {
                 let text = content_text(field(native, "content"));
                 if !js::trim(&text).is_empty() {
-                    self.add_item(field(native, "id"), Role::User, text, true, at, seq)?;
+                    let id = field(native, "id");
+                    self.add_input(id, Telling::Codex, turn, text, at, seq)?;
                 }
             }
             Some("AgentMessage") if completed => {
@@ -373,6 +395,18 @@ impl Rollout {
         seq: &Value,
     ) -> Result<usize, Stop> {
         let id = native_id(id, "codex item", seq).map_err(Stop::Failed)?;
+        Ok(self.add_named(id, role, text, complete, at))
+    }
+
+    /// [`Rollout::add_item`] of an id found to be one.
+    fn add_named(
+        &mut self,
+        id: Arc<str>,
+        role: Role,
+        text: String,
+        complete: bool,
+        at: Value,
+    ) -> usize {
         if let Some(&place) = self.places.get(&id) {
             let kept = &mut self.items[place];
             if !text.is_empty() && *kept.item.text != *text && kept.final_text.is_none() {
@@ -380,7 +414,7 @@ impl Rollout {
             }
             kept.item.complete |= complete;
             kept.item.at = Some(at);
-            return Ok(place);
+            return place;
         }
         let place = self.items.len();
         self.places.insert(Arc::clone(&id), place);
@@ -395,7 +429,7 @@ impl Rollout {
             },
             final_text: None,
         });
-        Ok(place)
+        place
     }
 
     /// The item at `place` is among the answers of the turn `turn` names.
@@ -481,50 +515,6 @@ impl Answer for Rollout {
             None => Settlement::Unknown,
         };
         Ok(record)
-    }
-}
-
-/// A field of a value that may be none (`value?.name`): none of anything
-/// that is no object.
-fn field<'a>(value: Option<&'a Value>, name: &str) -> Option<&'a Value> {
-    value.and_then(|value| value.get(name))
-}
-
-/// `first ?? second`.
-fn nullish_or<'a>(first: Option<&'a Value>, second: Option<&'a Value>) -> Option<&'a Value> {
-    match first {
-        None | Some(Value::Null) => second,
-        first => first,
-    }
-}
-
-/// `${value ?? ''}`, or the failure V8 threw.
-fn or_empty(value: Option<&Value>) -> Result<String, Stop> {
-    match value {
-        None | Some(Value::Null) => Ok(String::new()),
-        value => Ok(js::string(value).map_err(Stop::Failed)?.into_owned()),
-    }
-}
-
-/// `Number.isInteger`: a number with no fraction.
-fn is_whole(number: &Number) -> bool {
-    number.is_i64()
-        || number.is_u64()
-        || number.as_f64().is_some_and(|double| double.fract() == 0.0)
-}
-
-/// `contentText`: a message's text, from text, or from a list of parts
-/// whose own text (`text`, else `Text`) is joined a line each.
-fn content_text(content: Option<&Value>) -> String {
-    match content {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::Array(parts)) => parts
-            .iter()
-            .filter_map(|part| nullish_or(part.get("text"), part.get("Text"))?.as_str())
-            .filter(|text| !text.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n"),
-        _ => String::new(),
     }
 }
 

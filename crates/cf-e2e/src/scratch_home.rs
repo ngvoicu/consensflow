@@ -81,6 +81,15 @@ impl ScratchHome {
         stand_in::install(&self.path_dir(), name)
     }
 
+    /// Puts a stand-in for the harness command `name` on the `PATH` that the
+    /// daemon can open a window on, for a case that answers for the pane host:
+    /// nothing runs it. On Windows it names `agent`, a file that is there, as
+    /// the program and the script of its shim: any other `.cmd` is refused,
+    /// and the daemon then asks for no window.
+    pub fn window_stand_in(&self, name: &str, agent: &Path) -> Result<PathBuf> {
+        stand_in::install_for_window(&self.path_dir(), name, agent)
+    }
+
     /// `cf` run with `args` in the home.
     pub fn cf<I, S>(&self, args: I) -> Result<Ran>
     where
@@ -150,6 +159,16 @@ mod tests {
     fn a_stand_in_is_put_on_the_path_of_the_home() {
         let home = ScratchHome::new().unwrap();
         let found = home.stand_in("claude").unwrap();
+        assert_eq!(found.parent(), Some(home.path_dir().as_path()));
+        assert!(found.is_file());
+    }
+
+    #[test]
+    fn a_stand_in_for_a_window_is_put_on_the_path_of_the_home_too() {
+        let home = ScratchHome::new().unwrap();
+        let found = home
+            .window_stand_in("claude", Path::new("/bin/fake-agent"))
+            .unwrap();
         assert_eq!(found.parent(), Some(home.path_dir().as_path()));
         assert!(found.is_file());
     }

@@ -21,7 +21,9 @@ use cf_harness::contract::{
     Waiting, Window,
 };
 use cf_harness::records::Role;
-use cf_harness::testing::{fake_executable, finished, AnsweringHost, Fakes, OtherProcess};
+use cf_harness::testing::{
+    fake_executable, finished, AnsweringHost, Fakes, OtherProcess, FIRST_MESSAGE_MS,
+};
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
@@ -182,6 +184,7 @@ fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, Strin
         message: request.message.as_deref(),
         agent: request.agent,
         instructions: request.instructions,
+        first_message_ms: FIRST_MESSAGE_MS,
     };
     finished(adapter.prepare(&launch))
 }

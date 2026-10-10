@@ -20,11 +20,12 @@
  * --env NAME=VALUE gives the command that variable, as many as are named and
  * no others: this machine's environment does not go, and the machine's own is
  * the command's as it is. The output says each (`== env NAME=VALUE`) before
- * the command's own. It is how the tests, the evals and the live checks that
- * start a daemon (tests/choice.mjs) start the native one there, with the
- * native cf the copy built (bin\cf.exe: --build builds it):
+ * the command's own. It is how the evals and the live checks that start a
+ * daemon (tests/choice.mjs) start the native one there, with the native cf the
+ * copy built (bin\cf.exe: --build builds it). The black-box suites of
+ * crates/cf-e2e build the cf and the pane host they run, and need none:
  *
- *   npm run windows -- --host <ssh host> --env CONSENSFLOW_TEST_DAEMON=native -- npm run test:integration
+ *   npm run windows -- --host <ssh host> -- npm run test:integration
  *   npm run windows -- --host <ssh host> --env CONSENSFLOW_TEST_DAEMON=native -- npm run eval -- --scenario round-trip --chief devin --staff devin
  *
  * `npm run eval:windows` (tests/live/windows-matrix.mjs) takes --env too, and

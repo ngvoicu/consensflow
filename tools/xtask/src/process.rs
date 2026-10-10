@@ -13,7 +13,7 @@
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 
 use cf_base::env::Env;
 
@@ -137,6 +137,32 @@ pub fn capture(invocation: &Invocation, env: &Env) -> Result<Captured, Failure> 
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     })
+}
+
+/// Starts `invocation` beside this program and does not wait for it: its input is
+/// `stdin`, and its output and error streams are pipes, for the caller to read
+/// (one that is not read can fill and stop the program) and to wait for. With
+/// `own_group` it leads a process group of its own on Unix, which a signal to the
+/// negative of its pid reaches whole.
+pub fn spawn(
+    invocation: &Invocation,
+    env: &Env,
+    stdin: Stdio,
+    own_group: bool,
+) -> Result<Child, Failure> {
+    let mut command = command(invocation, env);
+    command
+        .stdin(stdin)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    if own_group {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(not(unix))]
+    let _ = own_group;
+    command.spawn().map_err(|cause| failure(invocation, cause))
 }
 
 /// The program to start for `program`: a bare name found on `env`'s PATH (with
@@ -280,6 +306,81 @@ mod tests {
         assert_eq!(
             found("npm", &windows(Some(".JS;.PS1"))),
             OsString::from("npm")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_spawned_program_has_its_folder_its_environment_and_its_input_and_answers_on_pipes() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let invocation = Invocation::new("/bin/sh", dir.path())
+            .args([
+                "-c",
+                "pwd -P; printf '%s\\n' \"$KEPT\" \"$GONE\" >&2; cat; exit 3",
+            ])
+            .var("KEPT", "yes")
+            .without("GONE");
+        let env = Env::from_vars([("GONE", "no"), ("PATH", "/bin:/usr/bin")]);
+        let mut child = spawn(&invocation, &env, Stdio::piped(), false).unwrap();
+        // The input is the caller's: closed once written, it ends the `cat`.
+        child.stdin.take().unwrap().write_all(b"typed\n").unwrap();
+        let answered = child.wait_with_output().unwrap();
+        assert_eq!(answered.status.code(), Some(3));
+        assert_eq!(
+            String::from_utf8_lossy(&answered.stdout),
+            format!("{}\ntyped\n", dir.path().canonicalize().unwrap().display())
+        );
+        assert_eq!(String::from_utf8_lossy(&answered.stderr), "yes\n\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_spawned_program_leads_a_process_group_of_its_own_only_when_it_is_asked_to() {
+        // The shell asks `ps` for the group it is in.
+        let group_of = |own_group: bool| {
+            let shell = Invocation::new("/bin/sh", ".").args(["-c", "/bin/ps -o pgid= -p $$"]);
+            let child = spawn(&shell, &Env::default(), Stdio::null(), own_group).unwrap();
+            let pid = child.id();
+            let answered = child.wait_with_output().unwrap();
+            let group: u32 = String::from_utf8_lossy(&answered.stdout)
+                .trim()
+                .parse()
+                .unwrap();
+            (pid, group)
+        };
+        let (pid, group) = group_of(true);
+        assert_eq!(group, pid);
+        let (pid, group) = group_of(false);
+        assert_ne!(group, pid);
+    }
+
+    #[test]
+    fn a_spawned_program_that_is_not_there_or_has_no_folder_to_run_in_is_said_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir
+            .path()
+            .join(format!("none{}", std::env::consts::EXE_SUFFIX));
+        let said = spawn(
+            &Invocation::new(&program, dir.path()),
+            &Env::default(),
+            Stdio::null(),
+            false,
+        )
+        .unwrap_err();
+        assert!(matches!(said, Failure::NotFound { .. }), "{said}");
+        let gone = dir.path().join("gone");
+        let said = spawn(
+            &Invocation::new(&program, &gone),
+            &Env::default(),
+            Stdio::null(),
+            true,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&said, Failure::NoFolder { folder, .. } if *folder == gone),
+            "{said}"
         );
     }
 }

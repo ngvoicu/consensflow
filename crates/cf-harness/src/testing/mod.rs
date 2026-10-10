@@ -608,6 +608,10 @@ impl<T> Driver<T> {
 /// recorder's does.
 pub const EPOCH_MS: i64 = 1_789_819_200_000;
 
+/// How long a launch given in a test has for its first message: what the
+/// daemon allows by default, three minutes (`Limits::default` of the engine).
+pub const FIRST_MESSAGE_MS: i64 = 180_000;
+
 /// The fakes a test drives, and the services an adapter is built with of
 /// them.
 pub struct Fakes {

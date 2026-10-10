@@ -15,7 +15,9 @@ use cf_harness::contract::{
 };
 use cf_harness::devin::DevinAdapter;
 use cf_harness::records::{Item, Options, Reading, Record, Role, Settlement};
-use cf_harness::testing::{called, fake_executable, finished, named, AnsweringHost, Fakes};
+use cf_harness::testing::{
+    called, fake_executable, finished, named, AnsweringHost, Fakes, FIRST_MESSAGE_MS,
+};
 use cf_proto::agents::Harness;
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -158,6 +160,7 @@ pub(super) struct Request {
     pub(super) resume: Option<String>,
     pub(super) message: Option<String>,
     pub(super) agent: Option<Agent<'static>>,
+    pub(super) first_message_ms: i64,
 }
 
 impl Default for Request {
@@ -172,6 +175,7 @@ impl Default for Request {
                 model: Some("swe-1-6-slow"),
                 ..Agent::default()
             }),
+            first_message_ms: FIRST_MESSAGE_MS,
         }
     }
 }
@@ -214,6 +218,7 @@ pub(super) fn prepare_as(
         message: request.message.as_deref(),
         agent: request.agent,
         instructions: &request.instructions,
+        first_message_ms: request.first_message_ms,
     };
     finished(adapter.prepare(&launch))
 }

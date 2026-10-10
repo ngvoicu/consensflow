@@ -2,6 +2,8 @@
 //! ended, a call answered in a later turn, ids JavaScript keys oddly, a
 //! completion that names no answer, and the records Node's reader threw on.
 
+mod twins;
+
 use super::*;
 use serde_json::json;
 
@@ -128,6 +130,47 @@ fn a_null_record_and_a_turn_event_that_names_no_turn_fail_the_look() {
         );
     }
     assert_eq!(read(&[]).unwrap_err(), "empty codex rollout for s");
+}
+
+#[test]
+fn the_output_of_an_image_tool_is_a_line_naming_the_tool_the_call_made_never_the_picture() {
+    // What the live designer's Codex wrote on 2026-10-10: `exec` drew the image,
+    // and its output holds the picture, then where Codex saved it.
+    let called = |kind: &str, id: &str| {
+        response(json!({ "type": kind, "id": format!("c-{id}"), "call_id": id, "name": "exec" }))
+    };
+    let answered = |id: &str| {
+        response(json!({
+            "type": "custom_tool_call_output",
+            "id": format!("o-{id}"),
+            "call_id": id,
+            "output": [
+                { "type": "input_text", "text": "Script completed" },
+                { "type": "input_image", "image_url": format!("data:image/png;base64,{}", "A".repeat(4_000)) },
+                { "type": "input_text", "text": "Generated images are saved to /h/g as /h/g/a.png by default." },
+            ]
+        }))
+    };
+    let read = read(&[
+        started(json!("t1")),
+        called("custom_tool_call", "c1"),
+        answered("c1"),
+        // An output of a call the rollout never showed: no tool to name.
+        answered("c2"),
+    ])
+    .unwrap();
+    let texts: Vec<&str> = read.items.iter().map(|item| &*item.text).collect();
+    assert_eq!(
+        texts,
+        [
+            "Script completed\n[image from exec: image/png, 3.0 KB, saved to /h/g/a.png]\nGenerated images are saved to /h/g as /h/g/a.png by default.",
+            "Script completed\n[image: image/png, 3.0 KB, saved to /h/g/a.png]\nGenerated images are saved to /h/g as /h/g/a.png by default.",
+        ]
+    );
+    assert!(read
+        .items
+        .iter()
+        .all(|item| item.role == Role::Tool && item.complete));
 }
 
 #[test]
