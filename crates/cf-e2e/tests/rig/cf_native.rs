@@ -10,6 +10,7 @@
 use cf_e2e::{cf, files, ScratchHome};
 use regex::Regex;
 use serde_json::Value;
+use std::time::Duration;
 
 use crate::Outcome;
 
@@ -90,8 +91,11 @@ fn take_a_many_line_argument_whole_from_powershell() -> Outcome {
             cf::binary()?.display()
         ))
         .finding_programs()
+        // A cold Windows PowerShell on a CI runner can take more than the
+        // usual limit just to start.
+        .limit(Duration::from_secs(180))
         .run()?;
-    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+    assert_eq!(ran.code, Some(0), "{ran}");
     assert_eq!(described(&home, "shell")?.as_deref(), Some(text.as_str()));
     Ok(())
 }
