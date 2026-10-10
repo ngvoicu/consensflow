@@ -24,13 +24,18 @@
 //!   the windows, driven as the page and the app drive them.
 //! - [`daemon_log`] reads a daemon's log; [`agents_proof`] holds a daemon's
 //!   agents screens to what they must do; [`http`] asks a daemon's API.
+//! - [`live`] is what the opt-in live tests share: the machine's own Codex,
+//!   found as a shell finds it, and the variable that keeps what a run made.
+//!   [`png`] reads the structure of a PNG file, to say that an image a harness
+//!   saved is a whole one.
 //!
 //! The suites are the tests of the crate, a file for each (`tests/cli.rs` is
 //! the CLI's, with its cases in `tests/cli/`; `tests/daemon.rs` the daemon's as
 //! a process; `tests/rig.rs` the rig's, windows included; `tests/load.rs` the
-//! daemon under load). Run them with `cargo xtask test clis`, `daemons`,
-//! `integration`, `agents` and `load` (the `npm run` names are the same), or
-//! one with `cargo test -p cf-e2e --test cli`.
+//! daemon under load; `tests/live_designer.rs` a real Codex drawing an image).
+//! Run them with `cargo xtask test clis`, `daemons`, `integration`, `agents`
+//! and `load` (the `npm run` names are the same), the live one with `cargo
+//! xtask live designer`, or one with `cargo test -p cf-e2e --test cli`.
 //!
 //! The stand-ins the suites run in place of what ConsensFlow runs are
 //! binaries of this crate, behind the `test-support` feature the crate's own
@@ -46,7 +51,9 @@ pub mod daemon_log;
 mod error;
 pub mod files;
 pub mod http;
+pub mod live;
 pub mod pattern;
+pub mod png;
 pub mod process;
 pub mod rig;
 pub mod scratch_home;
