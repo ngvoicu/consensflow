@@ -6,9 +6,6 @@
  * it (the driver says when another caught it).
  */
 
-const node = (...args) => [process.execPath, ...args]
-const test = (...files) => node('--test', ...files)
-
 /**
  * The tests of the publisher's crate, whose test binaries are named: every one
  * runs, so that the test a plant was meant for is named among the failures.
@@ -48,11 +45,23 @@ export const BUILT_PROOF = ['cargo', 'xtask', 'test', 'agents', '--offline']
 /** The app crate's tests of the portable app's collector, built as a worktree can build it. */
 export const PORTABLE = ['cargo', 'xtask', 'app', 'test', 'portable::']
 
-/** The updater smoke's readers of evidence (processes, daemon, ledger), and of the terminal command. */
-export const EVIDENCE = test('tests/updater-smoke-evidence.test.mjs')
-export const LAUNCHERS = test('tests/updater-smoke-launchers.test.mjs')
+/**
+ * The unit tests of xtask whose names hold a filter: every one that a filter names
+ * runs, so that the test a plant was meant for is named among the failures.
+ */
+const xtaskTests = (...filters) => [
+  ...['cargo', 'test', '--offline', '--no-fail-fast', '-p', 'xtask', '--lib', '--'],
+  ...filters,
+]
+/** The tests of the updater smoke's modules (tools/xtask/src/updater_smoke), which run on no app. */
+const smokeTests = (...modules) => xtaskTests(...modules.map((name) => `updater_smoke::${name}`))
+/** The smoke's readers of evidence (processes, daemon, ledger), and of the terminal command. */
+export const EVIDENCE = smokeTests('evidence', 'ledger')
+export const LAUNCHERS = smokeTests('launchers')
 /** What the smoke is made of apart from the apps: its versions, keys, feed and bundles. */
-export const SMOKE_KIT = test('tests/updater-smoke-kit.test.mjs')
+export const SMOKE_KIT = smokeTests('versions', 'build', 'bundle', 'processes', 'signing', 'feed')
+/** What xtask starts programs with (tools/xtask/src/process.rs), which the smoke starts its app by. */
+export const XTASK_PROCESS = xtaskTests('process::tests')
 /** The smoke on the apps it builds or takes, as `npm run smoke:updater` is. */
 export const smoke = (...args) => ['cargo', 'xtask', 'smoke-updater', ...args]
 
@@ -72,4 +81,4 @@ export const FEED_RS = `${SRC}/publish/feed.rs`
 export const CLI_RS = `${SRC}/cli.rs`
 export const RELEASE_YML = '.github/workflows/release.yml'
 export const PORTABLE_RS = 'app/src-tauri/src/portable.rs'
-export const SMOKE_DIR = 'tests/updater-smoke'
+export const SMOKE_DIR = 'tools/xtask/src/updater_smoke'

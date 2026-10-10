@@ -120,7 +120,6 @@ fn a_help_and_a_refusal_start_nothing() {
     let no_programs = tempfile::tempdir().unwrap();
     for (command, script) in [
         ("smoke", "tests/smoke.mjs"),
-        ("smoke-updater", "tests/smoke-updater.mjs"),
         ("candidate", "app/scripts/candidate.mjs"),
     ] {
         let ran = xtask(&checkout(), no_programs.path(), &[], &[command, "--help"]);
@@ -169,6 +168,18 @@ fn the_commands_that_run_in_rust_refuse_the_words_they_do_not_take_and_start_not
             vec!["conpty"],
             "xtask: conpty takes --into DIR, the folder for the console host's files\n",
         ),
+        (
+            vec!["smoke-updater", "--nope"],
+            "xtask: unknown option: --nope\n",
+        ),
+        (
+            vec!["smoke-updater", "--only"],
+            "xtask: --only takes a value (to start one with a dash: --only=-value)\n",
+        ),
+        (
+            vec!["smoke-updater", "refused"],
+            "xtask: unexpected argument: refused\n",
+        ),
     ] {
         let ran = xtask(&checkout().join("app"), no_programs.path(), &[], &args);
         assert_eq!(ran.status.code(), Some(2), "{args:?}");
@@ -190,6 +201,7 @@ fn the_commands_that_run_in_rust_say_so_in_their_help() {
         "conpty",
         "portable pack",
         "portable inspect",
+        "smoke-updater",
     ] {
         let mut words: Vec<&str> = command.split(' ').collect();
         words.push("--help");

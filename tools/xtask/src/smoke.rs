@@ -1,8 +1,10 @@
-//! The packaged smoke and the updater smoke (landing S6): the app as it is
-//! built, run as a user would, and the update path proven end to end between
-//! apps. For now each command hands its arguments to the script it replaces.
+//! The packaged smoke and the updater smoke: the app as it is built, run as a
+//! user would, and the update path proven end to end between apps. The updater
+//! smoke runs in Rust (`updater_smoke`, landing S12); the packaged smoke, for now,
+//! hands its arguments to the script it replaces.
 
 use crate::dispatch::{Command, Run, Script};
+use crate::updater_smoke;
 
 pub const COMMANDS: &[Command] = &[
     Command {
@@ -15,10 +17,8 @@ pub const COMMANDS: &[Command] = &[
         words: &["smoke-updater"],
         about:
             "Prove the update path on the packaged app, from each release it can be installed from",
-        usage: "[--from RELEASES] [--only WORDS] [--reuse] [--build-only] [--keep] \
-                [--from-app APP --from-release NAME --to-app APP] [--timeout MS] ...  \
-                (every option is in tests/smoke-updater.mjs)",
-        run: Run::Node(Script::at_root("tests/smoke-updater.mjs")),
+        usage: updater_smoke::USAGE,
+        run: Run::Native(updater_smoke::run),
     },
 ];
 
@@ -40,20 +40,10 @@ mod tests {
     }
 
     #[test]
-    fn smoke_updater_hands_every_option_to_the_script() {
-        delegates(
-            COMMANDS,
-            "smoke-updater",
-            "tests/smoke-updater.mjs",
-            "",
-            &[],
-        );
-        delegates(
-            COMMANDS,
-            "smoke-updater --from flip --only refused --keep",
-            "tests/smoke-updater.mjs",
-            "",
-            &["--from", "flip", "--only", "refused", "--keep"],
-        );
+    fn the_updater_smoke_runs_in_rust_and_is_no_script() {
+        let command = COMMANDS
+            .iter()
+            .find(|command| command.words == ["smoke-updater"]);
+        assert!(matches!(command.map(|c| &c.run), Some(Run::Native(_))));
     }
 }

@@ -34,9 +34,24 @@ thiserror.workspace = true
 cf-release.workspace = true
 sha2.workspace = true
 zip.workspace = true
-
-[dev-dependencies]
+# The updater smoke (S12): the feed it serves and the evidence it reads. JSON as
+# the app and the daemon write it (the feed's document, the build's override, a
+# self-test report, a ledger event); the ledger read from outside (SQLite,
+# built in, as the daemon's is); the feed over HTTPS on the loopback with a
+# certificate made for the run (rustls, on ring, as the app's updater is); a
+# bundle's Info.plist; the key a built app holds, found in its executable; and a
+# folder of the run's own for each machine.
+serde_json.workspace = true
+rusqlite.workspace = true
+rustls.workspace = true
+plist.workspace = true
+memchr.workspace = true
 tempfile.workspace = true
+
+# The smoke's input to an app is a FIFO, which is ended by signal and by group.
+# Both calls are safe in nix, where libc's are not (this crate forbids unsafe).
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["fs", "signal"] }
 
 [lints]
 workspace = true
