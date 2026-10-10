@@ -337,6 +337,7 @@ mod tests {
                 "test clis",
                 "test agents",
                 "test load",
+                "live designer",
                 "departures",
                 "bench records-memory",
                 "smoke",
@@ -448,6 +449,7 @@ mod tests {
             parsed("test"),
             "usage test takes a command: daemons, integration, clis, agents, load"
         );
+        assert_eq!(parsed("live"), "usage live takes a command: designer");
         assert_eq!(parsed("app tests"), "usage unknown command: app tests");
         assert_eq!(
             parsed("portable"),

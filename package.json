@@ -47,6 +47,7 @@
     "live:asks": "node tests/live/claude-asks.mjs",
     "live:codex-resume": "node tests/live/codex-resume.mjs",
     "live:terminal": "node tests/live/devin-terminal.mjs",
+    "live:designer": "cargo xtask live designer",
     "windows": "node tests/live/windows.mjs",
     "check:all": "cargo xtask check"
   },

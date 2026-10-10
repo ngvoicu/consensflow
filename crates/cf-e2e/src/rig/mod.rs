@@ -55,6 +55,7 @@ const IDLE: Duration = Duration::from_secs(60);
 pub struct Config {
     stand_in: PathBuf,
     vars: Vec<(String, String)>,
+    path: Vec<PathBuf>,
     existing_root: Option<PathBuf>,
     daemon: Option<PathBuf>,
 }
@@ -66,6 +67,7 @@ impl Config {
         Self {
             stand_in: stand_in.into(),
             vars: Vec::new(),
+            path: Vec::new(),
             existing_root: None,
             daemon: None,
         }
@@ -76,6 +78,16 @@ impl Config {
     #[must_use]
     pub fn var(mut self, name: &str, value: impl Into<String>) -> Self {
         self.vars.push((name.to_owned(), value.into()));
+        self
+    }
+
+    /// With the folder `dir` on the `PATH` of the daemon and so of every window,
+    /// after the folder of the stand-in `claude` and before the system's: for a
+    /// case that runs a real program of the machine (its own `codex`) beside the
+    /// stand-in. The stand-in is still the first `claude` found.
+    #[must_use]
+    pub fn also_on_path(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.path.push(dir.into());
         self
     }
 
@@ -114,7 +126,7 @@ pub struct Rig {
     daemon: Daemon,
     host: Spawned,
     /// Whether the home is left when the rig ends: it is not, unless a rig is
-    /// to resume on it.
+    /// to resume on it or a case asked to keep it ([`Rig::keep_home`]).
     keep_root: bool,
     closed: bool,
     _turn: MutexGuard<'static, ()>,
@@ -218,6 +230,13 @@ impl Rig {
             Ok(find().is_some())
         })?;
         find().ok_or_else(|| Error::Daemon(format!("the window {id} was opened, and is gone")))
+    }
+
+    /// Every `pane.exit` the pane host told so far, in order: which window
+    /// ended (`id`, `generation`), how (`exitCode`, `signal`) and the last lines
+    /// its screen showed (`tail`).
+    pub fn exits(&self) -> Vec<Value> {
+        self.shared.seen().exits.clone()
     }
 
     /// The human types into the chief's terminal, the one way work reaches the
@@ -331,6 +350,14 @@ impl Rig {
                 self.what_they_said()
             )))
         }
+    }
+
+    /// Leaves the home where it is when the rig ends, however it ends (closed,
+    /// or dropped by a case that failed), for a person to look at what the case
+    /// did: where it is.
+    pub fn keep_home(&mut self) -> PathBuf {
+        self.keep_root = true;
+        self.root.clone()
     }
 
     /// Ends the rig: both programs' input is ended, both are waited for, and
