@@ -68,11 +68,10 @@ pub(super) fn environment(root: &Path, fake_bin: &Path, config: &Config) -> Vec<
 
 /// The stand-in `claude` the windows find on their `PATH`, and the folder
 /// the stand-in agent writes its conversations in. On Windows it has the shape
-/// of an npm shim, `"<program>" "<script>" %*`, which is how a window opens on
-/// it (the pane host reads the program and the script, and starts them
-/// itself): it names the stand-in as both, and the stand-in knows its own file
-/// when it is given it first. The folder it is in.
-pub(super) fn write_fake_install(root: &Path, stand_in: &Path) -> Result<PathBuf> {
+/// of an npm shim ([`stand_in::window_shim`]), which is how a window opens on
+/// it: it names the stand-in `agent` as both program and script, and the
+/// stand-in knows its own file when it is given it first. The folder it is in.
+pub(super) fn write_fake_install(root: &Path, agent: &Path) -> Result<PathBuf> {
     let fake_bin = root.join("fake-bin");
     let projects = root
         .join("home")
@@ -82,11 +81,7 @@ pub(super) fn write_fake_install(root: &Path, stand_in: &Path) -> Result<PathBuf
     files::make_dir(&projects)?;
     let claude = fake_bin.join(stand_in::program_name("claude"));
     if cfg!(windows) {
-        let named = stand_in.display();
-        files::write_executable(
-            &claude,
-            format!("@echo off\r\n\"{named}\" \"{named}\" %*\r\n"),
-        )?;
+        files::write_executable(&claude, stand_in::window_shim(agent))?;
     } else {
         files::write_executable(&claude, "#!/bin/sh\nexec \"$CF_TEST_HARNESS\" \"$@\"\n")?;
     }

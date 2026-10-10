@@ -3,6 +3,7 @@
 //! it asks what the page asks, and as the pane host it opens every window it
 //! is asked to, though no window's program ever runs.
 
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -10,7 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_e2e::daemon::{Daemon, Home};
-use cf_e2e::daemon_log::assert_started;
+use cf_e2e::daemon_log::{assert_started, lines_of};
 use cf_e2e::wire::{self, Pending};
 use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
@@ -20,6 +21,13 @@ const WITHIN: Duration = Duration::from_secs(10);
 
 /// How often what is waited for is looked at again.
 const EVERY: Duration = Duration::from_millis(20);
+
+/// How many of the last lines of the daemon's log a wait that gave up shows.
+const LOG_TAIL: usize = 12;
+
+/// The stand-in agent, a file that is there for the shim of the Claude the daemon
+/// finds on Windows to name: it is never run, as the test is the pane host.
+const AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
 /// The daemon over its bridge.
 pub struct OverBridge {
@@ -56,8 +64,8 @@ impl OverBridge {
         for folder in [home.consensflow(), home.workspace()] {
             files::make_dir(&folder)?;
         }
-        // Never run: the test opens no window.
-        home.stand_in("claude")?;
+        // Never run: the test is the pane host, and answers each window's opening itself.
+        home.window_stand_in("claude", Path::new(AGENT))?;
         files::write(
             &home.consensflow().join("agents.json"),
             json!({ "schemaVersion": 1, "agents": agents }).to_string(),
@@ -148,29 +156,49 @@ impl OverBridge {
         self.daemon.send(&wire::request(id, op, body));
         answer.recv_timeout(WITHIN).map_err(|_| {
             self.pending.forget(id);
-            Error::Timeout(format!(
-                "the daemon never answered {op}: {}",
-                self.daemon.errors()
-            ))
+            Error::Timeout(format!("the daemon never answered {op}:\n{}", self.seen()))
         })
     }
 
     /// Waits for `found` to give something, looking every 20 ms for up to ten
-    /// seconds; `what` is what the daemon never did if it does not.
-    pub fn until<T>(&self, what: &str, mut found: impl FnMut() -> Option<T>) -> Result<T> {
+    /// seconds; `what` is what the daemon never did if it does not, and the
+    /// error says what the daemon did instead.
+    pub fn until<T>(&self, what: &str, found: impl FnMut() -> Option<T>) -> Result<T> {
+        self.wait(WITHIN, what, found)
+    }
+
+    fn wait<T>(
+        &self,
+        within: Duration,
+        what: &str,
+        mut found: impl FnMut() -> Option<T>,
+    ) -> Result<T> {
         let started = Instant::now();
         loop {
             if let Some(value) = found() {
                 return Ok(value);
             }
-            if started.elapsed() >= WITHIN {
+            if started.elapsed() >= within {
                 return Err(Error::Timeout(format!(
-                    "the daemon never {what}: {}",
-                    self.daemon.errors()
+                    "the daemon never {what}:\n{}",
+                    self.seen()
                 )));
             }
             thread::sleep(EVERY);
         }
+    }
+
+    /// What the daemon has done so far, as a wait that gave up says it: see
+    /// [`said`].
+    fn seen(&self) -> String {
+        let opened: Vec<String> = self
+            .frames()
+            .iter()
+            .filter(|frame| frame["kind"] == "req" && frame["op"] == "pane.open")
+            .map(|frame| frame["body"]["id"].as_str().unwrap_or("?").to_owned())
+            .collect();
+        let log = lines_of(&self.home.log(), self.daemon.id());
+        said(&opened, &log, &self.daemon.errors())
     }
 
     /// The app's end of the bridge breaks: nobody reads the daemon's output any
@@ -184,9 +212,12 @@ impl OverBridge {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(id.clone());
         self.ask(&id, "ping", &json!({}))?;
-        self.output_closed
-            .recv_timeout(WITHIN)
-            .map_err(|_| Error::Timeout("the daemon's output was never given up".to_owned()))
+        self.output_closed.recv_timeout(WITHIN).map_err(|_| {
+            Error::Timeout(format!(
+                "the daemon's output was never given up:\n{}",
+                self.seen()
+            ))
+        })
     }
 }
 
@@ -194,5 +225,92 @@ impl Drop for OverBridge {
     /// The daemon is asked to stop, as the app asks, before its home goes.
     fn drop(&mut self) {
         let _ = self.daemon.stop();
+    }
+}
+
+/// What a daemon had done when a wait gave up on it, on lines of their own: the
+/// windows it asked the pane host to open, the last [`LOG_TAIL`] lines of its
+/// log and what it wrote to its error output. A daemon that cannot open a
+/// window says why in its log and sends no frame, so the log is the part that
+/// tells why a window never opened.
+fn said(opened: &[String], log: &[String], errors: &str) -> String {
+    let windows = if opened.is_empty() {
+        "none".to_owned()
+    } else {
+        opened.join(", ")
+    };
+    let tail = &log[log.len().saturating_sub(LOG_TAIL)..];
+    let mut lines = vec![
+        format!("  windows opened: {windows}"),
+        format!("  its log, the last {} of {} lines:", tail.len(), log.len()),
+    ];
+    lines.extend(tail.iter().map(|line| format!("    {line}")));
+    lines.push("  its error output:".to_owned());
+    match errors.trim_end() {
+        "" => lines.push("    nothing".to_owned()),
+        written => lines.extend(written.lines().map(|line| format!("    {line}"))),
+    }
+    lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Outcome;
+
+    #[test]
+    fn a_wait_that_gave_up_says_the_windows_opened_the_end_of_the_log_and_the_error_output() {
+        let log: Vec<String> = (1..=15).map(|line| format!("line {line}")).collect();
+        let opened = ["p1-chief".to_owned(), "p1-worker".to_owned()];
+        let tail = (4..=15)
+            .map(|line| format!("    line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(
+            said(&opened, &log, "it broke\nand again\n"),
+            format!(
+                "  windows opened: p1-chief, p1-worker\n  its log, the last 12 of 15 lines:\n{tail}\n  \
+                 its error output:\n    it broke\n    and again"
+            )
+        );
+    }
+
+    #[test]
+    fn a_wait_that_gave_up_on_a_daemon_that_did_nothing_says_so_in_each_part() {
+        assert_eq!(
+            said(&[], &[], ""),
+            "  windows opened: none\n  its log, the last 0 of 0 lines:\n  its error output:\n    nothing"
+        );
+    }
+
+    #[test]
+    fn a_wait_that_gives_up_names_what_it_waited_for_and_what_the_daemon_did_meanwhile() -> Outcome
+    {
+        let d = OverBridge::start(&[])?;
+        let Err(gave_up) = d.wait::<()>(Duration::from_millis(50), "opened the chief", || None)
+        else {
+            panic!("a wait for what never comes found it");
+        };
+        let message = gave_up.to_string();
+        assert!(
+            message.starts_with(
+                "the daemon never opened the chief:\n  windows opened: none\n  its log, the last "
+            ),
+            "{message}"
+        );
+        // The log is the daemon's own: its start line, by its process id.
+        let start = format!(" info start pid {} rust ", d.daemon.id());
+        assert!(message.contains(&start), "{message}");
+        // A window the daemon asked the host for is named.
+        d.frames
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(json!({ "kind": "req", "op": "pane.open", "body": { "id": "p7-chief" } }));
+        assert!(
+            d.seen().starts_with("  windows opened: p7-chief\n"),
+            "{}",
+            d.seen()
+        );
+        Ok(())
     }
 }
