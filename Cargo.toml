@@ -11,7 +11,7 @@ resolver = "2"
 members = ["app/src-tauri", "crates/*", "tools/*"]
 
 [workspace.package]
-version = "3.0.0-alpha.83"
+version = "3.0.0"
 edition = "2021"
 rust-version = "1.95"
 

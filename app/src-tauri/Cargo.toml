@@ -22,7 +22,7 @@ cf-base.workspace = true
 cf-launcher.workspace = true
 # The portable exe's format, which the app reads and unpacks at its start.
 cf-portable.workspace = true
-tauri ={ version = "2.11.3", features = [] }
+tauri = { version = "2.11.3", features = [] }
 tauri-plugin-dialog = "2.7.3"
 tauri-plugin-updater = "~2.11.0"
 semver = "1"

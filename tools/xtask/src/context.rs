@@ -34,10 +34,14 @@ pub enum Error {
 
 impl Context {
     /// The checkout of this xtask: the one `cargo run` names, or else the one
-    /// it was built in.
+    /// it was built in. Only an xtask's own folder is taken from the
+    /// environment: run as another crate's archiver (`--as-archiver`), xtask is
+    /// started by that crate's build script, whose `CARGO_MANIFEST_DIR` is its
+    /// own.
     pub fn new(env: &Env) -> Result<Self, Error> {
         let manifest_dir = env
             .path("CARGO_MANIFEST_DIR")
+            .filter(|dir| dir.ends_with(Path::new("tools").join("xtask")))
             .unwrap_or(Path::new(env!("CARGO_MANIFEST_DIR")));
         Self::at(manifest_dir, env)
     }
@@ -103,6 +107,18 @@ mod tests {
         std::fs::write(other.path().join("Cargo.toml"), "").unwrap();
         let env = Env::from_vars([("CARGO_MANIFEST_DIR", manifest.as_os_str())]);
         assert_eq!(Context::new(&env).unwrap().root, other.path());
+    }
+
+    #[test]
+    fn another_crates_manifest_is_not_taken_for_xtasks() {
+        let ring = tempfile::tempdir().unwrap();
+        std::fs::write(ring.path().join("Cargo.toml"), "").unwrap();
+        let env = Env::from_vars([("CARGO_MANIFEST_DIR", ring.path().as_os_str())]);
+        let built_in = Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert_eq!(
+            Context::new(&env).unwrap().root,
+            built_in.parent().unwrap().parent().unwrap()
+        );
     }
 
     #[test]

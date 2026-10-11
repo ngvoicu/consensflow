@@ -113,14 +113,14 @@ serde_json.workspace = true'''
 file = "Cargo.lock"
 find = '''
 name = "cf-release"
-version = "3.0.0-alpha.83"
+version = "3.0.0"
 dependencies = [
  "base64 0.22.1",
  "cf-base",
 '''
 replace = '''
 name = "cf-release"
-version = "3.0.0-alpha.83"
+version = "3.0.0"
 dependencies = [
  "base64 0.22.1",
  "cf-base",
