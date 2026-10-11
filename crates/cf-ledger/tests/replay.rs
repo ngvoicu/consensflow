@@ -31,7 +31,10 @@ use base64::Engine;
 use cf_base::js;
 use cf_base::time::{parse, Clock};
 use cf_ledger::model::{parse_gate, parse_roles};
-use cf_ledger::testing::{hold_apart_what_node_never_logs, hold_apart_what_node_never_writes};
+use cf_ledger::testing::{
+    hold_apart_what_node_never_had_in_its_schema, hold_apart_what_node_never_logs,
+    hold_apart_what_node_never_writes,
+};
 use cf_ledger::{
     open_ledger, ChiefSwitch, Event, Ledger, LedgerError, NewMember, NewNote, NewProject,
     NewQuestion, NewTask, Options,
@@ -1051,11 +1054,12 @@ fn insert(db: &Connection, table: &str, contents: &Value) {
     }
 }
 
-/// A dump with what only this ledger writes held apart.
+/// A dump with what only this ledger writes, and only its schema has, held apart.
 fn held_apart(mut dump: Value) -> Value {
     if let Some(Value::Object(tables)) = dump.get_mut("tables") {
         hold_apart_what_node_never_writes(tables);
     }
+    hold_apart_what_node_never_had_in_its_schema(&mut dump);
     dump
 }
 

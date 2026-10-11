@@ -6,7 +6,9 @@ use super::*;
 
 #[test]
 fn every_role_enters_every_harness_with_its_whole_text_already_loaded() {
-    for name in ["chief", "advisor", "worker", "reviewer", "designer"] {
+    for name in [
+        "chief", "advisor", "worker", "reviewer", "tester", "designer",
+    ] {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().to_string_lossy().into_owned();
         let env = Env::from_vars([

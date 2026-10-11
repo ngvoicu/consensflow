@@ -15,6 +15,17 @@ deleted.
 The words after each verb were recorded too, through Node's `util.parseArgs`:
 `crates/cf-base/tests/goldens/args.json`.
 
+## The usage after the tester
+
+`board.json` holds the usage the board's commands print (`cf` with no command, `cf
+help`, `cf --help`, `cf -h --json`, `cf task --help` and `cf task help`) and the
+sentence `cf task add` says when it was given too little. Each names the tester,
+`--test`, where Node's did not: the six prints have its entry in the list, as
+`crates/cf/src/board/usage.txt` has it, and the two sentences have it in their
+parentheses. Changed by hand, in those words alone, when the tester was added; the
+daemon's traces of the same words (`crates/cf-daemon/tests/goldens`) were changed with
+them.
+
 ## Two cases changed by hand after Node
 
 In `cli.darwin.json` and `cli.win32.json`, the cases `unknown command: -h`

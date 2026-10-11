@@ -38,7 +38,7 @@ function about(lane, board, agent, now, onTryAgain) {
  * is doing and runs on, and switches it. While the chief's window is down
  * (starting, being switched, its agent gone) its card is there all the
  * same, with no terminal. A session's terminal (a worker's, an advisor's, a
- * reviewer's or an image designer's task) stays out of the dock until the
+ * reviewer's, a tester's or an image designer's task) stays out of the dock until the
  * human shows it from its lane, and leaves when they hide it, from its lane
  * or its card, which also lets its window go once nothing holds it open.
  * Only live windows: one that ends leaves with its card, and its lane says

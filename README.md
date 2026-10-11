@@ -16,9 +16,10 @@ and needs no API keys.
 - **One chief, a whole staff.** Give the chief your goal in its terminal. It
   breaks the work into tasks, does what is its own, and hands the rest to the
   staff you picked for the project.
-- **Workers, advisors and reviewers.** Workers do the tasks. Advisors answer
-  the chief's questions with findings. Reviewers check finished work. Advisors
-  and reviewers never change a file.
+- **Workers, advisors, reviewers and testers.** Workers do the tasks. Advisors
+  answer the chief's questions with findings. Reviewers check finished work.
+  Testers check it by running it. Advisors and reviewers never change a file,
+  and testers change no product code.
 - **A board you can read.** Each task shows who has it and where it stands,
   from backlog to done. Open a task to read its brief, its result, and
   everything its agent wrote.

@@ -17,7 +17,9 @@ fn instructions(argv: &[String]) -> String {
 
 #[test]
 fn every_role_enters_codex_with_its_whole_text_already_loaded() {
-    for name in ["chief", "advisor", "worker", "reviewer", "designer"] {
+    for name in [
+        "chief", "advisor", "worker", "reviewer", "tester", "designer",
+    ] {
         let home = Home::new();
         let existing = "User instructions: preserve \"quotes\", `backticks`, $HOME\nand newlines.";
         let (adapter, _fakes) = adapter_with(&home, None, existing, true);

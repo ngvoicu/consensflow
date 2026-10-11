@@ -9,7 +9,7 @@ pub fn usage() -> &'static str {
 }
 
 /// What `cf task add` takes, said when it was given too little.
-pub const ADD_USAGE: &str = r#"cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor or --review for a reviewer; or --design, --after T-3, or --self; --needs T-3,T-4 and --before T-9,T-10 order the board)"#;
+pub const ADD_USAGE: &str = r#"cf task add --tier <critical|complex|standard|light> "what to do" (with --advice for an advisor, --review for a reviewer or --test for a tester; or --design, --after T-3, or --self; --needs T-3,T-4 and --before T-9,T-10 order the board)"#;
 
 /// How far the lines that go on from a command's line are indented.
 const CONTINUED: usize = 36;

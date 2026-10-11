@@ -157,7 +157,9 @@ fn tells_devin_on_windows_to_name_files_the_way_its_file_tools_write_them_and_no
 #[test]
 fn every_role_enters_devin_with_its_whole_text_already_loaded() {
     let staff = "| saved-worker | worker | Complex work |";
-    for name in ["chief", "advisor", "worker", "reviewer", "designer"] {
+    for name in [
+        "chief", "advisor", "worker", "reviewer", "tester", "designer",
+    ] {
         let home = Home::new();
         let content = if name == "chief" {
             format!("# ConsensFlow chief\n\n{staff}\n\nPreserve \"quotes\", `backticks`, $HOME\nand newlines.")

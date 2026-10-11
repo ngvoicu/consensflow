@@ -36,3 +36,17 @@ What JSON cannot hold is tagged as in the daemon's traces
 `2026-01-01T00:00:00.000Z` and moved a second a reading, and drew its session
 names from one fixed sequence, unless the test gave its own: that is what makes
 two recordings the same bytes.
+
+## What moved after Node
+
+Migration 0012 (the tester joins the roles a member holds and the pools a task
+is for) moved two things that Node's recordings hold. Every `final` says
+`userVersion: 11` and a role check and a pool check without the tester: they
+are not rewritten, and the replay holds the database this ledger left to them
+as Node's schema had it (`cf_ledger::testing::hold_apart_what_node_never_had_in_its_schema`).
+And `ledger-008`, a ledger one version past what the build knows, which it refuses,
+says 13 and 12 where Node's said 12 and 11: it was changed by hand, in those two
+numbers, to stay the probe it was. And the four traces whose refusals list the roles a
+member may hold or the pools a task may be for (`ledger-projects-005`, `-008`,
+`ledger-staff-001` and `ledger-tiered-003`) list the tester too, in the words they
+quote, as the ledger's refusals now do: changed by hand, in those words alone.

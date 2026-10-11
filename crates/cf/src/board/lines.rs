@@ -145,6 +145,12 @@ mod tests {
             task_line(&drawing),
             "T-5 [open] for an image designer ← @chief: Logo"
         );
+        let testing = json!({ "number": 6, "state": "open", "assignee": null, "requester": "chief",
+            "title": "Run T-3", "blockedBy": [3], "pool": "tester", "tier": "standard" });
+        assert_eq!(
+            task_line(&testing),
+            "T-6 [open] blocked by T-3 · for a standard tester ← @chief: Run T-3"
+        );
     }
 
     #[test]

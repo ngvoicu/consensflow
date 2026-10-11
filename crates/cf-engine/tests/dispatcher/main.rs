@@ -12,7 +12,7 @@
 //! after a chief's turn, which waits for them (`switching_agents`), and the time
 //! a launch is told it has for its first message (`launch_wait`), and what a
 //! window is given while the words that were for it wait at the human's gate
-//! (`approval`).
+//! (`approval`), and the tester, which Node's staff never had (`testers`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -61,6 +61,7 @@ mod switching_handoffs;
 mod switching_refused;
 mod taken_back;
 mod tasks;
+mod testers;
 mod the_dispatcher;
 mod throws_early;
 mod trace_untold;

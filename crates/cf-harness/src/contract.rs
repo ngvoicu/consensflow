@@ -56,7 +56,7 @@ pub struct Launch<'a> {
     /// The participant's project and handle, which Pi names its window by.
     pub project: i64,
     pub handle: &'a str,
-    /// `chief`, `worker`, `advisor`, `reviewer` or `designer`.
+    /// `chief`, `worker`, `advisor`, `reviewer`, `tester` or `designer`.
     pub role: &'a str,
     /// The project's folder, where the window opens.
     pub directory: &'a str,

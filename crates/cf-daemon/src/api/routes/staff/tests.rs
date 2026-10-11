@@ -80,6 +80,44 @@ async fn a_member_is_said_with_its_roles_tier_harness_and_its_agent_s_model_and_
 }
 
 #[tokio::test]
+async fn a_tester_is_said_with_the_role_it_leads_with_and_the_others_it_holds() {
+    let scene = scene();
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .add_member(
+            scene.project.id,
+            &cf_ledger::NewMember {
+                agent: "tess".to_owned(),
+                harness: "claude-code".to_owned(),
+                designer: false,
+                roles: vec!["tester".to_owned(), "worker".to_owned()],
+                tier: "light".to_owned(),
+            },
+        )
+        .unwrap();
+    let (context, _, _home) = reading(
+        &scene,
+        r#"{"schemaVersion":1,"agents":[
+          {"id":"zeus","kind":"claude-code","model":"claude-sonnet-5"},
+          {"id":"tess","kind":"claude-code","model":"claude-sonnet-5","effort":"low"}
+        ]}"#,
+    );
+    let (_, said) = staff(&scene, &context).await;
+    let tess = &said["members"][1];
+    assert_eq!(tess["handle"], "tess");
+    assert_eq!(
+        (&tess["role"], &tess["roles"], &tess["tier"]),
+        (
+            &json!("tester"),
+            &json!(["tester", "worker"]),
+            &json!("light")
+        )
+    );
+}
+
+#[tokio::test]
 async fn an_agent_the_human_deleted_has_no_model_and_no_effort() {
     let scene = scene();
     // A member whose saved agent is gone: no catalog entry stands in for it.
