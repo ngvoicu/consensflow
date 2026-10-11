@@ -21,20 +21,30 @@
 //!   begins within [`Limits::background_settle_ms`] of the work's end, the last
 //!   turn's end is the result.
 //! - A window that closes with such work running says so to whoever gave the
-//!   task: the host lists what it ended in `pane.exit`.
+//!   task: the host lists what it ended in `pane.exit`. On Unix the host asks
+//!   the work to end first (TERM, then HUP) and gives it a grace to release what
+//!   it holds, so a job that handles the request ends cleanly.
 //!
 //! One window's mark is not renewed while its result is held back: a message
 //! that reaches it then (the chief asks how it goes) is no new start of the
 //! work the task's turn began.
 //!
-//! Limits. A launch's first message is marked when it shows in the window's
-//! record, which the engine sees on a pass (a second apart): work an agent
-//! starts before that is in the window's mark, and is not held for. A look
-//! that finds a message arrived and its turn already over takes the result
-//! without asking the host, as the turn took less than a pass. Agents take
-//! longer than that to start anything. And a long-lived helper the harness
-//! starts in the turn itself (a language server, a dev server) is work the turn
-//! started, and holds the task until the human pauses or cancels it.
+//! Limits. **On Windows a job the agent left running is ended with its window at
+//! once, with no chance to release what it holds**: the host asks nothing there
+//! and its job object ends the tree. The Ctrl+Break that would ask it escapes the
+//! pane's pseudoconsole when the window's program is behind a `.cmd` shim (as npm
+//! installs every harness), reaches the host's own console and ends the host. The
+//! hold, the board's line and the note to whoever gave the task are the same on
+//! every platform: they do not depend on how the window closes.
+//!
+//! A launch's first message is marked when it shows in the window's record,
+//! which the engine sees on a pass (a second apart): work an agent starts before
+//! that is in the window's mark, and is not held for. A look that finds a
+//! message arrived and its turn already over takes the result without asking the
+//! host, as the turn took less than a pass. Agents take longer than that to
+//! start anything. And a long-lived helper the harness starts in the turn itself
+//! (a language server, a dev server) is work the turn started, and holds the
+//! task until the human pauses or cancels it.
 
 use cf_harness::contract::{Observed, Pane};
 use cf_ledger::{NewNote, ParticipantView, ProjectView};

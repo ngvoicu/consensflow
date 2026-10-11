@@ -28,7 +28,8 @@ use cf_proto::bridge::Role;
 const SHUTDOWN_DRAIN: Duration = Duration::from_secs(5);
 /// How long quitting waits for every window's programs, asked to end, to have:
 /// they are given [`CLOSE_GRACE`] before what is left is killed, and a moment
-/// more to be.
+/// more to be. (On Windows nothing is asked and nothing waits: they are ended
+/// at once.)
 const SHUTDOWN_REAP: Duration = CLOSE_GRACE.saturating_add(Duration::from_secs(5));
 /// The page-side name of the daemon's `state.changed`. No dot: Tauri rejects it.
 pub(crate) const PAGE_STATE_EVENT: &str = "state-changed";
@@ -114,9 +115,9 @@ impl AppRuntime {
     /// bridge's last handlers) and reaps every pane, for `SHUTDOWN_DRAIN` at
     /// most besides the time the panes take: quitting had no limit, and a
     /// launch that never finished kept the app from quitting. The reap, which
-    /// asks each window's programs to end and gives them their grace, has a
-    /// time of its own (`SHUTDOWN_REAP`) that a launch that never finished does
-    /// not spend. `false` when the drain did not finish in time; the quit or
+    /// asks each window's programs to end and gives them their grace (on Windows
+    /// it ends them at once), has a time of its own (`SHUTDOWN_REAP`) that a
+    /// launch that never finished does not spend. `false` when the drain did not finish in time; the quit or
     /// the update's restart goes on without it.
     pub(crate) fn finish_shutdown(&self) -> bool {
         let bridge = self.daemon.bridge();

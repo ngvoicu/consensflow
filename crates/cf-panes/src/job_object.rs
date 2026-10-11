@@ -18,10 +18,9 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_MORE_DATA, FILETIME, HANDLE, UNICODE_STRING,
 };
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicAccountingInformation,
-    JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation, QueryInformationJobObject,
-    SetInformationJobObject, TerminateJobObject, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
-    JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicProcessIdList,
+    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+    TerminateJobObject, JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows_sys::Win32::System::Threading::{
@@ -89,26 +88,6 @@ impl JobObject {
             return Err(io::Error::last_os_error());
         }
         Ok(())
-    }
-
-    /// How many processes the job has running.
-    pub fn active_processes(&self) -> io::Result<u32> {
-        let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
-        // SAFETY: the structure is the one the information class names, at its
-        // size, and the handle is open until drop.
-        let queried = unsafe {
-            QueryInformationJobObject(
-                self.handle,
-                JobObjectBasicAccountingInformation,
-                (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
-                size_of_val(&accounting) as u32,
-                ptr::null_mut(),
-            )
-        };
-        if queried == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(accounting.ActiveProcesses)
     }
 
     /// The processes the job has now, each by its number and when it began and

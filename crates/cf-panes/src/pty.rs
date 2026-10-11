@@ -392,7 +392,8 @@ impl PaneTable {
 
     /// A table whose closed windows' programs are given `grace` to end once
     /// asked to, where [`PaneTable::new`]'s are given [`CLOSE_GRACE`]: a test of
-    /// the app's quit gives less than the grace it takes.
+    /// the app's quit gives less than the grace it takes. On Windows nothing is
+    /// asked and no grace is given, whichever it is.
     pub fn closing_within(grace: Duration) -> Self {
         Self {
             panes: Mutex::new(HashMap::new()),
@@ -758,7 +759,8 @@ impl PaneTable {
     /// Ends a pane and takes it out of the table. One that is gone already,
     /// killed or retired when its program ended, is closed: the caller cannot
     /// tell the two apart, and does not need to. Its programs are asked to end
-    /// first and given [`CLOSE_GRACE`] to do it in (see [`close`]).
+    /// first and given [`CLOSE_GRACE`] to do it in; on Windows they are ended at
+    /// once (see [`close`]).
     pub fn kill(&self, key: &PaneKey) -> Result<(), PaneError> {
         let mut panes = self.lock_panes()?;
         let Some(pane) = panes.remove(key) else {
@@ -2497,10 +2499,7 @@ mod tests {
         #[test]
         fn kill_ends_everything_the_harness_started() {
             let _pty_guard = serial_pty_test();
-            // A hidden window's program has a console of its own, which the Break
-            // the close sends to the pane's does not reach: it is ended by the
-            // job once the grace is over, which a test does not wait ten seconds for.
-            let table = Arc::new(PaneTable::closing_within(Duration::from_secs(1)));
+            let table = Arc::new(PaneTable::new());
             let ping = system("PING.EXE");
             let (key, output) = open(
                 &table,

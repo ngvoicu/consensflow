@@ -7,7 +7,8 @@
 //! with the work a window left running): the agent leaves when the pane host
 //! asks it to end, and the job it leaves running writes its process, ends by
 //! itself saying so, says it was asked to end where it is, and a deaf one is
-//! only killed.
+//! only killed. The asking is Unix's: on Windows a window is ended at once, and
+//! nothing there is asked to end.
 
 use std::path::{Path, PathBuf};
 use std::thread;

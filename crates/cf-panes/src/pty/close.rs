@@ -1,11 +1,22 @@
-//! Closing a window the way a terminal closes one. Its programs are asked to
-//! end: TERM and then HUP to the pane's process group and, on macOS, to every
-//! process of its tree wherever it went (a job the agent started in a session
-//! of its own is in no group of the pane's); Ctrl+Break to its console on
-//! Windows. They are given [`CLOSE_GRACE`] to do it in, and what is still there
-//! once they have ended or the grace is over is ended by force. A job that
-//! traps the signals gets to release what it holds; one that ignores them is
-//! killed after the grace, as every one was at once before.
+//! Closing a window, on Unix, the way a terminal closes one. Its programs are
+//! asked to end: TERM and then HUP to the pane's process group and, on macOS,
+//! to every process of its tree wherever it went (a job the agent started in a
+//! session of its own is in no group of the pane's). They are given
+//! [`CLOSE_GRACE`] to do it in, and what is still there once they have ended or
+//! the grace is over is ended by force. A job that traps the signals gets to
+//! release what it holds; one that ignores them is killed after the grace, as
+//! every one was at once before.
+//!
+//! Windows keeps the close it had: nothing is asked and nothing is waited for,
+//! and the pane's job object ends the whole tree at once. **A job the agent
+//! left running there is ended with no chance to release what it holds.** The
+//! request it would be given is Ctrl+Break to the pane's console, and that does
+//! not stay in the pane's console. For a program behind a `.cmd` shim (as npm
+//! installs every harness: `cmd.exe /d /s /c x.cmd`) the Break reached the
+//! console of the host itself: it ended the process that closed the pane
+//! (`STATUS_CONTROL_C_EXIT`, 0xc000013a), which in the rig was the pane host and
+//! the daemon, and left the shim asking "Terminate batch job (Y/N)?" on the
+//! host's own console.
 //!
 //! Every close of a window goes through here: a kill, the retirement of a
 //! window whose program ended, a table dropped ([`terminate`],
@@ -19,7 +30,8 @@ use std::time::{Duration, Instant};
 use super::{has_exited, wait_for_exit, Pane, PaneError, Teardown};
 
 /// How long a window's programs are given, once asked to end, before what is
-/// left of them is killed. A close that finds them all gone sooner does not wait.
+/// left of them is killed. A close that finds them all gone sooner does not wait,
+/// and on Windows, where nothing is asked, there is no grace.
 pub const CLOSE_GRACE: Duration = Duration::from_secs(10);
 /// How often a close that waits looks.
 const LOOK_EVERY: Duration = Duration::from_millis(25);
@@ -36,7 +48,7 @@ pub(super) struct Asked {
 impl Pane {
     /// Asks the window's programs to end. A program that cannot be asked
     /// (already gone, or not ours to signal) is not waited for, and the close
-    /// that follows ends what is left.
+    /// that follows ends what is left. On Windows nothing is asked.
     pub(super) fn ask_to_exit(&self) -> Asked {
         #[cfg_attr(not(unix), allow(unused_mut))]
         let mut asked = Asked::default();
@@ -50,10 +62,6 @@ impl Pane {
         {
             asked.tree = self.process_tree.ask_to_exit(self.process_group_id).ok();
         }
-        #[cfg(windows)]
-        if let Some(root) = self.child.process_id() {
-            let _ = crate::console_break::send(root);
-        }
         asked
     }
 
@@ -61,7 +69,8 @@ impl Pane {
     /// and the rest of its tree have no process left to signal. A program that
     /// has ended is reaped here, which is how the group comes to be empty. One
     /// that cannot be signalled is one that is ending (it waits on a write the
-    /// pane has blocked), as good as gone to a close that ends it next.
+    /// pane has blocked), as good as gone to a close that ends it next. On
+    /// Windows nothing was asked, so there is nothing to wait for.
     #[cfg_attr(not(unix), allow(unused_variables))]
     fn is_gone(&mut self, asked: &Asked) -> bool {
         let _ = has_exited(self);
@@ -71,10 +80,6 @@ impl Pane {
         }
         #[cfg(target_os = "macos")]
         if asked.tree.as_ref().is_some_and(|tree| tree.any_alive()) {
-            return false;
-        }
-        #[cfg(windows)]
-        if self.job.active_processes().is_ok_and(|active| active > 0) {
             return false;
         }
         true

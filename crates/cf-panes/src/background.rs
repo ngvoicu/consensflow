@@ -1,7 +1,9 @@
 //! What a window's program started and left running. An agent can start work
 //! that outlives its turn (a job in the background, a monitor it armed) and
 //! end the turn; whether the turn's end is the task's result depends on whether
-//! such work is still running, and closing the window ends it.
+//! such work is still running, and closing the window ends it: on Unix once it
+//! was asked to end and given time to release what it holds, on Windows at once
+//! with no chance to (`pty::close` says why).
 //!
 //! The host cannot tell a program from the work it started by anything the
 //! program is: an MCP server and a recording run are both children of the

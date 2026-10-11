@@ -5,11 +5,13 @@
 //! and a case reads them here:
 //!
 //! - `.pid`: its process, written once it can be asked to end;
-//! - `.released`: it was asked to end (a signal; on Windows a Ctrl+Break) and
-//!   said so before it went, as a tool that releases a lock does;
+//! - `.released`: it was asked to end (a signal) and said so before it went, as a
+//!   tool that releases a lock does;
 //! - `.finished`: it ran to its end by itself.
 //!
-//! A job that was killed outright wrote neither of the last two.
+//! A job that was killed outright wrote neither of the last two. That is every
+//! job of a window on Windows, which is ended at once with its window and never
+//! asked to end.
 
 use std::path::{Path, PathBuf};
 

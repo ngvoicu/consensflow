@@ -8,17 +8,17 @@
 //! The job is this program started again with [`JOB`] before anything else:
 //! `fake-agent --background-job <seconds> <file> [--deaf]`. It runs that many
 //! seconds and ends by writing `<file>.finished`. A request to end it (SIGINT,
-//! SIGTERM or SIGHUP; on Windows Ctrl+C, Ctrl+Break or the console closing)
-//! makes it write `<file>.released` and go, as a tool that releases a lock
-//! does; one that kills it leaves nothing. `<file>.pid` is its process, for
-//! whoever asks whether it is still there, and is written once the job can be
-//! asked to end. With `--deaf` it ignores the requests and is only ever killed.
-//! `cf_e2e::rig::Rig::jobs` reads what it wrote.
+//! SIGTERM or SIGHUP) makes it write `<file>.released` and go, as a tool that
+//! releases a lock does; one that kills it leaves nothing. `<file>.pid` is its
+//! process, for whoever asks whether it is still there, and is written once the
+//! job can be asked to end. With `--deaf` it ignores the requests and is only
+//! ever killed. `cf_e2e::rig::Rig::jobs` reads what it wrote.
 //!
 //! On Unix the job runs in a session of its own, as a harness's background
 //! shell does, where the signals sent to the pane's process group do not reach
-//! it. On Windows it stays on the window's console, where a process detached
-//! from it would never be sent a Break.
+//! it. On Windows nothing asks a job to end (a window is ended at once, its job
+//! object ending the tree), so the job has no handler there, and `--deaf`
+//! changes nothing: it writes its process, runs its seconds and is killed.
 
 use std::fs;
 use std::io::{self, Write};
@@ -160,6 +160,7 @@ impl Job {
     fn run(&self) -> Result<(), String> {
         // Hearing the requests comes first: once the process id is written, a
         // request is never lost.
+        #[cfg(unix)]
         self.hear()?;
         fs::write(self.beside("pid"), std::process::id().to_string())
             .map_err(|failed| failed.to_string())?;
@@ -192,45 +193,10 @@ impl Job {
         }
         Ok(())
     }
-
-    /// Hears the requests to end: a handler of the console's events, which
-    /// answers Ctrl+C, Ctrl+Break and the console closing.
-    #[cfg(windows)]
-    fn hear(&self) -> Result<(), String> {
-        use std::sync::OnceLock;
-
-        use windows_sys::core::BOOL;
-        use windows_sys::Win32::System::Console::{
-            SetConsoleCtrlHandler, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_C_EVENT,
-        };
-
-        /// Where it says it was asked to end; nowhere for a deaf job.
-        static RELEASED: OnceLock<PathBuf> = OnceLock::new();
-
-        unsafe extern "system" fn on_event(event: u32) -> BOOL {
-            if ![CTRL_C_EVENT, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT].contains(&event) {
-                return BOOL::from(false);
-            }
-            match RELEASED.get() {
-                Some(released) => release(released),
-                // Handled, and ignored.
-                None => BOOL::from(true),
-            }
-        }
-
-        if !self.deaf {
-            let _ = RELEASED.set(self.beside("released"));
-        }
-        // SAFETY: the handler is a function of this file that touches only
-        // `RELEASED` and the end of the process.
-        if unsafe { SetConsoleCtrlHandler(Some(on_event), 1) } == 0 {
-            return Err(io::Error::last_os_error().to_string());
-        }
-        Ok(())
-    }
 }
 
 /// Says it was asked to end, and goes.
+#[cfg(unix)]
 fn release(file: &Path) -> ! {
     let _ = fs::write(file, "RELEASED\n");
     std::process::exit(0)

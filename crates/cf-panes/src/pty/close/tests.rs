@@ -1,9 +1,11 @@
-//! A window closes the way a terminal does (`super`): its programs are asked to
-//! end and given a grace, and only what is left after it is killed. A job that
-//! traps the request gets to release what it holds; one that ignores it is
-//! killed once the grace is over; every window of a table that goes is asked
-//! before any is waited for. A Unix program is asked with TERM and HUP; a
-//! Windows program, with Ctrl+Break to its console.
+//! A window closes the way a terminal does on Unix (`super`): its programs are
+//! asked to end, with TERM and HUP, and given a grace, and only what is left
+//! after it is killed. A job that traps the request gets to release what it
+//! holds; one that ignores it is killed once the grace is over; every window of a
+//! table that goes is asked before any is waited for. On Windows nothing is asked
+//! and nothing waits: the pane's job object ends the tree at once, and a window
+//! whose program is behind a `.cmd` shim closes without ending the process that
+//! closes it.
 
 #[cfg(unix)]
 mod unix {
@@ -278,10 +280,13 @@ mod unix {
     }
 }
 
-/// The same on Windows, where the programs are PowerShell's and the request is
-/// Ctrl+Break to the pane's console: a program that handles it writes what it
-/// was asked to, and `Console.CancelKeyPress` is the handler a .NET program
-/// (PowerShell, through `Add-Type`) has for it.
+/// The same on Windows, where a window is ended at once and what ends it is the
+/// pane's job object, whatever its program is. Asking its programs first, with
+/// Ctrl+Break to the pane's console, did not stay in the pane's console for a
+/// program behind a `.cmd` shim (as npm installs every harness): the Break
+/// reached the console of the host itself and ended the process that closed the
+/// pane (`STATUS_CONTROL_C_EXIT`, 0xc000013a), and the shim asked "Terminate
+/// batch job (Y/N)?" there.
 #[cfg(windows)]
 mod windows {
     use std::collections::HashMap;
@@ -289,29 +294,36 @@ mod windows {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use crate::pty::conpty_test::{open, powershell, read_until};
+    use crate::pty::conpty_test::{open, read_until, system};
     use crate::pty::{serial_pty_test, PaneTable};
 
-    /// A .NET class that, once installed, writes `released` to its file and
-    /// ends the process when Ctrl+Break (or Ctrl+C) reaches it.
-    const HOOK: &str = "Add-Type -TypeDefinition 'using System; public static class Hook { \
-        public static string File; \
-        static void OnBreak(object sender, ConsoleCancelEventArgs e) { \
-        e.Cancel = true; System.IO.File.WriteAllText(File, \"released\"); Environment.Exit(0); } \
-        public static void Install() { Console.CancelKeyPress += OnBreak; } }'; ";
-
     #[test]
-    fn a_program_that_handles_ctrl_break_runs_its_handler_when_its_window_closes() {
+    fn a_window_whose_program_is_behind_a_cmd_shim_is_closed_at_once_and_its_closer_goes_on() {
         let _pty_guard = serial_pty_test();
-        let table = Arc::new(PaneTable::closing_within(Duration::from_secs(8)));
-        let released = std::env::temp_dir().join(format!("cf-break-{}", std::process::id()));
-        let _ = fs::remove_file(&released);
+        let table = Arc::new(PaneTable::new());
+        // A shim as npm writes one: a batch file that runs the program, which is
+        // PowerShell here, saying it is up and then staying.
+        let name = format!("cf-shim-{}.cmd", std::process::id());
+        let shim = std::env::temp_dir().join(&name);
+        fs::write(
+            &shim,
+            format!(
+                "@echo off\r\n\"{}\" -NoProfile -Command \"Write-Output 'READY#'; Start-Sleep 1000\"\r\n",
+                system(r"WindowsPowerShell\v1.0\powershell.exe")
+            ),
+        )
+        .expect("write the shim");
+        // `cmd.exe /d /s /c x.cmd`, as a harness behind a shim is opened; the
+        // pane's folder is the temporary one, where the shim is.
         let (key, output) = open(
             &table,
-            &powershell(&format!(
-                "{HOOK}[Hook]::File = '{}'; [Hook]::Install(); Write-Output 'READY#'; Start-Sleep 1000",
-                released.display()
-            )),
+            &[
+                system("cmd.exe"),
+                "/d".into(),
+                "/s".into(),
+                "/c".into(),
+                name,
+            ],
             &HashMap::new(),
             1 << 20,
         );
@@ -319,16 +331,14 @@ mod windows {
 
         let closing = Instant::now();
         table.kill(&key).expect("close the pane");
+        let closed_in = closing.elapsed();
+        let _ = fs::remove_file(&shim);
 
+        // This process is still here to say so, and the pane is gone.
         assert!(
-            closing.elapsed() < Duration::from_secs(6),
-            "its handler ended it: nothing was left to wait out the grace for ({:?})",
-            closing.elapsed()
+            closed_in < Duration::from_secs(3),
+            "nothing was waited for: the job ended the tree ({closed_in:?})"
         );
-        assert_eq!(
-            fs::read_to_string(&released).expect("the handler ran"),
-            "released"
-        );
-        let _ = fs::remove_file(&released);
+        assert!(table.list().expect("list the panes").is_empty());
     }
 }
