@@ -22,6 +22,10 @@ const VALUE_FLAGS: [&str; 7] = [
     "--effort",
 ];
 
+/// The options Claude takes with no value, which are no message either: the
+/// flags a live run's windows are given to reach no MCP server and no browser.
+const FLAGS: [&str; 2] = ["--strict-mcp-config", "--no-chrome"];
+
 /// What a window was launched with.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Launch {
@@ -69,7 +73,7 @@ pub fn parse(args: &[String], own: Option<&Path>) -> Result<Launch, String> {
             session = value;
             resuming = arg == "--resume";
             at += 1;
-        } else {
+        } else if !FLAGS.contains(&arg) {
             seed = Some(arg.to_owned());
         }
         at += 1;
@@ -134,6 +138,22 @@ mod tests {
             launch.seed.as_deref(),
             Some("--dangerously-skip-permissions")
         );
+    }
+
+    #[test]
+    fn the_flags_that_shut_mcp_servers_and_the_browser_out_are_no_message() {
+        // A live run's windows are given them, before the rest.
+        let launch = parse(&words(
+            "--settings /s.json --strict-mcp-config --no-chrome --session-id abc --model fake",
+        ))
+        .unwrap();
+        assert_eq!(launch.seed, None);
+        assert_eq!(launch.session, "abc");
+        let launch = parse(&words(
+            "--session-id abc --no-chrome HELLO --strict-mcp-config",
+        ))
+        .unwrap();
+        assert_eq!(launch.seed.as_deref(), Some("HELLO"));
     }
 
     #[test]

@@ -1,9 +1,12 @@
 //! The programs under test: the `cf` and the pane host (`consensflow-bridge`),
-//! the release builds of this checkout, each made once for a run of the tests.
-//! They are built, not found: `bin/cf` is whatever the last `cargo xtask
-//! build-cf` left, and a suite that ran that could pass against sources it
-//! never saw (a change in hand not built yet, a plant). `cargo build` knows
-//! when the build is up to date, and then it takes a moment.
+//! the release builds of this checkout, each made once for a run of the tests;
+//! and the test binary `harness-ask`, which the live tests ask what they need of
+//! the harness code of the product (and which depends on no crate of ours: it
+//! is a program, started as the others are). They are built, not found: `bin/cf`
+//! is whatever the last `cargo xtask build-cf` left, and a suite that ran that
+//! could pass against sources it never saw (a change in hand not built yet, a
+//! plant). `cargo build` knows when the build is up to date, and then it takes
+//! a moment.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -22,7 +25,7 @@ type Built = OnceLock<std::result::Result<PathBuf, String>>;
 /// for, and the same one for every case of the run.
 pub fn binary() -> Result<&'static Path> {
     static BUILT: Built = OnceLock::new();
-    built(&BUILT, "cf", "cf")
+    built(&BUILT, "cf", "cf", &[])
 }
 
 /// The pane host under test, `consensflow-bridge`: the program that gives each
@@ -30,25 +33,48 @@ pub fn binary() -> Result<&'static Path> {
 /// is, once for a run.
 pub fn pane_host() -> Result<&'static Path> {
     static BUILT: Built = OnceLock::new();
-    built(&BUILT, "cf-panes", "consensflow-bridge")
+    built(&BUILT, "cf-panes", "consensflow-bridge", &[])
 }
 
-/// The build of the binary `bin` of the package `package`, made the first time
-/// it is asked for and kept in `cell`.
-fn built(cell: &'static Built, package: &str, bin: &str) -> Result<&'static Path> {
-    cell.get_or_init(|| build(Run::new(env!("CARGO")), &checkout::root(), package, bin))
-        .as_deref()
-        .map_err(|message| Error::Build(message.clone()))
+/// The test binary `harness-ask`, which answers what a live test asks of the
+/// harness code of the product: the harness crate's own, built with the feature
+/// that makes it (it ships with nothing). Built as `cf` is, once for a run, and
+/// the first time a test asks.
+pub fn harness_ask() -> Result<&'static Path> {
+    static BUILT: Built = OnceLock::new();
+    built(
+        &BUILT,
+        "cf-harness",
+        "harness-ask",
+        &["--features", "test-support"],
+    )
+}
+
+/// The build of the binary `bin` of the package `package`, with the cargo words
+/// `more` after the rest, made the first time it is asked for and kept in `cell`.
+fn built(cell: &'static Built, package: &str, bin: &str, more: &[&str]) -> Result<&'static Path> {
+    cell.get_or_init(|| {
+        build(
+            Run::new(env!("CARGO")),
+            &checkout::root(),
+            package,
+            bin,
+            more,
+        )
+    })
+    .as_deref()
+    .map_err(|message| Error::Build(message.clone()))
 }
 
 /// Builds the binary `bin` of the package `package` in the checkout at `root`
 /// with `cargo` (the program that builds, given its first words if it has any),
-/// and answers where it is.
+/// and the cargo words `more`, and answers where it is.
 fn build(
     cargo: Run,
     root: &Path,
     package: &str,
     bin: &str,
+    more: &[&str],
 ) -> std::result::Result<PathBuf, String> {
     let ran = cargo
         .args([
@@ -60,6 +86,7 @@ fn build(
             "--bin",
             bin,
         ])
+        .args(more)
         .cwd(root)
         .inheriting_env()
         .unlimited()
@@ -107,7 +134,7 @@ mod tests {
             "pwd > asked-in; echo \"$@\" > asked; \
              mkdir -p app/src-tauri/target/release && : > app/src-tauri/target/release/cf",
         );
-        let built = build(cargo, root.path(), "cf", "cf").unwrap();
+        let built = build(cargo, root.path(), "cf", "cf", &[]).unwrap();
         assert_eq!(
             built,
             root.path()
@@ -134,7 +161,7 @@ mod tests {
             "echo \"$@\" > asked; \
              mkdir -p app/src-tauri/target/release && : > app/src-tauri/target/release/consensflow-bridge",
         );
-        let built = build(cargo, root.path(), "cf-panes", "consensflow-bridge").unwrap();
+        let built = build(cargo, root.path(), "cf-panes", "consensflow-bridge", &[]).unwrap();
         assert_eq!(
             built,
             root.path()
@@ -154,7 +181,7 @@ mod tests {
     fn a_build_that_fails_says_what_cargo_said() {
         let root = tempfile::tempdir().unwrap();
         let (_folder, cargo) = cargo("echo 'error: no such package' >&2; exit 101");
-        let failed = build(cargo, root.path(), "cf", "cf").unwrap_err();
+        let failed = build(cargo, root.path(), "cf", "cf", &[]).unwrap_err();
         assert!(
             failed.starts_with("building cf did not succeed: exit code 101\n"),
             "{failed}"
@@ -166,7 +193,7 @@ mod tests {
     fn a_build_that_leaves_no_binary_where_it_should_says_where() {
         let root = tempfile::tempdir().unwrap();
         let (_folder, cargo) = cargo("exit 0");
-        let failed = build(cargo, root.path(), "cf", "cf").unwrap_err();
+        let failed = build(cargo, root.path(), "cf", "cf", &[]).unwrap_err();
         assert!(
             failed.starts_with("cargo built cf, but there is none at "),
             "{failed}"
@@ -182,8 +209,36 @@ mod tests {
             root.path(),
             "cf",
             "cf",
+            &[],
         )
         .unwrap_err();
         assert!(failed.starts_with("could not start `"), "{failed}");
+    }
+
+    #[test]
+    fn the_test_binary_the_live_tests_ask_is_built_with_the_feature_that_makes_it() {
+        let root = tempfile::tempdir().unwrap();
+        let (_folder, cargo) = cargo(
+            "echo \"$@\" > asked; \
+             mkdir -p app/src-tauri/target/release && : > app/src-tauri/target/release/harness-ask",
+        );
+        let built = build(
+            cargo,
+            root.path(),
+            "cf-harness",
+            "harness-ask",
+            &["--features", "test-support"],
+        )
+        .unwrap();
+        assert_eq!(
+            built,
+            root.path()
+                .join("app/src-tauri/target/release")
+                .join(format!("harness-ask{}", std::env::consts::EXE_SUFFIX))
+        );
+        assert_eq!(
+            files::read_string(&root.path().join("asked")).unwrap(),
+            "build --release --locked -p cf-harness --bin harness-ask --features test-support\n"
+        );
     }
 }

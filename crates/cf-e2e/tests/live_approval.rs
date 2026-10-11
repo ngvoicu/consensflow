@@ -68,8 +68,6 @@ mod report;
 mod run;
 #[path = "live_approval/steps.rs"]
 mod steps;
-#[path = "live_approval/trace.rs"]
-mod trace;
 #[path = "live_approval/verdict.rs"]
 mod verdict;
 
@@ -96,7 +94,7 @@ fn kept() -> PathBuf {
 /// variables the command sets, or none.
 fn limits() -> Result<(Vec<Harness>, Vec<plan::Step>)> {
     let named = |name: &str| live::requested(name).unwrap_or_default();
-    let harnesses = plan::harnesses_named(&named(live::HARNESSES)).map_err(Error::Daemon)?;
+    let harnesses = plan::harnesses_named(&named(live::HARNESS)).map_err(Error::Daemon)?;
     let steps = plan::steps_named(&named(live::STEPS)).map_err(Error::Daemon)?;
     Ok((harnesses, steps))
 }

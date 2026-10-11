@@ -7,9 +7,8 @@
 //! it does not.
 
 use cf_e2e::live::cut;
+use cf_e2e::live::trace::Trace;
 use serde_json::Value;
-
-use crate::trace::Trace;
 
 /// The id of a message of the daemon's views.
 pub fn id(message: &Value) -> i64 {

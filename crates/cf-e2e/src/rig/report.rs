@@ -34,7 +34,7 @@ const SAID: usize = 100;
 /// stripped. Windows' console host draws a run of blanks as a cursor move and
 /// starts a line by jumping to it: those stay the blanks and the line break
 /// they stand for, so that text reads the same on every platform.
-fn plain(bytes: &[u8]) -> String {
+pub(super) fn plain(bytes: &[u8]) -> String {
     static MOVE: OnceLock<Regex> = OnceLock::new();
     static JUMP: OnceLock<Regex> = OnceLock::new();
     static SEQUENCE: OnceLock<Regex> = OnceLock::new();

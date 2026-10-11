@@ -1,16 +1,13 @@
-//! A project of the run: its folder, the trust Claude Code asks of it, and the
-//! opening of it with its staff and the gate on, as the app opens one and as
-//! the checkbox of its Staff dialog turns the gate on.
+//! A project of the run: its folder, and the opening of it with its staff and
+//! the gate on, as the app opens one and as the checkbox of its Staff dialog
+//! turns the gate on. (The trust Claude Code asks of the folder is
+//! [`cf_e2e::live::window::trust_claude`]'s.)
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-use std::thread::sleep;
-use std::time::{Duration, Instant};
 
-use cf_e2e::live::{self, text, Log};
+use cf_e2e::live::{self, text};
 use cf_e2e::rig::{Project, Rig};
-use cf_e2e::{files, pattern, Error, Result};
-use regex::Regex;
+use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
 
 use crate::agents::{self, DESIGNER};
@@ -80,137 +77,6 @@ pub fn open<'a>(rig: &'a Rig, planned: &Planned, folder: &Path) -> Result<Projec
     Ok(project)
 }
 
-/// How long a Claude window has to draw its first screen, and to draw what
-/// follows an answer.
-const DRAWS: Duration = Duration::from_secs(60);
-
-/// How long a window's screen holds still before it counts as drawn.
-const STILL: Duration = Duration::from_secs(3);
-
-const DOWN: [u8; 3] = [27, 91, 66];
-const ENTER: [u8; 1] = [13];
-
-/// Claude's question about a folder it has not seen, and the choice it is on.
-fn asks_to_trust(screen: &str) -> bool {
-    static ASKS: OnceLock<Regex> = OnceLock::new();
-    pattern::once(&ASKS, r"(?i)trust this folder").is_match(screen)
-}
-
-/// The choice of the question that the `❯` is on, if the screen shows one.
-fn chosen(screen: &str) -> Option<String> {
-    static CHOSEN: OnceLock<Regex> = OnceLock::new();
-    pattern::once(
-        &CHOSEN,
-        r"❯\s*(?:\d+\.\s*)?(No, exit|Yes, I trust this folder)",
-    )
-    .captures_iter(screen)
-    .last()
-    .map(|found| found[1].to_owned())
-}
-
-/// Trusts `folder` for Claude Code, once, as a person would. Claude asks
-/// whether to trust a folder it has not seen before an interactive session
-/// starts, and nobody can answer that in an unattended window: this opens
-/// Claude there in a window of the run's pane host, moves to "Yes, I trust
-/// this folder", confirms it with Enter once the ❯ is on it (the question opens
-/// on "No, exit", where Enter alone would quit), lets Claude write that down,
-/// and closes the window. What came of it, in a word. `claude` is the program
-/// the run's Claude windows start through (the wrapper that shuts out the MCP
-/// servers and the browser), so that this one, unattended on the human's own
-/// setup, reaches none of them either.
-pub fn trust_claude(rig: &Rig, log: &Log, claude: &Path, folder: &Path) -> Result<&'static str> {
-    let id = format!(
-        "trust-{}",
-        folder
-            .file_name()
-            .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
-    );
-    let pane = json!({ "id": id, "generation": 1 });
-    let opened = rig.host(
-        "pane.open",
-        json!({
-            "id": id, "generation": 1, "cwd": folder, "argv": [claude], "env": {},
-            "size": { "rows": 40, "cols": 120 },
-        }),
-    )?;
-    if opened["ok"] == false {
-        return Err(Error::Daemon(format!(
-            "Claude did not open in {} to be trusted there: {opened}",
-            folder.display()
-        )));
-    }
-    let screen = || -> String {
-        let shown = rig
-            .host(
-                "pane.snapshot",
-                json!({ "id": pane["id"], "generation": 1, "tail": 12 }),
-            )
-            .ok()
-            .and_then(|answer| answer["tail"].as_array().cloned())
-            .unwrap_or_default();
-        shown.iter().map(text).collect::<Vec<_>>().join("\n")
-    };
-    let kills = || {
-        let _ = rig.host("pane.kill", pane.clone());
-    };
-    let still = |within: Duration| -> bool {
-        let started = Instant::now();
-        let (mut seen, mut since) = (screen(), Instant::now());
-        while started.elapsed() < within {
-            sleep(Duration::from_millis(250));
-            let now = screen();
-            if now != seen {
-                (seen, since) = (now, Instant::now());
-            } else if !seen.is_empty() && since.elapsed() >= STILL {
-                return true;
-            }
-        }
-        false
-    };
-    if !still(DRAWS) {
-        let shown = screen();
-        kills();
-        return Err(Error::Daemon(format!(
-            "Claude drew no screen in {} s in {}; its screen: {shown}",
-            DRAWS.as_secs(),
-            folder.display()
-        )));
-    }
-    if !asks_to_trust(&screen()) {
-        kills();
-        return Ok("already trusted");
-    }
-    log.say(format!(
-        "Claude asks to trust {}: the human says yes",
-        folder.display()
-    ));
-    for presses in 0..=3 {
-        if chosen(&screen()).as_deref() == Some("Yes, I trust this folder") {
-            break;
-        }
-        if presses == 3 {
-            let shown = screen();
-            kills();
-            return Err(Error::Daemon(format!(
-                "could not choose \"Yes, I trust this folder\"; its screen: {shown}"
-            )));
-        }
-        rig.host(
-            "pane.input",
-            json!({ "id": pane["id"], "generation": 1, "bytes": DOWN }),
-        )?;
-        sleep(Duration::from_millis(500));
-    }
-    rig.host(
-        "pane.input",
-        json!({ "id": pane["id"], "generation": 1, "bytes": ENTER }),
-    )?;
-    // Claude writes the trust down as it moves on to its prompt.
-    still(DRAWS);
-    kills();
-    Ok("trusted")
-}
-
 /// What a lane of the board says of the member it is, for a report: the
 /// handle, the agent and the harness.
 pub fn member(lane: &Value) -> String {
@@ -226,24 +92,6 @@ pub fn member(lane: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn claude_asks_about_a_folder_it_has_not_seen_and_says_which_choice_it_is_on() {
-        let screen = "Quick safety check: Is this a project you created or one you trust?\n\
-                      ❯ 1. Yes, I trust this folder\n  2. No, exit";
-        assert!(asks_to_trust(screen));
-        assert_eq!(chosen(screen).as_deref(), Some("Yes, I trust this folder"));
-        let on_no =
-            "Do you trust the files in this folder?\n❯ No, exit\n  Yes, I trust this folder";
-        assert_eq!(chosen(on_no).as_deref(), Some("No, exit"));
-        assert!(!asks_to_trust("Welcome back! Try \"fix lint errors\""));
-        assert_eq!(chosen("nothing chosen"), None);
-        // The newest choice is the one shown last.
-        assert_eq!(
-            chosen("❯ No, exit\n...\n❯ Yes, I trust this folder").as_deref(),
-            Some("Yes, I trust this folder")
-        );
-    }
 
     #[test]
     fn a_member_is_named_by_its_handle_agent_and_harness() {

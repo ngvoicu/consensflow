@@ -28,22 +28,24 @@
 //! - [`live`] is what the opt-in live tests share: the machine's own harnesses
 //!   (Claude Code, OpenCode, Pi, Devin and Codex), found as a shell finds them
 //!   with the home each reads its login from, the rig whose windows run them,
-//!   what a live run says and how it waits, and the variable that keeps what a
-//!   run made. [`png`] reads the structure of a PNG file, to say that an image a
-//!   harness saved is a whole one.
+//!   the model each runs on, a real harness's window opened as the app opens
+//!   one, what Claude Code and Codex keep and say, what the daemon wrote as it
+//!   went, what a live run says and how it waits, and the variables
+//!   `cargo xtask live` sets from its flags. [`png`] reads the structure of a
+//!   PNG file, to say that an image a harness saved is a whole one.
 //!
 //! The suites are the tests of the crate, a file for each (`tests/cli.rs` is
 //! the CLI's, with its cases in `tests/cli/`; `tests/daemon.rs` the daemon's as
 //! a process; `tests/rig.rs` the rig's, windows included; `tests/load.rs` the
 //! daemon under load; `tests/smoke.rs` the built app's, which no other suite
 //! has: the packaged smoke, a macOS bundle's, with the parts it is made of in
-//! `tests/smoke/`; `tests/live_designer.rs` a real Codex drawing an image;
-//! `tests/live_approval.rs` real harnesses in every seat of five projects
-//! sending what the human approves, behind the gate). Run them with `cargo
-//! xtask test clis`, `daemons`, `integration`, `agents` and `load`, and `cargo
-//! xtask smoke` (the `npm run` names are the same), the live ones with `cargo
-//! xtask live designer` and `cargo xtask live approval`, or one with `cargo
-//! test -p cf-e2e --test cli`.
+//! `tests/smoke/`; and the live ones, `tests/live_<name>.rs`: `live_paste` a
+//! real window taking what the daemon pastes into it, `live_designer` a real
+//! Codex drawing an image, `live_approval` real harnesses in every seat of five
+//! projects sending what the human approves, behind the gate). Run them with
+//! `cargo xtask test clis`, `daemons`, `integration`, `agents` and `load`, and
+//! `cargo xtask smoke` (the `npm run` names are the same), a live one with
+//! `cargo xtask live <name>`, or one with `cargo test -p cf-e2e --test cli`.
 //!
 //! The stand-ins the suites run in place of what ConsensFlow runs are
 //! binaries of this crate, behind the `test-support` feature the crate's own

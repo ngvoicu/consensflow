@@ -12,14 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use cf_e2e::process::{own_var, Run};
-
-/// The name Claude Code gives a folder under its `projects`: the path with
-/// every character that is not a letter or a digit made a dash.
-fn claude_name(path: &str) -> String {
-    path.chars()
-        .map(|at| if at.is_ascii_alphanumeric() { at } else { '-' })
-        .collect()
-}
+use cf_e2e::rig::project_name as claude_name;
 
 /// The name Pi gives a folder under its `sessions`: the path without its first
 /// slash and with the others made dashes, between two dashes at each end.
@@ -101,17 +94,6 @@ pub fn forget_in_claude(claude: &Path, home: &Path, paths: &[String]) -> Vec<Str
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn claude_names_a_folder_by_its_path_with_dashes_for_what_is_no_letter_or_digit() {
-        assert_eq!(
-            claude_name(
-                "/private/var/folders/ab/x_y/T/consensflow-integration-Q1/workspace/p1-claude"
-            ),
-            "-private-var-folders-ab-x-y-T-consensflow-integration-Q1-workspace-p1-claude"
-        );
-        assert_eq!(claude_name("/a.b"), "-a-b");
-    }
 
     #[test]
     fn pi_names_a_folder_by_its_path_between_double_dashes() {

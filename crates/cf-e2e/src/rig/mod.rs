@@ -12,11 +12,15 @@
 //! what the desktop app asks ([`Rig::host`]: `pane.input`), and types to a
 //! chief as a human does ([`Rig::tell`]). What a window prints, what the
 //! stand-in agent wrote, the jobs it left running ([`Rig::jobs`]) and the
-//! frames themselves are there to look at.
+//! frames themselves are there to look at: a window's screen as text
+//! ([`Rig::screen`]), what the daemon wrote as it went ([`Rig::events`]) and the
+//! keys it pressed, and when ([`Rig::presses`]).
 
+mod forget;
 mod install;
 mod jobs;
 mod launch;
+mod observe;
 mod project;
 mod report;
 mod route;
@@ -26,16 +30,20 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, MutexGuard};
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::daemon::Daemon;
 use crate::daemon_log::StartLine;
 use crate::process::{self, Ran, Run, Sink, Spawned};
 use crate::{cf, checkout, files, wire, Error, Result};
 
+pub use forget::project_name;
 pub use jobs::Job;
 pub use project::{write_staff, Project};
 
+pub(crate) use observe::events_of;
+
+use forget::Forget;
 use route::Shared;
 
 /// How long the daemon or the pane host has to answer a request of the case's.
@@ -62,6 +70,7 @@ pub struct Config {
     path: Vec<PathBuf>,
     existing_root: Option<PathBuf>,
     daemon: Option<PathBuf>,
+    stand_in_records: Option<PathBuf>,
 }
 
 impl Config {
@@ -75,6 +84,7 @@ impl Config {
             path: Vec::new(),
             existing_root: None,
             daemon: None,
+            stand_in_records: None,
         }
     }
 
@@ -123,6 +133,18 @@ impl Config {
         self.daemon = Some(program.into());
         self
     }
+
+    /// With the stand-in agents writing their records in the Claude config
+    /// folder `config`, the machine's own (`~/.claude`: a program that plays the
+    /// stand-in for some windows and starts the real Claude Code for the others
+    /// has them write where the daemon reads Claude's), and not in the rig's. The
+    /// folder is the person's: a rig that ends takes away the conversations and
+    /// the status files its stand-ins wrote, and nothing else of it.
+    #[must_use]
+    pub fn stand_ins_write_in(mut self, config: impl Into<PathBuf>) -> Self {
+        self.stand_in_records = Some(config.into());
+        self
+    }
 }
 
 /// A process a window's stand-in agent started, as it wrote it down.
@@ -141,6 +163,9 @@ pub struct Rig {
     shared: Arc<Shared>,
     daemon: Daemon,
     host: Spawned,
+    /// What the rig takes away of the machine's own Claude folder when it
+    /// ends, where its stand-ins write there ([`Config::stand_ins_write_in`]).
+    forget: Option<Forget>,
     /// Whether the home is left when the rig ends: it is not, unless a rig is
     /// to resume on it or a case asked to keep it ([`Rig::keep_home`]).
     keep_root: bool,
@@ -259,54 +284,7 @@ impl Rig {
     /// (Escape is `[27]`, Control-C `[3]`): the `pane.input` requests it made of
     /// the pane host that are exactly that.
     pub fn keys_pressed(&self, id: &str, bytes: &[u8]) -> usize {
-        self.shared
-            .seen()
-            .daemon
-            .iter()
-            .filter(|frame| {
-                frame["kind"] == "req"
-                    && frame["op"] == "pane.input"
-                    && frame["body"]["id"] == id
-                    && frame["body"]["bytes"] == json!(bytes)
-            })
-            .count()
-    }
-
-    /// The human types into the chief's terminal, the one way work reaches the
-    /// chief: a bracketed paste of `text`, then Enter, once the chief is idle (it
-    /// is waited for a minute).
-    pub fn tell(&self, project: i64, text: &str) -> Result<()> {
-        // The first lane of the chief's, as the page draws it.
-        let chief = || -> Result<Value> {
-            let board = Project::new(self, project).board()?;
-            Ok(board["lanes"]
-                .as_array()
-                .and_then(|lanes| {
-                    lanes
-                        .iter()
-                        .find(|lane| lane["participant"]["handle"] == "chief")
-                })
-                .cloned()
-                .unwrap_or(Value::Null))
-        };
-        self.wait_for("the chief to be idle", IDLE, || {
-            Ok(chief()?["activity"]["state"] == "idle")
-        })?;
-        let pane = chief()?["pane"].clone();
-        let typed = format!("\u{1b}[200~{text}\u{1b}[201~\r");
-        let answer = self.host(
-            "pane.input",
-            json!({
-                "id": pane["id"],
-                "generation": pane["generation"],
-                "bytes": typed.as_bytes(),
-            }),
-        )?;
-        if answer["ok"] == true {
-            Ok(())
-        } else {
-            Err(Error::Daemon(format!("pane.input was refused: {answer}")))
-        }
+        self.presses(id, bytes).len()
     }
 
     /// `cf` run as an agent runs it in a window: the rig's environment with the
@@ -391,6 +369,17 @@ impl Rig {
         self.root.clone()
     }
 
+    /// The folder `folder` is one of the run's: what a real Claude Code kept of
+    /// it (its conversations there, and the `memory/` that every later session in
+    /// that folder reads) is taken away when the rig ends, unless the home is
+    /// kept. Only for a rig whose stand-ins write in the machine's own Claude
+    /// folder ([`Config::stand_ins_write_in`]), which it is the person's.
+    pub fn forget_claude_memory_of(&mut self, folder: &Path) {
+        if let Some(forget) = &mut self.forget {
+            forget.folder(folder);
+        }
+    }
+
     /// Ends the rig: both programs' input is ended, both are waited for, and
     /// every process a window started is checked to be gone. The home goes with
     /// it.
@@ -450,6 +439,11 @@ impl Drop for Rig {
         let _ = self.shutdown();
         self.daemon.kill();
         self.host.kill();
+        // Once every window is gone, and before the home that says which
+        // conversations the stand-ins started is.
+        if let Some(forget) = &self.forget {
+            forget.clear(&self.started(), self.keep_root);
+        }
         if !self.keep_root {
             let _ = std::fs::remove_dir_all(&self.root);
         }

@@ -34,6 +34,9 @@ thiserror.workspace = true
 cf-release.workspace = true
 sha2.workspace = true
 zip.workspace = true
+# S14.4, the runner of the Windows machine: the PowerShell script that ssh hands
+# it is the base64 of its UTF-16 (`-EncodedCommand`).
+base64.workspace = true
 # The updater smoke (S12): the feed it serves and the evidence it reads. JSON as
 # the app and the daemon write it (the feed's document, the build's override, a
 # self-test report, a ledger event); the ledger read from outside (SQLite,

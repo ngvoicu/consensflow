@@ -4,11 +4,12 @@
 //! arguments to `cargo test`: the CLI's (`cli`), the daemon's as a process
 //! (`daemon`), the rig's, with the daemon and the pane host in real terminals
 //! (`rig`), and the daemon under load (`load`, which is ignored unless asked
-//! for). The live tests (`live`) are ignored too, and what they run is the
-//! machine's own harness on its own login, which spends real quota: they are
-//! no part of `check`, and a person asks for each by name. The packaged smoke
-//! (`smoke`) is a test of the same crate, ignored the same way, and is run by
-//! its own command, [`crate::smoke`], which takes the app to run it on.
+//! for). The live tests are ignored too, and what they run is the machine's own
+//! harness on its own login, which spends real quota: they are no part of
+//! `check`, and a person asks for each by name, by [`crate::live`]'s one
+//! command. The packaged smoke (`smoke`) is a test of the same crate, ignored
+//! the same way, and is run by its own command, [`crate::smoke`], which takes
+//! the app to run it on.
 
 use std::ffi::OsString;
 
@@ -47,29 +48,7 @@ pub const COMMANDS: &[Command] = &[
         usage: "[cargo test arguments: --offline, or -- and libtest's; CONSENSFLOW_LOAD_PROJECTS, _WAVES and _TASKS set the size]",
         run: Run::Native(load),
     },
-    Command {
-        words: &["live", "designer"],
-        about: "Have a real Codex draw an image for a chief through the image designer (the live_designer test of cf-e2e: it spends the machine's Codex quota and needs its login)",
-        usage: "[--keep] [cargo test arguments: --offline, or -- and libtest's] (--keep leaves the run's home and project where they are)",
-        run: Run::Native(live_designer),
-    },
-    Command {
-        words: &["live", "approval"],
-        about: "Have real harnesses in every seat of five projects send what the human approves, with \"human approval required\" checked (the live_approval test of cf-e2e: it spends the machine's quota on Claude Code, OpenCode, Pi, Devin and Codex and needs their logins)",
-        usage: "[harness ...] [--steps worker,advisor,reviewer,question,designer] [--keep] [cargo test arguments: --offline, or -- and libtest's] (the harnesses limit the run to the projects they are the chief of; --keep leaves the runs' homes where they are)",
-        run: Run::Native(live_approval),
-    },
 ];
-
-/// What a live test reads to leave the home and the project it made where they
-/// are (`cf_e2e::live::KEEP`, which a test here holds this to).
-const KEEP: &str = "CONSENSFLOW_LIVE_KEEP";
-
-/// What the live approval test reads to limit itself to the projects whose
-/// chief is one of some harnesses, and to some steps (`cf_e2e::live::HARNESSES`
-/// and `STEPS`, which a test here holds these to).
-const HARNESSES: &str = "CONSENSFLOW_LIVE_HARNESSES";
-const STEPS: &str = "CONSENSFLOW_LIVE_STEPS";
 
 /// A set of the tests of `cf-e2e`: which test files, which cases of them, and
 /// whether they are the ones `cargo test` ignores.
@@ -108,16 +87,6 @@ const LOAD: Suite = Suite {
     filter: None,
     ignored: true,
 };
-const LIVE_DESIGNER: Suite = Suite {
-    tests: &["live_designer"],
-    filter: None,
-    ignored: true,
-};
-const LIVE_APPROVAL: Suite = Suite {
-    tests: &["live_approval"],
-    filter: None,
-    ignored: true,
-};
 /// The packaged smoke (`smoke`'s command): the one case of the smoke test, which
 /// runs on a built app and which `cargo test` ignores for there being none.
 pub(crate) const SMOKE: Suite = Suite {
@@ -144,75 +113,6 @@ fn agents(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, 
 
 fn load(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
     run(context, LOAD, args)
-}
-
-fn live_designer(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
-    Ok(process::run(
-        &live_designer_invocation(context, args),
-        &context.env,
-    )?)
-}
-
-/// The live designer's `cargo test`: `--keep`, when it is the first word (the
-/// one flag of this command's own), is not for cargo but is the variable the
-/// test reads to leave what it made.
-fn live_designer_invocation(context: &Context, args: &[OsString]) -> Invocation {
-    let (keep, rest) = match args.split_first() {
-        Some((first, rest)) if first == "--keep" => (true, rest),
-        _ => (false, args),
-    };
-    let invocation = cargo_test(context, LIVE_DESIGNER, rest);
-    if keep {
-        invocation.var(KEEP, "1")
-    } else {
-        invocation
-    }
-}
-
-fn live_approval(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
-    Ok(process::run(
-        &live_approval_invocation(context, args)?,
-        &context.env,
-    )?)
-}
-
-/// The live approval's `cargo test`: the words that come first and are the
-/// command's own are not for cargo but are the variables the test reads. They
-/// are `--keep`, `--steps` and the list that follows it, and any word that does
-/// not begin with a dash, which names a harness (the test says so when it names
-/// none); the first other word, and all after it, are cargo's.
-fn live_approval_invocation(context: &Context, args: &[OsString]) -> Result<Invocation, Failure> {
-    let (mut keep, mut steps, mut harnesses) = (false, None, Vec::new());
-    let mut rest = args;
-    while let Some((word, after)) = rest.split_first() {
-        let text = word.to_string_lossy();
-        if word == "--keep" {
-            keep = true;
-        } else if word == "--steps" {
-            let (list, after_list) = after.split_first().ok_or_else(|| {
-                Failure::Usage("--steps takes the list of steps to run".to_owned())
-            })?;
-            steps = Some(list.clone());
-            rest = after_list;
-            continue;
-        } else if text.starts_with('-') {
-            break;
-        } else {
-            harnesses.push(text.into_owned());
-        }
-        rest = after;
-    }
-    let mut invocation = cargo_test(context, LIVE_APPROVAL, rest);
-    if keep {
-        invocation = invocation.var(KEEP, "1");
-    }
-    if !harnesses.is_empty() {
-        invocation = invocation.var(HARNESSES, harnesses.join(","));
-    }
-    if let Some(steps) = steps {
-        invocation = invocation.var(STEPS, steps);
-    }
-    Ok(invocation)
 }
 
 fn run(context: &Context, suite: Suite, args: &[OsString]) -> Result<i32, Failure> {
@@ -277,8 +177,6 @@ mod tests {
             ["test", "clis"],
             ["test", "agents"],
             ["test", "load"],
-            ["live", "designer"],
-            ["live", "approval"],
         ] {
             let command = COMMANDS.iter().find(|command| command.words == words);
             assert!(
@@ -351,135 +249,14 @@ mod tests {
     }
 
     #[test]
-    fn the_live_designer_is_the_ignored_case_of_its_test_and_runs_only_when_asked_for() {
-        assert_eq!(
-            line(LIVE_DESIGNER, &[]),
-            "cargo test -p cf-e2e --test live_designer -- --ignored"
-        );
-        assert_eq!(
-            line(LIVE_DESIGNER, &["--offline", "--", "--nocapture"]),
-            "cargo test -p cf-e2e --test live_designer --offline -- --ignored --nocapture"
-        );
-        // Nothing that `check` or the workflows run asks for it: the test is
-        // ignored (the `--ignored` above), and no other suite names its file.
-        for suite in [DAEMONS, INTEGRATION, CLIS, AGENTS, LOAD, LIVE_APPROVAL] {
-            assert!(!suite.tests.contains(&"live_designer"));
-        }
-    }
-
-    #[test]
-    fn the_live_approval_is_the_ignored_case_of_its_test_and_runs_only_when_asked_for() {
-        assert_eq!(
-            line(LIVE_APPROVAL, &[]),
-            "cargo test -p cf-e2e --test live_approval -- --ignored"
-        );
-        assert_eq!(
-            line(LIVE_APPROVAL, &["--offline", "--", "--nocapture"]),
-            "cargo test -p cf-e2e --test live_approval --offline -- --ignored --nocapture"
-        );
-        for suite in [DAEMONS, INTEGRATION, CLIS, AGENTS, LOAD, LIVE_DESIGNER] {
-            assert!(!suite.tests.contains(&"live_approval"));
-        }
-    }
-
-    /// The live approval's `cargo test` for `words`, with the variables it sets.
-    fn approval(words: &[&str]) -> Result<(String, Vec<(String, String)>), Failure> {
-        let args: Vec<OsString> = words.iter().map(OsString::from).collect();
-        let invocation = live_approval_invocation(&context(), &args)?;
-        let vars = invocation
-            .vars
-            .iter()
-            .map(|(name, value)| {
-                (
-                    name.to_string_lossy().into_owned(),
-                    value
-                        .as_ref()
-                        .map_or_else(String::new, |value| value.to_string_lossy().into_owned()),
-                )
-            })
-            .collect();
-        Ok((invocation.display(), vars))
-    }
-
-    #[test]
-    fn harnesses_named_first_are_the_variable_the_test_reads_and_are_not_cargos() {
-        let (line, vars) = approval(&[]).unwrap();
-        assert_eq!(
-            line,
-            "cargo test -p cf-e2e --test live_approval -- --ignored"
-        );
-        assert!(vars.is_empty());
-
-        let (line, vars) = approval(&["claude", "pi", "--offline", "--", "--nocapture"]).unwrap();
-        assert_eq!(
-            line,
-            "cargo test -p cf-e2e --test live_approval --offline -- --ignored --nocapture"
-        );
-        assert_eq!(vars, [(HARNESSES.to_owned(), "claude,pi".to_owned())]);
-
-        // The first word that is cargo's ends them: what follows is cargo's own.
-        let (line, vars) = approval(&["--offline", "claude"]).unwrap();
-        assert!(line.ends_with("--offline claude -- --ignored"), "{line}");
-        assert!(vars.is_empty());
-    }
-
-    #[test]
-    fn keep_and_the_steps_are_set_for_the_test_wherever_they_come_among_the_first_words() {
-        let (line, vars) =
-            approval(&["--steps", "worker,question", "devin", "--keep", "--offline"]).unwrap();
-        assert_eq!(
-            line,
-            "cargo test -p cf-e2e --test live_approval --offline -- --ignored"
-        );
-        assert_eq!(
-            vars,
-            [
-                (KEEP.to_owned(), "1".to_owned()),
-                (HARNESSES.to_owned(), "devin".to_owned()),
-                (STEPS.to_owned(), "worker,question".to_owned()),
-            ]
-        );
-        assert!(matches!(approval(&["--steps"]), Err(Failure::Usage(_))));
-    }
-
-    #[test]
-    fn keep_as_the_first_word_is_the_variable_the_test_reads_and_is_not_cargos() {
-        let run = |words: &[&str]| {
-            let args: Vec<OsString> = words.iter().map(OsString::from).collect();
-            live_designer_invocation(&context(), &args)
-        };
-        let plain = run(&[]);
-        assert!(plain.vars.is_empty());
-        let kept = run(&["--keep", "--offline", "--", "--nocapture"]);
-        assert_eq!(
-            kept.display(),
-            "cargo test -p cf-e2e --test live_designer --offline -- --ignored --nocapture"
-        );
-        assert_eq!(
-            kept.vars,
-            [(OsString::from(KEEP), Some(OsString::from("1")))]
-        );
-        // Not first, it is a word like any other, for cargo to answer.
-        let late = run(&["--offline", "--keep"]);
-        assert!(late.vars.is_empty());
-        assert!(late.display().ends_with("--offline --keep -- --ignored"));
-    }
-
-    #[test]
-    fn the_variable_keep_sets_is_the_one_the_live_tests_read() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(2)
-            .unwrap();
-        let live = std::fs::read_to_string(root.join("crates/cf-e2e/src/live.rs")).unwrap();
-        assert!(
-            live.contains(&format!("pub const KEEP: &str = \"{KEEP}\";")),
-            "crates/cf-e2e/src/live.rs does not name {KEEP}"
-        );
-        for (constant, name) in [("HARNESSES", HARNESSES), ("STEPS", STEPS)] {
+    fn no_suite_here_names_a_live_test_which_only_the_live_command_runs() {
+        // Nothing that `check` or the workflows run asks for one: they are ignored,
+        // and `live` is the one command that asks for the ignored.
+        for suite in [DAEMONS, INTEGRATION, CLIS, AGENTS, LOAD, SMOKE] {
             assert!(
-                live.contains(&format!("pub const {constant}: &str = \"{name}\";")),
-                "crates/cf-e2e/src/live.rs does not name {name}"
+                suite.tests.iter().all(|test| !test.starts_with("live_")),
+                "{:?}",
+                suite.tests
             );
         }
     }

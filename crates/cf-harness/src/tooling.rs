@@ -2,8 +2,9 @@
 //! harness code. They start the real harnesses themselves, in windows of the
 //! pane host, and need what the daemon needs to open one the way the app does
 //! and to read what comes of it, so they ask through the test binary
-//! `harness-ask` (`tests/rust-harness.mjs` runs it), which has no logic of its
-//! own: this module is the answers, one function per question.
+//! `harness-ask` (`live::ask` of `crates/cf-e2e` runs it, and so does
+//! `tests/rust-harness.mjs` for the JavaScript tools that are left), which has
+//! no logic of its own: this module is the answers, one function per question.
 //!
 //! A question is a JSON object with an `op`, and its answer one JSON value:
 //!
@@ -15,6 +16,15 @@
 //! | `console_text` | `text`: as Windows' console carries it to a window | the text |
 //! | `claude_settings` | `env`, `launch`, `boardQuestions`: the settings file of a Claude window | `["--settings", file]`, the file written |
 //! | `interrupt` | `kind`: the keys that interrupt a turn in the harness's window | `{presses, closeAfterMs}`: Escape that many times in a row and, where `closeAfterMs` is not null, once more that long after |
+//! | `program` | `argv`, `env`: a program and its arguments to open a window on (the program's absolute path first) | the argv the pane host is asked to open: an npm shim (a `.cmd` on Windows) as the node and the script it runs, anything else as it is; an error for a script of another shape, or a shim that has no node |
+//! | `newest_session` | `kind`, `workspace`, `since`, `env`: the newest top-level conversation a harness of that kind (OpenCode, Devin or Codex) opened in `workspace` at or after `since` (milliseconds), from its own store | the session's id, or null while there is none |
+//!
+//! The last two are the evals' and the live tests' own: the program a window
+//! opens on, which the daemon asks `cf_process::pane_argv` for, and the
+//! conversation a window of a harness that names its own opened, which only
+//! its store says.
+
+mod session;
 
 use std::path::Path;
 
@@ -41,8 +51,10 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "console_text" => Ok(json!(console_text(text(question, "text")?))),
         "claude_settings" => claude_settings(question),
         "interrupt" => interrupt(question),
+        "program" => program(question),
+        "newest_session" => newest_session(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings and interrupt"
+            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, program and newest_session"
         )),
     }
 }
@@ -124,6 +136,42 @@ fn claude_settings(question: &Value) -> Result<Value, String> {
         &launch,
         board_questions
     )?))
+}
+
+/// The argv a window opens on, for the program and arguments the question
+/// gives, as the daemon opens a harness's window (`cf_process::pane_argv`).
+fn program(question: &Value) -> Result<Value, String> {
+    let words = question
+        .get("argv")
+        .and_then(Value::as_array)
+        .ok_or("the question names no argv")?;
+    let argv: Vec<String> = words
+        .iter()
+        .map(|word| {
+            word.as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| format!("a word of the argv is not text: {word}"))
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(json!(cf_process::pane_argv(&argv, &env(question)?)?))
+}
+
+/// The newest conversation of a harness that names its own in its store, in a
+/// folder, since a time.
+fn newest_session(question: &Value) -> Result<Value, String> {
+    let kind = text(question, "kind")?;
+    let since = question
+        .get("since")
+        .and_then(Value::as_i64)
+        .ok_or("the question names no since, in milliseconds")?;
+    let found = session::newest(
+        harness(kind)?,
+        kind,
+        text(question, "workspace")?,
+        since,
+        &env(question)?,
+    )?;
+    Ok(found.map_or(Value::Null, Value::from))
 }
 
 /// The keys that interrupt a turn in the harness's window, as its adapter

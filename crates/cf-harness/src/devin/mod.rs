@@ -5,7 +5,7 @@
 mod adapter;
 mod channel;
 mod install;
-mod paths;
+pub(crate) mod paths;
 mod question_hook;
 pub mod record;
 mod session_hook;

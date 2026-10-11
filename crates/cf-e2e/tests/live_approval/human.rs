@@ -7,12 +7,11 @@
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use cf_e2e::live::trace::Trace;
 use cf_e2e::live::{cut, text, wait, Log};
 use cf_e2e::rig::{Project, Rig};
 use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
-
-use crate::trace::Trace;
 
 /// How long a chief has to read idle: its window is started with the project,
 /// on a harness that may take its time to come up.
