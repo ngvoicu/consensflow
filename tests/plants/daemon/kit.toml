@@ -10,7 +10,7 @@
 
 run_limit_minutes = 5
 rebuild = ["cargo", "xtask", "build-cf", "--offline"]
-tables = ["run", "front", "parts", "constants", "screens", "support", "players", "launcher", "prepare", "detect", "pause", "pause-notes", "waiting-notes", "decided", "receipt-a", "obligations", "sessions", "review", "claude-rest", "taken-back", "board", "channels", "background"]
+tables = ["run", "front", "parts", "constants", "screens", "support", "players", "launcher", "prepare", "detect", "pause", "pause-notes", "waiting-notes", "decided", "receipt-a", "obligations", "sessions", "review", "claude-rest", "taken-back", "board", "channels", "background", "tester"]
 
 [run]
 bridge = ["cargo", "test", "--offline", "-p", "cf-bridge", "--features", "local", "--lib", "local::"]

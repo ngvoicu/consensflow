@@ -138,7 +138,8 @@ impl<'a> Project<'a> {
 }
 
 /// Writes the roster of four agents of the stand-in `claude`, as the tiered
-/// cases use: the chief, two workers on one model and a reviewer on another.
+/// cases use: the chief, two workers on one model and a checker on another (a
+/// reviewer, or a tester, as the case staffs it).
 pub fn write_staff(rig: &Rig) -> Result<()> {
     let agent = |id: &str, model: &str| json!({ "id": id, "kind": "claude-code", "model": model });
     let roster = json!({

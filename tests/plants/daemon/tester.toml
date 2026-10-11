@@ -1,0 +1,333 @@
+# The tester, the fifth role of the staff (worker, advisor, reviewer, tester, image
+# designer): a member holds it, a task is for it (`cf task add --test`), a window opens
+# with its text, and its results come back to the chief like any result. One plant
+# takes one piece of that out; a test of it fails: the ledger's (the roles and pools it
+# knows, migration 0012 that lets its two tables hold them, and what the recordings of
+# Node's ledger are held apart by), the engine's (the role it has a text for, and the
+# texts), the daemon's route, the page's staff dialog, and the rig's case that carries a
+# test from the chief to a tester's window and its result back. A run written `{ node:
+# [...] }` is `node --test`.
+#
+# The `tester rig:` plants run only the case of the rig (`crates/cf-e2e/tests/rig/
+# core_tiered.rs`) that holds the rule; it builds the `cf` and the pane host it runs from
+# the sources as planted, in release, and says `builds`: the family builds the native `cf`
+# again once each is put back. Every name holds `tester`, so `npm run plants:daemon --
+# tester` runs them all, and `tester rig` the end to end one, `tester page` the page's.
+
+[run]
+# The ledger's words for roles and pools, and what it checks them with.
+ledger-lib-model = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "model::"]
+# What holds the recordings of Node's ledger apart from the schema this one has beyond.
+ledger-lib-testing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::"]
+# The texts of the roles, and what the chief reads of them: not the golden of Node's chief text, which
+# the whole of the `text` test holds with them.
+engine-text-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles::", "--", "--skip", "goldens_roles"]
+# The page's staff dialog and board: what it offers a human who adds a member, and what it shows of a
+# tester's tasks (the cases of `app/tests/core-page.spec.mjs` that say tester, in the browser Playwright
+# keeps; each plant's `prepare` bundles the page's xterm first, as `npm run test:ui` does).
+page-tester = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "tester"]
+# The case of the rig that gives a tester a test: the daemon and the pane host in real terminals.
+rig-tester = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "core_tiered::a_test_is_a_task"]
+
+[[plant]]
+name = "tester: a member may not be a tester"
+meant = "a_tester_is_a_role_a_member_holds_and_a_pool_a_task_is_for_next_to_the_reviewer"
+runs = ["ledger-lib-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/model.rs"
+find = 'pub const MEMBER_ROLES: [&str; 5] = ["worker", "advisor", "reviewer", "tester", "designer"];'
+replace = 'pub const MEMBER_ROLES: [&str; 4] = ["worker", "advisor", "reviewer", "designer"];'
+
+[[plant]]
+name = "tester: a task may not be for the testers"
+meant = "a_tester_is_a_role_a_member_holds_and_a_pool_a_task_is_for_next_to_the_reviewer"
+runs = ["ledger-lib-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/model.rs"
+find = 'pub const POOLS: [&str; 5] = ["worker", "advisor", "reviewer", "tester", "designer"];'
+replace = 'pub const POOLS: [&str; 4] = ["worker", "advisor", "reviewer", "designer"];'
+
+[[plant]]
+name = "tester: migration 0012 leaves the tester out of the role check, and no tester can join the staff"
+meant = "a_populated_version_11_ledger_is_migrated_to_12_and_again_as_it_was_and_has_room_for_a_tester"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0012.sql"
+find = "      CHECK (role IN ('human', 'chief', 'advisor', 'worker', 'reviewer', 'tester', 'designer')),"
+replace = "      CHECK (role IN ('human', 'chief', 'advisor', 'worker', 'reviewer', 'designer')),"
+
+[[plant]]
+name = "tester: migration 0012 leaves the tester out of the pool check, and no task can be for the testers"
+meant = "a_populated_version_11_ledger_is_migrated_to_12_and_again_as_it_was_and_has_room_for_a_tester"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0012.sql"
+find = "      CHECK (pool IS NULL OR pool IN ('worker', 'advisor', 'reviewer', 'tester', 'designer')),"
+replace = "      CHECK (pool IS NULL OR pool IN ('worker', 'advisor', 'reviewer', 'designer')),"
+
+[[plant]]
+name = "tester: migration 0012 forgets the ids it had given, and a number that was deleted comes back"
+meant = "a_populated_version_11_ledger_is_migrated_to_12_and_again_as_it_was_and_has_room_for_a_tester"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0012.sql"
+find = '''
+  DELETE FROM sqlite_sequence;
+  INSERT INTO sqlite_sequence (name, seq) SELECT name, seq FROM sequence_rows ORDER BY at;'''
+replace = ""
+
+[[plant]]
+name = "tester: migration 0012 loses the image agents' flag on its way through the member table"
+meant = "a_populated_version_11_ledger_is_migrated_to_12_and_again_as_it_was_and_has_room_for_a_tester"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0012.sql"
+find = '''
+           created_at, left_at, switched_from_harness, switched_from_agent, switched_from_cut, designer
+    FROM participant_rows;'''
+replace = '''
+           created_at, left_at, switched_from_harness, switched_from_agent, switched_from_cut, 0
+    FROM participant_rows;'''
+
+[[plant]]
+name = "tester: migration 0012 loses when a task was paused and how often it was stopped"
+meant = "a_populated_version_11_ledger_is_migrated_to_12_and_again_as_it_was_and_has_room_for_a_tester"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0012.sql"
+find = '''
+           created_at, updated_at, taken_from_id, held_until, deleted_at, paused_at, stop_seq
+    FROM task_rows;'''
+replace = '''
+           created_at, updated_at, taken_from_id, held_until, deleted_at, NULL, 0
+    FROM task_rows;'''
+
+[[plant]]
+name = "tester: the recordings of Node's ledger are not held apart from the version this one has past them"
+meant = "takes_the_version_past_nodes_and_the_tester_out_of_the_two_checks_and_nothing_else"
+runs = ["ledger-lib-testing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = "if version.as_i64().is_some_and(|at| at > NODE_LAST_VERSION) {"
+replace = "if version.as_i64().is_some_and(|at| at > 99) {"
+
+[[plant]]
+name = "tester: the recordings of Node's ledger are not held apart from the tester in the checks of two tables"
+meant = "takes_the_version_past_nodes_and_the_tester_out_of_the_two_checks_and_nothing_else"
+runs = ["ledger-lib-testing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = "*sql = sql.replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1);"
+replace = "*sql = sql.replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.0);"
+
+[[plant]]
+name = "tester: the ledger's replay of Node's traces does not hold the schema apart, and every recorded database differs"
+meant = "every_ledger_the_node_suite_opened_answers_here_as_it_answered_there"
+runs = ["ledger-replay"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/tests/replay.rs"
+find = '''
+    hold_apart_what_node_never_had_in_its_schema(&mut dump);
+    dump'''
+replace = "    dump"
+
+[[plant]]
+name = "tester: the daemon's players of Node's traces do not hold the schema apart, and every recorded database differs"
+meant = "every_trace_of_the_api_is_answered_as_node_answered_it"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/compare.rs"
+find = "    cf_ledger::testing::hold_apart_what_node_never_had_in_its_schema(&mut dump);"
+replace = ""
+
+[[plant]]
+name = "tester: the engine has no text for a tester's window"
+meant = "teach_the_tester_only_the_board_s_commands"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = 'const MEMBERS: [&str; 5] = ["advisor", "worker", "reviewer", "tester", "designer"];'
+replace = 'const MEMBERS: [&str; 4] = ["advisor", "worker", "reviewer", "designer"];'
+
+[[plant]]
+name = "tester: the tester's text says it changes no file, as a reviewer's does, and not that it runs things"
+meant = "tells_the_tester_to_run_the_work_report_with_evidence_and_change_no_product_code"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = '''
+You change no product code: a
+test or script you write is part of your result, and only where the task asks
+for one.'''
+replace = '''
+A test changes no file: suggested fixes
+belong in your results.'''
+
+[[plant]]
+name = "tester: the tester's result does not say whether the work is ready"
+meant = "tells_the_tester_to_run_the_work_report_with_evidence_and_change_no_product_code"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = "where any test or script you wrote is; and whether the work is ready. If you"
+replace = "where any test or script you wrote is. If you"
+
+[[plant]]
+name = "tester: the tester's description does not say it changes no product code"
+meant = "tells_the_tester_to_run_the_work_report_with_evidence_and_change_no_product_code"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = "Verify finished work for the chief of a ConsensFlow project by running it, change no product code, and return results with evidence."
+replace = "Verify finished work for the chief of a ConsensFlow project and return results."
+
+[[plant]]
+name = "tester: the chief is not told what a tester is for where it is told what each role does"
+meant = "teach_the_chief_only_the_board_s_commands"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''
+of that tier (`--review`) checks finished work and changes no file; a tester
+of that tier (`--test`) runs the work to check it and changes no product code.
+An image comes from the image designer (`--design`, no tier): say what to draw,
+what to use as reference and where to save it, and its result names the file.'''
+replace = '''
+of that tier (`--review`) checks finished work and changes no file. An image
+comes from the image designer (`--design`, no tier): say what to draw, what to
+use as reference and where to save it, and its result names the file.'''
+
+[[plant]]
+name = "tester: the chief is not told a tester checks work by running it, where it is told reviews are asked for"
+meant = "teach_the_chief_only_the_board_s_commands"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''
+A tester checks work by running it, when the work can be run.
+
+## The staff'''
+replace = "## The staff"
+
+[[plant]]
+name = "tester: the chief's commands have no line for a test"
+meant = "teach_the_chief_only_the_board_s_commands"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '    cf task add --test --tier <tier> "…"     a test for a tester: what to run and what to check; results with evidence back, no product code changed'
+replace = ""
+
+[[plant]]
+name = "tester: a test the chief asks for opens on the board for a worker"
+meant = "a_test_opens_on_the_board_for_the_testers_of_its_tier_and_wakes_the_dispatcher_once"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = '''
+            } else if flag("test") {
+                "tester"
+            } else {'''
+replace = "            } else {"
+
+[[plant]]
+name = "tester: a test asked for beside a review is for the testers, not the reviewers"
+meant = "the_kind_of_staff_asked_for_is_the_first_flag_that_is_true_design_advice_review_test"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = '''
+            } else if flag("review") {
+                "reviewer"
+            } else if flag("test") {
+                "tester"
+            } else {'''
+replace = '''
+            } else if flag("test") {
+                "tester"
+            } else if flag("review") {
+                "reviewer"
+            } else {'''
+
+[[plant]]
+name = "tester: a test the chief asks for is for a pool the ledger does not know"
+meant = "a_test_opens_on_the_board_for_the_testers_of_its_tier_and_wakes_the_dispatcher_once"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = '''
+                "tester"
+            } else {'''
+replace = '''
+                "testers"
+            } else {'''
+
+[[plant]]
+name = "tester rig: a test the chief asks for goes to a worker, and no tester's window opens"
+meant = "a_test_is_a_task_the_chief_puts_on_the_board_a_tester_of_its_tier_takes_it_in_a_window_with_the_testers_text_and_the_brief_and_its_results_come_back_as_the_result"
+runs = ["rig-tester"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = '''
+            } else if flag("test") {
+                "tester"
+            } else {'''
+replace = "            } else {"
+
+[[plant]]
+name = "tester page: the staff dialog does not offer the tester among the roles"
+meant = "adds a saved agent to the staff as a tester, or as one more role of a member, in the place a tester has among the roles"
+runs = ["page-tester"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "const ROLES = ['worker', 'advisor', 'reviewer', 'tester', 'designer']"
+replace = "const ROLES = ['worker', 'advisor', 'reviewer', 'designer']"
+
+[[plant]]
+name = "tester page: the staff dialog has no word for the tester"
+meant = "adds a saved agent to the staff as a tester, or as one more role of a member, in the place a tester has among the roles"
+runs = ["page-tester"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+  tester: 'Tester',
+  designer: 'Image designer','''
+replace = "  designer: 'Image designer',"
+
+[[plant]]
+name = "tester page: the staff dialog does not say what a tester is for"
+meant = "adds a saved agent to the staff as a tester, or as one more role of a member, in the place a tester has among the roles"
+runs = ["page-tester"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = ", a tester checks it by running it when the chief asks"
+replace = ""

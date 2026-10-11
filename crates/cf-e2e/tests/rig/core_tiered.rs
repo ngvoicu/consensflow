@@ -1,18 +1,20 @@
-//! Tiered dispatch, reviews and quota, end to end through the real pane host
-//! (VERIFY-TD-13): fake Claude agents in real PTYs, the daemon picking the
+//! Tiered dispatch, reviews, tests and quota, end to end through the real pane
+//! host (VERIFY-TD-13): fake Claude agents in real PTYs, the daemon picking the
 //! member, a review the chief puts on the board going to a reviewer like any
-//! task, and a worker whose provider refuses it mid-task losing the task to
-//! another.
+//! task, a test going to a tester the same, and a worker whose provider refuses
+//! it mid-task losing the task to another.
 
+use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
+use cf_e2e::files;
 use cf_e2e::process::is_alive;
 use cf_e2e::rig::{write_staff, Project, Rig};
 use regex::Regex;
 use serde_json::{json, Value};
 
-use crate::{config, rig, secs, Outcome};
+use crate::{after, config, rig, secs, Outcome};
 
 /// Whether the lane's `pane` is there and null: the window is closed. A lane
 /// that is not there, or has no `pane`, is not.
@@ -96,6 +98,92 @@ fn a_review_is_a_task_the_chief_puts_on_the_board_a_reviewer_of_its_tier_takes_i
         [findings["recipient"].clone(), findings["body"].clone()],
         [json!("chief"), json!("FINDINGS_OK")]
     );
+    assert_eq!(p.task(1)?["state"], "done", "the chief decides the work");
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_test_is_a_task_the_chief_puts_on_the_board_a_tester_of_its_tier_takes_it_in_a_window_with_the_testers_text_and_the_brief_and_its_results_come_back_as_the_result(
+) -> Outcome {
+    let rig = rig()?;
+    let p = project_of(&rig, None, &[("worker", "worker"), ("checker", "tester")])?;
+    let tiers = p.tiers()?;
+    // The tester works three seconds, as a tester does that runs the work: its window is
+    // there to be read while it does, and goes with the task.
+    rig.tell(
+        p.id(),
+        &format!(
+            "DISPATCH --test --tier {} SLEEP 3 Reply with exactly: TESTS_OK",
+            tier(&tiers, "checker")
+        ),
+    )?;
+    let opened = |frames: &[Value]| {
+        frames
+            .iter()
+            .find(|frame| {
+                frame["id"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with(&format!("p{}-checker-", p.id())))
+            })
+            .cloned()
+    };
+    rig.wait_for("the tester's window to open", secs(60), || {
+        Ok(opened(&rig.open_frames()).is_some())
+    })?;
+    let window = opened(&rig.open_frames()).unwrap_or(Value::Null);
+
+    // Opened with the tester's text, loaded as the harness loads a role...
+    let role = after(&window, "--append-system-prompt-file");
+    assert!(
+        role.replace('\\', "/")
+            .ends_with("/consensflow-tester/SKILL.md"),
+        "{role}"
+    );
+    let text = files::read_string(Path::new(&role))?;
+    assert!(
+        Regex::new(r"(?m)^name: consensflow-tester$")?.is_match(&text),
+        "{text}"
+    );
+    assert!(text.contains("# ConsensFlow tester\n"), "{text}");
+    assert!(
+        Regex::new(r"You change no product code: a\s+test or script you write")?.is_match(&text),
+        "{text}"
+    );
+    // ...with the permissions a worker's window has, which a tester needs to run what it tests...
+    let argv = window["argv"].as_array().cloned().unwrap_or_default();
+    assert!(
+        argv.iter().any(|word| word == "bypassPermissions"),
+        "{argv:?}"
+    );
+    // ...and the brief the chief wrote, as the message it was launched with.
+    let brief = argv.last().and_then(Value::as_str).unwrap_or_default();
+    assert!(
+        Regex::new(
+            r"^\[ConsensFlow m-\d+ · T-1 · task from @chief\]\nSLEEP 3 Reply with exactly: TESTS_OK$"
+        )?
+        .is_match(brief),
+        "{brief:?}"
+    );
+
+    rig.wait_for("the test to be done", secs(90), || {
+        Ok(p.task(1)?["state"] == "done")
+    })?;
+    let test = p.task(1)?;
+    assert_eq!(
+        [test["pool"].clone(), test["tier"].clone()],
+        [json!("tester"), json!(tier(&tiers, "checker"))]
+    );
+    let assignee = test["assignee"].as_str().unwrap_or_default();
+    assert!(assignee.starts_with("checker-"), "{assignee}");
+    rig.wait_for("the result to be delivered to the chief", secs(60), || {
+        Ok(p.inbox("chief")?.iter().any(|m| {
+            m["kind"] == "result"
+                && m["taskNumber"] == 1
+                && m["body"] == "TESTS_OK"
+                && m["state"] == "delivered"
+        }))
+    })?;
     assert_eq!(p.task(1)?["state"], "done", "the chief decides the work");
     rig.close()?;
     Ok(())

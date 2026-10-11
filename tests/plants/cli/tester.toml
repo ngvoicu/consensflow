@@ -1,0 +1,62 @@
+# `cf task add --test`: a test for a tester of a tier, asked for as a review is
+# for a reviewer. The words the command reads (`--test` is a switch of `cf task
+# add`), what it posts, and what it says of itself where an agent reads it: the
+# usage of every board command, as `cf help` and `cf task add --help` print it, and
+# the sentence it says when it was given too little. One plant takes one piece out;
+# a test of it fails. What the daemon does with the flag, and the chief's text, are
+# the daemon family's (`tester.toml` there).
+
+[run]
+# `cf task add`, as the board's commands run it against a scripted API.
+board-task = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::task"]
+# The usage each board command answers `--help` with, and every line of the whole.
+board-help = ["cargo", "test", "--offline", "-p", "cf", "--test", "help"]
+# The board's commands held to what Node's said, usage and refusals among them.
+board-goldens = ["cargo", "test", "--offline", "-p", "cf", "--test", "board_goldens"]
+
+[[plant]]
+name = "tester: --test is no switch of cf task add"
+meant = "a_test_is_asked_for_a_tester_of_a_tier_and_says_whom_it_waits_for"
+runs = ["board-task"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '    switches: &["--self", "--advice", "--review", "--test", "--design"],'
+replace = '    switches: &["--self", "--advice", "--review", "--design"],'
+
+[[plant]]
+name = "tester: cf task add asks for a worker when it is asked for a test"
+meant = "a_test_is_asked_for_a_tester_of_a_tier_and_says_whom_it_waits_for"
+runs = ["board-task"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+        if words.on("--test") {
+            body.insert("test".into(), true.into());
+        }'''
+replace = ""
+
+[[plant]]
+name = "tester: cf help has no line for a test"
+meant = "every_board_command_answers_help_with_its_usage_and_asks_the_board_nothing"
+runs = ["board-help"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.txt"
+find = '''
+  cf task add --test --tier <tier> "…"
+                                    a test for a tester of that tier: say what to run
+                                    and check; results back, no product code changed
+'''
+replace = ""
+
+[[plant]]
+name = "tester: cf task add, given too little, does not say it can be asked for a test"
+meant = "every_case_but_the_departed_asks_says_and_exits_as_node_did"
+runs = ["board-goldens"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.rs"
+find = "(with --advice for an advisor, --review for a reviewer or --test for a tester; or --design,"
+replace = "(with --advice for an advisor or --review for a reviewer; or --design,"

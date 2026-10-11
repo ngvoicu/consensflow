@@ -5,8 +5,19 @@
 //! carrier, a claim, a shut door) moves a recording that predates it. That is
 //! migration 0011's four columns, which Node's ledger never fills, and the
 //! stop a pause counted, which it never says in the event that moved the task.
+//! And what only this one's schema has: migration 0012's tester in the checks
+//! of two tables, and the version it brings (a recording of Node's database
+//! says 11, and its checks do not name a tester).
 
 use serde_json::{Map, Value};
+
+/// The last schema version Node's ledger had.
+const NODE_LAST_VERSION: i64 = 11;
+
+/// The tester, as migration 0012 put it in the role check of `participant` and
+/// the pool check of `task`, and the words Node's checks had in its place.
+const TESTER_IN_THE_CHECKS: (&str, &str) =
+    ("'reviewer', 'tester', 'designer'", "'reviewer', 'designer'");
 
 /// The columns migration 0011 added, by table, whose values only this ledger writes.
 const NODE_NEVER_WRITES: [(&str, &str); 4] = [
@@ -43,6 +54,29 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
                     values.remove(at);
                 }
             }
+        }
+    }
+}
+
+/// `dump`, a database as the recorder dumps it (`userVersion`, `schema` and
+/// `tables`), with the schema as Node's ledger had it: no version past the
+/// last Node's ledger had, and no tester in the checks of the two tables that
+/// name the roles and the pools. A dump of Node's is left as it is.
+pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
+    if let Some(version) = dump.get_mut("userVersion") {
+        if version.as_i64().is_some_and(|at| at > NODE_LAST_VERSION) {
+            *version = Value::from(NODE_LAST_VERSION);
+        }
+    }
+    let Some(Value::Array(schema)) = dump.get_mut("schema") else {
+        return;
+    };
+    for entry in schema {
+        if !matches!(entry["name"].as_str(), Some("participant" | "task")) {
+            continue;
+        }
+        if let Some(Value::String(sql)) = entry.get_mut("sql") {
+            *sql = sql.replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1);
         }
     }
 }
@@ -177,6 +211,48 @@ mod tests {
                 "event": { "columns": ["id"], "rows": [["1"]] },
             })
         );
+    }
+
+    #[test]
+    fn takes_the_version_past_nodes_and_the_tester_out_of_the_two_checks_and_nothing_else() {
+        let checks = |roles: &str| format!("CHECK (role IN ('human', {roles})) STRICT");
+        let mut dump = json!({
+            "userVersion": 12,
+            "schema": [
+                { "name": "participant", "sql": checks("'reviewer', 'tester', 'designer'") },
+                { "name": "task", "sql": checks("'reviewer', 'tester', 'designer'") },
+                { "name": "message", "sql": checks("'reviewer', 'tester', 'designer'") },
+            ],
+            "tables": {},
+        });
+        hold_apart_what_node_never_had_in_its_schema(&mut dump);
+        assert_eq!(
+            dump,
+            json!({
+                "userVersion": 11,
+                "schema": [
+                    { "name": "participant", "sql": checks("'reviewer', 'designer'") },
+                    { "name": "task", "sql": checks("'reviewer', 'designer'") },
+                    { "name": "message", "sql": checks("'reviewer', 'tester', 'designer'") },
+                ],
+                "tables": {},
+            })
+        );
+    }
+
+    #[test]
+    fn leaves_a_schema_of_nodes_as_it_is() {
+        let before = json!({
+            "userVersion": 10,
+            "schema": [{ "name": "participant", "sql": "CHECK (role IN ('reviewer', 'designer'))" }],
+            "tables": {},
+        });
+        let mut dump = before.clone();
+        hold_apart_what_node_never_had_in_its_schema(&mut dump);
+        assert_eq!(dump, before);
+        let mut tables_only = json!({ "tables": {} });
+        hold_apart_what_node_never_had_in_its_schema(&mut tables_only);
+        assert_eq!(tables_only, json!({ "tables": {} }));
     }
 
     #[test]

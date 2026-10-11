@@ -2,9 +2,9 @@
 //!
 //! - `Reply with exactly: X` answers X.
 //! - A line `DISPATCH --tier standard <task>` (or `DISPATCH --review --tier
-//!   standard <task>`) runs `cf task add` with those words and the task (`\n`
-//!   in it becomes a line break), with this window's own token, the way a chief
-//!   hands out work.
+//!   standard <task>`, and `--test` the same) runs `cf task add` with those
+//!   words and the task (`\n` in it becomes a line break), with this window's
+//!   own token, the way a chief hands out work.
 //! - A line `CF <words>` runs any other `cf` with those words as they stand
 //!   (`CF task cancel T-3`), and `CF <words> :: <text>` with the text, spaces
 //!   and all, as one last word (`CF tell T-1 :: Stop now`): the chief's own
@@ -227,7 +227,7 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     }
     if let Some(dispatch) = pattern::once(
         &DISPATCH,
-        r"(?m)^DISPATCH ((?:(?:--(?:advice|review|design|self)|--\S+ \S+) )+)(.+)$",
+        r"(?m)^DISPATCH ((?:(?:--(?:advice|review|test|design|self)|--\S+ \S+) )+)(.+)$",
     )
     .captures(text)
     {

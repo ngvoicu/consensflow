@@ -21,6 +21,7 @@ reply does nothing.
     cf task add --tier <critical|complex|standard|light> "…"   work for a worker; ConsensFlow picks the member
     cf task add --advice --tier <tier> "…"   a question for an advisor: findings back, no file changed
     cf task add --review --tier <tier> "…"   a review for a reviewer: what to review and what to check; findings back, no file changed
+    cf task add --test --tier <tier> "…"     a test for a tester: what to run and what to check; results with evidence back, no product code changed
     cf task add --design "…"      an image from the image designer: what to draw, what to use as reference, where to save it
     cf task add --after T-3 "…"   a follow-up for the window that did T-3: the next step of that window's own work (carry out the plan or findings it just wrote, part 2 after its part 1); reviews, parallel work and work for another role stay fresh
     … --needs T-3,T-4             the task waits on the board until T-3 and T-4 are accepted
@@ -157,9 +158,10 @@ Keep this chief role after a new or resumed native session.
 
 Name the tier a task needs: a worker of that tier does the work; an advisor
 of that tier (`--advice`) answers a question and changes no file; a reviewer
-of that tier (`--review`) checks finished work and changes no file. An image
-comes from the image designer (`--design`, no tier): say what to draw, what to
-use as reference and where to save it, and its result names the file.
+of that tier (`--review`) checks finished work and changes no file; a tester
+of that tier (`--test`) runs the work to check it and changes no product code.
+An image comes from the image designer (`--design`, no tier): say what to draw,
+what to use as reference and where to save it, and its result names the file.
 ConsensFlow gives the task to a free member of that role and tier on this
 project's staff; you never pick the member. A tier nobody on the staff holds
 goes to the nearest one somebody does, the next one up first. Only a role
@@ -181,6 +183,8 @@ task, the files, the commit) and what to check; the reviewer can read the
 task with `cf task get T-3`. Its findings come back as the review's result.
 Then decide both: reopen the work with what must change, or accept it, and
 accept the review.
+
+A tester checks work by running it, when the work can be run.
 
 ## The staff
 

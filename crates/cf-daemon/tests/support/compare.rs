@@ -48,11 +48,13 @@ pub fn left(file: &Path, expected: &Value) -> Option<String> {
     )
 }
 
-/// A dump with what Node's ledger never writes taken out of its tables.
+/// A dump with what Node's ledger never writes taken out of its tables, and
+/// what its schema never had out of the schema.
 fn held_apart(mut dump: Value) -> Value {
     if let Some(Value::Object(tables)) = dump.get_mut("tables") {
         cf_ledger::testing::hold_apart_what_node_never_writes(tables);
     }
+    cf_ledger::testing::hold_apart_what_node_never_had_in_its_schema(&mut dump);
     dump
 }
 

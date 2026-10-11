@@ -6,7 +6,9 @@ use super::*;
 
 #[test]
 fn every_role_enters_pi_with_its_whole_text_already_loaded() {
-    for name in ["chief", "advisor", "worker", "reviewer", "designer"] {
+    for name in [
+        "chief", "advisor", "worker", "reviewer", "tester", "designer",
+    ] {
         let home = Home::new();
         let (adapter, _fakes) = adapter(&home);
         let content = format!(

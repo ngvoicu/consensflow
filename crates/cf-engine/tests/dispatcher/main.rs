@@ -8,7 +8,8 @@
 //! notes of a task's wait that go when it moves on, and the word that follows a
 //! hold (`waiting_notes`), and the result a turn's end is not while the work it
 //! started still runs (`background`), and the time a launch is told it has for
-//! its first message (`launch_wait`).
+//! its first message (`launch_wait`), and the tester, which Node's staff never
+//! had (`testers`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -54,6 +55,7 @@ mod switching_handoffs;
 mod switching_refused;
 mod taken_back;
 mod tasks;
+mod testers;
 mod the_dispatcher;
 mod throws_early;
 mod trace_untold;

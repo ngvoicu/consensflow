@@ -54,7 +54,7 @@ pub struct NewMember {
     pub agent: String,
     pub harness: String,
     pub designer: bool,
-    /// One or more of worker, advisor, reviewer and designer; the first leads.
+    /// One or more of worker, advisor, reviewer, tester and designer; the first leads.
     pub roles: Vec<String>,
     pub tier: String,
 }

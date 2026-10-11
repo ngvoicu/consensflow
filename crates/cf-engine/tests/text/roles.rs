@@ -54,6 +54,7 @@ fn teaches_only_the_boards_commands(role: &str) {
             "cf task add --design",
             "cf task add --self",
             "cf task add --review --tier",
+            "cf task add --test --tier",
             "cf answer",
             "cf task done",
             "cf note --human",
@@ -92,6 +93,15 @@ fn teaches_only_the_boards_commands(role: &str) {
             r"## Reviews\n\nNothing is reviewed unless you ask\.",
             &text
         ));
+        // The tester is one more role the chief names the tier of, and one line of the reviews' section.
+        assert!(found(
+            r"a tester\s+of that tier \(`--test`\) runs the work to check it and changes no product code\.",
+            &text
+        ));
+        assert!(found(
+            r"accept the review\.\n\nA tester checks work by running it, when the work can be run\.\n\n## The staff",
+            &text
+        ));
         assert!(text.contains("`cf staff` shows them as they are now"));
         // A chief that left the heredoc's word bare to fit a timestamp in ran
         // every backticked snippet of its brief (poker-lab, 2026-10-03).
@@ -128,6 +138,9 @@ fn teaches_only_the_boards_commands(role: &str) {
         );
         if role == "reviewer" {
             assert!(text.contains("delivers them to the chief, who decides"));
+        }
+        if role == "tester" {
+            assert!(text.contains("delivers it to the chief, who decides"));
         }
         assert!(
             !found(r"VERDICT|Review round", &text),
@@ -174,6 +187,11 @@ fn teach_the_reviewer_only_the_board_s_commands() {
 }
 
 #[test]
+fn teach_the_tester_only_the_board_s_commands() {
+    teaches_only_the_boards_commands("tester");
+}
+
+#[test]
 fn teach_the_designer_only_the_board_s_commands() {
     teaches_only_the_boards_commands("designer");
 }
@@ -189,6 +207,7 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         ("worker", "worker"),
         ("advisor", "advisor"),
         ("reviewer", "reviewer"),
+        ("tester", "tester"),
         ("designer", "image designer"),
     ] {
         let text = instructions(role, &[zeus()]);
@@ -205,6 +224,10 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         r"cf task get T-3 {15}a task and its whole thread: the work under review, or this one\n",
         &instructions("reviewer", &[])
     ));
+    assert!(found(
+        r"cf task get T-3 {15}a task and its whole thread: the work under test, or this one\n",
+        &instructions("tester", &[])
+    ));
     let refused = role_instructions(&Env::default(), "pm", &[], None).unwrap_err();
     assert_eq!(refused.to_string(), "no role instructions for pm");
 }
@@ -216,7 +239,7 @@ fn tells_every_window_it_never_has_to_wait_for_what_the_board_brings() {
         r"You never have to poll or wait for a result: ConsensFlow brings each one to\s+you as a message when it is ready",
         &instructions("chief", &[zeus()])
     ));
-    for role in ["worker", "advisor", "reviewer", "designer"] {
+    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
         assert!(
             found(
                 r"Never wait for an answer\s+in your shell \(no `sleep`",
@@ -225,6 +248,21 @@ fn tells_every_window_it_never_has_to_wait_for_what_the_board_brings() {
             "{role}"
         );
     }
+}
+
+#[test]
+fn tells_the_tester_to_run_the_work_report_with_evidence_and_change_no_product_code() {
+    let text = instructions("tester", &[zeus()]);
+    for pattern in [
+        r"(?m)^description: Verify finished work for the chief of a ConsensFlow project by running it, change no product code, and return results with evidence\.$",
+        r"You verify finished work for this project's chief by running it\.",
+        r"You change no product code: a\s+test or script you write is part of your result, and only where the task asks\s+for one\.",
+        r"what you tested and how; each check, passed or failed, with the exact\s+command you ran and what it printed; each bug with the steps to reproduce it;\s+where any test or script you wrote is; and whether the work is ready\.",
+    ] {
+        assert!(found(pattern, &text), "{pattern}");
+    }
+    // It runs things: nothing of the reviewer's reading only is left in its text.
+    assert!(!found(r"read-only|changes no file", &text));
 }
 
 #[test]
@@ -237,7 +275,9 @@ fn tells_the_chief_one_member_runs_as_many_tasks_at_once_as_it_is_given() {
 
 #[test]
 fn tells_every_window_its_messages_arrive_pasted_and_are_its_to_act_on() {
-    for role in ["chief", "worker", "advisor", "reviewer", "designer"] {
+    for role in [
+        "chief", "worker", "advisor", "reviewer", "tester", "designer",
+    ] {
         assert!(
             found(
                 r"Each message ConsensFlow brings you is typed into this terminal, headed\s+`\[ConsensFlow m-… · T-… · …\]`; your harness may show it as pasted text\. It is\s+ConsensFlow's delivery, and acting on it is your role\.",
@@ -306,7 +346,9 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
 
 #[test]
 fn names_this_window_s_cf_by_its_full_path_for_a_shell_that_finds_another_cf_first() {
-    for role in ["chief", "worker", "advisor", "reviewer", "designer"] {
+    for role in [
+        "chief", "worker", "advisor", "reviewer", "tester", "designer",
+    ] {
         let text =
             role_instructions(&Env::default(), role, &[], Some("/opt/consensflow/bin/cf")).unwrap();
         assert!(

@@ -17,7 +17,7 @@ const ITEM_CHARS: usize = 600;
 
 /// The flags of `cf task add`.
 const ADD: Shape = Shape {
-    switches: &["--self", "--advice", "--review", "--design"],
+    switches: &["--self", "--advice", "--review", "--test", "--design"],
     valued: &["--tier", "--purpose", "--after", "--needs", "--before"],
     leading: 0,
 };
@@ -112,6 +112,9 @@ fn add(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
         }
         if words.on("--review") {
             body.insert("review".into(), true.into());
+        }
+        if words.on("--test") {
+            body.insert("test".into(), true.into());
         }
         if let Some(purpose) = words.value("--purpose") {
             body.insert("purpose".into(), purpose.into());
@@ -405,6 +408,50 @@ mod tests {
             ]
             .join("\n")
         );
+    }
+
+    /// What `cf task add words…` posted and printed, the board answering with `answer`.
+    fn added(words: &[&str], answer: &Value) -> (Option<Value>, String) {
+        let api = scripted(vec![reply(201, answer.clone())]);
+        let words: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
+        let said = add(
+            &words,
+            &Board::new(Some(&api.url), "tok"),
+            &mut std::io::empty(),
+        )
+        .unwrap();
+        let posted = api.received().into_iter().next().and_then(|got| got.json());
+        (posted, said.text)
+    }
+
+    #[test]
+    fn a_test_is_asked_for_a_tester_of_a_tier_and_says_whom_it_waits_for() {
+        let answer = json!({
+            "task": { "number": 3, "state": "open", "assignee": null, "requester": "chief",
+                "title": "Run T-2", "blockedBy": [], "pool": "tester", "tier": "standard" },
+            "message": null, "gated": false,
+        });
+        let (posted, said) = added(&["--test", "--tier", "standard", "Run T-2"], &answer);
+        assert_eq!(
+            posted,
+            Some(json!({ "tier": "standard", "test": true, "body": "Run T-2" }))
+        );
+        assert_eq!(
+            said,
+            "T-3 is on the board for a standard tester; the first free one gets it, and its result arrives in your inbox."
+        );
+        // Beside the others, and with none of them it is a plain task.
+        let (posted, _) = added(
+            &["--tier", "light", "--review", "--test", "Check it"],
+            &answer,
+        );
+        assert_eq!(
+            posted,
+            Some(json!({ "tier": "light", "review": true, "test": true, "body": "Check it" })),
+            "the flags are the board's to rank"
+        );
+        let (posted, _) = added(&["--tier", "light", "Write it"], &answer);
+        assert_eq!(posted, Some(json!({ "tier": "light", "body": "Write it" })));
     }
 
     #[test]

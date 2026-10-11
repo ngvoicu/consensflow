@@ -10,11 +10,12 @@ import { isMember } from './board.js'
  * that cannot open says why by throwing, as the daemon's refusals do.
  */
 
-const ROLES = ['worker', 'advisor', 'reviewer', 'designer']
+const ROLES = ['worker', 'advisor', 'reviewer', 'tester', 'designer']
 const ROLE_LABEL = {
   worker: 'Worker',
   advisor: 'Advisor',
   reviewer: 'Reviewer',
+  tester: 'Tester',
   designer: 'Image designer',
 }
 /** The work tiers in the order the pick list groups them, most critical first, as the Agents screen names them. */

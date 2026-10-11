@@ -4,9 +4,9 @@ import { preview, render } from './markdown.js'
 /**
  * The board: a kanban of the project's tasks. One row per participant, one
  * column per state, every task a card that stays where it ended, with its
- * result on it. A review is a task like any other, on its reviewer's row. A
- * task no member has (never given to one, or of one who left the staff) is on
- * the row of whoever asked for it, so none goes unseen.
+ * result on it. A review or a test is a task like any other, on its reviewer's
+ * or its tester's row. A task no member has (never given to one, or of one who
+ * left the staff) is on the row of whoever asked for it, so none goes unseen.
  * Above the grid, what waits for the human: messages to approve when the
  * project asks for approval, notes to read, and, while the chief waits for
  * the human in its terminal, the way there. The human is asked nothing here:
