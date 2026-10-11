@@ -65,7 +65,7 @@ use serde_json::json;
 
 use agents::Agents;
 use background::Jobs;
-use records::{note_process, Records};
+use records::{note_process, Records, INTERRUPTED};
 use reply::{is_session_of, reply_to, Reply, Window};
 use stop::Stop;
 use terminal::{Event, Input};
@@ -76,9 +76,6 @@ const SERVER_SECONDS: u64 = 600;
 /// How long an Escape waits for the rest of a paste marker before it is the
 /// Escape key: a TUI's own wait is about as long.
 const ESCAPE_WAIT: Duration = Duration::from_millis(50);
-
-/// What Claude writes as the user's turn when it interrupts one it was at work on.
-const INTERRUPTED: &str = "[Request interrupted by user]";
 
 /// What a window with no login says on its screen, as Pi says it on a machine
 /// that has none.

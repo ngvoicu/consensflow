@@ -100,7 +100,7 @@ pub(super) fn frontier(
 
 /// Whether the extension saw a turn of this session start, and has not seen
 /// Pi settle.
-pub(super) fn working(session: &str, env: &Env, options: &Options) -> Result<bool, String> {
+pub(crate) fn working(session: &str, env: &Env, options: &Options) -> Result<bool, String> {
     let Some(launch) = launch(env, options) else {
         return Ok(false);
     };

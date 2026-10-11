@@ -1,0 +1,184 @@
+# A conversation the app's quit cut in a turn, and the window opened again on it
+# (the human's report that the daemon seemed not to send its answers: a chief
+# that was working when the app quit is resumed idle, at its prompt, and its
+# record still shows the turn open, so the daemon read it at work for good and
+# everything for it waited). Claude resumed on such a conversation waits at
+# its prompt, writes nothing of the turn, and closes it with a message of its own
+# when the next one comes (`npm run live:resume-cut`, Claude 2.1.296). One plant
+# takes one rule out; a test of it fails. The first plants run the tests of the
+# harness, which hold each rule apart on the records of two live runs; the
+# `resumed rig:` plants hold that the rule reaches the chief through the real
+# daemon and pane host (`crates/cf-e2e/tests/rig/approval.rs`, the case that cuts the
+# chief's turn), and say `builds`: the family builds the native `cf` again once
+# each is put back. The last plants are of the stand-in agent that makes the
+# cut. Every name holds `resumed`, so `npm run plants:daemon -- resumed` runs
+# them all, and `resumed rig` the end to end ones.
+
+[run]
+# The turn a record left open, as a window opened on it holds it.
+harness-left-open = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "left_open"]
+# A Claude window opened again on the records of two live runs: its looks and its pastes.
+harness-launch-claude-resumed = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::resumed"]
+# A Pi window opened again on a turn the quit cut: its looks.
+harness-launch-pi-resumed = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "pi::resumed"]
+# The case of the rig that cuts the chief's turn by the app's quit, found by the start of its name.
+rig-resumed-cut = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "approval::a_restart_that_cuts"]
+# What the stand-in agent writes of a conversation it is resumed on.
+fake-agent-records = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "records::"]
+
+# --- the Claude adapter: a window opened on a turn the quit cut ---
+
+[[plant]]
+name = "resumed: a window opened on a turn the quit cut never reads at rest"
+meant = "a_window_opened_again_on_a_turn_the_quit_cut_is_at_rest_once_claude_says_it_is_idle"
+runs = ["harness-launch-claude-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '                        idle && (settled || empty || left) || by_press,'
+replace = '                        idle && (settled || empty) || by_press,'
+
+[[plant]]
+name = "resumed: a window given a message of its own is read at rest by the turn before it"
+meant = "a_window_opened_with_a_message_of_its_own_is_not_read_at_rest_by_the_turn_the_quit_cut"
+runs = ["harness-launch-claude-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '            let left_open = if resumable && launch.message.is_none() {'
+replace = '            let left_open = if resumable {'
+
+[[plant]]
+name = "resumed: a window that shows another conversation keeps the turn it was opened on"
+meant = "a_window_that_shows_another_conversation_forgets_the_turn_it_was_opened_on"
+runs = ["harness-launch-claude-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '        *self.left_open.borrow_mut() = None;'
+replace = ''
+
+[[plant]]
+name = "resumed: a window that began a turn of its own is still read at rest by the one before it"
+meant = "what_the_cut_turn_left_is_what_the_look_says_and_a_turn_of_its_own_is_read_as_any"
+runs = ["harness-launch-claude-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/left_open.rs"
+find = '''
+        record.settlement == Settlement::InFlight
+            && record.items.len() == self.items
+            && record.items.last().is_some_and(|last| last.id == self.last)'''
+replace = '''
+        record.settlement == Settlement::InFlight'''
+
+[[plant]]
+name = "resumed: a turn that is over is taken for one the quit cut"
+meant = "a_turn_in_flight_is_the_one_the_window_was_opened_on_and_one_that_ended_is_none"
+runs = ["harness-left-open"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/left_open.rs"
+find = '''
+        if record.settlement != Settlement::InFlight {
+            return None;
+        }'''
+replace = ''
+
+# --- the Pi adapter: the same rule, with its extension's word that no turn is at work ---
+
+[[plant]]
+name = "resumed: a Pi window opened on a turn the quit cut never reads at rest"
+meant = "a_window_opened_again_on_a_turn_the_quit_cut_is_at_rest_once_its_extension_has_seen_no_turn_of_it"
+runs = ["harness-launch-pi-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = '                observed.settled = true;'
+replace = '                observed.settled = observed.settled;'
+
+[[plant]]
+name = "resumed: a Pi window with a turn at work is read at rest by the turn the quit cut"
+meant = "a_window_opened_again_on_a_turn_the_quit_cut_is_at_rest_once_its_extension_has_seen_no_turn_of_it"
+runs = ["harness-launch-pi-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = '                && !working(&session, &self.env, &options)?'
+replace = '                && !working(&session, &self.env, &options).map(|_| false)?'
+
+[[plant]]
+name = "resumed: a Pi window its extension has not named is read at rest by the turn the quit cut"
+meant = "a_window_opened_again_on_a_turn_the_quit_cut_is_at_rest_once_its_extension_has_seen_no_turn_of_it"
+runs = ["harness-launch-pi-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = '                && shown.as_deref() == Some(session.as_str())'
+replace = '                && true'
+
+[[plant]]
+name = "resumed: a Pi window given a message of its own is read at rest by the turn before it"
+meant = "a_window_opened_with_a_message_of_its_own_is_not_read_at_rest_by_the_turn_the_quit_cut"
+runs = ["harness-launch-pi-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = '            let left_open = if launch.resume.is_some() && launch.message.is_none() {'
+replace = '            let left_open = if launch.resume.is_some() {'
+
+[[plant]]
+name = "resumed: a Pi window that follows another conversation keeps the turn it was opened on"
+meant = "a_window_that_follows_another_conversation_forgets_the_turn_it_was_opened_on"
+runs = ["harness-launch-pi-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = '        *self.left_open.borrow_mut() = None;'
+replace = ''
+
+# --- end to end: through the real daemon and pane host ---
+
+[[plant]]
+name = "resumed rig: a chief the quit cut in its turn is read at work for good once resumed"
+meant = "a_restart_that_cuts_the_chiefs_turn_leaves_its_window_at_rest_and_what_waits_for_it_reaches_it"
+runs = ["rig-resumed-cut"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '                        idle && (settled || empty || left) || by_press,'
+replace = '                        idle && (settled || empty) || by_press,'
+
+# --- the stand-in agent that makes the cut ---
+
+[[plant]]
+name = "resumed rig: the stand-in answers at once, and the quit cuts no turn"
+meant = "a_restart_that_cuts_the_chiefs_turn_leaves_its_window_at_rest_and_what_waits_for_it_reaches_it"
+runs = ["rig-resumed-cut"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent.rs"
+find = '            wait_as_told("CF_TEST_ANSWER_MS");'
+replace = ''
+
+[[plant]]
+name = "resumed: the stand-in finds no turn cut in a conversation it is resumed on"
+meant = "a_conversation_cut_in_a_turn_is_resumed_waiting_and_closes_it_just_before_the_next_message"
+runs = ["fake-agent-records"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/records.rs"
+find = '    record["type"] == "user" && record["message"]["content"][0]["text"] != INTERRUPTED'
+replace = '''    let _ = record;
+    false'''
+
+[[plant]]
+name = "resumed: the stand-in closes a turn that was answered"
+meant = "a_conversation_that_ended_in_an_answer_or_in_an_interrupt_has_no_turn_to_close"
+runs = ["fake-agent-records"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/records.rs"
+find = '    record["type"] == "user" && record["message"]["content"][0]["text"] != INTERRUPTED'
+replace = '    record["type"] == "user"'

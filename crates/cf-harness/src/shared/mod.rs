@@ -3,6 +3,7 @@
 pub(crate) mod admission;
 pub(crate) mod child;
 pub(crate) mod launch_files;
+pub(crate) mod left_open;
 pub(crate) mod net;
 pub(crate) mod pane;
 pub(crate) mod paths;

@@ -211,6 +211,46 @@ fn a_window_starts_as_the_harness_opens_one_on_a_new_conversation() {
 }
 
 #[test]
+fn a_window_resumes_the_conversation_the_harness_keeps_when_the_question_says_so() {
+    let resumed = |agent: Value, session: Value| {
+        answer(&ask(
+            "start",
+            json!({ "agent": agent, "session": session, "seed": null, "resume": true }),
+        ))
+        .unwrap()
+    };
+    assert_eq!(
+        resumed(
+            json!({ "kind": "claude-code", "model": "claude-haiku-5-5", "effort": "low" }),
+            json!("s-1"),
+        )["args"],
+        json!([
+            "--resume",
+            "s-1",
+            "--model",
+            "claude-haiku-5-5",
+            "--effort",
+            "low",
+            "--permission-mode",
+            "bypassPermissions",
+        ])
+    );
+    assert_eq!(
+        resumed(json!({ "kind": "codex" }), json!("t-1"))["args"],
+        json!([
+            "resume",
+            "t-1",
+            "--dangerously-bypass-approvals-and-sandbox"
+        ])
+    );
+    // A conversation to resume has to be named.
+    assert_eq!(
+        resumed(json!({ "kind": "claude-code" }), Value::Null),
+        Value::Null
+    );
+}
+
+#[test]
 fn text_is_given_as_a_window_and_the_console_take_it() {
     let said = |op: &str, text: &str| answer(&ask(op, json!({ "text": text }))).unwrap();
     // A CR before a newline goes; a control character is shown as its picture.
