@@ -151,6 +151,9 @@ impl Transcript {
         if record.interrupt {
             let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
             self.items.push(id, Role::User, &record.text, at, seq);
+            // A call the interrupt cut is over: a server tool's (the advisor's)
+            // gets no result to close it.
+            self.open_tools.clear();
             self.turn_open = false;
             self.hooks.clear();
             self.terminal = Some(Terminal::Native);

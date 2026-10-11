@@ -204,3 +204,48 @@ fn a_turn_stopped_before_claude_wrote_a_word_reads_as_it_was_for_the_record_says
         "only the daemon's press says this turn stopped (`claude::stopped`)"
     );
 }
+
+#[test]
+fn an_interrupt_while_a_call_has_no_result_ends_the_turn_and_closes_the_call() {
+    // Escape while the advisor answered (a server tool, live on Claude Code
+    // 2.1.296, a pause of the task): the call never gets a result, and the
+    // interrupt that follows names its message. An ordinary tool's call is
+    // closed by the result Claude writes for it; a server tool's is not, and
+    // a reading that waited for it read the window at work for good, so the
+    // task's next words never went in.
+    let thinking = assistant("a1", "u1", json!("m1"), json!([]), Value::Null);
+    for call in [
+        json!({ "type": "server_tool_use", "id": "t1", "name": "advisor" }),
+        tool_use(json!("t1")),
+    ] {
+        let calling = assistant("a2", "a1", json!("m1"), json!([call]), Value::Null);
+        let stop = interrupt(json!({}), marked());
+        assert_eq!(
+            settlement_of(&[hello(), thinking.clone(), calling.clone(), stop.clone()]),
+            Settlement::Settled,
+            "{call}"
+        );
+        // The next prompt begins a turn of its own, which its answer ends.
+        let next = user("u3", json!("u2"), json!("continue"));
+        let answered = assistant(
+            "a3",
+            "u3",
+            json!("m2"),
+            json!([text(json!("Done"))]),
+            json!("end_turn"),
+        );
+        assert_eq!(
+            settlement_of(&[
+                hello(),
+                thinking.clone(),
+                calling,
+                stop,
+                next,
+                answered,
+                duration("d1", "a3")
+            ]),
+            Settlement::Settled,
+            "{call}"
+        );
+    }
+}
