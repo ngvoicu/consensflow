@@ -182,7 +182,8 @@ fn fails_an_unknown_verb_loudly() -> Outcome {
 fn prints_its_version() -> Outcome {
     let home = ScratchHome::new()?;
     let ran = home.cf(["--version"])?;
-    assert!(ran.stdout.contains("3.0.0"), "{ran}");
+    // The workspace's version, which every crate and the `cf` under test share.
+    assert!(ran.stdout.contains(env!("CARGO_PKG_VERSION")), "{ran}");
     Ok(())
 }
 
