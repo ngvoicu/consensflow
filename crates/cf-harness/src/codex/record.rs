@@ -14,11 +14,18 @@
 //!
 //! The rollout's ids key the reader's maps as they keyed Node's (see
 //! [`Key`]), so a record that says something odd is read as Node read it.
+//!
+//! What the model says reads as text (`directives`): the markup it writes for
+//! Codex's own screen is not relayed. A reading's items say it so; the
+//! rollout's own words stay what they were, since a turn's end names its final
+//! answer by them.
 
+mod directives;
 mod fields;
 mod images;
 mod inputs;
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -50,6 +57,22 @@ pub fn reader(session: &str, env: &Env) -> Box<dyn Look + Send> {
         ),
         format!("codex rollout for {session}"),
     ))
+}
+
+/// An item as a reading hands it out: what the model said, as text. The
+/// markup it wrote for Codex's own screen is not for whoever reads the
+/// answer, and a user's words, a tool's output are not the model's.
+fn handed_out(item: &Item) -> Item {
+    if item.role != Role::Assistant {
+        return item.clone();
+    }
+    match directives::readable(&item.text) {
+        Cow::Borrowed(_) => item.clone(),
+        Cow::Owned(text) => Item {
+            text: Arc::from(text),
+            ..item.clone()
+        },
+    }
 }
 
 /// What a rollout said so far.
@@ -501,7 +524,11 @@ impl Answer for Rollout {
         });
         let end = latest.and_then(|turn| Some((turn, turn.end.as_ref()?)));
         let mut record = Record::new();
-        record.items = self.items.iter().map(|kept| kept.item.clone()).collect();
+        record.items = self
+            .items
+            .iter()
+            .map(|kept| handed_out(&kept.item))
+            .collect();
         record.in_flight = in_flight;
         record.failed = matches!(end, Some((_, End::Failed)));
         record.quota = self.quota.clone();

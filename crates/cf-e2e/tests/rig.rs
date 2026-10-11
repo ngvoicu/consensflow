@@ -12,7 +12,9 @@
 //! agent's part in how a window closes: it leaves when it is asked to, and so
 //! does the job it leaves running. So is `live_support`: what the opt-in live
 //! tests stand on. So is `background_work`: what ConsensFlow does with the work
-//! a worker's turn left running, and how a window closes.)
+//! a worker's turn left running, and how a window closes. So is `approval`: what
+//! the daemon types into a window while the words that were for it wait for the
+//! human, where the stand-in agent stops a turn at the Escape it is pressed.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -21,6 +23,8 @@
 
 // The cases are in `tests/rig/`: cargo looks for the modules of a test's root
 // file beside it, where each would be a suite of its own.
+#[path = "rig/approval.rs"]
+mod approval;
 #[path = "rig/background_work.rs"]
 mod background_work;
 #[path = "rig/cf_native.rs"]

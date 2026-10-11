@@ -154,6 +154,70 @@ fn only_a_marker_alone_in_a_list_on_a_user_record_ends_the_turn_whether_or_not_i
 }
 
 #[test]
+fn a_turn_the_daemon_interrupted_ends_on_the_marker_whether_the_window_had_written_none_of_it_a_part_or_a_call(
+) {
+    // The window of the paused worker, stopped by the Escape the daemon pressed:
+    // the marker is the last record and no answer follows it. It names no message
+    // (Claude Code 2.1.292 names none), and the window had written nothing of the
+    // turn, a part of its answer, or a call: Claude closes that one with the
+    // result of a tool the user stopped (an error), as the transcripts of its
+    // real runs show, and then writes the marker for tool use.
+    let started = || user("u2", json!("a1"), json!("Parser"));
+    let part = || {
+        assistant(
+            "a2",
+            "u2",
+            json!("m2"),
+            json!([text(json!("Reading the grammar"))]),
+            Value::Null,
+        )
+    };
+    let calling = || {
+        assistant(
+            "a2",
+            "u2",
+            json!("m2"),
+            json!([tool_use(json!("t1"))]),
+            json!("tool_use"),
+        )
+    };
+    let refused = || {
+        user(
+            "u3",
+            json!("a2"),
+            json!([having(
+                tool_result(
+                    json!("t1"),
+                    json!("The user doesn't want to proceed with this tool use. The tool use was rejected.")
+                ),
+                json!({ "is_error": true })
+            )]),
+        )
+    };
+    let stopped = |parent: &str| user("u4", json!(parent), json!([text(json!(MARKER))]));
+    let for_tool_use = |parent: &str| {
+        user(
+            "u4",
+            json!(parent),
+            json!([text(json!("[Request interrupted by user for tool use]"))]),
+        )
+    };
+    let cases = [
+        ("no word of the answer", vec![stopped("u2")]),
+        ("a part of the answer", vec![part(), stopped("a2")]),
+        (
+            "a call it had begun",
+            vec![calling(), refused(), for_tool_use("u3")],
+        ),
+    ];
+    for (name, after) in cases {
+        let mut records = vec![hello(), answer("a1", "u1"), started()];
+        records.extend(after);
+        assert_eq!(settlement_of(&records), Settlement::Settled, "{name}");
+    }
+}
+
+#[test]
 fn an_interrupt_in_a_stop_hook_that_names_no_message_ends_the_turn_and_its_answer_is_no_result() {
     // Escape while a Stop hook that ignores signals ran, after the answer
     // `DONE` was written: Claude's record of it names no message.

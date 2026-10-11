@@ -2,7 +2,8 @@
 //! rides in the paste of the words that resume it, what makes a message
 //! received and what that does to its task, the doors and their claims, the
 //! stops a window owes, the result a decision withdraws before it is pasted
-//! (`queue.rs`), the notes of a task's wait that go when it moves on
+//! (`queue.rs`), what each kind of word does at the human's gate
+//! (`messages/gate.rs`), the notes of a task's wait that go when it moves on
 //! (`messages/pauses.rs`, `messages/holds.rs`), and what a ledger Node wrote
 //! means to this one (the
 //! rules are the docs of `messages/carrying.rs`, `messages/receipt.rs` and
@@ -13,6 +14,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 mod answered_again;
+mod approval;
 mod carrying;
 mod decided;
 mod doors;

@@ -11,7 +11,15 @@
 //!   verbs, as it would type them.
 //! - A line `SLEEP <seconds> <words>` is a turn that works that long before it
 //!   does what the words say: a window a chief can still tell, or a chief
-//!   nothing is delivered to.
+//!   nothing is delivered to. An Escape stops it, as it stops Claude's: the turn
+//!   ends there, and the window writes what Claude writes of a turn it was
+//!   interrupted in (`take_turn`).
+//! - A line `HOOKS <seconds> <words>` is a first turn still in the hooks of its
+//!   prompt for that long (the words that go in later, with this one carried in
+//!   them, do not put the window back there): Claude's status reads idle, and
+//!   the turn has written nothing but the message it was given. An Escape there
+//!   stops it and leaves no record of it at all, as it does Claude's: only the
+//!   key says it was stopped (`take_turn`).
 //! - A line `BACKGROUND <seconds> <words>` starts a job (`background`) that runs
 //!   that long and answers the words at once, as an agent does that leaves a job
 //!   in the background and ends its turn. With `--wake` before the seconds the
@@ -31,7 +39,7 @@
 
 use std::path::Path;
 use std::sync::mpsc::Sender;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -41,6 +49,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::background::{Jobs, THINKING};
+use crate::stop::Stop;
 
 /// What a window knows of itself that decides how it answers.
 pub struct Window {
@@ -56,6 +65,8 @@ pub struct Window {
     /// Where a turn the window begins by itself is queued: the message that
     /// wakes it when the job it left running ends.
     pub wake: Sender<String>,
+    /// The Escape that stops the turn at work.
+    pub stop: Arc<Stop>,
 }
 
 /// What a turn answers.
@@ -64,6 +75,8 @@ pub enum Reply {
     Text(String),
     /// The provider refuses it: Claude writes the refusal as a record.
     Refused,
+    /// An Escape stopped the turn before it answered.
+    Stopped,
 }
 
 /// `cf` as an agent runs it: the one first on the window's `PATH`, whichever
@@ -180,7 +193,9 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
 
     if let Some(slow) = pattern::once(&SLEEP, r"(?m)^SLEEP (\d+) (.+)$").captures(text) {
         let seconds: u64 = slow[1].parse().map_err(|_| format!("SLEEP {}", &slow[1]))?;
-        thread::sleep(Duration::from_secs(seconds));
+        if window.stop.work(Duration::from_secs(seconds)) {
+            return Ok(Reply::Stopped);
+        }
         return reply_to(&slow[2], window);
     }
     if let Some(job) = pattern::once(
@@ -292,6 +307,7 @@ mod tests {
             session: "sess".into(),
             jobs: Jobs::new(Path::new("/nowhere/consensflow"), 1),
             wake: std::sync::mpsc::channel().0,
+            stop: Arc::new(Stop::default()),
         }
     }
 
@@ -335,6 +351,23 @@ mod tests {
         let reply = reply_to("SLEEP 1 Reply with exactly: LATE", &window());
         assert_eq!(text(reply), "LATE");
         assert!(started.elapsed() >= Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_turn_that_works_is_stopped_by_an_escape_before_it_answers_and_the_words_after_it_are_never_said(
+    ) {
+        let window = window();
+        window.stop.begin();
+        let stop = Arc::clone(&window.stop);
+        let presser = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            stop.press();
+        });
+        let started = std::time::Instant::now();
+        let reply = reply_to("SLEEP 30 Reply with exactly: LATE", &window);
+        assert_eq!(reply, Ok(Reply::Stopped));
+        assert!(started.elapsed() < Duration::from_secs(20));
+        presser.join().unwrap();
     }
 
     #[test]
