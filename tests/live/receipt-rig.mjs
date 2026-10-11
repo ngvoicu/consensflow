@@ -28,7 +28,7 @@ import {
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { liveEnvironment, realOnPath } from '../../evals/plan.mjs'
+import { HARNESSES, liveEnvironment, realOnPath } from '../../evals/plan.mjs'
 import { startIntegration } from '../integration/harness.mjs'
 import { readRecord } from '../rust-harness.mjs'
 import { AGENTS, QUESTION_TOOL, tierFlag } from './bench-agents.mjs'
@@ -106,11 +106,21 @@ export function sessionOf(open) {
  * stopped: when each read was made, the `status` word (`busy`, `idle`,
  * `waiting`), what it waits for, and when Claude says the status last
  * changed (`statusUpdatedAt`, which the daemon's look reads an interrupt's
- * effect by).
+ * effect by). With `liveOnly`, a file whose process is gone says nothing, as it
+ * says nothing to the daemon: the file a killed window leaves names the
+ * conversation a window resumed on it shows.
  */
-export function claudeStatus(session) {
+export function claudeStatus(session, { liveOnly = false } = {}) {
   const folder = join(HOME, '.claude', 'sessions')
   const samples = []
+  const there = (pid) => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch (cause) {
+      return cause.code === 'EPERM'
+    }
+  }
   const read = () => {
     try {
       for (const file of readdirSync(folder)) {
@@ -121,7 +131,7 @@ export function claudeStatus(session) {
         } catch {
           continue
         }
-        if (row.sessionId === session) return row
+        if (row.sessionId === session && (!liveOnly || there(row.pid))) return row
       }
     } catch {}
     return null
@@ -281,9 +291,11 @@ exec "$CF_REAL_CLAUDE" "$@"
  * for the stand-in Claude that asks through the hook when its brief says
  * `ASK …`). `files` are written into the project's folder before anything
  * opens (a path under it, and its text): a Claude window reads the settings
- * there.
+ * there. With `chief: 'claude'` or `chief: 'pi'` the chief is that harness for
+ * real, on its model of the bench's, and not the stand-in; `restart` is the
+ * app's quit, and the app started again on the same home.
  */
-export async function openRig({ folder, workers, model = {}, files = {} }) {
+export async function openRig({ folder, workers, model = {}, files = {}, chief = 'fake' }) {
   useNativeDaemon()
   const root = mkdtempSync(join(tmpdir(), 'consensflow-receipt-'))
   const home = join(root, 'consensflow')
@@ -302,8 +314,15 @@ export async function openRig({ folder, workers, model = {}, files = {} }) {
     CF_REAL_CLAUDE: realClaude,
   }
   const agent = (name) => ({ ...AGENTS[name], ...(model[name] ? { model: model[name] } : {}) })
+  // The chief's agent: the stand-in, or a real harness on the bench's model for it
+  // (Pi on the cheap eval model: the bench's own Pi model is one that hangs).
+  const chiefs = {
+    fake: { id: 'chief', kind: 'claude-code', model: 'fake-chief' },
+    claude: { ...agent('claude'), id: 'chief' },
+    pi: { id: 'chief', kind: 'pi', model: HARNESSES.pi.model },
+  }
   const saved = [
-    { id: 'chief', kind: 'claude-code', model: 'fake-chief' },
+    chiefs[chief] ?? chiefs.fake,
     ...workers.map((name) =>
       name === 'fake' ? { id: 'worker', kind: 'claude-code', model: 'fake' } : agent(name),
     ),
@@ -321,13 +340,14 @@ export async function openRig({ folder, workers, model = {}, files = {} }) {
     writeFileSync(join(workspace, path), text)
   }
 
-  const app = await startIntegration({ fakeEnv: env, existingRoot: root })
+  let app = await startIntegration({ fakeEnv: env, existingRoot: root })
   const events = traceOf(home)
   const closing = []
   try {
-    const trust = workers.includes('claude')
-      ? await trustForClaude(app, workspace, realClaude)
-      : null
+    const trust =
+      workers.includes('claude') || chief === 'claude'
+        ? await trustForClaude(app, workspace, realClaude)
+        : null
     const opened = await app.requestNode('project.open', { directory: workspace, agent: 'chief' })
     if (opened.ok !== true) throw new Error(`project.open: ${JSON.stringify(opened)}`)
     const project = opened.project.id
@@ -434,7 +454,10 @@ export async function openRig({ folder, workers, model = {}, files = {} }) {
     }
 
     return {
-      app,
+      /** The app now: another one after a `restart`. */
+      get app() {
+        return app
+      },
       env,
       root,
       home,
@@ -451,6 +474,17 @@ export async function openRig({ folder, workers, model = {}, files = {} }) {
       give,
       windowOf,
       watchEscapes,
+      /**
+       * The app's quit, and the app started again on the same home: the daemon
+       * dies first, then the pane host, as the quit orders it, and the daemon
+       * that starts resumes the project.
+       */
+      async restart() {
+        for (const stop of closing.splice(0)) stop()
+        app.killDaemon()
+        await app.close({ preserveRoot: true })
+        app = await startIntegration({ fakeEnv: env, existingRoot: root })
+      },
       close: shutDown,
     }
   } catch (cause) {

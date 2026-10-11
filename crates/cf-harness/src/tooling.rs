@@ -10,7 +10,7 @@
 //! | `op` | the question | the answer |
 //! |---|---|---|
 //! | `records` | `kind`, `session`, `env`: what the harness's own record of the conversation says | `{reading, settled}`: the reading as [`records::answers`] writes it, and whether the window's turn is over, as the dispatcher reads it |
-//! | `start` | `agent` (`kind`, `model`, `effort`, `thinking`), `session`, `seed`: the harness's own window on a new conversation | `{command, args, prompt?, env, dropEnv}`, or null for a kind with no window of its own |
+//! | `start` | `agent` (`kind`, `model`, `effort`, `thinking`), `session`, `seed`: the harness's own window on a new conversation, or with `resume` true on the one `session` names | `{command, args, prompt?, env, dropEnv}`, or null for a kind with no window of its own |
 //! | `window_text` | `text`: as a window can take it | the text |
 //! | `console_text` | `text`: as Windows' console carries it to a window | the text |
 //! | `claude_settings` | `env`, `launch`, `boardQuestions`: the settings file of a Claude window | `["--settings", file]`, the file written |
@@ -91,7 +91,8 @@ fn read_record(question: &Value) -> Result<Value, String> {
     Ok(json!({ "reading": &*reading, "settled": settled }))
 }
 
-/// The harness's own window on a new conversation.
+/// The harness's own window on a new conversation, or, when the question says
+/// `resume`, on the one `session` names, which the harness already keeps.
 fn start(question: &Value) -> Result<Value, String> {
     let agent = question.get("agent").ok_or("the question names no agent")?;
     let fields = Agent {
@@ -100,8 +101,14 @@ fn start(question: &Value) -> Result<Value, String> {
         thinking: optional(agent, "thinking"),
         designer: false,
     };
+    let resumed = question.get("resume").and_then(Value::as_bool) == Some(true);
     let invocation = harness(text(agent, "kind")?).ok().and_then(|harness| {
-        window_args::start(
+        let open = if resumed {
+            window_args::resume
+        } else {
+            window_args::start
+        };
+        open(
             harness,
             fields,
             optional(question, "session"),

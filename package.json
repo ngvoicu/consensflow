@@ -41,6 +41,8 @@
     "live:interrupt": "node tests/live/interrupt-idle.mjs",
     "live:stops": "node tests/live/stops.mjs",
     "live:input-box": "node tests/live/claude-input-box.mjs",
+    "live:resume-cut": "node tests/live/resume-cut.mjs",
+    "live:restart-cut": "node tests/live/restart-cut.mjs",
     "live:door": "node tests/live/receipt-door.mjs",
     "live:hook-status": "node tests/live/receipt-door.mjs --harness claude --hold 90",
     "live:codex-interrupt": "node tests/live/codex-interrupted-question.mjs",

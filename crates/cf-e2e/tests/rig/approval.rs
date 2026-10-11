@@ -1095,13 +1095,48 @@ fn switching_approval_off_leaves_what_waits_at_the_gate_there_and_what_comes_aft
     Ok(())
 }
 
+/// The app quits as it does, the daemon dying first and then the pane host, and
+/// is started again on the same home: the rig it is now.
+fn quit_and_start_again(mut rig: Rig) -> cf_e2e::Result<Rig> {
+    rig.kill_daemon();
+    rig.wait_for_daemon_exit(secs(10))?;
+    let root = rig.close_keeping_the_root()?;
+    Rig::start(config().existing_root(root))
+}
+
+/// What the human finds when the app is back, and does: the chief's window is
+/// resumed and at rest, the brief that waited at the gate is still there and
+/// waits, passed on it goes to a window, and its result waits at the gate too
+/// and reaches the chief once passed on.
+fn goes_on_after_the_restart(rig: &Rig, id: i64, brief: &Value) -> cf_e2e::Result<()> {
+    rig.open_frame(&format!("p{id}-chief"), secs(30))?;
+    let project = Project::new(rig, id);
+    rig.wait_for("the resumed chief to be at rest", secs(30), || {
+        Ok(activity(&project, "chief")? == "idle")
+    })?;
+    assert_eq!(project.board()?["project"]["gate"], true);
+    let held = the_one_held(rig, &project, "the brief to be held after the restart")?;
+    assert_eq!(held["id"], brief["id"], "the same brief, still waiting");
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(!a_worker_window_opened(rig, &project));
+
+    approve(rig, &held["id"])?;
+    let result = the_one_held(rig, &project, "the result to be held")?;
+    assert_eq!(result["kind"], "result");
+    approve(rig, &result["id"])?;
+    rig.wait_for("the result to be delivered", secs(60), || {
+        Ok(the_result(&project)?["state"] == "delivered")
+    })?;
+    Ok(())
+}
+
 #[test]
 fn a_restart_of_the_daemon_leaves_what_waits_at_the_gate_there_and_passing_it_on_goes_on() -> Outcome
 {
     // The chief takes a moment to write its answer once its work is done, as a
-    // window on a slow machine does (CI's Windows is one): a quit that does not
-    // wait for the answer cuts its turn, on any machine.
-    let mut rig = Rig::start(config().var("CF_TEST_ANSWER_MS", "1500"))?;
+    // window on a slow machine does (CI's Windows is one): the app is quit once
+    // it is written, as it is when the chief is at rest.
+    let rig = Rig::start(config().var("CF_TEST_ANSWER_MS", "1500"))?;
     let (id, brief) = {
         let project = gated_project(&rig)?;
         let chief = chief_window(&rig, &project)?;
@@ -1113,10 +1148,6 @@ fn a_restart_of_the_daemon_leaves_what_waits_at_the_gate_there_and_passing_it_on
             ),
         )?;
         let brief = the_one_held(&rig, &project, "the brief to be held")?;
-        // The app is quit once its chief's turn is written to its end. A turn the
-        // quit cuts reads as at work in the window that resumes it, whatever that
-        // window says of itself, and nothing is delivered to it until it is given
-        // a turn of its own.
         let session = session_of(&chief);
         rig.wait_for("the chief's answer to be written", secs(30), || {
             Ok(rig.transcript(&session).contains("\"text\":\"dispatched:"))
@@ -1124,30 +1155,42 @@ fn a_restart_of_the_daemon_leaves_what_waits_at_the_gate_there_and_passing_it_on
         (project.id(), brief)
     };
 
-    // The app's quit order: the daemon dies first, then the pane host.
-    rig.kill_daemon();
-    rig.wait_for_daemon_exit(secs(10))?;
-    let root = rig.close_keeping_the_root()?;
-    let rig = Rig::start(config().existing_root(root))?;
-    rig.open_frame(&format!("p{id}-chief"), secs(30))?;
-    let project = Project::new(&rig, id);
-    rig.wait_for("the resumed chief to be at rest", secs(30), || {
-        Ok(activity(&project, "chief")? == "idle")
-    })?;
-    assert_eq!(project.board()?["project"]["gate"], true);
-    let held = the_one_held(&rig, &project, "the brief to be held after the restart")?;
-    assert_eq!(held["id"], brief["id"], "the same brief, still waiting");
-    std::thread::sleep(Duration::from_secs(3));
-    assert!(!a_worker_window_opened(&rig, &project));
+    let rig = quit_and_start_again(rig)?;
+    goes_on_after_the_restart(&rig, id, &brief)?;
+    rig.close()?;
+    Ok(())
+}
 
-    // Passed on, it goes to a window, and its result waits at the gate too.
-    approve(&rig, &held["id"])?;
-    let result = the_one_held(&rig, &project, "the result to be held")?;
-    assert_eq!(result["kind"], "result");
-    approve(&rig, &result["id"])?;
-    rig.wait_for("the result to be delivered", secs(60), || {
-        Ok(the_result(&project)?["state"] == "delivered")
-    })?;
+#[test]
+fn a_restart_that_cuts_the_chiefs_turn_leaves_its_window_at_rest_and_what_waits_for_it_reaches_it(
+) -> Outcome {
+    // The chief's answer is a long way off when the app quits: its turn is cut,
+    // and its record ends in the words it was given (the dispatch), with no
+    // answer. Claude resumed on it waits at its prompt and goes on with nothing
+    // (`npm run live:resume-cut`): the window is at rest, and the daemon has to
+    // read it so.
+    let rig = Rig::start(config().var("CF_TEST_ANSWER_MS", "20000"))?;
+    let (id, brief) = {
+        let project = gated_project(&rig)?;
+        let chief = chief_window(&rig, &project)?;
+        rig.tell(
+            project.id(),
+            &format!(
+                "DISPATCH --tier {} Reply with exactly: ONE_DONE",
+                tier(&project)?
+            ),
+        )?;
+        let brief = the_one_held(&rig, &project, "the brief to be held")?;
+        let record = rig.transcript(&session_of(&chief));
+        assert!(
+            record.contains("DISPATCH") && !record.contains("\"text\":\"dispatched:"),
+            "the chief is at work on its words, with no answer written: {record}"
+        );
+        (project.id(), brief)
+    };
+
+    let rig = quit_and_start_again(rig)?;
+    goes_on_after_the_restart(&rig, id, &brief)?;
     rig.close()?;
     Ok(())
 }

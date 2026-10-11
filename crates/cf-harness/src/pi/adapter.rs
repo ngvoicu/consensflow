@@ -5,9 +5,18 @@
 //! Pi shows it as a user message. The same extension marks each settled turn,
 //! which Pi's own log cannot, and says which conversation the window shows, so
 //! a /new or /resume in it is followed.
+//!
+//! A conversation the app's quit cut in a turn is found with that turn open
+//! (a user's message with no answer, or a tool's call with no result), and no
+//! process in it: resumed, Pi waits at its prompt and writes nothing of it
+//! (`npm run live:resume-cut -- --harness pi`). A window opened on such a
+//! conversation with no message to begin it is read at rest once its extension
+//! names the conversation and has seen no turn of the window at work, while its
+//! record holds no more than it held when the window was opened ([`LeftOpen`]).
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use cf_base::env::Env;
 use cf_base::text::window_text;
@@ -15,6 +24,7 @@ use cf_proto::agents::Harness;
 
 use super::channel::{hex, launch_configuration, send, Channel};
 use super::install::prepare_extension;
+use super::record::evidence::working;
 use crate::contract::{
     Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
     Window, Work,
@@ -23,6 +33,7 @@ use crate::detect::executable;
 use crate::records::{Options, PiSettlement};
 use crate::seams::{Entropy, Services, Time};
 use crate::shared::admission::admission;
+use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::{record_state, switched_to, unnamed};
 use crate::shared::role::write_role;
 use crate::shared::window_args;
@@ -82,6 +93,22 @@ impl Adapter for PiAdapter {
             // None only for a conversation of an empty id, which no ledger holds.
             let invocation = open(Harness::Pi, agent, Some(&session), message.as_deref())
                 .ok_or_else(|| "a Pi window opens on a session id".to_owned())?;
+            // What the record holds before this window exists is the old
+            // process's: a turn it left open, which a window with no message to
+            // begin one is told apart from by what the record holds later. A
+            // window given a message begins its own turn.
+            let left_open = if launch.resume.is_some() && launch.message.is_none() {
+                let options = Options {
+                    pi_settlement: Some(PiSettlement {
+                        directory: Some(configuration.channel.settled.clone()),
+                        launch_id: Some(configuration.channel.launch_id.clone()),
+                    }),
+                };
+                let before = self.records.look(Harness::Pi, &session, &options).await;
+                LeftOpen::of(&before)
+            } else {
+                None
+            };
             let mut argv = vec![executable];
             argv.extend(configuration.args);
             argv.extend(["--skill".to_owned(), role.file]);
@@ -100,11 +127,13 @@ impl Adapter for PiAdapter {
                     .collect(),
                 native_session: Some(session.clone()),
                 window: Rc::new(PiWindow {
+                    env: self.env.clone(),
                     records: Rc::clone(&self.records),
                     time: Rc::clone(&self.time),
                     entropy: Rc::clone(&self.entropy),
                     channel: configuration.channel,
                     session: RefCell::new(session),
+                    left_open: RefCell::new(left_open),
                 }),
             })
         })
@@ -113,6 +142,7 @@ impl Adapter for PiAdapter {
 
 /// A Pi window, and the channel to the extension inside it.
 struct PiWindow {
+    env: Env,
     records: Rc<dyn Records>,
     time: Rc<dyn Time>,
     entropy: Rc<dyn Entropy>,
@@ -120,6 +150,9 @@ struct PiWindow {
     /// The conversation the window shows: its launch's, or the one it was
     /// followed to.
     session: RefCell<String>,
+    /// The turn the record had open when the window was opened, while the
+    /// window has begun no turn of its own: the old process's.
+    left_open: RefCell<Option<LeftOpen>>,
 }
 
 impl Window for PiWindow {
@@ -129,6 +162,8 @@ impl Window for PiWindow {
 
     fn follow(&self, session: &str) {
         session.clone_into(&mut self.session.borrow_mut());
+        // The turn the record had open was a conversation's the window left.
+        *self.left_open.borrow_mut() = None;
     }
 
     fn started(&self) -> Work<'_, Result<Option<String>, String>> {
@@ -180,7 +215,22 @@ impl Window for PiWindow {
             // from Node on purpose: Node started both at once, and a record
             // its look had read before the file came back could be older.
             let shown = self.channel.shown_session()?;
-            let observed = record_state(self.records.look(Harness::Pi, &session, &options).await);
+            let reading = self.records.look(Harness::Pi, &session, &options).await;
+            let mut observed = record_state(Arc::clone(&reading));
+            // A turn the quit cut is over, though no record says so: the
+            // extension, which names the conversation, has seen no turn of this
+            // window begin, and the window has begun none of its own.
+            if !observed.settled
+                && shown.as_deref() == Some(session.as_str())
+                && self
+                    .left_open
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|open| open.still(&reading))
+                && !working(&session, &self.env, &options)?
+            {
+                observed.settled = true;
+            }
             Ok(match shown {
                 None => unnamed(observed, HOLD),
                 Some(shown) if shown == *self.session.borrow() => observed,

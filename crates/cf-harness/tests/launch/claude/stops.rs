@@ -44,11 +44,14 @@ impl Stopped {
     fn new(name: &str) -> Self {
         let home = Home::new();
         let fakes = Fakes::new(&home.env());
-        home.transcript(SESSION, &fixture(name, SESSION));
         let adapter = ClaudeAdapter::new(&fakes.services(&home.env(), Path::new(&home.root)));
+        // The window is opened, and then its turn begins and is written: what a
+        // record holds when a window is opened on it is the turn of a window
+        // that is gone (`resumed.rs`), and this one is the window's own.
         let window = prepare(&adapter, &Request::resumed(SESSION))
             .unwrap()
             .window;
+        home.transcript(SESSION, &fixture(name, SESSION));
         Self {
             home,
             fakes,

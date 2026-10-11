@@ -22,7 +22,7 @@
 //! session's records key its set of open tool calls as they keyed Node's (see
 //! `Key`).
 
-mod evidence;
+pub(crate) mod evidence;
 
 use std::collections::HashSet;
 use std::path::Path;

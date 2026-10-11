@@ -21,6 +21,13 @@
 //!   ([`stopped`]), the look says it took the message back
 //!   (`Observed::took_back`), and the box is cleared before the next paste,
 //!   which would go in after the old text.
+//! - A conversation the app's quit cut in a turn is found with that turn open,
+//!   and no process in it. Resumed, Claude waits at its prompt, status idle,
+//!   writes nothing of the old turn and closes it, with a message of its own
+//!   (`No response requested.`), when the next one comes (Claude 2.1.296,
+//!   `npm run live:resume-cut`). A window opened on such a conversation with no
+//!   message to begin it is read at rest by that status while its record holds
+//!   no more than it held when the window was opened ([`LeftOpen`]).
 //! - The window's Claude process is the pane's own child when a status names
 //!   it, so the first look already sees a /clear. Otherwise (Claude may run
 //!   as another process the child starts) it is the process whose status
@@ -56,6 +63,7 @@ use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
 use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
+use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::switched_to;
 use crate::shared::{pane, window_args};
 
@@ -107,6 +115,19 @@ impl Adapter for ClaudeAdapter {
                 Some(resume) => self.records.has_transcript(Harness::Claude, resume).await?,
                 None => false,
             };
+            // What the record holds before this window exists is the old
+            // process's: a turn it left open, which a window with no message
+            // to begin one has to be told apart from by what the record holds
+            // later. A window given a message begins its own turn.
+            let left_open = if resumable && launch.message.is_none() {
+                let before = self
+                    .records
+                    .look(Harness::Claude, &session, &Options::default())
+                    .await;
+                LeftOpen::of(&before)
+            } else {
+                None
+            };
             let agent = launch.agent.unwrap_or_default();
             let message = launch.message.map(window_text);
             let open = if resumable {
@@ -140,6 +161,7 @@ impl Adapter for ClaudeAdapter {
                     asked: RefCell::new(None),
                     pressed: RefCell::new(None),
                     restored: Cell::new(false),
+                    left_open: RefCell::new(left_open),
                 }),
             })
         })
@@ -166,6 +188,9 @@ struct ClaudeWindow {
     /// The latest look read the window at rest by that press: Claude has put
     /// the message back in its input box.
     restored: Cell<bool>,
+    /// The turn the record had open when the window was opened, while the
+    /// window has begun no turn of its own: the old process's.
+    left_open: RefCell<Option<LeftOpen>>,
 }
 
 impl ClaudeWindow {
@@ -220,10 +245,12 @@ impl Window for ClaudeWindow {
 
     fn follow(&self, session: &str) {
         session.clone_into(&mut self.session.borrow_mut());
-        // What was pressed for was a turn of the conversation the window left.
+        // What was pressed for was a turn of the conversation the window left,
+        // and so was the turn its record had open.
         *self.asked.borrow_mut() = None;
         *self.pressed.borrow_mut() = None;
         self.restored.set(false);
+        *self.left_open.borrow_mut() = None;
     }
 
     fn started(&self) -> Work<'_, Result<Option<String>, String>> {
@@ -365,8 +392,15 @@ impl Window for ClaudeWindow {
                     let by_press = idle && self.stopped(&reading);
                     self.restored.set(by_press);
                     *self.asked.borrow_mut() = stopped::last_user(&reading);
+                    // A turn the quit cut is over, though its record never says
+                    // so: Claude at its prompt has begun no other.
+                    let left = self
+                        .left_open
+                        .borrow()
+                        .as_ref()
+                        .is_some_and(|open| open.still(&reading));
                     observed(
-                        at_prompt && (settled || empty) || by_press,
+                        at_prompt && (settled || empty || left) || by_press,
                         waiting,
                         by_press,
                     )

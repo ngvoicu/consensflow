@@ -28,6 +28,7 @@ use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
 mod agents;
+mod resumed;
 mod stops;
 
 /// The launch's id: a uuid, as the engine mints one (Node's tests took any
