@@ -20,6 +20,8 @@
 
 // The parts are in `fake_agent/`: cargo looks for the modules of a binary's
 // root file beside it, where each would be a binary of its own.
+#[path = "fake_agent/agents.rs"]
+mod agents;
 #[path = "fake_agent/args.rs"]
 mod args;
 #[path = "fake_agent/background.rs"]
@@ -39,10 +41,12 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::mpsc;
 use std::thread;
+use std::time::Instant;
 
 use cf_e2e::process::own_var;
 use serde_json::json;
 
+use agents::Agents;
 use background::Jobs;
 use records::{note_process, Records};
 use reply::{is_session_of, reply_to, Reply, Window};
@@ -143,6 +147,7 @@ fn run(launch: &args::Launch, signals: Signals) -> Result<std::convert::Infallib
         settings: launch.settings.clone(),
         session: launch.session.clone(),
         jobs: Jobs::new(Path::new(&home), pid),
+        agents: Agents::default(),
         wake: turns.clone(),
     };
     // A server the harness starts with its window, before any turn, as an MCP
@@ -199,9 +204,11 @@ fn say(text: &str) -> io::Result<()> {
     out.flush()
 }
 
-/// One message: the window is busy, records the message, answers it, and is idle.
+/// One message: the window is busy, records the message, answers it, and is idle,
+/// or busy still while the background agents it started run, as Claude Code is.
 fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<(), String> {
     let failed = |cause: io::Error| cause.to_string();
+    let began = Instant::now();
     records.status(pid, "busy").map_err(failed)?;
     records
         .append(
@@ -258,9 +265,31 @@ fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Re
                     }),
                 )
                 .map_err(failed)?;
+            // A window that started agents writes what Claude Code writes after
+            // the stop hooks: the turn's duration, and how many agents it left
+            // running (the count is left out when none).
+            if window.agents.used() {
+                let mut duration = json!({
+                    "type": "system",
+                    "subtype": "turn_duration",
+                    "isSidechain": false,
+                    "durationMs": u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    "messageCount": records.ordinal(),
+                });
+                let running = window.agents.running();
+                if running > 0 {
+                    duration["pendingBackgroundAgentCount"] = json!(running);
+                }
+                records.append(pid, duration).map_err(failed)?;
+            }
         }
     }
-    records.status(pid, "idle").map_err(failed)
+    let status = if window.agents.running() > 0 {
+        "busy"
+    } else {
+        "idle"
+    };
+    records.status(pid, status).map_err(failed)
 }
 
 /// Bytes read in pieces, decoded to text as they come: a character cut in two

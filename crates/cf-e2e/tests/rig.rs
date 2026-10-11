@@ -12,7 +12,9 @@
 //! agent's part in how a window closes: it leaves when it is asked to, and so
 //! does the job it leaves running. So is `live_support`: what the opt-in live
 //! tests stand on. So is `background_work`: what ConsensFlow does with the work
-//! a worker's turn left running, and how a window closes.)
+//! a worker's turn left running, and how a window closes. So is `pending_agents`:
+//! what it does with the agents a turn left running, which no program of the
+//! window's tree is.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -45,6 +47,8 @@ mod decided_result;
 mod help;
 #[path = "rig/live_support.rs"]
 mod live_support;
+#[path = "rig/pending_agents.rs"]
+mod pending_agents;
 #[path = "rig/stand_ins.rs"]
 mod stand_ins;
 #[path = "rig/waiting_notes.rs"]

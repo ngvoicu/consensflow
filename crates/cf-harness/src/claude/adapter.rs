@@ -307,14 +307,15 @@ impl Window for ClaudeWindow {
                 .records
                 .look(Harness::Claude, &session, &Options::default())
                 .await;
-            let (empty, settled, failed, quota) = match &*reading {
+            let (empty, settled, failed, quota, agents) = match &*reading {
                 Reading::Known(record) => (
                     record.items.is_empty(),
                     record.settlement == Settlement::Settled,
                     record.failed,
                     record.quota.clone(),
+                    record.agents_pending,
                 ),
-                Reading::Unknown(_) => (true, false, false, None),
+                Reading::Unknown(_) => (true, false, false, None, false),
             };
             let observed = |settled, waiting, took_back| Observed {
                 reading: Some(Arc::clone(&reading)),
@@ -337,6 +338,19 @@ impl Window for ClaudeWindow {
                     // transcript that settled before this window opened, so
                     // a paste on its word alone lands before the prompt is up.
                     let idle = live.as_ref().is_some_and(|live| live.state == State::Idle);
+                    // Claude says `busy` for as long as a background agent or
+                    // workflow runs, though its turn is over and its prompt takes
+                    // input: a turn the transcript says ended with some pending is
+                    // at rest, and what is sent goes in between turns. The stop
+                    // hook's summary comes a moment before the duration that says
+                    // them, and Claude is busy through that moment: the look says
+                    // at rest only once the duration says why. A window that said
+                    // no status has said nothing, and one on its own dialog
+                    // (waiting) is no agents' business.
+                    let working = live
+                        .as_ref()
+                        .is_some_and(|live| live.state == State::Working);
+                    let at_prompt = idle || (agents && working);
                     let waiting = match live {
                         Some(Status {
                             state: State::Waiting(reason),
@@ -351,7 +365,11 @@ impl Window for ClaudeWindow {
                     let by_press = idle && self.stopped(&reading);
                     self.restored.set(by_press);
                     *self.asked.borrow_mut() = stopped::last_user(&reading);
-                    observed(idle && (settled || empty) || by_press, waiting, by_press)
+                    observed(
+                        at_prompt && (settled || empty) || by_press,
+                        waiting,
+                        by_press,
+                    )
                 }
             })
         })

@@ -150,6 +150,15 @@ Combined fixture/completion GREEN: 56/56, exit 0. This is native finalizer
 evidence; text ending, elapsed quiet and `away_summary` alone remain
 insufficient.
 
+**Departed from on 2026-10-11** (the Rust reader, on the owner's decision). The
+pending counts were then defensive schema checks, and are live evidence now: Claude
+Code 2.1.296 writes `pendingBackgroundAgentCount` on the `turn_duration` of a turn
+that left background agents running (a chief's four research agents, counted 4, 3,
+2, 2, 1 over five turns), and its own status says `busy` for as long as any runs.
+A `turn_duration` that says any pending is the end of its turn here, and the
+reading says the agents are pending; a count that is no count still is not. The
+departure is told in `crates/cf-harness/tests/goldens/README.md`.
+
 ## Pi — session JSONL, protocol `3` (Pi `0.85.1`)
 
 - `between-tool-steps.jsonl` — source

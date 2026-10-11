@@ -8,7 +8,7 @@ use cf_base::{js, time};
 use serde_json::Value;
 
 use super::patterns::CLEAR;
-use super::project::{Assistant, Block, Hook, Projected, ToolResult, User};
+use super::project::{Assistant, Block, Boundary, Hook, Projected, ToolResult, User};
 use super::{Candidate, Terminal, Transcript};
 use crate::shared::quota::exhausted_quota;
 use crate::shared::record::reading::{native_id, Role};
@@ -34,7 +34,7 @@ impl Transcript {
             Projected::Assistant(assistant) => self.assistant(assistant, seq)?,
             Projected::User(user) => self.user(user, place, seq)?,
             Projected::Clear(parent) => self.clear(parent),
-            Projected::Boundary(uuid) => self.boundary(uuid.as_ref()),
+            Projected::Boundary(boundary) => self.boundary(boundary),
         }
         Ok(())
     }
@@ -179,7 +179,7 @@ impl Transcript {
     /// `lateAncestor`: whether the user record at `place` is one of the
     /// records that came before the answer that already ended the turn.
     fn late_ancestor(&mut self, user: Option<usize>) -> bool {
-        let (Some(Terminal::Derived { item_id, uuid }), Some(candidate)) =
+        let (Some(Terminal::Derived { item_id, uuid, .. }), Some(candidate)) =
             (&self.terminal, &self.candidate)
         else {
             return false;
@@ -211,8 +211,10 @@ impl Transcript {
     }
 
     /// The boundary record that says a turn that answered is over, by its
-    /// uuid when that is text.
-    fn boundary(&mut self, uuid: Option<&Arc<str>>) {
+    /// uuid when that is text, and the agents it says are still running when it
+    /// says any. A boundary that says nothing of them (a stop hook's summary)
+    /// leaves what an earlier one of the same turn said.
+    fn boundary(&mut self, boundary: &Boundary) {
         let Some(candidate) = &self.candidate else {
             return;
         };
@@ -220,9 +222,13 @@ impl Transcript {
         self.hooks.remove(&item_id);
         self.items.complete(&item_id);
         self.turn_open = false;
+        // A record of the turn that follows is the turn's own: the terminal is
+        // none until its boundary, so what an earlier one said is this turn's.
+        let said = matches!(self.terminal, Some(Terminal::Derived { agents: true, .. }));
         self.terminal = Some(Terminal::Derived {
             item_id,
-            uuid: uuid.cloned(),
+            uuid: boundary.uuid.clone(),
+            agents: boundary.agents.unwrap_or(said),
         });
     }
 }
