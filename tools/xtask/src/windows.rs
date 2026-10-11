@@ -1,85 +1,185 @@
 //! `cargo xtask windows` and `cargo xtask windows-matrix` (landing S14.4): the
-//! Windows machine the checkout is tried on (`zeewin`, over ssh), and the matrix
-//! of the chief evals run there. They are still the JavaScript tools `npm run
-//! windows` and `npm run eval:windows`
-//! (`tests/live/windows.mjs`, `tests/live/windows-matrix.mjs`), which the landing
-//! that ports them replaces in this module: the rows below say so until then,
-//! and the words they will take are in their `usage`.
+//! Windows machine this checkout is tried on (`zeewin`, over ssh), and the matrix
+//! of the chief evals run there.
+//!
+//! `windows` runs a command on a Windows machine, over SSH, on this working tree
+//! as it is now: every tracked file, and new ones not ignored, go over as one
+//! tarball and are unpacked into a build folder there (a file gone from the tree
+//! since the last run goes from there too; `node_modules` and the Rust build
+//! stay). The command then runs in that folder with Node and Cargo on PATH, its
+//! output streamed back; its exit status is this one's, as ssh answers it (see
+//! below). One run at a time: a second is refused while the first goes on there
+//! (the script says "A run is still going on this machine (process N): one at a
+//! time." and exits 75), and a run stopped here (Ctrl-C, or a `kill`) is ended
+//! there too, which Windows' SSH server does not do (the status is then 130).
+//!
+//! What ssh answers is the machine's: where its SSH server hands the command to
+//! `cmd.exe` it is the script's own status, and where it hands it to PowerShell
+//! (zeewin's is: `HKLM\SOFTWARE\OpenSSH\DefaultShell`) it is 0 or 1, for that
+//! PowerShell answers 1 for any command that failed, 75 and the command's own
+//! status included. The JavaScript this replaced had the same answer there.
+//!
+//! ```text
+//! cargo xtask windows --host <ssh host> [--build] -- cargo xtask live paste
+//! cargo xtask windows --host <ssh host> -- cargo xtask eval --scenario round-trip --chief devin --staff devin
+//! cargo xtask windows --host <ssh host> --in app/src-tauri -- cargo test
+//! ```
+//!
+//! `--build` installs the packages and builds the page, a pane's `cf.exe` and the
+//! pane host first: on a fresh machine, and after any change to the Rust. `--in`
+//! runs the command in a folder of the copy. `--env NAME=VALUE` gives the command
+//! that variable, as many as are named and no others: this machine's environment
+//! does not go, and the machine's own is the command's as it is. The output says
+//! each (`== env NAME=VALUE`) before the command's own. The black-box suites of
+//! `crates/cf-e2e` build the `cf` and the pane host they run, and need none:
+//!
+//! ```text
+//! cargo xtask windows --host <ssh host> -- cargo xtask test integration
+//! cargo xtask windows --host <ssh host> --env CONSENSFLOW_TEST_DAEMON=native -- cargo xtask eval ...
+//! ```
+//!
+//! The machine needs an OpenSSH server, Node, Rust, git and Windows' own
+//! `tar.exe`; the folder is `%USERPROFILE%\consensflow-build` unless `--dir`
+//! names another under it. Run one at a time: a live run's windows are the
+//! machine's.
+//!
+//! `windows-matrix` is the evals there: each `--scenario` for each `--pair
+//! chief:staff`, one run after another through the same run, with `--env` given
+//! to each, the output of each kept in `evals/reports/windows/` and one line per
+//! run at the end.
+//!
+//! The modules: [`options`] (the words), [`script`] (the PowerShell that goes, as
+//! text), [`tree`] (the tarball), [`session`] (ssh, as it goes), [`interrupt`]
+//! (a stop), [`run`] (one run) and [`matrix`].
+
+mod interrupt;
+mod matrix;
+mod options;
+mod run;
+mod script;
+mod session;
+#[cfg(test)]
+mod testing;
+mod tree;
 
 use std::ffi::OsString;
+use std::io;
+use std::path::{Path, PathBuf};
+
+use cf_base::time::SystemClock;
 
 use crate::context::Context;
-use crate::dispatch::{not_yet, Command, Console, Failure, Run};
+use crate::dispatch::{Command, Console, Failure, Run};
+use crate::process::{self, Invocation};
+use interrupt::Interrupt;
+use matrix::Machine;
+use options::{MatrixOptions, Options};
+use run::Outcome;
 
 pub const COMMANDS: &[Command] = &[
     Command {
         words: &["windows"],
-        about: "Run a command on the Windows machine the checkout is tried on, over ssh",
+        about: "Run a command on the Windows machine this checkout is tried on, over ssh",
         usage: "--host HOST [--build] [--dir DIR] [--in DIR] [--env NAME=VALUE ...] -- <command ...>",
         run: Run::Native(windows),
     },
     Command {
         words: &["windows-matrix"],
         about: "Run the chief evals on the Windows machine, a pair of chief and staff at a time",
-        usage: "--host HOST [--build] [--scenario NAME ...] [--pair CHIEF:STAFF ...] [--claude-model M] [--pi-model M] [--env NAME=VALUE ...]",
+        usage: "--host HOST [--build] [--env NAME=VALUE ...] --scenario NAME ... --pair CHIEF:STAFF ... [--claude-model M] [--pi-model M]",
         run: Run::Native(windows_matrix),
     },
 ];
 
-fn windows(_: &Context, _: &[OsString], _: &mut Console) -> Result<i32, Failure> {
-    not_yet("windows", "run `npm run windows` for now")
+/// The status of a run that was stopped, as a program ends that Ctrl-C stops.
+const STOPPED: i32 = 130;
+
+/// Why a run on the machine did not happen: what, in words, as the command says it.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// What was asked cannot be sent.
+    #[error(transparent)]
+    Refused(#[from] script::Refusal),
+    /// A program could not be started.
+    #[error(transparent)]
+    Process(#[from] process::Failure),
+    /// A step of the run that must end with 0 did not.
+    #[error("`{step}` ended with status {status}{said}")]
+    Step {
+        step: String,
+        status: i32,
+        said: String,
+    },
+    #[error("could not {what} {}: {cause}", path.display())]
+    Files {
+        what: &'static str,
+        path: PathBuf,
+        cause: io::Error,
+    },
+    #[error("could not make a folder to pack the tree in: {0}")]
+    Scratch(io::Error),
+    /// A file of the tree has a name that cannot be sent as text.
+    #[error("a file of the tree has a name that is not text, and none is sent: {0}")]
+    Name(String),
+    /// What the run says could not be written (the run was ended on the machine).
+    #[error("could not write what the run says: {0}")]
+    Output(io::Error),
+    #[error("could not wait for ssh: {0}")]
+    Wait(io::Error),
 }
 
-fn windows_matrix(_: &Context, _: &[OsString], _: &mut Console) -> Result<i32, Failure> {
-    not_yet("windows-matrix", "run `npm run eval:windows` for now")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use std::path::PathBuf;
-
-    use cf_base::env::Env;
-
-    fn run(command: &Command) -> Failure {
-        let context = Context {
-            root: PathBuf::from("checkout"),
-            env: Env::default(),
-        };
-        let (mut out, mut err) = (Vec::new(), Vec::new());
-        let mut console = Console {
-            out: &mut out,
-            err: &mut err,
-        };
-        let Run::Native(run) = &command.run;
-        let said = run(
-            &context,
-            &[OsString::from("--host"), OsString::from("zeewin")],
-            &mut console,
-        );
-        assert!(
-            out.is_empty() && err.is_empty(),
-            "it starts nothing and says nothing itself"
-        );
-        said.unwrap_err()
+impl Error {
+    /// The step `invocation` ended with `status` and said `stderr`.
+    fn step(invocation: &Invocation, status: i32, stderr: &str) -> Self {
+        let said = stderr.trim();
+        Self::Step {
+            step: invocation.display(),
+            status,
+            said: if said.is_empty() {
+                String::new()
+            } else {
+                format!(": {said}")
+            },
+        }
     }
 
-    #[test]
-    fn until_the_landing_that_ports_them_the_commands_say_so_and_what_to_run() {
-        let said: Vec<String> = COMMANDS
-            .iter()
-            .map(|command| run(command).to_string())
-            .collect();
-        assert_eq!(
-            said,
-            [
-                "windows is not ported yet: run `npm run windows` for now",
-                "windows-matrix is not ported yet: run `npm run eval:windows` for now"
-            ]
-        );
-        for command in COMMANDS {
-            assert!(matches!(run(command), Failure::NotYet { .. }));
+    /// How a failed operation on `path` is told: what was being done.
+    fn files(what: &'static str, path: &Path) -> impl FnOnce(io::Error) -> Self {
+        let path = path.to_path_buf();
+        move |cause| Self::Files { what, path, cause }
+    }
+}
+
+fn windows(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
+    let options = Options::parse(args).map_err(Failure::Usage)?;
+    run::check(&options).map_err(|refusal| Failure::Usage(refusal.to_string()))?;
+    let interrupt = Interrupt::listen()?;
+    match run::run(context, &options, console, &interrupt) {
+        Ok(Outcome::Exited(status)) => Ok(status),
+        Ok(Outcome::Stopped) => Ok(STOPPED),
+        Err(error) => {
+            writeln!(console.err, "windows: {error}")?;
+            Ok(1)
+        }
+    }
+}
+
+fn windows_matrix(
+    context: &Context,
+    args: &[OsString],
+    console: &mut Console,
+) -> Result<i32, Failure> {
+    let options = MatrixOptions::parse(args).map_err(Failure::Usage)?;
+    let interrupt = Interrupt::listen()?;
+    let mut machine = Machine {
+        context,
+        interrupt: &interrupt,
+    };
+    match matrix::run(context, &options, &mut machine, &mut SystemClock, console) {
+        Ok(status) => Ok(status),
+        Err(error) => {
+            writeln!(console.err, "windows-matrix: {error}")?;
+            Ok(1)
         }
     }
 }

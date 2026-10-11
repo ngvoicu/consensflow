@@ -110,14 +110,6 @@ fn the_live_tests_are_one_command_whatever_their_names_and_eval_summary_is_found
 fn a_command_that_is_not_ported_yet_says_so_and_what_to_run_and_answers_1() {
     for (line, said) in [
         (
-            "windows --host zeewin",
-            "xtask: windows is not ported yet: run `npm run windows` for now\n",
-        ),
-        (
-            "windows-matrix",
-            "xtask: windows-matrix is not ported yet: run `npm run eval:windows` for now\n",
-        ),
-        (
             "eval summary",
             "xtask: eval summary is not ported yet: run `npm run eval:summary` for now\n",
         ),
