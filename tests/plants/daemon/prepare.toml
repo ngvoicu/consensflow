@@ -1,0 +1,123 @@
+# What `crates/cf-harness` does with the terminal command and with Claude's
+# settings: the stale hooks it reports (`claude/stale_hooks.rs`) and what
+# opening the app prepares (`prepare.rs`). `launcher.toml` holds the command
+# itself, and passes these on with its own; every name here begins as the
+# area does, so `npm run plants:daemon -- stale` and `-- prepare` run them.
+
+[run]
+harness-hooks = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "host_payloads"]
+
+[[plant]]
+name = "stale hooks: a hook is named in any case"
+meant = "every_settings_file_node_was_played_is_read_as_node_read_it"
+runs = ["harness-hooks"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/stale_hooks.rs"
+find = 'js::stringify(entry).contains("consensflow")'
+replace = 'js::stringify(entry).to_lowercase().contains("consensflow")'
+
+[[plant]]
+name = "stale hooks: the events are in the order of their names"
+meant = "every_settings_file_node_was_played_is_read_as_node_read_it"
+runs = ["harness-hooks"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/stale_hooks.rs"
+find = '''
+        .map(|(event, _)| event)
+        .collect()
+}'''
+replace = '''
+        .map(|(event, _)| event)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}'''
+
+[[plant]]
+name = "stale hooks: an event that is no list counts"
+meant = "every_settings_file_node_was_played_is_read_as_node_read_it"
+runs = ["harness-hooks"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/stale_hooks.rs"
+find = '''
+            entries.as_array().is_some_and(|list| {
+                list.iter()
+                    .any(|entry| js::stringify(entry).contains("consensflow"))
+            })'''
+replace = '            js::stringify(entries).contains("consensflow")'
+
+[[plant]]
+name = "stale hooks: hooks that is a list names no event"
+meant = "every_settings_file_node_was_played_is_read_as_node_read_it"
+runs = ["harness-hooks"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/stale_hooks.rs"
+find = "Some(Value::Array(hooks)) => hooks"
+replace = "Some(Value::Array(hooks)) if false => hooks"
+
+[[plant]]
+name = "stale hooks: an empty config folder is no folder"
+meant = "an_empty_claude_config_dir_is_the_working_folder_as_node_kept_it_and_no_home_is_no_failure"
+runs = ["harness-hooks"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/stale_hooks.rs"
+find = 'let folder = env.os("CLAUDE_CONFIG_DIR").map_or_else('
+replace = 'let folder = env.os("CLAUDE_CONFIG_DIR").filter(|folder| !folder.is_empty()).map_or_else('
+
+[[plant]]
+name = "stale hooks: USERPROFILE is asked before HOME"
+meant = "without_a_claude_config_dir_the_settings_are_in_dot_claude_of_the_home"
+runs = ["harness-hooks"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/stale_hooks.rs"
+find = '''
+    env.os("HOME")
+        .or_else(|| env.os("USERPROFILE"))'''
+replace = '''
+    env.os("USERPROFILE")
+        .or_else(|| env.os("HOME"))'''
+
+[[plant]]
+name = "prepare: a launcher that cannot be installed stops the integrations"
+meant = "app_preparation_says_why_its_launcher_could_not_be_installed_and_prepares_the_integrations_all_the_same"
+runs = ["harness-install"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/prepare.rs"
+find = '''
+        report.push(format!("The cf launcher could not be installed: {message}"));
+    }'''
+replace = '''
+        report.push(format!("The cf launcher could not be installed: {message}"));
+        return Prepared {
+            report,
+            pi_extension: pi::Extension::NotInstalled,
+            opencode_extension: opencode::Extension::NotInstalled,
+        };
+    }'''
+
+[[plant]]
+name = "prepare: the launcher is not installed"
+meant = "app_preparation_owns_its_launcher_and_integrations_not_role_documents_or_global_skills"
+runs = ["harness-install"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/prepare.rs"
+find = "cf_launcher::install(env, cf, &Places::default())"
+replace = "Ok::<Option<cf_launcher::Installed>, String>(None)"
+
+[[plant]]
+name = "prepare: the launcher's failure is worded another way"
+meant = "app_preparation_says_why_its_launcher_could_not_be_installed_and_prepares_the_integrations_all_the_same"
+runs = ["harness-install"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/prepare.rs"
+find = '"The cf launcher could not be installed: {message}"'
+replace = '"The launcher could not be installed: {message}"'

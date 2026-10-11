@@ -1,0 +1,210 @@
+# What the three players of Node's recordings (`crates/cf-daemon/tests/{api,page,screens}`)
+# once let pass, which Astraeus found at its first look at the daemon: a bug
+# of each kind is planted, and the player that was blind to it must fail a
+# trace. The bugs that no recorded trace can show are not here (see
+# `support.toml` for what bugs in the players' own parts can do).
+#
+# - The API's traces went through its own checks, not `api::handle` with the
+#   screens in front: a screen that took an agent's route passed.
+# - `cf`'s requests were compared by method, path and bearer: a query, a body
+#   or a trailing request that no answer showed passed.
+# - The page's operations were not held to the files they wrote, and their
+#   replies were read off the bridge and written again, so spaces and escapes
+#   did not show.
+# - The screens' world masked every time of every file, the recorder only a
+#   roster's `createdAt` and `updatedAt` (a test of the mask is what catches
+#   that: no recorded file holds a time outside them, so no daemon's bug is
+#   seen by the narrow mask alone).
+# - The API's and the screens' traces were not held to reach the ledger's
+#   `close`, where the database is compared, as the page's were.
+
+[[plant]]
+name = "players: the screens take an agent’s route (/api/whoami)"
+meant = "every_trace_of_the_api_is_answered_as_node_answered_it"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/mod.rs"
+find = '        "/api/preferences" => Some(Screen::Preferences),'
+replace = '        "/api/preferences" | "/api/whoami" => Some(Screen::Preferences),'
+
+[[plant]]
+name = "players: a screen’s path without the UI token falls through to the API"
+meant = "every_trace_of_the_api_is_answered_as_node_answered_it"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/mod.rs"
+find = 'return Some(Answer::json(401, json!({ "error": "unauthorized" })));'
+replace = "return None;"
+
+[[plant]]
+name = "players: the API’s traces go through the routes with no screens in front"
+meant = "every_trace_of_the_api_is_answered_as_node_answered_it"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/api/rig.rs"
+find = "Box::pin(async move { handle(&context, &screens, request).await })"
+replace = '''
+Box::pin(async move {
+                match cf_daemon::api::callers::caller_of(&context, &request) {
+                    Ok(caller) => match cf_daemon::api::routes::recognize(&request.method, &request.path) {
+                        Some(route) => {
+                            cf_daemon::api::routes::dispatch(&context, &caller, route, request).await
+                        }
+                        None => Err(request.unknown_route()),
+                    },
+                    Err(failure) => Err(failure),
+                }
+            })'''
+
+# The traces that polled a door (cf-board-023 and 024) depart now, a choice
+# answer being `queued` where Node's was `read`: the door's own test holds the poll.
+[[plant]]
+name = "players: cf asks the door to wait a second longer"
+meant = "puts_the_questions_on_the_board_and_polls_until_the_answer_comes"
+runs = ["daemon-api", "board-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-board/src/door.rs"
+find = "const POLL_WAIT: Duration = Duration::from_secs(20);"
+replace = "const POLL_WAIT: Duration = Duration::from_secs(21);"
+
+[[plant]]
+name = "players: cf asks for a transcript of ten items whatever it was asked for"
+meant = "every_run_of_cf_against_the_api_prints_what_it_printed_against_node"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = 'let transcript = format!("/api/tasks/{number}/transcript?last={last}");'
+replace = 'let transcript = format!("/api/tasks/{number}/transcript?last=10");'
+
+[[plant]]
+name = "players: cf writes the body of a task with its text first"
+meant = "every_run_of_cf_against_the_api_prints_what_it_printed_against_node"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+    let mut body = Map::new();
+    if mine {'''
+replace = '''
+    let mut body = Map::new();
+    body.insert("body".into(), String::new().into());
+    if mine {'''
+
+[[plant]]
+name = "players: cf asks who it is twice"
+meant = "every_run_of_cf_against_the_api_prints_what_it_printed_against_node"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '    let answer = board.get("/api/whoami")?;'
+replace = '''
+    let _ = board.get("/api/whoami");
+    let answer = board.get("/api/whoami")?;'''
+
+[[plant]]
+name = "players: a page operation leaves a file behind"
+meant = "every_page_trace_is_answered_as_node_answered"
+runs = ["daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/mod.rs"
+find = "    let kick = Rc::clone(&page.kick);"
+replace = '''
+    let kick = Rc::clone(&page.kick);
+    let home = page.env.text("CONSENSFLOW_HOME").map(str::to_owned);'''
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/mod.rs"
+find = "            if operation.kicks() {"
+replace = '''
+            if let Some(home) = &home {
+                let _ = std::fs::write(std::path::Path::new(home).join("left-behind"), "x");
+            }
+            if operation.kicks() {'''
+
+[[plant]]
+name = 'players: the bridge writes a space after "body":'
+meant = "every_page_trace_is_answered_as_node_answered"
+runs = ["daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/local/serve.rs"
+find = "        inner.write(line);"
+replace = '''
+        let line = String::from_utf8_lossy(&line)
+            .replacen("\"body\":", "\"body\": ", 1)
+            .into_bytes();
+        inner.write(line);'''
+
+[[plant]]
+name = "players: the world masks every time of every file"
+meant = "the_world_masks_what_the_recorder_masks_and_nothing_else"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/wrote.rs"
+find = 'Regex::new(r#"("(?:createdAt|updatedAt)": )"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z""#)'
+replace = 'Regex::new(r#"()"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z""#)'
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/wrote.rs"
+find = '''    if path.rsplit('/').next() == Some("agents.json") {'''
+replace = "    if path.rsplit('/').next().is_some() {"
+
+[[plant]]
+name = "players: the API’s traces are not played to the close of their ledger"
+meant = "every_trace_of_the_api_is_answered_as_node_answered_it"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/trace.rs"
+find = '    serde_json::from_str(&text).expect("a trace that is JSON")'
+replace = '''
+    let mut trace: Value = serde_json::from_str(&text).expect("a trace that is JSON");
+    if let Some(steps) = trace["steps"].as_array_mut() {
+        if steps.last().is_some_and(|step| step["method"] == "close") {
+            steps.pop();
+        }
+    }
+    trace'''
+
+[[plant]]
+name = "players: the screens’ traces are not played to the close of their ledger"
+meant = "corners_screens_004"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/trace.rs"
+find = '    serde_json::from_str(&text).expect("a trace that is JSON")'
+replace = '''
+    let mut trace: Value = serde_json::from_str(&text).expect("a trace that is JSON");
+    if let Some(steps) = trace["steps"].as_array_mut() {
+        if steps.last().is_some_and(|step| step["method"] == "close") {
+            steps.pop();
+        }
+    }
+    trace'''
+
+[[plant]]
+name = "players: the page’s traces are not played to the close of their ledger"
+meant = "every_page_trace_is_answered_as_node_answered"
+runs = ["daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/support/trace.rs"
+find = '    serde_json::from_str(&text).expect("a trace that is JSON")'
+replace = '''
+    let mut trace: Value = serde_json::from_str(&text).expect("a trace that is JSON");
+    if let Some(steps) = trace["steps"].as_array_mut() {
+        if steps.last().is_some_and(|step| step["method"] == "close") {
+            steps.pop();
+        }
+    }
+    trace'''

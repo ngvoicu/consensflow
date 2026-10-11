@@ -1,0 +1,390 @@
+# The screens: the token, the order of the checks, the routes, the pages, the feed's client.
+
+[run]
+screens-unit = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "screens::"]
+
+[[plant]]
+name = "screens: an empty bearer is the token"
+meant = "the_token_is_the_bearer_or_else_the_first_token_of_the_query"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/mod.rs"
+find = '''
+            .bearer()
+            .filter(|bearer| !bearer.is_empty())
+            .or_else(|| request.param("token"))'''
+replace = '''
+            .bearer()
+            .or_else(|| request.param("token"))'''
+
+[[plant]]
+name = "screens: the query’s token comes before the bearer"
+meant = "corners_screens_001"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/mod.rs"
+find = '''
+        let presented = request
+            .bearer()
+            .filter(|bearer| !bearer.is_empty())
+            .or_else(|| request.param("token"))'''
+replace = '''
+        let presented = request
+            .param("token")
+            .or_else(|| request.bearer().filter(|bearer| !bearer.is_empty()))'''
+
+[[plant]]
+name = "screens: any token opens them"
+meant = "core_agents_server_001"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/mod.rs"
+find = "        !presented.is_empty() && token_matches(presented, &self.token)"
+replace = "        !presented.is_empty()"
+
+[[plant]]
+name = "screens: the bare 401 says why"
+meant = "core_agents_server_001"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/mod.rs"
+find = 'return Some(Answer::json(401, json!({ "error": "unauthorized" })));'
+replace = 'return Some(Answer::json(401, json!({ "error": "unauthorized", "message": "no" })));'
+
+[[plant]]
+name = "screens: a GET’s body is read"
+meant = "a_get_reads_nothing_of_its_body_and_every_other_method_reads_it_before_any_route"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/mod.rs"
+find = '''
+        let body = if get {
+            Value::Object(Map::new())
+        } else {
+            body::read(request).await?
+        };'''
+replace = "        let body = body::read(request).await?;"
+
+[[plant]]
+name = "screens: a page is not asked for its body"
+meant = "corners_screens_002"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/mod.rs"
+find = "        let body = if get {"
+replace = '''
+        if !get && matches!(screen, Screen::Page) {
+            return Ok(Answer::json(404, json!({ "error": "not found" })));
+        }
+        let body = if get {'''
+
+[[plant]]
+name = "screens: not found is said another way"
+meant = "corners_screens_002"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/mod.rs"
+find = 'json!({ "error": "not found" })'
+replace = 'json!({ "error": "not-found" })'
+
+[[plant]]
+name = "screens: an agent’s name may begin with any letter"
+meant = "any_other_path_is_the_agents_api_s"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/mod.rs"
+find = ".is_some_and(|first| first.is_ascii_lowercase())"
+replace = ".is_some_and(|first| first.is_ascii_alphabetic())"
+
+[[plant]]
+name = "screens: an agent added is not told"
+meant = "an_agent_is_added_edited_and_removed_and_each_is_told"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/agents.rs"
+find = '''
+            .map_err(words)?;
+        (self.on_roster_change)()?;
+        Ok(Answer::created(json!({ "agent": agent })))'''
+replace = '''
+            .map_err(words)?;
+        Ok(Answer::created(json!({ "agent": agent })))'''
+
+[[plant]]
+name = "screens: a delete tells before it removes"
+meant = "a_write_the_roster_refuses_is_a_400_in_its_words_and_is_not_told"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/agents.rs"
+find = "        self.agents.roster().remove(name).map_err(words)?;"
+replace = '''
+        (self.on_roster_change)()?;
+        self.agents.roster().remove(name).map_err(words)?;'''
+
+[[plant]]
+name = "screens: a delete removes nothing"
+meant = "corners_screens_005"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/agents.rs"
+find = "        self.agents.roster().remove(name).map_err(words)?;"
+replace = "        let _ = name;"
+
+[[plant]]
+name = "screens: a delete answers 200"
+meant = "an_agent_is_added_edited_and_removed_and_each_is_told"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/agents.rs"
+find = "Answer::nothing(204)"
+replace = "Answer::nothing(200)"
+
+[[plant]]
+name = "screens: an agent added answers 200"
+meant = "corners_screens_005"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/agents.rs"
+find = 'Answer::created(json!({ "agent": agent }))'
+replace = 'Answer::ok(json!({ "agent": agent }))'
+
+[[plant]]
+name = "screens: an agent’s edit reads the model before the tier"
+meant = "a_body_that_is_no_object_is_read_as_javascript_read_it"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/agents.rs"
+find = 'let patch = fields(body, "workTier")?;'
+replace = 'let patch = fields(body, "model")?;'
+
+[[plant]]
+name = "screens: an agent that is not offered says notInstalled before hidden (the roster offers them, for the page too)"
+meant = "an_agent_that_cannot_be_offered_is_said_hidden_and_not_installed_in_that_order"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/roster.rs"
+find = '''
+                fields.insert("hidden".to_owned(), Value::Bool(true));
+                fields.insert("notInstalled".to_owned(), Value::Bool(true));'''
+replace = '''
+                fields.insert("notInstalled".to_owned(), Value::Bool(true));
+                fields.insert("hidden".to_owned(), Value::Bool(true));'''
+
+[[plant]]
+name = "screens: every harness is said installed"
+meant = "the_agents_are_the_catalog_s_as_the_pickers_offer_them"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/agents.rs"
+find = "            .filter(|harness| !missing.contains(harness))"
+replace = "            .filter(|_| true)"
+
+[[plant]]
+name = "screens: the efforts leave a harness out"
+meant = "core_agents_server_006"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/agents.rs"
+find = "            .map(|harness| (harness.as_str().to_owned(), json!(efforts(harness))))"
+replace = '''
+            .filter(|harness| *harness != Harness::Devin)
+            .map(|harness| (harness.as_str().to_owned(), json!(efforts(harness))))'''
+
+[[plant]]
+name = "screens: a check is looked at again for any refresh"
+meant = "a_check_of_one_harness_is_kept_five_minutes_and_looked_at_again_only_when_asked_to"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/harnesses.rs"
+find = '        let refresh = property(body, "refresh")? == Some(&Value::Bool(true));'
+replace = '        let refresh = property(body, "refresh")?.is_some();'
+
+[[plant]]
+name = "screens: a check names no harness"
+meant = "a_check_of_one_harness_is_kept_five_minutes_and_looked_at_again_only_when_asked_to"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/harnesses.rs"
+find = "self.admin.check(id.map(Harness::as_str), refresh)"
+replace = "self.admin.check(None, refresh)"
+
+[[plant]]
+name = "screens: a harness that is none of the five is Claude"
+meant = "corners_screens_009"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/harnesses.rs"
+find = "        .ok_or_else(|| UNKNOWN.to_owned())"
+replace = '''
+        .or(Some(Harness::Claude))
+        .ok_or_else(|| UNKNOWN.to_owned())'''
+
+[[plant]]
+name = "screens: an unknown harness is said more"
+meant = "corners_screens_009"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/harnesses.rs"
+find = 'const UNKNOWN: &str = "Unknown harness";'
+replace = 'const UNKNOWN: &str = "Unknown harnesses";'
+
+[[plant]]
+name = "screens: null is read in other words than V8’s"
+meant = "corners_screens_006"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/body.rs"
+find = '''"Cannot read properties of null (reading '{name}')"'''
+replace = '''"Cannot read property of null (reading '{name}')"'''
+
+[[plant]]
+name = "screens: no body is not an empty object"
+meant = "corners_screens_003"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/body.rs"
+find = "    if text.is_empty() {"
+replace = "    if false {"
+
+[[plant]]
+name = "screens: null is a body a roster operation reads"
+meant = "corners_screens_006"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/body.rs"
+find = "    property(body, first)?;"
+replace = "    let _ = first;"
+
+[[plant]]
+name = "screens: a body that is no JSON says it in no words of the daemon’s"
+meant = "corners_screens_002"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/body.rs"
+find = '        .map_err(|failed| format!("the request body is not valid JSON: {failed}"))'
+replace = "        .map_err(|failed| failed.to_string())"
+
+[[plant]]
+name = "screens: the token goes into the page as it is"
+meant = "a_token_that_needs_escaping_is_written_as_json_stringify_writes_it"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/pages.rs"
+find = "        &js::stringify(&Value::String(token.to_owned())),"
+replace = '        &format!("\"{token}\""),'
+
+[[plant]]
+name = "screens: the version is not put into the page"
+meant = "core_agents_server_003"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/pages.rs"
+find = 'AGENTS.replacen("$VERSION", VERSION, 1)'
+replace = 'AGENTS.replacen("$VERSION", "0", 1)'
+
+[[plant]]
+name = "screens: the agents page is not the recorded one"
+meant = "core_agents_server_003"
+runs = ["daemon-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/pages/agents.html"
+find = '<p class="eyebrow eyebrow--section">Define your own</p>'
+replace = '<p class="eyebrow eyebrow--section">Define yours</p>'
+
+[[plant]]
+name = "network: a redirect is followed"
+meant = "a_redirect_is_an_answer_like_another_and_is_not_followed"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = ".redirect(Policy::none())"
+replace = ".redirect(Policy::limited(5))"
+
+[[plant]]
+name = "network: a connection cut in the body is said as one that failed"
+meant = "a_connection_that_closes_while_the_body_comes_is_terminated"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = "Err(_) => Err(TERMINATED.to_owned()),"
+replace = "Err(_) => Err(FETCH_FAILED.to_owned()),"
+
+[[plant]]
+name = "network: a connection that cannot be made is said in the client’s words"
+meant = "a_connection_that_cannot_be_made_is_fetch_failed"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = ".map_err(|_| FETCH_FAILED.to_owned())?;"
+replace = ".map_err(|failed| failed.to_string())?;"
+
+[[plant]]
+name = "network: the client names no one"
+meant = "the_request_is_a_plain_get_that_names_its_client"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = '''
+        .no_proxy()
+        .user_agent(format!("ConsensFlow/{VERSION}"))'''
+replace = "        .no_proxy()"
+
+[[plant]]
+name = "network: a crypto provider is installed for the whole process"
+meant = "the_client_is_made_on_ring_and_installs_nothing_process_wide"
+runs = ["screens-unit"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = "    let provider = Arc::new(rustls::crypto::ring::default_provider());"
+replace = '''
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let _ = rustls::crypto::ring::default_provider().install_default();'''
+
+[[plant]]
+name = "start: the screens are given no environment"
+meant = "the_daemon_serves_the_screens_under_its_token_over_its_own_environment"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::screens::"],
+]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = '''
+        env: env.clone(),
+        agents: Rc::clone(&agents),'''
+replace = '''
+        env: Env::default(),
+        agents: Rc::clone(&agents),'''

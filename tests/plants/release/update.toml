@@ -1,0 +1,470 @@
+# Plants in the tool that makes the update feed's entry (tools/cf-release,
+# `prepare-update`): what holds an archive to its bundle (a path, a kind, a
+# mode, a size, a hash), what keeps an archive from being unpacked against the
+# machine, the versions that must agree, the shape of the signature, the
+# channel, the date and the notes, and the workflow's use of the tool. The
+# tool's own tests (its unit tests, and the command run on bundles and archives
+# made in the test) must catch each, and the workflow's text test the last.
+
+[run]
+# The command, on a bundle, an archive, a signature and notes made for each test.
+prepare-update = ["cargo", "test", "--offline", "-p", "cf-release", "--test", "prepare_update"]
+# The pure parts: the signature, the date, the channel, the paths, the trees, the entry.
+release-lib = ["cargo", "test", "--offline", "-p", "cf-release", "--lib"]
+# The workflow's text: where the tool is built, and what runs it.
+release-tool = ["node", "--test", "tests/release-tool.test.mjs"]
+
+# What an archive is held to.
+[[plant]]
+name = "update: an archive entry with a different mode passes"
+meant = "rejects_an_entry_whose_mode_is_not_the_bundles"
+runs = ["prepare-update", "release-lib"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/tree.rs"
+find = "(Some(in_bundle), Some(in_archive)) if in_bundle == in_archive => None,"
+replace = "(Some(in_bundle), Some(in_archive)) if in_bundle.kind == in_archive.kind => None,"
+
+[[plant]]
+name = "update: a set-user-id or sticky bit that the bundle does not have passes"
+meant = "rejects_a_set_user_id_or_sticky_bit_that_the_bundle_does_not_have"
+runs = ["prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/archive.rs"
+find = "let mode = entry.header().mode()? & PERMISSION_BITS;"
+replace = "let mode = entry.header().mode()? & 0o777;"
+
+[[plant]]
+name = "update: a file with other bytes of the same length passes"
+meant = "rejects_bytes_that_differ_and_are_as_many"
+runs = ["prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/tree.rs"
+find = "Ok((size, hex))"
+replace = "Ok((size, String::new()))"
+
+[[plant]]
+name = "update: an archive with a path more than the bundle has passes"
+meant = "rejects_a_path_the_archive_has_and_the_bundle_has_not_and_the_other_way"
+runs = ["prepare-update", "release-lib"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/tree.rs"
+find = '(None, Some(_)) => Some(format!("{name} is in the archive and not in the bundle")),'
+replace = "(None, Some(_)) => None,"
+
+[[plant]]
+name = "update: a bundle with a symlink in it passes"
+meant = "rejects_a_bundle_with_a_symlink_or_a_special_file_in_it"
+runs = ["prepare-update", "release-lib"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/tree.rs"
+find = "if file_type.is_symlink() {"
+replace = "if false && file_type.is_symlink() {"
+
+# What keeps an archive from being unpacked against the machine.
+[[plant]]
+name = "update: a symlink or a hard link in the archive passes"
+meant = "rejects_a_link_of_either_kind_wherever_it_points"
+runs = ["prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/archive.rs"
+find = "if kind.is_symlink() || kind.is_hard_link() {"
+replace = "if kind.is_symlink() && kind.is_hard_link() {"
+
+[[plant]]
+name = "update: a pipe or a device in the archive is a file"
+meant = "rejects_an_entry_that_is_a_pipe_or_a_device"
+runs = ["prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/archive.rs"
+find = "} else if kind.is_file() {"
+replace = "} else if kind.is_file() || !kind.is_dir() {"
+
+[[plant]]
+name = "update: a path with .. in it passes"
+meant = "a_path_that_leaves_the_root_or_never_was_under_it_is_unsafe"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/archive.rs"
+find = 'if parts.first() != Some(&ROOT) || parts.contains(&"..") {'
+replace = "if parts.first() != Some(&ROOT) {"
+
+[[plant]]
+name = "update: a path outside the root passes"
+meant = "a_path_that_leaves_the_root_or_never_was_under_it_is_unsafe"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/archive.rs"
+find = 'if parts.first() != Some(&ROOT) || parts.contains(&"..") {'
+replace = 'if parts.contains(&"..") {'
+
+[[plant]]
+name = "update: an absolute path passes"
+meant = "a_path_that_leaves_the_root_or_never_was_under_it_is_unsafe"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/archive.rs"
+find = "if raw.starts_with('/') {"
+replace = "if false && raw.starts_with('/') {"
+
+[[plant]]
+name = "update: a path given twice passes"
+meant = "rejects_a_path_given_twice_however_it_is_written"
+runs = ["prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/archive.rs"
+find = "if self.tree.contains_key(&name) {"
+replace = "if false && self.tree.contains_key(&name) {"
+
+[[plant]]
+name = "update: an archive with no root passes"
+meant = "rejects_an_archive_with_no_root_or_no_info_plist"
+runs = ["prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/archive.rs"
+find = "if !found.tree.contains_key(ROOT) {"
+replace = "if false && !found.tree.contains_key(ROOT) {"
+
+[[plant]]
+name = "update: an archive that is empty is read"
+meant = "rejects_missing_and_empty_archives"
+runs = ["prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/archive.rs"
+find = "if size == 0 {"
+replace = "if false {"
+
+[[plant]]
+name = "update: an archive named for no version passes"
+meant = "a_filename_is_a_safe_asset_name_that_ends_as_an_app_archive_and_names_the_version"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/archive.rs"
+find = 'if safe && name.ends_with(".app.tar.gz") && name.contains(version) {'
+replace = 'if safe && name.ends_with(".app.tar.gz") {'
+
+[[plant]]
+name = "update: an Info.plist of any size is read into memory"
+meant = "reads_an_info_plist_as_large_as_an_app_has_one_and_no_larger"
+runs = ["prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/archive.rs"
+find = "if name != INFO_PLIST || entry.size() > INFO_PLIST_LIMIT {"
+replace = "if name != INFO_PLIST {"
+
+# The versions that must agree.
+[[plant]]
+name = "update: a version mismatch passes: the sources say another"
+meant = "rejects_a_bundle_that_disagrees_with_the_source_versions"
+runs = ["prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update.rs"
+find = "if source != bundle.version {"
+replace = "if false && source != bundle.version {"
+
+[[plant]]
+name = "update: a version mismatch passes: the archive says another"
+meant = "rejects_an_archive_whose_packaged_version_differs"
+runs = ["prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/archive.rs"
+find = "if packaged != bundle.version {"
+replace = "if false && packaged != bundle.version {"
+
+[[plant]]
+name = "update: a bundle that is no .app folder passes"
+meant = "rejects_what_is_not_an_app_folder"
+runs = ["prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/bundle.rs"
+find = "if !named_app || !path.is_dir() {"
+replace = "if !path.is_dir() {"
+
+[[plant]]
+name = "update: an executable name that leaves its folder passes"
+meant = "rejects_an_executable_name_that_leaves_the_folder_it_is_in"
+runs = ["prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/bundle.rs"
+find = '''if executable.contains(['/', '\\', '\0']) {'''
+replace = '''if false && executable.contains(['/', '\\', '\0']) {'''
+
+[[plant]]
+name = "update: a bundle without a window's cf is read"
+meant = "rejects_a_bundle_without_the_cf_a_window_runs"
+runs = ["prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/bundle.rs"
+find = '''for (what, required) in [("native executable", &binary), ("a window's cf", &cf)] {'''
+replace = 'for (what, required) in [("native executable", &binary)] {'
+
+# The channel, the date, the notes, the entry.
+[[plant]]
+name = "update: the stable channel takes a prerelease"
+meant = "only_a_stable_release_goes_to_the_stable_channel"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/channel.rs"
+find = "Self::Stable => Err(ChannelError::NotStable),"
+replace = "Self::Stable => Ok(()),"
+
+[[plant]]
+name = "update: the alpha channel takes any prerelease"
+meant = "the_alpha_channel_takes_prereleases_that_begin_with_alpha"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/channel.rs"
+find = '''Self::Alpha if prerelease.split('.').next() == Some("alpha") => Ok(()),'''
+replace = "Self::Alpha if prerelease.split('.').next().is_some() => Ok(()),"
+
+[[plant]]
+name = "update: a channel in other letters is one"
+meant = "a_channel_is_alpha_or_stable_and_nothing_else"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/channel.rs"
+find = '"alpha" => Ok(Self::Alpha),'
+replace = '"alpha" | "Alpha" => Ok(Self::Alpha),'
+
+[[plant]]
+name = "update: a date that does not exist passes"
+meant = "every_month_has_the_days_it_has"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/date.rs"
+find = "&& (1..=days_in_month(year, month)).contains(&day)"
+replace = "&& (1..=31).contains(&day)"
+
+[[plant]]
+name = "update: a date with no zone passes"
+meant = "what_is_not_in_the_form_is_refused"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/date.rs"
+find = "offset(rest)?;"
+replace = "let _ = offset(rest);"
+
+[[plant]]
+name = "update: a date is not checked at all"
+meant = "rejects_invalid_channels_and_dates"
+runs = ["prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update.rs"
+find = "date::check(&options.date).map_err(failed)?;"
+replace = "let _ = date::check(&options.date);"
+
+[[plant]]
+name = "update: notes of any length pass"
+meant = "notes_of_64_kib_are_the_most_there_can_be_counted_in_bytes"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/feed.rs"
+find = "if notes.len() > NOTES_LIMIT {"
+replace = "if false && notes.len() > NOTES_LIMIT {"
+
+[[plant]]
+name = "update: the notes keep the blank around them"
+meant = "the_notes_are_the_text_of_the_file_without_javascripts_blank_around_it"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/feed.rs"
+find = "let notes = js::trim(&text);"
+replace = "let notes = &*text;"
+
+[[plant]]
+name = "update: the entry names the release without its v"
+meant = "what_the_script_this_replaced_wrote_for_a_build_is_what_this_writes"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/feed.rs"
+find = '"url": format!("{DOWNLOADS}/v{}/{}", build.version, build.archive),'
+replace = '"url": format!("{DOWNLOADS}/{}/{}", build.version, build.archive),'
+
+[[plant]]
+name = "update: the entry has no line break at its end"
+meant = "the_entry_is_one_line_in_the_order_the_updater_documents"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/feed.rs"
+find = 'format!("{}\n", js::stringify(&entry))'
+replace = "js::stringify(&entry)"
+
+[[plant]]
+name = "update: an archive is not inspected at all"
+meant = "rejects_an_archive_whose_file_bytes_differ_from_the_supplied_bundle"
+runs = ["prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update.rs"
+find = "let asset = archive::inspect(&options.archive, &bundle).map_err(failed)?;"
+replace = "let asset = options.archive.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();"
+
+# The signature's shape.
+[[plant]]
+name = "update: a signature cut short passes as text"
+meant = "text_too_short_or_not_text_is_refused_before_its_lines_are_counted"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/signature.rs"
+find = ".filter(|bytes| bytes.len() >= SHORTEST)"
+replace = ".filter(|_| true)"
+
+[[plant]]
+name = "update: a signature that is no UTF-8 passes as text"
+meant = "text_too_short_or_not_text_is_refused_before_its_lines_are_counted"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/signature.rs"
+find = "String::from_utf8(bytes).map_err(|_| SignatureError::NotBase64)?"
+replace = "String::from_utf8_lossy(&bytes).into_owned()"
+
+[[plant]]
+name = "update: a signature of more than four lines passes"
+meant = "four_lines_of_the_right_kinds_make_the_envelope"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/signature.rs"
+find = "let &[untrusted, key, trusted, global] = lines.as_slice() else {"
+replace = "let &[untrusted, key, trusted, global, ..] = lines.as_slice() else {"
+
+[[plant]]
+name = "update: a signature with any first line passes"
+meant = "four_lines_of_the_right_kinds_make_the_envelope"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/signature.rs"
+find = "let envelope = untrusted == UNTRUSTED_COMMENT"
+replace = "let envelope = !untrusted.is_empty()"
+
+[[plant]]
+name = "update: a signature with any trusted comment passes"
+meant = "the_trusted_comment_has_a_timestamp_a_gap_and_a_file_name"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/signature.rs"
+find = "&& is_trusted_comment(trusted)"
+replace = "&& !trusted.is_empty()"
+
+[[plant]]
+name = "update: a signature with the blank of its file around it is refused"
+meant = "the_file_is_read_without_the_blank_around_it"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/signature.rs"
+find = "let signature = js::trim(&text);"
+replace = "let signature = &*text;"
+
+# The words of the command line.
+[[plant]]
+name = "update: a flag given twice passes"
+meant = "a_flag_without_a_value_or_given_twice_is_refused"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/args.rs"
+find = "if values.insert(name, value.clone()).is_some() {"
+replace = "if values.insert(name, value.clone()).is_some() && false {"
+
+[[plant]]
+name = "update: a flag is given the next flag as its value"
+meant = "a_flag_without_a_value_or_given_twice_is_refused"
+runs = ["release-lib", "prepare-update"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/args.rs"
+find = '.filter(|value| !value.as_encoded_bytes().starts_with(b"--"));'
+replace = ".filter(|_| true);"
+
+# The workflow's use of the tool.
+[[plant]]
+name = "update: the feed entry is made through cargo run"
+meant = "is what the notes step runs, by its path"
+runs = ["release-tool"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '"$release_tool" prepare-update --repo "$PWD" \'
+replace = 'cargo run --release --locked -p cf-release -- prepare-update --repo "$PWD" \'
+
+[[plant]]
+name = "update: the version comes from node again"
+meant = "is what the notes step runs, by its path"
+runs = ["release-tool"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = 'version=$("$release_tool" version)'
+replace = '''version=$(node -p "require('./package.json').version")'''
+
+[[plant]]
+name = "update: the tool is built in the step that signs the update bundle, where the key is"
+meant = "never has a step that holds a key build or run anything through cargo"
+runs = ["release-tool"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '"$GITHUB_WORKSPACE/app/node_modules/.bin/tauri" signer sign ConsensFlow.app.tar.gz'
+replace = '''
+cargo build --release --locked -p cf-release
+          "$GITHUB_WORKSPACE/app/node_modules/.bin/tauri" signer sign ConsensFlow.app.tar.gz'''
+
+[[plant]]
+name = "update: the tool is built in a step that holds a key"
+meant = "is built with the lockfile in a step of its own that holds no key"
+runs = ["release-tool"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''
+      - name: Build the release tool
+        run: cargo build'''
+replace = '''
+      - name: Build the release tool
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: cargo build'''
+
+[[plant]]
+name = "update: the tool is built without the lockfile"
+meant = "is built with the lockfile in a step of its own that holds no key"
+runs = ["release-tool"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = "cargo build --release --locked -p cf-release"
+replace = "cargo build --release -p cf-release"

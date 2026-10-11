@@ -1,0 +1,43 @@
+# The plants of the Rust daemon, and of the crates it stands on (the ledger, the engine, the
+# harness, the launcher): each is a bug one test was written for. A run here is a `cargo test`
+# of a package, or a `node --test` of the extensions and the page that the daemon serves.
+#
+# What a plant is, and what this file and the tables beside it hold, is told in
+# tools/xtask/src/plants/kit.rs; `cargo xtask plants` runs them.
+
+run_limit_minutes = 5
+tables = ["run", "front", "parts", "constants", "screens", "support", "players", "launcher", "prepare", "detect", "pause", "pause-notes", "waiting-notes", "decided", "receipt-a", "obligations", "sessions", "review", "claude-rest", "taken-back", "board", "channels"]
+
+[run]
+bridge = ["cargo", "test", "--offline", "-p", "cf-bridge", "--features", "local", "--lib", "local::"]
+stop = ["cargo", "test", "--offline", "-p", "cf", "--test", "daemon_stop"]
+board-lib-door = ["cargo", "test", "--offline", "-p", "cf-board", "--lib", "door::"]
+cf-lib-board = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::"]
+daemon-api = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "api"]
+daemon-lib-body = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "body::"]
+daemon-lib-door = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "door::"]
+daemon-lib-files = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "files::"]
+daemon-lib-host = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::"]
+daemon-lib-pass = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "pass::"]
+daemon-lib-routes-answers = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::answers"]
+daemon-lib-routes-door = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::door"]
+daemon-lib-routes-task = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::task"]
+daemon-lib-server = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "server::"]
+daemon-lib-start = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::"]
+daemon-lib-stop = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "stop::"]
+daemon-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "page"]
+# The player of Node's recordings (`tests/screens`).
+daemon-screens = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "screens"]
+# The engine's dispatcher tests, whole.
+engine-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher"]
+# The chief eval's plumbing counts, over a ledger with a result withdrawn.
+evals-measure = ["node", "--test", "--test-reporter=tap", "tests/evals-measure.test.mjs"]
+# The one test of what opening the app prepares that a folder's writability breaks.
+harness-install = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "install"]
+# A Claude window on the records of two live runs: its looks and its pastes.
+harness-launch-claude-stops = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::stops"]
+# The ledger's tests of the redesign: every sequence of its model.
+ledger-receipt = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt"]
+# The ledger's replay of Node's recordings, with the traces that depart on purpose.
+ledger-replay = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "replay"]
+opencode-extension = ["node", "--test", "--test-reporter=tap", "tests/opencode-extension.test.mjs"]

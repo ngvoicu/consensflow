@@ -1,0 +1,140 @@
+# The numbers Node has, each changed in turn: a test that says them in terms of the constant itself holds nothing.
+
+# The numbers Node has, each changed in turn: a test that says them in terms
+# of the constant itself holds nothing.
+[[plant]]
+name = "constant: a pass runs every two seconds"
+meant = "a_pass_runs_a_second_after_the_start_and_then_every_second"
+runs = ["daemon-lib-pass"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/pass.rs"
+find = "pub const PASS: Duration = Duration::from_millis(1000);"
+replace = "pub const PASS: Duration = Duration::from_millis(2000);"
+
+[[plant]]
+name = "constant: a pass is slow at ten seconds"
+meant = "a_pass_longer_than_five_seconds_is_written_down_and_one_of_five_is_not"
+runs = ["daemon-lib-pass"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/pass.rs"
+find = "pub const SLOW_PASS: Duration = Duration::from_millis(5_000);"
+replace = "pub const SLOW_PASS: Duration = Duration::from_millis(10_000);"
+
+[[plant]]
+name = "constant: the daemon says it is alive every hour"
+meant = "every_ten_minutes_a_line_says_it_is_alive_how_its_passes_went_and_how_big_it_is"
+runs = ["daemon-lib-pass"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/pass.rs"
+find = "pub const HEARTBEAT: Duration = Duration::from_secs(10 * 60);"
+replace = "pub const HEARTBEAT: Duration = Duration::from_secs(60 * 60);"
+
+[[plant]]
+name = "constant: a stop waits half a minute for a pass"
+meant = "a_stop_waits_only_a_moment_for_a_pass_held_up_by_a_slow_window"
+runs = ["daemon-lib-pass"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/pass.rs"
+find = "pub const STOP_WAIT: Duration = Duration::from_millis(1_000);"
+replace = "pub const STOP_WAIT: Duration = Duration::from_millis(30_000);"
+
+[[plant]]
+name = "constant: a door polls every two and a half seconds"
+meant = "an_answer_that_comes_while_it_waits_is_found_at_the_next_poll"
+runs = ["daemon-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/door.rs"
+find = "const POLL: Duration = Duration::from_millis(250);"
+replace = "const POLL: Duration = Duration::from_millis(2500);"
+
+[[plant]]
+name = "constant: a connection idles for a minute"
+meant = "a_connection_waits_five_seconds_for_its_next_request_as_node_s_keep_alive_did"
+runs = ["daemon-lib-server"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = "const IDLE: Duration = Duration::from_secs(5);"
+replace = "const IDLE: Duration = Duration::from_secs(60);"
+
+[[plant]]
+name = "constant: the page is told a second after a change"
+meant = "the_page_is_told_the_board_moved_a_hundred_milliseconds_after_the_first_change_and_once"
+runs = ["daemon-lib-start"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = "const STATE_EVENT: Duration = Duration::from_millis(100);"
+replace = "const STATE_EVENT: Duration = Duration::from_millis(1000);"
+
+[[plant]]
+name = "constant: a preview is sixteen hundred units"
+meant = "the_preview_is_the_first_line_cut_at_160_utf16_units"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::"],
+]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/views.rs"
+find = "const PREVIEW_UNITS: usize = 160;"
+replace = "const PREVIEW_UNITS: usize = 1600;"
+
+[[plant]]
+name = "constant: the log and the trace keep fifty megabytes"
+meant = "the_log_of_a_home_is_moved_aside_past_five_million_bytes_and_not_at_them"
+runs = ["daemon-lib-files"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/log.rs"
+find = "pub const LIMIT: u64 = 5_000_000;"
+replace = "pub const LIMIT: u64 = 50_000_000;"
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "pub const LIMIT: u64 = 5_000_000;"
+replace = "pub const LIMIT: u64 = 50_000_000;"
+
+[[plant]]
+name = "constant: an agents’ request may hold four mebibytes"
+meant = "a_body_of_exactly_two_mebibytes_is_read_and_one_byte_more_is_too_large"
+runs = ["daemon-lib-body"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/body.rs"
+find = "pub const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;"
+replace = "pub const MAX_JSON_BYTES: usize = 4 * 1024 * 1024;"
+
+[[plant]]
+name = "constant: a screen’s request may hold 128 K units"
+meant = "a_screens_body_counts_the_chunks_together_and_stops_at_the_limit"
+runs = ["daemon-lib-body"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/body.rs"
+find = "pub const MAX_TEXT_UNITS: usize = 64 * 1024;"
+replace = "pub const MAX_TEXT_UNITS: usize = 128 * 1024;"
+
+[[plant]]
+name = "constant: the open deadline is ten minutes"
+meant = "an_open_the_host_never_answers_is_refused_as_the_deadline_after_sixty_seconds"
+runs = ["daemon-lib-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "pub const OPEN_DEADLINE: Duration = Duration::from_secs(60);"
+replace = "pub const OPEN_DEADLINE: Duration = Duration::from_secs(600);"
+
+[[plant]]
+name = "constant: the stop waits half a minute"
+meant = "a_pass_that_never_ends_a_door_an_idle_connection_and_a_body_half_sent_cost_one_deadline"
+runs = ["daemon-lib-stop"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = "pub const DEADLINE: Duration = Duration::from_secs(1);"
+replace = "pub const DEADLINE: Duration = Duration::from_secs(30);"

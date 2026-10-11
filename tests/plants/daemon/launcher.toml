@@ -1,0 +1,374 @@
+# The terminal command's plants (`crates/cf-launcher`), with those of what
+# `crates/cf-harness` does with it (`prepare.toml`): each bug is one a test was
+# written for, and the plant says which. They are the proof that those tests
+# hold what they claim, and run with the rest: `npm run plants:daemon --
+# launcher` (every name here begins with it; the harness's begin `stale` and
+# `prepare`).
+#
+# What no plant can show is what only a system that is not this one reads: the
+# `.cmd` run by cmd.exe (`crates/cf-launcher/tests/run.rs` runs it on Windows),
+# and libuv's attribute test of a writable folder there (`places.rs`).
+
+[run]
+launcher-units = ["cargo", "test", "--offline", "-p", "cf-launcher", "--lib"]
+launcher-goldens = ["cargo", "test", "--offline", "-p", "cf-launcher", "--test", "goldens"]
+launcher-run = ["cargo", "test", "--offline", "-p", "cf-launcher", "--test", "run"]
+launcher-repair = ["cargo", "test", "--offline", "-p", "cf-launcher", "--test", "repair"]
+launcher-holds = ["cargo", "test", "--offline", "-p", "cf-launcher", "--test", "repair_holds"]
+launcher-terminal = ["cargo", "test", "--offline", "-p", "cf-launcher", "--test", "terminal"]
+
+[[plant]]
+name = "launcher: a launcher for cmd ends its lines in LF"
+meant = "the_launcher_for_cmd_ends_its_lines_in_cr_lf_and_forwards_the_arguments_with_percent_star"
+runs = ["launcher-units", "launcher-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/text.rs"
+find = '{pin}\"{}\" %*\r\n",'
+replace = '{pin}\"{}\" %*\n",'
+
+[[plant]]
+name = "launcher: a launcher for sh forwards no arguments"
+meant = "the_launcher_for_sh_runs_the_cf_it_names_with_every_argument"
+runs = ["launcher-units", "launcher-run", "launcher-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/text.rs"
+find = '{pin}exec \"{}\" \"$@\"\n",'
+replace = '{pin}exec \"{}\"\n",'
+
+[[plant]]
+name = "launcher: the mark is spelled in another case"
+meant = "the_mark_is_what_makes_a_command_ours"
+runs = ["launcher-units", "launcher-repair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/text.rs"
+find = 'pub(crate) const MARKER: &str = "Installed by ConsensFlow";'
+replace = 'pub(crate) const MARKER: &str = "Installed by consensflow";'
+
+[[plant]]
+name = "launcher: a program that holds the mark in its bytes is a launcher of ours"
+meant = "a_program_that_merely_holds_the_mark_in_its_bytes_is_no_launcher_of_ours"
+runs = ["launcher-units", "launcher-repair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/text.rs"
+find = '''text.contains(MARKER) && !text.contains('\0')'''
+replace = "text.contains(MARKER)"
+
+[[plant]]
+name = "launcher: a dollar sign in a path is left for the shell to read"
+meant = "what_sh_reads_for_itself_is_escaped_in_a_path_and_nothing_else_is"
+runs = ["launcher-units", "launcher-run"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/text.rs"
+find = '''matches!(character, '\\' | '"' | '$' | '`')'''
+replace = '''matches!(character, '\\' | '"' | '`')'''
+
+[[plant]]
+name = "launcher: a percent sign in a cmd path is not doubled"
+meant = "a_percent_sign_is_doubled_in_a_cmd_path_and_nothing_else_is"
+runs = ["launcher-units"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/text.rs"
+find = '''text.replace('%', "%%")'''
+replace = '''text.replace('%', "%")'''
+
+[[plant]]
+name = "launcher: the old shape's white space is Rust's, not JavaScript's"
+meant = "the_old_shape_is_the_first_quoted_pair_that_the_pattern_matches_and_no_other"
+runs = ["launcher-units", "launcher-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/text.rs"
+find = "space.chars().all(js::is_space)"
+replace = "space.chars().all(char::is_whitespace)"
+
+[[plant]]
+name = "launcher: the old shape need not name a cf.mjs"
+meant = "the_old_shape_is_the_first_quoted_pair_that_the_pattern_matches_and_no_other"
+runs = ["launcher-units", "launcher-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/text.rs"
+find = '''
+            && entry.len() > ENTRY.len()
+            && entry.ends_with(ENTRY);'''
+replace = "            && entry.len() > ENTRY.len();"
+
+[[plant]]
+name = "launcher: the old shape is the last quoted pair that fits, not the first"
+meant = "the_old_shape_is_the_first_quoted_pair_that_the_pattern_matches_and_no_other"
+runs = ["launcher-units", "launcher-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/text.rs"
+find = "quotes.windows(4).find_map("
+replace = "quotes.windows(4).rev().find_map("
+
+[[plant]]
+name = "launcher: a verbatim path is written as it is"
+meant = "a_path_is_spelled_plain_for_windows_and_as_it_is_for_anything_else"
+runs = ["launcher-units", "launcher-repair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/text.rs"
+find = '''
+    if !windows {
+        return text.into_owned();'''
+replace = '''
+    if true {
+        return text.into_owned();'''
+
+[[plant]]
+name = "launcher: a repair asks for the spelling it was given"
+meant = "a_cf_named_in_the_verbatim_spelling_is_written_and_known_in_the_plain_one"
+runs = ["launcher-repair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/repair.rs"
+find = "let cf = spelled(cf, windows);"
+replace = "let cf = cf.to_string_lossy();"
+
+[[plant]]
+name = "launcher: a command is known by the spelling it was given"
+meant = "a_cf_named_in_the_verbatim_spelling_is_written_and_known_in_the_plain_one"
+runs = ["launcher-repair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/wiring.rs"
+find = "mine: named == spelled(cf, windows),"
+replace = "mine: named == cf.to_string_lossy(),"
+
+[[plant]]
+name = "launcher: a repair drops the home a command pinned"
+meant = "an_old_command_keeps_the_home_it_pinned"
+runs = ["launcher-repair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/repair.rs"
+find = "let script = launcher(windows, cf, pinned_home(&text, windows).as_deref());"
+replace = "let script = launcher(windows, cf, None);"
+
+[[plant]]
+name = "launcher: a repair pins a home the command did not"
+meant = "an_old_command_is_rewritten_in_the_new_shape_by_both_its_names"
+runs = ["launcher-repair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/repair.rs"
+find = "let script = launcher(windows, cf, pinned_home(&text, windows).as_deref());"
+replace = 'let script = launcher(windows, cf, Some("/another/home"));'
+
+[[plant]]
+name = "launcher: a repair rewrites a command that already runs this cf"
+meant = "a_repair_run_twice_writes_nothing_the_second_time"
+runs = ["launcher-holds"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/repair.rs"
+find = '''
+    if matches!(runs(&text, windows), Some(Runs::Native { cf: named }) if named == cf) {
+        return Repair::Current;
+    }'''
+replace = ""
+
+[[plant]]
+name = "launcher: a repair points a command at a place macOS takes away"
+meant = "an_app_opened_from_where_it_was_downloaded_leaves_the_command_as_it_is"
+runs = ["launcher-holds"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/repair.rs"
+find = '''
+    if is_translocated(cf) {
+        return Repair::Transient;
+    }'''
+replace = ""
+
+[[plant]]
+name = "launcher: a repair takes a command that runs another cf for this ones"
+meant = "a_command_that_runs_another_bundles_cf_is_rewritten_to_this_one"
+runs = ["launcher-repair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/repair.rs"
+find = "Some(Runs::Native { cf: named }) if named == cf)"
+replace = "Some(Runs::Native { cf: _named }) if true)"
+
+[[plant]]
+name = "launcher: a repair rewrites a command that is not ours"
+meant = "an_unmarked_command_is_left_alone_byte_for_byte_and_so_is_its_time"
+runs = ["launcher-holds"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/repair.rs"
+find = '''
+    if !is_ours(&text) {
+        return Repair::Unmarked;
+    }'''
+replace = ""
+
+[[plant]]
+name = "launcher: a repair makes a command where there was none"
+meant = "a_missing_command_is_never_made_and_nor_is_the_folder_it_would_be_in"
+runs = ["launcher-holds"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/repair.rs"
+find = '''
+    if !file.exists() {
+        return Repair::Absent;
+    }'''
+replace = '''
+    if !file.exists() {
+        let _ = write_launcher(file, &launcher(windows, cf, None), windows);
+        return Repair::Rewritten;
+    }'''
+
+[[plant]]
+name = "launcher: a repair looks at the first name only"
+meant = "a_command_that_is_there_under_one_name_is_not_made_under_the_other"
+runs = ["launcher-holds"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/repair.rs"
+find = "for name in names(windows) {"
+replace = "for name in names(windows).into_iter().take(1) {"
+
+[[plant]]
+name = "launcher: a status is asked of the second name"
+meant = "a_command_by_the_short_name_alone_is_not_the_command_that_is_reported"
+runs = ["launcher-terminal", "launcher-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/install.rs"
+find = "let name = names(env.on_windows())[0];"
+replace = "let name = names(env.on_windows())[1];"
+
+[[plant]]
+name = "launcher: a folder is on PATH when a folder on it begins like it"
+meant = "every_install_of_the_form_of_cmd_leaves_what_node_left_and_says_what_it_said"
+runs = ["launcher-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/install.rs"
+find = ".any(|at| at == dir_text)"
+replace = ".any(|at| at.starts_with(&dir_text))"
+
+[[plant]]
+name = "launcher: an install replaces someone else's command"
+meant = "every_install_of_the_form_of_cmd_leaves_what_node_left_and_says_what_it_said"
+runs = ["launcher-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/install.rs"
+find = "if file.exists() && !is_ours(&read_text(&file)?) {"
+replace = "if file.exists() && false {"
+
+[[plant]]
+name = "launcher: an install makes a command that cannot be run"
+meant = "writes_a_launcher_that_runs_this_very_copy"
+runs = ["launcher-terminal", "launcher-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/install.rs"
+find = "std::fs::Permissions::from_mode(0o755)"
+replace = "std::fs::Permissions::from_mode(0o644)"
+
+[[plant]]
+name = "launcher: the last folder that can be written takes the command"
+meant = "the_first_candidate_that_can_be_written_takes_the_command_and_a_missing_one_is_made"
+runs = ["launcher-terminal"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/install.rs"
+find = "folders.iter().find(|folder| writable(folder))"
+replace = "folders.iter().rfind(|folder| writable(folder))"
+
+[[plant]]
+name = "launcher: the refusal is worded another way"
+meant = "explains_itself_when_no_candidate_directory_can_be_written"
+runs = ["launcher-terminal", "launcher-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/install.rs"
+find = '— create one, or add it yourself",'
+replace = '- create one, or add it yourself",'
+
+[[plant]]
+name = "launcher: a project bin folder takes the command"
+meant = "by_default_the_only_place_is_the_bin_of_the_home_whatever_a_project_says"
+runs = ["launcher-units", "launcher-terminal"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/places.rs"
+find = 'let root = config_root(env).ok_or_else(|| "missing home in env".to_owned())?;'
+replace = '''
+if let Some(project) = env.path("CONSENSFLOW_BIN_DIR") {
+            return Ok(vec![project.to_path_buf()]);
+        }
+        let root = config_root(env).ok_or_else(|| "missing home in env".to_owned())?;'''
+
+[[plant]]
+name = "launcher: a folder under /opt is made"
+meant = "a_system_folder_is_one_that_begins_with_usr_or_opt_and_nothing_else_is"
+runs = ["launcher-units"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/places.rs"
+find = 'folder.starts_with("/usr") || folder.starts_with("/opt")'
+replace = 'folder.starts_with("/usr")'
+
+[[plant]]
+name = "launcher: a folder is writable only when it is a folder"
+meant = "a_file_is_as_writable_as_the_system_says_so_that_the_write_is_where_it_fails"
+runs = ["launcher-units", "launcher-goldens", "harness-install"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/places.rs"
+find = "access(dir, AccessFlags::W_OK).is_ok()"
+replace = "dir.is_dir() && access(dir, AccessFlags::W_OK).is_ok()"
+
+[[plant]]
+name = "launcher: a native command is never this copys"
+meant = "says_whether_the_command_runs_this_copy_or_another_consensflow"
+runs = ["launcher-terminal"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/wiring.rs"
+find = "mine: named == spelled(cf, windows),"
+replace = "mine: false,"
+
+[[plant]]
+name = "launcher: an old command is never this copys"
+meant = "a_command_that_runs_the_cf_mjs_beside_this_cf_is_this_copys_though_it_is_the_old_shape"
+runs = ["launcher-terminal"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/wiring.rs"
+find = 'mine: entry == spelled(&cf.with_file_name("cf.mjs"), windows),'
+replace = "mine: false,"
+
+[[plant]]
+name = "launcher: the bundle of an entry is looked for a level too high"
+meant = "says_when_the_command_runs_the_installed_release_which_development_must_never_write_into"
+runs = ["launcher-terminal"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/wiring.rs"
+find = "(0..4).fold("
+replace = "(0..3).fold("
+
+[[plant]]
+name = "launcher: a program that is not there is not said first"
+meant = "the_old_shape_is_reported_in_node_s_three_sentences"
+runs = ["launcher-units"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/wiring.rs"
+find = "if !self.exists {"
+replace = "if !self.exists && !self.mine {"

@@ -1,0 +1,176 @@
+# The receipt and stop redesign's fix round, one task per session at every
+# door: a member session takes one task at a time, whichever door gives it
+# one (a follow-up, a reopen, a task named for it, or what waited on the board
+# for its needs), and what waited goes to the session once it is free. One
+# plant takes one check out; a test of the door fails. The reopen's plant is
+# in `obligations.toml`, which is where the rule was first made.
+
+[run]
+# The engine's dispatcher tests about a follow-up that waits for its session.
+engine-follow-ups = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "follow_ups"]
+
+[[plant]]
+name = "session: a follow-up is given to a session that is on its work"
+meant = "a_follow_up_is_refused_while_its_session_is_on_its_work_and_goes_once_it_is_free"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''
+    require_free(store, &session, Giving::Task)?;
+    bring_back(store, session)'''
+replace = "    bring_back(store, session)"
+
+[[plant]]
+name = "session: a task named for a session is given to it whatever it has"
+meant = "a_task_named_for_a_session_is_refused_while_it_is_on_its_work_and_goes_once_it_is_free"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+                let named = store.participant_by_handle(project_id, to)?;
+                require_free(store, &named, Giving::Task)?;'''
+replace = "                let named = store.participant_by_handle(project_id, to)?;"
+
+[[plant]]
+name = "session: a follow-up that waits for what it needs does not make its session busy"
+meant = "a_follow_up_waiting_for_what_it_needs_makes_its_session_busy_to_every_door_though_its_window_has_nothing_in_hand"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '        &[&HELD_TASK_STATES[..], &["paused", "open"]].concat(),'
+replace = '        &[&HELD_TASK_STATES[..], &["paused"]].concat(),'
+
+[[plant]]
+name = "session: the rule holds a member that is no session, the chief too"
+meant = "the_rule_is_a_member_sessions_and_the_chief_and_a_members_own_lane_are_held_to_none"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "    if taker.member_id.is_some() && holds_work(store, taker.id)? {"
+replace = "    if holds_work(store, taker.id)? {"
+
+[[plant]]
+name = "session: a window is kept open for a follow-up that waits for what it needs"
+meant = "a_follow_up_waiting_for_what_it_needs_keeps_no_window_open_and_goes_to_one_opened_again_on_the_conversation"
+runs = ["engine-follow-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '        &[&HELD_TASK_STATES[..], &["paused"]].concat(),'
+replace = '        &[&HELD_TASK_STATES[..], &["paused", "open"]].concat(),'
+
+[[plant]]
+name = "session: a follow-up that waits for what it needs is in hand of its window"
+meant = "a_follow_up_waiting_for_what_it_needs_makes_its_session_busy_to_every_door_though_its_window_has_nothing_in_hand"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '        &[&HELD_TASK_STATES[..], &["paused"]].concat(),'
+replace = '        &[&HELD_TASK_STATES[..], &["paused", "open"]].concat(),'
+
+[[plant]]
+name = "session: a paused task is not in hand of its window"
+meant = "a_task_waiting_for_a_session_stays_through_what_does_not_free_it"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '        &[&HELD_TASK_STATES[..], &["paused"]].concat(),'
+replace = "        &HELD_TASK_STATES[..],"
+
+[[plant]]
+name = "session: a release goes to a session that has a task in hand"
+meant = "a_release_to_a_session_that_has_another_in_hand_waits_and_goes_with_that_tasks_result"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if assignee.member_id.is_some() && has_task_in_hand(store, assignee.id)? {"
+replace = "        if assignee.member_id.is_some() && false && has_task_in_hand(store, assignee.id)? {"
+
+[[plant]]
+name = "session: a task waiting for its session is not released when its need is accepted"
+meant = "a_follow_up_waiting_for_what_it_needs_makes_its_session_busy_to_every_door_though_its_window_has_nothing_in_hand"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''
+        store.move_task(&task, "accepted", json!({ "by": by }))?;
+        release_ready(store, project_id)?;'''
+replace = '        store.move_task(&task, "accepted", json!({ "by": by }))?;'
+
+[[plant]]
+name = "session: a task waiting for its session is not released with its result"
+meant = "a_release_to_a_session_that_has_another_in_hand_waits_and_goes_with_that_tasks_result"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''
+        store.move_task(&task, "done", json!({ "result": message_id }))?;
+        release_ready(store, project_id)?;'''
+replace = '        store.move_task(&task, "done", json!({ "result": message_id }))?;'
+
+[[plant]]
+name = "session: a task waiting for its session is not released when the task is called off"
+meant = "a_release_to_a_session_that_has_another_in_hand_waits_and_goes_when_that_task_is_called_off"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''
+    store.move_task(&task, "cancelled", json!({ "by": by }))?;
+    release_ready(store, project_id)?;'''
+replace = '    store.move_task(&task, "cancelled", json!({ "by": by }))?;'
+
+[[plant]]
+name = "session: a task waiting for its session is not released when the task fails"
+meant = "a_release_to_a_session_that_has_another_in_hand_waits_and_goes_when_that_task_fails"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''
+        store.move_task(&task, "failed", json!({ "reason": reason }))?;
+        release_ready(store, project_id)?;'''
+replace = '        store.move_task(&task, "failed", json!({ "reason": reason }))?;'
+
+[[plant]]
+name = "session: a task waiting for its session is not released when a delivery to it fails for good"
+meant = "a_release_to_a_session_that_has_another_in_hand_waits_and_goes_when_that_tasks_delivery_fails_for_good"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+                store.move_task(&task, "failed", json!({}))?;
+                release_ready(store, task.project_id)?;'''
+replace = '                store.move_task(&task, "failed", json!({}))?;'
+
+[[plant]]
+name = "session: a task waiting for its session is not released when its task is taken back for its tier"
+meant = "a_release_to_a_session_that_has_another_in_hand_waits_and_goes_when_that_task_is_taken_back_for_its_tier"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+        release_ready(store, project_id)?;
+        Ok(TaskReleased {'''
+replace = "        Ok(TaskReleased {"
+
+[[plant]]
+name = "session: a window is asked to stop for the task its oldest words were about"
+meant = "a_stop_paid_for_one_task_never_hides_a_later_stop_of_the_task_the_window_goes_on_with"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '                           ORDER BY m.id DESC LIMIT 1)",'
+replace = '                           ORDER BY m.id ASC LIMIT 1)",'

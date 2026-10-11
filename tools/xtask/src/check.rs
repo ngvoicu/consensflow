@@ -41,8 +41,9 @@ use crate::process::{self, Invocation};
 use crate::{app, clippy_windows};
 
 /// Where xtask's own tests are built, from the checkout's root: beside the
-/// workspace's build folder, not in it.
-const XTASK_TARGET: &str = "app/src-tauri/target/xtask-check";
+/// workspace's build folder, not in it. The plants' runs that test xtask whole
+/// name it too (`tests/plants/release`), and a test of theirs holds them to it.
+pub(crate) const XTASK_TARGET: &str = "app/src-tauri/target/xtask-check";
 
 pub const COMMANDS: &[Command] = &[Command {
     words: &["check"],

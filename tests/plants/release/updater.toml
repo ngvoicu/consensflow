@@ -1,0 +1,862 @@
+# Plants in what the updater smoke (`npm run smoke:updater`, `cargo xtask
+# smoke-updater`) reads as proof: the app's process, its daemon's process and
+# readiness, the ledger's one holder, the ledger's contents, the terminal
+# command, the bundles it inspects and makes, the key and the versions it builds
+# with, and how a program is started for it (`spawn`). Each takes one check out,
+# and a test that needs no app (the tests of tools/xtask/src/updater_smoke, and
+# of tools/xtask/src/process.rs) must fail.
+#
+# The ones in the product are in updater-product.toml.
+
+[[plant]]
+name = "updater evidence: a daemon that is not the app’s child is taken for its daemon"
+meant = "refuses_a_daemon_that_is_not_the_apps_child"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence.rs"
+find = "let mine: Vec<_> = rows.iter().filter(|row| row.ppid == seen.app).collect();"
+replace = "let mine: Vec<_> = rows.iter().collect();"
+
+[[plant]]
+name = "updater evidence: a home with a second daemon running is taken for one with a holder"
+meant = "refuses_a_home_with_a_second_daemon_running"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence.rs"
+find = '''
+        rows.len() == 1,
+        "one daemon serves the home'''
+replace = '''
+        rows.len() == rows.len(),
+        "one daemon serves the home'''
+
+[[plant]]
+name = "updater evidence: a daemon that logged no start line is taken for a ready one"
+meant = "refuses_a_daemon_that_never_logged_its_start"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence.rs"
+find = "let Some(start) = start_line(log, Some(row.pid)) else {"
+replace = "let Some(start) = start_line(log, Some(row.pid)).or_else(|| start_line(log, None)) else {"
+
+[[plant]]
+name = "updater evidence: a log that says one daemon where the process is the other is taken"
+meant = "refuses_a_log_that_says_one_daemon_where_the_process_is_the_other"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence.rs"
+find = '''
+        kind_of_command(&row.command) == start.kind,
+'''
+replace = '''
+        start.kind == start.kind,
+'''
+
+[[plant]]
+name = "updater evidence: the errors a daemon logged are not looked at"
+meant = "refuses_a_daemon_that_logged_an_error"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence.rs"
+find = '''
+            error_lines(&written).is_empty(),
+'''
+replace = '''
+            true,
+'''
+
+[[plant]]
+name = "updater evidence: a daemon that failed to start (exit 1) is not looked for"
+meant = "refuses_an_earlier_daemon_of_the_app_that_was_refused_its_start"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence.rs"
+find = "!written.iter().any(|line| refused_the_ledger(line)),"
+replace = '!written.iter().any(|line| line.ends_with(" info never")),'
+
+[[plant]]
+name = "updater evidence: a daemon of the app that was refused the ledger is let through at the end"
+meant = "say_so_when_a_daemon_the_app_started_was_refused_the_ledger"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence.rs"
+find = '''
+        refused == probes.len(),
+'''
+replace = '''
+        refused == refused,
+'''
+
+[[plant]]
+name = "updater evidence: a probe’s refusal counts against the app’s daemons"
+meant = "refuses_an_earlier_daemon_of_the_app_that_was_refused_its_start"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence.rs"
+find = '''
+        .into_iter()
+        .filter(|each| !seen.probes.contains(each))
+    {'''
+replace = '''
+        .into_iter()
+    {'''
+
+[[plant]]
+name = "updater evidence: a process that is not the app’s executable is taken for the app"
+meant = "takes_the_app_for_the_process_that_is_the_bundles_executable"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence.rs"
+find = '''
+        row.command == binary,
+'''
+replace = '''
+        binary == binary,
+'''
+
+[[plant]]
+name = "updater evidence: a zombie is taken for the running app"
+meant = "takes_the_app_for_the_process_that_is_the_bundles_executable"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence.rs"
+find = ".filter(|row| !row.state.starts_with('Z'));"
+replace = ".filter(|_| true);"
+
+[[plant]]
+name = "updater evidence: an app log that does not name the native daemon is taken for one that does"
+meant = "does_not_take_the_flips_sentence_another_bundles_cf_or_silence"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence.rs"
+find = '''app_log_text.split('\n').any(|line| line.ends_with(&said)),'''
+replace = '''app_log_text.split('\n').any(|line| line.contains("native")),'''
+
+[[plant]]
+name = "updater evidence: a second ConsensFlow that ran is taken for one that was refused"
+meant = "is_no_proof_when_the_second_one_ran"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence/holder.rs"
+find = '''
+        attempt.code == Some(1),
+'''
+replace = '''
+        attempt.code == attempt.code,
+'''
+
+[[plant]]
+name = "updater evidence: the ledger’s words are not looked for in the refusal"
+meant = "is_no_proof_when_the_second_one_ran"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence/holder.rs"
+find = '            .contains(&format!("another ConsensFlow has {db} open")),'
+replace = '            .contains(""),'
+
+[[plant]]
+name = "updater evidence: a probe that never ended is taken for a refused one"
+meant = "is_no_proof_when_the_second_one_ran"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence/holder.rs"
+find = '''
+        attempt.signal.is_none(),
+'''
+replace = '''
+        true,
+'''
+
+[[plant]]
+name = "updater evidence: a handle line from the second ConsensFlow is let through"
+meant = "is_no_proof_when_the_second_one_ran"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence/holder.rs"
+find = '''
+        attempt.out.is_empty(),
+'''
+replace = '''
+        true,
+'''
+
+[[plant]]
+name = "updater evidence: a column that changed is let through"
+meant = "is_no_longer_whole_when_a_row_is_gone"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = "if REWRITTEN.contains(&column.as_str()) {"
+replace = "if true {"
+
+[[plant]]
+name = "updater evidence: a row that is gone is let through"
+meant = "is_no_longer_whole_when_a_row_is_gone"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = '''
+            let Some(kept) = kept else {
+                return Err(Error::new(format!(
+                    "{table} {} is gone: {}",
+                    row.id(),
+                    row.json()
+                )));
+            };'''
+replace = '''
+            let Some(kept) = kept else {
+                continue;
+            };'''
+
+[[plant]]
+name = "updater evidence: a table that is gone is let through"
+meant = "is_no_longer_whole_when_a_row_is_gone"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = '''
+        let Some(now) = after.tables.get(table) else {
+            return Err(Error::new(format!("the ledger lost its {table} table")));
+        };'''
+replace = '''
+        let Some(now) = after.tables.get(table) else {
+            continue;
+        };'''
+
+[[plant]]
+name = "updater evidence: a schema that went back is let through"
+meant = "is_not_sound_when_its_schema_is_below"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = '''
+        ledger.version >= at_least,
+'''
+replace = '''
+        true,
+'''
+
+[[plant]]
+name = "updater evidence: SQLite’s own check of the file is not asked"
+meant = "is_not_sound_when_its_schema_is_below"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = '''
+        ledger.integrity == ["ok"],
+'''
+replace = '''
+        true,
+'''
+
+[[plant]]
+name = "updater evidence: a reference that does not hold is let through"
+meant = "is_not_sound_when_its_schema_is_below"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = '''
+        ledger.references.is_empty(),
+'''
+replace = '''
+        true,
+'''
+
+[[plant]]
+name = "updater evidence: a project that is not in the ledger is let through"
+meant = "has_a_project_for_each_directory_asked_for"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = '''
+            held.contains(&directory.as_ref()),
+'''
+replace = '''
+            true,
+'''
+
+[[plant]]
+name = "updater evidence: an event the daemon traced and the ledger lost is let through"
+meant = "reads_the_events_a_daemon_traced"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = '''
+            held.contains(&key),
+'''
+replace = '''
+            true,
+'''
+
+[[plant]]
+name = "updater evidence: no command is looked at: all are taken for repaired"
+meant = "is_not_repaired_while_it_still_names_nodes"
+runs = ["smoke-launchers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/launchers.rs"
+find = '''
+    for name in &planted.repaired {
+'''
+replace = '''
+    for name in &Vec::<&str>::new() {
+'''
+
+[[plant]]
+name = "updater evidence: only the first name is looked at: the second is taken for repaired"
+meant = "is_not_repaired_when_the_second_name_was_left_as_it_was"
+runs = ["smoke-launchers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/launchers.rs"
+find = '''
+    for name in &planted.repaired {
+'''
+replace = '''
+    for name in planted.repaired.iter().take(1) {
+'''
+
+[[plant]]
+name = "updater evidence: a command that does not run the update’s cf is taken for repaired"
+meant = "is_not_repaired_while_it_still_names_nodes"
+runs = ["smoke-launchers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/launchers.rs"
+find = '''
+            text.contains(&format!("exec \"{}\" \"$@\"", cf.display())),
+'''
+replace = '''
+            true,
+'''
+
+[[plant]]
+name = "updater evidence: a repaired command that lost its pin is taken for repaired"
+meant = "is_not_repaired_while_it_still_names_nodes"
+runs = ["smoke-launchers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/launchers.rs"
+find = '''
+            text.contains(&format!(
+                "export CONSENSFLOW_HOME=\"{}\"",
+                box_state.display()
+            )),
+'''
+replace = '''
+            true,
+'''
+
+[[plant]]
+name = "updater evidence: a repaired command that lost its mark is taken for repaired"
+meant = "is_not_repaired_while_it_still_names_nodes"
+runs = ["smoke-launchers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/launchers.rs"
+find = '        ensure!(text.contains(MARKER), "{shown} lost its mark");'
+replace = '        ensure!(true, "{shown} lost its mark");'
+
+[[plant]]
+name = "updater evidence: a repaired command that still names Node’s is taken for repaired"
+meant = "is_not_repaired_while_it_still_names_nodes"
+runs = ["smoke-launchers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/launchers.rs"
+find = '''
+            !(text.contains("cf.mjs") || text.contains("MacOS/node")),
+'''
+replace = '''
+            true,
+'''
+
+[[plant]]
+name = "updater evidence: a repaired command that cannot be run is taken for repaired"
+meant = "is_not_repaired_while_it_still_names_nodes"
+runs = ["smoke-launchers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/launchers.rs"
+find = '        ensure!(is_executable(&file)?, "{shown} is not executable");'
+replace = '        ensure!(true, "{shown} is not executable");'
+
+[[plant]]
+name = "updater evidence: a command that runs another cf than the daemon is taken for repaired"
+meant = "is_no_repair_when_it_runs_another_cf"
+runs = ["smoke-launchers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/launchers.rs"
+find = '''
+            version_of(sandbox, box_state, name)? == version,
+'''
+replace = '''
+            version == version,
+'''
+
+[[plant]]
+name = "updater evidence: an app log that does not say the repair is taken for one that does"
+meant = "is_not_own_home_only"
+runs = ["smoke-launchers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/launchers.rs"
+find = '''
+                app_log.split('\n').any(|line| line.ends_with(&said)),
+'''
+replace = '''
+                app_log.split('\n').any(|_| true),
+'''
+
+[[plant]]
+name = "updater evidence: a command that serves another home, changed in this home’s bin, is let through"
+meant = "is_not_own_home_only"
+runs = ["smoke-launchers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/launchers.rs"
+find = '''
+            now[name] == planted.own[name],
+'''
+replace = '''
+            now[name] == now[name],
+'''
+
+[[plant]]
+name = "updater evidence: an app log that speaks of the command pinned to another home is let through"
+meant = "is_not_own_home_only"
+runs = ["smoke-launchers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/launchers.rs"
+find = '''
+            !app_log.contains(&file.display().to_string()),
+'''
+replace = '''
+            true,
+'''
+
+[[plant]]
+name = "updater evidence: the commands of another home, changed, are let through"
+meant = "is_not_own_home_only"
+runs = ["smoke-launchers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/launchers.rs"
+find = '''
+        commands_of(&sandbox.other)? == planted.other,
+'''
+replace = '''
+        commands_of(&sandbox.other)? == commands_of(&sandbox.other)?,
+'''
+
+[[plant]]
+name = "updater evidence: an app log that speaks of another home’s command is let through"
+meant = "is_not_own_home_only"
+runs = ["smoke-launchers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/launchers.rs"
+find = '''
+        !app_log.contains(&bin_of(&sandbox.other).display().to_string()),
+'''
+replace = '''
+        true,
+'''
+
+[[plant]]
+name = "updater evidence: a process that is under the app but not its child is not looked for"
+meant = "finds_everything_under_a_process"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/processes.rs"
+find = "if row.ppid == parent && !found.contains(&row.pid) {"
+replace = "if row.ppid == root && !found.contains(&row.pid) {"
+
+[[plant]]
+name = "updater evidence: a tree is not ended, whatever the app made of it"
+meant = "ends_a_process_and_all_that_is_under_it"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/processes.rs"
+find = '''
+        if under.is_empty() && !alive(root) {
+            return;
+        }
+'''
+replace = '''
+        return;
+'''
+
+[[plant]]
+name = "updater evidence: a bundle of another app is taken"
+meant = "refuses_another_app_two_versions_in_one_plist"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/bundle.rs"
+find = '''
+        identifier == IDENTITY,
+'''
+replace = '''
+        IDENTITY == IDENTITY,
+'''
+
+[[plant]]
+name = "updater evidence: a plist with two versions is taken"
+meant = "refuses_another_app_two_versions_in_one_plist"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/bundle.rs"
+find = '''
+        plist_value(app, "CFBundleVersion")? == version,
+'''
+replace = '''
+        version == version,
+'''
+
+[[plant]]
+name = "updater evidence: a bundle with no cf is taken"
+meant = "refuses_another_app_two_versions_in_one_plist"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/bundle.rs"
+find = '''for (what, path) in [("native executable", &binary), ("window's cf", &cf)] {'''
+replace = 'for (what, path) in [("native executable", &binary)] {'
+
+[[plant]]
+name = "updater evidence: a bundle with half of Node’s files is taken"
+meant = "refuses_another_app_two_versions_in_one_plist"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/bundle.rs"
+find = '''
+        has.iter().all(|there| *there) || !has.iter().any(|there| *there),
+'''
+replace = '''
+        true,
+'''
+
+[[plant]]
+name = "updater evidence: a bundle signed again is not verified: any seal passes"
+meant = "makes_the_refused_bundles_the_way_the_smoke_needs_them"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/bundle.rs"
+find = '''
+pub fn verify_seal(app: &Path, env: &Env) -> Result {
+'''
+replace = '''
+pub fn verify_seal(app: &Path, env: &Env) -> Result {
+    if app.exists() {
+        let _ = env;
+        return Ok(());
+    }
+'''
+
+[[plant]]
+name = "updater evidence: the bundle with no cf is not signed again, so the seal refuses it before the rule does"
+meant = "makes_the_refused_bundles_the_way_the_smoke_needs_them"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/bundle.rs"
+find = '''
+                run(
+                    "/usr/bin/codesign",
+                    &args!["--force", "--deep", "--sign", "-", app],
+                    env,
+                )
+                .map(drop)
+'''
+replace = '''
+                let _ = env;
+                Ok(())
+'''
+
+[[plant]]
+name = "updater evidence: the tampered bundle is not tampered with"
+meant = "makes_the_refused_bundles_the_way_the_smoke_needs_them"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/bundle.rs"
+find = '''
+                file.write_all(b"changed after signing")
+                    .map_err(files("write", &cf))
+'''
+replace = '''
+                let _ = &mut file;
+                Ok(())
+'''
+
+[[plant]]
+name = "updater evidence: a replacement leaves the old files where they were"
+meant = "copies_a_bundle_whole_replacing_what_was_there"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/bundle.rs"
+find = '''
+    remove_all(to)?;
+    copy_over(from, to, env)
+'''
+replace = '''
+    copy_over(from, to, env)
+'''
+
+[[plant]]
+name = "updater evidence: a build that does not carry the run’s key is taken"
+meant = "a_build_is_held_to_its_key"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/build.rs"
+find = '''
+        holds(public_key),
+'''
+replace = '''
+        true,
+'''
+
+[[plant]]
+name = "updater evidence: a build that carries the product’s key is taken"
+meant = "a_build_is_held_to_its_key"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/build.rs"
+find = '''
+        !holds(product_key),
+'''
+replace = '''
+        true,
+'''
+
+[[plant]]
+name = "updater evidence: the update is not given its version"
+meant = "a_build_is_given_the_override_of_the_runs_public_key"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/build.rs"
+find = '''
+        config.insert("version".into(), json!(version));
+'''
+replace = '''
+        let _ = (config, version);
+'''
+
+[[plant]]
+name = "updater evidence: a build inherits the signing variables of the shell it runs in"
+meant = "a_build_inherits_no_updater_key_apple_certificate_or_identity"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/signing.rs"
+find = 'const SIGNING_VARIABLES: [&str; 3] = ["TAURI_", "APPLE_", "CSC_"];'
+replace = 'const SIGNING_VARIABLES: [&str; 3] = ["NOTHING_", "NOTHING_", "NOTHING_"];'
+
+[[plant]]
+name = "updater evidence: a build may use the network"
+meant = "a_build_inherits_no_updater_key_apple_certificate_or_identity"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/signing.rs"
+find = '("CARGO_NET_OFFLINE".into(), "true".into())'
+replace = '("CARGO_NET_OFFLINE".into(), "false".into())'
+
+[[plant]]
+name = "updater evidence: the update is given the checkout’s version, which is the installed app’s"
+meant = "is_the_next_one_after_the_newest_installed_apps"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/versions.rs"
+find = '''
+    if compare_versions(checkout, latest)? == Ordering::Greater {
+'''
+replace = '''
+    if true {
+'''
+
+[[plant]]
+name = "updater evidence: the update is given a version newer than the first installed app’s alone"
+meant = "is_the_next_one_after_the_newest_installed_apps"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/versions.rs"
+find = '''
+    let latest = newest(installed)?;
+'''
+replace = '''
+    let latest = installed[0];
+'''
+
+[[plant]]
+name = "updater evidence: the flip is the oldest release after the bridge"
+meant = "has_the_flip_release_the_newest_tag_after_the_bridges"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/versions.rs"
+find = '''
+        if compare_versions(version, latest_version)? == Ordering::Greater {
+'''
+replace = '''
+        if compare_versions(version, latest_version)? == Ordering::Less {
+'''
+
+[[plant]]
+name = "updater evidence: the release under test is taken for the flip"
+meant = "has_the_flip_among_the_tags_of_this_checkouts_history_but_for_the_one_under_test"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/build.rs"
+find = '''
+        .filter(|tag| !here.contains(tag))
+'''
+replace = '''
+        .filter(|_| true)
+'''
+
+[[plant]]
+name = "updater evidence: the flip’s terminal command is repaired though it was current"
+meant = "is_current_it_names_the_cf_of_the_bundle_which_the_updates_is_at"
+runs = ["smoke-launchers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/launchers.rs"
+find = '''
+        if release.setup() == Kind::Native {
+            ensure!(
+                *text == planted.own[name],'''
+replace = '''
+        if false {
+            ensure!(
+                *text == planted.own[name],'''
+
+[[plant]]
+name = "updater evidence: the app that started is not held to the bundle’s cf"
+meant = "does_not_take_the_flips_sentence_another_bundles_cf_or_silence"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence.rs"
+find = "line.ends_with(&said)"
+replace = 'line.contains("starting the daemon: ")'
+
+[[plant]]
+name = "updater evidence: a program asked for a process group of its own is left in the smoke’s"
+meant = "leads_a_process_group_of_its_own"
+runs = ["xtask-process"]
+
+[[plant.edit]]
+file = "tools/xtask/src/process.rs"
+find = "if own_group {"
+replace = "if false {"
+
+[[plant]]
+name = "updater evidence: a program not asked for a process group of its own is given one"
+meant = "leads_a_process_group_of_its_own"
+runs = ["xtask-process"]
+
+[[plant.edit]]
+file = "tools/xtask/src/process.rs"
+find = "if own_group {"
+replace = "if true {"
+
+[[plant]]
+name = "updater evidence: a program is not given the input it is told"
+meant = "has_its_folder_its_environment_and_its_input"
+runs = ["xtask-process"]
+
+[[plant.edit]]
+file = "tools/xtask/src/process.rs"
+find = ".stdin(stdin)"
+replace = ".stdin(Stdio::null())"
+
+[[plant]]
+name = "updater evidence: a program’s output is not given in a pipe"
+meant = "has_its_folder_its_environment_and_its_input"
+runs = ["xtask-process"]
+
+[[plant.edit]]
+file = "tools/xtask/src/process.rs"
+find = ".stdout(Stdio::piped())"
+replace = ".stdout(Stdio::null())"
+
+[[plant]]
+name = "updater evidence: a program’s error output is not given in a pipe"
+meant = "has_its_folder_its_environment_and_its_input"
+runs = ["xtask-process"]
+
+[[plant.edit]]
+file = "tools/xtask/src/process.rs"
+find = ".stderr(Stdio::piped());"
+replace = ".stderr(Stdio::null());"
+
+[[plant]]
+name = "updater evidence: a program is not run in the folder it is told"
+meant = "has_its_folder_its_environment_and_its_input"
+runs = ["xtask-process"]
+
+[[plant.edit]]
+file = "tools/xtask/src/process.rs"
+find = '''
+        .current_dir(&invocation.cwd)
+'''
+replace = ""
+
+[[plant]]
+name = "updater evidence: a variable a program is told to go without is left in its environment"
+meant = "has_its_folder_its_environment_and_its_input"
+runs = ["xtask-process"]
+
+[[plant.edit]]
+file = "tools/xtask/src/process.rs"
+find = "None => command.env_remove(name),"
+replace = "None => &mut command,"
+
+[[plant]]
+name = "updater evidence: a program that is not there is not said to be missing"
+meant = "that_is_not_there_or_has_no_folder"
+runs = ["xtask-process"]
+
+[[plant.edit]]
+file = "tools/xtask/src/process.rs"
+find = "command.spawn().map_err(|cause| failure(invocation, cause))"
+replace = "command.spawn().map_err(|cause| Failure::Refused { program: String::new(), cause })"

@@ -1,0 +1,577 @@
+# Plants in the packaged smoke and in the candidate builder, both in Rust: the
+# smoke's parts (crates/cf-e2e/tests/smoke/ and the paste reader it runs), the
+# command that runs it (`cargo xtask smoke`, tools/xtask/src/smoke.rs) and the
+# candidate (`cargo xtask candidate`, tools/xtask/src/candidate.rs). What a
+# plant is held to is the tests of each, which need no app and no install: the
+# smoke's against stand-in apps, the candidate's against a system that is a
+# script on a temporary tree, never the real /Applications or a real home.
+#
+# The plants of the last block plant what only a real app shows, the steps of
+# the smoke's own case and its stand-in harness: they run the packaged smoke
+# itself, on the app a build of the checkout leaves (`npm --prefix app run build
+# -- --bundles app`), and are refused where there is none.
+
+[run]
+# The tests of the smoke's parts: the bundle, the machine, the app, the extension.
+smoke-parts = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-e2e", "--test", "smoke"]
+# The reader of a large paste that the stand-in harness runs.
+smoke-paste-reader = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-e2e", "--bin", "smoke-paste-reader"]
+# The command that runs the smoke: its own tests, the packaged smoke's and not the updater's.
+smoke-command = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "smoke::", "--skip", "updater_smoke"]
+# The same command started as a process, against a stand-in for cargo.
+smoke-command-run = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "--no-fail-fast", "-p", "xtask", "--test", "drivers"]
+# The candidate's steps, on a machine of the test's own.
+candidate-steps = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "candidate::"]
+# The packaged smoke, on the app a build leaves.
+smoke-on-the-app = ["cargo", "xtask", "smoke"]
+
+# What the smoke holds the bundle to
+[[plant]]
+name = "packaged smoke: a bundle that holds cf.mjs is taken for one that holds no Node"
+meant = "node_is_found_wherever_it_is_in_the_bundle_and_named_with_where"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/bundle.rs"
+find = 'const NODE_FILES: [&str; 3] = ["node", "node.exe", "cf.mjs"];'
+replace = 'const NODE_FILES: [&str; 2] = ["node", "node.exe"];'
+
+[[plant]]
+name = "packaged smoke: a bundle with no cf for a window to run is taken for one that can be run"
+meant = "a_bundle_that_is_not_there_or_cannot_be_run_says_what_is_missing_and_what_builds_it"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/bundle.rs"
+find = 'for (what, path) in [("executable", &binary), ("cf for a window to run", &cf)] {'
+replace = 'for (what, path) in [("executable", &binary)] {'
+
+[[plant]]
+name = "packaged smoke: an app named by an empty variable is taken for the one that is named"
+meant = "the_bundle_is_the_one_named_else_the_one_a_build_leaves_and_a_relative_name_is_from_the_root"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/bundle.rs"
+find = "match named.filter(|name| !name.is_empty()) {"
+replace = "match named {"
+
+# The machine the app lives in
+[[plant]]
+name = "packaged smoke: the machine has a shell for the app to ask for its PATH"
+meant = "the_environment_is_these_variables_and_has_no_shell_to_ask_for_a_path"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/machine.rs"
+find = '("HOME", own(&self.home)),'
+replace = '''
+("HOME", own(&self.home)),
+            ("SHELL", "/bin/zsh".into()),'''
+
+[[plant]]
+name = "packaged smoke: the machine has no system commands on its PATH"
+meant = "the_environment_is_these_variables_and_has_no_shell_to_ask_for_a_path"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/machine.rs"
+find = 'format!("{}:{SYSTEM_PATH}", self.bin.display())'
+replace = "self.bin.display().to_string()"
+
+[[plant]]
+name = "packaged smoke: a harness that wrote pid 0 is taken for one that wrote its pid"
+meant = "the_pids_the_harness_wrote_are_one_to_a_line_and_nothing_else_is_taken_for_one"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/machine.rs"
+find = ".filter(|pid| *pid > 0))"
+replace = ".filter(|pid| *pid >= 0))"
+
+# What the app says, and what is made of it
+[[plant]]
+name = 'packaged smoke: an app that reports "failed" is waited on'
+meant = "a_page_error_that_is_not_a_resize_and_a_rejection_give_up_too_and_a_probe_does_not"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/app.rs"
+find = 'Some("failed" | "page-rejection") => true,'
+replace = 'Some("page-rejection") => true,'
+
+[[plant]]
+name = "packaged smoke: a page error that is not a resize is taken for one"
+meant = "a_page_error_that_is_not_a_resize_and_a_rejection_give_up_too_and_a_probe_does_not"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/app.rs"
+find = '.contains("ResizeObserver loop"),'
+replace = '.contains("ResizeObserver"),'
+
+[[plant]]
+name = "packaged smoke: an app whose output is over is waited on for the rest of the time"
+meant = "an_app_whose_output_is_over_fails_the_wait_at_once_and_does_not_wait_out_the_patience"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/app.rs"
+find = "if reports.ended {"
+replace = "if reports.ended && false {"
+
+[[plant]]
+name = "packaged smoke: the cf a daemon was started as is read with its arguments"
+meant = "the_cf_the_app_started_as_its_daemon_is_the_one_its_log_names"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/app.rs"
+find = "Some(PathBuf::from(said.strip_suffix(ARGS)?))"
+replace = "Some(PathBuf::from(said))"
+
+[[plant]]
+name = "packaged smoke: what a failure quotes is the start of the text"
+meant = "what_a_failure_quotes_is_the_end_of_the_text_whole_characters_only"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/app.rs"
+find = "let skip = text.chars().count().saturating_sub(count);"
+replace = "let skip = 0;"
+
+# The Pi extension, read for what it imports
+[[plant]]
+name = "packaged smoke: an extension that imports a file outside its folder is taken for one that loads from it"
+meant = "what_is_found_anywhere_but_the_folder_is_named"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/extension.rs"
+find = "if !target.starts_with(root) {"
+replace = "if false {"
+
+[[plant]]
+name = "packaged smoke: an extension that imports a package by its name is taken for one that loads from its folder"
+meant = "what_is_found_anywhere_but_the_folder_is_named"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/extension.rs"
+find = 'if specifier.starts_with("node:") {'
+replace = 'if !specifier.starts_with("./") && !specifier.starts_with("../") {'
+
+[[plant]]
+name = "packaged smoke: a method named import is taken for an import"
+meant = "what_a_module_imports_is_read_however_the_import_is_written"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/extension.rs"
+find = '''r#"(?:^|[^.\w$])(?:from\s*|import\s*\(?\s*)(?:'([^'\n]*)'|"([^"\n]*)")"#,'''
+replace = '''r#"(?:^|[^\w$])(?:from\s*|import\s*\(?\s*)(?:'([^'\n]*)'|"([^"\n]*)")"#,'''
+
+[[plant]]
+name = "packaged smoke: a run that fails does not say where its machine is kept"
+meant = "a_run_that_fails_says_where_its_machine_is_kept_and_one_that_passes_says_nothing"
+runs = ["smoke-parts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke/machine.rs"
+find = "        if kept {"
+replace = "        if !kept {"
+
+# The reader of a large paste
+[[plant]]
+name = "packaged smoke: a paste is whatever the first piece is"
+meant = "the_end_of_a_paste_is_found_across_the_pieces_it_was_cut_into"
+runs = ["smoke-paste-reader"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/smoke_paste_reader.rs"
+find = "if paste.ends_with(PASTE_END) {"
+replace = "if true {"
+
+[[plant]]
+name = "packaged smoke: the paste is said to be one byte more than it was"
+meant = "the_report_is_the_size_and_the_sha256_in_hex_with_the_line_end_of_a_raw_terminal"
+runs = ["smoke-paste-reader"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/smoke_paste_reader.rs"
+find = '''
+        paste.len(),
+        Sha256::digest(paste)'''
+replace = '''
+        paste.len() + 1,
+        Sha256::digest(paste)'''
+
+# The command that runs the smoke
+[[plant]]
+name = "packaged smoke: the smoke is run with its case ignored"
+meant = "the_smoke_is_the_smoke_test_of_cf_e2e_asked_for_its_ignored_case_and_its_own_output"
+runs = ["smoke-command", "smoke-command-run"]
+
+[[plant.edit]]
+file = "tools/xtask/src/suites.rs"
+find = '''
+pub(crate) const SMOKE: Suite = Suite {
+    tests: &["smoke"],
+    filter: None,
+    ignored: true,
+};'''
+replace = '''
+pub(crate) const SMOKE: Suite = Suite {
+    tests: &["smoke"],
+    filter: None,
+    ignored: false,
+};'''
+
+[[plant]]
+name = "packaged smoke: the smoke test says nothing of its own"
+meant = "the_smoke_is_the_smoke_test_of_cf_e2e_asked_for_its_ignored_case_and_its_own_output"
+runs = ["smoke-command", "smoke-command-run"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = 'cargo_test(context, SMOKE, &["--".into(), "--nocapture".into()])'
+replace = "cargo_test(context, SMOKE, &[])"
+
+[[plant]]
+name = "packaged smoke: the app it is given is not told to the test"
+meant = "the_app_it_is_given_is_the_one_variable_it_sets_and_a_relative_path_is_from_the_root"
+runs = ["smoke-command", "smoke-command-run"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = "Some(app) => invocation.var(APP_VARIABLE, context.root.join(app)),"
+replace = "Some(_) => invocation,"
+
+[[plant]]
+name = "packaged smoke: a relative app is from wherever the command was run"
+meant = "the_app_it_is_given_is_the_one_variable_it_sets_and_a_relative_path_is_from_the_root"
+runs = ["smoke-command", "smoke-command-run"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = "Some(app) => invocation.var(APP_VARIABLE, context.root.join(app)),"
+replace = "Some(app) => invocation.var(APP_VARIABLE, app),"
+
+[[plant]]
+name = "packaged smoke: an app given as --app=path is not the app"
+meant = "the_app_is_named_by_app_with_a_value_or_joined_and_by_nothing_else"
+runs = ["smoke-command", "smoke-command-run"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = 'Some((name, value)) if name.starts_with("--") => (name, Some(OsString::from(value))),'
+replace = "Some((_, _)) => (text.as_ref(), None),"
+
+[[plant]]
+name = "packaged smoke: a mac is refused the smoke"
+meant = "smoke_runs_the_smoke_test_from_the_root_asking_for_its_ignored_case_and_the_app_it_is_given"
+runs = ["smoke-command-run"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = 'if !cfg!(target_os = "macos") {'
+replace = 'if cfg!(target_os = "macos") {'
+
+# The candidate: what it refuses
+[[plant]]
+name = "candidate: a bundle that kept the release identity is installed"
+meant = "a_bundle_that_kept_the_release_identity_is_refused_before_it_is_smoked_or_installed"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = 'if plist_value(&paths.built, "CFBundleIdentifier")? != IDENTIFIER {'
+replace = 'if plist_value(&paths.built, "CFBundleIdentifier")?.is_empty() {'
+
+[[plant]]
+name = "candidate: a candidate that fails the smoke is installed"
+meant = "a_candidate_that_fails_the_smoke_is_not_installed_and_the_one_there_stays"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = "if system.run(&plan.smoke)? != 0 {"
+replace = "if system.run(&plan.smoke)? == 12345 {"
+
+[[plant]]
+name = "candidate: a candidate that is running is built over"
+meant = "a_candidate_that_is_running_is_refused_before_anything_is_run_and_nothing_else_is_taken_for_it"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = "if !running_from(&table, &paths.target).is_empty() {"
+replace = "if false && !running_from(&table, &paths.target).is_empty() {"
+
+[[plant]]
+name = "candidate: a candidate is installed in the system applications, beside the live app"
+meant = "a_run_is_where_the_checkout_the_home_and_the_applications_put_it"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = 'target: home.join("Applications").join(NAME),'
+replace = "target: applications.join(NAME),"
+
+# The candidate: how it installs
+[[plant]]
+name = "candidate: a copy cut short is built on"
+meant = "an_install_replaces_what_is_there_and_clears_what_an_interrupted_one_left"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = '''
+    remove_all(&next)?;
+    remove_all(&previous)?;
+'''
+replace = '''
+    remove_all(&previous)?;
+'''
+
+[[plant]]
+name = "candidate: a swap cut short is built on"
+meant = "an_install_replaces_what_is_there_and_clears_what_an_interrupted_one_left"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = '''
+    remove_all(&next)?;
+    remove_all(&previous)?;
+'''
+replace = '''
+    remove_all(&next)?;
+'''
+
+[[plant]]
+name = "candidate: the installed one is not put aside for the new one"
+meant = "an_install_replaces_what_is_there_and_clears_what_an_interrupted_one_left"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = '''
+    if target.exists() {
+        fs::rename(target, &previous).map_err(file("move aside", target))?;
+    }
+'''
+replace = ""
+
+# The candidate: its roster and its record
+[[plant]]
+name = "candidate: the roster is copied from the live app every time"
+meant = "the_roster_is_the_live_apps_once_and_the_candidates_own_after"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = "if !roster.exists() && paths.live_roster.exists() {"
+replace = "if paths.live_roster.exists() {"
+
+[[plant]]
+name = "candidate: the candidates home is open to everyone"
+meant = "the_candidates_home_and_its_roster_are_the_users_alone"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = "folder.mode(0o700);"
+replace = "folder.mode(0o755);"
+
+[[plant]]
+name = "candidate: the candidates roster is open to everyone"
+meant = "the_candidates_home_and_its_roster_are_the_users_alone"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = "fs::Permissions::from_mode(0o600)"
+replace = "fs::Permissions::from_mode(0o644)"
+
+[[plant]]
+name = "candidate: a blank line of git status is a file that is uncommitted"
+meant = "git_is_asked_in_the_checkout_and_what_it_counts_as_uncommitted_is_the_lines_it_says"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = '''
+        .filter(|line| !line.is_empty())
+        .count();'''
+replace = "        .count();"
+
+[[plant]]
+name = "candidate: the build says it was made at the epoch"
+meant = "a_good_run_builds_proves_the_bundle_installs_it_and_writes_down_what_it_was_in_that_order"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = '"builtAt": iso(clock.now_ms()),'
+replace = '"builtAt": iso(0),'
+
+[[plant]]
+name = "candidate: the live processes are said with no space after the comma"
+meant = "the_live_processes_are_those_that_run_the_live_apps_program_whole_and_alone"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = 'format!("; live PID {} running", pids.join(", "))'
+replace = 'format!("; live PID {} running", pids.join(","))'
+
+# The candidate: the proof that the live app was not touched
+[[plant]]
+name = "candidate: a live app that was changed is not found"
+meant = "a_build_that_touched_the_live_app_is_found_whatever_it_touched"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = "if after.app != before.app {"
+replace = "if false && after.app != before.app {"
+
+[[plant]]
+name = "candidate: a live roster that was changed is not found"
+meant = "a_build_that_touched_the_live_roster_is_found_and_said_with_what_may_explain_it"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = "if after.roster != before.roster {"
+replace = "if false && after.roster != before.roster {"
+
+[[plant]]
+name = "candidate: a live app that stopped running is not found"
+meant = "a_live_app_that_stopped_running_during_the_build_is_found_by_the_process_that_is_gone"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = "if !system.alive(*pid) {"
+replace = "if false && !system.alive(*pid) {"
+
+[[plant]]
+name = "candidate: a helper of the live app is taken for the live app"
+meant = "the_live_processes_are_those_that_run_the_live_apps_program_whole_and_alone"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = ".filter(|row| row.command == live_program)"
+replace = ".filter(|row| row.command.starts_with(&live_program))"
+
+[[plant]]
+name = "candidate: a change to the mode of a file of the live app is not one"
+meant = "a_link_made_to_name_another_file_and_a_file_made_executable_are_changes_too"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate/canary.rs"
+find = '''
+            hash.update(mode_of(&kind).to_string().as_bytes());
+'''
+replace = ""
+
+[[plant]]
+name = "candidate: a link of the live app made to name another file is not a change"
+meant = "a_link_made_to_name_another_file_and_a_file_made_executable_are_changes_too"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate/canary.rs"
+find = '''
+            hash.update(target.to_string_lossy().as_bytes());
+'''
+replace = ""
+
+# The candidate: the system it is run on
+[[plant]]
+name = "candidate: the status a program ended with is lost"
+meant = "the_programs_it_runs_end_with_their_status_and_what_they_wrote_is_kept"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate/system.rs"
+find = "Ok(process::run(invocation, self.env)?)"
+replace = '''
+{
+            process::run(invocation, self.env)?;
+            Ok(0)
+        }'''
+
+[[plant]]
+name = "candidate: the table of processes says there are none"
+meant = "the_table_is_the_systems_own_and_this_process_is_in_it"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate/system.rs"
+find = "Ok(processes::process_table()?)"
+replace = "Ok(Vec::new())"
+
+[[plant]]
+name = "candidate: a process that is gone is taken for one that runs"
+meant = "a_process_is_alive_while_it_runs_and_not_once_it_has_gone"
+runs = ["candidate-steps"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate/system.rs"
+find = '''
+        processes::alive(pid)
+'''
+replace = '''
+        let _ = pid;
+        true
+'''
+
+# What only the app shows: the packaged smoke, run on the app a build leaves
+[[plant]]
+name = "packaged smoke, on the app: the harness finds no system command on its PATH"
+meant = "the_built_app"
+runs = ["smoke-on-the-app"]
+requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/fixtures/smoke-harness.sh"
+find = "if command -v uname >/dev/null 2>&1; then"
+replace = "if command -v no-such-command-of-the-system >/dev/null 2>&1; then"
+
+[[plant]]
+name = "packaged smoke, on the app: the daemon is held to the program of the app and not to its cf"
+meant = "the_built_app"
+runs = ["smoke-on-the-app"]
+requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke.rs"
+find = "let bundled = std::fs::canonicalize(&bundle.cf)?;"
+replace = "let bundled = std::fs::canonicalize(&bundle.binary)?;"
+
+[[plant]]
+name = "packaged smoke, on the app: the second cf ui is held to a refusal the ledger does not give"
+meant = "the_built_app"
+runs = ["smoke-on-the-app"]
+requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke.rs"
+find = 'consensflow\.db open$'
+replace = 'consensflow\.sqlite open$'
+
+[[plant]]
+name = "packaged smoke, on the app: the agents are proved on a home that is not the daemons"
+meant = "the_built_app"
+runs = ["smoke-on-the-app"]
+requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/smoke.rs"
+find = "home: &machine.state,"
+replace = "home: &machine.probe,"

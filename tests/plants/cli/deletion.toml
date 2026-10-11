@@ -1,0 +1,342 @@
+# Plants in the bundle without Node: that nothing reads what the flip release
+# read (the `use-node` file of a home, the runtime the app named to the daemon),
+# that an npm shim with no Node to run on is refused in words that say what to
+# do, that the daemon the app starts is the bundle's `cf` and nothing is added
+# to it, that the update's check asks for what it should, and that the page's
+# console text, the bundle's packing and the release's checks hold. Each takes
+# one thing out or puts one back, and a test must fail.
+
+[run]
+app-test-daemon-command = ["cargo", "xtask", "app", "test", "daemon_command"]
+app-test-update-install = ["cargo", "xtask", "app", "test", "update_install"]
+
+# The file the flip release read, read by nothing now.
+[[plant]]
+name = "deletion: cf ui is not the daemon in a home that has the use-node file"
+meant = "cf_ui_is_the_daemon_in_a_home_the_flip_release_sent_to_node"
+runs = ["ui"]
+
+[[plant.edit]]
+file = "crates/cf/src/lib.rs"
+find = '    let asked = first == "ui" && env.text("CONSENSFLOW_TOKEN").is_none();'
+replace = '    let asked = first == "ui" && env.text("CONSENSFLOW_TOKEN").is_none() && !cf_base::home::config_root(env).is_some_and(|root| root.join("use-node").exists());'
+
+[[plant]]
+name = "deletion: a verb is refused in a home that has the use-node file"
+meant = "a_use_node_file_left_in_the_home_changes_no_answer"
+runs = ["process"]
+
+[[plant.edit]]
+file = "crates/cf/src/lib.rs"
+find = "        None => standalone::run(env, args, out, err),"
+replace = '''
+        None if cf_base::home::config_root(env).is_some_and(|root| root.join("use-node").exists()) => {
+            writeln!(err, "cf: this home is on Node")?;
+            Ok(1)
+        }
+        None => standalone::run(env, args, out, err),'''
+
+[[plant]]
+name = "deletion: setup is refused in a home that has the use-node file"
+meant = "setup_and_doctor_in_a_home_with_a_use_node_file_make_and_read_the_command_here"
+runs = ["process"]
+
+[[plant.edit]]
+file = "crates/cf/src/lib.rs"
+find = "        None => standalone::run(env, args, out, err),"
+replace = '''
+        None if cf_base::home::config_root(env).is_some_and(|root| root.join("use-node").exists()) && args.first().is_some_and(|word| word == "setup") => {
+            writeln!(err, "cf: this home is on Node")?;
+            Ok(1)
+        }
+        None => standalone::run(env, args, out, err),'''
+
+# The runtime the app named to the daemon, passed on to every window.
+[[plant]]
+name = "deletion: the window is told a Node again"
+meant = "a_window_starts_with_its_url_project_participant_and_the_bundle_first_on_its_path"
+runs = ["seams"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '        env.push(("PATH".to_owned(), self.path.clone()));'
+replace = '''
+        env.push(("CONSENSFLOW_NODE".to_owned(), "/the/apps/node".to_owned()));
+        env.push(("PATH".to_owned(), self.path.clone()));'''
+
+[[plant]]
+name = "deletion: the app names a Node to the daemon again"
+meant = "the_daemon_is_the_bundled_cf_running_ui_and_nothing_of_the_apps_is_added_to_it"
+runs = ["app-test-daemon-command"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '    command.args(["ui", "--json", "--no-open"]);'
+replace = '    command.args(["ui", "--json", "--no-open"]).env("CONSENSFLOW_NODE", "/the/apps/node");'
+
+[[plant]]
+name = "deletion: the app opens the daemon without --no-open"
+meant = "the_daemon_is_the_bundled_cf_running_ui_and_nothing_of_the_apps_is_added_to_it"
+runs = ["app-test-daemon-command"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '    command.args(["ui", "--json", "--no-open"]);'
+replace = '    command.args(["ui", "--json"]);'
+
+[[plant]]
+name = "deletion: the app’s log names another cf than the one it starts"
+meant = "the_log_says_which_cf_the_daemon_is"
+runs = ["app-test-daemon-command"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '    format!("starting the daemon: {} ui --json --no-open", cf.display())'
+replace = '    format!("starting the daemon: {} ui --json --no-open", cf.with_file_name("cf.mjs").display())'
+
+[[plant]]
+name = "deletion: the bundled cf is looked for beside cf.mjs"
+meant = "the_cf_is_the_one_in_the_clis_folder_of_the_bundle_or_the_portable_runtime"
+runs = ["app-test-daemon-command"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '    root.join("cli").join("bin").join(CF)'
+replace = '    root.join("cli").join("bin").join("cf.mjs")'
+
+# An npm shim with no Node to be found.
+[[plant]]
+name = "deletion: an npm shim runs on the Node an environment names"
+meant = "an_npm_shim_with_no_node_beside_it_or_on_the_path_is_refused_saying_what_to_do"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''
+    on_path("node", env)
+}'''
+replace = '''
+    on_path("node", env).or_else(|| env.path("CONSENSFLOW_NODE").map(Path::to_path_buf))
+}'''
+
+[[plant]]
+name = "deletion: an npm shim with no Node goes through cmd.exe"
+meant = "an_npm_shim_with_no_node_beside_it_or_on_the_path_is_refused_saying_what_to_do"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "        Shim::NeedsNode => return Err(needs_node(executable)),"
+replace = "        Shim::NeedsNode => {}"
+
+[[plant]]
+name = "deletion: a window is opened on an npm shim with no Node as on one that cannot be read"
+meant = "an_npm_shim_with_no_node_beside_it_or_on_the_path_is_refused_saying_what_to_do"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "        Shim::NeedsNode => return Err(needs_node(Path::new(executable))),"
+replace = '''
+        Shim::NeedsNode => {
+            return Err(format!(
+                "{executable} is not an npm shim, and only cmd.exe could run it in a window"
+            ));
+        }'''
+
+[[plant]]
+name = "deletion: the Node beside an npm shim is not looked for"
+meant = "an_npm_shim_takes_the_node_beside_it_first_as_npm_itself_would"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''
+    if beside.exists() {
+        return Some(beside);
+    }
+'''
+replace = ""
+
+[[plant]]
+name = "deletion: the refusal does not say the Node can be made visible"
+meant = "an_npm_shim_with_no_node_beside_it_or_on_the_path_is_refused_saying_what_to_do"
+runs = ["runnable", "npm-shims"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''
+Make the harness's Node \
+         visible to ConsensFlow, or install'''
+replace = '''
+Install \
+         the harness, or install'''
+
+[[plant]]
+name = "deletion: a Codex that is an npm shim with no Node is said to be a server that did not start"
+meant = "a_codex_that_is_an_npm_shim_with_no_node_to_run_on_is_refused_saying_what_to_do"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''
+        args.extend(plan.endpoint.listen().iter().cloned());
+        let (mut command, program) = command(plan, &args).map_err(SessionError::Unrunnable)?;'''
+replace = '''
+        args.extend(plan.endpoint.listen().iter().cloned());
+        let (mut command, program) = command(plan, &args).map_err(SessionError::Server)?;'''
+
+# The tests' stand-in for a window's program on Windows is an npm shim, and
+# brings the Node it runs on: the app names none to the daemon now.
+[[plant]]
+name = "deletion: the Windows stand-in of a window has no Node beside it"
+meant = "a_window_opens_on_the_npm_shim_stand_in_in_an_environment_with_only_its_folder_on_the_path"
+runs = ["stand-in"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/mod.rs"
+find = '''
+    fs::write(file.with_file_name("node.exe"), "").expect("a stand-in's node written");
+'''
+replace = ""
+
+[[plant]]
+name = "deletion: the Windows stand-in of a window has no Node beside it, seen at the daemon’s host"
+meant = "a_window_opens_on_an_npm_shim_with_its_node_beside_it_and_is_refused_without_one"
+runs = ["host"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/mod.rs"
+find = '''
+    fs::write(file.with_file_name("node.exe"), "").expect("a stand-in's node written");
+'''
+replace = ""
+
+# The update's check, and the portable app's collector.
+[[plant]]
+name = "deletion: the update’s check asks for the package.json of a CLI again"
+meant = "a_signed_bundle_replaces_the_whole_app_and_leaves_nothing_of_an_older_layout"
+runs = ["app-test-update-install"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_install.rs"
+find = '    if !app.join("Contents/Resources/cli/bin/cf").is_file() {'
+replace = '''
+    if !app.join("Contents/Resources/cli/package.json").is_file() {
+        return Err("The archive must include the CLI's package.json".into());
+    }
+    if !app.join("Contents/Resources/cli/bin/cf").is_file() {'''
+
+[[plant]]
+name = "deletion: the update’s check takes a bundle whose seal is broken"
+meant = "a_newer_bundle_modified_after_signing_leaves_the_old_app_intact"
+runs = ["app-test-update-install"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_install.rs"
+find = "    if !signature.status.success() {"
+replace = "    if false && !signature.status.success() {"
+
+# (The portable app's collector, which keeps a flip release's node.exe, is plants/release/portable.toml's.)
+[[plant]]
+name = "deletion: the portable exe is packed with a node.exe again"
+meant = "a_packed_exe_is_the_app_then_its_runtime_as_a_gzip_compressed_tar_then_the_length_and_the_tag"
+runs = ["portable-pack"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/pack.rs"
+find = '''
+const RUNTIME: [&str; 4] = [
+    "cli",'''
+replace = '''
+const RUNTIME: [&str; 5] = [
+    "node.exe",
+    "cli",'''
+
+[[plant]]
+name = "deletion: the release does not ask the bundled cf its version"
+meant = "rejects_a_bundle_whose_plist_and_bundled_cf_disagree_on_the_version"
+runs = ["update-release"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/bundle.rs"
+find = "    if version != cf_version {"
+replace = "    if false && version != cf_version {"
+
+[[plant]]
+name = "deletion: the release asks for the package.json of a CLI again"
+meant = "takes_a_bundle_that_ships_nothing_of_nodes"
+runs = ["update-release"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/update/bundle.rs"
+find = '''for (what, required) in [("native executable", &binary), ("a window's cf", &cf)] {'''
+replace = '''for (what, required) in [("native executable", &binary), ("a window's cf", &cf), ("bundled CLI package", &path.join("Contents").join("Resources").join("cli").join("package.json"))] {'''
+
+[[plant]]
+name = "deletion: the app is signed without the hardened runtime"
+meant = "an_ad_hoc_release_signs_the_code_then_the_app_then_makes_the_dmg_again_with_no_notary"
+runs = ["sign-mac"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/sign_mac/signing.rs"
+find = '''
+    codesign(tools, signing, app, &["--options", "runtime"])
+}'''
+replace = '''
+    codesign(tools, signing, app, &[])
+}'''
+
+[[plant]]
+name = "deletion: a verb is given the first line of an argument"
+meant = "are_given_every_argument_whole_line_breaks_quotes_and_and_diacritics"
+runs = ["cf-native"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf/src/standalone/agent.rs"
+find = "            input.insert(key.to_owned(), Value::from(text));"
+replace = '            input.insert(key.to_owned(), Value::from(text.lines().next().unwrap_or("")));'
+
+# The page's console text.
+[[plant]]
+name = "deletion: the page spells an em dash as a hyphen"
+meant = "spells every code point the console changes as the table has it"
+runs = ["console-text"]
+
+[[plant.edit]]
+file = "app/ui/core/console-text.js"
+find = "    '—': '--',"
+replace = "    '—': '-',"
+
+[[plant]]
+name = "deletion: the page does not compose a text before it spells it"
+meant = "spells the texts that compose or decompose as a whole as the table has them, and null as null"
+runs = ["console-text"]
+
+[[plant.edit]]
+file = "app/ui/core/console-text.js"
+find = "text.normalize('NFC')"
+replace = "text"
+
+[[plant]]
+name = "deletion: the page changes a letter"
+meant = "leaves every other code point as it is"
+runs = ["console-text"]
+
+[[plant.edit]]
+file = "app/ui/core/console-text.js"
+find = 'if (code < 0x80 || /\p{L}/u.test(character)) return character'
+replace = "if (code < 0x80) return character"
+
+[[plant]]
+name = "deletion: the page’s module imports something"
+meant = "imports nothing, so the page loads it as it is"
+runs = ["console-text"]
+
+[[plant.edit]]
+file = "app/ui/core/console-text.js"
+find = "const CONSOLE_ASCII = new Map("
+replace = '''
+import { join } from 'node:path'
+const CONSOLE_ASCII = new Map('''

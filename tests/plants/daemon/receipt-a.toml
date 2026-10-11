@@ -1,0 +1,350 @@
+# The receipt and stop redesign's first fix round, part A: a read is no
+# receipt (`cf` says what it wrote whole, once it has), a native answer is
+# received only after the handoff happened, a claim does not outlive its
+# request, and the gate holds the brief back from the agents' API. One plant
+# takes one fix out, and a test of it fails. A run written `{ node: [...] }`
+# is `node --test` of those files.
+
+[run]
+codex-session-lib-broker-tests-handoff = ["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "broker::tests::handoff"]
+
+[[plant]]
+name = "read: a thread read receives the answers it shows"
+meant = "a_worker_that_reads_its_task_and_is_refused_its_transcript_still_has_its_answer_to_be_pasted"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '        return Ok(Answer::ok(json!({ "task": value(&task)? })));'
+replace = '''
+        let ids: Vec<i64> = task
+            .messages
+            .iter()
+            .filter(|message| message.kind == "answer" && message.state == "queued")
+            .filter(|message| message.recipient_id == caller.participant.id)
+            .map(|message| message.id)
+            .collect();
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.receive_read(caller.participant.id, &ids, cf_ledger::Read::Task)?;
+        drop(ledger);
+        return Ok(Answer::ok(json!({ "task": value(&task)? })));'''
+
+[[plant]]
+name = "read: a list receives the answers it shows"
+meant = "a_list_receives_nothing_whatever_it_shows_and_the_answers_are_still_to_be_delivered"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::inbox"],
+]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/inbox.rs"
+find = '    Ok(Answer::ok(json!({ "messages": summaries })))'
+replace = '''
+    let ids: Vec<i64> = messages
+        .iter()
+        .filter(|message| message.kind == "answer" && message.state == "queued")
+        .filter(|message| message.recipient_id == caller.participant.id)
+        .map(|message| message.id)
+        .collect();
+    let mut ledger = context.ledger.borrow_mut();
+    ledger.receive_read(caller.participant.id, &ids, cf_ledger::Read::Inbox)?;
+    drop(ledger);
+    Ok(Answer::ok(json!({ "messages": summaries })))'''
+
+[[plant]]
+name = "read: a message read receives the answer it shows"
+meant = "an_answer_read_whole_by_the_one_it_is_for_is_served_and_nothing_is_received_by_serving_it"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::message"],
+]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/message.rs"
+find = '        Some(message) => Ok(Answer::ok(json!({ "message": value(&message)? }))),'
+replace = '''
+        Some(message) => {
+            if message.kind == "answer" && message.recipient_id == caller.participant.id {
+                let mut ledger = context.ledger.borrow_mut();
+                ledger.receive_read(caller.participant.id, &[message.id], cf_ledger::Read::Inbox)?;
+            }
+            Ok(Answer::ok(json!({ "message": value(&message)? })))
+        }'''
+
+[[plant]]
+name = "read: the board takes the word of anyone for any answer"
+meant = "what_is_not_a_queued_answer_for_the_caller_is_left_as_it_is_and_wakes_nothing"
+runs = ["daemon-lib-routes-answers"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/answers.rs"
+find = '''
+                && message.recipient_id == caller.participant.id
+        }) {'''
+replace = "        }) {"
+
+[[plant]]
+name = "read: cf says what it wrote before it has written it"
+meant = "a_task_thread_printed_whole_is_acknowledged_once_after_the_output_is_flushed_in_text_and_in_json"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''
+        Ok(Said { data, text, wrote }) => {
+            let printed = if json {'''
+replace = '''
+        Ok(Said { data, text, wrote }) => {
+            if let Some(wrote) = &wrote {
+                wrote.acknowledge(board);
+            }
+            let printed = if json {'''
+
+[[plant]]
+name = "read: cf asks for the task before it checks what it was asked"
+meant = "a_bad_last_asks_the_board_nothing_and_so_receives_nothing"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+    let last = if words.on("--transcript") {
+        Some(items_asked(&words)?)
+    } else {
+        None
+    };
+    let path = format!("/api/tasks/{number}");
+    let mut answer = board.get(&path)?;
+    let task = answer.take("task")?;'''
+replace = '''
+    let path = format!("/api/tasks/{number}");
+    let mut answer = board.get(&path)?;
+    let task = answer.take("task")?;
+    let last = if words.on("--transcript") {
+        Some(items_asked(&words)?)
+    } else {
+        None
+    };'''
+
+[[plant]]
+name = "read: cf says of a transcript what it did not write"
+meant = "a_transcript_says_nothing_of_any_answer_whether_it_prints_the_thread_or_not"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+    Ok(Said::new(Value::Object(data), text))
+}'''
+replace = '''
+    let answers = waiting_answers(&[json!({ "id": 12, "kind": "answer", "state": "queued" })]);
+    Ok(Said::new(Value::Object(data), text).having_written("task", answers))
+}'''
+
+[[plant]]
+name = "read: cf says of a list of previews that it wrote the answers whole"
+meant = "a_list_of_the_inbox_prints_first_lines_and_says_nothing_of_the_answers_in_it"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''
+    Ok(Said::new(messages, text))
+}'''
+replace = '''
+    let answers = lines::waiting_answers(messages.as_array().map_or(&[], Vec::as_slice));
+    Ok(Said::new(messages, text).having_written("inbox", answers))
+}'''
+
+[[plant]]
+name = "native: an answer is told to the board as received when it is queued for Codex"
+meant = "an_answer_waiting_to_be_written_is_not_a_receipt_and_the_turn_ending_gives_it_back_at_once"
+runs = ["codex-session-lib-broker-tests-handoff"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/pair.rs"
+find = '''
+            let handed = tokio::select! {
+                written = written => written.unwrap_or(false),
+                () = ending.wait() => false,
+            };'''
+replace = "            let handed = !matches!(written.try_recv(), Err(oneshot::error::TryRecvError::Closed));"
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/pair.rs"
+find = "use tokio::sync::Notify;"
+replace = "use tokio::sync::{oneshot, Notify};"
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/pair.rs"
+find = "        let written = match self.native.send_unless(frame, Arc::clone(&ending.raised)) {"
+replace = "        let mut written = match self.native.send_unless(frame, Arc::clone(&ending.raised)) {"
+
+[[plant]]
+name = "native: a question is let go as its answer is queued, so its turn ending is not heard"
+meant = "an_answer_waiting_to_be_written_is_not_a_receipt_and_the_turn_ending_gives_it_back_at_once"
+runs = ["codex-session-lib-broker-tests-handoff"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/pair.rs"
+find = '''
+        let this = Rc::clone(self);
+        self.shared.spawn(async move {
+            let handed = tokio::select! {'''
+replace = '''
+        let this = Rc::clone(self);
+        self.release(&ending);
+        self.shared.spawn(async move {
+            let handed = tokio::select! {'''
+
+[[plant]]
+name = "native: the writer sends a frame nobody wants any more"
+meant = "a_frame_not_wanted_any_more_when_its_turn_comes_is_not_sent_and_is_reported_so"
+runs = ["codex-session-lib-broker-tests-handoff"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/transport.rs"
+find = '''
+        let wanted = watch
+            .as_ref()
+            .is_none_or(|watch| !watch.ended.load(Ordering::SeqCst));'''
+replace = "        let wanted = true;"
+
+[[plant]]
+name = "native: Codex's resolving the request does not end its question"
+meant = "a_request_codex_resolved_ends_the_poll_of_the_question_it_was_and_the_answer_is_given_back"
+runs = ["codex-session-lib-broker-tests-handoff"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/pair.rs"
+find = '        let resolved = if method == Some("serverRequest/resolved") {'
+replace = "        let resolved = if false {"
+
+[[plant]]
+name = "native: a pair that ends takes the board answer with it unacknowledged"
+meant = "a_pair_that_ends_while_the_board_is_still_asked_gives_back_the_answer_the_poll_in_hand_gets"
+runs = ["codex-session-lib-broker-tests-handoff"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/pair.rs"
+find = '''
+        // A task of the broker's, not the pair's: a pair that ends while the
+        // board is still polled for the question has its poll end at the next
+        // request, and an answer the board claimed meanwhile is still given back.
+        self.shared.spawn(async move {
+            let (asking, polling, raised) ='''
+replace = '''
+        self.spawn(async move {
+            let (asking, polling, raised) ='''
+
+[[plant]]
+name = "native: OpenCode takes any reply that resolved for received"
+meant = "OpenCode: the answer is received only when the SDK's reply took: an error or a status that is no success comes back as a result, not a throw"
+runs = ["opencode-extension"]
+
+[[plant.edit]]
+file = "hosts/opencode-extension/consensflow-session.mjs"
+find = '''
+    if (result === true) return true
+    return result != null && !result.error && (result.response?.ok === true || result.data === true)'''
+replace = "    return true"
+
+[[plant]]
+name = "claim: a window at its own dialog keeps the claim on its answer"
+meant = "a_claim_whose_door_gave_up_for_the_windows_own_dialog_is_voided_and_the_answer_is_pasted_once_the_dialog_is_gone"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '            _ if observed.waiting.is_some() => Some("its window shows a dialog of its own"),'
+replace = "            _ if observed.waiting.is_some() => None,"
+
+# With the check gone a wait the client's leaving ends would spin: both go.
+[[plant]]
+name = "claim: a poll takes no notice of its client having left"
+meant = "a_poll_whose_client_has_gone_before_it_looks_claims_nothing_though_the_answer_is_there"
+runs = ["daemon-lib-routes-door"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/door.rs"
+find = '''
+            || request.consumer().has_left()
+            || context.credentials'''
+replace = "            || context.credentials"
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/door.rs"
+find = "            () = request.consumer().left() => {}"
+replace = "            () = std::future::pending::<()>() => {}"
+
+[[plant]]
+name = "claim: a poll goes on waiting after its client has left"
+meant = "a_client_that_leaves_ends_the_poll_at_once_and_an_answer_that_comes_after_is_not_claimed_for_it"
+runs = ["daemon-lib-routes-door"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/door.rs"
+find = "            () = request.consumer().left() => {}"
+replace = "            () = std::future::pending::<()>() => {}"
+
+[[plant]]
+name = "claim: the server does not tell a handler its client left"
+meant = "a_handler_is_told_when_its_client_leaves_and_not_before"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::server"],
+]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = '''
+    fn drop(&mut self) {
+        self.0.leave();
+    }'''
+replace = '''
+    fn drop(&mut self) {
+    }'''
+
+[[plant]]
+name = "claim: a door gives up at the first poll that gets no answer"
+meant = "a_poll_whose_reply_was_lost_is_asked_again_and_gets_the_answer_the_board_claimed_for_it"
+runs = ["board-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-board/src/door.rs"
+find = "            Err(cause) if cause.is_unreachable() && lost < retries.len() => {"
+replace = "            Err(cause) if cause.is_unreachable() && lost < 0 => {"
+
+[[plant]]
+name = "claim: OpenCode's door gives up at the first poll that gets no answer"
+meant = "OpenCode: a poll whose reply was lost is asked again and the answer is handed over once, then acknowledged"
+runs = ["opencode-extension"]
+
+[[plant.edit]]
+file = "hosts/lib/question-door.js"
+find = "      if (cause?.refused || lost >= retries.length) throw cause"
+replace = "      throw cause"
+
+[[plant]]
+name = "gate: the brief is given to an agent while it waits at the gate"
+meant = "a_brief_that_waits_at_the_gate_is_in_no_agents_view_of_the_task"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '''
+        if held_back {
+            task.task.body.clear();
+        }'''
+replace = '''
+        if held_back && false {
+            task.task.body.clear();
+        }'''
+
+[[plant]]
+name = "gate: a later message held at the gate takes the received brief back"
+meant = "a_brief_is_given_once_it_has_passed_the_gate_and_a_later_message_held_there_does_not_take_it_back"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '            "delivered" | "read" => return false,'
+replace = '            "delivered" | "read" => {}'

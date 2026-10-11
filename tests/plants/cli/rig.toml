@@ -1,0 +1,141 @@
+# The chief's report of 2026-10-08, end to end: the daemon the app starts and the
+# native `cf` of a window, built from the sources as a plant leaves them (the
+# suites build the `cf` they run), and the rig's fake agents in real PTYs (the
+# `rig` test of `crates/cf-e2e`). Where the tests of the crates hold each rule
+# apart, these hold that the rule reaches the chief through the pane host: a
+# stale note not pasted into a chief in the middle of a turn, a hold told as it
+# ends, `--help` answered and posted nowhere. And what the black-box suites hold
+# of the daemon as a process (the words its log ends with, the `PATH` a window
+# is given, a result decided on, a Codex window's socket). One plant takes one
+# rule out; a test of it fails.
+
+[run]
+# The notes of a task's wait, withdrawn and told.
+rig-waiting-notes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "waiting_notes::"]
+# Every verb of the board asked for help.
+rig-help = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "help::"]
+# `cf ui` as a process: its log, and what it opens a window with.
+rig-core-daemon = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "daemon", "core_daemon::"]
+# A result the chief decided on.
+rig-decided-result = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "decided_result::"]
+# The Codex window's supervisor, as a process.
+rig-codex-session = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "codex_session::"]
+
+# m-1668: "T-357 was taken back from @ullr … waits for another standard
+# worker" reached the chief after another worker had taken T-357.
+[[plant]]
+name = "rig: a take-over leaves the note that the task was taken back for the chief to be given"
+meant = "the_note_that_a_task_was_taken_back_is_withdrawn_when_another_worker_takes_it_before_the_chief_is_given_the_note"
+runs = ["rig-waiting-notes"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+        leave_pause_notes(store, &task, &format!("was taken by @{}", member.handle))?;
+'''
+replace = ""
+
+# m-1670: the hold note reached the chief after the daemon had resumed the task.
+[[plant]]
+name = "rig: a resume leaves the note that the task is held for the chief to be given"
+meant = "the_note_that_a_task_is_held_is_withdrawn_when_the_account_is_switched_before_the_chief_is_given_it_and_nothing_is_said_after"
+runs = ["rig-waiting-notes"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+        // A refusal below writes nothing, this withdrawal with it.
+        leave_pause_notes(store, &task, "resumed")?;'''
+replace = ""
+
+[[plant]]
+name = "rig: the daemon resumes a held task and the chief given the note is told nothing"
+meant = "a_chief_given_the_note_that_a_task_is_held_is_told_it_goes_on_when_the_account_is_switched"
+runs = ["rig-waiting-notes"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+        if by.is_none() {
+            tell_goes_on(store, &task)?;
+        }
+'''
+replace = ""
+
+# m-1542: `cf note --help` posted a note saying "--help".
+[[plant]]
+name = "rig: cf --help is text and is posted"
+meant = "a_window_asks_every_verb_of_cf_for_help_and_nothing_is_posted_or_read"
+runs = ["rig-help"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf/src/board/words.rs"
+find = '''
+        !self.literal
+'''
+replace = '''
+        false
+            && !self.literal
+'''
+
+# The daemon as a process, and a window's Codex.
+[[plant]]
+name = "rig: the daemon says in its log that its input closed, not ended"
+meant = "starts_its_log_with_its_pid_and_ends_it_with_why_it_stopped_its_input_ending"
+runs = ["rig-core-daemon"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = 'Ended::Input => watching.trip("stdin ended"),'
+replace = 'Ended::Input => watching.trip("stdin closed"),'
+
+[[plant]]
+name = "rig: the daemon stops for a broken bridge and says it broke"
+meant = "stops_itself_when_the_apps_end_of_the_bridge_breaks"
+runs = ["rig-core-daemon"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = '                latch.trip("the bridge failed");'
+replace = '                latch.trip("the bridge broke");'
+
+[[plant]]
+name = "rig: the bundle’s folder is last on a window’s PATH, not first"
+meant = "opens_a_window_with_the_agents_api_its_project_and_participant_and_the_bundled_cf_first_on_path_and_names_it_no_node"
+runs = ["rig-core-daemon"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = 'Some(path) => format!("{bin}{delimiter}{}", path.to_string_lossy()),'
+replace = 'Some(path) => format!("{}{delimiter}{bin}", path.to_string_lossy()),'
+
+[[plant]]
+name = "rig: a result the chief accepted is not withdrawn"
+meant = "a_result_the_chief_read_and_decided_on_in_its_own_turn_is_withdrawn_and_the_next_result_reaches_it"
+runs = ["rig-decided-result"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''
+        withdraw_result(store, &task, "was accepted")?;
+'''
+replace = ""
+
+[[plant]]
+name = "rig: a Codex window’s supervisor leaves its socket folder behind"
+meant = "opens_codex_as_its_server_on_a_private_socket_and_its_tui_through_the_broker_and_leaves_nothing_behind"
+runs = ["rig-codex-session"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = "    match std::fs::remove_dir_all(folder) {"
+replace = "    match Ok::<(), io::Error>(()) {"

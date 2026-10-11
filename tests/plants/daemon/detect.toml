@@ -1,0 +1,65 @@
+# Where `crates/cf-harness` finds a harness's CLI (`detect.rs`): on Windows,
+# npm's global folder, `%APPDATA%\npm`, after PATH, the harness's own places
+# and the common ones, and nowhere off Windows. Every name here begins
+# `detect:`, so `npm run plants:daemon -- detect` runs them.
+
+[run]
+detect-unit = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "detect::"]
+# Node's recordings of detection, played (`crates/cf-harness/tests/goldens/admin`).
+detect-goldens = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "admin"]
+
+[[plant]]
+name = "detect: npm's folder is not looked in"
+meant = "a_cli_is_found_in_npm_s_folder_when_path_lacks_it_as_the_cmd_windows_starts"
+runs = ["detect-unit", "detect-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = "        let folders = homed(harness, env).into_iter().chain(npm_global(env));"
+replace = "        let folders = homed(harness, env).into_iter();"
+
+[[plant]]
+name = "detect: npm's folder is looked in before the common places"
+meant = "it_comes_after_path_the_harness_s_own_places_and_the_other_common_ones"
+runs = ["detect-unit", "detect-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = "        let folders = homed(harness, env).into_iter().chain(npm_global(env));"
+replace = "        let folders = npm_global(env).into_iter().chain(homed(harness, env));"
+
+[[plant]]
+name = "detect: npm's folder is looked in only where there is a home"
+meant = "it_needs_no_home"
+runs = ["detect-unit"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = "        let folders = homed(harness, env).into_iter().chain(npm_global(env));"
+replace = '''
+        home(env).ok()?;
+        let folders = homed(harness, env).into_iter().chain(npm_global(env));'''
+
+[[plant]]
+name = "detect: npm's folder is looked in off Windows too"
+meant = "nothing_changes_off_windows"
+runs = ["detect-unit", "detect-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = '''
+    if !env.on_windows() {
+        return None;
+    }
+    Some(PathBuf::from(set(env, "APPDATA")?).join("npm"))'''
+replace = '    Some(PathBuf::from(set(env, "APPDATA")?).join("npm"))'
+
+[[plant]]
+name = "detect: an empty APPDATA names a folder"
+meant = "an_appdata_that_is_missing_or_empty_adds_nothing"
+runs = ["detect-unit"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = '    Some(PathBuf::from(set(env, "APPDATA")?).join("npm"))'
+replace = '    Some(PathBuf::from(env.os("APPDATA")?).join("npm"))'
