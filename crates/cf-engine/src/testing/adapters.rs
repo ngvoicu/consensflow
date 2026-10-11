@@ -78,6 +78,7 @@ fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
             failed: false,
             quota: None,
             settlement: Settlement::Unknown,
+            agents_pending: false,
         }),
     }
 }

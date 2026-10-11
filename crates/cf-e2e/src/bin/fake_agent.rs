@@ -29,6 +29,8 @@
 
 // The parts are in `fake_agent/`: cargo looks for the modules of a binary's
 // root file beside it, where each would be a binary of its own.
+#[path = "fake_agent/agents.rs"]
+mod agents;
 #[path = "fake_agent/args.rs"]
 mod args;
 #[path = "fake_agent/background.rs"]
@@ -51,13 +53,14 @@ use std::process::ExitCode;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, OnceLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cf_e2e::pattern;
 use cf_e2e::process::own_var;
 use regex::Regex;
 use serde_json::json;
 
+use agents::Agents;
 use background::Jobs;
 use records::{note_process, Records};
 use reply::{is_session_of, reply_to, Reply, Window};
@@ -169,6 +172,7 @@ fn run(launch: &args::Launch, signals: Signals) -> Result<std::convert::Infallib
         jobs: Jobs::new(Path::new(&home), pid),
         wake: turns.clone(),
         stop: Arc::clone(&stop),
+        agents: Agents::default(),
     };
     // A server the harness starts with its window, before any turn, as an MCP
     // server is.
@@ -265,9 +269,11 @@ fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Re
 }
 
 /// A turn: the window is busy (not in the hooks of its prompt, where Claude's
-/// status reads idle), records the message, answers it, and is idle.
+/// status reads idle), records the message, answers it, and is idle, or busy
+/// still while the background agents it started run, as Claude Code is.
 fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<(), String> {
     let failed = |cause: io::Error| cause.to_string();
+    let began = Instant::now();
     // Only the first message of the window is in the hooks of its prompt: the
     // words that go in later, a brief they carry among them, do not put it back.
     let hooks = hooks_of(text).filter(|_| records.ordinal() == 0);
@@ -351,9 +357,31 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
                     }),
                 )
                 .map_err(failed)?;
+            // A window that started agents writes what Claude Code writes after
+            // the stop hooks: the turn's duration, and how many agents it left
+            // running (the count is left out when none).
+            if window.agents.used() {
+                let mut duration = json!({
+                    "type": "system",
+                    "subtype": "turn_duration",
+                    "isSidechain": false,
+                    "durationMs": u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    "messageCount": records.ordinal(),
+                });
+                let running = window.agents.running();
+                if running > 0 {
+                    duration["pendingBackgroundAgentCount"] = json!(running);
+                }
+                records.append(pid, duration).map_err(failed)?;
+            }
         }
     }
-    records.status(pid, "idle").map_err(failed)
+    let status = if window.agents.running() > 0 {
+        "busy"
+    } else {
+        "idle"
+    };
+    records.status(pid, status).map_err(failed)
 }
 
 /// Bytes read in pieces, decoded to text as they come: a character cut in two

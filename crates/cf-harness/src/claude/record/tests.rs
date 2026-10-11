@@ -6,7 +6,8 @@
 //!
 //! The records and the helpers that make them are here; the tests are by what
 //! they look at: the ids and texts of the records (`texts`), what ends a turn
-//! (`boundaries`), the tool calls and how the items are ordered (`items`),
+//! (`boundaries`), the agents a turn left running (`agents`, which departs from
+//! Node's reading), the tool calls and how the items are ordered (`items`),
 //! the messages queued (`queues`), the API's refusals (`refusals`), the
 //! output of a `/clear` (`clear`), an interrupt (`interrupts`), and the
 //! records read late (`ancestry`). What a record waits as, and the line it is
@@ -15,6 +16,7 @@
 //! reading (`fields`). A long transcript, made like a big one (`synthetic`),
 //! is read (`scale`) and measured (`memory`).
 
+mod agents;
 mod ancestry;
 mod boundaries;
 mod clear;
@@ -135,7 +137,8 @@ fn looks(batches: &[&[Value]]) -> Vec<String> {
 }
 
 /// A reading as the Node probe printed it: its reason, or its items and what
-/// they say of the turn.
+/// they say of the turn, and that agents are pending where it says so (as a
+/// reading is serialized: no reading of Node's has it).
 fn show(reading: &Reading) -> String {
     let record = match reading {
         Reading::Unknown(reason) => return format!("unknown: {reason}"),
@@ -151,8 +154,13 @@ fn show(reading: &Reading) -> String {
         Settlement::InFlight => "in-flight",
         Settlement::Settled => "settled",
     };
+    let agents = if record.agents_pending {
+        r#","agentsPending":true"#
+    } else {
+        ""
+    };
     format!(
-        r#"{{"items":{},"inFlight":{},"asking":{},"failed":{},"quota":{},"settlement":"{state}"}}"#,
+        r#"{{"items":{},"inFlight":{},"asking":{},"failed":{},"quota":{},"settlement":"{state}"{agents}}}"#,
         js::stringify(&Value::from(items)),
         record.in_flight,
         record.asking,

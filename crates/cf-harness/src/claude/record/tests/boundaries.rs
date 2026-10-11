@@ -36,6 +36,9 @@ fn set(record: Value, field: &str, value: Option<&str>) -> Value {
 fn a_turn_duration_ends_the_turn_only_when_each_of_its_guards_holds() {
     // Node's answer for each value of each field of an otherwise good record:
     // `Number.isFinite`, `Number.isSafeInteger`, `>= 0`, `count === undefined || count === 0`.
+    // Except a pending count above 0, which Node answered did not end the turn:
+    // it does here, and the reading says the agents are pending (`agents`, which
+    // holds each such value; it departs from Node on purpose).
     let guards: &[(&str, Option<&str>, bool)] = &[
         ("durationMs", Some("0"), true),
         ("durationMs", Some("-0"), true),
@@ -67,7 +70,6 @@ fn a_turn_duration_ends_the_turn_only_when_each_of_its_guards_holds() {
         ("pendingBackgroundAgentCount", Some("-0"), true),
         ("pendingBackgroundAgentCount", Some("0e5"), true),
         ("pendingBackgroundAgentCount", None, true),
-        ("pendingBackgroundAgentCount", Some("1"), false),
         ("pendingBackgroundAgentCount", Some("-1"), false),
         ("pendingBackgroundAgentCount", Some("1e-7"), false),
         ("pendingBackgroundAgentCount", Some(r#""0""#), false),
@@ -76,7 +78,6 @@ fn a_turn_duration_ends_the_turn_only_when_each_of_its_guards_holds() {
         ("pendingWorkflowCount", Some("0"), true),
         ("pendingWorkflowCount", Some("-0"), true),
         ("pendingWorkflowCount", None, true),
-        ("pendingWorkflowCount", Some("1"), false),
         ("pendingWorkflowCount", Some(r#""0""#), false),
         ("pendingWorkflowCount", Some("null"), false),
         ("isSidechain", Some("false"), true),

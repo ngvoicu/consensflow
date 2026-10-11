@@ -38,9 +38,19 @@ pub(super) enum Projected {
     User(Box<User>),
     /// The output of a `/clear`, a child of the record with this uuid.
     Clear(Arc<str>),
-    /// A boundary record that ends the turn of the answer before it, by its
-    /// uuid when that is text.
-    Boundary(Option<Arc<str>>),
+    /// A boundary record that ends the turn of the answer before it.
+    Boundary(Boundary),
+}
+
+/// A record that ends the turn of the answer before it.
+#[derive(Debug, PartialEq)]
+pub(super) struct Boundary {
+    /// The record's uuid, when that is text.
+    pub(super) uuid: Option<Arc<str>>,
+    /// Whether the record says background agents or workflows are still running:
+    /// none for a record that says nothing of them (a stop hook's summary), as a
+    /// `turn_duration` says by its counts.
+    pub(super) agents: Option<bool>,
 }
 
 /// An attachment that holds a hook's context.
@@ -260,23 +270,30 @@ fn system(record: &Value, session: &str) -> Projected {
     match record.get("subtype").and_then(Value::as_str) {
         Some("local_command") => clear(record, session).map_or(Projected::Other, Projected::Clear),
         // 2.1.263/265/266's root query finalizer emits a `turn_duration` only
-        // after query completion, after stop hooks, and when not aborted. The
-        // transcript omits optional background counts; candidate/tool/queue/
-        // hook guards establish readiness. The exact installed call sites and
-        // native fixture are documented beside
+        // after query completion, after stop hooks, and when not aborted;
+        // candidate/tool/queue/hook guards establish readiness. The exact
+        // installed call sites and native fixture are documented beside
         // tests/engine/fixtures/completion/claude-code/v263-tool-loop.jsonl.
-        Some("turn_duration") if is_root_duration(record) => boundary(record),
+        // Later versions (2.1.296) write its counts of the background agents and
+        // workflows still running when there are any (and none when there are
+        // none): the turn is over all the same, and the counts are its word.
+        Some("turn_duration") => {
+            root_duration(record).map_or(Projected::Other, |agents| boundary(record, Some(agents)))
+        }
         Some("stop_hook_summary")
             if record.get("preventedContinuation") == Some(&Value::Bool(false)) =>
         {
-            boundary(record)
+            boundary(record, None)
         }
         _ => Projected::Other,
     }
 }
 
-fn boundary(record: &Value) -> Projected {
-    Projected::Boundary(text_id(record.get("uuid")))
+fn boundary(record: &Value, agents: Option<bool>) -> Projected {
+    Projected::Boundary(Boundary {
+        uuid: text_id(record.get("uuid")),
+        agents,
+    })
 }
 
 /// The uuid of the parent of a `local_command` record that has the shape of
@@ -298,26 +315,41 @@ fn clear(record: &Value, session: &str) -> Option<Arc<str>> {
         .map(Arc::from)
 }
 
-/// Whether a `turn_duration` is the root conversation's: in the main
-/// conversation, with a duration and a message count that are numbers, and
-/// no background agent or workflow pending.
-fn is_root_duration(record: &Value) -> bool {
+/// `Number.isSafeInteger`, `>= 0`: a count as Claude Code writes one.
+fn is_count(count: f64) -> bool {
+    count >= 0.0 && count.fract() == 0.0 && count <= 9_007_199_254_740_991.0
+}
+
+/// Whether a `turn_duration` is the root conversation's, which is the end of its
+/// turn: in the main conversation, with a duration and a message count that are
+/// numbers, and counts of the background agents and workflows pending that are
+/// counts where it has them. Says whether it names any pending.
+///
+/// Departs from Node's reader on purpose (the owner's decision of 2026-10-11):
+/// Node asked the counts to be none or 0, and read a record that named any as no
+/// end of the turn, which then stayed in flight until the last agent finished.
+/// A count that is no count (a string, a fraction, a number below 0) is still no
+/// end of the turn here.
+fn root_duration(record: &Value) -> Option<bool> {
     // `Number.isFinite`, `>= 0`: a number alone, a JSON one always finite here.
     let duration = record.get("durationMs").and_then(Value::as_f64);
     let count = record.get("messageCount").and_then(Value::as_f64);
-    // `Number.isSafeInteger`, `>= 0`.
-    let counted = count.is_some_and(|count| {
-        count >= 0.0 && count.fract() == 0.0 && count <= 9_007_199_254_740_991.0
-    });
-    let nothing_pending = ["pendingBackgroundAgentCount", "pendingWorkflowCount"]
-        .into_iter()
-        .all(|name| match record.get(name) {
-            None => true,
-            Some(Value::Number(pending)) => pending.as_f64() == Some(0.0),
-            Some(_) => false,
-        });
-    record.get("isSidechain") == Some(&Value::Bool(false))
+    let root = record.get("isSidechain") == Some(&Value::Bool(false))
         && duration.is_some_and(|duration| duration >= 0.0)
-        && counted
-        && nothing_pending
+        && count.is_some_and(is_count);
+    if !root {
+        return None;
+    }
+    let mut running = false;
+    for name in ["pendingBackgroundAgentCount", "pendingWorkflowCount"] {
+        match record.get(name) {
+            None => {}
+            Some(Value::Number(pending)) => {
+                let pending = pending.as_f64().filter(|pending| is_count(*pending))?;
+                running |= pending > 0.0;
+            }
+            Some(_) => return None,
+        }
+    }
+    Some(running)
 }

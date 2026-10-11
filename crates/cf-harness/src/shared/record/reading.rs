@@ -53,6 +53,13 @@ pub struct Record {
     pub failed: bool,
     pub quota: Option<Arc<Quota>>,
     pub settlement: Settlement,
+    /// The turn is settled and left background agents or workflows running,
+    /// which its harness says on the record that ends it (Claude Code's counts).
+    /// The window takes input between turns, and an agent's end wakes a turn of
+    /// its own: a task whose turn ended so is not done. Said only when true: no
+    /// reading Node wrote has it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub agents_pending: bool,
 }
 
 impl Record {
@@ -65,6 +72,7 @@ impl Record {
             failed: false,
             quota: None,
             settlement: Settlement::Unknown,
+            agents_pending: false,
         }
     }
 }

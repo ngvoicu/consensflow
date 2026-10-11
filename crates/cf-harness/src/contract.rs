@@ -264,6 +264,13 @@ impl Observed {
             Some(Reading::Unknown(_)) | None => &[],
         }
     }
+
+    /// Whether the conversation's turn ended and left background agents or
+    /// workflows running: the window takes input between turns, and its agent
+    /// is woken when they end.
+    pub fn agents_pending(&self) -> bool {
+        matches!(self.reading.as_deref(), Some(Reading::Known(record)) if record.agents_pending)
+    }
 }
 
 /// A window that waits on something its own dialog holds, and why where its

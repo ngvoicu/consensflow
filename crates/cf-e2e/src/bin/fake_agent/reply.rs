@@ -26,6 +26,13 @@
 //!   window begins a turn of its own when the job ends, as a harness does that
 //!   its job's notification wakes (`WOKEN <words>`, which answers `woken:
 //!   <words>`); with `--deaf` the job ignores the requests to end.
+//! - A line `AGENTS <count> <seconds> <words>` starts that many background agents
+//!   (`agents`: no program, as Claude Code's run in its own process) that end
+//!   together after that long, and answers the words at once, as an agent does
+//!   that leaves some running and ends its turn: the turn's `turn_duration` says
+//!   how many are left, the window's status stays `busy` for them, and when they
+//!   end the window begins a turn of its own (`WOKEN <words>`, which answers
+//!   `woken: <words>`), as Claude Code does.
 //! - A task saying `QUOTA-OUT` is refused with a 429, Claude's way, by the
 //!   window whose participant `CF_TEST_QUOTA_OUT` names, for as long as the
 //!   file `CF_TEST_QUOTA_FILE` names is there when it is set (taking it away is
@@ -48,6 +55,7 @@ use cf_e2e::process::{own_var, Run};
 use regex::Regex;
 use serde_json::{json, Value};
 
+use crate::agents::Agents;
 use crate::background::{Jobs, THINKING};
 use crate::stop::Stop;
 
@@ -62,6 +70,8 @@ pub struct Window {
     pub session: String,
     /// The jobs the window starts.
     pub jobs: Jobs,
+    /// The background agents the window starts.
+    pub agents: Agents,
     /// Where a turn the window begins by itself is queued: the message that
     /// wakes it when the job it left running ends.
     pub wake: Sender<String>,
@@ -182,6 +192,7 @@ fn shell(command: &str) -> Run {
 pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static SLEEP: OnceLock<Regex> = OnceLock::new();
     static BACKGROUND: OnceLock<Regex> = OnceLock::new();
+    static AGENTS: OnceLock<Regex> = OnceLock::new();
     static WOKEN: OnceLock<Regex> = OnceLock::new();
     static ASK: OnceLock<Regex> = OnceLock::new();
     static ASKED: OnceLock<Regex> = OnceLock::new();
@@ -219,6 +230,20 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
                 let _ = wake.send(woken);
             }
         })?;
+        return Ok(Reply::Text(words));
+    }
+    if let Some(agents) = pattern::once(&AGENTS, r"(?m)^AGENTS (\d+) (\d+) (.+)$").captures(text) {
+        let count: u64 = agents[1]
+            .parse()
+            .map_err(|_| format!("AGENTS {}", &agents[1]))?;
+        let seconds: u64 = agents[2]
+            .parse()
+            .map_err(|_| format!("AGENTS {} {}", &agents[1], &agents[2]))?;
+        let words = agents[3].to_owned();
+        let (wake, woken) = (window.wake.clone(), format!("WOKEN {words}"));
+        window.agents.start(count, seconds, move || {
+            let _ = wake.send(woken);
+        });
         return Ok(Reply::Text(words));
     }
     if let Some(woken) = pattern::once(&WOKEN, r"(?m)^WOKEN (.+)$").captures(text) {
@@ -306,6 +331,7 @@ mod tests {
             settings: None,
             session: "sess".into(),
             jobs: Jobs::new(Path::new("/nowhere/consensflow"), 1),
+            agents: Agents::default(),
             wake: std::sync::mpsc::channel().0,
             stop: Arc::new(Stop::default()),
         }
@@ -374,6 +400,35 @@ mod tests {
     fn the_turn_a_jobs_end_wakes_says_what_woke_it() {
         let reply = reply_to("WOKEN started the job", &window());
         assert_eq!(text(reply), "woken: started the job");
+    }
+
+    #[test]
+    fn an_agents_line_leaves_that_many_running_answers_its_words_and_wakes_a_turn_when_they_end() {
+        let (wake, woken) = std::sync::mpsc::channel();
+        let window = Window { wake, ..window() };
+        let reply = reply_to("AGENTS 2 0 started the research", &window);
+        assert_eq!(text(reply), "started the research");
+        assert!(window.agents.used());
+        assert_eq!(
+            woken.recv_timeout(Duration::from_secs(5)).unwrap(),
+            "WOKEN started the research"
+        );
+        assert_eq!(window.agents.running(), 0);
+
+        // Some that run on are what the turn that follows leaves running.
+        let window = self::window();
+        let reply = reply_to("AGENTS 3 600 waiting on three", &window);
+        assert_eq!(text(reply), "waiting on three");
+        assert_eq!(window.agents.running(), 3);
+    }
+
+    #[test]
+    fn an_agents_line_that_names_no_count_or_seconds_is_only_acknowledged() {
+        for line in ["AGENTS started the research", "AGENTS 2 soon words"] {
+            let window = window();
+            assert_eq!(text(reply_to(line, &window)), format!("noted: {line}"));
+            assert!(!window.agents.used(), "{line}");
+        }
     }
 
     #[test]

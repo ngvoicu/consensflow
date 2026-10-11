@@ -20,6 +20,18 @@
 //!   wakes is the one whose end is the result, by the usual rules. If no turn
 //!   begins within [`Limits::background_settle_ms`] of the work's end, the last
 //!   turn's end is the result.
+//! - The agents and workflows a turn started in its harness are work the turn
+//!   left running too, which the pane host cannot see (they are no process of the
+//!   window's tree): the harness says so on its record, on the reading of a turn
+//!   that ended with some pending ([`Observed::agents_pending`], Claude Code's own
+//!   counts, decided on 2026-10-11 after a chief's result waited twelve minutes
+//!   for its agents). Such a turn's end is no result, however long they run: an
+//!   agent's end wakes a turn of its own, and no settle time ends the wait. That
+//!   is the whole of what agents change here: a window whose turn ended with them
+//!   pending takes input like any at rest, a chief's and a worker's alike, and
+//!   what the chief sends a worker in the meantime (an answer, a resume, a tell)
+//!   goes in between its turns (the harness's adapter says it is at rest; no
+//!   delivery looks at them).
 //! - A window that closes with such work running says so to whoever gave the
 //!   task: the host lists what it ended in `pane.exit`. On Unix the host asks
 //!   the work to end first (TERM, then HUP) and gives it a grace to release what
@@ -36,6 +48,19 @@
 //! installs every harness), reaches the host's own console and ends the host. The
 //! hold, the board's line and the note to whoever gave the task are the same on
 //! every platform: they do not depend on how the window closes.
+//!
+//! Limits of the agents' part. The reading says a turn left agents pending until
+//! the window's next turn says otherwise, and nothing else says they ended:
+//!
+//! - Agents the human ended by hand, with no turn to follow, keep the task held
+//!   until the human pauses or cancels it.
+//! - A pause or a cancel is paid by a window at rest with no key, as for a job,
+//!   and the agents go on; closing the window ends them, with no note of them (a
+//!   note lists the processes the pane host saw).
+//! - A turn the human interrupts says nothing of agents (its record is the
+//!   interrupt's), so the window does not read at rest until they end.
+//! - A switch of the chief after its turn waits for a turn that leaves none
+//!   (`chief_switch`); a switch now closes the window and ends them.
 //!
 //! A launch's first message is marked when it shows in the window's record,
 //! which the engine sees on a pass (a second apart): work an agent starts before
@@ -92,6 +117,9 @@ pub(crate) enum Left {
     Running(usize),
     /// They have ended, a moment ago: the agent may be about to be woken.
     Ended,
+    /// The turn ended with background agents or workflows pending, which its
+    /// harness says on the reading: the end of one wakes a turn of its own.
+    Agents,
 }
 
 impl Left {
@@ -102,7 +130,19 @@ impl Left {
             Left::Running(1) => Some("background work running (1 process)".to_owned()),
             Left::Running(count) => Some(format!("background work running ({count} processes)")),
             Left::Ended => Some("background work ended; the agent may go on".to_owned()),
+            Left::Agents => Some("background agents running".to_owned()),
         }
+    }
+}
+
+/// What the window was last found to be held for, or its agents where it was
+/// held for no work: what a look keeps while the window shows a dialog or a
+/// message is going in.
+fn remembered(held: Option<Held>, agents: bool) -> Left {
+    match (held, agents) {
+        (Some(held), _) => held.left(),
+        (None, true) => Left::Agents,
+        (None, false) => Left::Nothing,
     }
 }
 
@@ -134,8 +174,11 @@ impl Dispatcher {
             return Ok(Left::Nothing);
         }
         let held = record.background.borrow().held;
+        // Agents are the reading's word, which the host cannot give: a turn
+        // that ended with some pending left them running.
+        let agents = observed.agents_pending();
         if starting || observed.waiting.is_some() || record.delivery.borrow().delivering.is_some() {
-            return Ok(held.map_or(Left::Nothing, Held::left));
+            return Ok(remembered(held, agents));
         }
         let state = self
             .seams
@@ -165,6 +208,11 @@ impl Dispatcher {
                 ended_at: None,
             });
             return Ok(Left::Running(work.total));
+        }
+        // No settle time ends a wait for agents: the turn an agent's end wakes
+        // is the one whose end is the result, however long they run.
+        if agents {
+            return Ok(Left::Agents);
         }
         let Some(mut held) = part.held else {
             return Ok(Left::Nothing);
@@ -275,6 +323,28 @@ mod tests {
             Some("background work running (2 processes)")
         );
         assert!(Left::Ended.reason().is_some());
+        assert_eq!(
+            Left::Agents.reason().as_deref(),
+            Some("background agents running")
+        );
+    }
+
+    #[test]
+    fn a_look_that_keeps_what_it_found_keeps_the_work_it_was_held_for_before_the_agents() {
+        let running = Held {
+            running: 2,
+            ended_at: None,
+        };
+        let ended = Held {
+            running: 2,
+            ended_at: Some(5),
+        };
+        assert_eq!(remembered(Some(running), false), Left::Running(2));
+        assert_eq!(remembered(Some(running), true), Left::Running(2));
+        assert_eq!(remembered(Some(ended), true), Left::Ended);
+        // Held for no work, a window whose turn left agents is held for them.
+        assert_eq!(remembered(None, true), Left::Agents);
+        assert_eq!(remembered(None, false), Left::Nothing);
     }
 
     #[test]

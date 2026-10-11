@@ -27,6 +27,7 @@ use cf_harness::testing::{
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
+mod agents;
 mod stops;
 
 /// The launch's id: a uuid, as the engine mints one (Node's tests took any

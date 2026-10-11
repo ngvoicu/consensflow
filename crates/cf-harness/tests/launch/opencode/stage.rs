@@ -419,6 +419,7 @@ pub(super) fn empty_record() -> Reading {
         failed: false,
         quota: None,
         settlement: Settlement::Unknown,
+        agents_pending: false,
     })
 }
 
@@ -438,5 +439,6 @@ pub(super) fn working_record() -> Record {
         failed: false,
         quota: None,
         settlement: Settlement::InFlight,
+        agents_pending: false,
     }
 }

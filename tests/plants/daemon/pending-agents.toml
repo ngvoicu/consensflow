@@ -1,0 +1,358 @@
+# The background agents and workflows a turn left running (the report of
+# 2026-10-11: a chief with four research agents kept a result waiting twelve
+# minutes, because Claude Code's own status says `busy` for as long as an agent
+# runs, though its prompt takes input). The reader says a turn that ended with
+# some pending is settled and that they are (`agents_pending` of the reading, from
+# the counts of the `turn_duration` that ends it); the Claude adapter reads a
+# window at rest by it, though its status is busy; no delivery looks at them
+# (a chief's, a worker's); the hold a worker's task has for the work its turn
+# left (`background`) holds it for them, so the result is the end of the turn
+# that leaves none; and a switch of the chief after its turn, which closes the
+# window and ends them with it, waits for a turn that leaves none (`chief_switch`).
+# One plant takes one rule out; a test of it fails. The first
+# plants run the tests of the crates, which hold each rule apart; the `pending
+# agents rig:` plants after them hold that the rule reaches the board through the
+# real daemon and pane host, and run only the case of the rig
+# (`crates/cf-e2e/tests/rig/pending_agents.rs`) that holds it. The rig's cases
+# build the `cf` and the pane host they run from the sources as planted, in
+# release, which makes these the slowest plants, and they say `builds`: the
+# family builds the native `cf` again once each is put back. Every name holds
+# `pending agents`, so `npm run plants:daemon -- pending` runs them all (a word
+# selects the plants whose name holds it, any of the words given), and
+# `npm run plants:daemon -- "pending agents rig"` the end to end ones.
+
+[run]
+# The Claude reader's own tests: what each record says of a turn and its agents.
+claude-reader-agents = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+# The reading, as it is written.
+harness-lib-reading = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::reading"]
+# Node's recordings of the readers, held through the switch: four of them were moved for
+# this reader (`crates/cf-harness/tests/goldens/README.md` says which).
+harness-records = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "records"]
+# A Claude window on the records and the status files of a turn that left agents running.
+harness-launch-claude-agents = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::agents"]
+# The engine's tests of the hold, on the fake windows: what the agents leave and what they do not.
+engine-dispatcher-pending-agents = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "pending_agents"]
+# The engine's tests of the switch after the chief's turn, on the fake windows.
+engine-dispatcher-switching-agents = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "switching_agents"]
+# The hold's own small rules.
+engine-lib-background = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "background"]
+# The cases of the rig (`pending_agents` of crates/cf-e2e): the daemon and the pane
+# host in real terminals, a case for each rule, found by the start of its name.
+rig-pending-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "pending_agents::a_result_for_a_chief"]
+rig-pending-worker = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "pending_agents::a_workers_turn"]
+rig-pending-switch = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "pending_agents::a_switch_after"]
+
+[[plant]]
+name = "pending agents: a turn_duration that says agents are pending is no end of the turn, as in Node"
+meant = "a_turn_duration_that_says_agents_or_workflows_are_pending_ends_the_turn_and_the_reading_says_so"
+runs = ["claude-reader-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '                running |= pending > 0.0;'
+replace = '''
+                if pending > 0.0 {
+                    return None;
+                }'''
+
+[[plant]]
+name = "pending agents: Node’s recordings of a turn with a pending count are no more the reader’s"
+meant = "every_look_node_took_reads_through_the_switch_what_node_read"
+runs = ["harness-records"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '                running |= pending > 0.0;'
+replace = '''
+                if pending > 0.0 {
+                    return None;
+                }'''
+
+[[plant]]
+name = "pending agents: the workflows a turn left running are not read"
+meant = "a_turn_duration_that_says_agents_or_workflows_are_pending_ends_the_turn_and_the_reading_says_so"
+runs = ["claude-reader-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '    for name in ["pendingBackgroundAgentCount", "pendingWorkflowCount"] {'
+replace = '    for name in ["pendingBackgroundAgentCount"] {'
+
+[[plant]]
+name = "pending agents: a count that is no count ends the turn"
+meant = "a_count_that_is_no_count_does_not_end_the_turn_as_in_node_and_nothing_is_said_of_agents"
+runs = ["claude-reader-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '                let pending = pending.as_f64().filter(|pending| is_count(*pending))?;'
+replace = '                let pending = pending.as_f64()?;'
+
+[[plant]]
+name = "pending agents: the reading never says the agents are pending"
+meant = "the_summary_a_stop_hook_writes_settles_the_turn_and_the_duration_after_it_says_the_agents"
+runs = ["claude-reader-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+        record.agents_pending = settlement == Settlement::Settled
+            && matches!(self.terminal, Some(Terminal::Derived { agents: true, .. }));'''
+replace = '''
+        record.agents_pending = false;'''
+
+[[plant]]
+name = "pending agents: the reading says the agents of a turn that is still in flight"
+meant = "agents_are_said_of_a_turn_that_is_over_and_of_none_that_is_open"
+runs = ["claude-reader-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+        record.agents_pending = settlement == Settlement::Settled
+            && matches!(self.terminal, Some(Terminal::Derived { agents: true, .. }));'''
+replace = '''
+        record.agents_pending =
+            matches!(self.terminal, Some(Terminal::Derived { agents: true, .. }));'''
+
+[[plant]]
+name = "pending agents: a stop hook’s summary says agents are pending"
+meant = "the_summary_a_stop_hook_writes_settles_the_turn_and_the_duration_after_it_says_the_agents"
+runs = ["claude-reader-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '            agents: boundary.agents.unwrap_or(said),'
+replace = '            agents: boundary.agents.unwrap_or(true),'
+
+[[plant]]
+name = "pending agents: a summary that follows the duration takes back what it said"
+meant = "the_summary_a_stop_hook_writes_settles_the_turn_and_the_duration_after_it_says_the_agents"
+runs = ["claude-reader-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '            agents: boundary.agents.unwrap_or(said),'
+replace = '            agents: boundary.agents.unwrap_or(false),'
+
+[[plant]]
+name = "pending agents: a later duration that says none leaves the agents the earlier one said"
+meant = "the_summary_a_stop_hook_writes_settles_the_turn_and_the_duration_after_it_says_the_agents"
+runs = ["claude-reader-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '            agents: boundary.agents.unwrap_or(said),'
+replace = '            agents: boundary.agents.map_or(said, |agents| agents || said),'
+
+[[plant]]
+name = "pending agents: the reading is written with its agents even when none are pending"
+meant = "a_reading_is_written_as_node_wrote_one"
+runs = ["harness-lib-reading"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/reading.rs"
+find = '    #[serde(skip_serializing_if = "std::ops::Not::not")]'
+replace = ''
+
+[[plant]]
+name = "pending agents: a look never says the agents are pending"
+meant = "a_window_busy_with_the_agents_its_turn_left_is_at_rest_and_the_look_says_the_agents_are_pending"
+runs = ["harness-launch-claude-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '        matches!(self.reading.as_deref(), Some(Reading::Known(record)) if record.agents_pending)'
+replace = '        false'
+
+[[plant]]
+name = "pending agents: a window busy with its agents is not at rest"
+meant = "a_window_busy_with_the_agents_its_turn_left_is_at_rest_and_the_look_says_the_agents_are_pending"
+runs = ["harness-launch-claude-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '                    let at_prompt = idle || (agents && working);'
+replace = '                    let at_prompt = idle;'
+
+[[plant]]
+name = "pending agents: a window that said no status is at rest for its agents"
+meant = "agents_pending_are_no_word_of_the_window_where_claude_said_none"
+runs = ["harness-launch-claude-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '                    let at_prompt = idle || (agents && working);'
+replace = '                    let at_prompt = idle || agents;'
+
+[[plant]]
+name = "pending agents: a window busy with a turn that left no agents is at rest"
+meant = "a_window_busy_with_a_turn_that_left_no_agents_is_not_at_rest"
+runs = ["harness-launch-claude-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '                    let at_prompt = idle || (agents && working);'
+replace = '                    let at_prompt = idle || working;'
+
+[[plant]]
+name = "pending agents: a delivery waits for the agents of the window it is for"
+meant = "a_message_waiting_for_a_chief_goes_in_when_its_turn_ends_with_agents_pending"
+runs = ["engine-dispatcher-pending-agents"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+            && observed.waiting.is_none()
+            && !drawing;'''
+replace = '''
+            && observed.waiting.is_none()
+            && !observed.agents_pending()
+            && !drawing;'''
+
+[[plant]]
+name = "pending agents: a worker’s turn that ends with agents pending is its task’s result"
+meant = "a_workers_turn_that_ends_with_agents_pending_is_not_its_result_and_the_next_that_ends_with_none_is"
+runs = ["engine-dispatcher-pending-agents"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''
+        if agents {
+            return Ok(Left::Agents);
+        }'''
+replace = ""
+
+[[plant]]
+name = "pending agents: the settle time ends a wait for agents after a job"
+meant = "a_turn_that_left_a_job_and_agents_is_held_for_the_job_and_then_for_the_agents"
+runs = ["engine-dispatcher-pending-agents"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '        if agents {'
+replace = '        if agents && part.held.is_none() {'
+
+[[plant]]
+name = "pending agents: the board does not say why a worker whose turn left agents works"
+meant = "a_workers_turn_that_ends_with_agents_pending_is_not_its_result_and_the_next_that_ends_with_none_is"
+runs = ["engine-dispatcher-pending-agents"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '            Left::Agents => Some("background agents running".to_owned()),'
+replace = '            Left::Agents => None,'
+
+[[plant]]
+name = "pending agents: a window whose look is kept forgets its agents"
+meant = "a_look_that_keeps_what_it_found_keeps_the_work_it_was_held_for_before_the_agents"
+runs = ["engine-lib-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '        (None, true) => Left::Agents,'
+replace = '        (None, true) => Left::Nothing,'
+
+[[plant]]
+name = "pending agents: a switch after the chief’s turn goes with its agents still running"
+meant = "a_switch_after_the_turn_waits_while_the_chiefs_agents_run_and_goes_once_a_turn_ends_with_none"
+runs = ["engine-dispatcher-switching-agents"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_switch.rs"
+find = '''
+        if observed.agents_pending() {
+            return Ok(());
+        }
+        self.perform_switch(project, chief, record, pending.to)'''
+replace = '''
+        self.perform_switch(project, chief, record, pending.to)'''
+
+[[plant]]
+name = "pending agents: the note that asks the chief where things stand waits for its agents"
+meant = "the_note_that_asks_where_things_stand_goes_in_between_turns_and_the_switch_still_waits_for_the_agents"
+runs = ["engine-dispatcher-switching-agents"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_switch.rs"
+find = '''
+        if !idle {
+            return Ok(());
+        }
+        let Some(pending) = record.pending_switch.borrow().clone() else {'''
+replace = '''
+        if !idle || observed.agents_pending() {
+            return Ok(());
+        }
+        let Some(pending) = record.pending_switch.borrow().clone() else {'''
+
+[[plant]]
+name = "pending agents: a switch now waits for the chief’s agents"
+meant = "a_switch_now_goes_at_once_whatever_the_chief_left_running"
+runs = ["engine-dispatcher-switching-agents"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '        if open && !this.is_out(&chief) && (when == SwitchWhen::Turn || note) {'
+replace = '        if open && !this.is_out(&chief) {'
+
+# The same rules end to end, through the real daemon and pane host: each of these
+# runs only the case of the rig that holds the rule, most of them with the edit of a
+# plant of the crates above.
+[[plant]]
+name = "pending agents rig: a chief with agents running is not at rest"
+meant = "a_result_for_a_chief_whose_turn_ended_with_agents_pending_goes_in_at_once_and_does_not_wait_for_them"
+runs = ["rig-pending-chief"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '                    let at_prompt = idle || (agents && working);'
+replace = '                    let at_prompt = idle;'
+
+[[plant]]
+name = "pending agents rig: a message waits for the agents of the chief it is for"
+meant = "a_result_for_a_chief_whose_turn_ended_with_agents_pending_goes_in_at_once_and_does_not_wait_for_them"
+runs = ["rig-pending-chief"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+            && observed.waiting.is_none()
+            && !drawing;'''
+replace = '''
+            && observed.waiting.is_none()
+            && !observed.agents_pending()
+            && !drawing;'''
+
+[[plant]]
+name = "pending agents rig: a worker’s turn that ends with agents pending is its task’s result"
+meant = "a_workers_turn_that_ends_with_agents_pending_is_not_its_result_the_agents_end_and_the_turn_they_wake_is"
+runs = ["rig-pending-worker"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''
+        if agents {
+            return Ok(Left::Agents);
+        }'''
+replace = ""
+
+[[plant]]
+name = "pending agents rig: a switch after the chief’s turn ends its agents with its window"
+meant = "a_switch_after_the_chiefs_turn_waits_for_its_agents_which_would_end_with_its_window_and_goes_when_a_turn_ends_with_none"
+runs = ["rig-pending-switch"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_switch.rs"
+find = '''
+        if observed.agents_pending() {
+            return Ok(());
+        }
+        self.perform_switch(project, chief, record, pending.to)'''
+replace = '''
+        self.perform_switch(project, chief, record, pending.to)'''

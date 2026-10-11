@@ -13,6 +13,14 @@
 //! ran (a `turn_duration`, or a `stop_hook_summary` that did not prevent
 //! continuation). A turn that has begun and not ended is in flight.
 //!
+//! A turn that ended may have left background agents or workflows running, which
+//! its `turn_duration` says by its counts (`pendingBackgroundAgentCount`,
+//! `pendingWorkflowCount`, left out when none). It is settled all the same, and
+//! the reading says the agents are pending (`agents_pending`): the window takes
+//! input between turns, and the end of an agent wakes a turn of its own, whose
+//! record says what is left. (Departs from Node's reader, which took such a
+//! record for no end of the turn, on the owner's decision of 2026-10-11.)
+//!
 //! A look's records wait until all of them are in, and are then replayed in
 //! order, so that a decision may rest on a record that comes after the one it
 //! is about (`ancestry`). A record read later that such a decision looked up
@@ -113,10 +121,12 @@ enum Terminal {
     /// The record says so: an API error, an interrupt, a `/clear`.
     Native,
     /// A boundary record came after the candidate. It names the candidate's
-    /// item and its own uuid, when that is text.
+    /// item and its own uuid, when that is text, and says whether the turn left
+    /// background agents or workflows running.
     Derived {
         item_id: Arc<str>,
         uuid: Option<Arc<str>>,
+        agents: bool,
     },
 }
 
@@ -221,6 +231,10 @@ impl Answer for Transcript {
         record.failed = self.failed;
         record.quota = self.quota.clone();
         record.settlement = settlement;
+        // Said of a turn that is over: one with a call open or a message queued
+        // is in flight, whatever its duration said.
+        record.agents_pending = settlement == Settlement::Settled
+            && matches!(self.terminal, Some(Terminal::Derived { agents: true, .. }));
         Ok(record)
     }
 }
