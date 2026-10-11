@@ -317,3 +317,124 @@ fn a_claude_window_gets_the_settings_file_of_its_launch() {
     ));
     assert!(refused.unwrap_err().contains("not a launch id"));
 }
+
+/// The argv the window `argv` opens on, as the daemon would open it, with `env`.
+fn program_of(argv: &[&str], env: Value) -> Result<Vec<String>, String> {
+    let words = answer(&ask("program", json!({ "argv": argv, "env": env })))?;
+    Ok(words
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|word| word.as_str().unwrap().to_owned())
+        .collect())
+}
+
+#[test]
+fn a_program_that_is_no_script_opens_a_window_as_it_is() {
+    let argv = [
+        "/home/me/.local/bin/claude",
+        "--model",
+        "a b",
+        "--session-id",
+        "s-1",
+    ];
+    assert_eq!(program_of(&argv, json!({})).unwrap(), argv);
+    assert_eq!(program_of(&[], json!({})).unwrap(), Vec::<String>::new());
+}
+
+#[test]
+fn an_npm_shim_opens_a_window_as_the_node_and_the_script_it_runs() {
+    // The pane host starts a file with each argument quoted the way programs read
+    // them, which cmd.exe does not: the shim is read for what it runs, on any platform.
+    let folder = tempfile::tempdir().unwrap();
+    let script = folder
+        .path()
+        .join("node_modules")
+        .join("claude")
+        .join("cli.js");
+    fs::create_dir_all(script.parent().unwrap()).unwrap();
+    fs::write(&script, "").unwrap();
+    let node = folder.path().join("node.exe");
+    fs::write(&node, "").unwrap();
+    let shim = folder.path().join("claude.cmd");
+    fs::write(
+        &shim,
+        "@ECHO off\r\nSETLOCAL\r\n\"%_prog%\" \"%dp0%\\node_modules\\claude\\cli.js\" %*\r\n",
+    )
+    .unwrap();
+    let shim = shim.to_string_lossy().into_owned();
+    assert_eq!(
+        program_of(&[&shim, "--model", "a b"], json!({})).unwrap(),
+        [
+            node.to_string_lossy().into_owned(),
+            script.to_string_lossy().into_owned(),
+            "--model".to_owned(),
+            "a b".to_owned()
+        ]
+    );
+}
+
+#[test]
+fn a_script_of_another_shape_cannot_open_a_window_and_the_error_says_so() {
+    let folder = tempfile::tempdir().unwrap();
+    let script = folder.path().join("codex.cmd");
+    fs::write(&script, "@echo off\r\necho hello\r\n").unwrap();
+    let script = script.to_string_lossy().into_owned();
+    let refused = program_of(&[&script], json!({})).unwrap_err();
+    assert!(
+        refused.contains("is not an npm shim, and only cmd.exe could run it in a window"),
+        "{refused}"
+    );
+    assert!(answer(&ask("program", json!({ "env": {} })))
+        .unwrap_err()
+        .contains("names no argv"));
+    assert!(
+        answer(&ask("program", json!({ "argv": ["a", 7], "env": {} })))
+            .unwrap_err()
+            .contains("is not text")
+    );
+}
+
+#[test]
+fn the_newest_session_of_a_folder_is_asked_of_the_store_the_environment_names() {
+    let root = tempfile::tempdir().unwrap();
+    let store = root.path().join("opencode.db");
+    let db = rusqlite::Connection::open(&store).unwrap();
+    db.execute_batch(
+        "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, parent_id TEXT, time_created INTEGER);
+         INSERT INTO session VALUES ('mine', '/work/a', NULL, 5000);",
+    )
+    .unwrap();
+    drop(db);
+    let asked = |kind: &str, workspace: &str, since: Value| {
+        answer(&ask(
+            "newest_session",
+            json!({
+                "kind": kind, "workspace": workspace, "since": since,
+                "env": { "OPENCODE_DB": store.to_str().unwrap() },
+            }),
+        ))
+    };
+    assert_eq!(
+        asked("opencode", "/work/a", json!(1000)).unwrap(),
+        json!("mine")
+    );
+    // Nothing yet is null, which is not a failure.
+    assert_eq!(
+        asked("opencode", "/work/a", json!(6000)).unwrap(),
+        Value::Null
+    );
+    assert_eq!(asked("opencode", "/work/b", json!(0)).unwrap(), Value::Null);
+    // Claude and Pi are opened on an id they are given.
+    let refused = asked("claude-code", "/work/a", json!(0)).unwrap_err();
+    assert!(
+        refused.contains("opens on a session id of its own choosing"),
+        "{refused}"
+    );
+    assert!(asked("kimi", "/work/a", json!(0))
+        .unwrap_err()
+        .contains("no harness runs as kimi"));
+    assert!(asked("opencode", "/work/a", Value::Null)
+        .unwrap_err()
+        .contains("names no since"));
+}

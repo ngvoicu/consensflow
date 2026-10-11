@@ -17,10 +17,17 @@
 //! and S9's, `smoke` (the packaged smoke, which runs the smoke test of
 //! `crates/cf-e2e`) and `candidate` are S11's, `updater_smoke` is S12's: the
 //! updater smoke in Rust, which `smoke` lists as `smoke-updater`, and `plants`
-//! is S13's: the mutation tests, with their data in `tests/plants`. The lead's
-//! are this list of modules, `dispatch`, `process`, `context`, `check`, the
-//! manifests and the lockfile, the alias, and the call sites (the npm scripts,
-//! the workflows, the drivers that run a command).
+//! is S13's: the mutation tests, with their data in `tests/plants`. S14 ports
+//! the last JavaScript outside the page and the extensions: `live` (the one
+//! command that runs every live test of `crates/cf-e2e`, whatever its name)
+//! was made whole by S14.0, and the three modules S14.0 left with rows that say
+//! "not ported yet" are filled by the landings that port what they stand for:
+//! `evals` (`eval`, `eval summary`, `watch`) by S14.3, which hands them to
+//! `crates/cf-evals`, `windows` (`windows`, `windows-matrix`) by S14.4, and
+//! `scrub_transcript` by the landing that ports its tool. The lead's are this
+//! list of modules, `dispatch`, `process`, `context`, `check`, the manifests and
+//! the lockfile, the alias, and the call sites (the npm scripts, the workflows,
+//! the drivers that run a command).
 
 #![forbid(unsafe_code)]
 
@@ -32,12 +39,16 @@ mod clippy_windows;
 pub mod context;
 mod departures;
 mod dispatch;
+mod evals;
+mod live;
 mod plants;
 mod portable;
 pub mod process;
+mod scrub_transcript;
 mod sidecar;
 mod smoke;
 mod suites;
 mod updater_smoke;
+mod windows;
 
 pub use dispatch::run;

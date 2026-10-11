@@ -62,6 +62,8 @@ thiserror.workspace = true
 ureq.workspace = true
 # The WebSocket the stand-in Codex speaks, on a socket or on loopback.
 tungstenite.workspace = true
+# The conversation id a live test opens a Claude Code or Pi window on.
+uuid.workspace = true
 
 [dev-dependencies]
 cf-e2e = { path = ".", features = ["test-support"] }

@@ -11,7 +11,11 @@
 //! on Windows, which the supervisor's cases here do not reach, and the stand-in
 //! agent's part in how a window closes: it leaves when it is asked to, and so
 //! does the job it leaves running. So is `live_support`: what the opt-in live
-//! tests stand on. So is `background_work`: what ConsensFlow does with the work
+//! tests stand on, and `live_base`: the rest of it, which the stand-in agent
+//! stands in for the harnesses of (what the rig tells of its windows, the
+//! records the stand-ins leave in a Claude folder that is the person's, a
+//! window opened as the app opens one, the harness code asked as a process).
+//! So is `background_work`: what ConsensFlow does with the work
 //! a worker's turn left running, and how a window closes. So is `approval`: what
 //! the daemon types into a window while the words that were for it wait for the
 //! human, where the stand-in agent stops a turn at the Escape it is pressed. So is
@@ -49,6 +53,8 @@ mod daemon_seam;
 mod decided_result;
 #[path = "rig/help.rs"]
 mod help;
+#[path = "rig/live_base.rs"]
+mod live_base;
 #[path = "rig/live_support.rs"]
 mod live_support;
 #[path = "rig/pending_agents.rs"]

@@ -10,6 +10,7 @@ use std::path::Path;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use cf_e2e::live::trace::Trace;
 use cf_e2e::live::{cut, text, wait, Log};
 use cf_e2e::rig::{Project, Rig};
 use cf_e2e::{Error, Result};
@@ -17,7 +18,6 @@ use serde_json::{json, Value};
 
 use crate::human::Human;
 use crate::plan::Planned;
-use crate::trace::Trace;
 use crate::verdict;
 
 /// How long the chief has to put the brief on the board once the human has

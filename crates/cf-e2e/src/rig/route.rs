@@ -31,6 +31,19 @@ pub(super) const PAGE: &str = "r-test-";
 /// The prefix of the id of a request the case makes of the pane host.
 pub(super) const HOST: &str = "n-test-";
 
+/// A key the daemon pressed into a window: a `pane.input` request it made of
+/// the pane host, and when the rig saw it sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Press {
+    /// The window's id.
+    pub pane: String,
+    /// The bytes of the key (Escape is `[27]`).
+    pub bytes: Vec<u8>,
+    /// When it was seen, in milliseconds since the epoch: the clock the daemon's
+    /// event file and a harness's status file keep their times by.
+    pub at_ms: i64,
+}
+
 /// What the frames showed so far.
 #[derive(Debug, Default)]
 pub(super) struct Seen {
@@ -40,6 +53,8 @@ pub(super) struct Seen {
     pub host: Vec<Value>,
     /// The body of each `pane.open` the daemon asked, in order.
     pub opened: Vec<Value>,
+    /// Every key the daemon pressed into a window, in order.
+    pub presses: Vec<Press>,
     /// Everything each pane printed, by the pane's id.
     pub printed: HashMap<String, Vec<u8>>,
     /// The body of each `pane.exit` the pane host told.
@@ -86,6 +101,15 @@ impl Shared {
             seen.daemon.push(frame.clone());
             if frame["kind"] == "req" && frame["op"] == "pane.open" {
                 seen.opened.push(frame["body"].clone());
+            }
+            if frame["kind"] == "req" && frame["op"] == "pane.input" {
+                if let Some(bytes) = bytes_of(&frame["body"]["bytes"]) {
+                    seen.presses.push(Press {
+                        pane: frame["body"]["id"].as_str().unwrap_or_default().to_owned(),
+                        bytes,
+                        at_ms: jiff::Timestamp::now().as_millisecond(),
+                    });
+                }
             }
         }
         if frame["kind"] == "res"
@@ -198,6 +222,55 @@ mod tests {
         let seen = shared.seen();
         assert_eq!(seen.daemon.len(), 1);
         assert_eq!(seen.opened, [json!({"id": "p1-chief", "argv": ["x"]})]);
+    }
+
+    #[test]
+    fn a_key_the_daemon_pressed_is_kept_with_the_time_it_was_seen_sent() {
+        let shared = Shared::default();
+        let (host, host_lines, _daemon, _) = sinks();
+        let before = jiff::Timestamp::now().as_millisecond();
+        let key = |id: &str, bytes: &str| {
+            format!(
+                r#"{{"v":1,"id":"n-1","kind":"req","op":"pane.input","body":{{"id":"{id}","generation":1,"bytes":{bytes}}}}}"#
+            )
+        };
+        for line in [
+            key("p1-chief", "[27]"),
+            key("p1-worker", "[3]"),
+            key("p1-chief", "[27]"),
+        ] {
+            shared.route_daemon(&line, &host);
+            // Each is passed on, as every frame is.
+            assert_eq!(
+                host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+                line
+            );
+        }
+        // Another request of the daemon's is no key, and nor is an answer.
+        shared.route_daemon(
+            r#"{"v":1,"id":"n-2","kind":"req","op":"pane.write_paste","body":{"id":"p1-chief","bytes":[27]}}"#,
+            &host,
+        );
+        let after = jiff::Timestamp::now().as_millisecond();
+        let seen = shared.seen();
+        let kept: Vec<(&str, &[u8])> = seen
+            .presses
+            .iter()
+            .map(|press| (press.pane.as_str(), press.bytes.as_slice()))
+            .collect();
+        assert_eq!(
+            kept,
+            [
+                ("p1-chief", &[27][..]),
+                ("p1-worker", &[3][..]),
+                ("p1-chief", &[27][..])
+            ]
+        );
+        assert!(seen
+            .presses
+            .iter()
+            .all(|press| (before..=after).contains(&press.at_ms)));
+        assert!(seen.presses[0].at_ms <= seen.presses[2].at_ms);
     }
 
     #[test]

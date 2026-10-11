@@ -479,6 +479,7 @@ dependencies = [
  "tungstenite",
  "ureq",
  "url",
+ "uuid",
  "windows-sys 0.61.2",
 ]
 
@@ -501,6 +502,19 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
+]
+
+[[package]]
+name = "cf-evals"
+version = "3.0.1"
+dependencies = [
+ "cf-e2e",
+ "jiff",
+ "regex",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -5716,6 +5730,7 @@ dependencies = [
 name = "xtask"
 version = "3.0.1"
 dependencies = [
+ "base64 0.22.1",
  "cf-base",
  "cf-portable",
  "cf-process",

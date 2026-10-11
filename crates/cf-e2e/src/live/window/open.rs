@@ -1,0 +1,219 @@
+//! How a window is opened: the folder it runs in, the agent it runs, the command
+//! line its harness opens a new conversation with (the harness code of the
+//! product says it, through [`super::super::ask`]), what a Claude window has
+//! besides, and the question Claude asks of a folder it has not seen, answered
+//! first ([`super::trust_claude`]).
+
+use std::cell::{Cell, RefCell};
+use std::path::Path;
+
+use serde_json::{json, Value};
+
+use super::super::agents;
+use super::super::ask;
+use super::super::machine::{live_folder_in, Harness, Installed, ISOLATION};
+use super::{trust_claude, Window};
+use crate::rig::Rig;
+use crate::{Error, Result};
+
+/// The launch the live windows' settings are written for: one id, so each is
+/// written over the last.
+const LAUNCH: &str = "11111111-1111-4111-8111-111111111111";
+
+/// The harnesses the app pastes into: Codex, Pi and OpenCode take their
+/// messages through their own queues.
+pub const PASTED: [Harness; 2] = [Harness::Claude, Harness::Devin];
+
+/// The harnesses `names` name, which the app pastes into, or why one cannot be
+/// run: a word that names none, or one that takes its messages through its own
+/// queue.
+pub fn pasted_into(names: &[String]) -> Result<Vec<Harness>> {
+    names
+        .iter()
+        .map(|name| {
+            let harness = Harness::from_name(name).ok_or_else(|| {
+                Error::Daemon(format!(
+                    "no harness is called {name}: {}",
+                    Harness::ALL.map(Harness::name).join(", ")
+                ))
+            })?;
+            if PASTED.contains(&harness) {
+                Ok(harness)
+            } else {
+                Err(Error::Daemon(format!(
+                    "the app pastes into claude and devin only; {name} takes its messages through its own queue"
+                )))
+            }
+        })
+        .collect()
+}
+
+/// A conversation id, which Claude Code and Pi are opened on (the others name
+/// their own): a random one in the shape of a version 4 uuid.
+pub(super) fn new_session() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
+/// How a window is to be opened.
+pub struct Open<'a> {
+    rig: &'a Rig,
+    install: &'a Installed,
+    folder: String,
+    id: String,
+    agent: Option<Value>,
+    env: Vec<(String, String)>,
+    drop_env: Vec<String>,
+    trusting: bool,
+}
+
+impl<'a> Open<'a> {
+    /// The window `id` of the harness `install`, in the folder called `folder` of
+    /// the home the rig gives its windows (`.consensflow-candidate/live/<folder>`
+    /// below it), on the harness's cheap model.
+    pub fn new(rig: &'a Rig, install: &'a Installed, folder: &str, id: &str) -> Self {
+        Self {
+            rig,
+            install,
+            folder: folder.to_owned(),
+            id: id.to_owned(),
+            agent: None,
+            env: Vec::new(),
+            drop_env: Vec::new(),
+            trusting: true,
+        }
+    }
+
+    /// The window runs `agent` (`kind`, `model`, `effort`: [`agents::agent`] is
+    /// the harness's cheap one) instead of the harness's cheap model.
+    #[must_use]
+    pub fn agent(mut self, agent: Value) -> Self {
+        self.agent = Some(agent);
+        self
+    }
+
+    /// With the variable `name` set to `value` in the window, over what its
+    /// harness starts with.
+    #[must_use]
+    pub fn var(mut self, name: &str, value: &str) -> Self {
+        self.env.push((name.to_owned(), value.to_owned()));
+        self
+    }
+
+    /// Without the variable `name`, which its harness would start it with.
+    #[must_use]
+    pub fn without(mut self, name: &str) -> Self {
+        self.drop_env.push(name.to_owned());
+        self
+    }
+
+    /// Without asking Claude to trust the folder first: for a program that is no
+    /// Claude Code (the stand-in agent, in the tests of this support), which asks
+    /// nothing of a folder and has no dialog to wait for.
+    #[must_use]
+    pub fn without_trust(mut self) -> Self {
+        self.trusting = false;
+        self
+    }
+
+    /// Opens it. A Claude window is opened after Claude has been asked to trust
+    /// its folder, and says what came of that ([`Window::trust`]).
+    pub fn open(self) -> Result<Window<'a>> {
+        let harness = self.install.harness();
+        let home = self
+            .rig
+            .var("HOME")
+            .filter(|home| !home.is_empty())
+            .ok_or_else(|| Error::Daemon("the rig gives its windows no home".to_owned()))?;
+        let workspace = live_folder_in(Path::new(home), &self.folder)?;
+        let agent = self.agent.unwrap_or_else(|| agents::agent(harness));
+        let kind = agent["kind"]
+            .as_str()
+            .unwrap_or_else(|| harness.kind())
+            .to_owned();
+        // Claude and Pi open on an id they are given; the others name their own.
+        let session = (kind == "claude-code" || kind == "pi").then(new_session);
+        let start = ask::start(&agent, session.as_deref(), None)?.ok_or_else(|| {
+            Error::Daemon(format!(
+                "{} has no window of its own to open on a new conversation",
+                harness.name()
+            ))
+        })?;
+        let executable = self.install.command().to_string_lossy().into_owned();
+        let env = window_env(self.rig, &workspace);
+        let claude = harness == Harness::Claude;
+        let trust = if claude && self.trusting {
+            let shut_out = ISOLATION.map(str::to_owned);
+            let argv: Vec<String> = std::iter::once(executable.clone())
+                .chain(shut_out)
+                .collect();
+            Some(trust_claude(self.rig, &argv, &workspace)?)
+        } else {
+            None
+        };
+        let mut argv = vec![executable];
+        if claude {
+            // The settings the app writes for each launch (which skip the full-permission
+            // warning), and no MCP server, connector or browser.
+            argv.extend(ask::claude_settings(&env, LAUNCH, false)?);
+            argv.extend(ISOLATION.map(str::to_owned));
+        }
+        argv.extend(start.args);
+        let argv = ask::program(&argv, &env).map_err(|failed| {
+            Error::Daemon(format!("{} cannot open a window: {failed}", harness.name()))
+        })?;
+        let mut window_vars: serde_json::Map<String, Value> = start
+            .env
+            .iter()
+            .map(|(name, value)| (name.clone(), json!(value)))
+            .collect();
+        window_vars.extend(
+            self.env
+                .iter()
+                .map(|(name, value)| (name.clone(), json!(value))),
+        );
+        let drop_env: Vec<String> = start.drop_env.into_iter().chain(self.drop_env).collect();
+        let opened_at_ms = jiff::Timestamp::now().as_millisecond();
+        let opened = self.rig.host(
+            "pane.open",
+            json!({
+                "id": self.id, "generation": 1, "cwd": workspace, "argv": argv,
+                "env": window_vars, "dropEnv": drop_env,
+                "size": { "rows": 40, "cols": 120 },
+            }),
+        )?;
+        if opened["ok"] != true {
+            return Err(Error::Daemon(format!(
+                "{} did not open: {opened}",
+                harness.name()
+            )));
+        }
+        Ok(Window {
+            rig: self.rig,
+            harness,
+            kind,
+            id: self.id.clone(),
+            workspace,
+            argv,
+            session: RefCell::new(session),
+            opened_at_ms,
+            env,
+            trust,
+            killed: Cell::new(false),
+        })
+    }
+}
+
+/// The environment a harness is asked where its records are with, for a window in
+/// `workspace`: the rig's own, with the folder as its ConsensFlow home (the
+/// settings of a Claude window are written there).
+fn window_env(rig: &Rig, workspace: &Path) -> Vec<(String, String)> {
+    let mut env = rig.environment().to_vec();
+    env.push((
+        "CONSENSFLOW_HOME".to_owned(),
+        workspace
+            .join(".consensflow")
+            .to_string_lossy()
+            .into_owned(),
+    ));
+    env
+}

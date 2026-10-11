@@ -10,6 +10,7 @@ use std::time::Duration;
 use regex::Regex;
 use serde_json::Value;
 
+use super::forget::Forget;
 use super::install::{environment, var, write_fake_install, write_roster};
 use super::route::Shared;
 use super::{Config, Rig};
@@ -78,6 +79,7 @@ impl Rig {
             shared,
             daemon,
             host,
+            forget: config.stand_in_records.map(Forget::new),
             keep_root: false,
             closed: false,
             _turn: turn,

@@ -4,10 +4,16 @@
 //! `participant` and its `state`). The daemon holds its database itself while
 //! it runs; this is its running copy, which a run reads again at each look,
 //! oldest event first, and which tells in what order things happened.
+//!
+//! A [`Trace`] is a look at it, with the questions a live test asks of it: what
+//! was said about a message, in what place, and what state a window was in at
+//! that place. The keys the daemon pressed into a window, with the times it
+//! pressed them, are the rig's ([`Rig::presses`]); both tell their times by the
+//! clock of the daemon's events (`at`, in ISO 8601: [`at_ms`]).
 
-use cf_e2e::files;
-use cf_e2e::rig::Rig;
 use serde_json::Value;
+
+use crate::rig::Rig;
 
 /// The events of a daemon so far.
 pub struct Trace {
@@ -18,23 +24,31 @@ impl Trace {
     /// What the daemon of `rig` has written so far; a line that is not whole
     /// yet (the daemon is writing it) is left for the next read.
     pub fn read(rig: &Rig) -> Self {
-        let text = files::read_string(&rig.home().join("events.jsonl")).unwrap_or_default();
-        Self::of(&text)
+        Self {
+            events: rig.events(),
+        }
     }
 
     /// The events of the file's `text`.
     pub fn of(text: &str) -> Self {
         Self {
-            events: text
-                .lines()
-                .filter_map(|line| serde_json::from_str(line).ok())
-                .collect(),
+            events: crate::rig::events_of(text),
         }
+    }
+
+    /// The events, oldest first, each with the number `n` it has in the file.
+    pub fn events(&self) -> &[Value] {
+        &self.events
     }
 
     /// How many events there are: a mark to ask what came after.
     pub fn len(&self) -> usize {
         self.events.len()
+    }
+
+    /// Whether the daemon has written none.
+    pub fn is_empty(&self) -> bool {
+        self.events.is_empty()
     }
 
     /// The events about the message `message`, with their places, in order.
@@ -105,6 +119,18 @@ impl Trace {
     }
 }
 
+/// When an event happened, in milliseconds since the epoch, from its `at` (an ISO
+/// 8601 time, `2026-10-11T09:30:00.123Z`): the clock the rig's presses and a
+/// status file's are told by. None for an event that says no time, or one that is
+/// no time.
+pub fn at_ms(event: &Value) -> Option<i64> {
+    event["at"]
+        .as_str()?
+        .parse::<jiff::Timestamp>()
+        .ok()
+        .map(|time| time.as_millisecond())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,7 +159,9 @@ mod tests {
             6,
             "the line the daemon is writing is not one yet"
         );
-        assert_eq!(Trace::of("").len(), 0);
+        assert!(!trace.is_empty());
+        assert_eq!(trace.events()[2]["n"], 3, "each has its place in the file");
+        assert!(Trace::of("").is_empty());
     }
 
     #[test]
@@ -183,5 +211,13 @@ mod tests {
              delivery.begun {\"message\":7,\"attempt\":1}\n\
              delivery.confirmed {\"message\":9,\"carried\":[7]}"
         );
+    }
+
+    #[test]
+    fn an_event_is_told_when_it_happened_by_the_clock_the_presses_and_status_files_keep() {
+        let event = serde_json::json!({ "at": "2026-10-11T09:30:00.123Z", "kind": "x" });
+        assert_eq!(at_ms(&event), Some(1_791_711_000_123));
+        assert_eq!(at_ms(&serde_json::json!({ "at": "t" })), None);
+        assert_eq!(at_ms(&serde_json::json!({ "kind": "x" })), None);
     }
 }

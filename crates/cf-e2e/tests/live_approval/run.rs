@@ -51,9 +51,9 @@ fn since(started: Instant) -> u64 {
     started.elapsed().as_secs()
 }
 
-/// The environment the windows of a live run have besides the harnesses'
-/// logins: a locale that draws their screens, and the user's name, which a
-/// harness may ask the system's keychain by.
+/// The rig of the project: its windows run the harnesses of the plan on the
+/// machine's logins ([`live::rig`]), and Claude Code through the wrapper, where
+/// the project has it, in place of the stand-in.
 fn rig_for(planned: &Planned, machine: &Machine) -> cf_e2e::rig::Config {
     let needs = planned.needs();
     let installs: Vec<Installed> = needs
@@ -64,13 +64,7 @@ fn rig_for(planned: &Planned, machine: &Machine) -> cf_e2e::rig::Config {
         (Some(claude), true) => claude.clone(),
         _ => machine.stand_in.clone(),
     };
-    let mut config = live::rig(&installs, stand_in).var("LANG", "en_US.UTF-8");
-    for name in ["USER", "LOGNAME"] {
-        if let Some(value) = own_var(name) {
-            config = config.var(name, value);
-        }
-    }
-    config
+    live::rig(&installs, stand_in)
 }
 
 /// Starts the rig of the project, and opens it: the staff's agents in the
@@ -90,7 +84,8 @@ fn open<'a>(
         // Through the wrapper the project's windows start through: this window,
         // unattended on the human's own setup, reaches none of its MCP servers either.
         let program = machine.claude.as_deref().unwrap_or(claude.command());
-        let trust = project::trust_claude(rig, log, program, &folder)?;
+        let argv = [program.to_string_lossy().into_owned()];
+        let trust = live::window::trust_claude(rig, &argv, &folder)?;
         log.say(format!("Claude Code and the folder: {trust}"));
     }
     let project = project::open(rig, planned, &folder)?;

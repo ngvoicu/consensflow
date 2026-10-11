@@ -36,7 +36,7 @@
     "candidate": "cargo xtask candidate",
     "bench:core": "node tests/live/core-bench.mjs",
     "bench:records-memory": "cargo xtask bench records-memory",
-    "live:paste": "node tests/live/paste-submit.mjs",
+    "live:paste": "cargo xtask live paste",
     "live:agent": "node tests/live/catalog-agent.mjs",
     "live:interrupt": "node tests/live/interrupt-idle.mjs",
     "live:stops": "node tests/live/stops.mjs",

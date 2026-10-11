@@ -6,7 +6,7 @@ mod adapter;
 mod channel;
 mod child_env;
 mod install;
-mod paths;
+pub(crate) mod paths;
 mod quota;
 pub mod record;
 mod role;

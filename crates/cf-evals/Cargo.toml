@@ -1,0 +1,35 @@
+[package]
+name = "cf-evals"
+description = "ConsensFlow's chief evals: scenarios played by real harnesses on the native daemon, and the measure of what each left in the ledger, read without the product's code. A library and the `cf-evals` command that `cargo xtask eval` hands its words to."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "cf-evals"
+path = "src/main.rs"
+
+# Nothing of the product's: the measure of a run is the ledger file's rows, read
+# as they are, and an eval that read them through the ledger's own code would be
+# held to what that code believes. It reads the file with SQLite, and drives the
+# daemon and the windows as `crates/cf-e2e` does, by processes and files.
+[dependencies]
+# What the landing that ports the evals (S14.3) uses, named here already so that
+# it touches no manifest and no lockfile but its own crate's: the rig, the
+# machine's harnesses and the windows the run drives, which are `crates/cf-e2e`'s,
+# and the patterns and the times the measure and the reports are read by.
+cf-e2e = { path = "../cf-e2e" }
+jiff.workspace = true
+regex.workspace = true
+# The ledger file, as the measure reads it and as a test of it makes one.
+rusqlite.workspace = true
+# What a recording of a run says, and what a report holds.
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
