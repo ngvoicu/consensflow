@@ -27,6 +27,7 @@ use cf_harness::testing::{
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
+mod agents;
 mod resumed;
 mod stops;
 

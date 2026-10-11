@@ -6,11 +6,12 @@
 
 use std::time::{Duration, Instant};
 
+use cf_e2e::live::{text, wait, Log};
 use cf_e2e::rig::{Project, Rig};
 use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
 
-use crate::{report, text, Log};
+use crate::report;
 
 /// How long the daemon has to open the designer's window, from the task's being
 /// on the board: Codex's own start, and its role text asked for first.
@@ -22,30 +23,8 @@ const DRAWS: Duration = Duration::from_secs(600);
 /// How long a window has to close once its result is delivered.
 pub const CLOSES: Duration = Duration::from_secs(60);
 
-/// How often the daemon is asked how it is getting on while waiting, and how
-/// often a run that has nothing new says it is still waiting.
-const LOOK: Duration = Duration::from_secs(1);
+/// How often a run that has nothing new to say says it is still waiting.
 const HEARTBEAT: Duration = Duration::from_secs(30);
-
-/// `rig.wait_for`, looking once a second (each look asks the daemon), which says
-/// what it waits for, and for how long, before it does.
-pub fn wait(
-    rig: &Rig,
-    log: &Log,
-    what: &str,
-    within: Duration,
-    mut check: impl FnMut() -> Result<bool>,
-) -> Result {
-    log.say(format!("waiting up to {} s for {what}", within.as_secs()));
-    let mut looked: Option<Instant> = None;
-    rig.wait_for(what, within, || {
-        if looked.is_some_and(|at| at.elapsed() < LOOK) {
-            return Ok(false);
-        }
-        looked = Some(Instant::now());
-        check()
-    })
-}
 
 /// The `pane.open` of the image designer's window, once the daemon has made it:
 /// the window of a session of the member `pygmalion`.

@@ -10,3 +10,12 @@ release `v3.0.0-alpha.82`, and in `21297242`, the commit before it was deleted.
 
 `../text/` plays it: `goldens_delivery.rs`, `goldens_handoff.rs` and
 `goldens_roles.rs` each take their tables.
+
+## Changed by hand after Node
+
+The chief's text, in each of the twelve `roleInstructions` rows that hold it, has
+three passages Node's did not: the line of its commands for `cf task add --test`, the
+tester in the sentence that names what each role of a tier does, and the line of its
+Reviews that says a tester checks work by running it. They were changed by hand, in
+those words alone, when the tester was added (`skill/core/chief.md`), and no row of the
+tester's own text was added: `../text/roles.rs` holds that.

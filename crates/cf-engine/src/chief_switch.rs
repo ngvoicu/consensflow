@@ -3,7 +3,9 @@
 //! and copy, gives back what was in flight, closes the old window as the
 //! engine's own, switches the chief in the ledger and launches the new one with
 //! the handoff. It also picks a chief's first message, and owns the record's
-//! pending switch.
+//! pending switch. A switch after the chief's turn waits for a turn that leaves
+//! no background agents pending, since closing the window ends them; a switch
+//! now, and a chief out of quota, go at once.
 
 use std::rc::Rc;
 
@@ -204,8 +206,15 @@ impl Dispatcher {
 
     /// A switch the human asked for after the chief's turn: once the turn is
     /// over (and the note asking where things stand came and was answered,
-    /// when they asked for one), the chief goes. Until then nothing else is
-    /// delivered to it, so its turn can end.
+    /// when they asked for one), and has left no background agents pending,
+    /// the chief goes. Until then nothing else is delivered to it, so its turn
+    /// can end.
+    ///
+    /// A switch closes the window, and the agents a turn left running end with
+    /// it, so it waits for a turn that leaves none. That is the switch's own
+    /// condition, not a wait for messages: they go in between turns, the note
+    /// among them. What the chief's turn left is the reading's word, the one
+    /// the hold of a worker's result reads ([`Observed::agents_pending`]).
     pub(crate) async fn await_switch(
         self: &Rc<Self>,
         project: &ProjectView,
@@ -246,6 +255,9 @@ impl Dispatcher {
                     return Ok(());
                 }
             }
+        }
+        if observed.agents_pending() {
+            return Ok(());
         }
         self.perform_switch(project, chief, record, pending.to)
             .await

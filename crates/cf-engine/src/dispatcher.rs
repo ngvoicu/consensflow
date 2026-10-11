@@ -32,7 +32,7 @@ use cf_ledger::{
 use cf_proto::panes::PaneExit;
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
-use crate::background::{quote, Left};
+use crate::background::{agent_processes, quote, Left};
 use crate::chief_switch::SwitchTo;
 use crate::record::Record;
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
@@ -782,7 +782,7 @@ impl Dispatcher {
             }
         } else {
             let task = self.seams.ledger.borrow().active_task(record.id, false)?;
-            let left = shown.left_running();
+            let left = agent_processes(participant.harness.as_deref(), shown.left_running());
             if let Some(thread) = task {
                 // The pause note says what the close ended, where there was any.
                 let because = if left.is_empty() {
@@ -791,12 +791,12 @@ impl Dispatcher {
                     format!(
                         "@{}'s window closed with background work still running: {}",
                         participant.handle,
-                        quote(left)
+                        quote(&left)
                     )
                 };
                 self.stall(&project, &thread.task, &because)?;
             } else {
-                self.tell_left_running(&project, &participant, left)?;
+                self.tell_left_running(&project, &participant, &left)?;
             }
         }
         self.changed();

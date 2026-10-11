@@ -373,6 +373,32 @@ fn a_row_node_was_pasting_on_its_own_joins_the_carrier_that_waits_when_it_goes_a
     assert_eq!(w.states(&[carrier, answer]), ["delivered", "delivered"]);
 }
 
+/// The rows of `tables`, in the order they are kept, one line each: the table,
+/// then every cell as SQLite holds it.
+fn rows_of(db: &Connection, tables: &[&str]) -> Vec<String> {
+    tables
+        .iter()
+        .flat_map(|table| {
+            let mut read = db
+                .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+                .unwrap();
+            let columns = read.column_count();
+            read.query_map([], move |row| {
+                (0..columns)
+                    .map(|at| {
+                        row.get::<_, rusqlite::types::Value>(at)
+                            .map(|value| format!("{value:?}"))
+                    })
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map(|cells| format!("{table}: {}", cells.join("|")))
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 #[test]
 fn a_populated_version_10_ledger_is_migrated_to_11_and_again_with_every_row_as_it_was() {
     let db = Connection::open_in_memory().unwrap();
@@ -394,33 +420,11 @@ fn a_populated_version_10_ledger_is_migrated_to_11_and_again_with_every_row_as_i
            (3, 1, 3, 2, 'answer', 1, 2, 'This one', 'read', '2026-10-01T00:00:00.000Z');",
     )
     .unwrap();
-    let rows = |db: &Connection| -> Vec<String> {
-        ["project", "participant", "event"]
-            .iter()
-            .flat_map(|table| {
-                let mut read = db
-                    .prepare(&format!("SELECT * FROM {table} ORDER BY id"))
-                    .unwrap();
-                let columns = read.column_count();
-                read.query_map([], move |row| {
-                    (0..columns)
-                        .map(|at| {
-                            row.get::<_, rusqlite::types::Value>(at)
-                                .map(|value| format!("{value:?}"))
-                        })
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                        .map(|cells| format!("{table}: {}", cells.join("|")))
-                })
-                .unwrap()
-                .map(Result::unwrap)
-                .collect::<Vec<_>>()
-            })
-            .collect()
-    };
+    let rows = |db: &Connection| rows_of(db, &["project", "participant", "event"]);
     let before = rows(&db);
 
-    migrate(&db, &MIGRATIONS).unwrap();
-    migrate(&db, &MIGRATIONS).unwrap();
+    migrate(&db, &MIGRATIONS[..11]).unwrap();
+    migrate(&db, &MIGRATIONS[..11]).unwrap();
 
     let version: i64 = db
         .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -468,4 +472,108 @@ fn a_populated_version_10_ledger_is_migrated_to_11_and_again_with_every_row_as_i
         ["delivered", "delivered", "read"],
         "and as they were"
     );
+}
+
+#[test]
+fn a_populated_version_11_ledger_is_migrated_to_12_and_again_as_it_was_and_has_room_for_a_tester() {
+    const AT: &str = "2026-10-01T00:00:00.000Z";
+    const TABLES: [&str; 8] = [
+        "project",
+        "participant",
+        "conversation",
+        "task",
+        "task_need",
+        "message",
+        "event",
+        "sqlite_sequence",
+    ];
+    let db = Connection::open_in_memory().unwrap();
+    db.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+    migrate(&db, &MIGRATIONS[..11]).unwrap();
+    db.execute_batch(&format!(
+        "INSERT INTO project (id, directory, name, state, gate, created_at, updated_at)
+           VALUES (1, '/work/app', 'app', 'open', 0, '{AT}', '{AT}');
+         INSERT INTO participant (id, project_id, handle, role, roles, agent, harness, tier, member_id, created_at, designer) VALUES
+           (1, 1, 'human', 'human', '[]', NULL, NULL, NULL, NULL, '{AT}', 0),
+           (2, 1, 'chief', 'chief', '[]', 'apollo', 'claude-code', NULL, NULL, '{AT}', 0),
+           (3, 1, 'zeus', 'worker', '[\"worker\",\"reviewer\"]', 'zeus', 'claude-code', 'standard', NULL, '{AT}', 0),
+           (4, 1, 'pygmalion', 'designer', '[\"designer\"]', 'pygmalion', 'codex', NULL, NULL, '{AT}', 1),
+           (5, 1, 'hera', 'reviewer', '[\"reviewer\"]', 'hera', 'claude-code', 'light', NULL, '{AT}', 0),
+           (6, 1, 'zeus-amber-pine', 'worker', '[\"worker\"]', 'zeus', 'claude-code', 'standard', 3, '{AT}', 0),
+           (7, 1, 'gone', 'advisor', '[\"advisor\"]', 'gone', 'claude-code', 'light', NULL, '{AT}', 0);
+         UPDATE participant SET switched_from_harness = 'codex', switched_from_agent = 'mars', switched_from_cut = 1 WHERE id = 2;
+         UPDATE participant SET out_until = '2026-10-02T00:00:00.000Z', out_since = '{AT}' WHERE id = 5;
+         INSERT INTO conversation (id, participant_id, harness, native_session, started_at)
+           VALUES (1, 6, 'claude-code', 'session-1', '{AT}');
+         INSERT INTO task (id, project_id, number, title, body, requester_id, assignee_id, state, pool, tier, purpose, created_at, updated_at, taken_from_id, held_until, deleted_at, paused_at, stop_seq) VALUES
+           (1, 1, 1, 'Parser', 'Parser', 2, 6, 'paused', NULL, NULL, NULL, '{AT}', '{AT}', 3, '2026-10-02T00:00:00.000Z', NULL, '{AT}', 2),
+           (2, 1, 2, 'Review T-1', 'Review T-1', 2, NULL, 'open', 'reviewer', 'standard', 'critical-review', '{AT}', '{AT}', NULL, NULL, '{AT}', NULL, 0),
+           (3, 1, 3, 'Dropped', 'Dropped', 2, NULL, 'cancelled', 'worker', 'light', NULL, '{AT}', '{AT}', NULL, NULL, NULL, NULL, 0);
+         INSERT INTO task_need (task_id, needs_id) VALUES (2, 1);
+         INSERT INTO message (id, project_id, recipient_id, sender_id, kind, task_id, body, state, created_at)
+           VALUES (1, 1, 6, 2, 'task', 1, 'Parser', 'delivered', '{AT}');
+         INSERT INTO event (id, project_id, at, kind, data) VALUES (1, 1, '{AT}', 'project.created', '{{}}');
+         DELETE FROM task WHERE id = 3;
+         DELETE FROM participant WHERE id = 7;"
+    ))
+    .unwrap();
+    // A member of a role, and a task for a pool, each a statement of its own.
+    let member = |handle: &str, role: &str| {
+        format!(
+            "INSERT INTO participant (project_id, handle, role, roles, created_at)
+               VALUES (1, '{handle}', '{role}', '[\"{role}\"]', '{AT}')"
+        )
+    };
+    let task = |number: i64, pool: &str| {
+        format!(
+            "INSERT INTO task (project_id, number, title, body, requester_id, state, pool, tier, created_at, updated_at)
+               VALUES (1, {number}, 'Test T-1', 'Test T-1', 2, 'open', '{pool}', 'light', '{AT}', '{AT}')"
+        )
+    };
+    let refused = |sql: String| db.execute_batch(&sql).unwrap_err().to_string();
+    // Neither check has room for a tester yet.
+    assert!(refused(member("tess", "tester")).contains("participant_role_check"));
+    assert!(refused(task(9, "tester")).contains("task_pool_check"));
+    let before = rows_of(&db, &TABLES);
+
+    migrate(&db, &MIGRATIONS).unwrap();
+    migrate(&db, &MIGRATIONS).unwrap();
+
+    let version: i64 = db
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 12);
+    let integrity: String = db
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(integrity, "ok");
+    let dangling = db
+        .prepare("PRAGMA foreign_key_check")
+        .unwrap()
+        .exists([])
+        .unwrap();
+    assert!(!dangling, "every reference holds");
+    assert_eq!(
+        rows_of(&db, &TABLES),
+        before,
+        "every row as it was, and each table's sequence, in its place"
+    );
+
+    // A tester is a member now, and a task may be for the testers; any other word is still none.
+    db.execute_batch(&member("tess", "tester")).unwrap();
+    db.execute_batch(&task(9, "tester")).unwrap();
+    let ids: (i64, i64) = db
+        .query_row(
+            "SELECT (SELECT id FROM participant WHERE handle = 'tess'), (SELECT id FROM task WHERE number = 9)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        ids,
+        (8, 4),
+        "the member who left and the task that was deleted keep their numbers"
+    );
+    assert!(refused(member("chuck", "checker")).contains("participant_role_check"));
+    assert!(refused(task(10, "checker")).contains("task_pool_check"));
 }

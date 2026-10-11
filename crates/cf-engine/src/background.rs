@@ -20,6 +20,18 @@
 //!   wakes is the one whose end is the result, by the usual rules. If no turn
 //!   begins within [`Limits::background_settle_ms`] of the work's end, the last
 //!   turn's end is the result.
+//! - The agents and workflows a turn started in its harness are work the turn
+//!   left running too, which the pane host cannot see (they are no process of the
+//!   window's tree): the harness says so on its record, on the reading of a turn
+//!   that ended with some pending ([`Observed::agents_pending`], Claude Code's own
+//!   counts, decided on 2026-10-11 after a chief's result waited twelve minutes
+//!   for its agents). Such a turn's end is no result, however long they run: an
+//!   agent's end wakes a turn of its own, and no settle time ends the wait. That
+//!   is the whole of what agents change here: a window whose turn ended with them
+//!   pending takes input like any at rest, a chief's and a worker's alike, and
+//!   what the chief sends a worker in the meantime (an answer, a resume, a tell)
+//!   goes in between its turns (the harness's adapter says it is at rest; no
+//!   delivery looks at them).
 //! - A window that closes with such work running says so to whoever gave the
 //!   task: the host lists what it ended in `pane.exit`. On Unix the host asks
 //!   the work to end first (TERM, then HUP) and gives it a grace to release what
@@ -29,6 +41,12 @@
 //! that reaches it then (the chief asks how it goes) is no new start of the
 //! work the task's turn began.
 //!
+//! What the harness itself starts in the turn is no work the agent left. Codex
+//! starts `codex-code-mode-host` the first time its agent runs a command, and
+//! keeps it for the session: a program of Codex's own, beside its binary, which
+//! the host sees begin after the mark like any job. A process named for the
+//! window's harness (`<harness>-…`) is the harness's, and is not counted.
+//!
 //! Limits. **On Windows a job the agent left running is ended with its window at
 //! once, with no chance to release what it holds**: the host asks nothing there
 //! and its job object ends the tree. The Ctrl+Break that would ask it escapes the
@@ -36,6 +54,19 @@
 //! installs every harness), reaches the host's own console and ends the host. The
 //! hold, the board's line and the note to whoever gave the task are the same on
 //! every platform: they do not depend on how the window closes.
+//!
+//! Limits of the agents' part. The reading says a turn left agents pending until
+//! the window's next turn says otherwise, and nothing else says they ended:
+//!
+//! - Agents the human ended by hand, with no turn to follow, keep the task held
+//!   until the human pauses or cancels it.
+//! - A pause or a cancel is paid by a window at rest with no key, as for a job,
+//!   and the agents go on; closing the window ends them, with no note of them (a
+//!   note lists the processes the pane host saw).
+//! - A turn the human interrupts says nothing of agents (its record is the
+//!   interrupt's), so the window does not read at rest until they end.
+//! - A switch of the chief after its turn waits for a turn that leaves none
+//!   (`chief_switch`); a switch now closes the window and ends them.
 //!
 //! A launch's first message is marked when it shows in the window's record,
 //! which the engine sees on a pass (a second apart): work an agent starts before
@@ -48,7 +79,8 @@
 
 use cf_harness::contract::{Observed, Pane};
 use cf_ledger::{NewNote, ParticipantView, ProjectView};
-use cf_proto::panes::BackgroundProcess;
+use cf_proto::agents::Harness;
+use cf_proto::panes::{Background, BackgroundProcess};
 
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -92,6 +124,9 @@ pub(crate) enum Left {
     Running(usize),
     /// They have ended, a moment ago: the agent may be about to be woken.
     Ended,
+    /// The turn ended with background agents or workflows pending, which its
+    /// harness says on the reading: the end of one wakes a turn of its own.
+    Agents,
 }
 
 impl Left {
@@ -102,7 +137,19 @@ impl Left {
             Left::Running(1) => Some("background work running (1 process)".to_owned()),
             Left::Running(count) => Some(format!("background work running ({count} processes)")),
             Left::Ended => Some("background work ended; the agent may go on".to_owned()),
+            Left::Agents => Some("background agents running".to_owned()),
         }
+    }
+}
+
+/// What the window was last found to be held for, or its agents where it was
+/// held for no work: what a look keeps while the window shows a dialog or a
+/// message is going in.
+fn remembered(held: Option<Held>, agents: bool) -> Left {
+    match (held, agents) {
+        (Some(held), _) => held.left(),
+        (None, true) => Left::Agents,
+        (None, false) => Left::Nothing,
     }
 }
 
@@ -134,8 +181,11 @@ impl Dispatcher {
             return Ok(Left::Nothing);
         }
         let held = record.background.borrow().held;
+        // Agents are the reading's word, which the host cannot give: a turn
+        // that ended with some pending left them running.
+        let agents = observed.agents_pending();
         if starting || observed.waiting.is_some() || record.delivery.borrow().delivering.is_some() {
-            return Ok(held.map_or(Left::Nothing, Held::left));
+            return Ok(remembered(held, agents));
         }
         let state = self
             .seams
@@ -158,13 +208,19 @@ impl Dispatcher {
             return Ok(Left::Nothing);
         };
         let work = self.seams.background.running(&pane).await;
+        let running = agent_work(participant.harness.as_deref(), &work);
         let mut part = record.background.borrow_mut();
-        if work.total > 0 {
+        if running > 0 {
             part.held = Some(Held {
-                running: work.total,
+                running,
                 ended_at: None,
             });
-            return Ok(Left::Running(work.total));
+            return Ok(Left::Running(running));
+        }
+        // No settle time ends a wait for agents: the turn an agent's end wakes
+        // is the one whose end is the result, however long they run.
+        if agents {
+            return Ok(Left::Agents);
         }
         let Some(mut held) = part.held else {
             return Ok(Left::Nothing);
@@ -217,6 +273,40 @@ impl Dispatcher {
         )?;
         Ok(())
     }
+}
+
+/// The processes of `listed`, which a window's tree started in the turn, that
+/// are the agent's work: all but the harness's own (`kind` is the harness of
+/// the window, as the roster says it).
+pub(crate) fn agent_processes(
+    kind: Option<&str>,
+    listed: &[BackgroundProcess],
+) -> Vec<BackgroundProcess> {
+    let harness = kind.and_then(Harness::from_kind);
+    listed
+        .iter()
+        .filter(|process| harness.is_none_or(|harness| !harness_own(harness, &process.command)))
+        .cloned()
+        .collect()
+}
+
+/// How many of the processes a window's tree started in the turn are the
+/// agent's work. Of a list the host cut short, the ones it left out are taken
+/// for the agent's.
+fn agent_work(kind: Option<&str>, work: &Background) -> usize {
+    let own = work.processes.len() - agent_processes(kind, &work.processes).len();
+    work.total.saturating_sub(own)
+}
+
+/// Whether the process a command line starts is a program of the harness's
+/// own: the program is named for the harness, then a dash (`codex-code-mode-host`
+/// for Codex), on Windows with its extension. The program is the line's first
+/// word.
+fn harness_own(harness: Harness, command: &str) -> bool {
+    let program = command.split_whitespace().next().unwrap_or_default();
+    let name = program.rsplit(['/', '\\']).next().unwrap_or_default();
+    name.strip_prefix(harness.as_str())
+        .is_some_and(|rest| rest.starts_with('-'))
 }
 
 /// The commands of what a window left running, as a note quotes them: the first
@@ -275,6 +365,28 @@ mod tests {
             Some("background work running (2 processes)")
         );
         assert!(Left::Ended.reason().is_some());
+        assert_eq!(
+            Left::Agents.reason().as_deref(),
+            Some("background agents running")
+        );
+    }
+
+    #[test]
+    fn a_look_that_keeps_what_it_found_keeps_the_work_it_was_held_for_before_the_agents() {
+        let running = Held {
+            running: 2,
+            ended_at: None,
+        };
+        let ended = Held {
+            running: 2,
+            ended_at: Some(5),
+        };
+        assert_eq!(remembered(Some(running), false), Left::Running(2));
+        assert_eq!(remembered(Some(running), true), Left::Running(2));
+        assert_eq!(remembered(Some(ended), true), Left::Ended);
+        // Held for no work, a window whose turn left agents is held for them.
+        assert_eq!(remembered(None, true), Left::Agents);
+        assert_eq!(remembered(None, false), Left::Nothing);
     }
 
     #[test]
@@ -311,5 +423,63 @@ mod tests {
     #[test]
     fn a_process_whose_command_could_not_be_read_is_named_by_its_number() {
         assert_eq!(quote(&[process(42, "")]), "process 42");
+    }
+
+    #[test]
+    fn a_program_named_for_the_harness_and_a_dash_is_the_harnesss_own() {
+        // What Codex 0.162 starts when its agent first runs a command.
+        let helper = "/opt/homebrew/Caskroom/codex/0.162.1/bin/codex-code-mode-host";
+        assert!(harness_own(Harness::Codex, helper));
+        assert!(harness_own(
+            Harness::Codex,
+            &format!("{helper} --serve --port 7")
+        ));
+        // On Windows, by its own separators and with its extension.
+        assert!(harness_own(
+            Harness::Codex,
+            r"C:\tools\codex\bin\codex-code-mode-host.exe"
+        ));
+        // Not another harness's, nor a program that only starts with its name,
+        // nor the agent's own jobs.
+        assert!(!harness_own(Harness::Claude, helper));
+        assert!(!harness_own(Harness::Codex, "/usr/bin/codexec --watch"));
+        assert!(!harness_own(
+            Harness::Codex,
+            "python3 lock.py record --run 7"
+        ));
+        assert!(!harness_own(Harness::Codex, "tail -f codex-notes.log"));
+        assert!(!harness_own(Harness::Codex, ""));
+        // The harness's own program, with no dash and nothing after, is the baseline's.
+        assert!(!harness_own(Harness::Codex, "/opt/homebrew/bin/codex"));
+    }
+
+    #[test]
+    fn only_the_agents_work_is_counted_and_a_list_the_host_cut_short_counts_what_it_left_out() {
+        let helper = process(
+            1,
+            "/opt/homebrew/Caskroom/codex/0.162.1/bin/codex-code-mode-host",
+        );
+        let job = process(2, "python3 lock.py record --run 7");
+        let listed = [helper.clone(), job.clone()];
+        assert_eq!(
+            agent_processes(Some("codex"), &listed),
+            std::slice::from_ref(&job)
+        );
+        // A harness the roster does not know, or none, owns nothing.
+        assert_eq!(agent_processes(Some("claude-code"), &listed).len(), 2);
+        assert_eq!(agent_processes(Some("image"), &listed).len(), 2);
+        assert_eq!(agent_processes(None, &listed).len(), 2);
+
+        let work = |total, processes: Vec<BackgroundProcess>| Background { total, processes };
+        assert_eq!(agent_work(Some("codex"), &work(2, listed.to_vec())), 1);
+        assert_eq!(agent_work(Some("codex"), &work(1, vec![helper])), 0);
+        // Twenty processes and sixteen listed, one of them the harness's: the
+        // four the host left out are the agent's.
+        let mut cut_short = vec![job; 15];
+        cut_short.push(process(
+            3,
+            "/opt/homebrew/Caskroom/codex/0.162.1/bin/codex-code-mode-host",
+        ));
+        assert_eq!(agent_work(Some("codex"), &work(20, cut_short)), 19);
     }
 }

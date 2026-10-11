@@ -40,6 +40,8 @@ pub struct FakeAgent {
     pub native: String,
     pub items: Vec<Item>,
     pub settled: bool,
+    /// The settled turn left background agents running (the reading says so).
+    pub agents_pending: bool,
     pub waiting: Option<Waiting>,
     pub quota: Option<Arc<Quota>>,
     /// Whether a delivery is taken.
@@ -225,14 +227,23 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.items.push(item);
             agent.settled = true;
+            agent.agents_pending = false;
             agent.took_back = false;
         });
+    }
+
+    /// The agent answers, and its turn ends with background agents still
+    /// running: its harness lets it take input, and an agent's end wakes a turn.
+    pub fn answer_leaving_agents(&self, handle: &str, text: &str) {
+        self.answer(handle, text);
+        self.with(handle, |agent| agent.agents_pending = true);
     }
 
     /// The agent is at work on a turn.
     pub fn busy(&self, handle: &str) {
         self.with(handle, |agent| {
             agent.settled = false;
+            agent.agents_pending = false;
             agent.took_back = false;
         });
     }
@@ -271,6 +282,7 @@ impl FakeAdapter {
             agent.quota = Some(Arc::new(quota));
             agent.failed = true;
             agent.settled = true;
+            agent.agents_pending = false;
         });
     }
 
@@ -292,6 +304,7 @@ impl FakeAdapter {
             agent.items = agent.records.get(native).cloned().unwrap_or_default();
             agent.shows = Some(native.to_owned());
             agent.settled = true;
+            agent.agents_pending = false;
         });
     }
 
@@ -326,6 +339,7 @@ impl FakeAdapter {
             if agent.arrive {
                 agent.items.push(self.item(Role::User, text));
                 agent.settled = false;
+                agent.agents_pending = false;
                 // A message that arrives starts a turn: the one before it ended as it did.
                 agent.failed = false;
                 agent.took_back = false;
@@ -387,6 +401,7 @@ impl Asked {
             native: native.clone(),
             items: Vec::new(),
             settled: true,
+            agents_pending: false,
             waiting: None,
             quota: None,
             admit: true,

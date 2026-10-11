@@ -40,20 +40,18 @@ mod verdict;
 #[path = "live_designer/waits.rs"]
 mod waits;
 
-use std::fmt::Display;
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::Instant;
 
+use cf_e2e::live::{self, text, wait, Log};
 use cf_e2e::rig::{Project, Rig, OPEN};
-use cf_e2e::{files, live, pattern, Error, Result};
+use cf_e2e::{files, pattern, Error, Result};
 use regex::Regex;
 use serde_json::{json, Value};
 
 use result::{named, Named};
 use verdict::{Made, Seen};
-use waits::{await_result, await_window, wait, CLOSES};
+use waits::{await_result, await_window, CLOSES};
 
 /// The stand-in for the chief's window, built for these tests.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
@@ -64,38 +62,6 @@ const BRIEF: &str = "Draw a small flat icon of a jar of honey on a plain backgro
 
 /// Where the brief says to save it, from the project's folder, with `/` between folders.
 const IMAGE: &str = "images/honey.png";
-
-/// What the run says as it goes, on the error output (which a test's capture
-/// does not hold back), with the seconds since it began.
-struct Log {
-    started: Instant,
-}
-
-impl Log {
-    fn new() -> Self {
-        Self {
-            started: Instant::now(),
-        }
-    }
-
-    fn say(&self, text: impl Display) {
-        let seconds = self.started.elapsed().as_secs_f64();
-        let _ = writeln!(io::stderr(), "[{seconds:>6.1} s] live designer: {text}");
-    }
-
-    /// `title`, then `body` a line at a time, indented.
-    fn block(&self, title: &str, body: &str) {
-        let indented: Vec<String> = body.lines().map(|line| format!("    {line}")).collect();
-        self.say(format!("{title}:\n{}", indented.join("\n")));
-    }
-}
-
-/// A JSON string as the text it is; anything else as JSON writes it.
-fn text(value: &Value) -> String {
-    value
-        .as_str()
-        .map_or_else(|| value.to_string(), str::to_owned)
-}
 
 /// The number of the task `cf task add --design` says it put on the board for
 /// an image designer, from what it printed.
@@ -228,7 +194,7 @@ fn attempt(
 #[ignore = "opt-in: spends the machine's Codex quota; cargo xtask live designer (npm run live:designer)"]
 fn a_real_codex_draws_the_image_a_chief_asks_the_image_designer_for() -> Result {
     let codex = live::codex()?;
-    let log = Log::new();
+    let log = Log::new("live designer");
     log.say(format!(
         "Codex is {}; its login is read from {}",
         codex.command().display(),
@@ -312,13 +278,5 @@ mod tests {
             None
         );
         assert_eq!(task_for_a_designer(""), None);
-    }
-
-    #[test]
-    fn a_json_string_is_the_text_it_is_and_anything_else_is_as_json_writes_it() {
-        assert_eq!(text(&json!("a b")), "a b");
-        assert_eq!(text(&json!(7)), "7");
-        assert_eq!(text(&json!(null)), "null");
-        assert_eq!(text(&json!({ "a": 1 })), r#"{"a":1}"#);
     }
 }

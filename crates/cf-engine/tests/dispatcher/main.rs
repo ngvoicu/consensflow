@@ -7,9 +7,12 @@
 //! decision withdraws before the chief is given it (`decided_results`), and the
 //! notes of a task's wait that go when it moves on, and the word that follows a
 //! hold (`waiting_notes`), and the result a turn's end is not while the work it
-//! started still runs (`background`), and the time a launch is told it has for
-//! its first message (`launch_wait`), and what a window is given while the
-//! words that were for it wait at the human's gate (`approval`).
+//! started still runs (`background`), and the same of the agents a turn left
+//! running, which a window takes input beside (`pending_agents`), and the switch
+//! after a chief's turn, which waits for them (`switching_agents`), and the time
+//! a launch is told it has for its first message (`launch_wait`), and what a
+//! window is given while the words that were for it wait at the human's gate
+//! (`approval`), and the tester, which Node's staff never had (`testers`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -40,6 +43,7 @@ mod not_ready;
 mod out_of_quota;
 mod participant_leaves;
 mod pause_notes;
+mod pending_agents;
 mod quota;
 mod receipts;
 mod restart;
@@ -51,11 +55,13 @@ mod several_roles;
 mod stops;
 mod switched_conversation;
 mod switching;
+mod switching_agents;
 mod switching_deleted;
 mod switching_handoffs;
 mod switching_refused;
 mod taken_back;
 mod tasks;
+mod testers;
 mod the_dispatcher;
 mod throws_early;
 mod trace_untold;

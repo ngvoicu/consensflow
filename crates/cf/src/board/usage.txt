@@ -9,6 +9,9 @@ cf inside a ConsensFlow window: the board's commands.
   cf task add --review --tier <tier> "…"
                                     a review for a reviewer of that tier: say what to
                                     review; findings back, no file changed
+  cf task add --test --tier <tier> "…"
+                                    a test for a tester of that tier: say what to run
+                                    and check; results back, no product code changed
   cf task add --design "…"          an image from the image designer: what to draw, what
                                     to use as reference, where to save it
   cf task add --after T-3 "…"       a follow-up for the window that did T-3, which

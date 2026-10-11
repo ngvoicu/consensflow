@@ -87,7 +87,7 @@ async fn staff_that_is_no_list_is_refused_and_so_is_a_member_whose_roles_are_no_
             .await;
             assert_eq!(
                 answer["error"],
-                r#"a member is one or more of worker, advisor, reviewer, designer, not "worker""#
+                r#"a member is one or more of worker, advisor, reviewer, tester, designer, not "worker""#
             );
             assert!(rig.kit.ledger.borrow().projects().unwrap().is_empty());
         })
@@ -122,7 +122,7 @@ async fn a_gate_or_roles_that_are_no_good_are_refused_before_the_project_is_look
                     json!({ "project": 99, "agent": "zeus", "roles": "worker" })
                 )
                 .await["error"],
-                r#"a member is one or more of worker, advisor, reviewer, designer, not "worker""#
+                r#"a member is one or more of worker, advisor, reviewer, tester, designer, not "worker""#
             );
             assert_eq!(
                 ask(

@@ -22,7 +22,7 @@ pub use skill::{team_table, work_tier_list};
 const CHIEF: &str = include_str!("../../../skill/core/chief.md");
 
 /// The roles of the staff's members, who have one window a task.
-const MEMBERS: [&str; 4] = ["advisor", "worker", "reviewer", "designer"];
+const MEMBERS: [&str; 5] = ["advisor", "worker", "reviewer", "tester", "designer"];
 
 /// Evals only: a chief measured without ConsensFlow's card gets this file's
 /// text instead of all of it (tiers, staff and its cf too), so nothing tells

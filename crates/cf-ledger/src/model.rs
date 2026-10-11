@@ -16,13 +16,13 @@ use serde_json::Value;
 
 use crate::views::ParticipantRow;
 
-pub const MEMBER_ROLES: [&str; 4] = ["worker", "advisor", "reviewer", "designer"];
+pub const MEMBER_ROLES: [&str; 5] = ["worker", "advisor", "reviewer", "tester", "designer"];
 /// Who hands out work and hears when the staff changes: the human and the chief.
 pub const COORDINATOR_HANDLES: [&str; 2] = ["human", "chief"];
 pub const COORDINATOR_ROLES: [&str; 2] = ["human", "chief"];
 pub const TIERS: [&str; 4] = ["critical", "complex", "standard", "light"];
-/// Who takes a task on the board: a worker, an advisor (advice), a reviewer, or an image designer (no tier).
-pub const POOLS: [&str; 4] = ["worker", "advisor", "reviewer", "designer"];
+/// Who takes a task on the board: a worker, an advisor (advice), a reviewer, a tester, or an image designer (no tier).
+pub const POOLS: [&str; 5] = ["worker", "advisor", "reviewer", "tester", "designer"];
 pub const PURPOSES: [&str; 4] = [
     "critical-review",
     "architecture",
@@ -209,7 +209,7 @@ pub fn parse_gate(value: Option<&Value>) -> Result<bool, LedgerError> {
     })
 }
 
-/// A member's roles: one or more of worker, advisor, reviewer and
+/// A member's roles: one or more of worker, advisor, reviewer, tester and
 /// designer, distinct, the first one leading; `offender` is how the
 /// refusal prints what was given.
 pub fn require_roles<S: AsRef<str>>(
@@ -393,7 +393,7 @@ mod tests {
         );
         assert_eq!(
             refusal(parse_roles(Some(&json!(["chief"])))).1,
-            r#"a member is one or more of worker, advisor, reviewer, designer, not ["chief"]"#
+            r#"a member is one or more of worker, advisor, reviewer, tester, designer, not ["chief"]"#
         );
         assert_eq!(
             refusal(parse_agent_id(Some(&json!("chief")), &["human", "chief"])).1,
@@ -419,6 +419,10 @@ mod tests {
         assert_eq!(
             parse_roles(Some(&json!(["reviewer", "worker", "reviewer"]))).unwrap(),
             ["reviewer", "worker"]
+        );
+        assert_eq!(
+            parse_roles(Some(&json!(["tester", "worker", "tester"]))).unwrap(),
+            ["tester", "worker"]
         );
         assert!(parse_roles(Some(&json!([]))).is_err());
         assert!(parse_gate(Some(&json!(true))).unwrap());
@@ -453,6 +457,22 @@ mod tests {
         );
         assert_eq!(
             refusal(require_fitting_roles("pygmalion", true, &["worker"])).1,
+            "pygmalion is an image agent, which can only be an image designer"
+        );
+    }
+
+    #[test]
+    fn a_tester_is_a_role_a_member_holds_and_a_pool_a_task_is_for_next_to_the_reviewer() {
+        for roles in [&MEMBER_ROLES[..], &POOLS[..]] {
+            let at = |word: &str| roles.iter().position(|role| *role == word).unwrap();
+            assert_eq!(at("tester"), at("reviewer") + 1, "{roles:?}");
+            assert_eq!(roles.last(), Some(&"designer"), "{roles:?}");
+        }
+        assert_eq!(require_roles(&["tester"], String::new).unwrap(), ["tester"]);
+        // Any agent may test but an image agent, which is nothing but a designer.
+        assert!(require_fitting_roles("hera", false, &["tester"]).is_ok());
+        assert_eq!(
+            refusal(require_fitting_roles("pygmalion", true, &["tester"])).1,
             "pygmalion is an image agent, which can only be an image designer"
         );
     }

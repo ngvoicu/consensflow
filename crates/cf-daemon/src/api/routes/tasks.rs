@@ -45,8 +45,8 @@ pub(super) async fn list(
 /// is given by name. A follow-up that needs the context of the window that did
 /// T-n goes back to that window (`after`); the chief's own later step is its
 /// own (`self`); everything else is fresh work for a tier of worker, advice
-/// from a tier of advisor, a review from a tier of reviewer, or an image from
-/// the designer.
+/// from a tier of advisor, a review from a tier of reviewer, a test from a tier
+/// of tester, or an image from the designer.
 pub(super) async fn create(
     context: &Context,
     caller: &Caller,
@@ -139,6 +139,8 @@ fn given(caller: &Caller, body: &Map<String, Value>, after: Option<f64>) -> Valu
                 "advisor"
             } else if flag("review") {
                 "reviewer"
+            } else if flag("test") {
+                "tester"
             } else {
                 "worker"
             };

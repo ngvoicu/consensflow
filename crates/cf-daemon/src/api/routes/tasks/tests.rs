@@ -202,20 +202,24 @@ async fn a_task_for_the_chief_itself_is_queued_with_its_message_named() {
 }
 
 #[tokio::test]
-async fn the_kind_of_staff_asked_for_is_the_first_flag_that_is_true_design_advice_review() {
+async fn the_kind_of_staff_asked_for_is_the_first_flag_that_is_true_design_advice_review_test() {
     let scene = scene();
     for (body, said) in [
         (
-            r#"{"design":true,"advice":true,"review":true,"body":"x","tier":"standard"}"#,
+            r#"{"design":true,"advice":true,"review":true,"test":true,"body":"x","tier":"standard"}"#,
             "no image designer is on the staff: ask the human for one, in your terminal",
         ),
         (
-            r#"{"advice":true,"review":true,"body":"x","tier":"standard"}"#,
+            r#"{"advice":true,"review":true,"test":true,"body":"x","tier":"standard"}"#,
             "no advisor is on the staff: ask the human for one, in your terminal",
         ),
         (
-            r#"{"review":true,"body":"x","tier":"standard"}"#,
+            r#"{"review":true,"test":true,"body":"x","tier":"standard"}"#,
             "no reviewer is on the staff: ask the human for one, in your terminal",
+        ),
+        (
+            r#"{"test":true,"body":"x","tier":"standard"}"#,
+            "no tester is on the staff: ask the human for one, in your terminal",
         ),
     ] {
         let answered = post(&scene, &scene.chief, body).await;
@@ -242,6 +246,63 @@ async fn the_kind_of_staff_asked_for_is_the_first_flag_that_is_true_design_advic
     .await;
     assert_eq!(status, 201);
     assert_eq!(scene.kicks.get(), 1);
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        r#"{"test":"true","body":"x","tier":"standard"}"#,
+    )
+    .await;
+    assert_eq!(
+        (status, said["task"]["pool"].as_str()),
+        (201, Some("worker")),
+        "a test is asked for with true, and with no other word"
+    );
+}
+
+#[tokio::test]
+async fn a_test_opens_on_the_board_for_the_testers_of_its_tier_and_wakes_the_dispatcher_once() {
+    let scene = scene();
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .add_member(
+            scene.project.id,
+            &cf_ledger::NewMember {
+                agent: "tess".to_owned(),
+                harness: "claude-code".to_owned(),
+                designer: false,
+                roles: vec!["tester".to_owned()],
+                tier: "standard".to_owned(),
+            },
+        )
+        .unwrap();
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        r#"{"test":true,"tier":"standard","body":"Run the suite on T-1"}"#,
+    )
+    .await;
+    assert_eq!(status, 201, "{said}");
+    assert_eq!(
+        (
+            said["task"]["pool"].as_str(),
+            said["task"]["tier"].as_str(),
+            said["task"]["state"].as_str(),
+            said["task"]["assignee"].as_str(),
+        ),
+        (Some("tester"), Some("standard"), Some("open"), None),
+        "it waits on the board for a tester"
+    );
+    assert_eq!(scene.kicks.get(), 1);
+    // A member does not give one: only the chief hands out tasks.
+    let answered = post(
+        &scene,
+        &scene.zeus,
+        r#"{"test":true,"tier":"standard","body":"x"}"#,
+    )
+    .await;
+    assert_eq!(refused(&answered).1, "not-a-coordinator");
 }
 
 #[tokio::test]

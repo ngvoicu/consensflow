@@ -28,7 +28,9 @@ fn every_role_enters_opencode_with_its_whole_text_already_loaded() {
         "skills": { "paths": ["/user/skills"], "urls": ["https://example.com/skills"] },
         "instructions": ["/user/rules.md"],
     });
-    for name in ["chief", "advisor", "worker", "reviewer", "designer"] {
+    for name in [
+        "chief", "advisor", "worker", "reviewer", "tester", "designer",
+    ] {
         let stage = stage_with(&original.to_string());
         stage.serves_creation("ses_abc123");
         let content = format!(

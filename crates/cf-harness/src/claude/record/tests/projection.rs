@@ -311,10 +311,29 @@ fn a_record_waits_as_little_as_its_reading_asks_of_it() {
         ),
         Projected::Other
     );
-    // What it holds of what it says: the uuid of the boundary, the text of a result.
+    // What it holds of what it says: the uuid of the boundary and whether it
+    // says agents run (a `turn_duration` does, by its counts; a summary does
+    // not), the text of a result.
+    let boundary = |uuid: &str, agents: Option<bool>| {
+        Projected::Boundary(project::Boundary {
+            uuid: Some(Arc::from(uuid)),
+            agents,
+        })
+    };
     assert_eq!(
         projected(&duration("d1", "a1"), SESSION),
-        Projected::Boundary(Some(Arc::from("d1")))
+        boundary("d1", Some(false))
+    );
+    assert_eq!(
+        projected(
+            &having(duration("d1", "a1"), json!({ "pendingWorkflowCount": 2 })),
+            SESSION
+        ),
+        boundary("d1", Some(true))
+    );
+    assert_eq!(
+        projected(&summary("s1", "a1"), SESSION),
+        boundary("s1", None)
     );
     assert_eq!(
         projected(&queue("enqueue", json!(7)), SESSION),

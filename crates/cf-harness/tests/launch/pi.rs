@@ -381,6 +381,7 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         failed: false,
         quota,
         settlement,
+        agents_pending: false,
     }))
 }
 

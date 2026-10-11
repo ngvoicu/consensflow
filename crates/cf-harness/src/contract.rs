@@ -56,7 +56,7 @@ pub struct Launch<'a> {
     /// The participant's project and handle, which Pi names its window by.
     pub project: i64,
     pub handle: &'a str,
-    /// `chief`, `worker`, `advisor`, `reviewer` or `designer`.
+    /// `chief`, `worker`, `advisor`, `reviewer`, `tester` or `designer`.
     pub role: &'a str,
     /// The project's folder, where the window opens.
     pub directory: &'a str,
@@ -263,6 +263,13 @@ impl Observed {
             Some(Reading::Known(record)) => &record.items,
             Some(Reading::Unknown(_)) | None => &[],
         }
+    }
+
+    /// Whether the conversation's turn ended and left background agents or
+    /// workflows running: the window takes input between turns, and its agent
+    /// is woken when they end.
+    pub fn agents_pending(&self) -> bool {
+        matches!(self.reading.as_deref(), Some(Reading::Known(record)) if record.agents_pending)
     }
 }
 

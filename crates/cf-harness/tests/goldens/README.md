@@ -52,6 +52,24 @@ once, with the reason here and in the commit.
   Pi has the same rule, with its extension's word for a window that has seen no
   turn begin; it moved none of the recordings.
 
+- **A turn that ends with agents pending** (2026-10-11, found when a chief's
+  result waited twelve minutes for its four research agents). Claude Code writes,
+  on the `turn_duration` that ends a turn, how many background agents and
+  workflows are still running (`pendingBackgroundAgentCount`,
+  `pendingWorkflowCount`; left out when none). Node's reader took a record that
+  named any as no end of the turn, which then stayed in flight until the last
+  agent finished, and every message for the window waited. The Rust reader takes
+  it for the end of the turn, as it takes a stop hook's summary (a ConsensFlow
+  window's Stop hook makes Claude Code write one before every `turn_duration`),
+  and says the agents are pending (`agentsPending`, said only when true, which no
+  reading of Node's has). A count that is no count (a string, a fraction, a number
+  below 0) is still no end of the turn. `records/` moved for it in 4 of its 399
+  scenarios, all of `suite`: the readings of `claude-v263` and `claude-v265` whose
+  records say a count of 1 (of agents and of workflows, two each) are settled, the
+  answers a turn's end completes are complete, and they say `agentsPending`; the
+  six that say a count of none (−1, `"0"`, `null`) are Node's still. No look was
+  added or taken, so the counts in `../records/main.rs` stand.
+
 ## The launch scenarios
 
 A scenario of `launch/scenarios.<platform>.json` is data, and the Rust player

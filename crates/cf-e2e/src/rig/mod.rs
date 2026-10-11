@@ -58,6 +58,7 @@ const IDLE: Duration = Duration::from_secs(60);
 pub struct Config {
     stand_in: PathBuf,
     vars: Vec<(String, String)>,
+    unset: Vec<String>,
     path: Vec<PathBuf>,
     existing_root: Option<PathBuf>,
     daemon: Option<PathBuf>,
@@ -70,6 +71,7 @@ impl Config {
         Self {
             stand_in: stand_in.into(),
             vars: Vec::new(),
+            unset: Vec::new(),
             path: Vec::new(),
             existing_root: None,
             daemon: None,
@@ -81,6 +83,17 @@ impl Config {
     #[must_use]
     pub fn var(mut self, name: &str, value: impl Into<String>) -> Self {
         self.vars.push((name.to_owned(), value.into()));
+        self
+    }
+
+    /// Without the variable `name` in that environment, whatever the rig sets
+    /// and whatever [`Config::var`] gave it: for a real harness that reads its
+    /// config where the rig's own value does not point (Claude Code with
+    /// `CLAUDE_CONFIG_DIR` set keeps its config there, finds no login, and
+    /// opens on its first-run dialog).
+    #[must_use]
+    pub fn unset(mut self, name: &str) -> Self {
+        self.unset.push(name.to_owned());
         self
     }
 

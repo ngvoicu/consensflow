@@ -20,7 +20,7 @@ test.beforeAll(async () => {
 test.afterAll(() => ui?.close())
 
 const at = (minutesAgo) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
-const MEMBER = ['worker', 'advisor', 'reviewer']
+const MEMBER = ['worker', 'advisor', 'reviewer', 'tester']
 const participant = (id, handle, role, extra = {}) => ({
   id,
   projectId: 1,
@@ -594,6 +594,32 @@ test('gives a member with two roles a row per role, each with its own sessions a
   await expect(reviewer.locator('button.card')).toHaveCount(0)
 })
 
+test('gives a member who is a worker and a tester a row for each, every task on the row of its pool', async ({
+  page,
+}) => {
+  const data = model()
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  zeusLane.participant.roles = ['worker', 'tester']
+  zeusLane.tasks = [
+    task(31, 'Old parser', 'accepted', 'chief', 'zeus', 40, { pool: 'worker', tier: 'standard' }),
+    task(32, 'Test T-31', 'done', 'chief', 'zeus', 30, { pool: 'tester', tier: 'standard' }),
+  ]
+  await open(page, data)
+  const rows = await page
+    .locator('tbody tr[data-handle="zeus"]')
+    .evaluateAll((rows) => rows.map((row) => [row.dataset.handle, row.dataset.role]))
+  expect(rows).toEqual([
+    ['zeus', 'worker'],
+    ['zeus', 'tester'],
+  ])
+  const worker = page.locator('tr[data-handle="zeus"][data-role="worker"]')
+  const tester = page.locator('tr[data-handle="zeus"][data-role="tester"]')
+  await expect(tester.locator('.row-meta')).toHaveText(/^tester · standard/)
+  await expect(worker.locator('button.card[data-task="31"]')).toHaveCount(1)
+  await expect(worker.locator('button.card[data-task="32"]')).toHaveCount(0)
+  await expect(tester.locator('button.card[data-task="32"]')).toHaveCount(1)
+})
+
 test("draws a member's sessions as lanes under it, named, and counts its open windows", async ({
   page,
 }) => {
@@ -940,6 +966,34 @@ test("shows a member out of quota, and a reviewer's review tasks as cards on its
   await expect(hera.locator('td[data-state="done"] button.card[data-task="10"]')).toHaveCount(1)
   // A review hangs under no other card: it is a task of its own.
   await expect(page.locator('.reviews')).toHaveCount(0)
+})
+
+test("shows a tester's test tasks as cards on its row like any task, and a test nobody has says it waits for a tester", async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].lanes.push({
+    participant: participant(7, 'tess', 'tester', { harness: 'pi', tier: 'light' }),
+    tasks: [
+      task(9, 'Test T-8', 'working', 'chief', 'tess', 1, { pool: 'tester', tier: 'light' }),
+      task(10, 'Test T-2', 'done', 'chief', 'tess', 2, { pool: 'tester', tier: 'light' }),
+    ],
+    activity: { state: 'working' },
+    pane: { id: 'p1-tess', generation: 2 },
+  })
+  // No tester has taken this one yet: it waits in its requester's backlog for one of its tier.
+  data.boards[1].open.push(
+    task(11, 'Test T-9', 'open', 'chief', null, 1, { pool: 'tester', tier: 'standard' }),
+  )
+  await open(page, data)
+  const tess = page.locator('tr[data-handle="tess"]')
+  await expect(tess.locator('.row-meta')).toHaveText(/^tester · light · pi/)
+  await expect(tess.locator('td[data-state="working"] button.card[data-task="9"]')).toHaveCount(1)
+  await expect(tess.locator('td[data-state="done"] button.card[data-task="10"]')).toHaveCount(1)
+  const waiting = page.locator(
+    'tr[data-handle="chief"] td[data-state="open"] button.card[data-task="11"]',
+  )
+  await expect(waiting.locator('.card-route')).toHaveText('for a standard tester')
 })
 
 test('names the day of a reset that is not today, and tries a member or the chief out of quota again', async ({
@@ -2457,6 +2511,7 @@ test('shows the staff as one row per member and role, and adds a saved agent in 
     'Worker',
     'Advisor',
     'Reviewer',
+    'Tester',
     'Image designer',
   ])
   // A worker: every agent that does not hold the role yet, grouped by work tier, the most critical first.
@@ -2513,6 +2568,38 @@ test('shows the staff as one row per member and role, and adds a saved agent in 
       { project: 1, agent: 'athena', roles: ['advisor'] },
       { project: 1, agent: 'pygmalion', roles: ['designer'] },
     ])
+})
+
+test('adds a saved agent to the staff as a tester, or as one more role of a member, in the place a tester has among the roles', async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Staff' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await expect(dialog.locator('.dialog-help')).toContainText(
+    'a tester checks it by running it when the chief asks',
+  )
+  // Any agent may test but the image agent, which only draws.
+  await dialog.getByLabel('Role').selectOption('tester')
+  await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
+    'hera · gpt-6-astra · codex · max',
+    'zeus · claude-sonnet-5 · claude · high',
+    'diana · gpt-5.6-luna · codex · low',
+    'athena · muse-spark · opencode',
+  ])
+  await dialog.getByLabel('Agent').selectOption('athena')
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([{ project: 1, agent: 'athena', roles: ['tester'] }])
+  await expect(page.locator('#status')).toHaveText('@athena joined the staff as Tester.')
+  // A member on the staff already takes it as one role more.
+  await dialog.getByLabel('Agent').selectOption('zeus')
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.roles'))
+    .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'tester'] }])
+  await expect(page.locator('#status')).toHaveText('@zeus is Tester now too.')
 })
 
 test('says why no image designer is on offer: Codex, which image agents run through, is not here, or each is one already', async ({
