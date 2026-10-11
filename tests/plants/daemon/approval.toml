@@ -30,6 +30,9 @@ harness-claude-interrupts = ["cargo", "test", "--offline", "-p", "cf-harness", "
 # The cases of the rig, found by the start of their names.
 rig-approval-decided = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "approval::a_result_the_human_passed_on_while_the_chief_was_in_a_turn_is_withdrawn"]
 rig-approval-refused = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "approval::a_chief_that_accepts_a_task_whose_result_waits_at_the_gate"]
+rig-approval-restart = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "approval::a_restart_of_the_daemon"]
+# How long the stand-in agent waits, as its variables tell it.
+fake-agent-waits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "tests::a_wait_is_the_milliseconds"]
 
 # --- the ledger: what each kind of word does at the gate ---
 
@@ -404,3 +407,33 @@ builds = true
 file = "crates/cf-daemon/src/api/routes/task.rs"
 find = '        task.messages.retain(|message| message.state != "gated");'
 replace = ''
+
+# --- the restart: a chief whose turn the quit cuts is at work, for ever, once resumed ---
+# (the fix of a case that failed on CI's Windows and not on a faster machine: the
+# daemon was killed while the chief was still writing its answer). The first of
+# these two edits the case itself, and the second the stand-in agent: neither
+# changes the `cf` under test, so neither says `builds`.
+
+[[plant]]
+name = "approval rig: a quit that does not wait for the chief’s answer cuts its turn"
+meant = "a_restart_of_the_daemon_leaves_what_waits_at_the_gate_there_and_passing_it_on_goes_on"
+runs = ["rig-approval-restart"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/rig/approval.rs"
+find = '''
+        rig.wait_for("the chief's answer to be written", secs(30), || {
+            Ok(rig.transcript(&session).contains("\"text\":\"dispatched:"))
+        })?;'''
+replace = '''
+        let _ = &session;'''
+
+[[plant]]
+name = "approval: the stand-in’s wait is not the milliseconds its variable says"
+meant = "a_wait_is_the_milliseconds_a_variable_says_and_none_where_it_says_none"
+runs = ["fake-agent-waits"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent.rs"
+find = '    Duration::from_millis(text.and_then(|text| text.parse().ok()).unwrap_or(0))'
+replace = '    Duration::ZERO'
