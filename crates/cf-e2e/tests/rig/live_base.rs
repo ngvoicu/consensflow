@@ -244,7 +244,10 @@ fn a_window_opens_as_the_app_opens_one_takes_a_paste_answers_and_is_read_through
     let window = Open::new(&rig, &install, "paste", "paste-claude")
         .without_trust()
         .open()?;
-    let folder = Path::new(&home).join(".consensflow-candidate/live/paste");
+    let folder = Path::new(&home)
+        .join(".consensflow-candidate")
+        .join("live")
+        .join("paste");
     assert_eq!(window.workspace(), folder);
     assert!(
         window.session().is_some(),
@@ -255,13 +258,17 @@ fn a_window_opens_as_the_app_opens_one_takes_a_paste_answers_and_is_read_through
 
     // The app's settings for the launch were written in the folder, and the window runs through
     // them, with no MCP server and no browser, on the model of the harness's agent.
-    let settings = folder.join(".consensflow/integrations/claude");
+    let settings = folder
+        .join(".consensflow")
+        .join("integrations")
+        .join("claude");
     assert!(settings.is_dir(), "{}", settings.display());
     let argv: Vec<&str> = window.argv().iter().map(String::as_str).collect();
     assert_eq!(argv[0], FAKE_AGENT);
     assert_eq!(argv[1], "--settings");
     assert!(
-        argv[2].starts_with(&*settings.to_string_lossy()),
+        // As paths, which a Windows path spells with either slash.
+        Path::new(argv[2]).starts_with(&settings),
         "{} is not in {}",
         argv[2],
         settings.display()
