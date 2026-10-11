@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use cf_e2e::live::Codex;
+use cf_e2e::live::{Harness, Installed};
 use cf_e2e::rig::{Project, Rig};
 use serde_json::json;
 
@@ -14,7 +14,7 @@ use crate::{rig, secs, Outcome, FAKE_AGENT};
 
 /// What a rig for `codex` gives its windows: the login they read, and the
 /// folders of their `PATH`, in order.
-fn windows_of(codex: &Codex) -> Result<(String, Vec<String>), Box<dyn std::error::Error>> {
+fn windows_of(codex: &Installed) -> Result<(String, Vec<String>), Box<dyn std::error::Error>> {
     let rig = Rig::start(codex.rig(FAKE_AGENT))?;
     let login = rig.var("CODEX_HOME").unwrap_or_default().to_owned();
     let path = rig.var("PATH").unwrap_or_default().to_owned();
@@ -37,7 +37,7 @@ fn a_rig_for_a_codex_gives_its_windows_its_login_and_the_folders_it_needs_after_
     let text = |folder: &tempfile::TempDir| folder.path().to_string_lossy().into_owned();
 
     // The command's folder follows the stand-in's, and the system's follow it.
-    let codex = Codex::at(&command, login.path());
+    let codex = Installed::at(Harness::Codex, &command, login.path());
     let (home, plain) = windows_of(&codex)?;
     assert_eq!(home, text(&login));
     assert!(plain[0].ends_with("fake-bin"), "{plain:?}");

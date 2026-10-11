@@ -29,6 +29,12 @@
 //! that reaches it then (the chief asks how it goes) is no new start of the
 //! work the task's turn began.
 //!
+//! What the harness itself starts in the turn is no work the agent left. Codex
+//! starts `codex-code-mode-host` the first time its agent runs a command, and
+//! keeps it for the session: a program of Codex's own, beside its binary, which
+//! the host sees begin after the mark like any job. A process named for the
+//! window's harness (`<harness>-…`) is the harness's, and is not counted.
+//!
 //! Limits. **On Windows a job the agent left running is ended with its window at
 //! once, with no chance to release what it holds**: the host asks nothing there
 //! and its job object ends the tree. The Ctrl+Break that would ask it escapes the
@@ -48,7 +54,8 @@
 
 use cf_harness::contract::{Observed, Pane};
 use cf_ledger::{NewNote, ParticipantView, ProjectView};
-use cf_proto::panes::BackgroundProcess;
+use cf_proto::agents::Harness;
+use cf_proto::panes::{Background, BackgroundProcess};
 
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -158,13 +165,14 @@ impl Dispatcher {
             return Ok(Left::Nothing);
         };
         let work = self.seams.background.running(&pane).await;
+        let running = agent_work(participant.harness.as_deref(), &work);
         let mut part = record.background.borrow_mut();
-        if work.total > 0 {
+        if running > 0 {
             part.held = Some(Held {
-                running: work.total,
+                running,
                 ended_at: None,
             });
-            return Ok(Left::Running(work.total));
+            return Ok(Left::Running(running));
         }
         let Some(mut held) = part.held else {
             return Ok(Left::Nothing);
@@ -217,6 +225,40 @@ impl Dispatcher {
         )?;
         Ok(())
     }
+}
+
+/// The processes of `listed`, which a window's tree started in the turn, that
+/// are the agent's work: all but the harness's own (`kind` is the harness of
+/// the window, as the roster says it).
+pub(crate) fn agent_processes(
+    kind: Option<&str>,
+    listed: &[BackgroundProcess],
+) -> Vec<BackgroundProcess> {
+    let harness = kind.and_then(Harness::from_kind);
+    listed
+        .iter()
+        .filter(|process| harness.is_none_or(|harness| !harness_own(harness, &process.command)))
+        .cloned()
+        .collect()
+}
+
+/// How many of the processes a window's tree started in the turn are the
+/// agent's work. Of a list the host cut short, the ones it left out are taken
+/// for the agent's.
+fn agent_work(kind: Option<&str>, work: &Background) -> usize {
+    let own = work.processes.len() - agent_processes(kind, &work.processes).len();
+    work.total.saturating_sub(own)
+}
+
+/// Whether the process a command line starts is a program of the harness's
+/// own: the program is named for the harness, then a dash (`codex-code-mode-host`
+/// for Codex), on Windows with its extension. The program is the line's first
+/// word.
+fn harness_own(harness: Harness, command: &str) -> bool {
+    let program = command.split_whitespace().next().unwrap_or_default();
+    let name = program.rsplit(['/', '\\']).next().unwrap_or_default();
+    name.strip_prefix(harness.as_str())
+        .is_some_and(|rest| rest.starts_with('-'))
 }
 
 /// The commands of what a window left running, as a note quotes them: the first
@@ -311,5 +353,63 @@ mod tests {
     #[test]
     fn a_process_whose_command_could_not_be_read_is_named_by_its_number() {
         assert_eq!(quote(&[process(42, "")]), "process 42");
+    }
+
+    #[test]
+    fn a_program_named_for_the_harness_and_a_dash_is_the_harnesss_own() {
+        // What Codex 0.162 starts when its agent first runs a command.
+        let helper = "/opt/homebrew/Caskroom/codex/0.162.1/bin/codex-code-mode-host";
+        assert!(harness_own(Harness::Codex, helper));
+        assert!(harness_own(
+            Harness::Codex,
+            &format!("{helper} --serve --port 7")
+        ));
+        // On Windows, by its own separators and with its extension.
+        assert!(harness_own(
+            Harness::Codex,
+            r"C:\tools\codex\bin\codex-code-mode-host.exe"
+        ));
+        // Not another harness's, nor a program that only starts with its name,
+        // nor the agent's own jobs.
+        assert!(!harness_own(Harness::Claude, helper));
+        assert!(!harness_own(Harness::Codex, "/usr/bin/codexec --watch"));
+        assert!(!harness_own(
+            Harness::Codex,
+            "python3 lock.py record --run 7"
+        ));
+        assert!(!harness_own(Harness::Codex, "tail -f codex-notes.log"));
+        assert!(!harness_own(Harness::Codex, ""));
+        // The harness's own program, with no dash and nothing after, is the baseline's.
+        assert!(!harness_own(Harness::Codex, "/opt/homebrew/bin/codex"));
+    }
+
+    #[test]
+    fn only_the_agents_work_is_counted_and_a_list_the_host_cut_short_counts_what_it_left_out() {
+        let helper = process(
+            1,
+            "/opt/homebrew/Caskroom/codex/0.162.1/bin/codex-code-mode-host",
+        );
+        let job = process(2, "python3 lock.py record --run 7");
+        let listed = [helper.clone(), job.clone()];
+        assert_eq!(
+            agent_processes(Some("codex"), &listed),
+            std::slice::from_ref(&job)
+        );
+        // A harness the roster does not know, or none, owns nothing.
+        assert_eq!(agent_processes(Some("claude-code"), &listed).len(), 2);
+        assert_eq!(agent_processes(Some("image"), &listed).len(), 2);
+        assert_eq!(agent_processes(None, &listed).len(), 2);
+
+        let work = |total, processes: Vec<BackgroundProcess>| Background { total, processes };
+        assert_eq!(agent_work(Some("codex"), &work(2, listed.to_vec())), 1);
+        assert_eq!(agent_work(Some("codex"), &work(1, vec![helper])), 0);
+        // Twenty processes and sixteen listed, one of them the harness's: the
+        // four the host left out are the agent's.
+        let mut cut_short = vec![job; 15];
+        cut_short.push(process(
+            3,
+            "/opt/homebrew/Caskroom/codex/0.162.1/bin/codex-code-mode-host",
+        ));
+        assert_eq!(agent_work(Some("codex"), &work(20, cut_short)), 19);
     }
 }

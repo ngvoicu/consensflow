@@ -5,9 +5,9 @@
 
 use std::ops::RangeInclusive;
 
+use cf_e2e::live::cut;
 use cf_e2e::png;
 
-use crate::report::cut;
 use crate::result::Named;
 
 /// What a file of a sane size is: not an empty stub, and not past what any
