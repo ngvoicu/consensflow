@@ -53,17 +53,13 @@ replace = "true"
 
 [[plant]]
 name = "tooling: a command that fails answers 0"
-meant = "the_exit_status_of_what_it_ran_is_its_own"
+meant = "check_stops_at_the_first_step_that_fails_and_answers_its_status"
 runs = ["xtask-test-cli"]
 
 [[plant.edit]]
 file = "tools/xtask/src/dispatch.rs"
-find = '''
-let status = process::run(&script.invocation(context, args), &context.env)?;
-                Ok(status)'''
-replace = '''
-process::run(&script.invocation(context, args), &context.env)?;
-                Ok(0)'''
+find = "run(context, args, console)"
+replace = "run(context, args, console).map(|_| 0)"
 
 [[plant]]
 name = "tooling: a program that ends with a code answers 0"
@@ -92,8 +88,10 @@ runs = ["xtask-test-cli"]
 
 [[plant.edit]]
 file = "tools/xtask/src/context.rs"
-find = 'Self::at(Path::new(env!("CARGO_MANIFEST_DIR")), env)'
-replace = 'Self::at(&std::env::current_dir().unwrap_or_default().join("tools").join("xtask"), env)'
+find = "Self::at(manifest_dir, env)"
+replace = '''
+let _ = manifest_dir;
+        Self::at(&std::env::current_dir().unwrap_or_default().join("tools").join("xtask"), env)'''
 
 # The manifest and the lockfile together, so that cargo has nothing to mend before the test reads it.
 [[plant]]
