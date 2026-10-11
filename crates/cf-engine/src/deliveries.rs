@@ -119,6 +119,8 @@ impl Dispatcher {
             self.pay_with_words(record)?;
         }
         let text = delivery_text(&begun.message, &begun.carried);
+        // A turn begins with this message: what the window's tree runs now came before it.
+        self.mark_turn(record, &pane).await;
         let outcome = match returning(window.deliver(host, &pane, &text)).await {
             Ok(admission) => admission,
             // An adapter that failed never handed it over, and its error must show.
@@ -200,7 +202,20 @@ impl Dispatcher {
         record: &Rc<Record>,
         observed: &Observed,
     ) -> Result<(), EngineError> {
+        let launching = record
+            .delivery
+            .borrow()
+            .delivering
+            .as_ref()
+            .is_some_and(|delivering| delivering.launch);
         if self.confirm_arrival(record, observed)? {
+            // A launch's first message went in with the window, so the turn
+            // it began is told by the record: its header showing is the
+            // harness's own start of it.
+            let pane = record.window.borrow().pane.clone();
+            if let Some(pane) = pane.filter(|_| launching) {
+                self.mark_turn(record, &pane).await;
+            }
             return Ok(());
         }
         let Some(delivering) = record.delivery.borrow().delivering.clone() else {

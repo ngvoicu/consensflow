@@ -17,7 +17,9 @@ use cf_base::refusal::Refusal;
 use cf_bridge::local::Bridge;
 use cf_engine::runtime::{begin, Begun, Spawn};
 use cf_engine::seams::{Adapters, Limits, Roster, SavedAgent, Seams};
-use cf_engine::testing::{CountingLaunchIds, FakeAdapter, FakeAdapters, FakeRecords, Recorder};
+use cf_engine::testing::{
+    CountingLaunchIds, FakeAdapter, FakeAdapters, FakeBackground, FakeRecords, Recorder,
+};
 use cf_engine::Dispatcher;
 use cf_harness::seams::{SystemTime, Time};
 use cf_ledger::{open_ledger, Ledger, NewProject, NewTask, Options, ProjectView};
@@ -225,6 +227,13 @@ impl Rig {
         let seams = Seams {
             ledger: Rc::clone(&ledger),
             host: Rc::new(BridgeHost::new(bridge.clone(), env.clone())),
+            // Node's dispatcher never asked its host what a window's turn left
+            // running, and this rig holds the engine to the order Node ran its
+            // callbacks in: a round trip to the host before a result is taken
+            // would be a turn Node's order has none of. Nothing runs here; the
+            // host's answers are the daemon's own tests' (`host`) and the
+            // integration suite's.
+            background: FakeBackground::new(),
             adapters,
             records: Rc::new(FakeRecords::new(fakes)),
             time,

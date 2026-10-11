@@ -6,8 +6,9 @@
 //! a window that did not come up showed (`unstarted`), and the result a
 //! decision withdraws before the chief is given it (`decided_results`), and the
 //! notes of a task's wait that go when it moves on, and the word that follows a
-//! hold (`waiting_notes`), and the time a launch is told it has for its first
-//! message (`launch_wait`).
+//! hold (`waiting_notes`), and the result a turn's end is not while the work it
+//! started still runs (`background`), and the time a launch is told it has for
+//! its first message (`launch_wait`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -15,6 +16,7 @@
 mod adapters_failing_at_once;
 mod agent_gone;
 mod assigning;
+mod background;
 mod cancelled_task;
 mod carriers;
 mod chief_not_up;

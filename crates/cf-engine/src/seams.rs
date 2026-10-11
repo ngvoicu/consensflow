@@ -10,9 +10,10 @@ use std::rc::Rc;
 
 use cf_base::env::Env;
 use cf_base::refusal::Refusal;
-use cf_harness::contract::{Adapter, Agent, LaunchId, Records};
+use cf_harness::contract::{Adapter, Agent, LaunchId, Pane, Records, Work};
 use cf_harness::seams::Time;
 use cf_ledger::{Ledger, LedgerError, ParticipantView, ProjectView};
+use cf_proto::panes::Background;
 use cf_proto::trace::TraceLine;
 
 use crate::host::EngineHost;
@@ -151,15 +152,21 @@ pub struct Limits {
     pub launch_ms: i64,
     /// Attempts at a delivery before it fails.
     pub max_attempts: u32,
+    /// For an agent to go on, once the background work its turn left has
+    /// ended: a harness wakes its agent when the work it started ends, and a turn
+    /// that has not begun by then was not woken.
+    pub background_settle_ms: i64,
 }
 
 impl Default for Limits {
-    /// The daemon's (`arrivalTimeoutMs`, `launchTimeoutMs`, `maxAttempts`).
+    /// The daemon's (`arrivalTimeoutMs`, `launchTimeoutMs`, `maxAttempts`), and
+    /// ten seconds for a woken agent to begin its turn.
     fn default() -> Self {
         Self {
             arrival_ms: 60_000,
             launch_ms: 180_000,
             max_attempts: 3,
+            background_settle_ms: 10_000,
         }
     }
 }
@@ -169,20 +176,43 @@ impl Default for Limits {
 /// would otherwise wait three minutes; nothing in a person's environment sets it.
 pub const LAUNCH_MS_VARIABLE: &str = "CONSENSFLOW_LAUNCH_TIMEOUT_MS";
 
+/// The variable that sets how long an agent is given to go on once the
+/// background work its turn left has ended, in milliseconds. A test that
+/// waits for a turn that never comes would otherwise wait ten seconds; nothing
+/// in a person's environment sets it.
+pub const BACKGROUND_SETTLE_MS_VARIABLE: &str = "CONSENSFLOW_BACKGROUND_SETTLE_MS";
+
 impl Limits {
-    /// The daemon's limits, with the launch's wait what `env` says it is
-    /// ([`LAUNCH_MS_VARIABLE`]) where it names a number of milliseconds above
-    /// zero; any other value is no value.
+    /// The daemon's limits, with the launch's wait and the settle time what
+    /// `env` says they are ([`LAUNCH_MS_VARIABLE`],
+    /// [`BACKGROUND_SETTLE_MS_VARIABLE`]) where it names a number of
+    /// milliseconds above zero; any other value is no value.
     pub fn of(env: &Env) -> Self {
-        let launch = env
-            .text(LAUNCH_MS_VARIABLE)
-            .and_then(|text| text.parse::<i64>().ok())
-            .filter(|ms| *ms > 0);
+        let named = |variable: &str| {
+            env.text(variable)
+                .and_then(|text| text.parse::<i64>().ok())
+                .filter(|ms| *ms > 0)
+        };
+        let default = Self::default();
         Self {
-            launch_ms: launch.unwrap_or(Self::default().launch_ms),
-            ..Self::default()
+            launch_ms: named(LAUNCH_MS_VARIABLE).unwrap_or(default.launch_ms),
+            background_settle_ms: named(BACKGROUND_SETTLE_MS_VARIABLE)
+                .unwrap_or(default.background_settle_ms),
+            ..default
         }
     }
+}
+
+/// What a worker's window started that outlives its turn, which only the pane
+/// host can see: it keeps each pane's processes, and the daemon tells it where
+/// a turn begins. It says nothing it cannot know: a host that does not answer
+/// has no background work to tell of.
+pub trait BackgroundWork {
+    /// A turn is about to begin in `pane`: whatever its tree runs now came
+    /// before it, and is no turn's work.
+    fn mark<'a>(&'a self, pane: &'a Pane) -> Work<'a, ()>;
+    /// What `pane`'s tree runs that began after its last mark.
+    fn running<'a>(&'a self, pane: &'a Pane) -> Work<'a, Background>;
 }
 
 /// Everything the engine is made with: each seam shared, so a second
@@ -193,6 +223,7 @@ pub struct Seams {
     /// page): borrowed for one call at a time, never across a wait.
     pub ledger: Rc<RefCell<Ledger>>,
     pub host: Rc<dyn EngineHost>,
+    pub background: Rc<dyn BackgroundWork>,
     pub adapters: Rc<dyn Adapters>,
     pub records: Rc<dyn Records>,
     pub time: Rc<dyn Time>,
@@ -225,6 +256,26 @@ mod tests {
         assert_eq!(
             (named.arrival_ms, named.max_attempts),
             (60_000, 3),
+            "the rest is as it was"
+        );
+    }
+
+    #[test]
+    fn an_agent_is_given_ten_seconds_to_go_on_after_its_background_work_ends_unless_the_environment_names_a_number_of_milliseconds(
+    ) {
+        let settle = |value: &str| {
+            Limits::of(&Env::from_vars([(BACKGROUND_SETTLE_MS_VARIABLE, value)]))
+                .background_settle_ms
+        };
+        assert_eq!(Limits::of(&Env::default()).background_settle_ms, 10_000);
+        assert_eq!(settle("1500"), 1_500);
+        for refused in ["", "0", "-5", "soon", "1.5", "2s"] {
+            assert_eq!(settle(refused), 10_000, "{refused:?}");
+        }
+        let named = Limits::of(&Env::from_vars([(BACKGROUND_SETTLE_MS_VARIABLE, "1500")]));
+        assert_eq!(
+            (named.launch_ms, named.arrival_ms),
+            (180_000, 60_000),
             "the rest is as it was"
         );
     }

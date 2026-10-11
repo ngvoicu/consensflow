@@ -11,9 +11,11 @@
 //! ([`Rig::page`]: `project.open`, `board.get`, `task.get`…), and the pane host
 //! what the desktop app asks ([`Rig::host`]: `pane.input`), and types to a
 //! chief as a human does ([`Rig::tell`]). What a window prints, what the
-//! stand-in agent wrote, and the frames themselves are there to look at.
+//! stand-in agent wrote, the jobs it left running ([`Rig::jobs`]) and the
+//! frames themselves are there to look at.
 
 mod install;
+mod jobs;
 mod launch;
 mod project;
 mod report;
@@ -31,6 +33,7 @@ use crate::daemon_log::StartLine;
 use crate::process::{self, Ran, Run, Sink, Spawned};
 use crate::{cf, checkout, files, wire, Error, Result};
 
+pub use jobs::Job;
 pub use project::{write_staff, Project};
 
 use route::Shared;

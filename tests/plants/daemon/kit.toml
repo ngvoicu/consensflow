@@ -1,12 +1,16 @@
 # The plants of the Rust daemon, and of the crates it stands on (the ledger, the engine, the
 # harness, the launcher): each is a bug one test was written for. A run here is a `cargo test`
-# of a package, or a `node --test` of the extensions and the page that the daemon serves.
+# of a package, or a `node --test` of the extensions and the page that the daemon serves; the
+# plants of `background` also run the cases of the rig (crates/cf-e2e), which build the native
+# `cf` and the pane host from the sources as planted, and say `builds`: `rebuild` builds the
+# `cf` again once such a plant is put back.
 #
 # What a plant is, and what this file and the tables beside it hold, is told in
 # tools/xtask/src/plants/kit.rs; `cargo xtask plants` runs them.
 
 run_limit_minutes = 5
-tables = ["run", "front", "parts", "constants", "screens", "support", "players", "launcher", "prepare", "detect", "pause", "pause-notes", "waiting-notes", "decided", "receipt-a", "obligations", "sessions", "review", "claude-rest", "taken-back", "board", "channels"]
+rebuild = ["cargo", "xtask", "build-cf", "--offline"]
+tables = ["run", "front", "parts", "constants", "screens", "support", "players", "launcher", "prepare", "detect", "pause", "pause-notes", "waiting-notes", "decided", "receipt-a", "obligations", "sessions", "review", "claude-rest", "taken-back", "board", "channels", "background"]
 
 [run]
 bridge = ["cargo", "test", "--offline", "-p", "cf-bridge", "--features", "local", "--lib", "local::"]

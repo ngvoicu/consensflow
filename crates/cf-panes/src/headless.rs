@@ -28,12 +28,19 @@ pub const ENTER: EnterTiming = EnterTiming {
     most_ms: 2_000,
 };
 
-/// Ends every pane the table still holds.
+/// Ends every pane the table still holds, all at once: each is closed as
+/// `PaneTable::kill` closes one (asked to end and given its grace; on Windows
+/// ended at once), and a window whose programs ignore the request does not make
+/// the others wait for it.
 pub fn reap_all(panes: &PaneTable) {
     if let Ok(open) = panes.list() {
-        for pane in open {
-            let _ = panes.kill(&PaneKey::new(pane.id, pane.generation));
-        }
+        std::thread::scope(|scope| {
+            for pane in open {
+                scope.spawn(move || {
+                    let _ = panes.kill(&PaneKey::new(pane.id, pane.generation));
+                });
+            }
+        });
     }
 }
 

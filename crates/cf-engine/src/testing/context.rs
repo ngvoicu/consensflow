@@ -22,6 +22,7 @@ use serde_json::{json, Value};
 
 use super::adapter::FakeAdapter;
 use super::adapters::{FakeAdapters, FakeRecords};
+use super::background::FakeBackground;
 use super::executor::Answer;
 use super::host::FakeHost;
 use super::operations::{answer, nothing};
@@ -86,6 +87,8 @@ pub struct Context {
     /// The timers an engine's sleeps wait on, which the clock never sees.
     pub timers: Rc<TestTime>,
     pub host: Rc<FakeHost>,
+    /// What the host says of the work a window's turn left running.
+    pub background: Rc<FakeBackground>,
     pub adapter: Rc<FakeAdapter>,
     /// The fake of Codex's own, which answers for it when the test made it so.
     pub codex: Rc<FakeAdapter>,
@@ -142,6 +145,7 @@ impl Context {
         let ledger = Rc::new(RefCell::new(ledger));
         let executor = Rc::new(Executor::strict());
         let host = FakeHost::new(recorder.clone());
+        let background = FakeBackground::new();
         let adapter = FakeAdapter::new(recorder.clone());
         let codex = adapter.another();
         let mut table = FakeAdapters::new(&adapter, &made.harnesses);
@@ -174,6 +178,7 @@ impl Context {
         let seams = Seams {
             ledger: Rc::clone(&ledger),
             host: Rc::clone(&host) as Rc<_>,
+            background: Rc::clone(&background) as Rc<_>,
             adapters: Rc::clone(&adapters) as Rc<dyn Adapters>,
             records: Rc::new(FakeRecords::new(adapters)),
             time: Rc::clone(&timers) as Rc<dyn Time>,
@@ -197,6 +202,7 @@ impl Context {
                 arrival_ms: 30_000,
                 launch_ms: 120_000,
                 max_attempts: 3,
+                background_settle_ms: 10_000,
             },
         };
         let dispatcher = Dispatcher::new(seams.clone());
@@ -208,6 +214,7 @@ impl Context {
             time,
             timers,
             host,
+            background,
             adapter,
             codex,
             roster,

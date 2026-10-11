@@ -16,7 +16,8 @@ test-support = []
 
 # The stand-in for the `claude` a window runs: it speaks Claude's launch
 # arguments, writes Claude's transcript and status, reads its terminal as a TUI
-# does, and runs `cf` as an agent does.
+# does, runs `cf` as an agent does, and leaves jobs running past its turn as an
+# agent's background shell does (the program is the job too: `--background-job`).
 [[bin]]
 name = "fake-agent"
 path = "src/bin/fake_agent.rs"

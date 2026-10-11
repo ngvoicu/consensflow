@@ -5,10 +5,13 @@
 //! are the loop's), a pane host and an adapter whose agents do what the test
 //! tells them, fakes of the other seams, a test's engine made with them all
 //! ([`Context`]), and a recorder that writes down what the engine asks of its
-//! seams in the shape of the Node traces the tests are held to.
+//! seams in the shape of the Node traces the tests are held to. What Node's
+//! dispatcher never asked of its host (the work a turn left running) is the
+//! one thing the recorder leaves out ([`FakeBackground`]).
 
 mod adapter;
 mod adapters;
+mod background;
 mod context;
 mod executor;
 mod holds;
@@ -22,6 +25,7 @@ mod window;
 
 pub use adapter::{AfterPrepare, Deliver, FakeAdapter, FakeAgent, Prepare, Ready, Started, Taking};
 pub use adapters::{FakeAdapters, FakeRecords};
+pub use background::FakeBackground;
 pub use context::{Closed, Context, Made, START_MS};
 pub use executor::{Answer, Gate, GateWait};
 pub use holds::Holds;

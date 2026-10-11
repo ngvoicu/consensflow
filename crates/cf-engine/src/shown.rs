@@ -9,11 +9,11 @@
 //! looks like a key or a token in them is hidden ([`mask`]): a screen can echo
 //! one, and the note goes to the board, the chief's window and the log.
 
-mod mask;
+pub(crate) mod mask;
 #[cfg(test)]
 mod tests;
 
-use cf_proto::panes::{PaneExit, SnapshotTail};
+use cf_proto::panes::{BackgroundProcess, PaneExit, SnapshotTail};
 use serde_json::Value;
 
 use mask::mask;
@@ -27,13 +27,14 @@ const QUOTE_CHARS: usize = 400;
 const BETWEEN: &str = " / ";
 
 /// What the pane host said of a window: how its program ended where it had,
-/// and the last lines its screen showed. A host that did not say is not a
-/// screen that showed nothing.
+/// the last lines its screen showed, and what it left running when the window
+/// closed. A host that did not say is not a screen that showed nothing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Shown {
     code: Option<u32>,
     signal: Option<String>,
     tail: Option<Vec<String>>,
+    background: Vec<BackgroundProcess>,
 }
 
 impl Shown {
@@ -43,7 +44,14 @@ impl Shown {
             code: exit.exit_code,
             signal: exit.signal,
             tail: exit.tail,
+            background: exit.background,
         }
+    }
+
+    /// What the window left running when it closed, which its close ended: the
+    /// processes its turns started, as the host listed them.
+    pub(crate) fn left_running(&self) -> &[BackgroundProcess] {
+        &self.background
     }
 
     /// A pane's snapshot, asked for its tail: the lines it answered. An answer

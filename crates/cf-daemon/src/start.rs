@@ -337,9 +337,13 @@ async fn run(
         bundle: options.bundle.clone(),
         zone,
     };
+    // The pane host opens, kills and tells of windows, and says what a window's
+    // turn left running: one end of the bridge for the engine's every word to it.
+    let host = Rc::new(BridgeHost::new(bridge.clone(), env.clone()));
     let seams = Seams {
         ledger: Rc::clone(&ledger),
-        host: Rc::new(BridgeHost::new(bridge.clone(), env.clone())),
+        host: Rc::clone(&host) as _,
+        background: host as _,
         adapters: Rc::new(HarnessAdapters::new(&services)),
         records: Rc::clone(&records) as _,
         time: Rc::clone(&time) as _,

@@ -1,8 +1,9 @@
 //! The pane host as the engine uses it, over the bridge: a window's pane is
 //! opened and killed by a request to the host, an adapter's own requests
 //! (`pane.snapshot`, `pane.input`, `pane.write_paste`, `pane.claim`) go
-//! straight through, and the host's `pane.exit` events are told to the engine
-//! where they are read.
+//! straight through, what a window's turn left running is asked of it
+//! (`pane.mark`, `pane.background`: [`BackgroundWork`]), and the host's
+//! `pane.exit` events are told to the engine where they are read.
 //!
 //! The protocol is the app's (`crates/cf-panes/src/pane_handlers.rs`); this
 //! adds no rules of its own, only the Windows shim a window's program may be
@@ -17,9 +18,10 @@ use cf_bridge::local::{Bridge, BridgeBuilder, Subscription};
 use cf_bridge::BridgeError;
 use cf_engine::host::{EngineHost, Killed, OpenPane, Opened};
 use cf_engine::runtime::LocalWork;
+use cf_engine::seams::BackgroundWork;
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::bridge::Role;
-use cf_proto::panes::PaneExit;
+use cf_proto::panes::{Background, PaneExit};
 use serde_json::{json, Map, Value};
 
 use crate::errors::contain_now;
@@ -88,6 +90,33 @@ impl EngineHost for BridgeHost {
         let sent = self.bridge.request("pane.kill", body, None);
         Box::pin(async move { sent.await.map(|answer| killed(&answer)).map_err(host_error) })
     }
+}
+
+impl BackgroundWork for BridgeHost {
+    fn mark<'a>(&'a self, pane: &'a Pane) -> Work<'a, ()> {
+        let body = json!({ "id": pane.id, "generation": pane.generation });
+        let sent = self.bridge.request("pane.mark", body, None);
+        // A host that cannot mark has no background work to tell of: nothing
+        // the engine can do about it, and nothing it should fail for.
+        Box::pin(async move {
+            let _ = sent.await;
+        })
+    }
+
+    fn running<'a>(&'a self, pane: &'a Pane) -> Work<'a, Background> {
+        let body = json!({ "id": pane.id, "generation": pane.generation });
+        let sent = self.bridge.request("pane.background", body, None);
+        Box::pin(async move { running(sent.await.ok()) })
+    }
+}
+
+/// What a host answered to what a window's tree has running that began after
+/// its turn did: its word, or nothing for an answer that was a refusal or none.
+fn running(answer: Option<Value>) -> Background {
+    answer
+        .filter(|answer| answer.get("ok") == Some(&Value::Bool(true)))
+        .and_then(|answer| serde_json::from_value(answer).ok())
+        .unwrap_or_default()
 }
 
 /// What a request that never came back says: `eof` where the bridge ended, as

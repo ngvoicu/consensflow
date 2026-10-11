@@ -8,10 +8,18 @@
 //! is not. Nothing in the crate knows which program hosts it, so the app, the
 //! headless helper and the Rust daemon to come run the same code, and none
 //! keeps a copy that could drift.
+//!
+//! A window closes the way a terminal does on Unix (`pty::close`): its programs
+//! are asked to end and given a grace, and only what is left is killed. On
+//! Windows nothing is asked, and the job object of the pane ends its tree at
+//! once. What its agent started and left running past a turn is the pane's tree
+//! less what it had when the daemon said the turn began (`background`), which
+//! the daemon asks for and the window's exit lists.
 
 #![deny(clippy::undocumented_unsafe_blocks)]
 
 pub mod arbiter;
+mod background;
 pub mod ended;
 pub mod headless;
 pub mod input_queue;

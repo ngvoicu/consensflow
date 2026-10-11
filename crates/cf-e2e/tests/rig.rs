@@ -8,8 +8,11 @@
 //! JavaScript suites `tests/integration/*.test.mjs` (gone with the port); the
 //! module of a case is the JavaScript file it came from, and its name the
 //! JavaScript test's. (`stand_ins` is new: the stand-in Codex's own transport
-//! on Windows, which the supervisor's cases here do not reach. So is
-//! `live_support`: what the opt-in live tests stand on.)
+//! on Windows, which the supervisor's cases here do not reach, and the stand-in
+//! agent's part in how a window closes: it leaves when it is asked to, and so
+//! does the job it leaves running. So is `live_support`: what the opt-in live
+//! tests stand on. So is `background_work`: what ConsensFlow does with the work
+//! a worker's turn left running, and how a window closes.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -18,6 +21,8 @@
 
 // The cases are in `tests/rig/`: cargo looks for the modules of a test's root
 // file beside it, where each would be a suite of its own.
+#[path = "rig/background_work.rs"]
+mod background_work;
 #[path = "rig/cf_native.rs"]
 mod cf_native;
 #[path = "rig/codex_session.rs"]

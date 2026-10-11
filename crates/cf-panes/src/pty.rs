@@ -8,8 +8,15 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
+use crate::background::Baseline;
 use crate::ended::{Ended, EndedSlot};
 use crate::screen::PaneScreen;
+
+mod close;
+mod turn;
+
+pub use close::CLOSE_GRACE;
+use close::{ask_all_to_exit, terminate, terminate_asked, terminate_detached};
 
 /// How long a pane whose output has ended waits for its program's exit to be
 /// readable: a program closes its terminal before it has finished exiting,
@@ -234,7 +241,9 @@ struct Pane {
     #[cfg(target_os = "macos")]
     process_tree: crate::process_tree::ProcessTree,
     #[cfg(windows)]
-    job: crate::job_object::JobObject,
+    job: Arc<crate::job_object::JobObject>,
+    /// The processes the pane's tree had when its turn began (`pane.mark`).
+    baseline: Baseline,
     output_flow: Option<Arc<OutputFlow>>,
     active_writes: Arc<AtomicU64>,
     alive: bool,
@@ -331,6 +340,9 @@ pub struct PaneTable {
     next_id: AtomicU64,
     updating: AtomicBool,
     teardown: Arc<Teardown>,
+    /// How long a closed window's programs are given to end once asked to
+    /// ([`CLOSE_GRACE`]): a test gives less.
+    close_grace: Duration,
 }
 
 /// Panes whose child is still being torn down. A pane leaves `finishing` only
@@ -375,12 +387,21 @@ impl Drop for UpdatePermit {
 
 impl PaneTable {
     pub fn new() -> Self {
+        Self::closing_within(CLOSE_GRACE)
+    }
+
+    /// A table whose closed windows' programs are given `grace` to end once
+    /// asked to, where [`PaneTable::new`]'s are given [`CLOSE_GRACE`]: a test of
+    /// the app's quit gives less than the grace it takes. On Windows nothing is
+    /// asked and no grace is given, whichever it is.
+    pub fn closing_within(grace: Duration) -> Self {
         Self {
             panes: Mutex::new(HashMap::new()),
             #[cfg(any(test, feature = "test-support"))]
             next_id: AtomicU64::new(1),
             updating: AtomicBool::new(false),
             teardown: Arc::new(Teardown::default()),
+            close_grace: grace,
         }
     }
 
@@ -501,7 +522,7 @@ impl PaneTable {
         #[cfg(target_os = "macos")]
         command.env(crate::process_tree::OWNER_ENV, &process_tree.marker);
         #[cfg(windows)]
-        let job = crate::job_object::JobObject::new()?;
+        let job = Arc::new(crate::job_object::JobObject::new()?);
         #[cfg_attr(not(windows), allow(unused_mut))]
         let mut child = pair
             .slave
@@ -545,6 +566,7 @@ impl PaneTable {
                 process_tree,
                 #[cfg(windows)]
                 job,
+                baseline: Baseline::default(),
                 output_flow: None,
                 active_writes: Arc::new(AtomicU64::new(0)),
                 alive: true,
@@ -736,7 +758,9 @@ impl PaneTable {
 
     /// Ends a pane and takes it out of the table. One that is gone already,
     /// killed or retired when its program ended, is closed: the caller cannot
-    /// tell the two apart, and does not need to.
+    /// tell the two apart, and does not need to. Its programs are asked to end
+    /// first and given [`CLOSE_GRACE`] to do it in; on Windows they are ended at
+    /// once (see [`close`]).
     pub fn kill(&self, key: &PaneKey) -> Result<(), PaneError> {
         let mut panes = self.lock_panes()?;
         let Some(pane) = panes.remove(key) else {
@@ -791,12 +815,15 @@ impl PaneTable {
         self.teardown.begin();
         drop(panes);
         close_output(&pane);
+        // What the close ends is what the window leaves running: the exit it
+        // sends says so, and by then the processes are gone.
+        pane.keep_background();
         if pane.active_writes.load(Ordering::Acquire) == 0 {
-            let result = terminate(&mut pane);
+            let result = terminate(&mut pane, self.close_grace);
             self.teardown.resolve(result.is_ok());
             result
         } else {
-            terminate_detached(pane, Arc::clone(&self.teardown))
+            terminate_detached(pane, Arc::clone(&self.teardown), self.close_grace)
         }
     }
 
@@ -1044,9 +1071,13 @@ impl Drop for PaneTable {
             Ok(panes) => panes,
             Err(poisoned) => poisoned.into_inner(),
         };
+        // Every window is asked to end before any is waited for, so one whose
+        // programs ignore the request does not make the others wait for it too.
         for pane in panes.values_mut() {
             close_output(pane);
-            let _ = terminate(pane);
+        }
+        for (pane, _) in ask_all_to_exit(panes.values_mut(), self.close_grace) {
+            let _ = terminate_asked(pane);
         }
     }
 }
@@ -1130,113 +1161,6 @@ fn wait_for_exit(pane: &mut Pane) -> Result<(), PaneError> {
         }
         Err(error) if already_reaped(&error) => Ok(()),
         Err(error) => Err(PaneError::Io(error)),
-    }
-}
-
-fn terminate(pane: &mut Pane) -> Result<(), PaneError> {
-    let child_exited = signal_for_termination(pane, false)?;
-
-    if !child_exited {
-        wait_for_exit(pane)?;
-    }
-    pane.alive = false;
-    Ok(())
-}
-
-fn terminate_detached(mut pane: Pane, teardown: Arc<Teardown>) -> Result<(), PaneError> {
-    let child_exited = match signal_for_termination(&mut pane, true) {
-        Ok(exited) => exited,
-        Err(error) => {
-            teardown.resolve(false);
-            return Err(error);
-        }
-    };
-    if child_exited {
-        pane.alive = false;
-        teardown.resolve(true);
-        return Ok(());
-    }
-
-    let reaper = Arc::clone(&teardown);
-    if let Err(error) = std::thread::Builder::new()
-        .name("consensflow-pty-reaper".to_string())
-        .spawn(move || reaper.resolve(wait_for_exit(&mut pane).is_ok()))
-    {
-        teardown.resolve(false);
-        return Err(PaneError::Io(error));
-    }
-    Ok(())
-}
-
-/// `detached`: the caller does not wait for the exit (a write is still in
-/// progress in the pane), and a reaper confirms it later.
-fn signal_for_termination(pane: &mut Pane, detached: bool) -> Result<bool, PaneError> {
-    #[cfg(not(target_os = "macos"))]
-    let _ = detached;
-    #[cfg(target_os = "macos")]
-    pane.process_tree.terminate()?;
-
-    #[cfg_attr(not(unix), allow(unused_mut))]
-    let mut child_exited = has_exited(pane)?;
-
-    #[cfg(unix)]
-    if let Some(process_group_id) = pane.process_group_id {
-        if let Err(error) = signal_process_group(process_group_id) {
-            // macOS answers EPERM when a member of the group cannot take the
-            // signal: here one already killed with the tree above, whose exit
-            // waits on the pane's blocked write. A caller that does not wait
-            // hands that exit to the reaper; one that waits keeps the check.
-            #[cfg(target_os = "macos")]
-            if detached && is_permission_denied(&error) {
-                return Ok(child_exited);
-            }
-            if is_permission_denied(&error) {
-                let deadline = Instant::now() + Duration::from_millis(100);
-                while !child_exited && Instant::now() < deadline {
-                    child_exited = has_exited(pane)?;
-                    if !child_exited {
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                }
-            }
-            if !child_exited || !is_permission_denied(&error) {
-                return Err(error);
-            }
-        }
-    }
-
-    #[cfg(windows)]
-    if !child_exited {
-        pane.job.terminate()?;
-    }
-
-    Ok(child_exited)
-}
-
-#[cfg(unix)]
-fn is_permission_denied(error: &PaneError) -> bool {
-    matches!(error, PaneError::Io(error) if error.kind() == io::ErrorKind::PermissionDenied)
-}
-
-#[cfg(unix)]
-fn signal_process_group(process_group_id: i32) -> Result<(), PaneError> {
-    unsafe extern "C" {
-        fn kill(pid: i32, signal: i32) -> i32;
-    }
-
-    const SIGKILL: i32 = 9;
-    // SAFETY: portable-pty created the child as its own session leader. A
-    // negative pid addresses that process group, and SIGKILL needs no handler.
-    if unsafe { kill(-process_group_id, SIGKILL) } == 0 {
-        return Ok(());
-    }
-
-    let error = io::Error::last_os_error();
-    const ESRCH: i32 = 3;
-    if error.kind() == io::ErrorKind::NotFound || error.raw_os_error() == Some(ESRCH) {
-        Ok(())
-    } else {
-        Err(PaneError::Io(error))
     }
 }
 
@@ -2123,7 +2047,8 @@ mod tests {
         let kill_result = kill_receiver.recv_timeout(Duration::from_millis(500));
         let completed_before_emergency_cleanup = responsive_result.is_ok() && kill_result.is_ok();
         if responsive_result.is_err() || kill_result.is_err() {
-            let _ = super::signal_process_group(blocked_process_group);
+            let _ =
+                super::close::signal_process_group(blocked_process_group, super::close::SIGKILL);
         }
 
         let responsive_result = responsive_result

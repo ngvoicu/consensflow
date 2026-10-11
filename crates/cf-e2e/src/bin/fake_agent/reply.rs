@@ -12,6 +12,12 @@
 //! - A line `SLEEP <seconds> <words>` is a turn that works that long before it
 //!   does what the words say: a window a chief can still tell, or a chief
 //!   nothing is delivered to.
+//! - A line `BACKGROUND <seconds> <words>` starts a job (`background`) that runs
+//!   that long and answers the words at once, as an agent does that leaves a job
+//!   in the background and ends its turn. With `--wake` before the seconds the
+//!   window begins a turn of its own when the job ends, as a harness does that
+//!   its job's notification wakes (`WOKEN <words>`, which answers `woken:
+//!   <words>`); with `--deaf` the job ignores the requests to end.
 //! - A task saying `QUOTA-OUT` is refused with a 429, Claude's way, by the
 //!   window whose participant `CF_TEST_QUOTA_OUT` names, for as long as the
 //!   file `CF_TEST_QUOTA_FILE` names is there when it is set (taking it away is
@@ -24,6 +30,7 @@
 //! - Anything else is acknowledged.
 
 use std::path::Path;
+use std::sync::mpsc::Sender;
 use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
@@ -32,6 +39,8 @@ use cf_e2e::pattern;
 use cf_e2e::process::{own_var, Run};
 use regex::Regex;
 use serde_json::{json, Value};
+
+use crate::background::{Jobs, THINKING};
 
 /// What a window knows of itself that decides how it answers.
 pub struct Window {
@@ -42,6 +51,11 @@ pub struct Window {
     pub settings: Option<String>,
     /// The conversation, for the hook's event.
     pub session: String,
+    /// The jobs the window starts.
+    pub jobs: Jobs,
+    /// Where a turn the window begins by itself is queued: the message that
+    /// wakes it when the job it left running ends.
+    pub wake: Sender<String>,
 }
 
 /// What a turn answers.
@@ -154,6 +168,8 @@ fn shell(command: &str) -> Run {
 /// The answer to `text`.
 pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static SLEEP: OnceLock<Regex> = OnceLock::new();
+    static BACKGROUND: OnceLock<Regex> = OnceLock::new();
+    static WOKEN: OnceLock<Regex> = OnceLock::new();
     static ASK: OnceLock<Regex> = OnceLock::new();
     static ASKED: OnceLock<Regex> = OnceLock::new();
     static REPLY: OnceLock<Regex> = OnceLock::new();
@@ -166,6 +182,32 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         let seconds: u64 = slow[1].parse().map_err(|_| format!("SLEEP {}", &slow[1]))?;
         thread::sleep(Duration::from_secs(seconds));
         return reply_to(&slow[2], window);
+    }
+    if let Some(job) = pattern::once(
+        &BACKGROUND,
+        r"(?m)^BACKGROUND ((?:--(?:wake|deaf) )*)(\d+) (.+)$",
+    )
+    .captures(text)
+    {
+        let seconds: u64 = job[2]
+            .parse()
+            .map_err(|_| format!("BACKGROUND {}", &job[2]))?;
+        let words = job[3].to_owned();
+        let (wakes, deaf) = (job[1].contains("--wake"), job[1].contains("--deaf"));
+        // An agent thinks before it runs a tool: the daemon marks where a launch's
+        // turn begins when its message shows in the record, up to a pass after the
+        // agent began.
+        thread::sleep(THINKING);
+        let (wake, woken) = (window.wake.clone(), format!("WOKEN {words}"));
+        window.jobs.start("job", seconds, deaf, move || {
+            if wakes {
+                let _ = wake.send(woken);
+            }
+        })?;
+        return Ok(Reply::Text(words));
+    }
+    if let Some(woken) = pattern::once(&WOKEN, r"(?m)^WOKEN (.+)$").captures(text) {
+        return Ok(Reply::Text(format!("woken: {}", &woken[1])));
     }
     if let Some(ask) = pattern::once(&ASK, r"(?m)^ASK (.+)$").captures(text) {
         let questions: Value =
@@ -248,6 +290,8 @@ mod tests {
             participant: "chief".into(),
             settings: None,
             session: "sess".into(),
+            jobs: Jobs::new(Path::new("/nowhere/consensflow"), 1),
+            wake: std::sync::mpsc::channel().0,
         }
     }
 
@@ -291,6 +335,22 @@ mod tests {
         let reply = reply_to("SLEEP 1 Reply with exactly: LATE", &window());
         assert_eq!(text(reply), "LATE");
         assert!(started.elapsed() >= Duration::from_secs(1));
+    }
+
+    #[test]
+    fn the_turn_a_jobs_end_wakes_says_what_woke_it() {
+        let reply = reply_to("WOKEN started the job", &window());
+        assert_eq!(text(reply), "woken: started the job");
+    }
+
+    #[test]
+    fn a_background_line_that_is_no_job_is_only_acknowledged() {
+        // No seconds, or none a number: nothing is started, and nothing waited for.
+        for line in ["BACKGROUND started the job", "BACKGROUND --wake soon words"] {
+            let started = std::time::Instant::now();
+            assert_eq!(text(reply_to(line, &window())), format!("noted: {line}"));
+            assert!(started.elapsed() < Duration::from_secs(1), "{line}");
+        }
     }
 
     #[test]
