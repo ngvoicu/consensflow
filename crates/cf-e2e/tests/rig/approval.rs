@@ -1098,9 +1098,13 @@ fn switching_approval_off_leaves_what_waits_at_the_gate_there_and_what_comes_aft
 #[test]
 fn a_restart_of_the_daemon_leaves_what_waits_at_the_gate_there_and_passing_it_on_goes_on() -> Outcome
 {
-    let mut rig = rig()?;
+    // The chief takes a moment to write its answer once its work is done, as a
+    // window on a slow machine does (CI's Windows is one): a quit that does not
+    // wait for the answer cuts its turn, on any machine.
+    let mut rig = Rig::start(config().var("CF_TEST_ANSWER_MS", "1500"))?;
     let (id, brief) = {
         let project = gated_project(&rig)?;
+        let chief = chief_window(&rig, &project)?;
         rig.tell(
             project.id(),
             &format!(
@@ -1109,6 +1113,14 @@ fn a_restart_of_the_daemon_leaves_what_waits_at_the_gate_there_and_passing_it_on
             ),
         )?;
         let brief = the_one_held(&rig, &project, "the brief to be held")?;
+        // The app is quit once its chief's turn is written to its end. A turn the
+        // quit cuts reads as at work in the window that resumes it, whatever that
+        // window says of itself, and nothing is delivered to it until it is given
+        // a turn of its own.
+        let session = session_of(&chief);
+        rig.wait_for("the chief's answer to be written", secs(30), || {
+            Ok(rig.transcript(&session).contains("\"text\":\"dispatched:"))
+        })?;
         (project.id(), brief)
     };
 
@@ -1119,6 +1131,9 @@ fn a_restart_of_the_daemon_leaves_what_waits_at_the_gate_there_and_passing_it_on
     let rig = Rig::start(config().existing_root(root))?;
     rig.open_frame(&format!("p{id}-chief"), secs(30))?;
     let project = Project::new(&rig, id);
+    rig.wait_for("the resumed chief to be at rest", secs(30), || {
+        Ok(activity(&project, "chief")? == "idle")
+    })?;
     assert_eq!(project.board()?["project"]["gate"], true);
     let held = the_one_held(&rig, &project, "the brief to be held after the restart")?;
     assert_eq!(held["id"], brief["id"], "the same brief, still waiting");

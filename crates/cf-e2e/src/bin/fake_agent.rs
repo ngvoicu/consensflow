@@ -22,6 +22,9 @@
 //! `CF_TEST_WIND_DOWN_MS` set takes that long to stop, as Claude does when it
 //! has a tool to wind down, so that a case can do something while the stop is
 //! not yet paid. Control-C once clears what is typed, and twice ends the window.
+//! A window with `CF_TEST_ANSWER_MS` set takes that long to write its answer once
+//! its work is done, so that a case can do something while the turn is still open
+//! in the record: quit the app, as a human may at any moment.
 //!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
@@ -240,13 +243,15 @@ fn say(text: &str) -> io::Result<()> {
     out.flush()
 }
 
-/// How long the turn a window was stopped in takes to end: what
-/// `CF_TEST_WIND_DOWN_MS` says, none unless it does.
-fn wind_down() {
-    let milliseconds = own_var("CF_TEST_WIND_DOWN_MS")
-        .and_then(|milliseconds| milliseconds.parse().ok())
-        .unwrap_or(0);
-    thread::sleep(Duration::from_millis(milliseconds));
+/// How long a variable's text says to wait: its milliseconds, none unless it is
+/// a number of them.
+fn wait_of(text: Option<&str>) -> Duration {
+    Duration::from_millis(text.and_then(|text| text.parse().ok()).unwrap_or(0))
+}
+
+/// Waits as long as the variable `name` says.
+fn wait_as_told(name: &str) {
+    thread::sleep(wait_of(own_var(name).as_deref()));
 }
 
 /// How long the message `text` stays in the hooks of its prompt: a line
@@ -299,7 +304,8 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
     let id = format!("{}-message-{pid}-{}", window.session, records.ordinal());
     match reply {
         Reply::Stopped => {
-            wind_down();
+            // The turn takes that long to end once it is stopped.
+            wait_as_told("CF_TEST_WIND_DOWN_MS");
             // What Claude writes of a turn the user interrupted: the marker, as
             // a turn of the user's, and no answer after it.
             records
@@ -332,6 +338,9 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
                 .map_err(failed)?;
         }
         Reply::Text(reply) => {
+            // The work is done (a `cf` it ran has answered) and the answer is
+            // not yet written: the turn is open in the record that long.
+            wait_as_told("CF_TEST_ANSWER_MS");
             records
                 .append(
                     pid,
@@ -488,6 +497,15 @@ mod tests {
             "HOOKS 5",
         ] {
             assert_eq!(hooks_of(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_wait_is_the_milliseconds_a_variable_says_and_none_where_it_says_none() {
+        assert_eq!(wait_of(Some("1500")), Duration::from_millis(1500));
+        assert_eq!(wait_of(Some("0")), Duration::ZERO);
+        for text in [None, Some(""), Some("soon"), Some("-5"), Some("1.5")] {
+            assert_eq!(wait_of(text), Duration::ZERO, "{text:?}");
         }
     }
 
