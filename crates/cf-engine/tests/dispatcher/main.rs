@@ -8,13 +8,15 @@
 //! notes of a task's wait that go when it moves on, and the word that follows a
 //! hold (`waiting_notes`), and the result a turn's end is not while the work it
 //! started still runs (`background`), and the time a launch is told it has for
-//! its first message (`launch_wait`).
+//! its first message (`launch_wait`), and what a window is given while the
+//! words that were for it wait at the human's gate (`approval`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod adapters_failing_at_once;
 mod agent_gone;
+mod approval;
 mod assigning;
 mod background;
 mod cancelled_task;

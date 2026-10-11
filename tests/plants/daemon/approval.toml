@@ -1,0 +1,406 @@
+# The approval gate (the human's reports from the live app, alpha.81, which ran
+# Node's engine: the words they passed on that were never typed, m-1930, and a
+# result typed into a chief that had accepted its task, m-1929; and a Codex
+# answer that reached the chief with the markup of Codex's own screen in it).
+# With approval required, every word one agent gives another waits at the gate,
+# out of its recipient's inbox and queue, until the human passes it on or
+# declines it. One plant takes one rule out; a test of it fails. The ledger's
+# plants run its own tests of the gate (`crates/cf-ledger/tests/receipt/approval.rs`),
+# the page's the human's approve and decline (`crates/cf-daemon/src/page/tests/gate.rs`),
+# the engine's the dispatcher's (`tests/dispatcher/approval.rs`), the readers'
+# their own; the `approval rig:` plants after them hold that the rule reaches the
+# chief through the real daemon and pane host (`crates/cf-e2e/tests/rig/approval.rs`,
+# one case each, found by the start of its name) and say `builds`: the family
+# builds the native `cf` again once each is put back. Every name holds
+# `approval`, so `npm run plants:daemon -- approval` runs them all, and
+# `npm run plants:daemon -- "approval rig:"` the end to end ones (the words of a
+# filter are each a word that may hold, so a filter of two words picks both).
+
+[run]
+# The ledger's tests of what each kind of word does at the gate.
+ledger-approval = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "approval::"]
+# The page's tests of the human's approve and decline.
+daemon-approval-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::gate"]
+# The dispatcher's tests of what a window is given, and when, while words wait.
+engine-approval = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "approval::"]
+# What Codex's answers read as.
+harness-codex-record = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
+# Where a Claude turn ends when it was interrupted.
+harness-claude-interrupts = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::interrupts"]
+# The cases of the rig, found by the start of their names.
+rig-approval-decided = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "approval::a_result_the_human_passed_on_while_the_chief_was_in_a_turn_is_withdrawn"]
+rig-approval-refused = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "approval::a_chief_that_accepts_a_task_whose_result_waits_at_the_gate"]
+
+# --- the ledger: what each kind of word does at the gate ---
+
+[[plant]]
+name = "approval: an agent’s word to another is never held at the gate"
+meant = "every_kind_of_word_the_gate_holds_is_kept_from_its_recipient_until_the_human_passes_it_on"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/queue.rs"
+find = '    if store.project_row(project_id)?.gate != 1 {'
+replace = '    if true {'
+
+[[plant]]
+name = "approval: what the human sends or receives is held at the gate too"
+meant = "a_note_of_consensflows_own_and_the_words_with_the_human_pass_the_gate"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/queue.rs"
+find = '    Ok(store.participant_row(from)?.role != "human" && store.participant_row(to)?.role != "human")'
+replace = '    Ok(true)'
+
+[[plant]]
+name = "approval: a message the human passes on is read, not queued for its recipient"
+meant = "every_kind_of_word_the_gate_holds_is_kept_from_its_recipient_until_the_human_passes_it_on"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/gate.rs"
+find = '''
+            "UPDATE message SET state = 'queued' WHERE id = ?",'''
+replace = '''
+            "UPDATE message SET state = 'read' WHERE id = ?",'''
+
+[[plant]]
+name = "approval: a question, a note and a result are declined as a task is"
+meant = "the_human_declines_the_brief_the_words_and_the_answer_and_only_passes_the_rest_on"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/gate.rs"
+find = '    if message.kind != "task" && message.kind != "answer" {'
+replace = '    if false {'
+
+[[plant]]
+name = "approval: a declined brief leaves its task as it was"
+meant = "a_declined_brief_cancels_its_task_and_tells_the_chief_and_no_window_is_given_anything"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/gate.rs"
+find = '                call_off(store, message.project_id, task.number, by)?;'
+replace = ''
+
+[[plant]]
+name = "approval: whoever sent a declined message is not told"
+meant = "a_declined_brief_cancels_its_task_and_tells_the_chief_and_no_window_is_given_anything"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/gate.rs"
+find = '        if told.as_deref() != Some(by) {'
+replace = '        if false {'
+
+[[plant]]
+name = "approval: a declined answer takes its question with it"
+meant = "a_declined_answer_leaves_its_question_open_and_the_chief_is_told_to_answer_it_again"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/gate.rs"
+find = '            reopen_question(store, question)?;'
+replace = ''
+
+[[plant]]
+name = "approval: the chief may decide a task whose result still waits at the gate"
+meant = "the_chief_cannot_decide_a_task_whose_result_still_waits_at_the_gate_and_the_human_can"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '    if held {'
+replace = '    if held && false {'
+
+[[plant]]
+name = "approval: accepting a task leaves the result the human never passed on at the gate"
+meant = "the_chief_cannot_decide_a_task_whose_result_still_waits_at_the_gate_and_the_human_can"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '        withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;'
+replace = ''
+
+[[plant]]
+name = "approval: sending a task back leaves the result the human never passed on at the gate"
+meant = "the_chief_cannot_decide_a_task_whose_result_still_waits_at_the_gate_and_the_human_can"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '        withdraw_gated(store, task.id, &format!("sent back by @{by}"))?;'
+replace = ''
+
+[[plant]]
+name = "approval: a result passed on is still given to a chief that decided its task"
+meant = "a_result_approved_and_decided_on_before_the_chief_is_given_it_is_withdrawn_whichever_way_it_decides"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '        withdraw_result(store, &task, "was accepted")?;'
+replace = ''
+
+[[plant]]
+name = "approval: a cancelled task leaves what waits for it at the gate"
+meant = "a_cancel_takes_everything_of_the_task_back_from_the_gate_and_none_of_it_can_be_passed_on"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''AND state IN ('queued', 'delivering', 'gated')",'''
+replace = '''AND state IN ('queued', 'delivering')",'''
+
+[[plant]]
+name = "approval: the chief’s pause leaves its words at the gate"
+meant = "a_pause_by_the_chief_takes_the_brief_back_from_the_gate_and_the_words_that_resume_wait_there_again"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''AND kind IN ('task', 'note') AND state IN ('queued', 'gated')",'''
+replace = '''AND kind IN ('task', 'note') AND state IN ('queued')",'''
+
+# What a pause takes back is what its own author wrote, and only the chief's
+# pause takes anything back; the plant lets the human's pause take back the
+# words of whoever wrote them.
+[[plant]]
+name = "approval: the human’s pause takes back the chief’s words at the gate"
+meant = "a_pause_by_the_human_leaves_the_brief_at_the_gate_and_one_passed_on_meanwhile_goes_nowhere"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = 'author.filter(|author| author.role == "chief"),'
+replace = 'author.filter(|author| author.role != "nobody"),'
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = 'WHERE task_id = ? AND recipient_id = ? AND sender_id = ?'
+replace = 'WHERE task_id = ? AND recipient_id = ? AND ? IS NOT NULL'
+
+[[plant]]
+name = "approval: a restart lets go of what a carrier at the gate carries"
+meant = "what_waits_at_the_gate_is_there_when_the_ledger_is_opened_again_and_goes_on_when_passed_on"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')'''
+replace = '''WHERE m.state = 'queued' AND c.state NOT IN ('queued')'''
+
+[[plant]]
+name = "approval: switching approval off passes on what waits at the gate"
+meant = "what_waits_at_the_gate_when_approval_is_switched_off_waits_on_and_what_comes_after_passes"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '        if from != gate {'
+replace = '''        if !gate {
+            store.db.execute(
+                "UPDATE message SET state = 'queued' WHERE project_id = ? AND state = 'gated'",
+                [id],
+            )?;
+        }
+        if from != gate {'''
+
+# --- the page: what the human's approve and decline do ---
+
+[[plant]]
+name = "approval: the human passes a message on in a project that is closed"
+meant = "nothing_is_passed_on_in_a_closed_project_until_it_is_resumed"
+runs = ["daemon-approval-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/messages.rs"
+find = '            require_open(&project)?;'
+replace = '            let _ = &project;'
+
+[[plant]]
+name = "approval: switching approval off on the page wakes nothing"
+meant = "approval_switched_off_on_the_page_wakes_the_dispatcher_and_leaves_what_waits_at_the_gate"
+runs = ["daemon-approval-page"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/page.rs"
+find = '''
+                | Self::TaskTranscript
+        )'''
+replace = '''
+                | Self::TaskTranscript
+                | Self::ProjectGate
+        )'''
+
+# --- the engine: what a window is given while words wait ---
+
+[[plant]]
+name = "approval: a window at work is not interrupted for a task whose words wait at the gate"
+meant = "words_that_resume_a_paused_task_wait_for_the_human_and_the_window_is_stopped_all_the_same"
+runs = ["engine-approval"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '''
+                self.press_round(record, key, stop.number);
+                self.press(record).await;
+                Ok(())'''
+replace = '''
+                self.press_round(record, key, stop.number);
+                Ok(())'''
+
+# --- Codex's answers: the markup of its own screen is not relayed ---
+
+[[plant]]
+name = "approval: the markup of Codex’s own screen reaches whoever reads an answer"
+meant = "the_markup_of_a_final_answer_reads_as_its_path_and_its_label_and_the_turn_is_still_settled"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '.map(|kept| handed_out(&kept.item))'
+replace = '.map(|kept| kept.item.clone())'
+
+[[plant]]
+name = "approval: a user’s words and a tool’s output are read as the model’s"
+meant = "what_is_not_the_models_stays_as_it_was_written"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '    if item.role != Role::Assistant {'
+replace = '    if false {'
+
+[[plant]]
+name = "approval: a turn is proven by the words as they read, not as the rollout holds them"
+meant = "the_markup_of_a_final_answer_reads_as_its_path_and_its_label_and_the_turn_is_still_settled"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+            Some("AgentMessage") if completed => {
+                let text = content_text(field(native, "content"));'''
+replace = '''
+            Some("AgentMessage") if completed => {
+                let text = directives::readable(&content_text(field(native, "content")))
+                    .into_owned();'''
+
+[[plant]]
+name = "approval: a directive quoted between backticks is read"
+meant = "a_directive_quoted_as_code_is_text_and_stays_so"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/directives.rs"
+find = "        if rest.starts_with('`') {"
+replace = '        if false {'
+
+[[plant]]
+name = "approval: a directive in a fenced block of code is read"
+meant = "a_directive_quoted_as_code_is_text_and_stays_so"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/directives.rs"
+find = '                if let Some(opening) = Fence::opened_by(line) {'
+replace = '                if let Some(opening) = Fence::opened_by(line).filter(|_| false) {'
+
+[[plant]]
+name = "approval: the scan of an answer steps a byte at a time into the middle of a character"
+meant = "text_in_any_language_is_read_whole_and_no_scan_stops_in_the_middle_of_a_character"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/directives.rs"
+find = '            at += rest.chars().next().map_or(1, char::len_utf8);'
+replace = '            at += 1;'
+
+[[plant]]
+name = "approval: a file citation reads as its label, not its path"
+meant = "a_file_citation_reads_as_its_path_wherever_it_stands_in_a_sentence"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/directives.rs"
+find = '        if self.name == FILE_CITATION {'
+replace = '        if self.name != FILE_CITATION {'
+
+[[plant]]
+name = "approval: any other directive of Codex’s reads as nothing, not as its label"
+meant = "any_other_directive_reads_as_its_label_and_as_nothing_where_it_has_none"
+runs = ["harness-codex-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/directives.rs"
+find = '        label.unwrap_or_default().to_owned()'
+replace = '        String::new()'
+
+# --- Claude's interrupt: the turn it ends (alpha.81's Node reader asked the marker to name the message) ---
+
+[[plant]]
+name = "approval: an interrupt that names no message is the user’s next turn, which never ends"
+meant = "a_turn_the_daemon_interrupted_ends_on_the_marker_whether_the_window_had_written_none_of_it_a_part_or_a_call"
+runs = ["harness-claude-interrupts"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/text.rs"
+find = '''
+    let [only] = content.as_slice() else {
+        return false;
+    };'''
+replace = '''
+    let [only] = content.as_slice() else {
+        return false;
+    };
+    if record
+        .get("interruptedMessageId")
+        .and_then(Value::as_str)
+        .is_none_or(str::is_empty)
+    {
+        return false;
+    }'''
+
+[[plant]]
+name = "approval: the error result Claude writes of a tool the user stopped leaves its call open"
+meant = "a_turn_the_daemon_interrupted_ends_on_the_marker_whether_the_window_had_written_none_of_it_a_part_or_a_call"
+runs = ["harness-claude-interrupts"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        for result in &record.results {
+            self.tool_result(result, at, seq)?;
+        }
+        if record.interrupt {'''
+replace = '''
+        let _ = &record.results;
+        if record.interrupt {'''
+
+# --- end to end: through the real daemon and pane host ---
+
+[[plant]]
+name = "approval rig: a result the chief decided on is typed into it when its turn ends"
+meant = "a_result_the_human_passed_on_while_the_chief_was_in_a_turn_is_withdrawn_when_the_chief_read_it_and_accepted_its_task_in_that_turn"
+runs = ["rig-approval-decided"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '        withdraw_result(store, &task, "was accepted")?;'
+replace = ''
+
+[[plant]]
+name = "approval rig: a chief reads in its task’s thread the result the human has not passed on"
+meant = "a_chief_that_accepts_a_task_whose_result_waits_at_the_gate_is_refused_and_is_given_the_result_once_it_is_passed_on"
+runs = ["rig-approval-refused"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '        task.messages.retain(|message| message.state != "gated");'
+replace = ''

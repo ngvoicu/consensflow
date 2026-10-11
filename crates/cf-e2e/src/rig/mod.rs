@@ -242,6 +242,23 @@ impl Rig {
         self.shared.seen().exits.clone()
     }
 
+    /// How many times the daemon pressed the key `bytes` into the window `id`
+    /// (Escape is `[27]`, Control-C `[3]`): the `pane.input` requests it made of
+    /// the pane host that are exactly that.
+    pub fn keys_pressed(&self, id: &str, bytes: &[u8]) -> usize {
+        self.shared
+            .seen()
+            .daemon
+            .iter()
+            .filter(|frame| {
+                frame["kind"] == "req"
+                    && frame["op"] == "pane.input"
+                    && frame["body"]["id"] == id
+                    && frame["body"]["bytes"] == json!(bytes)
+            })
+            .count()
+    }
+
     /// The human types into the chief's terminal, the one way work reaches the
     /// chief: a bracketed paste of `text`, then Enter, once the chief is idle (it
     /// is waited for a minute).

@@ -14,6 +14,15 @@
 //! too (`background`): started with `--background-job` first, it is not a
 //! window but the work a window left running.
 //!
+//! Escape stops the turn at work, as it stops Claude's: a turn that works (a
+//! `SLEEP`) ends there, writing the record Claude writes of a turn the user
+//! interrupted, `[Request interrupted by user]`, and no answer; and a turn still
+//! in the hooks of its prompt (`HOOKS`) writes nothing, as Claude writes nothing
+//! of one stopped before a word of its answer. A window with
+//! `CF_TEST_WIND_DOWN_MS` set takes that long to stop, as Claude does when it
+//! has a tool to wind down, so that a case can do something while the stop is
+//! not yet paid. Control-C once clears what is typed, and twice ends the window.
+//!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
 //! `cf_e2e::process`, the one place a program starts and the environment is read.
@@ -31,25 +40,39 @@ mod reply;
 #[cfg(unix)]
 #[path = "fake_agent/signals.rs"]
 mod signals;
+#[path = "fake_agent/stop.rs"]
+mod stop;
 #[path = "fake_agent/terminal.rs"]
 mod terminal;
 
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::mpsc;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, OnceLock};
 use std::thread;
+use std::time::Duration;
 
+use cf_e2e::pattern;
 use cf_e2e::process::own_var;
+use regex::Regex;
 use serde_json::json;
 
 use background::Jobs;
 use records::{note_process, Records};
 use reply::{is_session_of, reply_to, Reply, Window};
+use stop::Stop;
 use terminal::{Event, Input};
 
 /// How long the server a window starts as it opens runs: past any case.
 const SERVER_SECONDS: u64 = 600;
+
+/// How long an Escape waits for the rest of a paste marker before it is the
+/// Escape key: a TUI's own wait is about as long.
+const ESCAPE_WAIT: Duration = Duration::from_millis(50);
+
+/// What Claude writes as the user's turn when it interrupts one it was at work on.
+const INTERRUPTED: &str = "[Request interrupted by user]";
 
 /// What a window with no login says on its screen, as Pi says it on a machine
 /// that has none.
@@ -138,12 +161,14 @@ fn run(launch: &args::Launch, signals: Signals) -> Result<std::convert::Infallib
         .map_err(|failed| failed.to_string())?;
 
     let (turns, queued) = mpsc::channel::<String>();
+    let stop = Arc::new(Stop::default());
     let window = Window {
         participant,
         settings: launch.settings.clone(),
         session: launch.session.clone(),
         jobs: Jobs::new(Path::new(&home), pid),
         wake: turns.clone(),
+        stop: Arc::clone(&stop),
     };
     // A server the harness starts with its window, before any turn, as an MCP
     // server is.
@@ -166,18 +191,29 @@ fn run(launch: &args::Launch, signals: Signals) -> Result<std::convert::Infallib
         let _ = turns.send(seed.clone());
     }
 
-    // Raw input, like a real TUI: a bracketed paste is text, Enter outside one submits.
+    // Raw input, like a real TUI: a bracketed paste is text, Enter outside one
+    // submits, and an Escape that nothing follows is the key.
     terminal::raw_mode();
+    let (read, incoming) = mpsc::channel::<Vec<u8>>();
+    thread::spawn(move || {
+        let mut chunk = [0_u8; 4096];
+        let mut stdin = io::stdin().lock();
+        while let Ok(read_now @ 1..) = stdin.read(&mut chunk) {
+            if read.send(chunk[..read_now].to_vec()).is_err() {
+                return;
+            }
+        }
+    });
     let mut input = Input::default();
     let mut bytes = Utf8::default();
-    let mut chunk = [0_u8; 4096];
-    let mut stdin = io::stdin().lock();
     loop {
-        let read = match stdin.read(&mut chunk) {
-            Ok(0) | Err(_) => leave(&status_file, 0),
-            Ok(read) => read,
+        let events = match incoming.recv_timeout(ESCAPE_WAIT) {
+            Ok(chunk) => input.feed(&bytes.decode(&chunk)),
+            Err(RecvTimeoutError::Timeout) => input.quiet(),
+            // The terminal is gone.
+            Err(RecvTimeoutError::Disconnected) => leave(&status_file, 0),
         };
-        for event in input.feed(&bytes.decode(&chunk[..read])) {
+        for event in events {
             match event {
                 Event::Submit(text) => {
                     let _ = turns.send(text);
@@ -186,6 +222,7 @@ fn run(launch: &args::Launch, signals: Signals) -> Result<std::convert::Infallib
                 Event::Pasted(characters) => {
                     let _ = say(&format!("[pasted, {characters} characters]\n"));
                 }
+                Event::Escape => stop.press(),
                 Event::Interrupt => leave(&status_file, 0),
             }
         }
@@ -199,20 +236,76 @@ fn say(text: &str) -> io::Result<()> {
     out.flush()
 }
 
-/// One message: the window is busy, records the message, answers it, and is idle.
+/// How long the turn a window was stopped in takes to end: what
+/// `CF_TEST_WIND_DOWN_MS` says, none unless it does.
+fn wind_down() {
+    let milliseconds = own_var("CF_TEST_WIND_DOWN_MS")
+        .and_then(|milliseconds| milliseconds.parse().ok())
+        .unwrap_or(0);
+    thread::sleep(Duration::from_millis(milliseconds));
+}
+
+/// How long the message `text` stays in the hooks of its prompt: a line
+/// `HOOKS <seconds> <words>`.
+fn hooks_of(text: &str) -> Option<Duration> {
+    static HOOKS: OnceLock<Regex> = OnceLock::new();
+    pattern::once(&HOOKS, r"(?m)^HOOKS (\d+) ")
+        .captures(text)
+        .and_then(|hooks| hooks[1].parse().ok())
+        .map(Duration::from_secs)
+}
+
+/// One message: the window works on it and is idle again once it is answered
+/// or an Escape stopped it.
 fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<(), String> {
+    window.stop.begin();
+    let done = turn(records, pid, window, text);
+    window.stop.end();
+    done
+}
+
+/// A turn: the window is busy (not in the hooks of its prompt, where Claude's
+/// status reads idle), records the message, answers it, and is idle.
+fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<(), String> {
     let failed = |cause: io::Error| cause.to_string();
-    records.status(pid, "busy").map_err(failed)?;
+    // Only the first message of the window is in the hooks of its prompt: the
+    // words that go in later, a brief they carry among them, do not put it back.
+    let hooks = hooks_of(text).filter(|_| records.ordinal() == 0);
+    if hooks.is_none() {
+        records.status(pid, "busy").map_err(failed)?;
+    }
     records
         .append(
             pid,
             json!({ "type": "user", "message": { "role": "user", "content": text } }),
         )
         .map_err(failed)?;
+    if let Some(hooks) = hooks {
+        // Stopped there, the turn leaves nothing of itself: Claude puts the
+        // message back in its input box, and its status never left idle.
+        if window.stop.work(hooks) {
+            return Ok(());
+        }
+        records.status(pid, "busy").map_err(failed)?;
+    }
     let reply = reply_to(text, window)?;
     // The message id numbers the records so far, this one not yet among them.
     let id = format!("{}-message-{pid}-{}", window.session, records.ordinal());
     match reply {
+        Reply::Stopped => {
+            wind_down();
+            // What Claude writes of a turn the user interrupted: the marker, as
+            // a turn of the user's, and no answer after it.
+            records
+                .append(
+                    pid,
+                    json!({
+                        "type": "user",
+                        "message": { "role": "user", "content": [{ "type": "text", "text": INTERRUPTED }] },
+                    }),
+                )
+                .map_err(failed)?;
+        }
         Reply::Refused => {
             // The provider refused: Claude writes the refusal as an assistant record.
             records
@@ -354,6 +447,20 @@ mod tests {
         assert_eq!(bytes.decode(first), "a ");
         assert_eq!(bytes.decode(second), "· b");
         assert_eq!(bytes.decode(b""), "");
+    }
+
+    #[test]
+    fn a_message_stays_in_the_hooks_of_its_prompt_as_long_as_its_line_says() {
+        let brief = "[ConsensFlow m-1 · T-1 · task from @chief]\nHOOKS 20 Reply with exactly: X";
+        assert_eq!(hooks_of(brief), Some(Duration::from_secs(20)));
+        for text in [
+            "Reply with exactly: X",
+            "HOOKS soon X",
+            "say HOOKS 5 x",
+            "HOOKS 5",
+        ] {
+            assert_eq!(hooks_of(text), None, "{text}");
+        }
     }
 
     #[test]

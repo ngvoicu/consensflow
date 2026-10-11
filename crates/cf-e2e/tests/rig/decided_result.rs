@@ -17,7 +17,7 @@ use crate::{rig, secs, session_of, Outcome};
 /// `cf` as the chief runs it in its window (`frame` is the window's `pane.open`):
 /// its own token, the native binary. What it printed; a `cf` that fails is an
 /// error, as `execFileSync` made it.
-fn cf(rig: &Rig, frame: &Value, words: &[&str]) -> cf_e2e::Result<String> {
+pub(crate) fn cf(rig: &Rig, frame: &Value, words: &[&str]) -> cf_e2e::Result<String> {
     let ran = rig.cf_in_window(frame, words)?;
     if ran.code == Some(0) {
         Ok(ran.stdout)
@@ -27,7 +27,7 @@ fn cf(rig: &Rig, frame: &Value, words: &[&str]) -> cf_e2e::Result<String> {
 }
 
 /// The results in the chief's inbox, oldest first.
-fn results(project: &Project) -> cf_e2e::Result<Vec<Value>> {
+pub(crate) fn results(project: &Project) -> cf_e2e::Result<Vec<Value>> {
     let mut results: Vec<Value> = project
         .inbox("chief")?
         .into_iter()
