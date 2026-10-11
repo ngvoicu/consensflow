@@ -1,0 +1,173 @@
+# Plants in the product that the updater smoke (`npm run smoke:updater`) must
+# fail on, each rebuilding what it plants and running the smoke on the result:
+# the daemon's readiness taken out (the app says nothing of the cf it starts; the
+# daemon logs no start), the ledger's check taken out (a second daemon opens the
+# ledger the first holds; an update empties it), the refused update's check
+# taken out (the installed app takes a bundle with no `cf`, and one whose seal is
+# broken), and the update's own work taken out (no repair of the terminal
+# command, a repair of another home's, a daemon that is not the cf the log
+# names). They need the smoke's builds to have been made once
+# (`npm run smoke:updater`): the installed flip app and the update it kept, the
+# installed bridge app (whose terminal command is the old shape, the one thing
+# the repair at the app's start has to work on), and the bridge's source it
+# exported, which the check of an update is planted in, as the installed app is
+# the one that judges an update. They are built into a folder of their own, so
+# what a run kept is not replaced by a plant's.
+
+[run]
+smoke-flip-update = ["cargo", "xtask", "smoke-updater", "--from-app", "app/src-tauri/target/updater-smoke/flip/ConsensFlow.app", "--from-release", "flip", "--cache", "app/src-tauri/target/updater-smoke-plants", "--only", "the update installs and restarts", "--timeout", "60000"]
+smoke-bridge-refused = ["cargo", "xtask", "smoke-updater", "--from", "bridge", "--bridge", "app/src-tauri/target/updater-smoke/bridge-source", "--to-app", "app/src-tauri/target/updater-smoke/update/ConsensFlow.app", "--cache", "app/src-tauri/target/updater-smoke-plants", "--only", "refused", "--timeout", "60000"]
+smoke-bridge-update = ["cargo", "xtask", "smoke-updater", "--from-app", "app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app", "--from-release", "bridge", "--cache", "app/src-tauri/target/updater-smoke-plants", "--only", "the update installs and restarts", "--timeout", "60000"]
+
+# Readiness: what the smoke reads of an app that started its daemon.
+[[plant]]
+name = "updater product: the app does not say which cf it starts"
+meant = "the update installs and restarts"
+runs = ["smoke-flip-update"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''
+    eprintln!("consensflow: {}", starting(&cf));
+'''
+replace = ""
+
+[[plant]]
+name = "updater product: the daemon logs no start line"
+meant = "the update installs and restarts"
+runs = ["smoke-flip-update"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = '''
+    log.info(&format!(
+        "start pid {} rust {VERSION} home {}",
+        std::process::id(),
+        home.display()
+    ));
+'''
+replace = ""
+
+# The ledger's check: one holder, and what it holds.
+[[plant]]
+name = "updater product: a second daemon opens the ledger the first holds"
+meant = "the update installs and restarts"
+runs = ["smoke-flip-update"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''
+        db.execute_batch("PRAGMA locking_mode = EXCLUSIVE")?;
+'''
+replace = ""
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''
+        db.execute_batch("BEGIN EXCLUSIVE; COMMIT")?;
+'''
+replace = ""
+
+[[plant]]
+name = "updater product: the update empties the events of the ledger it opens"
+meant = "the update installs and restarts"
+runs = ["smoke-flip-update"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''
+        migrate(&db, &MIGRATIONS)
+    })();'''
+replace = '''
+        migrate(&db, &MIGRATIONS)?;
+        db.execute_batch("DELETE FROM event")?;
+        Ok(())
+    })();'''
+
+# The refused update's check: the installed app's, which is the bridge's.
+[[plant]]
+name = "updater product: the installed app takes a bundle with no cf"
+meant = "without-cf"
+runs = ["smoke-bridge-refused"]
+builds = true
+prepare = [
+  ["cargo", "xtask", "smoke-updater", "--export-bridge"],
+]
+requires = ["app/src-tauri/target/updater-smoke/update/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "app/src-tauri/target/updater-smoke/bridge-source/app/src-tauri/src/update_install.rs"
+find = '''
+    if !app.join("Contents/Resources/cli/bin/cf").is_file() {
+        return Err("The archive must include cf, the command a window runs".into());
+    }
+'''
+replace = ""
+
+[[plant]]
+name = "updater product: the installed app takes a bundle whose seal is broken"
+meant = "tampered"
+runs = ["smoke-bridge-refused"]
+builds = true
+prepare = [
+  ["cargo", "xtask", "smoke-updater", "--export-bridge"],
+]
+requires = ["app/src-tauri/target/updater-smoke/update/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "app/src-tauri/target/updater-smoke/bridge-source/app/src-tauri/src/update_install.rs"
+find = "    if !signature.status.success() {"
+replace = "    if false && !signature.status.success() {"
+
+# What the update does of its own.
+[[plant]]
+name = "updater product: the app does not repair the terminal command at its start"
+meant = "the update installs and restarts"
+runs = ["smoke-bridge-update"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''
+            launcher::repair_in_background(app.handle());
+'''
+replace = ""
+
+[[plant]]
+name = "updater product: the app repairs a command that serves another home"
+meant = "the update installs and restarts"
+runs = ["smoke-bridge-update"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/repair.rs"
+find = '''
+    if !serves(&text, windows, env) {
+        return Repair::Elsewhere;
+    }
+'''
+replace = ""
+
+# The app's log names the bundle's cf, and another program is what it starts: only the process
+# the machine shows tells.
+[[plant]]
+name = "updater product: the app starts another program than the cf its log names"
+meant = "the update installs and restarts"
+runs = ["smoke-flip-update"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = "    let mut command = Command::new(cf);"
+replace = '    let mut command = Command::new("/usr/bin/true");'

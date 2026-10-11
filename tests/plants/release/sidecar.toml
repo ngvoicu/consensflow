@@ -1,0 +1,214 @@
+# Plants in what builds and stages the app's `cf` and its console host
+# (tools/xtask, `cargo xtask build-cf`, `stage` and `conpty`): the pinned
+# package's checks, the replacing of the `cf` in bin/ that Windows will not
+# delete while it runs, and the files the bundle is staged with. The tests in
+# the sidecar module must catch each.
+
+[run]
+# The sidecar commands' own tests, on a stand-in for the system: programs, platform, clock, deleting.
+xtask-sidecar = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "sidecar::"]
+
+[[plant]]
+name = "sidecar: a fetched package is used without its hash being checked"
+meant = "refuses_a_fetched_package_that_is_not_the_pinned_one_and_deletes_it"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/conpty.rs"
+find = "if actual != package.sha256 {"
+replace = "if false {"
+
+[[plant]]
+name = "sidecar: a kept package is used without its hash being checked"
+meant = "fetches_again_a_kept_package_that_is_not_the_pinned_one"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/conpty.rs"
+find = "if sha256(&bytes) == package.sha256 {"
+replace = "if true {"
+
+[[plant]]
+name = "sidecar: a cf that cannot be deleted is not set aside"
+meant = "is_set_aside_and_the_new_one_put_in_its_place"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/build_cf.rs"
+find = 'fs::rename(placed, &aside).map_err(files("set aside", placed))'
+replace = "Ok(())"
+
+[[plant]]
+name = "sidecar: the cf is left out of the bundle"
+meant = "stages_the_cf_as_the_bundles_cli_bin_cf_and_nothing_else_off_windows"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/stage.rs"
+find = 'fs::copy(&cf, &staged).map_err(files("copy the cf to", &staged))?;'
+replace = "let _ = &cf;"
+
+[[plant]]
+name = "sidecar: OpenConsole.exe is left out of the bundle"
+meant = "stages_the_console_host_beside_it_on_windows_and_says_each_file"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/conpty.rs"
+find = "const FILES: [(&str, &str); 2] = ["
+replace = "const FILES: [(&str, &str); 1] = ["
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/conpty.rs"
+find = '''
+    (
+        "build/native/runtimes/x64/OpenConsole.exe",
+        "OpenConsole.exe",
+    ),
+'''
+replace = ""
+
+[[plant]]
+name = "sidecar: the console host is not staged on Windows"
+meant = "stages_the_console_host_beside_it_on_windows_and_says_each_file"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/stage.rs"
+find = "if system.platform() == Platform::Windows {"
+replace = "if false {"
+
+[[plant]]
+name = "sidecar: the bundle keeps what an older staging left in cli/"
+meant = "replaces_what_was_staged_in_the_cli_folder_and_leaves_the_other_folders"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/stage.rs"
+find = "    clear(&cli)?;"
+replace = "    let _ = &cli;"
+
+[[plant]]
+name = "sidecar: the bundle takes the cf cargo built and not the signed copy in bin/"
+meant = "stages_the_copy_in_bin_after_it_was_signed_and_not_the_one_cargo_built"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/stage.rs"
+find = 'fs::copy(&cf, &staged).map_err(files("copy the cf to", &staged))?;'
+replace = '''
+let _ = &cf;
+    let built = context.path("app/src-tauri/target/release").join(system.platform().cf());
+    fs::copy(&built, &staged).map_err(files("copy the cf to", &staged))?;'''
+
+[[plant]]
+name = "sidecar: the copies set aside earlier are never taken away"
+meant = "replaces_the_cf_there_and_takes_away_the_copies_set_aside_earlier"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/build_cf.rs"
+find = "let _ = system.remove_file(&entry.path());"
+replace = "let _ = &entry;"
+
+[[plant]]
+name = "sidecar: a build that left no cf is found only after bin/ was cleared"
+meant = "a_build_that_left_no_cf_is_said_before_the_cf_in_bin_is_touched"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/build_cf.rs"
+find = "if !built.is_file() {"
+replace = "if false {"
+
+[[plant]]
+name = "sidecar: cargo is not told --offline"
+meant = "is_given_offline_in_the_place_cargo_takes_it_when_it_is_asked_for"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/build_cf.rs"
+find = '.args(offline.then_some("--offline"))'
+replace = ".args(None::<&str>)"
+
+[[plant]]
+name = "sidecar: cargo is not held to the lockfile"
+meant = "is_cargos_release_build_of_the_cf_binary_on_the_lockfile_from_the_root"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/build_cf.rs"
+find = '.args(["build", "--release", "--locked"])'
+replace = '.args(["build", "--release"])'
+
+[[plant]]
+name = "sidecar: the cf is not signed on macOS"
+meant = "only_on_macos_is_the_copy_signed_ad_hoc_once_it_is_in_place"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/build_cf.rs"
+find = "if platform == Platform::MacOs {"
+replace = "if false {"
+
+[[plant]]
+name = "sidecar: a program that ends with a status is taken for done"
+meant = "a_build_that_fails_ends_the_command_with_its_status_and_leaves_bin_alone"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar.rs"
+find = "        0 => Ok(()),"
+replace = "        _ => Ok(()),"
+
+[[plant]]
+name = "sidecar: a closed pipe is a failure of the command and not an end like the help’s"
+meant = "what_could_not_be_said_is_an_input_output_failure_so_a_closed_pipe_ends_quietly"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar.rs"
+find = '''
+        Err(Error::Said(cause)) => Err(Failure::Io(cause)),
+'''
+replace = ""
+
+[[plant]]
+name = "sidecar: the cf is named cf on Windows"
+meant = "the_cf_is_a_program_of_the_system_it_is_built_on"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar.rs"
+find = 'Self::Windows => "cf.exe",'
+replace = 'Self::Windows => "cf",'
+
+[[plant]]
+name = "sidecar: the console host is taken from the arm64 folder of the package"
+meant = "fetches_a_package_that_is_not_kept_and_puts_its_two_files_in_the_folder"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/conpty.rs"
+find = '("runtimes/win-x64/native/conpty.dll", "conpty.dll"),'
+replace = '("runtimes/win-arm64/native/conpty.dll", "conpty.dll"),'
+
+[[plant]]
+name = "sidecar: the pin is another package"
+meant = "the_pin_is_the_package_microsoft_published"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/conpty.rs"
+find = 'sha256: "02b07b349af66d801159bdf9e440d4a1ce78bb951f37fc8609731665afdae7ee",'
+replace = 'sha256: "12b07b349af66d801159bdf9e440d4a1ce78bb951f37fc8609731665afdae7ee",'
+
+[[plant]]
+name = "sidecar: a relative --into is from where xtask was run"
+meant = "into_is_the_one_folder_conpty_takes_and_a_relative_one_is_from_the_root"
+runs = ["xtask-sidecar"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/conpty.rs"
+find = ".map(|dir| context.root.join(dir))"
+replace = ".map(PathBuf::from)"

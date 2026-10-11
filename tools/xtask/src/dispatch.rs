@@ -18,7 +18,8 @@ use cf_base::env::Env;
 use crate::context::{self, Context};
 use crate::process;
 use crate::{
-    app, bench, candidate, check, clippy_windows, departures, portable, sidecar, smoke, suites,
+    app, bench, candidate, check, clippy_windows, departures, plants, portable, sidecar, smoke,
+    suites,
 };
 
 /// A command of xtask.
@@ -68,6 +69,9 @@ pub enum Failure {
     /// The sources have no one version to name a build by.
     #[error(transparent)]
     Version(#[from] cf_release::version::VersionError),
+    /// The plants could not be read, planted or put back.
+    #[error(transparent)]
+    Plants(#[from] plants::Error),
     /// What it had to say could not be written.
     #[error(transparent)]
     Io(#[from] io::Error),
@@ -83,6 +87,7 @@ pub fn commands() -> Vec<&'static Command> {
         suites::COMMANDS,
         departures::COMMANDS,
         bench::COMMANDS,
+        plants::COMMANDS,
         smoke::COMMANDS,
         candidate::COMMANDS,
         check::COMMANDS,
@@ -296,6 +301,7 @@ mod tests {
                 "live designer",
                 "departures",
                 "bench records-memory",
+                "plants",
                 "smoke",
                 "smoke-updater",
                 "candidate",

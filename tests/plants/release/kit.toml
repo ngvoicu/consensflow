@@ -1,0 +1,42 @@
+# The plants of what releases and of the agents screens: the rule of the feeds and its checks,
+# the publisher, the release workflow's text, the tool that makes the update feed's entry
+# (`cf-release prepare-update`), the portable app's collector, the agents of the daemon as the
+# packaged smoke holds them, the thin drivers of xtask (the app’s tests and lint, the lint for
+# Windows and its archiver, the departures, the bench) and the gate that runs them, and the
+# updater smoke: its readers of evidence, and the product it holds (the app’s daemon choice,
+# the ledger’s one holder, the check of an update), and the packaged smoke and the candidate
+# builder (`cargo xtask smoke` and `candidate`).
+#
+# A run that tests the xtask package whole (`-p xtask --test …`) names the folder it is built in,
+# `--target-dir app/src-tauri/target/xtask-check`, which `cargo xtask check` tests xtask in: the
+# xtask that runs the plants is `target/debug/xtask`, such a test builds xtask again, and a
+# program that is running is not to be replaced (Windows refuses; macOS overwrote one without a
+# word). The tests of its library (`--lib`) build no program, and have no folder named.
+#
+# What a plant is, and what this file and the tables beside it hold, is told in
+# tools/xtask/src/plants/kit.rs; `cargo xtask plants` runs them.
+
+run_limit_minutes = 10
+rebuild = ["cargo", "xtask", "build-cf", "--offline"]
+tables = ["feeds", "publish", "workflow", "portable", "agents", "updater", "updater-product", "tooling", "sidecar", "drivers", "update", "sign-mac", "packaged"]
+
+[run]
+# The proof of the agents screens against the native daemon, built from the sources as they are.
+agents-proof = { command = ["cargo", "xtask", "test", "agents", "--offline"], builds = true }
+# The smoke's readers of evidence (processes, daemon, ledger), and of the terminal command.
+smoke-evidence = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::evidence", "updater_smoke::ledger"]
+# The rule of the feeds and its checks, against GitHub as the simulator has it.
+feeds = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "feeds_rule", "--test", "feeds_plan", "--test", "feeds_prerequisites", "--test", "feeds_check", "--test", "feeds_cli"]
+smoke-launchers = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::launchers"]
+# The app crate's tests of the portable app's collector, built as a worktree can build it.
+app-portable = ["cargo", "xtask", "app", "test", "portable::"]
+# The publisher, every state a run can be cut short in, and the workflow's steps run as written.
+publish = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "publish_release", "--test", "publish_rerun", "--test", "publish_cut_short", "--test", "publish_swap", "--test", "release_publish", "--test", "release_steps", "--test", "release_mac"]
+# What the smoke is made of apart from the apps: its versions, keys, feed and bundles.
+smoke-kit = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::versions", "updater_smoke::build", "updater_smoke::bundle", "updater_smoke::processes", "updater_smoke::signing", "updater_smoke::feed"]
+# The workflow's own text: who may publish, what holds the token, and the steps that call the publisher.
+workflow = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "release_publish", "--test", "release_steps", "--test", "release_mac", "--test", "workflow_scripts"]
+# What xtask starts programs with (tools/xtask/src/process.rs), which the smoke starts its app by.
+xtask-process = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "process::tests"]
+# xtask run as a process, handing its words to a stand-in for node and answering its status.
+xtask-test-cli = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "cli"]

@@ -1,0 +1,520 @@
+# Plants in the portable app's collector (app/src-tauri/src/portable.rs): what it
+# removes of the runtimes an older start unpacked, and what it keeps because a
+# program of the runtime runs: the programs it looks at, and the open it makes of
+# each. The app's tests of it must catch each. A program that runs is stood in
+# for by a read-only file and, on macOS, by a file that may only be appended to,
+# which refuses a write open and grants an append open as Windows does a program
+# that runs: the last plant is caught here by that file alone, and on Windows by
+# the tests with real processes (which Windows runs, and this does not).
+#
+# And in the library that writes the portable exe and reads it back
+# (crates/cf-portable): its footer, the unpacking of its payload, and the packer.
+# Its tests (against an exe the JavaScript packer wrote, and the exes it makes
+# itself) must catch each.
+#
+# And in the two commands over it (tools/xtask, `cargo xtask portable pack` and
+# `portable inspect`): their defaults, the arguments they take and refuse, what
+# they say, and the status they end with. Their own tests, in the module and as
+# processes, must catch each.
+
+[run]
+# The library's tests, which run on any system. Every test binary is run: cargo stops at the first that fails.
+portable-library = ["cargo", "test", "--offline", "-p", "cf-portable", "--no-fail-fast"]
+# The commands' own tests, on a checkout in a temporary folder.
+portable-commands = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "portable::", "--no-fail-fast"]
+# The commands as processes, as `cargo xtask` starts them.
+portable-process = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "portable", "--no-fail-fast"]
+
+[[plant]]
+name = "portable: a cf.exe that runs does not keep its runtime"
+meant = "a_runtime_with_a_program_that_cannot_be_written_stays_whole_and_the_others_go"
+runs = ["app-portable"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/portable.rs"
+find = 'const PROGRAMS: [&[&str]; 2] = [&["node.exe"], &["cli", "bin", "cf.exe"]];'
+replace = 'const PROGRAMS: [&[&str]; 1] = [&["node.exe"]];'
+
+[[plant]]
+name = "portable: a node.exe that runs does not keep its runtime"
+meant = "a_runtime_with_a_program_that_cannot_be_written_stays_whole_and_the_others_go"
+runs = ["app-portable"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/portable.rs"
+find = 'const PROGRAMS: [&[&str]; 2] = [&["node.exe"], &["cli", "bin", "cf.exe"]];'
+replace = 'const PROGRAMS: [&[&str]; 1] = [&["cli", "bin", "cf.exe"]];'
+
+[[plant]]
+name = "portable: no program is taken to run"
+meant = "a_runtime_with_a_program_that_cannot_be_written_stays_whole_and_the_others_go"
+runs = ["app-portable"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/portable.rs"
+find = "program.is_file() && OpenOptions::new().write(true).open(program).is_err()"
+replace = "program.is_file() && OpenOptions::new().write(true).open(program).is_err() && false"
+
+[[plant]]
+name = "portable: every program is taken to run"
+meant = "a_runtime_with_a_program_that_cannot_be_written_stays_whole_and_the_others_go"
+runs = ["app-portable"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/portable.rs"
+find = "program.is_file() && OpenOptions::new().write(true).open(program).is_err()"
+replace = "program.is_file() && (OpenOptions::new().write(true).open(program).is_err() || true)"
+
+[[plant]]
+name = "portable: a runtime whose program runs is removed all the same"
+meant = "a_runtime_with_a_program_that_cannot_be_written_stays_whole_and_the_others_go"
+runs = ["app-portable"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/portable.rs"
+find = "if path != keep && !runs(&path) {"
+replace = "if path != keep {"
+
+[[plant]]
+name = "portable: a program that runs is looked for by an open for appending, which it grants"
+meant = "a_program_that_refuses_a_write_open_and_grants_an_append_open_is_seen_to_run"
+runs = ["app-portable"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/portable.rs"
+find = "program.is_file() && OpenOptions::new().write(true).open(program).is_err()"
+replace = "program.is_file() && OpenOptions::new().append(true).open(program).is_err()"
+
+[[plant]]
+name = "portable: the runtime folder is not named by the crc of its payload"
+meant = "the_first_start_unpacks_the_runtime_and_later_ones_reuse_it"
+runs = ["app-portable"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/portable.rs"
+find = "root.join(payload.folder(version))"
+replace = "root.join(version)"
+
+# The library's footer.
+[[plant]]
+name = "portable footer: a file that does not end with the tag is taken for one that does"
+meant = "a_file_that_does_not_end_with_the_tag_carries_nothing"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/format.rs"
+find = "        if tag != *TAG {"
+replace = "        if false && tag != *TAG {"
+
+[[plant]]
+name = "portable footer: the length is read big-endian"
+meant = "the_footer_of_the_exe_the_javascript_packer_wrote_is_found"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/format.rs"
+find = "let length = u64::from_le_bytes(length);"
+replace = "let length = u64::from_be_bytes(length);"
+
+[[plant]]
+name = "portable footer: a payload smaller than any gzip stream is taken"
+meant = "a_footer_that_cannot_be_right_is_an_error"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/format.rs"
+find = "if length < SMALLEST_GZIP || length > size - footer_bytes {"
+replace = "if length > size - footer_bytes {"
+
+[[plant]]
+name = "portable footer: a payload longer than the file is taken"
+meant = "a_footer_that_cannot_be_right_is_an_error"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/format.rs"
+find = "if length < SMALLEST_GZIP || length > size - footer_bytes {"
+replace = "if length < SMALLEST_GZIP {"
+
+[[plant]]
+name = "portable footer: the crc is read from the wrong place in the trailer"
+meant = "the_trailer_names_the_crc_then_the_length_and_the_folder_the_crc_in_eight_hex_digits"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/format.rs"
+find = "file.seek(SeekFrom::Start(offset + length - TRAILER_BYTES))?;"
+replace = "file.seek(SeekFrom::Start(offset + length - 4))?;"
+
+[[plant]]
+name = "portable footer: the folder is named by the crc without its leading zeros"
+meant = "the_trailer_names_the_crc_then_the_length_and_the_folder_the_crc_in_eight_hex_digits"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/format.rs"
+find = 'format!("{:08x}", self.crc)'
+replace = 'format!("{:x}", self.crc)'
+
+[[plant]]
+name = "portable footer: the footer is written with another tag"
+meant = "the_footer_is_the_length_as_eight_little_endian_bytes_then_the_tag"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/format.rs"
+find = "footer[8..].copy_from_slice(TAG);"
+replace = 'footer[8..].copy_from_slice(b"CFPAYLD2");'
+
+# The library's unpacking.
+[[plant]]
+name = "portable archive: the gzip stream is not read to its end, so its crc is not checked"
+meant = "a_payload_that_does_not_match_its_crc_or_its_length_is_refused_when_unpacked"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/archive.rs"
+find = "        io::copy(&mut archive.into_inner(), &mut io::sink())?;"
+replace = "        let _ = &archive;"
+
+[[plant]]
+name = "portable archive: a link is unpacked"
+meant = "an_entry_that_is_not_a_plain_file_or_folder_is_refused"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/archive.rs"
+find = "            if !(kind.is_file() || kind.is_dir()) {"
+replace = "            if false {"
+
+[[plant]]
+name = "portable archive: an absolute path is unpacked under the folder, as the tar crate does"
+meant = "an_entry_with_a_path_outside_the_folder_is_refused_and_nothing_is_unpacked_for_it"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/archive.rs"
+find = "            if !stays_inside(&entry.path()?) || !entry.unpack_in(into)? {"
+replace = "            if !entry.unpack_in(into)? {"
+
+[[plant]]
+name = "portable archive: a global header of pax is refused"
+meant = "a_global_header_of_pax_and_names_that_begin_with_a_dot_are_unpacked"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/archive.rs"
+find = '''
+            if kind.is_pax_global_extensions() {
+                continue;
+            }
+'''
+replace = ""
+
+[[plant]]
+name = "portable archive: a name that begins with a dot is refused"
+meant = "a_global_header_of_pax_and_names_that_begin_with_a_dot_are_unpacked"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/archive.rs"
+find = "        .all(|part| matches!(part, Component::Normal(_) | Component::CurDir))"
+replace = "        .all(|part| matches!(part, Component::Normal(_)))"
+
+[[plant]]
+name = "portable archive: the folder to unpack into is not made"
+meant = "the_runtime_unpacks_as_it_was_packed_and_the_builds_leftovers_are_not_in_it"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/archive.rs"
+find = '''
+        fs::create_dir_all(into).map_err(files("make", into))?;
+'''
+replace = ""
+
+# The library's packer.
+[[plant]]
+name = "portable pack: the license of the console host is not packed"
+meant = "a_packed_exe_is_the_app_then_its_runtime_as_a_gzip_compressed_tar_then_the_length_and_the_tag"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/pack.rs"
+find = "const RUNTIME: [&str; 4] = ["
+replace = "const RUNTIME: [&str; 3] = ["
+
+[[plant.edit]]
+file = "crates/cf-portable/src/pack.rs"
+find = '''
+    "OpenConsole.exe",
+    "OpenConsole-LICENSE.txt",
+];'''
+replace = '''
+    "OpenConsole.exe",
+];'''
+
+[[plant]]
+name = "portable pack: the pieces of the runtime are not looked for"
+meant = "a_release_folder_missing_a_piece_is_refused_naming_the_piece_and_the_build"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/pack.rs"
+find = "match required().find(|piece| !release.join(piece).is_file()) {"
+replace = "match required().find(|piece| !release.join(piece).is_file() && false) {"
+
+[[plant]]
+name = "portable pack: the app is not looked for"
+meant = "the_first_piece_missing_is_the_one_named_and_the_app_comes_first"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/pack.rs"
+find = "    if !exe.is_file() {"
+replace = "    if false {"
+
+[[plant]]
+name = "portable pack: the footer names a byte too many"
+meant = "a_packed_exe_is_the_app_then_its_runtime_as_a_gzip_compressed_tar_then_the_length_and_the_tag"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/pack.rs"
+find = "file.write_all(&footer(payload.len() as u64))"
+replace = "file.write_all(&footer(payload.len() as u64 + 1))"
+
+[[plant]]
+name = "portable pack: the folder the exe goes to is not made"
+meant = "the_folder_the_exe_is_written_to_is_made_and_an_older_exe_is_replaced"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/pack.rs"
+find = '''
+        fs::create_dir_all(folder).map_err(files("make", folder))?;
+'''
+replace = ""
+
+[[plant]]
+name = "portable pack: a socket in the runtime is taken for a file"
+meant = "a_special_file_in_the_runtime_is_refused_and_nothing_is_written"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/pack.rs"
+find = "    } else if kind.is_file() {"
+replace = "    } else if true {"
+
+[[plant]]
+name = "portable pack: the folders of the runtime are not in the tar"
+meant = "a_folder_of_the_runtime_is_packed_whole_and_by_name"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/pack.rs"
+find = '''
+        tar.append_dir(name, path).map_err(files("pack", path))?;
+'''
+replace = ""
+
+[[plant]]
+name = "portable pack: the refusal does not name the build"
+meant = "a_release_folder_missing_a_piece_is_refused_naming_the_piece_and_the_build"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/error.rs"
+find = "build first with npm --prefix app run build"
+replace = "build it first"
+
+[[plant]]
+name = "portable inspect: a footer that cannot be right is told without the file"
+meant = "inspect_names_a_file_whose_footer_cannot_be_right"
+runs = ["portable-library"]
+
+[[plant.edit]]
+file = "crates/cf-portable/src/format.rs"
+find = 'Err(cause) => Err(files("read", path)(cause.into())),'
+replace = "Err(cause) => Err(cause),"
+
+# The commands over it.
+[[plant]]
+name = "portable command: pack looks in another folder for the build"
+meant = "pack_with_no_options_packs_the_builds_release_folder_into_its_bundle_named_by_the_sources"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = 'const RELEASE: &str = "app/src-tauri/target/release";'
+replace = 'const RELEASE: &str = "app/src-tauri/target/debug";'
+
+[[plant]]
+name = "portable command: pack puts the exe in the release folder, not in its bundle"
+meant = "pack_with_no_options_packs_the_builds_release_folder_into_its_bundle_named_by_the_sources"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = '.unwrap_or_else(|| release.join("bundle").join("portable"));'
+replace = ".unwrap_or_else(|| release.clone());"
+
+[[plant]]
+name = "portable command: pack puts the exe in the build’s bundle, whichever release folder it was told"
+meant = "a_release_folder_alone_has_its_exe_in_its_own_bundle_folder"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = '.unwrap_or_else(|| release.join("bundle").join("portable"));'
+replace = '.unwrap_or_else(|| context.path(RELEASE).join("bundle").join("portable"));'
+
+[[plant]]
+name = "portable command: pack names the exe without its architecture"
+meant = "pack_with_no_options_packs_the_builds_release_folder_into_its_bundle_named_by_the_sources"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = 'format!("ConsensFlow_{version}_x64-portable.exe")'
+replace = 'format!("ConsensFlow_{version}-portable.exe")'
+
+[[plant]]
+name = "portable command: pack names the exe by a version the sources do not say"
+meant = "pack_with_no_options_packs_the_builds_release_folder_into_its_bundle_named_by_the_sources"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = "None => source_version(&context.root)?,"
+replace = 'None => String::from("0.0.0"),'
+
+[[plant]]
+name = "portable command: pack names the exe by the sources’ version, not the one it was given"
+meant = "a_version_given_names_the_file_and_the_sources_are_not_asked"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = "Some(version) => version,"
+replace = "Some(_) => source_version(&context.root)?,"
+
+[[plant]]
+name = "portable command: pack does not say where the exe is"
+meant = "pack_with_no_options_packs_the_builds_release_folder_into_its_bundle_named_by_the_sources"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = 'writeln!(console.out, "portable: {}", packed.path.display())?;'
+replace = "let _ = &packed;"
+
+[[plant]]
+name = "portable command: an option joined to its value is not read"
+meant = "an_option_takes_its_value_after_it_or_joined_to_it_by_the_first_equals_sign"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = "Some((flag, value)) => (flag, Some(value)),"
+replace = "Some((flag, _)) => (flag, None::<&str>),"
+
+[[plant]]
+name = "portable command: a relative path is from where xtask is run, not from the checkout"
+meant = "a_relative_path_is_from_the_checkouts_root"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = ".map(|value| context.root.join(value))"
+replace = ".map(PathBuf::from)"
+
+[[plant]]
+name = "portable command: an option given twice is taken"
+meant = "pack_refuses_what_it_does_not_take"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = "if options.insert(name, value).is_some() {"
+replace = "if options.insert(name, value).is_some() && false {"
+
+[[plant]]
+name = "portable command: an option takes the next option for its value"
+meant = "pack_refuses_what_it_does_not_take"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = ".filter(|word| !word.to_string_lossy().starts_with('-'))"
+replace = ".filter(|_| true)"
+
+[[plant]]
+name = "portable command: pack takes a word that is no option’s"
+meant = "pack_refuses_what_it_does_not_take"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = "if !given.words.is_empty() {"
+replace = "if false {"
+
+[[plant]]
+name = "portable command: inspect takes more than one file"
+meant = "inspect_refuses_what_it_does_not_take"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = "let [exe] = given.words.as_slice() else {"
+replace = "let [exe, ..] = given.words.as_slice() else {"
+
+[[plant]]
+name = "portable command: inspect says the crc in decimal"
+meant = "inspect_says_the_payload_and_the_crc_and_with_the_version_the_runtime_folder"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = 'writeln!(console.out, "crc: {}", payload.crc_hex())?;'
+replace = 'writeln!(console.out, "crc: {}", payload.crc)?;'
+
+[[plant]]
+name = "portable command: inspect leaves the runtime folder out"
+meant = "inspect_says_the_payload_and_the_crc_and_with_the_version_the_runtime_folder"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = 'writeln!(console.out, "runtime: {}", payload.folder(&version))?;'
+replace = "let _ = &version;"
+
+[[plant]]
+name = "portable command: inspect looks for a relative path where xtask is run"
+meant = "a_relative_path_is_from_the_checkouts_root_whatever_folder_xtask_is_run_in"
+runs = ["portable-process"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = "inspect(&context.root.join(exe))?"
+replace = "inspect(&PathBuf::from(exe))?"
+
+[[plant]]
+name = "portable command: pack is no command of the table"
+meant = "the_two_commands_run_in_rust_and_are_named_pack_and_inspect"
+runs = ["portable-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/portable.rs"
+find = 'words: &["portable", "pack"],'
+replace = 'words: &["portable", "packed"],'
+
+[[plant]]
+name = "portable command: a refusal of the library does not say it is the portable exe’s"
+meant = "a_file_without_the_footer_ends_with_status_1_naming_it"
+runs = ["portable-process"]
+
+[[plant.edit]]
+file = "tools/xtask/src/dispatch.rs"
+find = '#[error("portable: {0}")]'
+replace = '#[error("{0}")]'

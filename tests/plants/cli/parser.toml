@@ -1,0 +1,98 @@
+# Plants in the parser the verbs read their words with (`cf_base::args`), and
+# in the padding of their tables: the recording of Node's `parseArgs` and of the
+# CLI must catch each.
+
+[[plant]]
+name = "parser: a value of two units is no option-like value, only one of three"
+meant = "every_list_of_words_is_read_as_node_reads_it"
+runs = ["args"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/args.rs"
+find = "value.len() > 1 && value.starts_with('-')"
+replace = "value.len() > 2 && value.starts_with('-')"
+
+[[plant]]
+name = "parser: an equals right after the dashes splits the name"
+meant = "every_list_of_words_is_read_as_node_reads_it"
+runs = ["args"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/args.rs"
+find = "if after[first..].contains('=') {"
+replace = "if after.contains('=') {"
+
+[[plant]]
+name = "parser: a letter past U+FFFF is named whole"
+meant = "every_list_of_words_is_read_as_node_reads_it"
+runs = ["args"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/args.rs"
+find = "if letter.len_utf16() == 2 {"
+replace = "if letter.len_utf16() == 99 {"
+
+[[plant]]
+name = "parser: the suggestion is made where no positional is allowed, and not where one is"
+meant = "every_list_of_words_is_read_as_node_reads_it"
+runs = ["args"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/args.rs"
+find = "Positionals::Allowed => format!("
+replace = "Positionals::Refused => format!("
+
+[[plant.edit]]
+file = "crates/cf-base/src/args.rs"
+find = "Positionals::Refused => String::new(),"
+replace = "Positionals::Allowed => String::new(),"
+
+[[plant]]
+name = "parser: a text option takes only a word that does not look like an option"
+meant = "every_list_of_words_is_read_as_node_reads_it"
+runs = ["args"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/args.rs"
+find = "let value = if takes_text(after) && at < words.len() {"
+replace = "let value = if takes_text(after) && at < words.len() && !looks_like_an_option(&words[at]) {"
+
+[[plant]]
+name = "parser: the first of an option given twice is kept, not the last"
+meant = "every_list_of_words_is_read_as_node_reads_it"
+runs = ["args"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/args.rs"
+find = "Some(slot) => slot.1 = value,"
+replace = "Some(_) => {}"
+
+[[plant]]
+name = "parser: the refusal of a positional is cut short"
+meant = "every_list_of_words_is_read_as_node_reads_it"
+runs = ["args"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/args.rs"
+find = '''"Unexpected argument '{word}'. This command does not take positional arguments"'''
+replace = '''"Unexpected argument '{word}'"'''
+
+[[plant]]
+name = "parser: a flag given a value is taken"
+meant = "every_list_of_words_is_read_as_node_reads_it"
+runs = ["args"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/args.rs"
+find = "(Takes::Nothing, Some(_)) => {"
+replace = "(Takes::Nothing, Some(_)) if false => {"
+
+[[plant]]
+name = "text: padEnd counts bytes, not UTF-16 units"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/text.rs"
+find = "width.saturating_sub(utf16_len(text)),"
+replace = "width.saturating_sub(text.len()),"

@@ -1,0 +1,159 @@
+# Plants in the standalone verbs and in the roster they write through: the
+# recording of Node's CLI, replayed against the native `cf`, must catch each.
+
+[[plant]]
+name = "verbs: a name of the catalog is padded to 13, not 12"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf/src/standalone/catalog.rs"
+find = "pad_end(&entry.name, 12),"
+replace = "pad_end(&entry.name, 13),"
+
+[[plant]]
+name = "verbs: the table of a harness is no wider than 33 at the least"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf/src/standalone/catalog.rs"
+find = ".fold(34, usize::max)"
+replace = ".fold(33, usize::max)"
+
+[[plant]]
+name = "verbs: the model of an agent is padded to 35, not 36"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf/src/standalone/agent.rs"
+find = "pad_end(model, 36),"
+replace = "pad_end(model, 35),"
+
+[[plant]]
+name = "verbs: the home is made before an agent is refused"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf/src/standalone/agent.rs"
+find = '''
+    let catalog = bundled()?;
+    match action {'''
+replace = '''
+    let catalog = bundled()?;
+    if let Some(path) = cf_catalog::roster_path(env) {
+        let _ = std::fs::create_dir_all(path.parent().unwrap_or(&path));
+    }
+    match action {'''
+
+[[plant]]
+name = "verbs: a catalog name is refused only once the harness and the model are given"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf/src/standalone/agent.rs"
+find = "if let Some(name) = name.filter(|name| catalog.entry(name).is_some()) {"
+replace = 'if let Some(name) = name.filter(|name| parsed.text("model").is_some() && catalog.entry(name).is_some()) {'
+
+[[plant]]
+name = "verbs: a work tier of auto is kept on an added agent"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf/src/standalone/agent.rs"
+find = '.filter(|tier| *tier != "auto")'
+replace = ".filter(|_| true)"
+
+[[plant]]
+name = "verbs: the image flag is dropped from an added agent"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf/src/standalone/agent.rs"
+find = 'input.insert("designer".to_owned(), Value::Bool(true));'
+replace = "let _ = &input;"
+
+[[plant]]
+name = "verbs: an edit with no name does not read the file first"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf/src/standalone/agent.rs"
+find = "roster.preferences()?;"
+replace = "let _ = roster;"
+
+[[plant]]
+name = "verbs: the table goes on past an agent with no model"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf/src/standalone/agent.rs"
+find = "return Err(Stop::Said(NOTHING_TO_PAD.to_owned()));"
+replace = "continue;"
+
+[[plant]]
+name = "verbs: the usage ends without its blank line"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf/src/standalone/mod.rs"
+find = 'writeln!(out, "{}", usage()).map_err(Stop::from)'
+replace = 'write!(out, "{}", usage()).map_err(Stop::from)'
+
+[[plant]]
+name = "verbs: a refusal exits with 0"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf/src/standalone/mod.rs"
+find = "Ok(1)"
+replace = "Ok(0)"
+
+[[plant]]
+name = "verbs: an unknown command is said without JSON's escapes"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf/src/standalone/mod.rs"
+find = "js::stringify(&Value::from(other))"
+replace = 'format!("\"{other}\"")'
+
+[[plant]]
+name = "verbs: the usage has no doctor"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf/src/standalone/usage.txt"
+find = "doctor                                    Inspect runtime, roster and bundled roles"
+replace = ""
+
+[[plant]]
+name = "verbs: an edit does not stamp the time"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/edit.rs"
+find = 'row.set("updatedAt", Value::from(iso(clock.now_ms())));'
+replace = "let _ = &clock;"
+
+[[plant]]
+name = "verbs: an add stamps two instants"
+meant = "every_case_says_writes_and_exits_as_node_did"
+runs = ["goldens"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/add.rs"
+find = 'row.insert("updatedAt".to_owned(), now);'
+replace = 'row.insert("updatedAt".to_owned(), Value::from(iso(clock.now_ms() + 1)));'

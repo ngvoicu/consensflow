@@ -1,0 +1,636 @@
+# Plants in the thin drivers of xtask (tools/xtask: `app test`, `app clippy`,
+# `clippy-windows` and the archiver it has cc-rs run, `departures`, `bench
+# records-memory`) and in `check`, the one gate that runs them: an argument
+# dropped, the app's resources left on, the archiver's re-entry broken, an
+# exit status lost. The tests of each module, and `tests/drivers.rs`,
+# `tests/bench.rs` and `tests/cli.rs`, which run them as processes against a
+# stand-in for cargo, must catch each.
+
+[run]
+xtask-lib-app = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "app::"]
+# The commands as processes, against a cargo that says where it ran, with what, and ends as told.
+xtask-test-drivers = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "drivers"]
+xtask-lib-departures = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "departures::"]
+xtask-lib-clippy-windows = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "clippy_windows::"]
+xtask-lib-bench = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "bench::"]
+# `bench records-memory` as a process, the same way.
+xtask-test-bench = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "bench"]
+xtask-lib-check = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "check::"]
+
+# app test, app clippy
+[[plant]]
+name = "drivers: app test drops the words it was given"
+meant = "the_app_tests_are_cargo_test_offline_in_the_app_with_the_words_after_a_double_dash"
+runs = ["xtask-lib-app", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/app.rs"
+find = '''
+        .args(["test", "--offline", "--"])
+        .args(args.iter().cloned())'''
+replace = '''
+        .args(["test", "--offline", "--"])
+        .args(None::<OsString>)'''
+
+[[plant]]
+name = "drivers: app test gives its words to cargo, before the double dash, and not to the tests"
+meant = "the_app_tests_are_cargo_test_offline_in_the_app_with_the_words_after_a_double_dash"
+runs = ["xtask-lib-app", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/app.rs"
+find = '''
+        .args(["test", "--offline", "--"])
+        .args(args.iter().cloned())'''
+replace = '''
+        .args(["test", "--offline"])
+        .args(args.iter().cloned())
+        .arg("--")'''
+
+[[plant]]
+name = "drivers: app test is not told --offline"
+meant = "the_app_tests_are_cargo_test_offline_in_the_app_with_the_words_after_a_double_dash"
+runs = ["xtask-lib-app", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/app.rs"
+find = '.args(["test", "--offline", "--"])'
+replace = '.args(["test", "--"])'
+
+[[plant]]
+name = "drivers: app clippy does not deny warnings"
+meant = "the_app_lint_is_cargo_clippy_offline_over_every_target_with_warnings_denied_and_the_words_last"
+runs = ["xtask-lib-app", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/app.rs"
+find = '''
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings",
+        ])'''
+replace = '''
+            "--all-targets",
+            "--",
+        ])'''
+
+[[plant]]
+name = "drivers: app clippy leaves the tests unlinted"
+meant = "the_app_lint_is_cargo_clippy_offline_over_every_target_with_warnings_denied_and_the_words_last"
+runs = ["xtask-lib-app", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/app.rs"
+find = '''
+            "--all-targets",
+'''
+replace = ""
+
+[[plant]]
+name = "drivers: the app is built with its resources: the configuration is not given"
+meant = "both_leave_the_apps_resources_out_of_the_configuration_and_nothing_else_of_the_environment"
+runs = ["xtask-lib-app", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/app.rs"
+find = "invocation.var(NO_RESOURCES.0, NO_RESOURCES.1)"
+replace = "invocation"
+
+[[plant]]
+name = "drivers: the app is built in the checkout, not in its own folder"
+meant = "the_app_tests_are_cargo_test_offline_in_the_app_with_the_words_after_a_double_dash"
+runs = ["xtask-lib-app", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/app.rs"
+find = 'Invocation::new("cargo", context.path(APP))'
+replace = 'Invocation::new("cargo", &context.root)'
+
+[[plant]]
+name = "drivers: app test answers 0 whatever cargo ended with"
+meant = "the_exit_status_of_cargo_is_the_commands_own_and_it_says_nothing_of_its_own"
+runs = ["xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/app.rs"
+find = "Ok(process::run(&test(context, args), &context.env)?)"
+replace = '''
+process::run(&test(context, args), &context.env)?;
+    Ok(0)'''
+
+[[plant]]
+name = "drivers: app clippy answers 0 whatever cargo ended with"
+meant = "the_exit_status_of_cargo_is_the_commands_own_and_it_says_nothing_of_its_own"
+runs = ["xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/app.rs"
+find = "Ok(process::run(&clippy(context, args), &context.env)?)"
+replace = '''
+process::run(&clippy(context, args), &context.env)?;
+    Ok(0)'''
+
+# departures
+[[plant]]
+name = "drivers: departures does not set the variable that records"
+meant = "the_traces_are_recorded_by_the_engines_dispatcher_tests_run_from_the_root_with_the_variable_set"
+runs = ["xtask-lib-departures", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/departures.rs"
+find = '''
+
+        .var("CF_RERECORD_DEPARTED", "1")'''
+replace = ""
+
+[[plant]]
+name = "drivers: departures runs another test of the engine"
+meant = "the_traces_are_recorded_by_the_engines_dispatcher_tests_run_from_the_root_with_the_variable_set"
+runs = ["xtask-lib-departures", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/departures.rs"
+find = '"--test", "dispatcher"'
+replace = '"--test", "traces"'
+
+[[plant]]
+name = "drivers: departures answers 0 whatever cargo ended with"
+meant = "the_exit_status_of_cargo_is_the_commands_own_and_it_says_nothing_of_its_own"
+runs = ["xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/departures.rs"
+find = "Ok(process::run(&rerecord(context), &context.env)?)"
+replace = '''
+process::run(&rerecord(context), &context.env)?;
+    Ok(0)'''
+
+[[plant]]
+name = "drivers: departures takes an argument and runs on"
+meant = "departures_takes_no_arguments_and_starts_nothing_without_them"
+runs = ["xtask-lib-departures", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/departures.rs"
+find = "if !args.is_empty() {"
+replace = "if false {"
+
+# clippy-windows and its archiver
+[[plant]]
+name = "drivers: clippy-windows compiles the C"
+meant = "the_c_is_not_compiled_and_the_archive_is_made_by_xtask_run_as_the_archiver"
+runs = ["xtask-lib-clippy-windows", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = '.var(CC, "true")'
+replace = '.var(CC, "cc")'
+
+[[plant]]
+name = "drivers: clippy-windows does not tell the archiver it is one: the re-entry word is another"
+meant = "the_c_is_not_compiled_and_the_archive_is_made_by_xtask_run_as_the_archiver"
+runs = ["xtask-lib-clippy-windows", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = "as_archiver.push(AS_ARCHIVER);"
+replace = 'as_archiver.push("--archiver");'
+
+[[plant]]
+name = "drivers: clippy-windows has cc-rs run another program as the archiver"
+meant = "xtasks_own_program_is_the_archiver_it_is_told_to_run_as"
+runs = ["xtask-lib-clippy-windows", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = '    std::env::current_exe().map_err(doing("find the xtask that cc-rs is to run as the archiver"))'
+replace = '    Ok::<_, io::Error>(PathBuf::from("ar")).map_err(doing("find the xtask that cc-rs is to run as the archiver"))'
+
+[[plant]]
+name = "drivers: the archiver is not a command of xtask"
+meant = "the_two_commands_run_in_rust_and_the_archiver_is_the_word_cc_rs_is_told"
+runs = ["xtask-lib-clippy-windows", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = "words: &[AS_ARCHIVER],"
+replace = 'words: &["archive"],'
+
+[[plant]]
+name = "drivers: the archiver does not make the archive"
+meant = "the_archive_is_made_empty_when_there_is_none_and_left_as_it_is_when_there_is"
+runs = ["xtask-lib-clippy-windows", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = '''
+            .create(true)
+            .append(true)'''
+replace = '''
+            .create(false)
+            .append(true)'''
+
+[[plant]]
+name = "drivers: the archiver empties an archive that is there"
+meant = "the_archive_is_made_empty_when_there_is_none_and_left_as_it_is_when_there_is"
+runs = ["xtask-lib-clippy-windows", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = '''
+            .create(true)
+            .append(true)'''
+replace = '''
+            .create(true)
+            .write(true)
+            .truncate(true)'''
+
+[[plant]]
+name = "drivers: the archiver looks for -out: in the first word only"
+meant = "an_archiver_line_names_its_archive_as_ar_does_or_as_lib_does"
+runs = ["xtask-lib-clippy-windows", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = "let named = words.iter().find_map(|word| {"
+replace = "let named = words.iter().take(1).find_map(|word| {"
+
+[[plant]]
+name = "drivers: the archiver takes -OUT: for no option"
+meant = "an_archiver_line_names_its_archive_as_ar_does_or_as_lib_does"
+runs = ["xtask-lib-clippy-windows", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = 'bytes[1..4].eq_ignore_ascii_case(b"out")'
+replace = 'bytes[1..4] == *b"out"'
+
+[[plant]]
+name = "drivers: the archiver takes /out: for no option"
+meant = "an_archiver_line_names_its_archive_as_ar_does_or_as_lib_does"
+runs = ["xtask-lib-clippy-windows", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = "matches!(bytes[0], b'-' | b'/')"
+replace = "bytes[0] == b'-'"
+
+[[plant]]
+name = "drivers: the archiver takes the first word for the archive where there is no -out:"
+meant = "the_archiver_makes_the_empty_archive_it_is_asked_for_leaves_one_that_is_there_and_says_nothing"
+runs = ["xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = "words.get(1).map(|word| &**word)"
+replace = "words.first().map(|word| &**word)"
+
+[[plant]]
+name = "drivers: clippy-windows lints the app with the workspace by default"
+meant = "the_workspace_but_the_app_is_linted_for_the_target_from_the_root_when_no_crate_is_named"
+runs = ["xtask-lib-clippy-windows", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = '["--workspace", "--exclude", "app"]'
+replace = '["--workspace"]'
+
+[[plant]]
+name = "drivers: clippy-windows lints the whole workspace though crates are named"
+meant = "each_crate_named_is_one_package_and_the_workspace_is_not_linted_whole"
+runs = ["xtask-lib-clippy-windows", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = '''
+        crates
+            .iter()
+            .flat_map(|name| [OsString::from("-p"), name.clone()])
+            .collect()'''
+replace = '        ["--workspace"].map(OsString::from).to_vec()'
+
+[[plant]]
+name = "drivers: clippy-windows is not told --offline"
+meant = "the_workspace_but_the_app_is_linted_for_the_target_from_the_root_when_no_crate_is_named"
+runs = ["xtask-lib-clippy-windows", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = '.args(["clippy", "--offline", "--target", TARGET, "--all-targets"])'
+replace = '.args(["clippy", "--target", TARGET, "--all-targets"])'
+
+[[plant]]
+name = "drivers: clippy-windows lints the app with its resources on"
+meant = "the_app_is_linted_with_its_resources_left_out_when_it_is_named_among_the_crates"
+runs = ["xtask-lib-clippy-windows", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = '''
+    if names_the_app(crates) {
+        app::without_resources(invocation)'''
+replace = '''
+    if false {
+        app::without_resources(invocation)'''
+
+[[plant]]
+name = "drivers: clippy-windows does not put the resource compiler that does nothing on the PATH"
+meant = "clippy_windows_of_the_app_leaves_its_resources_out_and_finds_a_resource_compiler_that_does_nothing"
+runs = ["xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = '''
+    if names_the_app(args) {
+        lint = lint.var("PATH", path_with_stand_in(context)?);
+    }'''
+replace = "    let _ = path_with_stand_in;"
+
+[[plant]]
+name = "drivers: clippy-windows puts the resource compiler that does nothing last on the PATH"
+meant = "the_stand_in_is_the_first_place_the_path_names_and_the_others_follow_in_order"
+runs = ["xtask-lib-clippy-windows", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = "std::env::join_paths(iter::once(folder.clone()).chain(kept))"
+replace = "std::env::join_paths(kept.chain(iter::once(folder.clone())))"
+
+[[plant]]
+name = "drivers: the resource compiler that does nothing is no program"
+meant = "the_stand_in_is_a_program_that_compiles_nothing_and_ends_with_0"
+runs = ["xtask-lib-clippy-windows", "xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = "        fs::set_permissions(file, fs::Permissions::from_mode(0o755))?;"
+replace = "        let _ = file;"
+
+[[plant]]
+name = "drivers: clippy-windows answers 0 whatever cargo ended with"
+meant = "the_exit_status_of_cargo_is_the_commands_own_and_it_says_nothing_of_its_own"
+runs = ["xtask-test-drivers"]
+
+[[plant.edit]]
+file = "tools/xtask/src/clippy_windows.rs"
+find = "Ok(process::run(&lint, &context.env)?)"
+replace = '''
+process::run(&lint, &context.env)?;
+    Ok(0)'''
+
+# bench records-memory
+[[plant]]
+name = "drivers: bench says the lines of the test harness"
+meant = "only_a_line_that_starts_with_running_or_test_is_the_harnesss"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = '!line.is_empty() && !line.starts_with("running") && !line.starts_with("test ")'
+replace = '!line.is_empty() && !line.starts_with("test ")'
+
+[[plant]]
+name = "drivers: bench says the empty lines"
+meant = "each_measure_has_its_heading_and_its_own_lines_indented_and_nothing_of_cargos_or_the_harness"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = '!line.is_empty() && !line.starts_with("running")'
+replace = '!line.starts_with("running")'
+
+[[plant]]
+name = "drivers: bench ends with 0 when the first look fails"
+meant = "whichever_of_the_four_measures_fails_the_status_is_1_and_the_ones_after_it_are_not_run"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = '''
+            if !look(name, &which, &mut capture, out, err)? {
+                return Ok(1);'''
+replace = '''
+            if !look(name, &which, &mut capture, out, err)? {
+                return Ok(0);'''
+
+[[plant]]
+name = "drivers: bench ends with 0 when one of the last two fails"
+meant = "whichever_of_the_four_measures_fails_the_status_is_1_and_the_ones_after_it_are_not_run"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = '''
+        if !look(name, "", &mut capture, out, err)? {
+            return Ok(1);'''
+replace = '''
+        if !look(name, "", &mut capture, out, err)? {
+            return Ok(0);'''
+
+[[plant]]
+name = "drivers: bench goes on after a measure that failed"
+meant = "whichever_of_the_four_measures_fails_the_status_is_1_and_the_ones_after_it_are_not_run"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = '        write!(err, "{}{}", done.stdout, done.stderr)?;'
+replace = '''
+        write!(err, "{}{}", done.stdout, done.stderr)?;
+        return Ok(true);'''
+
+[[plant]]
+name = "drivers: bench does not say what a failed measure wrote"
+meant = "a_measure_that_fails_says_all_it_wrote_and_which_it_was_and_the_status_is_1_whatever_it_ended_with"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = '''
+        write!(err, "{}{}", done.stdout, done.stderr)?;
+'''
+replace = ""
+
+[[plant]]
+name = "drivers: bench runs the first look once whatever --runs says"
+meant = "more_runs_repeat_the_first_look_and_the_look_in_parts_each_in_turn_and_the_others_once"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = "for run in 1..=runs {"
+replace = "for run in 1..=runs.min(1) {"
+
+[[plant]]
+name = "drivers: bench does not say which run it is"
+meant = "more_runs_repeat_the_first_look_and_the_look_in_parts_each_in_turn_and_the_others_once"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = 'format!(" (run {run})")'
+replace = "String::new()"
+
+[[plant]]
+name = "drivers: bench does not give the lines to the measures"
+meant = "the_lines_and_the_transcript_reach_the_measures_by_the_variables_they_read"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = 'invocation = invocation.var("CF_RECORDS_MEMORY_LINES", lines);'
+replace = "let _ = lines;"
+
+[[plant]]
+name = "drivers: bench does not give the transcript to the measures"
+meant = "the_lines_and_the_transcript_reach_the_measures_by_the_variables_they_read"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = 'invocation = invocation.var("CF_RECORDS_MEMORY_TRANSCRIPT", transcript);'
+replace = "let _ = transcript;"
+
+[[plant]]
+name = "drivers: bench measures a repo from where xtask is run, not from the checkout"
+meant = "a_repo_is_measured_from_where_it_is_named_from_the_roots_folder_when_relative"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = "|dir| context.root.join(dir))"
+replace = "|dir| dir.clone())"
+
+[[plant]]
+name = "drivers: bench builds the measures for debugging, not release"
+meant = "a_measure_is_one_release_built_ignored_test_of_the_library_run_alone"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = '''
+            "--release",
+'''
+replace = ""
+
+[[plant]]
+name = "drivers: bench runs every measure that has a name that starts with the one it is"
+meant = "a_measure_is_one_release_built_ignored_test_of_the_library_run_alone"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = '.args(["--", "--ignored", "--nocapture", "--exact"])'
+replace = '.args(["--", "--ignored", "--nocapture"])'
+
+[[plant]]
+name = "drivers: bench takes an option for the value of another"
+meant = "an_option_with_no_value_is_refused_and_so_is_one_followed_by_another_option"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = "        Some(word) if !word.to_string_lossy().starts_with('-') => Ok(word.clone()),"
+replace = "        Some(word) => Ok(word.clone()),"
+
+[[plant]]
+name = "drivers: bench takes a number of runs that is no number for one"
+meant = "the_number_of_runs_is_a_whole_number_which_may_be_none"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = ".and_then(|text| text.parse().ok())"
+replace = ".and_then(|text| text.parse().ok().or(Some(1)))"
+
+[[plant]]
+name = "drivers: bench takes a word that is no option and ignores it"
+meant = "a_word_that_is_no_option_it_has_is_refused_with_what_it_takes"
+runs = ["xtask-lib-bench", "xtask-test-bench"]
+
+[[plant.edit]]
+file = "tools/xtask/src/bench.rs"
+find = "                return Err(refused(arg));"
+replace = "                continue;"
+
+# check, which runs them
+[[plant]]
+name = "drivers: check does not lint the app"
+meant = "the_steps_are_the_gates_in_order_and_each_runs_where_and_as_its_own_command_does"
+runs = ["xtask-lib-check", "xtask-test-cli"]
+
+[[plant.edit]]
+file = "tools/xtask/src/check.rs"
+find = '''
+        app::clippy(context, &[]),
+    ];'''
+replace = "    ];"
+
+[[plant]]
+name = "drivers: check does not run the app tests"
+meant = "the_steps_are_the_gates_in_order_and_each_runs_where_and_as_its_own_command_does"
+runs = ["xtask-lib-check", "xtask-test-cli"]
+
+[[plant.edit]]
+file = "tools/xtask/src/check.rs"
+find = '''
+        app::test(context, &[]),
+'''
+replace = ""
+
+[[plant]]
+name = "drivers: check runs the Node tests on a cf it did not build again"
+meant = "the_cf_the_node_tests_run_is_built_again_just_before_them"
+runs = ["xtask-lib-check", "xtask-test-cli"]
+
+[[plant.edit]]
+file = "tools/xtask/src/check.rs"
+find = '''
+        at("cargo", &["xtask", "build-cf", "--offline"]),
+'''
+replace = ""
+
+[[plant]]
+name = "drivers: check builds the cf after the Node tests that run it"
+meant = "the_cf_the_node_tests_run_is_built_again_just_before_them"
+runs = ["xtask-lib-check", "xtask-test-cli"]
+
+[[plant.edit]]
+file = "tools/xtask/src/check.rs"
+find = '''
+        at("cargo", &["xtask", "build-cf", "--offline"]),
+        at("npm", &["test"]),'''
+replace = '''
+        at("npm", &["test"]),
+        at("cargo", &["xtask", "build-cf", "--offline"]),'''
+
+[[plant]]
+name = "drivers: check has no lint for Windows on any machine"
+meant = "the_steps_are_the_gates_in_order_and_each_runs_where_and_as_its_own_command_does"
+runs = ["xtask-lib-check", "xtask-test-cli"]
+
+[[plant.edit]]
+file = "tools/xtask/src/check.rs"
+find = "    if !windows {"
+replace = "    if false {"
+
+[[plant]]
+name = "drivers: check has a lint for Windows on Windows too"
+meant = "on_windows_the_workspaces_clippy_is_the_one_for_windows_and_there_is_no_step_of_it"
+runs = ["xtask-lib-check", "xtask-test-cli"]
+
+[[plant.edit]]
+file = "tools/xtask/src/check.rs"
+find = "    if !windows {"
+replace = "    if true {"
+
+[[plant]]
+name = "drivers: check lints for Windows with the app"
+meant = "the_lint_for_windows_is_the_one_its_command_runs_with_xtask_as_its_archiver"
+runs = ["xtask-lib-check", "xtask-test-cli"]
+
+[[plant.edit]]
+file = "tools/xtask/src/check.rs"
+find = "steps.push(clippy_windows::lint(context, &[], archiver));"
+replace = 'steps.push(clippy_windows::lint(context, &[OsString::from("app")], archiver));'

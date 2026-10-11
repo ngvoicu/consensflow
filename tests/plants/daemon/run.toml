@@ -1,0 +1,205 @@
+# The daemon’s run: the pass loop and the throttles, the stop, the start.
+
+[[plant]]
+name = "pass: a kick during a pass is lost"
+meant = "one_pass_at_a_time_and_kicks_during_a_pass_run_one_more_after_it"
+runs = ["daemon-lib-pass"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/pass.rs"
+find = '''
+    if *state.running.borrow() {
+        state.again.set(true);'''
+replace = "    if *state.running.borrow() {"
+
+[[plant]]
+name = "pass: a kick runs the pass inside the call"
+meant = "a_kick_runs_its_pass_from_the_turn_after_the_work_begun_just_after_it"
+runs = ["daemon-lib-pass"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/pass.rs"
+find = "        schedule(&self.state);"
+replace = "        let _ = futures_util::FutureExt::now_or_never(run(&self.state));"
+
+[[plant]]
+name = "pass: what a pass’s first part woke is not run where the pass was begun"
+meant = "a_pass_a_kick_begins_does_its_first_part_there_and_what_it_woke_is_run_before_the_next_callback"
+runs = ["daemon-lib-pass"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/pass.rs"
+find = '''
+    drop(begun);
+    state.spawn.drain();'''
+replace = "    drop(begun);"
+
+[[plant]]
+name = "pass: a pass of exactly five seconds is slow"
+meant = "a_pass_longer_than_five_seconds_is_written_down_and_one_of_five_is_not"
+runs = ["daemon-lib-pass"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/pass.rs"
+find = "if took > SLOW_PASS {"
+replace = "if took >= SLOW_PASS {"
+
+[[plant]]
+name = "pass: a panic in a pass is not contained"
+meant = "a_pass_that_panics_is_written_down_traced_and_said_and_the_next_one_runs"
+runs = ["daemon-lib-pass"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/pass.rs"
+find = "        let outcome = contain((pass.work)()).await;"
+replace = "        let outcome: Result<Result<(), String>, crate::errors::Panicked> = Ok((pass.work)().await);"
+
+[[plant]]
+name = "throttle: every call begins a wait of its own"
+meant = "the_throttle_tells_once_a_wait_after_the_first_call_whatever_came_between"
+runs = ["daemon-lib-pass"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/pass.rs"
+find = '''
+        if pending.replace(true) {
+            return;
+        }'''
+replace = "        pending.replace(true);"
+
+[[plant]]
+name = "stop: the last reason wins"
+meant = "the_first_reason_wins_and_the_daemon_stops_for_that_one_alone"
+runs = ["daemon-lib-stop"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = '''
+            if reason.is_some() {
+                return false;
+            }
+'''
+replace = ""
+
+[[plant]]
+name = "stop: the process exits 1"
+meant = "a_stop_says_why_and_how_big_the_daemon_is_and_ends_the_log_with_exit_0"
+runs = ["daemon-lib-stop", "stop"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = "        (self.exit)(0);"
+replace = "        (self.exit)(1);"
+
+[[plant]]
+name = "stop: the children are left running"
+meant = "the_children_still_running_are_ended_on_the_way_out"
+runs = ["daemon-lib-stop"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = "contain_now(|| (self.ends_children)())"
+replace = "contain_now(|| ())"
+
+[[plant]]
+name = "stop: a panic in the tail ends the tail"
+meant = "children_that_cannot_be_ended_are_written_down_and_the_ledger_is_still_closed"
+runs = ["daemon-lib-stop"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = '''
+        if let Err(panicked) = contain_now(|| (self.ends_children)()) {
+            self.errors.caught("the children did not end", &panicked);
+        }'''
+replace = "        (self.ends_children)();"
+
+[[plant]]
+name = "stop: the ledger is not closed in place"
+meant = "closes_in_place_where_it_is_shared_and_frees_the_file_with_its_data_kept"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "opening"],
+  "daemon-lib-stop",
+]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''
+        let open = std::mem::replace(&mut self.store.db, Connection::open_in_memory()?);
+        open.close().map_err(|(_, cause)| cause.into())'''
+replace = "        Ok(())"
+
+[[plant]]
+name = "start: a start that failed says nothing of its exit"
+meant = "a_second_daemon_on_the_same_home_is_refused_and_touches_no_window_of_the_first"
+runs = ["daemon-lib-start", "stop"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = '''
+    if started.is_err() {
+        log.info("exit 1");
+    }
+    started'''
+replace = "    started"
+
+# Only a process has signals of its own: the daemon of a test is told to stop.
+[[plant]]
+name = "start: SIGTERM and SIGINT are not listened for"
+meant = "a_quiet_daemon_starts_its_log_with_its_pid_and_ends_it_with_why_it_stopped"
+runs = ["stop"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = '''
+    if signals {
+        listen_for_signals(latch, errors);
+    }'''
+replace = "    let _ = signals;"
+
+[[plant]]
+name = "start: a bridge that failed does not stop the daemon"
+meant = "an_output_nobody_reads_stops_it_as_the_bridge_failing_while_its_input_stays_open"
+runs = ["daemon-lib-start", "stop"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = '''
+                log.error("the bridge failed", Some(&cause.to_string()));
+                latch.trip("the bridge failed");'''
+replace = '                log.error("the bridge failed", Some(&cause.to_string()));'
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = '            Ended::Failed(_) => watching.trip("the bridge failed"),'
+replace = "            Ended::Failed(_) => {}"
+
+[[plant]]
+name = "start: the executor’s driver is not spawned"
+meant = "the_engine_s_work_is_driven_from_the_start_so_what_is_woken_outside_a_drain_runs"
+runs = ["daemon-lib-start"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = "    spawn.drive();"
+replace = ""
+
+[[plant]]
+name = "start: what was open is not suspended for the restart"
+meant = "what_was_open_comes_back_and_its_window_opens_with_the_environment_the_app_expects"
+runs = ["daemon-lib-start"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = "    ledger.borrow_mut().suspend_for_restart()?;"
+replace = ""
+
+[[plant]]
+name = "start: an agents file that cannot be used stops the start"
+meant = "an_agents_file_that_cannot_be_used_stops_no_start_and_the_log_says_why"
+runs = ["daemon-lib-start"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = '        log.error("the agents file could not be used", Some(&cause));'
+replace = "        return Err(StartError::System(cause));"

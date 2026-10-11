@@ -43,6 +43,12 @@ zip.workspace = true
 # folder of the run's own for each machine.
 serde_json.workspace = true
 rusqlite.workspace = true
+# The plants (S13): their data is TOML (tests/plants), read as the structures that
+# say what a plant is; their runs are started by cf-process, which runs on tokio,
+# and a Ctrl-C is heard through tokio's signals, so that the sources are put back.
+serde.workspace = true
+tokio = { workspace = true, features = ["rt", "signal"] }
+toml.workspace = true
 rustls.workspace = true
 plist.workspace = true
 memchr.workspace = true

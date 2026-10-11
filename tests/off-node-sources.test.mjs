@@ -100,7 +100,7 @@ const SAYS_THEM = [
   /^tools\/xtask\/src\/updater_smoke\//,
   /^crates\/cf-launcher\//,
   /^crates\/cf\/tests\/cli_goldens\//,
-  /^tests\/plants\/cli\/admin\.mjs$/,
+  /^tests\/plants\/cli\/admin\.toml$/,
 ]
 
 /** Folders no source lives in: what is built, installed or fetched. */

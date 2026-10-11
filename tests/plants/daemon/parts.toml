@@ -1,0 +1,321 @@
+# What the daemon is made of: where a panic is written down, the engine’s work, the host, the files, the bridge, the engine’s runtime, the processes, `cf`.
+
+[run]
+daemon-lib-errors = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "errors::"]
+daemon-lib-seams = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "seams::"]
+daemon-files = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "files"]
+engine-lib-runtime = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "runtime::"]
+harness-lib-seams-processes = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "seams::processes"]
+
+[[plant]]
+name = "errors: a panic is not traced as a daemon error"
+meant = "a_caught_panic_goes_to_the_log_with_its_place_and_to_the_trace_as_a_daemon_error"
+runs = ["daemon-lib-errors"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/errors.rs"
+find = '        self.trace.error(&format!("{what}: {}", panicked.message));'
+replace = ""
+
+[[plant]]
+name = "errors: work that goes on apart is not contained"
+meant = "work_that_goes_on_apart_is_caught_and_written_down_and_the_rest_goes_on"
+runs = ["daemon-lib-errors"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/errors.rs"
+find = '''
+            if let Err(panicked) = contain(work).await {
+                errors.caught(what, &panicked);
+            }'''
+replace = "            work.await;"
+
+[[plant]]
+name = "seams: the engine’s work that panics is not written down"
+meant = "a_panic_in_work_apart_is_written_down_and_the_work_after_it_runs"
+runs = ["daemon-lib-seams"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''
+            if let Err(panicked) = contain(work).await {
+                errors.caught(what, &panicked);
+            }'''
+replace = "            work.await;"
+
+[[plant]]
+name = "seams: a drain runs nothing"
+meant = "work_spawned_waits_for_a_drain_and_a_drain_runs_it_in_the_order_it_was_woken"
+runs = ["daemon-lib-seams"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = "        self.executor.drain();"
+replace = "        let _ = &self.executor;"
+
+[[plant]]
+name = "seams: a wait is taken by a poll that is not its relay’s"
+meant = "two_answers_that_come_between_begin_and_the_executors_first_poll_are_two_callbacks"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "contract::callbacks"],
+  ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "contract::looks"],
+]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams/boundary.rs"
+find = "        if this.relay.is_some() && !this.relayed.get() {"
+replace = "        if false {"
+
+[[plant]]
+name = "seams: a wait its relay woke with nothing to say is taken again without its relay"
+meant = "a_wait_its_relay_woke_with_nothing_to_say_has_its_answer_from_its_relay_again"
+runs = ["daemon-lib-seams"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams/boundary.rs"
+find = '''
+            Poll::Pending => {
+                this.relayed.set(false);
+                if this.relay.is_none() {'''
+replace = '''
+            Poll::Pending => {
+                if this.relay.is_none() {'''
+
+[[plant]]
+name = "host: the daemon’s bridge does not run what the frames woke after a read"
+meant = "a_chain_of_the_engines_turns_a_frame_began_ends_before_the_next_frame_is_handled"
+runs = ["daemon-lib-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "    BridgeBuilder::new(Role::Daemon).after_read(move || spawn.drain())"
+replace = '''
+    drop(spawn);
+    BridgeBuilder::new(Role::Daemon)'''
+
+[[plant]]
+name = "seams: a window is not told its participant"
+meant = "a_window_starts_with_its_url_project_participant_and_the_bundle_first_on_its_path"
+runs = ["daemon-lib-seams"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '"CONSENSFLOW_PARTICIPANT".to_owned()'
+replace = '"CONSENSFLOW_PARTICIPANTS".to_owned()'
+
+[[plant]]
+name = "files: a cause is indented two spaces in the log"
+meant = "every_log_line_is_what_node_wrote"
+runs = ["daemon-files"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/log.rs"
+find = 'format!("    {line}")'
+replace = 'format!("  {line}")'
+
+[[plant]]
+name = "files: forgetting a project keeps its lines and drops the others"
+meant = "forgetting_a_project_drops_its_lines_from_both_files_and_keeps_the_rest"
+runs = ["daemon-files", "daemon-lib-files"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "        .is_some_and(|named| named == wanted)"
+replace = "        .is_some_and(|named| named != wanted)"
+
+[[plant]]
+name = "files: a file exactly at its limit is moved aside"
+meant = "a_file_past_the_limit_is_moved_aside_before_the_append_and_not_at_it"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "file::append"],
+  "daemon-files",
+]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file/append.rs"
+find = "if size > limit {"
+replace = "if size >= limit {"
+
+[[plant]]
+name = "bridge: the end of the input is told as a close"
+meant = "the_end_of_the_input_is_the_input"
+runs = ["bridge"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/local/state.rs"
+find = "        self.end(Ended::Input);"
+replace = "        self.end(Ended::Closed);"
+
+[[plant]]
+name = "bridge: the hook is told after each frame and not after the read"
+meant = "it_is_told_once_after_all_the_frames_of_a_read_and_not_between_them"
+runs = ["bridge", "daemon-lib-host"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/local/reader.rs"
+find = '''
+            if self.inner.is_closed() {
+                return true;
+            }'''
+replace = '''
+            self.inner.read_handled();
+            if self.inner.is_closed() {
+                return true;
+            }'''
+
+[[plant]]
+name = "bridge: a read whose frames closed the bridge is not told"
+meant = "a_read_whose_frames_closed_the_bridge_is_told_once_for_the_frames_before_the_close"
+runs = ["bridge"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/local/reader.rs"
+find = '''
+        bridge.inner.read_handled();
+        if closed {
+            return;
+        }'''
+replace = '''
+        if closed {
+            return;
+        }
+        bridge.inner.read_handled();'''
+
+[[plant]]
+name = "bridge: the end of the input is told as a read"
+meant = "the_end_of_the_input_handled_nothing_and_is_not_told"
+runs = ["bridge"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/local/reader.rs"
+find = "                bridge.inner.eof();"
+replace = '''
+                bridge.inner.read_handled();
+                bridge.inner.eof();'''
+
+[[plant]]
+name = "bridge: a read is not told at all"
+meant = "it_is_told_once_after_all_the_frames_of_a_read_and_not_between_them"
+runs = ["bridge"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/local/reader.rs"
+find = '''
+        bridge.inner.read_handled();
+        if closed {'''
+replace = "        if closed {"
+
+[[plant]]
+name = "engine: a participant is kept held by work that panicked"
+meant = "work_that_panics_after_a_wait_lets_go_of_its_participant_and_the_next_waiter_takes_its_turn"
+runs = ["engine-lib-runtime"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/runtime.rs"
+find = '''
+    fn drop(&mut self) {
+        self.held.set(false);'''
+replace = '''
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        self.held.set(false);'''
+
+[[plant]]
+name = "engine: whoever waits for work that panicked waits for ever"
+meant = "whoever_waits_for_work_that_panicked_ends_with_an_error_and_does_not_wait_for_ever"
+runs = ["engine-lib-runtime"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/runtime.rs"
+find = "                    answer.fail(&panic_words(panic.as_ref()));"
+replace = ""
+
+[[plant]]
+name = "process: a forced end sends SIGTERM"
+meant = "ends_a_child_with_the_signal_asked_for"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "terminate::"],
+]
+
+[[plant.edit]]
+file = "crates/cf-process/src/terminate.rs"
+find = "            Ending::Forced => libc::SIGKILL,"
+replace = "            Ending::Forced => libc::SIGTERM,"
+
+[[plant]]
+name = "process: a program run to its end does not hand over its end"
+meant = "a_program_is_handed_over_to_be_ended_while_it_runs_and_let_go_of_once_it_has_ended"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "capture::"],
+]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = "    started(group.ender());"
+replace = "    let _ = started;"
+
+[[plant]]
+name = "process: a program run to its end (run) is not kept for the way out"
+meant = "programs_run_to_their_end_are_kept_while_they_run_and_let_go_of_once_they_have_ended"
+runs = ["harness-lib-seams-processes", "daemon-lib-stop"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/processes.rs"
+find = '''
+            let kept = |ender| self.keep(ender);
+            cf_process::execute(&run, program.cwd.as_deref(), &env, limits, kept).await'''
+replace = '''
+            let kept = |_ender| ();
+            cf_process::execute(&run, program.cwd.as_deref(), &env, limits, kept).await'''
+
+[[plant]]
+name = "process: a program captured (an update) is not kept for the way out"
+meant = "a_program_the_daemon_is_waiting_for_is_ended_when_it_stops"
+runs = ["stop", "daemon-lib-stop"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/processes.rs"
+find = '''
+            let kept = |ender| self.keep(ender);
+            cf_process::capture(&run, program.cwd.as_deref(), &env, limits, kept).await'''
+replace = '''
+            let kept = |_ender| ();
+            cf_process::capture(&run, program.cwd.as_deref(), &env, limits, kept).await'''
+
+[[plant]]
+name = "process: programs that ended are kept for the way out"
+meant = "programs_run_to_their_end_are_kept_while_they_run_and_let_go_of_once_they_have_ended"
+runs = ["harness-lib-seams-processes"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/processes.rs"
+find = '''
+        started.retain(Ender::running);
+        started.push(ender);'''
+replace = "        started.push(ender);"
+
+[[plant]]
+name = "process: a size in megabytes is rounded down"
+meant = "megabytes_are_rounded_as_math_round_rounds_them"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "memory::"],
+]
+
+[[plant.edit]]
+file = "crates/cf-process/src/memory.rs"
+find = "    (bytes + 524_288) / 1_048_576"
+replace = "    bytes / 1_048_576"
+
+[[plant]]
+name = "cf: a window’s cf ui is the daemon"
+meant = "a_window_s_cf_ui_is_the_board_and_never_the_daemon"
+runs = [
+  ["cargo", "test", "--offline", "-p", "cf", "--test", "daemon_stop", "a_window_s_cf_ui"],
+]
+
+[[plant.edit]]
+file = "crates/cf/src/lib.rs"
+find = 'first == "ui" && env.text("CONSENSFLOW_TOKEN").is_none()'
+replace = 'first == "ui"'
