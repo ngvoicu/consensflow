@@ -9,6 +9,11 @@
 //! ends with the code 3). A key pressed in a turn (the Escape that stops it) is
 //! ignored: this window is never stopped.
 //!
+//! With `CF_TEST_MCP_SERVER` set, every window starts a job as it opens, before
+//! any turn: a server the harness started with it. And the program is the job
+//! too (`background`): started with `--background-job` first, it is not a
+//! window but the work a window left running.
+//!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
 //! `cf_e2e::process`, the one place a program starts and the environment is read.
@@ -17,10 +22,15 @@
 // root file beside it, where each would be a binary of its own.
 #[path = "fake_agent/args.rs"]
 mod args;
+#[path = "fake_agent/background.rs"]
+mod background;
 #[path = "fake_agent/records.rs"]
 mod records;
 #[path = "fake_agent/reply.rs"]
 mod reply;
+#[cfg(unix)]
+#[path = "fake_agent/signals.rs"]
+mod signals;
 #[path = "fake_agent/terminal.rs"]
 mod terminal;
 
@@ -33,9 +43,13 @@ use std::thread;
 use cf_e2e::process::own_var;
 use serde_json::json;
 
+use background::Jobs;
 use records::{note_process, Records};
 use reply::{is_session_of, reply_to, Reply, Window};
 use terminal::{Event, Input};
+
+/// How long the server a window starts as it opens runs: past any case.
+const SERVER_SECONDS: u64 = 600;
 
 /// What a window with no login says on its screen, as Pi says it on a machine
 /// that has none.
@@ -46,10 +60,15 @@ const NO_LOGIN: &str =
 const LIMIT: &str = "You've hit your limit. Resets in 2 hours.";
 
 fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // The work a window left running is this program, with a word first that no
+    // window is launched with: it holds its signals as it needs, not as a window.
+    if args.first().map(String::as_str) == Some(background::JOB) {
+        return background::run(&args[1..]);
+    }
     // Signals are waited for on a thread of their own, so they are blocked in
     // this one and in every thread started after it.
     let signals = block_signals();
-    let args: Vec<String> = std::env::args().skip(1).collect();
     let own = std::env::current_exe().ok();
     let launch = match args::parse(&args, own.as_deref()) {
         Ok(launch) => launch,
@@ -118,12 +137,19 @@ fn run(launch: &args::Launch, signals: Signals) -> Result<std::convert::Infallib
     say(&format!("fake agent {said} on {}\n", launch.session))
         .map_err(|failed| failed.to_string())?;
 
+    let (turns, queued) = mpsc::channel::<String>();
     let window = Window {
         participant,
         settings: launch.settings.clone(),
         session: launch.session.clone(),
+        jobs: Jobs::new(Path::new(&home), pid),
+        wake: turns.clone(),
     };
-    let (turns, queued) = mpsc::channel::<String>();
+    // A server the harness starts with its window, before any turn, as an MCP
+    // server is.
+    if own_var("CF_TEST_MCP_SERVER").is_some_and(|server| !server.is_empty()) {
+        window.jobs.start("server", SERVER_SECONDS, false, || {})?;
+    }
     {
         let status_file = status_file.clone();
         thread::spawn(move || {
@@ -306,7 +332,7 @@ fn block_signals() -> Signals {
 #[cfg(unix)]
 fn leave_on_signal(signals: Signals, status_file: PathBuf) {
     thread::spawn(move || {
-        if signals.wait().is_ok() {
+        if signals::wait(&signals) {
             leave(&status_file, 0);
         }
     });
