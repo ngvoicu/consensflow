@@ -25,7 +25,9 @@ import { trustForClaude } from './trust-claude.mjs'
 const H = process.env.HOME ?? homedir()
 export const ENV = liveEnvironment({ home: H })
 /** Where a harness looks for its records: the environment without the sandbox's removals. */
-const RECORD_ENV = Object.fromEntries(Object.entries(ENV).filter(([, value]) => value !== null))
+export const RECORD_ENV = Object.fromEntries(
+  Object.entries(ENV).filter(([, value]) => value !== null),
+)
 
 /** How long a window may take to draw its prompt, and a sent message its answer. */
 export const READY_MS = 120_000
@@ -92,18 +94,20 @@ export async function claudeExtras(workspace) {
  * `~/.consensflow-candidate/live/<folder>`, as pane `id`, `env` added to
  * what its harness starts with and `dropEnv` taken from it. `agent` is what
  * the window runs (its kind, model and effort), the harness's cheap eval model
- * unless a test names another.
+ * unless a test names another. With `resume`, a conversation's id, the window
+ * is the one the app opens on a conversation the harness already keeps, in the
+ * same folder.
  */
 export async function openWindow(
   app,
   name,
-  { folder, id, env = {}, dropEnv = [], agent = HARNESSES[name] },
+  { folder, id, env = {}, dropEnv = [], agent = HARNESSES[name], resume = null },
 ) {
   const workspace = liveFolder(folder)
   const { kind } = agent
   // Claude and Pi open on an id they are given; the others name their own.
-  const session = kind === 'claude-code' || kind === 'pi' ? randomUUID() : null
-  const start = await interactiveStart(agent, session, null)
+  const session = resume ?? (kind === 'claude-code' || kind === 'pi' ? randomUUID() : null)
+  const start = await interactiveStart(agent, session, null, { resume: resume !== null })
   const executable = realOnPath(start.command, ENV.PATH)
   const trust = name === 'claude' ? await trustForClaude(app, workspace, executable) : null
   const pane = { id, generation: 1 }
@@ -148,6 +152,14 @@ export async function openWindow(
       if (native === null) return []
       const read = await readRecord(kind, native, RECORD_ENV).catch(() => null)
       return read === null ? [] : read.items
+    },
+    /**
+     * The conversation the window shows, as the harness's own record names it
+     * once there is one (Claude and Pi are given theirs): its id, or null.
+     */
+    async conversation() {
+      await this.recorded()
+      return native
     },
     /** Until the window has printed and then held still, or `ms` passed; whether it did. */
     async still(ms) {

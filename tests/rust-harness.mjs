@@ -43,10 +43,12 @@ export async function readRecord(kind, session, env) {
  * `prompt`. `agent` is `{kind, model, effort, thinking}`; `session` is the
  * conversation's id where the harness takes one (Claude, Pi) and `seed` the first
  * message where the window takes one. Null for a harness with no window of its own,
- * and for one that needs an id when none is given.
+ * and for one that needs an id when none is given. With `resume`, the window
+ * is the one the app opens on a conversation the harness already keeps, `session`
+ * its id.
  */
-export const interactiveStart = (agent, session, seed) =>
-  question({ op: 'start', agent, session, seed })
+export const interactiveStart = (agent, session, seed, { resume = false } = {}) =>
+  question({ op: 'start', agent, session, seed, resume })
 
 /** A message as a window can take it. */
 export const windowText = (text) => question({ op: 'window_text', text })

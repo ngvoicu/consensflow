@@ -35,6 +35,22 @@ once, with the reason here and in the commit.
   `sweep`. Each such reading lost the repeated user item and nothing else (its
   other items, their order, `inFlight`, `failed`, `quota` and `settlement` are
   Node's); no look was added or taken, so the counts in `../records/main.rs` stand.
+- **A Claude window opened again on a turn the app's quit cut** (2026-10-11, the
+  human's report that the daemon seemed not to send responses; found by
+  `npm run live:resume-cut` and `npm run live:restart-cut`). The quit ends a
+  window with its turn at work, and the daemon that starts again resumes the
+  chief on that conversation: a record whose last turn has no end. Claude 2.1.296
+  resumed there waits at its prompt, status idle, and writes nothing of the turn;
+  Node read such a window at work for good, since its record said the turn was
+  in flight, and nothing was delivered to the chief until the human typed to it.
+  The Rust adapter reads a window opened with no message of its own at rest, by
+  Claude's status, while its record holds no more than it did when the window
+  was opened (`shared/left_open.rs`). `launch/` moved for it in one step of
+  one scenario, `claude: a conversation Claude kept is resumed on its session,
+  and its window looks there`, step 5, in both platforms' recordings, which now
+  carry a `kept` difference there: Node's answer `settled: false`, Rust's `true`.
+  Pi has the same rule, with its extension's word for a window that has seen no
+  turn begin; it moved none of the recordings.
 
 ## The launch scenarios
 

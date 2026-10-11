@@ -3,6 +3,12 @@
 //! config folder, and its live status in `sessions/<pid>.json`. The daemon
 //! reads both. And what it writes for the test: the ids of the processes it
 //! started, beside the home.
+//!
+//! A conversation the app's quit cut in a turn (its last record is the user's
+//! message, with nothing after it) is resumed as Claude 2.1.296 resumes it: the
+//! window waits at its prompt and writes nothing of that turn, and closes it
+//! with a message of its own when the next one comes (`No response requested.`,
+//! no model behind it, written just before that message).
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -13,6 +19,13 @@ use serde_json::{json, Map, Value};
 /// The version Claude's records say it is.
 const VERSION: &str = "2.1.277";
 
+/// What Claude writes as the user's turn when it interrupts one it was at work on.
+pub const INTERRUPTED: &str = "[Request interrupted by user]";
+
+/// What Claude says, in a message of its own, of a turn that was cut and that
+/// nothing answered.
+const NO_RESPONSE: &str = "No response requested.";
+
 /// A window's files.
 pub struct Records {
     session: String,
@@ -20,6 +33,21 @@ pub struct Records {
     status_file: PathBuf,
     /// How many records the window has written: each record's `uuid` ends in it.
     ordinal: u64,
+    /// The conversation ends in a turn nothing answered, which the next user's
+    /// message finds open and closes.
+    cut: bool,
+}
+
+/// Whether the conversation `text` ends in a turn nothing answered: its last
+/// record is a user's message that is not the marker of an interrupt.
+fn ends_cut(text: &str) -> bool {
+    let Some(last) = text.lines().rev().find(|line| !line.trim().is_empty()) else {
+        return false;
+    };
+    let Ok(record) = serde_json::from_str::<Value>(last) else {
+        return false;
+    };
+    record["type"] == "user" && record["message"]["content"][0]["text"] != INTERRUPTED
 }
 
 impl Records {
@@ -36,11 +64,13 @@ impl Records {
                 fs::create_dir_all(folder)?;
             }
         }
+        let cut = fs::read_to_string(&transcript).is_ok_and(|text| ends_cut(&text));
         Ok(Self {
             session: session.to_owned(),
             transcript,
             status_file,
             ordinal: 0,
+            cut,
         })
     }
 
@@ -56,8 +86,25 @@ impl Records {
     }
 
     /// Writes one record: the session, the version, the time and a `uuid` of
-    /// its own, then `fields`.
+    /// its own, then `fields`. A user's message that comes to a conversation
+    /// that was cut closes the turn that was cut first.
     pub fn append(&mut self, pid: u32, fields: Value) -> io::Result<()> {
+        if self.cut && fields["type"] == "user" {
+            self.cut = false;
+            self.append(
+                pid,
+                json!({
+                    "type": "assistant",
+                    "message": {
+                        "id": format!("{}-closed-{pid}", self.session),
+                        "model": "<synthetic>",
+                        "role": "assistant",
+                        "stop_reason": "stop_sequence",
+                        "content": [{ "type": "text", "text": NO_RESPONSE }],
+                    },
+                }),
+            )?;
+        }
         self.ordinal += 1;
         let mut record = Map::new();
         record.insert("sessionId".to_owned(), json!(self.session));
@@ -165,6 +212,89 @@ mod tests {
             "{at}"
         );
         assert_eq!(records.ordinal(), 2);
+    }
+
+    /// The `type` of each record of a conversation, in order.
+    fn types(file: &Path) -> Vec<String> {
+        lines(file)
+            .iter()
+            .map(|record| record["type"].as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    fn user(text: &str) -> Value {
+        json!({ "type": "user", "message": { "role": "user", "content": text } })
+    }
+
+    #[test]
+    fn a_conversation_cut_in_a_turn_is_resumed_waiting_and_closes_it_just_before_the_next_message()
+    {
+        let config = tempfile::tempdir().unwrap();
+        let file = config.path().join("projects/integration/sess-1.jsonl");
+        let mut cut = Records::new(config.path(), "sess-1", 11).unwrap();
+        cut.append(11, user("first")).unwrap();
+
+        // The window the app opens again writes nothing of that turn.
+        let mut again = Records::new(config.path(), "sess-1", 22).unwrap();
+        assert_eq!(types(&file), ["user"]);
+
+        again.append(22, user("second")).unwrap();
+        assert_eq!(types(&file), ["user", "assistant", "user"]);
+        let closed = &lines(&file)[1];
+        assert_eq!(closed["message"]["model"], "<synthetic>");
+        assert_eq!(closed["message"]["stop_reason"], "stop_sequence");
+        assert_eq!(
+            closed["message"]["content"][0]["text"],
+            "No response requested."
+        );
+
+        // A turn is closed once.
+        again.append(22, user("third")).unwrap();
+        assert_eq!(types(&file), ["user", "assistant", "user", "user"]);
+    }
+
+    #[test]
+    fn a_conversation_that_ended_in_an_answer_or_in_an_interrupt_has_no_turn_to_close() {
+        let answered = tempfile::tempdir().unwrap();
+        let mut first = Records::new(answered.path(), "s", 1).unwrap();
+        first.append(1, user("first")).unwrap();
+        first
+            .append(
+                1,
+                json!({ "type": "assistant", "message": { "content": [{ "type": "text", "text": "done" }] } }),
+            )
+            .unwrap();
+        let mut again = Records::new(answered.path(), "s", 2).unwrap();
+        again.append(2, user("second")).unwrap();
+        assert_eq!(
+            types(&answered.path().join("projects/integration/s.jsonl")),
+            ["user", "assistant", "user"]
+        );
+
+        let interrupted = tempfile::tempdir().unwrap();
+        let mut first = Records::new(interrupted.path(), "s", 1).unwrap();
+        first.append(1, user("first")).unwrap();
+        first
+            .append(
+                1,
+                json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "text", "text": INTERRUPTED }] } }),
+            )
+            .unwrap();
+        let mut again = Records::new(interrupted.path(), "s", 2).unwrap();
+        again.append(2, user("second")).unwrap();
+        assert_eq!(
+            types(&interrupted.path().join("projects/integration/s.jsonl")),
+            ["user", "user", "user"]
+        );
+
+        // A conversation with nothing in it has nothing cut either.
+        let fresh = tempfile::tempdir().unwrap();
+        let mut window = Records::new(fresh.path(), "s", 1).unwrap();
+        window.append(1, user("first")).unwrap();
+        assert_eq!(
+            types(&fresh.path().join("projects/integration/s.jsonl")),
+            ["user"]
+        );
     }
 
     /// What a file is given, a write at a time.
