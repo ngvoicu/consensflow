@@ -20,7 +20,8 @@ pub(super) fn var<'e>(env: &'e [(String, String)], name: &str) -> &'e str {
 
 /// What the daemon, the pane host and so every window is given, and nothing
 /// else of the machine's: a home of its own, a `PATH` that finds the stand-in
-/// `claude` first, and the stand-in's settings. `config`'s variables come last.
+/// `claude` first, and the stand-in's settings. `config`'s variables come last,
+/// but for the ones it unsets, which are not there at all.
 pub(super) fn environment(root: &Path, fake_bin: &Path, config: &Config) -> Vec<(String, String)> {
     let text = |path: &Path| path.to_string_lossy().into_owned();
     let home = root.join("home");
@@ -54,6 +55,7 @@ pub(super) fn environment(root: &Path, fake_bin: &Path, config: &Config) -> Vec<
     env.push(("CF_TEST_HARNESS".to_owned(), text(&config.stand_in)));
     env.push(("TERM".to_owned(), "xterm-256color".to_owned()));
     env.extend(config.vars.iter().cloned());
+    env.retain(|(name, _)| !config.unset.contains(name));
     env
 }
 
@@ -184,6 +186,24 @@ mod tests {
         let config = config().var("TERM", "dumb");
         let env = environment(root, &root.join("fake-bin"), &config);
         assert_eq!(var(&env, "TERM"), "dumb");
+    }
+
+    #[test]
+    fn a_variable_a_case_unsets_is_not_in_the_environment_whoever_set_it() {
+        let root = Path::new("root");
+        let plain = environment(root, &root.join("fake-bin"), &config());
+        assert!(plain.iter().any(|(name, _)| name == "CLAUDE_CONFIG_DIR"));
+        // The rig's own, and one the case set: both go, and nothing else with them.
+        let config = config()
+            .var("CF_TEST_ONE", "1")
+            .unset("CLAUDE_CONFIG_DIR")
+            .unset("CF_TEST_ONE");
+        let env = environment(root, &root.join("fake-bin"), &config);
+        assert!(!env
+            .iter()
+            .any(|(name, _)| name == "CLAUDE_CONFIG_DIR" || name == "CF_TEST_ONE"));
+        assert_eq!(env.len(), plain.len() - 1);
+        assert_eq!(var(&env, "CLAUDE_CONFIG_DIR"), "");
     }
 
     #[test]

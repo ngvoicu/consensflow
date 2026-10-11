@@ -2,29 +2,16 @@
 //! folder: the files the designer wrote, which its role text limits to the one
 //! the task named.
 
-use std::io;
 use std::path::Path;
 
-use cf_e2e::process::Run;
-use cf_e2e::{checkout, files, live, Error, Result};
+use cf_e2e::live::{self, Log};
+use cf_e2e::{checkout, files, Result};
 
-use crate::{report, Log, IMAGE};
+use crate::{report, IMAGE};
 
 /// The demo project: a folder with a git repository in it and a README.
 pub fn project(folder: &Path) -> Result {
-    files::make_dir(folder)?;
-    let ran = Run::new(live::command("git")?)
-        .args(["init", "--quiet"])
-        .cwd(folder)
-        .inheriting_env()
-        .run()?;
-    if ran.code != Some(0) {
-        return Err(Error::Program {
-            action: "run",
-            program: "git init".to_owned(),
-            source: io::Error::other(ran.to_string()),
-        });
-    }
+    live::git_repository(folder)?;
     files::write(
         &folder.join("README.md"),
         "# Honey shop\n\nA demo project: the image designer draws its pictures here.\n",

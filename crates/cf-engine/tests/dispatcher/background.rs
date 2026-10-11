@@ -18,6 +18,11 @@ use crate::fixtures::{closed, given, Tiers};
 const LOCK: &str = "python3 lock.py record --run 7";
 const LOG: &str = "tail -f run.log";
 
+/// A program of the harness's own that it started in the turn and keeps for the
+/// session, as Codex does its `codex-code-mode-host` the first time its agent
+/// runs a command. The kit's workers run on Claude Code: this one is named for it.
+const HELPER: &str = "/opt/claude/bin/claude-code-mode-host --serve";
+
 /// How long the engine gives a woken agent to begin its turn, in the kit.
 const SETTLE_MS: i64 = 10_000;
 
@@ -194,6 +199,49 @@ fn work_the_window_had_before_the_turn_holds_nothing() {
 
     assert_eq!(tiers.task(1).task.state, "done");
     assert_eq!(results(&context, &tiers), ["Parser done"]);
+}
+
+#[test]
+fn a_helper_the_harness_started_in_the_turn_is_no_work_the_agent_left_and_holds_nothing() {
+    // Found by the live test of the gate: a Codex designer's turn ended and its
+    // result never came, held for `codex-code-mode-host` for as long as the window lived.
+    let context = Context::new();
+    let tiers = left_running(&context, &[HELPER]);
+
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(results(&context, &tiers), ["Started the recording run"]);
+}
+
+#[test]
+fn beside_the_work_of_the_agent_the_harnesss_own_helper_is_not_counted() {
+    let context = Context::new();
+    let tiers = left_running(&context, &[HELPER, LOCK]);
+
+    assert_eq!(tiers.task(1).task.state, "working", "held for the job");
+    assert_eq!(
+        doing(&context, &tiers).reason.as_deref(),
+        Some("background work running (1 process)")
+    );
+}
+
+#[test]
+fn a_window_that_closes_with_only_the_harnesss_helper_left_says_nothing_of_work_running() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    // The host finds the harness's helper when it closes the window.
+    context.host.exits_leaving(&[HELPER]);
+    context.adapter.answer("zeus", "Parser done");
+    context.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "done");
+    let told = tiers.notes("chief");
+    assert!(
+        !told.iter().any(|note| note.contains("background work")),
+        "{told:?}"
+    );
 }
 
 #[test]
