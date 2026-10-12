@@ -15,9 +15,8 @@ path = "src/main.rs"
 # held to what that code believes. It reads the file with SQLite, and drives the
 # daemon and the windows as `crates/cf-e2e` does, by processes and files.
 [dependencies]
-# What the landing that ports the evals (S14.3) uses, named here already so that
-# it touches no manifest and no lockfile but its own crate's: the rig, the
-# machine's harnesses and the windows the run drives, which are `crates/cf-e2e`'s,
+# The rig, the machine's harnesses and the windows the run drives, which are
+# `crates/cf-e2e`'s (test support, which depends on no crate of the product either),
 # and the patterns and the times the measure and the reports are read by.
 cf-e2e = { path = "../cf-e2e" }
 jiff.workspace = true

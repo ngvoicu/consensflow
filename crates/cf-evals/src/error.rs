@@ -20,9 +20,20 @@ pub enum Error {
     #[error(transparent)]
     Ledger(#[from] rusqlite::Error),
     /// What was asked cannot be: a ledger of a newer ConsensFlow, migrations that
-    /// are not numbered in order, rows that leave a reference that does not hold.
+    /// are not numbered in order, rows that leave a reference that does not hold,
+    /// a harness or a scenario that is none.
     #[error("{0}")]
     Refused(String),
+    /// The words of the command are not ones it takes: the status is 2.
+    #[error("{0}")]
+    Usage(String),
+    /// The support the run is made of (the rig, the machine's harnesses, the
+    /// harness code of the product) failed.
+    #[error(transparent)]
+    Support(#[from] cf_e2e::Error),
+    /// What the command had to say could not be written.
+    #[error("could not write what it says: {0}")]
+    Say(#[from] io::Error),
 }
 
 impl Error {
