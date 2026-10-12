@@ -3,7 +3,6 @@
   "files": {
     "includes": [
       "tests/**",
-      "evals/**",
       "app/ui/*.js",
       "app/ui/core/**",
       "app/tests/**",
@@ -15,8 +14,7 @@
       "!!**/dist",
       "!!**/coverage",
       "!!**/test-results",
-      "!!app/ui/vendor",
-      "!!evals/reports"
+      "!!app/ui/vendor"
     ]
   },
   "formatter": {

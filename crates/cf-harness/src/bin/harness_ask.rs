@@ -1,13 +1,12 @@
-//! What the evals and the live tools ask of the harness code
-//! (`cf_harness::tooling`), for `live::ask` of `crates/cf-e2e` and for
-//! `tests/rust-harness.mjs`. It is no adapter, and ships with nothing: it is
-//! built only with the `test-support` feature.
+//! What the evals and the live tests ask of the harness code
+//! (`cf_harness::tooling`), through `live::ask` of `crates/cf-e2e`. It is no
+//! adapter, and ships with nothing: it is built only with the `test-support`
+//! feature.
 //!
 //! The question is one JSON object on the first line of stdin, and `tooling`
 //! says what each `op` asks and answers. The last line of stdout is
 //! `{"answered": value}`, or `{"threw": message}` for a failure, and the exit
-//! status is then 1 (`live::ask` reads it, as `ask` of
-//! `tests/rust-channels.mjs` does).
+//! status is then 1 (`live::ask` reads it).
 
 #![forbid(unsafe_code)]
 

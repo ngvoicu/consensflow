@@ -6,10 +6,9 @@ import { fileURLToPath } from 'node:url'
 
 /**
  * `crates/cf-harness` as the JavaScript suites that stay call it: Pi's channel
- * (`rustPi`), for the tests of the Pi extension, and the test binaries those
- * and `tests/rust-harness.mjs` run, built once (`build`) and asked (`ask`), on
- * the machine's own clock, randomness and processes. The other channels' cases
- * are Rust tests (`crates/cf-harness/tests/channels`).
+ * (`rustPi`), for the tests of the Pi extension. It is the test binary `pi-send`,
+ * built once and run on the machine's own clock, randomness and processes. The
+ * other channels' cases are Rust tests (`crates/cf-harness/tests/channels`).
  */
 
 /** Why the cases against Rust do not run, or false: a machine without cargo cannot build the test binaries. */
@@ -64,7 +63,7 @@ function privateCopy(name, executable) {
 }
 
 /** The test binary `name`, built, and a copy of it to run (see `privateCopy`). */
-export function build(name) {
+function build(name) {
   return privateCopy(name, cargoBuild(name))
 }
 
@@ -110,36 +109,6 @@ function paneHost(target) {
     typeof target.claim === 'function'
       ? target.claim(body)
       : target.bridge.request(op, body, { deadlineMs: target.deadlineMs })
-}
-
-/**
- * A question put to a test binary (`crates/cf-harness/src/bin/harness_ask.rs`
- * says how): what it answered, which is the last line it wrote, or the failure
- * it says JavaScript would have thrown.
- */
-export function ask(executable, question) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'inherit'] })
-    let heard = ''
-    child.on('error', reject)
-    child.stdin.on('error', reject)
-    child.stdout.setEncoding('utf8')
-    child.stdout.on('data', (chunk) => {
-      heard += chunk
-    })
-    child.on('close', (code) => {
-      let last
-      try {
-        last = JSON.parse(heard.trimEnd().split('\n').at(-1))
-      } catch {
-        reject(new Error(`${executable} ended with ${code} and said ${JSON.stringify(heard)}`))
-        return
-      }
-      if (last.threw !== undefined) reject(new Error(last.threw))
-      else resolve(last.answered)
-    })
-    child.stdin.write(`${JSON.stringify(question)}\n`)
-  })
 }
 
 /**

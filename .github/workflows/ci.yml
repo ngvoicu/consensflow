@@ -1,11 +1,11 @@
-# The gate on both platforms the app ships for: lint and the Node suite, the
-# black-box suites of crates/cf-e2e (the daemon, and the rig on a real pane
-# host, with stand-in agents in real terminals; the CLI), the page's
-# Playwright suite (on macOS: it needs no app, and once is enough), and the
-# Rust host's tests, headless ones included, and clippy. The packaged smoke
-# needs a built app and stays with the release build. Rust comes from the
-# runner's own rustup; the one third-party action is pinned to a commit. A
-# release runs this same gate on the commit it releases.
+# The gate on both platforms the app ships for: lint and the Node tests (the
+# page's units and the extensions'), the black-box suites of crates/cf-e2e
+# (the daemon, and the rig on a real pane host, with stand-in agents in real
+# terminals; the CLI), the page's Playwright suite (on macOS: it needs no app,
+# and once is enough), and the Rust host's tests, headless ones included, and
+# clippy. The packaged smoke needs a built app and stays with the release
+# build. Rust comes from the runner's own rustup; the one third-party action is
+# pinned to a commit. A release runs this same gate on the commit it releases.
 name: CI
 
 on:
@@ -46,8 +46,8 @@ jobs:
 
       - run: npm ci
       - run: npm ci --prefix app
-      # The page, and the native cf a window runs, built into bin/ for the Node
-      # suite and staged as the resource the Rust build expects.
+      # The page, and the native cf a window runs, built into bin/ for the
+      # page's Playwright suite and staged as the resource the Rust build expects.
       - run: npm --prefix app run bundle:ui
       - run: npm --prefix app run prepare-sidecar
 

@@ -19,6 +19,8 @@ mod catalog;
 mod commands;
 #[path = "cli/host_verbs.rs"]
 mod host_verbs;
+#[path = "cli/off_node.rs"]
+mod off_node;
 #[path = "cli/role_files.rs"]
 mod role_files;
 #[path = "cli/roster.rs"]

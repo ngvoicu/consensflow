@@ -1,5 +1,5 @@
-//! `cargo xtask portable pack` and `portable inspect` (landing S2): the portable
-//! Windows exe, whose layout is `cf-portable`'s alone.
+//! `cargo xtask portable pack` and `portable inspect`: the portable Windows exe,
+//! whose layout is `cf-portable`'s alone.
 //!
 //! - `pack` writes it from the built app and the release folder around it (the
 //!   runtime the daemon and the terminals need), and says where.

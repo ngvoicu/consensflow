@@ -69,9 +69,9 @@ enum Outcome {
 /// `LEFT_THE_PAUSE`, `WAIT_NOTE_TAKEN` or `GOES_ON`, which the notes of a
 /// task's wait moved: Node leaves one queued when another member takes the
 /// task or it is taken back, and tells its requester nothing when a hold ends.
-/// Departed traces that Node's suite records only off Windows: the test
-/// that writes `home-copies-004` is skipped there, as Windows holds an open
-/// ledger's files (`tests/home-copies.test.mjs`). Elsewhere each must be there.
+/// Departed traces that Node's suite recorded only off Windows: the test
+/// that wrote `home-copies-004` was skipped there, as Windows holds an open
+/// ledger's files. Elsewhere each must be there.
 const RECORDED_OFF_WINDOWS: &[&str] = &["home-copies-004"];
 
 const DEPARTED: &[(&str, usize, &str)] = &[

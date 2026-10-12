@@ -4,8 +4,9 @@
 # packaged smoke holds them, the thin drivers of xtask (the app’s tests and lint, the lint for
 # Windows and its archiver, the departures, the bench) and the gate that runs them, and the
 # updater smoke: its readers of evidence, and the product it holds (the app’s daemon choice,
-# the ledger’s one holder, the check of an update), and the packaged smoke and the candidate
-# builder (`cargo xtask smoke` and `candidate`).
+# the ledger’s one holder, the check of an update), the packaged smoke and the candidate
+# builder (`cargo xtask smoke` and `candidate`), and what hands over to xtask: the npm scripts
+# and the build hooks of Tauri.
 #
 # A run that tests the xtask package whole (`-p xtask --test …`) names the folder it is built in,
 # `--target-dir app/src-tauri/target/xtask-check`, which `cargo xtask check` tests xtask in: the
@@ -18,7 +19,7 @@
 
 run_limit_minutes = 10
 rebuild = ["cargo", "xtask", "build-cf", "--offline"]
-tables = ["feeds", "publish", "workflow", "portable", "agents", "updater", "updater-product", "tooling", "sidecar", "drivers", "update", "sign-mac", "packaged"]
+tables = ["feeds", "publish", "workflow", "portable", "agents", "updater", "updater-product", "tooling", "sidecar", "drivers", "update", "sign-mac", "packaged", "wiring"]
 
 [run]
 # The proof of the agents screens against the native daemon, built from the sources as they are.

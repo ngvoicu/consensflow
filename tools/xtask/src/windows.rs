@@ -1,6 +1,6 @@
-//! `cargo xtask windows` and `cargo xtask windows-matrix` (landing S14.4): the
-//! Windows machine this checkout is tried on (`zeewin`, over ssh), and the matrix
-//! of the chief evals run there.
+//! `cargo xtask windows` and `cargo xtask windows-matrix`: the Windows machine
+//! this checkout is tried on (`zeewin`, over ssh), and the matrix of the chief
+//! evals run there.
 //!
 //! `windows` runs a command on a Windows machine, over SSH, on this working tree
 //! as it is now: every tracked file, and new ones not ignored, go over as one

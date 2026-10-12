@@ -1,5 +1,5 @@
-//! `cargo xtask clippy-windows` (landing S10): clippy for Windows from a machine
-//! that is not one, as the gate runs it here (`--all-targets -- -D warnings`,
+//! `cargo xtask clippy-windows`: clippy for Windows from a machine that is not
+//! one, as the gate runs it here (`--all-targets -- -D warnings`,
 //! tests included): what only Windows compiles (the `cfg(windows)` code, and the
 //! unix code a Windows build must leave out) is found in seconds, though nothing
 //! is run. The crates to lint are named, else all of the workspace but the app

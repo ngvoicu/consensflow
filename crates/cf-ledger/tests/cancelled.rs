@@ -329,8 +329,8 @@ fn cancelled(file: &Path, tell: i64, session: i64) -> (Value, Option<&'static st
 }
 
 /// Whether the thread's one tell counts as answered the way the chief eval
-/// counts it (`plumbing` in `evals/measure.mjs`): an answer to it that is not
-/// cancelled.
+/// counts it (`plumbing` in `crates/cf-evals/src/measure/plumbing.rs`): an answer
+/// to it that is not cancelled.
 fn counted_answered(thread: &Value) -> bool {
     thread[1]
         .as_array()

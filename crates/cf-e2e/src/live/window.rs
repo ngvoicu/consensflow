@@ -26,11 +26,12 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use super::ask::{self, Interrupt, Item};
+use super::last_lines;
 use super::machine::Harness;
 use crate::rig::Rig;
 use crate::Result;
 
-pub use open::{pasted_into, Open, PASTED};
+pub use open::{pasted_installs, session_for, Open};
 pub use trust::claude as trust_claude;
 
 /// How long a window may take to draw its prompt, and a sent message its answer.
@@ -133,6 +134,23 @@ impl Window<'_> {
     /// What it printed after the mark `mark`.
     pub fn screen_after(&self, mark: usize) -> String {
         after(&self.screen(), mark)
+    }
+
+    /// The end of its screen, as a line ([`last_lines`]): what a report says of a
+    /// window to say why it did not open or did not answer.
+    pub fn tail(&self) -> String {
+        last_lines(&self.screen())
+    }
+
+    /// Whether the window has drawn its prompt, waiting for it for [`READY`]
+    /// ([`Window::still`]); where it has not, the end of its screen, which says
+    /// why: a login page, or a dialog that nobody answers.
+    pub fn ready(&self) -> std::result::Result<(), String> {
+        if self.still(READY) {
+            Ok(())
+        } else {
+            Err(self.tail())
+        }
     }
 
     /// The Claude config folder the window's Claude Code keeps its sessions and

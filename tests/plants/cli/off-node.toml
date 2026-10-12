@@ -1,0 +1,49 @@
+# Plants in the scripts that stay and in the check that holds Node's sources gone
+# (`crates/cf-e2e/tests/cli/off_node.rs`): a script that imports a library of Node's that
+# was deleted, a path of Node's CLI named in a script, an import of a helper that is gone,
+# and the check that looks at less than it is to. The check must catch each. (A deleted file
+# put back is a plant of no edit: it is planted in a tree of its own, by that file's tests.)
+
+[run]
+# The check, as the CLI's suite runs it: the repository's own files, read as they are.
+off-node = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "off_node"]
+
+[[plant]]
+name = "off node: the OpenCode plugin imports a host library of Node's that is gone"
+meant = "has_every_script_import_files_that_are_there"
+runs = ["off-node"]
+
+[[plant.edit]]
+file = "hosts/opencode-extension/consensflow-session.mjs"
+find = "} from '../lib/question-door.js'"
+replace = "} from '../lib/quota.js'"
+
+[[plant]]
+name = "off node: a page spec imports a helper that is gone"
+meant = "has_every_script_import_files_that_are_there"
+runs = ["off-node"]
+
+[[plant.edit]]
+file = "app/tests/harnesses.spec.mjs"
+find = "import { tempEnv } from '../../tests/helpers.mjs'"
+replace = "import { tempEnv } from '../../tests/engine/helpers.mjs'"
+
+[[plant]]
+name = "off node: a script names the file of Node's CLI"
+meant = "names_none_of_them_anywhere_but_where_a_recording_or_an_older_release_says_them"
+runs = ["off-node"]
+
+[[plant.edit]]
+file = "tests/helpers.mjs"
+find = "const WINDOWS = process.platform === 'win32'"
+replace = "const WINDOWS = process.platform === 'win32' // run it with node bin/cf.mjs"
+
+[[plant]]
+name = "off node: the check does not read the host extensions"
+meant = "reads_the_scripts_it_is_to_hold"
+runs = ["off-node"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/cli/off_node.rs"
+find = 'const ROOTS: [&str; 4] = ["tests", "app/tests", "app/scripts", "hosts"];'
+replace = 'const ROOTS: [&str; 3] = ["tests", "app/tests", "app/scripts"];'

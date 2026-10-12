@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use super::super::agents;
 use super::super::ask;
 use super::super::machine::{live_folder_in, Harness, Installed, ISOLATION};
+use super::super::{list, Log};
 use super::{trust_claude, Window};
 use crate::rig::Rig;
 use crate::{Error, Result};
@@ -22,12 +23,12 @@ const LAUNCH: &str = "11111111-1111-4111-8111-111111111111";
 
 /// The harnesses the app pastes into: Codex, Pi and OpenCode take their
 /// messages through their own queues.
-pub const PASTED: [Harness; 2] = [Harness::Claude, Harness::Devin];
+const PASTED: [Harness; 2] = [Harness::Claude, Harness::Devin];
 
 /// The harnesses `names` name, which the app pastes into, or why one cannot be
 /// run: a word that names none, or one that takes its messages through its own
 /// queue.
-pub fn pasted_into(names: &[String]) -> Result<Vec<Harness>> {
+pub(super) fn pasted_into(names: &[String]) -> Result<Vec<Harness>> {
     names
         .iter()
         .map(|name| {
@@ -48,10 +49,46 @@ pub fn pasted_into(names: &[String]) -> Result<Vec<Harness>> {
         .collect()
 }
 
-/// A conversation id, which Claude Code and Pi are opened on (the others name
-/// their own): a random one in the shape of a version 4 uuid.
+/// The harnesses a run that sends the app's pastes is asked for: those it names
+/// (`--harness`), and Devin where it names none (the harness that showed the
+/// failure these runs look for: a paste left waiting in its input, on Windows).
+pub(super) fn asked_for(named: Vec<String>) -> Vec<String> {
+    if named.is_empty() {
+        vec![Harness::Devin.name().to_owned()]
+    } else {
+        named
+    }
+}
+
+/// The harnesses a run that sends the app's pastes is asked for (`--harness`, and
+/// Devin where it names none), which the app pastes into (Claude Code and Devin
+/// alone: the others take their messages through their own queues), found on the
+/// machine and said in the `log` ([`Log::found`]): one that is none of them, or
+/// cannot be run, is the error, before anything is spent.
+pub fn pasted_installs(log: &Log) -> Result<Vec<Installed>> {
+    pasted_into(&asked_for(list("harness")))?
+        .into_iter()
+        .map(|harness| log.found(harness))
+        .collect()
+}
+
+/// What a run says of what came of asking Claude to trust the folder of the
+/// window of `who`: `claude: trust: trusted`.
+pub(super) fn trust_line(who: &str, trust: &str) -> String {
+    format!("{who}: trust: {trust}")
+}
+
+/// A conversation id: a random one in the shape of a version 4 uuid.
 pub(super) fn new_session() -> String {
     uuid::Uuid::new_v4().to_string()
+}
+
+/// The conversation id a window of the harness kind `kind` is opened on: a new
+/// one for Claude Code and Pi, which open on an id they are given, and none for
+/// the others, which name their own. A run that opens a window of its own, as the
+/// evals' bare arm does, draws its id here.
+pub fn session_for(kind: &str) -> Option<String> {
+    (kind == "claude-code" || kind == "pi").then(new_session)
 }
 
 /// How a window is to be opened.
@@ -126,6 +163,16 @@ impl<'a> Open<'a> {
         self
     }
 
+    /// [`Open::open`], and what came of asking Claude to trust the folder said in
+    /// the `log` where it was asked, as the run of `who` (`claude: trust: trusted`).
+    pub fn open_telling(self, log: &Log, who: &str) -> Result<Window<'a>> {
+        let window = self.open()?;
+        if let Some(trust) = window.trust() {
+            log.say(trust_line(who, trust));
+        }
+        Ok(window)
+    }
+
     /// Opens it. A Claude window is opened after Claude has been asked to trust
     /// its folder, and says what came of that ([`Window::trust`]).
     pub fn open(self) -> Result<Window<'a>> {
@@ -141,12 +188,9 @@ impl<'a> Open<'a> {
             .as_str()
             .unwrap_or_else(|| harness.kind())
             .to_owned();
-        // Claude and Pi open on an id they are given; the others name their own, which a
-        // window resumed on a conversation is given.
-        let session = self
-            .resume
-            .clone()
-            .or_else(|| (kind == "claude-code" || kind == "pi").then(new_session));
+        // A window resumed on a conversation is given its id; one that is not opens on
+        // an id of its harness's kind ([`session_for`]).
+        let session = self.resume.clone().or_else(|| session_for(&kind));
         let start = match &self.resume {
             Some(resumed) => ask::resume(&agent, resumed)?,
             None => ask::start(&agent, session.as_deref(), None)?,

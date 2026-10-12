@@ -31,8 +31,8 @@ use std::time::Duration;
 
 use cf_e2e::live::ask::{self, Item};
 use cf_e2e::live::report::{self, Check};
-use cf_e2e::live::window::{self, Open, Sent, Window, ANSWER, READY};
-use cf_e2e::live::{self, last_lines, Harness, Log};
+use cf_e2e::live::window::{self, Open, Sent, Window, ANSWER};
+use cf_e2e::live::{self, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::Result;
 
@@ -102,27 +102,20 @@ fn outcome(who: &str, second: &Sent, record: &[Item], screen: &str) -> Check {
 fn check_of(window: &Window, asks: &[Ask; 2]) -> Result<Check> {
     let harness = window.harness();
     let name = harness.name();
-    if !window.still(READY) {
-        let screen = last_lines(&window.screen());
+    if let Err(screen) = window.ready() {
         return Ok(Check::failed(name, WHAT, format!("did not open: {screen}")));
     }
     let [first, second] = asks;
     let sent = window.send(&window.given(&first.message)?, &first.answer)?;
     if !sent.shown {
-        let screen = last_lines(&window.screen());
-        let detail = format!("the first message was not answered: {screen}");
+        let detail = format!("the first message was not answered: {}", window.tail());
         return Ok(Check::failed(name, WHAT, detail));
     }
     window.still(ANSWER);
     window.interrupt(&ask::interrupt(harness.kind())?)?;
     sleep(SETTLE);
     let sent = window.send(&window.given(&second.message)?, &second.answer)?;
-    Ok(outcome(
-        name,
-        &sent,
-        &window.recorded(),
-        &last_lines(&window.screen()),
-    ))
+    Ok(outcome(name, &sent, &window.recorded(), &window.tail()))
 }
 
 #[test]
@@ -131,43 +124,23 @@ fn an_interrupt_at_an_idle_window_leaves_the_conversation_and_the_next_message_a
     let log = Log::new("live interrupt");
     // What a window is opened on is the harness code's to say: built before anything is spent.
     ask::prepare()?;
-    let named = live::list("harness");
-    let harnesses = window::pasted_into(&if named.is_empty() {
-        vec![Harness::Devin.name().to_owned()]
-    } else {
-        named
-    })?;
-    let mut installs = Vec::new();
-    for harness in harnesses {
-        let found = live::installed(harness)?;
-        log.say(format!(
-            "{} is {} ({}); its login is read from {}",
-            harness.name(),
-            found.command().display(),
-            found.version(),
-            found.home().display()
-        ));
-        installs.push(found);
-    }
+    let installs = window::pasted_installs(&log)?;
     let rig = Rig::start(live::rig(&installs, FAKE_AGENT))?;
     let asks = asks();
     let mut checks = Vec::new();
     for install in &installs {
         let name = install.harness().name();
-        let window = Open::new(&rig, install, "interrupt", &format!("interrupt-{name}")).open()?;
-        if let Some(trust) = window.trust() {
-            log.say(format!("{name}: trust: {trust}"));
-        }
+        let window = Open::new(&rig, install, "interrupt", &format!("interrupt-{name}"))
+            .open_telling(&log, name)?;
         checks.push(check_of(&window, &asks)?);
     }
     rig.close()?;
-    log.block("what each check came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::conclude(&log, "what each check came to", &checks)
 }
 
 #[cfg(test)]
 mod tests {
-    use cf_e2e::live::Installed;
+    use cf_e2e::live::{Harness, Installed};
     use cf_e2e::rig::Config;
     use serde_json::json;
 

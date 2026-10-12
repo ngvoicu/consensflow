@@ -24,6 +24,12 @@
 //!   measure are made of.
 //! - [`results`] and [`summarize`] say the reports kept in a table, and [`watch`]
 //!   looks at a project that is running.
+//!
+//! What the rest leans on: the flags every command reads the same way (`cli`),
+//! the stamps of a report (`clock`), the lengths, slices and white space of
+//! JavaScript's strings, which the measured numbers were made in (`js`), and what
+//! goes wrong, as a value (`error`). What a window and a conversation id are, and
+//! how a harness is found on the machine, are `crates/cf-e2e`'s ([`cf_e2e::live`]).
 
 #![forbid(unsafe_code)]
 
@@ -35,7 +41,6 @@ mod js;
 pub mod ledger_file;
 pub mod measure;
 pub mod plan;
-mod random;
 pub mod results;
 pub mod run;
 pub mod scenarios;

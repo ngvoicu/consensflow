@@ -182,13 +182,8 @@ mod on_windows {
         // What a window is opened on is the harness code's to say: built before anything is spent.
         ask::prepare()?;
         let pane_host = cf::pane_host()?.to_string_lossy().into_owned();
-        let devin = live::installed(Harness::Devin)?;
-        log.say(format!(
-            "devin is {} ({}); its login is read from {}; the pane host is {pane_host}",
-            devin.command().display(),
-            devin.version(),
-            devin.home().display()
-        ));
+        let devin = log.found(Harness::Devin)?;
+        log.say(format!("the pane host is {pane_host}"));
         let rig = Rig::start(live::rig(std::slice::from_ref(&devin), FAKE_AGENT))?;
         let mut checks = Vec::new();
         for (index, case) in CASES.iter().enumerate() {
@@ -196,8 +191,7 @@ mod on_windows {
             checks.push(check_of(&rig, &devin, index, case, &pane_host)?);
         }
         rig.close()?;
-        log.block("what each window came to", &report::table(&checks));
-        report::verdict(&checks)
+        report::conclude(&log, "what each window came to", &checks)
     }
 }
 

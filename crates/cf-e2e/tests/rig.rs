@@ -5,9 +5,9 @@
 //! app asks, type to a chief as a human does, and judge what comes of it: the
 //! board, the inboxes, the windows' own records, the daemon's log and event
 //! file, the processes left behind. They are ported one for one from the
-//! JavaScript suites `tests/integration/*.test.mjs` (gone with the port); the
-//! module of a case is the JavaScript file it came from, and its name the
-//! JavaScript test's. (`stand_ins` is new: the stand-in Codex's own transport
+//! JavaScript suites of the integration rig (gone with the port); the module of
+//! a case is the JavaScript file it came from, and its name the JavaScript
+//! test's. (`stand_ins` is new: the stand-in Codex's own transport
 //! on Windows, which the supervisor's cases here do not reach, and the stand-in
 //! agent's part in how a window closes: it leaves when it is asked to, and so
 //! does the job it leaves running. So is `live_support`: what the opt-in live

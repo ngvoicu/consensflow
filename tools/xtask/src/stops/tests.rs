@@ -71,7 +71,7 @@ fn the_stops_a_program_listens_for_include_a_hangup() {
     let asked = Invocation::new(this, ".").args([
         "--ignored",
         "--exact",
-        "plants::stops::tests::helper_hears_a_hangup",
+        "stops::tests::helper_hears_a_hangup",
     ]);
     let ran = process::capture(&asked, &Env::from_process()).unwrap();
     assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);

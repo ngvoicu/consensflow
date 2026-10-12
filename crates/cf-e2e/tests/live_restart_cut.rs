@@ -32,7 +32,7 @@ use cf_e2e::live::members::{
     find, member_as, stand_in_worker, Account, LongCommand, Members, Plan, STAND_IN_WORKER,
 };
 use cf_e2e::live::report::{self, Check};
-use cf_e2e::live::{self, ask, installed, last_lines, seconds, Harness, Log};
+use cf_e2e::live::{self, ask, seconds, Harness, Log};
 use cf_e2e::{Error, Result};
 use serde_json::Value;
 
@@ -137,11 +137,7 @@ fn drive(mut members: Members, log: &Log) -> Result<Account> {
     if at_command.is_none() {
         case.fail(format!(
             "the chief never ran its command: {}",
-            last_lines(
-                &members
-                    .rig()
-                    .screen(pane["id"].as_str().unwrap_or_default())
-            )
+            members.tail(pane["id"].as_str().unwrap_or_default())
         ));
         case.closed(members.close());
         return Ok(case);
@@ -216,11 +212,7 @@ fn drive(mut members: Members, log: &Log) -> Result<Account> {
     let lane = members.lane("chief")?;
     case.say(format!(
         "the chief's screen: {}",
-        last_lines(
-            &members
-                .rig()
-                .screen(lane["pane"]["id"].as_str().unwrap_or_default())
-        )
+        members.tail(lane["pane"]["id"].as_str().unwrap_or_default())
     ));
     case.require(idle.is_some() && delivered.is_some());
     case.closed(members.close());
@@ -252,10 +244,7 @@ fn a_chief_the_quit_cut_in_a_turn_reads_at_rest_and_is_given_what_waits_for_it()
     named.extend(live::list("harness"));
     let mut checks = Vec::new();
     for chief in chiefs(&named)? {
-        let version = installed(chief).map_or_else(
-            |failed| format!("unknown ({failed})"),
-            |install| install.version(),
-        );
+        let version = live::version_of(chief);
         let case = run(chief, &log);
         log.block(&format!("== {}: {version}", chief.name()), &case.text());
         checks.push(Check::new(
@@ -269,8 +258,7 @@ fn a_chief_the_quit_cut_in_a_turn_reads_at_rest_and_is_given_what_waits_for_it()
             version,
         ));
     }
-    log.block("what each chief came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::conclude(&log, "what each chief came to", &checks)
 }
 
 #[cfg(test)]

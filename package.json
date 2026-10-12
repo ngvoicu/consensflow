@@ -55,8 +55,7 @@
     "check:all": "cargo xtask check"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.8",
-    "ws": "8.21.3"
+    "@biomejs/biome": "2.5.8"
   },
   "repository": {
     "type": "git",

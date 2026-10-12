@@ -202,7 +202,7 @@ pub fn results_table(reports: &[Report]) -> String {
     let mut lines = vec![
         "# Chief eval results".to_owned(),
         String::new(),
-        "One row per report in `evals/reports/`, oldest first; `npm run eval:summary` rewrites this file.".to_owned(),
+        "One row per report in `evals/reports/`, oldest first; `cargo xtask eval summary` rewrites this file.".to_owned(),
         "Judgment: how many of the scenario's expectations the chief met. Plumbing: how many of the".to_owned(),
         "board's own checks held (briefs delivered, results back to the chief, members' questions".to_owned(),
         "answered and the answers delivered, every task on the board). On board: questions put to the".to_owned(),

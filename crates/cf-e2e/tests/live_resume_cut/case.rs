@@ -14,7 +14,7 @@ use cf_e2e::live::ask::{self, Record};
 use cf_e2e::live::claude::{record, runs, transcript_file, Status};
 use cf_e2e::live::members::{find, Account};
 use cf_e2e::live::window::{Open, Window, ANSWER, READY};
-use cf_e2e::live::{last_lines, seconds, until, Harness, Installed, Log};
+use cf_e2e::live::{seconds, until, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::{files, Result};
 use serde_json::Value;
@@ -100,11 +100,8 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
     let claude = run.harness() == Harness::Claude;
     let id = format!("resume-cut-{}-{}", run.harness().name(), case.name());
     let cut = run.window(&id, None)?;
-    if !cut.still(READY) {
-        said.fail(format!(
-            "the window did not open: {}",
-            last_lines(&cut.screen())
-        ));
+    if let Err(screen) = cut.ready() {
+        said.fail(format!("the window did not open: {screen}"));
         return Ok(());
     }
     let watching = cut
@@ -138,7 +135,7 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
         said.fail(format!(
             "the turn was never at work in {} s: {}",
             WORK.as_secs(),
-            last_lines(&cut.screen())
+            cut.tail()
         ));
         return Ok(());
     }
@@ -148,10 +145,7 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
     // The harnesses that name their own conversation have named it by now.
     cut.recorded();
     let Some(session) = cut.session() else {
-        said.fail(format!(
-            "no conversation was recorded: {}",
-            last_lines(&cut.screen())
-        ));
+        said.fail(format!("no conversation was recorded: {}", cut.tail()));
         return Ok(());
     };
 
@@ -193,7 +187,7 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
     }
     said.say(change(before, &again.recorded()));
     said.say(reading(run.read(&session).as_ref()));
-    said.say(format!("its screen: {}", last_lines(&again.screen())));
+    said.say(format!("its screen: {}", again.tail()));
 
     // A message as the daemon pastes one: does the window take it, and alone?
     again.paste(&again.given(SECOND)?)?;

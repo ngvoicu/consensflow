@@ -1,10 +1,9 @@
-//! What the evals and the live tools (`evals/`, `tests/live/`) ask of the
-//! harness code. They start the real harnesses themselves, in windows of the
+//! What the evals (`crates/cf-evals`) and the live tests of `crates/cf-e2e` ask of
+//! the harness code. They start the real harnesses themselves, in windows of the
 //! pane host, and need what the daemon needs to open one the way the app does
 //! and to read what comes of it, so they ask through the test binary
-//! `harness-ask` (`live::ask` of `crates/cf-e2e` runs it, and so does
-//! `tests/rust-harness.mjs` for the JavaScript tools that are left), which has
-//! no logic of its own: this module is the answers, one function per question.
+//! `harness-ask` (`live::ask` of `crates/cf-e2e` runs it), which has no logic of
+//! its own: this module is the answers, one function per question.
 //!
 //! A question is a JSON object with an `op`, and its answer one JSON value:
 //!

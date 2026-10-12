@@ -1,14 +1,15 @@
-//! What ends a run of plants before its end: Ctrl-C, and where the system has
-//! them a terminal that is closed and a `kill`. A plant is in the sources while
-//! its runs go, so a stop is not the end of this program: it is heard, the run in
-//! hand is ended, and the driver puts every file back before it ends.
+//! What ends a run before its end: Ctrl-C, and where the system has them a
+//! terminal that is closed and a `kill`. The plants listen for it (a plant is in
+//! the sources while its runs go, so a stop is not the end of this program: it is
+//! heard, the run in hand is ended, and the driver puts every file back before it
+//! ends), and so does `windows`, whose run on the Windows machine would go on
+//! there when this side is stopped, and is told to end.
 //!
 //! tokio hears them: a handler is installed for each and nothing is blocked, so
 //! the programs a run starts have no signal blocked or ignored on account of
 //! this one (as they would if this program had masked them and waited). A stop is
 //! kept until it is asked for; but tokio tells it to who listens only when the
-//! runtime it was made in gets its turn, which is what [`Execute`](super::runs::Execute)
-//! gives it.
+//! runtime it was made in gets its turn, which the runner of the plants gives it.
 
 use std::io;
 use std::task::{Context, Poll};

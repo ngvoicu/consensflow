@@ -241,9 +241,10 @@ fn a_window_opens_as_the_app_opens_one_takes_a_paste_answers_and_is_read_through
     // The stand-in is the Claude Code of this rig, and asks nothing of a folder.
     let home = rig.var("HOME").unwrap_or_default().to_owned();
     let install = Installed::at(Harness::Claude, FAKE_AGENT, &home);
+    // The trust it asked of the folder is said where it was asked: the stand-in is asked none.
     let window = Open::new(&rig, &install, "paste", "paste-claude")
         .without_trust()
-        .open()?;
+        .open_telling(&live::Log::new("a window"), "claude")?;
     let folder = Path::new(&home)
         .join(".consensflow-candidate")
         .join("live")
@@ -255,6 +256,9 @@ fn a_window_opens_as_the_app_opens_one_takes_a_paste_answers_and_is_read_through
     );
     assert!(window.still(secs(60)), "{}", window.screen());
     assert!(window.screen().contains("fake agent started on"));
+    // A window that drew its prompt is ready, and says nothing; its screen ends in what it drew.
+    assert_eq!(window.ready(), Ok(()));
+    assert!(window.tail().contains("fake agent started on"));
 
     // The app's settings for the launch were written in the folder, and the window runs through
     // them, with no MCP server and no browser, on the model of the harness's agent.
@@ -327,6 +331,9 @@ fn a_window_opens_as_the_app_opens_one_takes_a_paste_answers_and_is_read_through
         Ok(rig.exits().iter().any(|exit| exit["id"] == "paste-claude"))
     })?;
     assert!(window.closed());
+    // A window that ended did not draw its prompt, and what it says is what its screen ended in.
+    let ended = window.ready().unwrap_err();
+    assert!(ended.contains("fake agent started on"), "{ended}");
     drop(window);
     rig.close()?;
     Ok(())

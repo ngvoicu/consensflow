@@ -1,5 +1,5 @@
-//! `cargo xtask departures` (landing S10): the traces of the tests the Rust
-//! engine departs from Node's on purpose, recorded again. Each test named in
+//! `cargo xtask departures`: the traces of the tests the Rust engine departs
+//! from Node's on purpose, recorded again. Each test named in
 //! `DEPARTED` (`crates/cf-engine/tests/dispatcher/traces.rs`) runs with
 //! `CF_RERECORD_DEPARTED` set and writes the trace of what the engine did into
 //! `crates/cf-engine/tests/departures/`, in the shape of Node's, where it is held

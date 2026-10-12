@@ -1,12 +1,12 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { assertBuilt, choose, NATIVE_CF } from './choice.mjs'
 
 /**
- * Every test runs against a throwaway CONSENSFLOW_HOME and throwaway harness
- * homes. The env object is passed explicitly to every module call — modules
- * never read process.env on their own, which is what makes this guard airtight.
+ * Every test of the page (`app/tests`) runs against a throwaway CONSENSFLOW_HOME
+ * and throwaway harness homes. The env object is passed explicitly to every
+ * program the test starts, which never reads the machine's own environment: that
+ * is what makes this guard airtight.
  */
 export function tempEnv() {
   const root = mkdtempSync(join(tmpdir(), 'cfv3-'))
@@ -42,21 +42,6 @@ export const windowsEnv = () =>
       }
     : {}
 
-/**
- * How a test starts the daemon: `cf ui --json --no-open` of the native `cf`
- * this checkout builds, or the command `CONSENSFLOW_TEST_DAEMON` names (a JSON
- * array, a command and its arguments; the words are tests/choice.mjs's). The
- * daemon that starts is held to the native one by the start line in its log
- * (`assertStarted`). `named` is what a test sets to choose in its own words, not
- * the environment's.
- */
-export function daemonCommand({ named = process.env.CONSENSFLOW_TEST_DAEMON } = {}) {
-  const chosen = choose('CONSENSFLOW_TEST_DAEMON', named)
-  if (chosen === null) assertBuilt()
-  const [command, ...args] = chosen ?? [NATIVE_CF, 'ui', '--json', '--no-open']
-  return { command, args }
-}
-
 const WINDOWS = process.platform === 'win32'
 /** The name a fake is found at: as given on POSIX, `.cmd` on Windows unless it already says so. */
 function fakePath(file) {
@@ -68,7 +53,8 @@ function fakePath(file) {
  * on Windows, since Windows has no shebang. It prints `output` (or the file
  * `outputFile`), creates `touch` when asked, adds a line to `log` each time it
  * is run when asked (to count its runs), and exits with `exit`. Returns the
- * path the fake is found at, which is what `harnessPath` resolves.
+ * path the fake is found at, which is what the daemon's lookup of a harness's
+ * CLI on PATH resolves.
  */
 export function fakeExecutable(
   file,
