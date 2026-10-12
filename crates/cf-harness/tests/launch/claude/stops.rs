@@ -1,6 +1,6 @@
 //! A Claude window the daemon interrupted, and how the look at it reads it:
 //! on the records Claude 2.1.292 wrote in two live runs of
-//! `npm run live:stops` (scrubbed by `tests/live/scrub-transcript.mjs`).
+//! `npm run live:stops` (scrubbed by `cargo xtask scrub-transcript`).
 //!
 //! `stopped-before-a-word`: the daemon paused the task a moment after its
 //! brief and pressed Escape; Claude, in the hooks of the prompt, stopped and

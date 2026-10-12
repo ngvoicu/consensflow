@@ -16,7 +16,7 @@
     "eval": "cargo xtask eval",
     "eval:summary": "cargo xtask eval summary",
     "watch": "cargo xtask watch",
-    "eval:windows": "node tests/live/windows-matrix.mjs",
+    "eval:windows": "cargo xtask windows-matrix",
     "test:integration": "cargo xtask test integration",
     "test:daemons": "cargo xtask test daemons",
     "test:agents": "cargo xtask test agents",
@@ -51,7 +51,7 @@
     "live:terminal": "cargo xtask live terminal",
     "live:designer": "cargo xtask live designer",
     "live:approval": "cargo xtask live approval",
-    "windows": "node tests/live/windows.mjs",
+    "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },
   "devDependencies": {

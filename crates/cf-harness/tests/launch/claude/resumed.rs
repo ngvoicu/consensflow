@@ -1,7 +1,7 @@
 //! A Claude window opened again on a conversation the app's quit cut in a turn,
 //! and how the look at it reads it: on the records Claude 2.1.296 left in two
 //! live runs of `npm run live:resume-cut` (scrubbed by
-//! `tests/live/scrub-transcript.mjs`).
+//! `cargo xtask scrub-transcript`).
 //!
 //! `quit-before-a-word`: the process was killed as soon as Claude's status read
 //! busy, before a word of its answer: the record ends on the user's message.
