@@ -7,8 +7,9 @@
 //! file, the processes left behind. They are ported one for one from the
 //! JavaScript suites `tests/integration/*.test.mjs` (gone with the port); the
 //! module of a case is the JavaScript file it came from, and its name the
-//! JavaScript test's. (`stand_ins` is new: the stand-in Codex's own transport
-//! on Windows, which the supervisor's cases here do not reach, and the stand-in
+//! JavaScript test's. (`stand_in_codex` is new: the stand-in Codex's own transport
+//! on Windows, which the supervisor's cases here do not reach, and what a window
+//! the daemon opens on it runs on; and `stand_ins`: the stand-in
 //! agent's part in how a window closes: it leaves when it is asked to, and so
 //! does the job it leaves running. So is `live_support`: what the opt-in live
 //! tests stand on, and `live_base`: the rest of it, which the stand-in agent
@@ -20,7 +21,11 @@
 //! question judged from what the daemon wrote of it, and the app quit and started
 //! again.
 //! So is `background_work`: what ConsensFlow does with the work
-//! a worker's turn left running, and how a window closes. So is `approval`: what
+//! a worker's turn left running (and not with the servers its harness keeps,
+//! which the stand-in agent starts after the first message, as Claude Code does,
+//! nor with the browser one of them launches),
+//! and how a window closes. (The bugs the owner hit in real use are `regressions`,
+//! a test of its own, on this rig.) So is `approval`: what
 //! the daemon types into a window while the words that were for it wait for the
 //! human, where the stand-in agent stops a turn at the Escape it is pressed. So is
 //! `pending_agents`: what it does with the agents a turn left running, which no
@@ -65,6 +70,8 @@ mod live_members;
 mod live_support;
 #[path = "rig/pending_agents.rs"]
 mod pending_agents;
+#[path = "rig/stand_in_codex.rs"]
+mod stand_in_codex;
 #[path = "rig/stand_ins.rs"]
 mod stand_ins;
 #[path = "rig/waiting_notes.rs"]

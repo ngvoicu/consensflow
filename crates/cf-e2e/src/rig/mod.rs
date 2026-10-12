@@ -72,6 +72,7 @@ pub struct Config {
     existing_root: Option<PathBuf>,
     daemon: Option<PathBuf>,
     stand_in_records: Option<PathBuf>,
+    codex: Option<PathBuf>,
     devin: Option<PathBuf>,
 }
 
@@ -87,8 +88,20 @@ impl Config {
             existing_root: None,
             daemon: None,
             stand_in_records: None,
+            codex: None,
             devin: None,
         }
+    }
+
+    /// With `stand_in`, the stand-in Codex (the `fake-codex` binary of this crate),
+    /// as the `codex` the windows find on their `PATH`: the windows of Codex's
+    /// agents run on it, each on a thread of its own, its TUI waiting to be ended,
+    /// its record in the rig's Codex home. A script that runs it, so Unix's: there
+    /// is no such shim on Windows.
+    #[must_use]
+    pub fn codex(mut self, stand_in: impl Into<PathBuf>) -> Self {
+        self.codex = Some(stand_in.into());
+        self
     }
 
     /// With the windows of a Devin agent running `program`, the stand-in for Devin

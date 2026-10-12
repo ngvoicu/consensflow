@@ -13,7 +13,7 @@ use cf_base::refusal::Refusal;
 use cf_harness::contract::{Adapter, Agent, LaunchId, Pane, Records, Work};
 use cf_harness::seams::Time;
 use cf_ledger::{Ledger, LedgerError, ParticipantView, ProjectView};
-use cf_proto::panes::Background;
+use cf_proto::panes::{Background, Servers};
 use cf_proto::trace::TraceLine;
 
 use crate::host::EngineHost;
@@ -209,8 +209,10 @@ impl Limits {
 /// has no background work to tell of.
 pub trait BackgroundWork {
     /// A turn is about to begin in `pane`: whatever its tree runs now came
-    /// before it, and is no turn's work.
-    fn mark<'a>(&'a self, pane: &'a Pane) -> Work<'a, ()>;
+    /// before it, and is no turn's work. `servers` says how the window's harness
+    /// keeps its own processes (`Adapter::servers`): they, and what they start,
+    /// are no turn's work either, however late each began.
+    fn mark<'a>(&'a self, pane: &'a Pane, servers: Servers) -> Work<'a, ()>;
     /// What `pane`'s tree runs that began after its last mark.
     fn running<'a>(&'a self, pane: &'a Pane) -> Work<'a, Background>;
 }

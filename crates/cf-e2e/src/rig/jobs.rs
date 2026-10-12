@@ -1,8 +1,8 @@
 //! The jobs a window's stand-in agent left running: what an agent starts in the
-//! background and ends its turn with, and the server a harness starts as it
-//! opens a window. The stand-in writes their files in `jobs/` beside the
-//! daemon's home, `<label>-<window's process id>-<n>` with a kind after a dot,
-//! and a case reads them here:
+//! background and ends its turn with, and the servers a harness starts as it
+//! opens a window, and what they start. The stand-ins write their files in `jobs/`
+//! beside the daemon's home, `<label>-<window's process id>-<n>` with a kind after
+//! a dot, and a case reads them here:
 //!
 //! - `.pid`: its process, written once it can be asked to end;
 //! - `.released`: it was asked to end (a signal) and said so before it went, as a
@@ -58,7 +58,10 @@ impl Rig {
     /// The jobs named `label` that the windows' stand-in agents started and
     /// that can be asked to end (their process id is written), in the order of
     /// their names. A window's own are `job`; the server it starts as it opens,
-    /// when `CF_TEST_MCP_SERVER` is set, is `server`.
+    /// when `CF_TEST_MCP_SERVER` is set, is `server`, and the browser that server
+    /// launches (`CF_TEST_MCP_BROWSER`) is `browser`. A stand-in Codex's windows
+    /// open `plugin` servers (`CF_TEST_CODEX_SERVERS`), the first of which starts
+    /// `worker` processes of its own (`CF_TEST_CODEX_WORKERS`).
     pub fn jobs(&self, label: &str) -> Vec<Job> {
         listed(&self.root.join(FOLDER), label)
     }

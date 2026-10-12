@@ -56,7 +56,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::agents::Agents;
-use crate::background::{Jobs, THINKING};
+use crate::background::{Group, Jobs, Server, THINKING};
 use crate::stop::Stop;
 
 /// What a window knows of itself that decides how it answers.
@@ -69,7 +69,10 @@ pub struct Window {
     /// The conversation, for the hook's event.
     pub session: String,
     /// The jobs the window starts.
-    pub jobs: Jobs,
+    pub jobs: Arc<Jobs>,
+    /// When its harness starts its server: the window's first message is what
+    /// one that is late waits for.
+    pub server: Server,
     /// The background agents the window starts.
     pub agents: Agents,
     /// Where a turn the window begins by itself is queued: the message that
@@ -225,11 +228,15 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         // agent began.
         thread::sleep(THINKING);
         let (wake, woken) = (window.wake.clone(), format!("WOKEN {words}"));
-        window.jobs.start("job", seconds, deaf, move || {
-            if wakes {
-                let _ = wake.send(woken);
-            }
-        })?;
+        // A command the agent's tool runs is in a group of its own, as a harness
+        // runs it.
+        window
+            .jobs
+            .start("job", seconds, deaf, Group::Own, move || {
+                if wakes {
+                    let _ = wake.send(woken);
+                }
+            })?;
         return Ok(Reply::Text(words));
     }
     if let Some(agents) = pattern::once(&AGENTS, r"(?m)^AGENTS (\d+) (\d+) (.+)$").captures(text) {
@@ -330,7 +337,8 @@ mod tests {
             participant: "chief".into(),
             settings: None,
             session: "sess".into(),
-            jobs: Jobs::new(Path::new("/nowhere/consensflow"), 1),
+            jobs: Arc::new(Jobs::new(Path::new("/nowhere/consensflow"), 1)),
+            server: Server::Never,
             agents: Agents::default(),
             wake: std::sync::mpsc::channel().0,
             stop: Arc::new(Stop::default()),

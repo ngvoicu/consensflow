@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
+use cf_proto::panes::Servers;
 
 use super::channel::{send, Channel, Session, Shown, Target};
 use super::{launch, role};
@@ -136,6 +137,21 @@ impl Adapter for CodexAdapter {
                 }),
             })
         })
+    }
+
+    /// Codex opens the window's servers (its plugins': computer use, a REPL) as
+    /// the window starts, each in a group of its own under `codex`, the harness's
+    /// own process, which is in the window's group: they are there when the first
+    /// turn begins, and what they start later (a REPL's workers, as a tool is
+    /// called) is the harness's. What `codex` starts is the agent's: its helper,
+    /// `codex-code-mode-host`, and its commands, which are believed to start
+    /// under it (the tree was probed on Codex 0.162.1 with no command running).
+    fn servers(&self) -> Servers {
+        if self.services.env.on_windows() {
+            Servers::Unknown
+        } else {
+            Servers::AtLaunch
+        }
     }
 }
 

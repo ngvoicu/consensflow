@@ -3,11 +3,11 @@
 //! host they run, so a command here has nothing to build first and hands its
 //! arguments to `cargo test`: the CLI's (`cli`), the daemon's as a process
 //! (`daemon`), the rig's, with the daemon and the pane host in real terminals
-//! (`rig`), the regressions, a rig case for each bug the owner met
-//! (`regressions`), and the daemon under load (`load`, which is ignored unless
-//! asked for). The live tests are ignored too, and what they run is the
-//! machine's own harness on its own login, which spends real quota: they are no
-//! part of `check`, and a person asks for each by name, by [`crate::live`]'s one
+//! (`rig`), the regressions (`regressions`: the rig's, one case for each bug the
+//! owner hit in real use), and the daemon under load (`load`, which is ignored
+//! unless asked for). The live tests are ignored too, and what they run is the machine's own
+//! harness on its own login, which spends real quota: they are no part of
+//! `check`, and a person asks for each by name, by [`crate::live`]'s one
 //! command. The packaged smoke (`smoke`) is a test of the same crate, ignored
 //! the same way, and is run by its own command, [`crate::smoke`], which takes
 //! the app to run it on.
@@ -21,7 +21,7 @@ use crate::process::{self, Invocation};
 pub const COMMANDS: &[Command] = &[
     Command {
         words: &["test", "daemons"],
-        about: "Run the daemon suites and the rig's (the daemon, rig and regressions tests of cf-e2e) against the native daemon, built for them",
+        about: "Run the daemon suites, the rig's and the regressions (the daemon, rig and regressions tests of cf-e2e) against the native daemon, built for them",
         usage: "[cargo test arguments: --offline, or a test's name, or -- and libtest's]",
         run: Run::Native(daemons),
     },
@@ -30,6 +30,12 @@ pub const COMMANDS: &[Command] = &[
         about: "Run the rig's suites (the rig and regressions tests of cf-e2e): the daemon and the pane host in real terminals, with stand-in agents in the windows",
         usage: "[cargo test arguments: --offline, or a test's name, or -- and libtest's]",
         run: Run::Native(integration),
+    },
+    Command {
+        words: &["test", "regressions"],
+        about: "Run the regressions (the regressions test of cf-e2e): a case for each bug the owner hit in real use, on the rig, asserting what the owner should have seen",
+        usage: "[cargo test arguments: --offline, or a test's name, or -- and libtest's]",
+        run: Run::Native(regressions),
     },
     Command {
         words: &["test", "clis"],
@@ -73,6 +79,11 @@ const INTEGRATION: Suite = Suite {
     filter: None,
     ignored: false,
 };
+const REGRESSIONS: Suite = Suite {
+    tests: &["regressions"],
+    filter: None,
+    ignored: false,
+};
 const CLIS: Suite = Suite {
     tests: &["cli"],
     filter: None,
@@ -102,6 +113,10 @@ fn daemons(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32,
 
 fn integration(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
     run(context, INTEGRATION, args)
+}
+
+fn regressions(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
+    run(context, REGRESSIONS, args)
 }
 
 fn clis(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
@@ -175,6 +190,7 @@ mod tests {
         for words in [
             ["test", "daemons"],
             ["test", "integration"],
+            ["test", "regressions"],
             ["test", "clis"],
             ["test", "agents"],
             ["test", "load"],
@@ -226,6 +242,18 @@ mod tests {
     }
 
     #[test]
+    fn the_regressions_suite_is_the_regressions_test_of_cf_e2e_and_no_other() {
+        assert_eq!(
+            line(REGRESSIONS, &[]),
+            "cargo test -p cf-e2e --test regressions"
+        );
+        assert_eq!(
+            line(REGRESSIONS, &["--offline", "--", "--nocapture"]),
+            "cargo test -p cf-e2e --test regressions --offline -- --nocapture"
+        );
+    }
+
+    #[test]
     fn the_agents_proof_is_the_agents_proof_cases_of_the_daemon_test() {
         assert_eq!(
             line(AGENTS, &[]),
@@ -258,7 +286,7 @@ mod tests {
     fn no_suite_here_names_a_live_test_which_only_the_live_command_runs() {
         // Nothing that `check` or the workflows run asks for one: they are ignored,
         // and `live` is the one command that asks for the ignored.
-        for suite in [DAEMONS, INTEGRATION, CLIS, AGENTS, LOAD, SMOKE] {
+        for suite in [DAEMONS, INTEGRATION, REGRESSIONS, CLIS, AGENTS, LOAD, SMOKE] {
             assert!(
                 suite.tests.iter().all(|test| !test.starts_with("live_")),
                 "{:?}",

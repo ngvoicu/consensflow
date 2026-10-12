@@ -82,10 +82,10 @@ cf-e2e = { path = ".", features = ["test-support"] }
 # Node's `--import` takes a module as a file URL, on Windows as anywhere.
 url.workspace = true
 
-# Signals by process id, whether a process is there, and the terminal's raw
-# mode, which std does not give (and this crate forbids unsafe code).
+# Signals by process id, whether a process is there, the group it is in, and the
+# terminal's raw mode, which std does not give (and this crate forbids unsafe code).
 [target.'cfg(unix)'.dependencies]
-nix = { workspace = true, features = ["signal", "term"] }
+nix = { workspace = true, features = ["process", "signal", "term"] }
 
 # The console's raw mode for the stand-in agent, which std does not give.
 [target.'cfg(windows)'.dependencies]

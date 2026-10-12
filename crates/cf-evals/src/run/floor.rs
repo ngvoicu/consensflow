@@ -149,10 +149,11 @@ mod tests {
             Duration::from_millis(30),
             Duration::from_secs(5),
         );
-        // It looked again once the output held, and waited the hold out: how many
-        // looks that took is the machine's, which a slow one makes fewer.
+        // It looked again once the output held (the fourth look is the first that
+        // finds it unchanged), and waited the hold out: how many looks that took is
+        // the machine's, and one slow sleep can outlast the whole hold.
         assert!(
-            looks.get() > 4,
+            looks.get() >= 4,
             "it looked after the output held: {}",
             looks.get()
         );

@@ -9,9 +9,13 @@
 //! ends with the code 3). A key pressed in a turn (the Escape that stops it) is
 //! ignored: this window is never stopped.
 //!
-//! With `CF_TEST_MCP_SERVER` set, every window starts a job as it opens, before
-//! any turn: a server the harness started with it. And the program is the job
-//! too (`background`): started with `--background-job` first, it is not a
+//! With `CF_TEST_MCP_SERVER` set, every window starts a server of its harness,
+//! in the group of its program (`background`): as it opens, before any turn, or,
+//! with the word `late`, as it takes its first message, after the daemon has
+//! marked where that turn began, as Claude Code starts its servers; with
+//! `CF_TEST_MCP_BROWSER` set the server launches a browser of its own, in a session
+//! of its own, as `@playwright/mcp` and `chrome-devtools-mcp` do. And the
+//! program is the job too: started with `--background-job` first, it is not a
 //! window but the work a window left running.
 //!
 //! Escape stops the turn at work, as it stops Claude's: a turn that works (a
@@ -67,14 +71,11 @@ use regex::Regex;
 use serde_json::json;
 
 use agents::Agents;
-use background::Jobs;
+use background::{Jobs, Server};
 use records::{note_process, Records, INTERRUPTED};
 use reply::{is_session_of, reply_to, Reply, Window};
 use stop::Stop;
 use terminal::{Event, Keys};
-
-/// How long the server a window starts as it opens runs: past any case.
-const SERVER_SECONDS: u64 = 600;
 
 /// What a window with no login says on its screen, as Pi says it on a machine
 /// that has none.
@@ -174,16 +175,18 @@ fn run(
         participant,
         settings: launch.settings.clone(),
         session: launch.session.clone(),
-        jobs: Jobs::new(Path::new(&home), pid),
+        jobs: Arc::new(
+            Jobs::new(Path::new(&home), pid)
+                .launching_a_browser(own_var("CF_TEST_MCP_BROWSER").as_deref()),
+        ),
+        server: Server::of(own_var("CF_TEST_MCP_SERVER").as_deref()),
         wake: turns.clone(),
         stop: Arc::clone(&stop),
         agents: Agents::default(),
     };
     // A server the harness starts with its window, before any turn, as an MCP
-    // server is.
-    if own_var("CF_TEST_MCP_SERVER").is_some_and(|server| !server.is_empty()) {
-        window.jobs.start("server", SERVER_SECONDS, false, || {})?;
-    }
+    // server may be (one that is late begins with the first message instead).
+    window.server.as_the_window_opens(&window.jobs)?;
     {
         let status_file = status_file.clone();
         thread::spawn(move || {
@@ -269,7 +272,8 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
     let began = Instant::now();
     // Only the first message of the window is in the hooks of its prompt: the
     // words that go in later, a brief they carry among them, do not put it back.
-    let hooks = hooks_of(text).filter(|_| records.ordinal() == 0);
+    let first = records.ordinal() == 0;
+    let hooks = hooks_of(text).filter(|_| first);
     if hooks.is_none() {
         records.status(pid, "busy").map_err(failed)?;
     }
@@ -279,6 +283,10 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
             json!({ "type": "user", "message": { "role": "user", "content": text } }),
         )
         .map_err(failed)?;
+    // The harness starts its servers as it takes the first message, which now shows.
+    if first {
+        window.server.as_the_first_message_shows(&window.jobs);
+    }
     if let Some(hooks) = hooks {
         // Stopped there, the turn leaves nothing of itself: Claude puts the
         // message back in its input box, and its status never left idle.

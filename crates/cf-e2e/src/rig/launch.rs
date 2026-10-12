@@ -55,7 +55,7 @@ impl Rig {
         };
         let workspace = root.join("workspace");
         files::make_dir(&workspace)?;
-        let fake_bin = write_fake_install(&root, &config.stand_in, config.devin.as_deref())?;
+        let fake_bin = write_fake_install(&root, &config)?;
         let env = environment(&root, &fake_bin, &config);
         // A restart over the same home keeps its roster, as the app's does: the
         // agents a case wrote are still the ones its chief and staff run on.

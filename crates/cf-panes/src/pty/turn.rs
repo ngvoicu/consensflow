@@ -1,18 +1,20 @@
 //! Where a pane's turn began, and what it started and left running (see
 //! [`crate::background`]). The daemon says a turn is about to begin
-//! (`pane.mark`: [`PaneTable::mark`]) and asks, when the turn ends, what the
-//! pane's tree has running that was not there then ([`PaneTable::background`]).
-//! A close lists the same for the exit it sends: what is about to be ended is
-//! what the window left running ([`Pane::keep_background`]).
+//! (`pane.mark`: [`PaneTable::mark`]), and how its harness keeps its servers, and
+//! asks, when the turn ends, what the pane's tree has running that was not there
+//! then ([`PaneTable::background`]). A close lists the same for the exit it
+//! sends: what is about to be ended is what the window left running
+//! ([`Pane::keep_background`]). The window's group is the pane's own process
+//! group (`Pane::process_group_id`), which the close signals whole.
 
 use std::io;
 #[cfg(windows)]
 use std::sync::Arc;
 
-use cf_proto::panes::{Background, BackgroundProcess};
+use cf_proto::panes::{Background, BackgroundProcess, Servers};
 
 use super::{Pane, PaneError, PaneKey, PaneTable};
-use crate::background::{Baseline, Member};
+use crate::background::{Baseline, Kept, Member};
 use crate::ended::EndedSlot;
 
 /// A pane's tree, held where the table's lock is not: looking at it walks the
@@ -76,19 +78,23 @@ impl Pane {
 
 impl PaneTable {
     /// A turn begins in the pane: every process its tree has now came before
-    /// it, and is not the turn's.
-    pub fn mark(&self, key: &PaneKey) -> Result<(), PaneError> {
-        let tree = self
-            .lock_panes()?
-            .get(key)
-            .ok_or_else(|| PaneError::NotFound(key.clone()))?
-            .tree();
+    /// it, and is not the turn's. Where `servers` says how the pane's harness
+    /// keeps its own, what they are, and what they start, is not the turn's
+    /// either, whenever it began ([`crate::background`]).
+    pub fn mark(&self, key: &PaneKey, servers: Servers) -> Result<(), PaneError> {
+        let (tree, group) = {
+            let panes = self.lock_panes()?;
+            let pane = panes
+                .get(key)
+                .ok_or_else(|| PaneError::NotFound(key.clone()))?;
+            (pane.tree(), pane.process_group_id)
+        };
         let members = tree.members()?;
         self.lock_panes()?
             .get_mut(key)
             .ok_or_else(|| PaneError::NotFound(key.clone()))?
             .baseline
-            .mark(&members);
+            .mark(&members, Kept::of(servers, group));
         Ok(())
     }
 

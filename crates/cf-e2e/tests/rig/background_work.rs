@@ -13,6 +13,16 @@
 //!   turn the job's end wakes is the one whose end is.
 //! - Work that was there before the turn (a server the harness started with its
 //!   window) is not the turn's.
+//! - Nor is a server the harness starts after the first message was marked, which
+//!   is where Claude Code starts its MCP servers (found on 3.0.1, where a worker's
+//!   task was never done): it stays in the group of the window's program, and a
+//!   command the agent's tool runs is in a group of its own. The stand-in starts
+//!   its server so (`CF_TEST_MCP_SERVER=late`), well past the pass that marks the
+//!   turn, and a Claude worker's turn still ends with its result; with a job of the
+//!   agent's beside the server, the window is held for the job alone. Nor is what
+//!   the server starts, in whatever group: the browser of `@playwright/mcp` and
+//!   `chrome-devtools-mcp`, which the stand-in's server launches in a session of
+//!   its own (`CF_TEST_MCP_BROWSER`).
 //! - A window that closes with the job running (a cancel) asks it to end first,
 //!   and whoever gave the task is told the job was running. A pause closes
 //!   nothing.
@@ -26,6 +36,8 @@
 use std::thread;
 use std::time::Instant;
 
+#[cfg(unix)]
+use cf_e2e::process::group_of;
 use cf_e2e::process::is_alive;
 use cf_e2e::rig::{Config, Job, Project, Rig};
 use cf_e2e::Error;
@@ -80,6 +92,18 @@ fn until_the_turn_ended(rig: &Rig, project: &Project) -> cf_e2e::Result<()> {
     })
 }
 
+/// What the board says a window held for one process is doing: the count, and
+/// the command it names after it (what the line holds of a long path is no more
+/// than the first of it).
+fn assert_held_for_one_process(activity: &Value) {
+    let reason = activity["reason"].as_str().unwrap_or_default();
+    let named = reason.strip_prefix("background work running (1 process): ");
+    assert!(
+        named.is_some_and(|command| !command.is_empty()),
+        "the board says it waits for one process, and which: {activity}"
+    );
+}
+
 /// The results the chief has been given, oldest first.
 fn results(project: &Project) -> cf_e2e::Result<Vec<Value>> {
     Ok(project
@@ -115,10 +139,9 @@ fn a_turn_that_ends_with_the_job_it_started_running_is_not_the_result_the_job_en
         "working",
         "the turn ended with the job running: the task has no result yet"
     );
-    assert_eq!(
-        project.lane("worker")?["activity"],
-        json!({ "state": "working", "reason": "background work running (1 process)" })
-    );
+    let activity = project.lane("worker")?["activity"].clone();
+    assert_eq!(activity["state"], "working");
+    assert_held_for_one_process(&activity);
     assert!(is_alive(job.pid()), "the job runs on");
     assert_eq!(
         results(&project)?,
@@ -193,6 +216,154 @@ fn work_the_window_had_before_its_turn_is_not_the_turns_a_server_the_harness_sta
         Ok(!results(&project)?.is_empty())
     })?;
     assert_eq!(results(&project)?[0]["body"], "WORKER_OK");
+    rig.close()?;
+    Ok(())
+}
+
+/// What these cases cannot hold on Windows, where a job object has no process
+/// groups for the host to tell by: a server the harness starts after the first
+/// message was marked is the turn's work there, and holds the first task's result
+/// (written as a limit in the engine's `background` module). So they are Unix's:
+/// where the host looks at the tree at all, which is macOS.
+///
+/// The server begins `THINKING` after the window's first message shows in its
+/// record, past the pass that marks where the turn began, and the turn outlasts it.
+#[cfg(unix)]
+#[test]
+fn a_server_the_harness_starts_after_the_first_message_was_marked_holds_nothing_the_workers_task_is_done(
+) -> Outcome {
+    // Found on 3.0.1: Claude Code starts its MCP servers as it takes its first
+    // message, and the user's own held a worker's task for ever.
+    let rig = Rig::start(settling().var("CF_TEST_MCP_SERVER", "late"))?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    rig.tell(
+        project.id(),
+        &format!(
+            "DISPATCH --tier {} SLEEP 15 Reply with exactly: WORKER_OK",
+            tier(&added)
+        ),
+    )?;
+    // The chief's server and the worker's run while the worker's turn is at work.
+    rig.wait_for("the servers to run", secs(60), || {
+        let servers = rig.jobs("server");
+        Ok(servers.len() >= 2 && servers.iter().all(|server| is_alive(server.pid())))
+    })?;
+    assert_eq!(
+        project.task(1)?["state"],
+        "working",
+        "the servers began while the turn was at work"
+    );
+    rig.wait_for("T-1 to be done", secs(60), || {
+        Ok(project.task(1)?["state"] == "done")
+    })?;
+    rig.wait_for("the result to reach the chief", secs(30), || {
+        Ok(!results(&project)?.is_empty())
+    })?;
+    assert_eq!(results(&project)?[0]["body"], "WORKER_OK");
+    rig.close()?;
+    Ok(())
+}
+
+/// The owner's own setup: `@playwright/mcp` and `chrome-devtools-mcp` launch a
+/// browser when a tool is used, in a group of its own. The browser is a child of
+/// the server, and what a harness's server starts is the harness's whatever group it
+/// goes to: a task that touched a page is done with the browser running, not held
+/// for it as long as the server lives.
+#[cfg(unix)]
+#[test]
+fn a_browser_the_server_launches_in_a_group_of_its_own_holds_nothing_either_the_workers_task_is_done(
+) -> Outcome {
+    let rig = Rig::start(
+        settling()
+            .var("CF_TEST_MCP_SERVER", "late")
+            .var("CF_TEST_MCP_BROWSER", "1"),
+    )?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    rig.tell(
+        project.id(),
+        &format!(
+            "DISPATCH --tier {} SLEEP 15 Reply with exactly: WORKER_OK",
+            tier(&added)
+        ),
+    )?;
+    // The chief's server and browser and the worker's run while the worker's turn is at work.
+    rig.wait_for("the servers and their browsers to run", secs(60), || {
+        let (servers, browsers) = (rig.jobs("server"), rig.jobs("browser"));
+        Ok(servers.len() >= 2
+            && browsers.len() >= 2
+            && servers
+                .iter()
+                .chain(&browsers)
+                .all(|job| is_alive(job.pid())))
+    })?;
+    // The browsers are in a group of their own, the servers are not: the shapes this
+    // case stands on.
+    for browser in rig.jobs("browser") {
+        assert_eq!(group_of(browser.pid()), Some(browser.pid()), "it leads one");
+    }
+    for server in rig.jobs("server") {
+        assert_ne!(
+            group_of(server.pid()),
+            Some(server.pid()),
+            "it is in its window's"
+        );
+    }
+    assert_eq!(
+        project.task(1)?["state"],
+        "working",
+        "the browsers began while the turn was at work"
+    );
+    rig.wait_for("T-1 to be done", secs(60), || {
+        Ok(project.task(1)?["state"] == "done")
+    })?;
+    rig.wait_for("the result to reach the chief", secs(30), || {
+        Ok(!results(&project)?.is_empty())
+    })?;
+    assert_eq!(results(&project)?[0]["body"], "WORKER_OK");
+    rig.close()?;
+    Ok(())
+}
+
+/// The same worker, whose agent leaves a job beside the harness's server: the job
+/// is in a group of its own and holds the result, the server is not counted, and
+/// when the job has ended the turn's end is the result.
+#[cfg(unix)]
+#[test]
+fn a_job_the_agent_leaves_holds_the_result_beside_the_harnesss_server_which_is_not_counted_or_waited_for(
+) -> Outcome {
+    let rig = Rig::start(settling().var("CF_TEST_MCP_SERVER", "late"))?;
+    let (project, job) = a_worker_with_a_job(&rig, "BACKGROUND 20 started the job")?;
+    // The harness's servers have begun beside the job, and the daemon has looked since.
+    rig.wait_for("the servers to run", secs(30), || {
+        let servers = rig.jobs("server");
+        Ok(servers.len() >= 2 && servers.iter().all(|server| is_alive(server.pid())))
+    })?;
+    thread::sleep(secs(2));
+    until_the_turn_ended(&rig, &project)?;
+
+    assert_eq!(project.task(1)?["state"], "working", "held for the job");
+    let activity = project.lane("worker")?["activity"].clone();
+    assert_eq!(activity["state"], "working");
+    assert_held_for_one_process(&activity);
+    assert!(is_alive(job.pid()), "the job runs on");
+    assert!(
+        rig.jobs("server")
+            .iter()
+            .all(|server| is_alive(server.pid())),
+        "and so do the harness's servers, which the task does not wait for"
+    );
+    assert_eq!(results(&project)?, Vec::<Value>::new());
+
+    rig.wait_for("T-1 to be done", secs(60), || {
+        Ok(project.task(1)?["state"] == "done")
+    })?;
+    assert!(job.finished(), "the job ran to its end");
+    rig.wait_for("the result to reach the chief", secs(30), || {
+        Ok(!results(&project)?.is_empty())
+    })?;
+    assert_eq!(results(&project)?[0]["body"], "started the job");
     rig.close()?;
     Ok(())
 }

@@ -32,10 +32,10 @@ use std::thread::sleep;
 
 use cf_e2e::files;
 use cf_e2e::live::trace::at_ms;
-use cf_e2e::rig::{Config, Project, Rig};
+use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
 
-use crate::{secs, Outcome, FAKE_AGENT, FAKE_DEVIN};
+use crate::{config, secs, Outcome, FAKE_DEVIN};
 
 /// What the human is told when a window ignored every round of a stop.
 const IGNORED: &str = "did not stop for T-";
@@ -79,7 +79,7 @@ fn delivered(events: &[Value]) -> Option<i64> {
 #[test]
 fn a_pause_stops_a_devin_window_that_takes_escape_twice_within_the_rounds_and_the_chiefs_question_goes_in(
 ) -> Outcome {
-    let rig = Rig::start(Config::new(FAKE_AGENT).devin(FAKE_DEVIN))?;
+    let rig = Rig::start(config().devin(FAKE_DEVIN))?;
     write_roster(&rig)?;
     let project = Project::open(&rig, "chief", json!({}))?;
     project.add_member("devin-worker")?;

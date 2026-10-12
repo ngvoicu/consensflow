@@ -13,7 +13,9 @@
 //!
 //! Claude Code has two programs of ours in front of it: [`isolated_claude`] adds
 //! the flags that shut the human's MCP servers and browser out, and
-//! [`shimmed_claude`] also plays the windows of the agents the rig stands in for.
+//! [`shimmed_claude`] also plays the windows of the agents the rig stands in for
+//! ([`shimmed_claude_with_servers`] gives the real ones the MCP servers a file
+//! names, and no others).
 
 mod path;
 #[cfg(test)]
@@ -28,7 +30,7 @@ use crate::rig::Config;
 use crate::{files, Error, Result};
 
 pub use path::command;
-pub use wrapper::{isolated_claude, shimmed_claude, ISOLATION};
+pub use wrapper::{isolated_claude, shimmed_claude, shimmed_claude_with_servers, ISOLATION};
 
 /// What the `.cmd` of a command a window opens on says on Windows, which opens a
 /// window only on the shape of an npm shim (`"<program>" "<script>" %*`): the

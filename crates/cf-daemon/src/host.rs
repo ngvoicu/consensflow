@@ -21,7 +21,7 @@ use cf_engine::runtime::LocalWork;
 use cf_engine::seams::BackgroundWork;
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::bridge::Role;
-use cf_proto::panes::{Background, PaneExit};
+use cf_proto::panes::{Background, MarkRequest, PaneExit, Servers};
 use serde_json::{json, Map, Value};
 
 use crate::errors::contain_now;
@@ -93,13 +93,24 @@ impl EngineHost for BridgeHost {
 }
 
 impl BackgroundWork for BridgeHost {
-    fn mark<'a>(&'a self, pane: &'a Pane) -> Work<'a, ()> {
-        let body = json!({ "id": pane.id, "generation": pane.generation });
-        let sent = self.bridge.request("pane.mark", body, None);
+    fn mark<'a>(&'a self, pane: &'a Pane, servers: Servers) -> Work<'a, ()> {
+        // How the harness keeps its servers is said only where it is known: a
+        // window whose harness says nothing is marked with the request a host
+        // has always had.
+        let request = MarkRequest {
+            id: pane.id.clone(),
+            generation: pane.generation,
+            servers,
+        };
+        let sent = serde_json::to_value(&request)
+            .ok()
+            .map(|body| self.bridge.request("pane.mark", body, None));
         // A host that cannot mark has no background work to tell of: nothing
         // the engine can do about it, and nothing it should fail for.
         Box::pin(async move {
-            let _ = sent.await;
+            if let Some(sent) = sent {
+                let _ = sent.await;
+            }
         })
     }
 

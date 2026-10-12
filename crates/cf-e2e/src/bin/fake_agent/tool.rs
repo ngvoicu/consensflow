@@ -57,8 +57,11 @@ pub fn reply(text: &str, window: &Window) -> Option<Result<Reply, String>> {
 /// and the turn works until the program ends or the turn is stopped.
 fn run(command: &Command, window: &Window) -> Result<Reply, String> {
     thread::sleep(THINKING);
+    // In a group of its own, as Claude Code runs a command: the window's own
+    // group is its harness's and its servers'.
     let mut program = Run::new(command.program)
         .args(&command.arguments)
+        .own_group()
         .inheriting_env()
         .closed_input()
         .spawn()

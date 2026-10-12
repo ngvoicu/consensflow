@@ -175,6 +175,10 @@ fn member(pid: u32) -> Option<Member> {
             began: began(&process)?,
         },
         command: command_line(&process).unwrap_or_default(),
+        // A job object has no process groups, and does not say which process
+        // started which.
+        group: None,
+        parent: None,
     })
 }
 
