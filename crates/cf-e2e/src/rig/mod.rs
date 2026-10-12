@@ -71,6 +71,7 @@ pub struct Config {
     existing_root: Option<PathBuf>,
     daemon: Option<PathBuf>,
     stand_in_records: Option<PathBuf>,
+    codex: Option<PathBuf>,
 }
 
 impl Config {
@@ -85,7 +86,19 @@ impl Config {
             existing_root: None,
             daemon: None,
             stand_in_records: None,
+            codex: None,
         }
+    }
+
+    /// With `stand_in`, the stand-in Codex (the `fake-codex` binary of this crate),
+    /// as the `codex` the windows find on their `PATH`: the windows of Codex's
+    /// agents run on it, each on a thread of its own, its TUI waiting to be ended,
+    /// its record in the rig's Codex home. A script that runs it, so Unix's: there
+    /// is no such shim on Windows.
+    #[must_use]
+    pub fn codex(mut self, stand_in: impl Into<PathBuf>) -> Self {
+        self.codex = Some(stand_in.into());
+        self
     }
 
     /// With the variable `name` set to `value` in the environment of the
@@ -384,25 +397,40 @@ impl Rig {
     /// every process a window started is checked to be gone. The home goes with
     /// it.
     pub fn close(mut self) -> Result<()> {
-        self.shutdown()
+        self.shutdown(EXIT)
+    }
+
+    /// [`Rig::close`], but the daemon and the pane host each have `within` to end,
+    /// where [`Rig::close`] gives them a few seconds, which suits the stand-in
+    /// agents that leave when asked: a real harness's window may take longer than
+    /// that, and the host gives a program that does not leave ten seconds before
+    /// it kills it.
+    pub fn close_within(mut self, within: Duration) -> Result<()> {
+        self.shutdown(within)
     }
 
     /// [`Rig::close`], but the home is left, for a rig that resumes on it
     /// ([`Config::existing_root`]). Where it is.
-    pub fn close_keeping_the_root(mut self) -> Result<PathBuf> {
+    pub fn close_keeping_the_root(self) -> Result<PathBuf> {
+        self.close_keeping_the_root_within(EXIT)
+    }
+
+    /// [`Rig::close_keeping_the_root`], the daemon and the pane host each given
+    /// `within` to end, as [`Rig::close_within`] gives them: for real harnesses.
+    pub fn close_keeping_the_root_within(mut self, within: Duration) -> Result<PathBuf> {
         self.keep_root = true;
-        self.shutdown()?;
+        self.shutdown(within)?;
         Ok(self.root.clone())
     }
 
-    fn shutdown(&mut self) -> Result<()> {
+    fn shutdown(&mut self, exit: Duration) -> Result<()> {
         if self.closed {
             return Ok(());
         }
         self.closed = true;
         self.daemon.end_input();
         self.host.end_input();
-        let (daemon, host) = (self.daemon.wait(EXIT)?, self.host.wait(EXIT)?);
+        let (daemon, host) = (self.daemon.wait(exit)?, self.host.wait(exit)?);
         if daemon.is_none() || host.is_none() {
             return Err(Error::Timeout(format!(
                 "process did not exit{}",
@@ -436,7 +464,7 @@ impl Drop for Rig {
         if std::thread::panicking() || !self.closed {
             report::say(self);
         }
-        let _ = self.shutdown();
+        let _ = self.shutdown(EXIT);
         self.daemon.kill();
         self.host.kill();
         // Once every window is gone, and before the home that says which

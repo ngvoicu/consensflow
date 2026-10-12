@@ -13,7 +13,9 @@
 //!
 //! Claude Code has two programs of ours in front of it: [`isolated_claude`] adds
 //! the flags that shut the human's MCP servers and browser out, and
-//! [`shimmed_claude`] also plays the windows of the agents the rig stands in for.
+//! [`shimmed_claude`] also plays the windows of the agents the rig stands in for
+//! ([`shimmed_claude_with_servers`] gives the real ones the MCP servers a file
+//! names, and no others).
 
 mod path;
 #[cfg(test)]
@@ -28,7 +30,7 @@ use crate::rig::Config;
 use crate::{files, Error, Result};
 
 pub use path::command;
-pub use wrapper::{isolated_claude, shimmed_claude, ISOLATION};
+pub use wrapper::{isolated_claude, shimmed_claude, shimmed_claude_with_servers, ISOLATION};
 
 /// What the `.cmd` of a command a window opens on says on Windows, which opens a
 /// window only on the shape of an npm shim (`"<program>" "<script>" %*`): the
@@ -84,7 +86,8 @@ impl Harness {
 
     /// Where its login is, below the home it reads it from: the first that is
     /// there says the machine has been set up for it. Codex's home is its own
-    /// folder, which is all there is to look for.
+    /// folder, which is all there is to look for. Devin's are the places of the
+    /// XDG layout; on Windows it keeps its login elsewhere ([`login_places`]).
     const fn login_marks(self) -> &'static [&'static str] {
         match self {
             Self::Claude => &[".claude.json", ".claude"],
@@ -338,15 +341,9 @@ pub fn installed(harness: Harness) -> Result<Installed> {
             "this run has neither a home nor CODEX_HOME to look for its login in",
         ),
     })?;
-    if !has_login(harness, &home) {
-        return Err(Error::File {
-            action: "find",
-            path: home,
-            source: io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("{name} keeps its login there: {}", harness.log_in()),
-            ),
-        });
+    let places = login_places(harness, &home, own_var("APPDATA").as_deref(), cfg!(windows));
+    if !has_login(&places) {
+        return Err(no_login(harness, &places));
     }
     let installed = Installed::at(harness, command, home);
     // A machine with no Node has a harness that needs none (a native one).
@@ -361,12 +358,61 @@ pub fn codex() -> Result<Installed> {
     installed(Harness::Codex)
 }
 
-/// Whether `home` holds what `harness` keeps its login in.
-fn has_login(harness: Harness, home: &Path) -> bool {
+/// Where `harness` keeps its login on a machine whose home is `home`: the places
+/// of its marks below it, but for Devin on Windows (`windows`), which keeps its
+/// login, its config and its sessions in the one folder `devin` in `%APPDATA%`
+/// (`appdata`; `AppData\Roaming` in the home where the machine names none), as
+/// the product's own lookup has it.
+fn login_places(
+    harness: Harness,
+    home: &Path,
+    appdata: Option<&str>,
+    windows: bool,
+) -> Vec<PathBuf> {
+    if harness == Harness::Devin && windows {
+        let roaming = match appdata.filter(|folder| !folder.is_empty()) {
+            Some(folder) => PathBuf::from(folder),
+            None => home.join("AppData").join("Roaming"),
+        };
+        return vec![roaming.join("devin")];
+    }
     harness
         .login_marks()
         .iter()
-        .any(|mark| home.join(mark).exists())
+        .map(|mark| home.join(mark))
+        .collect()
+}
+
+/// Whether one of `places` is there: the machine has been set up for the harness.
+fn has_login(places: &[PathBuf]) -> bool {
+    places.iter().any(|place| place.exists())
+}
+
+/// A machine that has no login for `harness`: the places it keeps one in, the
+/// first named and the others after it, and what to do.
+fn no_login(harness: Harness, places: &[PathBuf]) -> Error {
+    let others: Vec<String> = places
+        .iter()
+        .skip(1)
+        .map(|place| place.display().to_string())
+        .collect();
+    let also = if others.is_empty() {
+        String::new()
+    } else {
+        format!(" (or in {})", others.join(", "))
+    };
+    Error::File {
+        action: "find",
+        path: places.first().cloned().unwrap_or_default(),
+        source: io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "{} keeps its login there{also}: {}",
+                harness.name(),
+                harness.log_in()
+            ),
+        ),
+    }
 }
 
 /// The folder the program `name` is in, if it is on the `PATH`.

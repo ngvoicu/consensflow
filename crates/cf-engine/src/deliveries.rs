@@ -583,13 +583,14 @@ impl Dispatcher {
     }
 
     /// Whether a participant's harness's record of its current conversation,
-    /// read with no window open, ends in a turn with no end: the one the app's
-    /// quit cut, or a Close.
-    pub(crate) async fn turn_left_open(&self, participant: i64) -> Result<bool, EngineError> {
+    /// read with no window open, ends in a turn with no end (the one the app's
+    /// quit cut, or a Close), and none where it cannot tell: the record cannot,
+    /// or there is none to read.
+    pub(crate) async fn turn_cut(&self, participant: i64) -> Result<Option<bool>, EngineError> {
         let Some((harness, session)) = self.readable(participant)? else {
-            return Ok(false);
+            return Ok(None);
         };
-        Ok(self.seams.records.turn_left_open(harness, &session).await)
+        Ok(self.seams.records.turn_cut(harness, &session).await)
     }
 
     /// The harness and the session a participant's current conversation is on,

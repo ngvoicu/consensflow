@@ -36,7 +36,25 @@ pub fn shimmed_claude(folder: &Path, claude: &Path, stand_in: &Path) -> Result<P
         folder,
         "claude-shimmed",
         claude,
-        shimming_script(claude, stand_in),
+        shimming_script(claude, stand_in, None),
+    )
+}
+
+/// [`shimmed_claude`], whose real Claude Code also loads the MCP servers the file
+/// `servers` names, and only those: [`ISOLATION`]'s `--strict-mcp-config` shuts
+/// every other out. For the live case that needs a window of the product's own
+/// kind, which has a server of its harness's.
+pub fn shimmed_claude_with_servers(
+    folder: &Path,
+    claude: &Path,
+    stand_in: &Path,
+    servers: &Path,
+) -> Result<PathBuf> {
+    written(
+        folder,
+        "claude-shimmed",
+        claude,
+        shimming_script(claude, stand_in, Some(servers)),
     )
 }
 
@@ -68,8 +86,13 @@ fn isolating_script(claude: &Path) -> String {
 }
 
 /// The shell script that is [`shimmed_claude`]. A window is the stand-in's when
-/// one of its words is its agent's model, `fake` or `fake-chief`.
-fn shimming_script(claude: &Path, stand_in: &Path) -> String {
+/// one of its words is its agent's model, `fake` or `fake-chief`. `servers` is
+/// the file of the MCP servers the real Claude Code loads (alone: the isolation
+/// flags shut the rest out); it comes first, before a flag that ends its list.
+fn shimming_script(claude: &Path, stand_in: &Path, servers: Option<&Path>) -> String {
+    let servers = servers.map_or_else(String::new, |file| {
+        format!("--mcp-config {} ", shell_word(&file.to_string_lossy()))
+    });
     format!(
         "#!/bin/sh\n\
          # Written by a live test: a window whose agent's model is fake or fake-chief is the\n\
@@ -80,7 +103,7 @@ fn shimming_script(claude: &Path, stand_in: &Path) -> String {
          \x20   fake | fake-chief) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec {} \"$@\" ;;\n\
          \x20 esac\n\
          done\n\
-         exec {} {} \"$@\"\n",
+         exec {} {servers}{} \"$@\"\n",
         shell_word(&stand_in.to_string_lossy()),
         shell_word(&claude.to_string_lossy()),
         ISOLATION.join(" ")
@@ -110,8 +133,40 @@ mod tests {
     }
 
     #[test]
+    fn a_shim_made_with_servers_gives_the_real_claude_their_file_before_the_flags_that_shut_the_rest_out(
+    ) {
+        let script = shimming_script(
+            Path::new("/real/claude"),
+            Path::new("/the/fake-agent"),
+            Some(Path::new("/run/it's/mcp.json")),
+        );
+        // The list of a flag that takes several files ends at the flag after it.
+        assert!(
+            script.ends_with(
+                "exec '/real/claude' --mcp-config '/run/it'\\''s/mcp.json' --strict-mcp-config --no-chrome \"$@\"\n"
+            ),
+            "{script}"
+        );
+        // The stand-in's window is as it was: it has no server of the harness's.
+        assert!(
+            script.contains(
+                "fake | fake-chief) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec '/the/fake-agent' \"$@\" ;;"
+            ),
+            "{script}"
+        );
+        assert!(
+            !shimming_script(Path::new("/c"), Path::new("/s"), None).contains("--mcp-config"),
+            "a shim with no servers names none"
+        );
+    }
+
+    #[test]
     fn the_shim_hands_the_stand_in_the_machines_claude_folder_and_the_real_claude_the_flags() {
-        let script = shimming_script(Path::new("/real/claude"), Path::new("/the/fake-agent"));
+        let script = shimming_script(
+            Path::new("/real/claude"),
+            Path::new("/the/fake-agent"),
+            None,
+        );
         assert!(
             script.contains(
                 "fake | fake-chief) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec '/the/fake-agent' \"$@\" ;;"
@@ -189,6 +244,39 @@ mod tests {
         assert_eq!(
             shimmed(&["--append", "fakes"]),
             "--strict-mcp-config --no-chrome --append fakes\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_window_of_the_real_claude_is_given_the_servers_file_and_a_fake_one_is_not() {
+        let folder = tempfile::tempdir().unwrap();
+        let shim = shimmed_claude_with_servers(
+            folder.path(),
+            Path::new("/bin/echo"),
+            Path::new("/bin/sh"),
+            Path::new("/run/mcp.json"),
+        )
+        .unwrap();
+        assert_eq!(shim, folder.path().join("claude-shimmed"));
+        let run = |words: &[&str]| {
+            crate::process::Run::new("/bin/sh")
+                .arg(&shim)
+                .args(words)
+                .var("HOME", "/h")
+                .run()
+                .unwrap()
+                .stdout
+        };
+        assert_eq!(
+            run(&["--model", "claude-sonnet-5-5"]),
+            "--mcp-config /run/mcp.json --strict-mcp-config --no-chrome --model claude-sonnet-5-5\n"
+        );
+        // A window the stand-in plays is started as it was, with no servers file (the
+        // stand-in is a shell here, which prints the Claude folder it was given).
+        assert_eq!(
+            run(&["-c", "echo $CLAUDE_CONFIG_DIR", "fake"]),
+            "/h/.claude\n"
         );
     }
 

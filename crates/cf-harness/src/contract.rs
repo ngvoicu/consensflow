@@ -14,9 +14,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cf_proto::agents::Harness;
+use cf_proto::panes::Servers;
 use serde_json::Value;
 
-use crate::records::{Item, Options, Quota, Reading, Settlement};
+use crate::records::{Item, Options, Quota, Reading, Record, Role, Settlement};
 
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -37,6 +38,25 @@ pub trait Adapter {
             presses: 1,
             close_after: None,
         }
+    }
+
+    /// How the harness keeps its own processes (its MCP servers, its helpers),
+    /// which the pane host tells a turn's work from them by (`pane.mark`'s
+    /// `servers`): what a server is, and so what it starts, is the harness's and
+    /// no work a turn left. Where it is not known the host tells by when each
+    /// process began alone, and a server that begins after the first turn's mark
+    /// is the turn's.
+    ///
+    /// Only what someone has looked at is said: what a window's tree holds with a
+    /// command of its agent running (`ps -axo pid,pgid,ppid,command`). Claude Code
+    /// and Pi keep their servers in the group of the window's program, however
+    /// late each begins, and run every command their agents start in a group of its
+    /// own ([`Servers::InGroup`]). Codex's supervisor opens its servers with the
+    /// window, each in a group of its own, under the harness's own process, which
+    /// starts the agent's commands ([`Servers::AtLaunch`]). Windows has no process
+    /// groups to tell by, and OpenCode and Devin have not been probed.
+    fn servers(&self) -> Servers {
+        Servers::Unknown
     }
 }
 
@@ -299,17 +319,35 @@ pub trait Records {
         session: &'a str,
     ) -> Work<'a, Result<bool, String>>;
 
-    /// Whether `harness`'s record of `session` ends in a turn with no end, read
-    /// with no window open: the turn the app's quit cut, or a Close. False where
-    /// the record cannot be read.
-    fn turn_left_open<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, bool> {
+    /// Whether `harness`'s record of `session`, read with no window open, ends in
+    /// a turn with no end (the turn the app's quit cut, or a Close): yes, or no
+    /// where it ends at rest, and none where the record cannot tell. Devin's
+    /// cannot: it reads a turn as going on only while its window shows it working,
+    /// and one whose last word is the message it was given as settled, which with
+    /// no window open is a turn never answered as much as one at rest.
+    fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<bool>> {
         Box::pin(async move {
-            matches!(
-                &*self.look(harness, session, &Options::default()).await,
-                Reading::Known(record) if record.settlement == Settlement::InFlight
-            )
+            match &*self.look(harness, session, &Options::default()).await {
+                Reading::Known(record) => match record.settlement {
+                    Settlement::InFlight => Some(true),
+                    Settlement::Settled if ends_in_a_reply(record) => Some(false),
+                    Settlement::Settled | Settlement::Unknown => None,
+                },
+                _ => None,
+            }
         })
     }
+}
+
+/// Whether the last word of `record` (what the harness put in it itself aside)
+/// is the agent's reply: what a turn at rest ends in.
+fn ends_in_a_reply(record: &Record) -> bool {
+    record
+        .items
+        .iter()
+        .rev()
+        .find(|item| item.role != Role::Custom)
+        .is_some_and(|item| item.role == Role::Assistant)
 }
 
 #[cfg(test)]

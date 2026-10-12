@@ -246,7 +246,7 @@ fn a_turn_that_left_a_job_and_agents_is_held_for_the_job_and_then_for_the_agents
     context.pass().unwrap();
     assert_eq!(
         doing(&context, &tiers).reason.as_deref(),
-        Some("background work running (1 process)")
+        Some("background work running (1 process): python3 lock.py record --run 7")
     );
 
     // The job ends, and the agents run on: more than the settle time later, the

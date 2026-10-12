@@ -127,13 +127,14 @@ impl Records for FakeRecords {
         Box::pin(async move { Ok(known) })
     }
 
-    /// Whether the agent of `session` was never answered. Asked where Node's
-    /// dispatcher asked nothing, so it is no call of the adapter in a trace.
-    fn turn_left_open<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, bool> {
-        let open = self
+    /// Whether the agent of `session` was never answered, and none where the
+    /// fake has no record of it. Asked where Node's dispatcher asked nothing, so
+    /// it is no call of the adapter in a trace.
+    fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<bool>> {
+        let cut = self
             .adapters
             .fake(harness.kind())
-            .is_some_and(|fake| fake.record_of(session).is_some_and(|(_, settled)| !settled));
-        Box::pin(async move { open })
+            .and_then(|fake| fake.cut_of(session));
+        Box::pin(async move { cut })
     }
 }

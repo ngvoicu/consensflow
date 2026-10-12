@@ -12,11 +12,27 @@
 //! (`unix://<path>`), or on loopback (`ws://127.0.0.1:0`, Windows'), where it
 //! takes a port, says which on its stderr, and lets in only a connection that
 //! brings the token whose SHA-256 it was given.
+//!
+//! It is also the Codex of a window the daemon opens (`agent`): a TUI given a
+//! message starts the first turn with it, the server takes the turns it is handed
+//! and writes their rollout where the daemon reads it, and the servers Codex opens
+//! with its window run in groups of their own (`servers`). What the daemon asks
+//! of the CLI before it opens a window is answered too (`probes`).
+
+// The parts are in `fake_codex/`: cargo looks for the modules of a binary's
+// root file beside it, where each would be a binary of its own.
+#[path = "fake_codex/agent.rs"]
+mod agent;
+#[path = "fake_codex/probes.rs"]
+mod probes;
+#[path = "fake_codex/servers.rs"]
+mod servers;
 
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::thread;
 
 use cf_e2e::http::Http;
@@ -28,15 +44,22 @@ use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http::{HeaderValue, StatusCode};
 use tungstenite::{Message, WebSocket};
 
-/// The thread the server starts, and the TUI sees.
-const THREAD: &str = "01a09094-938f-7fd1-a2d3-315cf92b4559";
+use agent::Agent;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.iter().any(|arg| arg == "app-server") {
-        server(&args)
-    } else {
-        tui(&args)
+    match args.first().map(String::as_str) {
+        Some(servers::SERVER) => servers::serve(&args[1..]),
+        Some(servers::WORKER) => servers::work(&args[1..]),
+        Some("queue") => probes::queue_help(),
+        _ if args.iter().any(|arg| arg == "app-server") => {
+            if args.iter().any(|arg| arg == "--listen") {
+                server(&args)
+            } else {
+                probes::configuration()
+            }
+        }
+        _ => tui(&args),
     }
 }
 
@@ -93,10 +116,14 @@ fn server(args: &[String]) -> ExitCode {
         die: how == "die",
         asks: own_var("CF_TEST_CODEX_QUESTION").is_some_and(|asks| !asks.is_empty()),
     };
+    let agent = match Agent::start() {
+        Ok(agent) => agent,
+        Err(failed) => fail(&failed),
+    };
     let listen = option(args, "--listen").unwrap_or_default().to_owned();
     match listen.strip_prefix("unix://") {
-        Some(path) => on_a_socket(path, behavior),
-        None => on_loopback(option(args, "--ws-token-sha256"), behavior),
+        Some(path) => on_a_socket(path, behavior, &agent),
+        None => on_loopback(option(args, "--ws-token-sha256"), behavior, &agent),
     }
 }
 
@@ -111,15 +138,16 @@ struct Behavior {
 
 /// Listens on the Unix socket `path`, and serves every connection.
 #[cfg(unix)]
-fn on_a_socket(path: &str, behavior: Behavior) -> ExitCode {
+fn on_a_socket(path: &str, behavior: Behavior, agent: &Arc<Agent>) -> ExitCode {
     let listener = match std::os::unix::net::UnixListener::bind(path) {
         Ok(listener) => listener,
         Err(failed) => fail(&format!("{path}: {failed}")),
     };
     for stream in listener.incoming().flatten() {
+        let agent = Arc::clone(agent);
         thread::spawn(move || {
             if let Ok(socket) = tungstenite::accept(stream) {
-                serve(socket, behavior);
+                serve(socket, behavior, &agent);
             }
         });
     }
@@ -128,13 +156,13 @@ fn on_a_socket(path: &str, behavior: Behavior) -> ExitCode {
 
 /// There is no Unix socket to listen on.
 #[cfg(not(unix))]
-fn on_a_socket(path: &str, _: Behavior) -> ExitCode {
+fn on_a_socket(path: &str, _: Behavior, _: &Arc<Agent>) -> ExitCode {
     fail(&format!("no Unix socket here to listen on: {path}"))
 }
 
 /// Listens on loopback, on a port it picks, which it says on its stderr, and
 /// lets in only a connection whose bearer token has the SHA-256 it was given.
-fn on_loopback(hash: Option<&str>, behavior: Behavior) -> ExitCode {
+fn on_loopback(hash: Option<&str>, behavior: Behavior, agent: &Arc<Agent>) -> ExitCode {
     let listener = match TcpListener::bind("127.0.0.1:0") {
         Ok(listener) => listener,
         Err(failed) => fail(&format!("127.0.0.1:0: {failed}")),
@@ -146,7 +174,7 @@ fn on_loopback(hash: Option<&str>, behavior: Behavior) -> ExitCode {
     );
     let hash = hash.unwrap_or_default().to_owned();
     for stream in listener.incoming().flatten() {
-        let hash = hash.clone();
+        let (hash, agent) = (hash.clone(), Arc::clone(agent));
         thread::spawn(move || {
             // The size of the refusal is tungstenite's: its handshake callback answers with it.
             #[allow(clippy::result_large_err)]
@@ -167,7 +195,7 @@ fn on_loopback(hash: Option<&str>, behavior: Behavior) -> ExitCode {
                     }
                 };
             if let Ok(socket) = tungstenite::accept_hdr(stream, only_the_token) {
-                serve(socket, behavior);
+                serve(socket, behavior, &agent);
             }
         });
     }
@@ -183,8 +211,9 @@ fn sha256_hex(text: &str) -> String {
 }
 
 /// Answers a connection's requests: every request with a result, the start of a
-/// thread with a thread.
-fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior) {
+/// thread with a thread, and a message handed over (as the start of a turn, or
+/// queued behind one) with what Codex answers, which the agent then takes.
+fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &Arc<Agent>) {
     while let Ok(message) = socket.read() {
         let Message::Text(text) = message else {
             continue;
@@ -199,11 +228,21 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior) {
         let start = request["method"] == "thread/start";
         if start {
             record(json!({ "run": "server", "started": request["params"] }));
+            agent.thread_started();
         }
-        let result = if start {
-            json!({ "thread": { "id": THREAD, "turns": [], "status": { "type": "idle" } } })
-        } else {
-            json!({})
+        let result = match request["method"].as_str() {
+            Some("thread/start") => {
+                json!({ "thread": { "id": agent.thread(), "turns": [], "status": { "type": "idle" } } })
+            }
+            Some("turn/start") => {
+                hand_over(agent, &request);
+                json!({ "turn": { "id": "turn-1" } })
+            }
+            Some("thread/queue/add") => {
+                hand_over(agent, &request);
+                json!({ "queuedMessage": { "id": "queue-1" } })
+            }
+            _ => json!({}),
         };
         if socket
             .send(Message::text(
@@ -222,7 +261,7 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior) {
                 "id": "ask-1",
                 "method": "item/tool/requestUserInput",
                 "params": {
-                    "threadId": THREAD,
+                    "threadId": agent.thread(),
                     "questions": [{
                         "id": "q",
                         "header": "Which",
@@ -236,6 +275,32 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior) {
             }
         }
     }
+}
+
+/// The agent takes the text of the message a request hands over, the first of its
+/// input.
+fn hand_over(agent: &Arc<Agent>, request: &Value) {
+    if let Some(text) = request["params"]["input"][0]["text"].as_str() {
+        record(json!({ "run": "server", "handedOver": text }));
+        agent.take(text);
+    }
+}
+
+/// The message a TUI was given to start with: the word that is no flag and no
+/// value of one, after those the broker adds (`--remote <url>
+/// --remote-auth-token-env <name>`). None where it was given none.
+fn first_message(args: &[String]) -> Option<&str> {
+    let mut words = args.get(4..)?.iter();
+    while let Some(word) = words.next() {
+        match word.as_str() {
+            "-c" | "--config" | "--enable" | "--disable" | "--model" | "-m" => {
+                words.next();
+            }
+            flag if flag.starts_with('-') => {}
+            message => return Some(message),
+        }
+    }
+    None
 }
 
 /// Codex's TUI: it reaches the server through the broker, its token in its
@@ -258,34 +323,37 @@ fn tui(args: &[String]) -> ExitCode {
     let Ok((mut socket, _)) = tungstenite::connect(request) else {
         return ExitCode::SUCCESS;
     };
-    let mut call = |id: u64, method: &str, params: Value| -> bool {
+    // The answer to a request, or none where the connection went first.
+    let mut call = |id: u64, method: &str, params: Value| -> Option<Value> {
         let sent = socket.send(Message::text(
             json!({ "id": id, "method": method, "params": params }).to_string(),
         ));
-        if sent.is_err() {
-            return false;
-        }
+        sent.ok()?;
         while let Ok(message) = socket.read() {
             if let Message::Text(text) = message {
                 let answer: Value = serde_json::from_str(text.as_str()).unwrap_or(Value::Null);
                 if answer["id"] == id {
-                    return true;
+                    return Some(answer);
                 }
             }
         }
-        false
+        None
     };
-    if !call(
+    let started = call(
         1,
         "initialize",
         json!({ "clientInfo": { "name": "codex-tui", "version": "test" } }),
-    ) || !call(
-        2,
-        "thread/start",
-        json!({ "ephemeral": false, "threadSource": "user" }),
-    ) {
+    )
+    .and_then(|_| {
+        call(
+            2,
+            "thread/start",
+            json!({ "ephemeral": false, "threadSource": "user" }),
+        )
+    });
+    let Some(started) = started else {
         return ExitCode::SUCCESS;
-    }
+    };
     let session = Http::new().get(
         &format!("{}/session", remote.replacen("ws:", "http:", 1)),
         Some(&bearer["Bearer ".len()..]),
@@ -293,6 +361,16 @@ fn tui(args: &[String]) -> ExitCode {
     match session.and_then(|reply| reply.json()) {
         Ok(session) => record(json!({ "run": "tui", "session": session })),
         Err(failed) => fail(&failed.to_string()),
+    }
+    // A window opened with a message begins its first turn with it.
+    if let Some(message) = first_message(args) {
+        let input = json!([{ "type": "text", "text": message, "text_elements": [] }]);
+        let thread = started["result"]["thread"]["id"].clone();
+        call(
+            3,
+            "turn/start",
+            json!({ "threadId": thread, "input": input }),
+        );
     }
     if own_var("CF_TEST_CODEX_TUI").as_deref() != Some("wait") {
         return ExitCode::from(7);

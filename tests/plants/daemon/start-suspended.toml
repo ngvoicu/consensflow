@@ -108,14 +108,24 @@ replace = ""
 # --- what the engine asks of a record ---
 
 [[plant]]
-name = "start suspended: a record that ends in a settled turn is taken for one left open"
-meant = "a_turn_is_left_open_when_the_record_ends_in_one_with_no_end_and_in_no_other_case"
+name = "start suspended: a record that ends in a turn with no end is taken for one at rest"
+meant = "a_turn_was_cut_when_the_record_ends_in_one_with_no_end_not_when_at_rest_and_unknown_when_it_cannot_tell"
 runs = ["harness-contract"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/contract.rs"
-find = '''                Reading::Known(record) if record.settlement == Settlement::InFlight'''
-replace = '''                Reading::Known(record) if record.settlement != Settlement::InFlight'''
+find = '''                    Settlement::InFlight => Some(true),'''
+replace = '''                    Settlement::InFlight => Some(false),'''
+
+[[plant]]
+name = "start suspended: a record settled on the message it was given is taken for one at rest"
+meant = "a_turn_was_cut_when_the_record_ends_in_one_with_no_end_not_when_at_rest_and_unknown_when_it_cannot_tell"
+runs = ["harness-contract"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''        .is_some_and(|item| item.role == Role::Assistant)'''
+replace = '''        .is_some_and(|_| true)'''
 
 # --- the engine: a start ---
 
@@ -242,11 +252,8 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        if !self.turn_left_open(participant.id).await? {
-            return Ok(None);
-        }
-'''
-replace = ""
+find = '''            Some(cut) => cut,'''
+replace = '''            Some(_) => true,'''
 
 [[plant]]
 name = "start suspended: a window the quit cut is told nothing"
@@ -255,8 +262,28 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        if !self.turn_left_open(participant.id).await? {'''
+find = '''        if !cut {'''
 replace = '''        if true {'''
+
+[[plant]]
+name = "start suspended: a member whose record cannot tell a cut is told nothing"
+meant = "a_member_whose_record_cannot_tell_a_cut_is_told_all_the_same_and_a_chief_is_not"
+runs = ["engine-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''            None => matches!(coming, Coming::Member(_)),'''
+replace = '''            None => false,'''
+
+[[plant]]
+name = "start suspended: a chief whose record cannot tell a cut is told its turn was"
+meant = "a_member_whose_record_cannot_tell_a_cut_is_told_all_the_same_and_a_chief_is_not"
+runs = ["engine-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''            None => matches!(coming, Coming::Member(_)),'''
+replace = '''            None => true,'''
 
 [[plant]]
 name = "start suspended: a note that waits for a window is written again"
@@ -371,7 +398,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        if !self.turn_left_open(participant.id).await? {'''
+find = '''        if !cut {'''
 replace = '''        if true {'''
 
 # --- the page ---

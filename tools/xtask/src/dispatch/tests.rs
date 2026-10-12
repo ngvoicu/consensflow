@@ -38,6 +38,7 @@ fn every_command_of_the_plan_is_there_once() {
             "--as-archiver",
             "test daemons",
             "test integration",
+            "test regressions",
             "test clis",
             "test agents",
             "test load",
@@ -107,39 +108,6 @@ fn the_live_tests_are_one_command_whatever_their_names_and_eval_summary_is_found
 }
 
 #[test]
-fn a_command_that_is_not_ported_yet_says_so_and_what_to_run_and_answers_1() {
-    for (line, said) in [
-        (
-            "windows --host zeewin",
-            "xtask: windows is not ported yet: run `npm run windows` for now\n",
-        ),
-        (
-            "windows-matrix",
-            "xtask: windows-matrix is not ported yet: run `npm run eval:windows` for now\n",
-        ),
-        (
-            "eval summary",
-            "xtask: eval summary is not ported yet: run `npm run eval:summary` for now\n",
-        ),
-        (
-            "eval --scenario round-trip",
-            "xtask: eval is not ported yet: run `npm run eval` for now\n",
-        ),
-        (
-            "watch --tokens",
-            "xtask: watch is not ported yet: run `npm run watch` for now\n",
-        ),
-    ] {
-        let (status, out, err) = answer(line);
-        assert_eq!(
-            (status, out.as_str(), err.as_str()),
-            (1, "", said),
-            "{line}"
-        );
-    }
-}
-
-#[test]
 fn words_with_spaces_in_them_stay_one_word_each() {
     let args: Vec<OsString> = ["smoke", "--app", "A Folder/Consens Flow.app", "", "-"]
         .iter()
@@ -192,7 +160,7 @@ fn a_group_of_commands_has_its_help_and_wants_a_command_of_it() {
     assert_eq!(parsed("app"), "usage app takes a command: test, clippy");
     assert_eq!(
         parsed("test"),
-        "usage test takes a command: daemons, integration, clis, agents, load"
+        "usage test takes a command: daemons, integration, regressions, clis, agents, load"
     );
     assert_eq!(parsed("app tests"), "usage unknown command: app tests");
     assert_eq!(

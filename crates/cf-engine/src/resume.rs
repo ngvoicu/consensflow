@@ -12,7 +12,11 @@
 //! A window whose turn the quit cut is told so, once: the harness's record of
 //! its conversation, read before its window opens, has a turn with no end, and
 //! a note from ConsensFlow is the first thing the window is given, with what
-//! waits for it after. A window at rest when the app quit is given no note.
+//! waits for it after. A window at rest when the app quit is given no note. Where
+//! the record cannot tell (Devin's, with no window open), a member with a task
+//! in hand is told all the same: a member whose cut turn goes untold reads at
+//! rest with its task at work for good, and one told that was at rest only looks
+//! again.
 
 use std::rc::Rc;
 
@@ -130,8 +134,8 @@ impl Dispatcher {
     /// first message: the one that waits for it already if the app quit again
     /// before it came (so it is told once), else one written now. None when its
     /// turn was not cut: its conversation's record, read with no window open,
-    /// has no turn without an end, or cannot be read; and none for a chief that
-    /// is given its handoff again, which tells it where things stand.
+    /// ends at rest, or cannot tell and the window is the chief's; and none for a
+    /// chief that is given its handoff again, which tells it where things stand.
     pub(crate) async fn cut_note(
         &self,
         project: &ProjectView,
@@ -155,7 +159,11 @@ impl Dispatcher {
         if told.is_some() {
             return Ok(told);
         }
-        if !self.turn_left_open(participant.id).await? {
+        let cut = match self.turn_cut(participant.id).await? {
+            Some(cut) => cut,
+            None => matches!(coming, Coming::Member(_)),
+        };
+        if !cut {
             return Ok(None);
         }
         let note = self.seams.ledger.borrow_mut().note(

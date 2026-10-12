@@ -21,7 +21,7 @@ use crate::pty::{validate_drop_env, PaneEnvironment, PaneKey, PaneTable, Streame
 use crate::screen::PaneScreen;
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
-use cf_proto::panes::{BackgroundProcess, PaneExit, SnapshotRequest, TAIL_LINES};
+use cf_proto::panes::{BackgroundProcess, MarkRequest, PaneExit, SnapshotRequest, TAIL_LINES};
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
 
@@ -227,12 +227,16 @@ pub fn register_pane_handlers(
         Ok(json!({"ok":true}))
     });
 
-    // A turn is about to begin in a window: what its tree has now came before it.
+    // A turn is about to begin in a window: what its tree has now came before
+    // it, and so does what its harness's servers start later, where the daemon
+    // says how the harness keeps them.
     let mark_panes = Arc::clone(&panes);
     builder.on("pane.mark", move |_bridge, body| {
-        let request: PaneRequest = parse_body(body)?;
+        let request: MarkRequest = parse_body(body)?;
         let key = pane_key(&request.id, request.generation)?;
-        mark_panes.mark(&key).map_err(|error| error.to_string())?;
+        mark_panes
+            .mark(&key, request.servers)
+            .map_err(|error| error.to_string())?;
         Ok(json!({"ok":true}))
     });
 

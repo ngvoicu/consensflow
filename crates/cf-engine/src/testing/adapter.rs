@@ -24,6 +24,7 @@ use cf_harness::contract::{
     Adapter, Admission, Interrupt, Launch, Prepared, Readiness, Waiting, Window, Work,
 };
 use cf_harness::records::{Item, Quota, Role};
+use cf_proto::panes::Servers;
 use serde_json::{json, Value};
 
 use super::holds::{Holds, Wrapped};
@@ -68,6 +69,9 @@ pub struct FakeAgent {
     /// The latest look found the window taken back so, until a message
     /// arrives that begins another turn.
     pub took_back: bool,
+    /// Its record, read with no window open, cannot tell whether its turn was
+    /// cut: Devin's, which reads a turn as going on only while its window shows it.
+    pub cannot_tell_a_cut: bool,
 }
 
 /// What a test makes `ready` answer, where it gives the adapter one.
@@ -123,6 +127,9 @@ pub struct FakeAdapter {
     /// The keys that interrupt a turn in its windows (`adapter.interrupt`):
     /// Escape once, as an adapter that says no more.
     pub interrupt: Cell<Interrupt>,
+    /// How its windows' harness keeps its servers (`adapter.servers`): not known,
+    /// as an adapter that says no more.
+    pub servers: Cell<Servers>,
     /// Launches the test holds (`hold(adapter, 'prepare', ...)`): one let go
     /// fails with the reason, where the test gave one.
     pub prepare_holds: Holds<String>,
@@ -166,6 +173,7 @@ impl FakeAdapter {
                 presses: 1,
                 close_after: None,
             }),
+            servers: Cell::new(Servers::Unknown),
             prepare_holds: Holds::default(),
             observe_holds: Holds::default(),
             start_holds: Holds::default(),
@@ -257,6 +265,12 @@ impl FakeAdapter {
         });
     }
 
+    /// Its record cannot tell, with no window open, whether its turn was cut,
+    /// as Devin's cannot.
+    pub fn cannot_tell_a_cut(&self, handle: &str) {
+        self.with(handle, |agent| agent.cannot_tell_a_cut = true);
+    }
+
     /// The same, and what it stops it takes back: Claude, stopped before a
     /// word of its answer, has the message of its turn in its input box again
     /// and out of its conversation.
@@ -315,6 +329,18 @@ impl FakeAdapter {
             .find(|agent| agent.launch == launch)
             .unwrap_or_else(|| panic!("no window of launch {launch}"));
         read(agent)
+    }
+
+    /// Whether the turn `session`'s record ends in was cut, as a harness reads it
+    /// with no window open: none where no window had it, or its record cannot tell.
+    pub(super) fn cut_of(&self, session: &str) -> Option<bool> {
+        let agents = self.agents.borrow();
+        agents
+            .iter()
+            .rev()
+            .find(|agent| agent.native == session)
+            .filter(|agent| !agent.cannot_tell_a_cut)
+            .map(|agent| !agent.settled)
     }
 
     /// What the record of `session` holds (`adapter.record`): the latest
@@ -417,6 +443,7 @@ impl Asked {
             stops_when_interrupted: false,
             takes_back: false,
             took_back: false,
+            cannot_tell_a_cut: false,
         };
         if let Some(message) = launch.message {
             agent.items.push(fake.item(Role::User, message));
@@ -510,5 +537,9 @@ impl Adapter for Asked {
 
     fn interrupt(&self) -> Interrupt {
         self.fake.interrupt.get()
+    }
+
+    fn servers(&self) -> Servers {
+        self.fake.servers.get()
     }
 }

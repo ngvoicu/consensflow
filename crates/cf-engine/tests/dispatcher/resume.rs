@@ -291,6 +291,41 @@ fn a_window_the_quit_cut_mid_turn_is_told_so_once_and_one_at_rest_is_told_nothin
     );
 }
 
+/// Found live on 2026-10-12 with Devin as the worker: its record, read with no window
+/// open, cannot tell a cut turn from one at rest, so it was told nothing, read at rest
+/// once resumed, and its task stayed at work for good.
+#[test]
+fn a_member_whose_record_cannot_tell_a_cut_is_told_all_the_same_and_a_chief_is_not() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    for handle in ["zeus", "diana", "chief"] {
+        context.adapter.cannot_tell_a_cut(handle);
+    }
+    // Diana's turn ended before the quit: its record cannot say so either.
+    context.adapter.answer("diana", "Lexer done");
+    let after = quit_and_start(&context);
+
+    after.resume_project(project).unwrap();
+
+    assert_match(
+        launch_of(&context, "zeus-amber-pine")["message"]
+            .as_str()
+            .unwrap(),
+        r"^\[ConsensFlow m-\d+ · T-1 · note from ConsensFlow\]\nConsensFlow quit while you were working on T-1\. Go on where you stopped\.$",
+    );
+    assert_eq!(cut_notes(&context, tiers.id("zeus-amber-pine")).len(), 1);
+    // Diana was at rest: told all the same, it only looks again.
+    assert_match(
+        launch_of(&context, "diana-brisk-birch")["message"]
+            .as_str()
+            .unwrap(),
+        r"^\[ConsensFlow m-\d+ · T-2 · note from ConsensFlow\]\nConsensFlow quit while you were working on T-2\. Go on where you stopped\.$",
+    );
+    assert!(cut_notes(&context, tiers.id("chief")).is_empty());
+    assert_eq!(launch_of(&context, "chief")["message"], Value::Null);
+}
+
 #[test]
 fn a_session_waiting_for_an_answer_comes_back_at_rest_and_is_given_the_answer_that_came_meanwhile()
 {

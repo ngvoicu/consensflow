@@ -309,14 +309,16 @@ mod tests {
     #[test]
     fn a_login_path_is_read_while_a_started_process_holds_the_output() {
         let home = tempfile::tempdir().expect("home");
-        let shell = login_shell(home.path(), "/bin/sleep 3 & exec /bin/sh -c \"$2\"");
+        // The process outlives the read by far, so a loaded machine's slow start is
+        // not taken for a wait on it.
+        let shell = login_shell(home.path(), "/bin/sleep 20 & exec /bin/sh -c \"$2\"");
         let started = Instant::now();
         assert_eq!(
-            login_path_in(&shell, Duration::from_secs(5)),
+            login_path_in(&shell, Duration::from_secs(15)),
             std::env::var("PATH").ok()
         );
         assert!(
-            started.elapsed() < Duration::from_secs(2),
+            started.elapsed() < Duration::from_secs(10),
             "the read waited for the process"
         );
     }
