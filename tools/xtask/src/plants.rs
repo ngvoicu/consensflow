@@ -26,7 +26,8 @@ mod driver;
 mod kit;
 mod report;
 mod runs;
-mod stops;
+// What `windows` listens for as well: a run there goes on when this side is stopped.
+pub(crate) mod stops;
 
 use std::ffi::OsString;
 use std::io;

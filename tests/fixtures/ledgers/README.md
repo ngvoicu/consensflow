@@ -1,15 +1,18 @@
 # Frozen ledgers
 
-Ledgers the evals' tests read (`tests/evals-measure.test.mjs`) and the home the
-copy tests start from (`tests/integration/home-fixture.mjs`), written down as
-the rows of the ledger and nothing else: `<name>.sql` is one `INSERT` for each
-row, which `tests/ledger-file.mjs` loads into a fresh ledger file made from the
+Ledgers the measure of the evals is held to (`crates/cf-evals/tests/measure.rs`)
+and the candidate's home that the ledger file's own test loads
+(`crates/cf-evals/src/ledger_file/tests.rs`), written down as the rows of the
+ledger and nothing else: `<name>.sql` is one `INSERT` for each row, which
+`crates/cf-evals/src/ledger_file.rs` loads into a fresh ledger file made from the
 native ledger's own migrations (`crates/cf-ledger/migrations`), so the schema
 is always the build's and the rows are what was recorded.
 
 `<name>.json` is what the evals' `measure()` answered on the ledger file the
 rows were taken from, when it read the ledger through Node's ledger module:
-the numbers that reading it with SQLite is held to, every field of the answer.
+the numbers that reading it with SQLite is held to, every field of the answer
+(`crates/cf-evals/tests/measure.rs` holds the Rust measure to them to the byte,
+in the order the keys are written).
 `placed.json` also holds `listed`, how many tasks the ledger's own board listed.
 
 | ledger | what it holds |
@@ -31,7 +34,7 @@ of that commit answered), by a recorder that ran Node's ledger module on a clock
 that moves a second a reading;
 `eval-round-trip` is the ledger file of the run as it was, recorded whole, but for the home
 folder of the machine and its user, which a recording does not carry: they are
-`/home/user` and `user` in it, and `tests/ledger-file.test.mjs` holds every
+`/home/user` and `user` in it, and `crates/cf-evals/tests/ledgers.rs` holds every
 recording to that. On that ledger the
 run's own report, the measure that reads it with SQLite and the one that read it
 through Node's ledger gave the same answer, every field. The recorder went with

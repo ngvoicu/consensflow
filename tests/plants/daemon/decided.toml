@@ -160,10 +160,10 @@ replace = '("core-api-003", 20, RESULT_ACCEPTED),'
 
 [[plant]]
 name = "decided result: the eval counts a result the chief decided on as one that never reached it"
-meant = "does not count a result the chief decided on before it was given it as one that never reached the chief"
+meant = "does_not_count_a_result_the_chief_decided_on_before_it_was_given_it_as_one_that_never_reached_the_chief"
 runs = ["evals-measure"]
 
 [[plant.edit]]
-file = "evals/measure.mjs"
-find = '''WHERE kind = 'result' AND recipient_id = ? AND state != 'cancelled'",'''
-replace = '''WHERE kind = 'result' AND recipient_id = ?",'''
+file = "crates/cf-evals/src/measure/plumbing.rs"
+find = '''WHERE kind = 'result' AND recipient_id = ?1 AND state != 'cancelled'",'''
+replace = '''WHERE kind = 'result' AND recipient_id = ?1",'''

@@ -397,25 +397,34 @@ impl Rig {
     /// every process a window started is checked to be gone. The home goes with
     /// it.
     pub fn close(mut self) -> Result<()> {
-        self.shutdown()
+        self.shutdown(EXIT)
+    }
+
+    /// [`Rig::close`], but the daemon and the pane host each have `within` to end,
+    /// where [`Rig::close`] gives them a few seconds, which suits the stand-in
+    /// agents that leave when asked: a real harness's window may take longer than
+    /// that, and the host gives a program that does not leave ten seconds before
+    /// it kills it.
+    pub fn close_within(mut self, within: Duration) -> Result<()> {
+        self.shutdown(within)
     }
 
     /// [`Rig::close`], but the home is left, for a rig that resumes on it
     /// ([`Config::existing_root`]). Where it is.
     pub fn close_keeping_the_root(mut self) -> Result<PathBuf> {
         self.keep_root = true;
-        self.shutdown()?;
+        self.shutdown(EXIT)?;
         Ok(self.root.clone())
     }
 
-    fn shutdown(&mut self) -> Result<()> {
+    fn shutdown(&mut self, exit: Duration) -> Result<()> {
         if self.closed {
             return Ok(());
         }
         self.closed = true;
         self.daemon.end_input();
         self.host.end_input();
-        let (daemon, host) = (self.daemon.wait(EXIT)?, self.host.wait(EXIT)?);
+        let (daemon, host) = (self.daemon.wait(exit)?, self.host.wait(exit)?);
         if daemon.is_none() || host.is_none() {
             return Err(Error::Timeout(format!(
                 "process did not exit{}",
@@ -449,7 +458,7 @@ impl Drop for Rig {
         if std::thread::panicking() || !self.closed {
             report::say(self);
         }
-        let _ = self.shutdown();
+        let _ = self.shutdown(EXIT);
         self.daemon.kill();
         self.host.kill();
         // Once every window is gone, and before the home that says which

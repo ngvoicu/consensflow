@@ -16,6 +16,10 @@
 //! stands in for the harnesses of (what the rig tells of its windows, the
 //! records the stand-ins leave in a Claude folder that is the person's, a
 //! window opened as the app opens one, the harness code asked as a process).
+//! So is `live_members`: the project of the live checks that play the chief with
+//! its own token, with the stand-in agent for the chief and the member, a
+//! question judged from what the daemon wrote of it, and the app quit and started
+//! again.
 //! So is `background_work`: what ConsensFlow does with the work
 //! a worker's turn left running (and not with the servers its harness keeps,
 //! which the stand-in agent starts after the first message, as Claude Code does,
@@ -60,6 +64,8 @@ mod decided_result;
 mod help;
 #[path = "rig/live_base.rs"]
 mod live_base;
+#[path = "rig/live_members.rs"]
+mod live_members;
 #[path = "rig/live_support.rs"]
 mod live_support;
 #[path = "rig/pending_agents.rs"]

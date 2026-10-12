@@ -1,0 +1,304 @@
+[
+  {
+    "id": "advice-trip",
+    "title": "Advice out, advice back, a note to the owner",
+    "fixture": "site",
+    "prompt": "Un test de funcționare, te rog, fără să mă întrebi pe mine nimic. Cere sfatul unui advisor (cf task add --advice): pentru un site despre burnout, ce culoare e mai potrivită pentru butonul Contact, albastru sau verde, și de ce, în cel mult trei propoziții. Când vine răspunsul, acceptă sarcina și trimite-mi recomandarea lui ca notă (cf note --human). Nu modifica niciun fișier și nu pune alte sarcini.",
+    "followUps": [],
+    "answers": [],
+    "fallback": "Da.",
+    "nudge": null,
+    "quietMs": 90000,
+    "expectations": [
+      "one advice task goes on the board",
+      "the advice task is accepted",
+      "the recommendation reaches the owner as a note",
+      "no file changes",
+      "the owner is not asked anything"
+    ]
+  },
+  {
+    "id": "chief-switch",
+    "title": "A chief switched to another harness knows what the old one was told",
+    "fixture": "site",
+    "prompt": "Two things to remember for later; nothing to do yet. The codeword for this release is @CODEWORD@. And we decided the release goes out on Friday, not Thursday. Confirm in one line.",
+    "followUps": [
+      "My notes from today's review, so you have them; nothing to do yet, confirm in one line.\nNote 1: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 1 before the next review.\nNote 2: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 2 before the next review.\nNote 3: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 3 before the next review.\nNote 4: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 4 before the next review.\nNote 5: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 5 before the next review.\nNote 6: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 6 before the next review.\nNote 7: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 7 before the next review.\nNote 8: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 8 before the next review.\nNote 9: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 9 before the next review.\nNote 10: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 10 before the next review.\nNote 11: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 11 before the next review.\nNote 12: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 12 before the next review.\nNote 13: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 13 before the next review.\nNote 14: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 14 before the next review.\nNote 15: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 15 before the next review.\nNote 16: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 16 before the next review.\nNote 17: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 17 before the next review.\nNote 18: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 18 before the next review.\nNote 19: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 19 before the next review.\nNote 20: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 20 before the next review.\nNote 21: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 21 before the next review.\nNote 22: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 22 before the next review.\nNote 23: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 23 before the next review.\nNote 24: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 24 before the next review.\nNote 25: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 25 before the next review.\nNote 26: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 26 before the next review.\nNote 27: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 27 before the next review.\nNote 28: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 28 before the next review.\nNote 29: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 29 before the next review.\nNote 30: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 30 before the next review.\nNote 31: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 31 before the next review.\nNote 32: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 32 before the next review.\nNote 33: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 33 before the next review.\nNote 34: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 34 before the next review.\nNote 35: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 35 before the next review.\nNote 36: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 36 before the next review.\nNote 37: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 37 before the next review.\nNote 38: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 38 before the next review.\nNote 39: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 39 before the next review.\nNote 40: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 40 before the next review.\nNote 41: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 41 before the next review.\nNote 42: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 42 before the next review.\nNote 43: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 43 before the next review.\nNote 44: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 44 before the next review.\nNote 45: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 45 before the next review.\nNote 46: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 46 before the next review.\nNote 47: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 47 before the next review.\nNote 48: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 48 before the next review.\nNote 49: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 49 before the next review.\nNote 50: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 50 before the next review.\nNote 51: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 51 before the next review.\nNote 52: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 52 before the next review.\nNote 53: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 53 before the next review.\nNote 54: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 54 before the next review.\nNote 55: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 55 before the next review.\nNote 56: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 56 before the next review.\nNote 57: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 57 before the next review.\nNote 58: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 58 before the next review.\nNote 59: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 59 before the next review.\nNote 60: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 60 before the next review.\nNote 61: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 61 before the next review.\nNote 62: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 62 before the next review.\nNote 63: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 63 before the next review.\nNote 64: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 64 before the next review.\nNote 65: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 65 before the next review.\nNote 66: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 66 before the next review.\nNote 67: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 67 before the next review.\nNote 68: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 68 before the next review.\nNote 69: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 69 before the next review.\nNote 70: the style guide asks for sentence case in headings, short paragraphs and alt text on every image; check item 70 before the next review.",
+      {
+        "switch": true
+      },
+      "What is the codeword for this release, and which day did we decide it goes out? Answer from what you know; change nothing."
+    ],
+    "answers": [],
+    "fallback": "Nothing to do yet; just answer.",
+    "nudge": null,
+    "quietMs": 90000,
+    "expectations": [
+      "the chief was switched once, to another harness",
+      "the new chief read the chief's history with cf history",
+      "the new chief names the codeword",
+      "the new chief knows the release goes out on Friday",
+      "nothing went on the board"
+    ]
+  },
+  {
+    "id": "complex-launch",
+    "title": "A launch: research, pages, a hard call, a sign-off",
+    "fixture": "site",
+    "prompt": "Lansăm site-ul luna viitoare și vreau trei lucruri deodată. Unu: o pagină nouă „Legislație” în română și engleză, din content/legislatie-ro.md, terminată și tradusă (secțiunile lipsă sunt marcate). Doi: o pagină „Pentru manageri” care explică ce văd managerii după evaluare, pornind de la docs/ghidul-managerului.md; verifică că ce spune ghidul chiar corespunde cu ce arată site-ul. Trei: un raport scurt (docs/lansare.md) despre ce ne lipsește ca site-ul să fie publicabil (accesibilitate, ce pagini lipsesc în engleză, ce texte sunt vechi), cu o recomandare de ordine. Nu publicăm nimic fără să văd eu; unde trebuie o decizie care e a mea, întreabă-mă.",
+    "followUps": [],
+    "answers": [
+      {
+        "source": "document(ul)? de referin|reference document",
+        "flags": "i",
+        "text": "Îl păstrăm, cu o notă că e vechi."
+      },
+      {
+        "source": "ordine|order|întâi|first",
+        "flags": "i",
+        "text": "Legislația întâi, apoi managerii, apoi raportul."
+      },
+      {
+        "source": "recomand|recommend",
+        "flags": "i",
+        "text": "Da, cum recomanzi."
+      },
+      {
+        "source": "publica|publish",
+        "flags": "i",
+        "text": "Nu încă; după ce văd paginile."
+      }
+    ],
+    "fallback": "Da.",
+    "nudge": "Da, cum recomanzi. Continuă.",
+    "quietMs": 150000,
+    "expectations": [
+      "at least three tasks go on the board",
+      "two tasks run side by side at some point",
+      "advice is asked at least once",
+      "finished work goes to a review",
+      "the owner is asked in the terminal, at least two questions",
+      "a finding reaches the owner as a note (the guide and the site disagree)",
+      "the chief's own edits stay under ten (counted for a Claude chief only)"
+    ]
+  },
+  {
+    "id": "control-trip",
+    "title": "Tell, answer, resume, a follow-up to the same window",
+    "fixture": "site",
+    "prompt": "Un test de funcționare, te rog, fără să mă întrebi nimic pe mine. Pașii, în ordine: (1) Pune o sarcină unui worker: să ruleze întâi comanda `sleep 90`, apoi să scrie în fișierul nou site/notes.md o singură linie, „unu”. (2) Când sarcina e în lucru (verifică cu cf task get T-1), oprește-o cu cf tell T-1 și întreabă-l în ce fișier va scrie. (3) După ce îți răspunde, reia sarcina cu cf task resume T-1 „continuă de unde ai rămas”. (4) Când vine rezultatul, acceptă T-1 și dă o continuare aceleiași ferestre cu cf task add --after T-1: să adauge în site/notes.md a doua linie, „doi”. (5) Când vine și acest rezultat, acceptă-l. Nu modifica alte fișiere și nu pune alte sarcini.",
+    "followUps": [],
+    "answers": [],
+    "fallback": "Da.",
+    "nudge": null,
+    "quietMs": 240000,
+    "expectations": [
+      "the chief stops the task with cf tell",
+      "the worker answers the tell",
+      "the task is paused and resumed",
+      "a follow-up goes to the same window (--after)",
+      "both tasks are accepted",
+      "only site/notes.md is new",
+      "the owner is not asked anything"
+    ]
+  },
+  {
+    "id": "conversation",
+    "title": "A working conversation of small asks: how many go to the board",
+    "fixture": "site",
+    "prompt": "Salut. Ce pagini are site-ul acum și ce face fiecare, pe scurt?",
+    "followUps": [
+      "În site/evaluare.html scorul e de la 0 la 10, dar docs/ghidul-managerului.md zice de la 1 la 5. Corectează ghidul să spună 0 la 10.",
+      "Adaugă în subsolul paginii principale un link către pagina de evaluare.",
+      "Culorile din site/style.css sunt scrise direct peste tot; mută-le în variabile CSS.",
+      "Fă și versiunea în engleză a paginii de evaluare, în site/en/evaluare.html.",
+      "Titlul paginii principale să fie „Burnout la locul de muncă — ghid pentru manageri”.",
+      "Verifică dacă merg toate linkurile interne din site.",
+      "Scrie în README ce s-a schimbat azi, pe scurt."
+    ],
+    "answers": [],
+    "fallback": "Da, cum crezi tu.",
+    "nudge": null,
+    "quietMs": 120000,
+    "expectations": [
+      "at least three changes go to the board",
+      "the English page is a worker’s (a translation runs on its own)",
+      "the work is done: the English evaluation page exists"
+    ]
+  },
+  {
+    "id": "long-trip",
+    "title": "Long messages both ways: members to the chief, the owner and the chief",
+    "fixture": "long",
+    "prompt": "Un test de funcționare pentru mesaje lungi. Nu modifica niciun fișier.\n1. Pune o sarcină unui worker: să citească interne/worker.txt și să-ți trimită ca rezultat\nun raport de cel puțin 8000 de caractere despre site/index.html; ultima linie a\nrezultatului să fie exact codul din fișier.\n2. Cere sfatul unui advisor (cf task add --advice): să citească interne/advisor.txt și să-ți\ntrimită un sfat de cel puțin 8000 de caractere despre cum se poate îmbunătăți site/index.html;\nultima linie să fie exact codul din fișier.\n3. Cere o revizie unui reviewer (cf task add --review): să citească interne/reviewer.txt și\nsite/index.html și să-ți trimită o recenzie de cel puțin 8000 de caractere; ultima linie să\nfie exact codul din fișier.\nNu citi tu fișierele din interne/.\n4. Pune-mi aici, în terminal, o singură întrebare: cum se numește raportul final.\n5. Citește integral fiecare rezultat și răspunsul meu. Când le ai pe toate, acceptă sarcinile\nși trimite-mi o singură notă (cf note --human) cu cinci lucruri: codul workerului, codul\nadvisorului, codul reviewerului, numele raportului din răspunsul meu și codul de la\nsfârșitul acestui mesaj.\n\nContext, de citit până la capăt:\n\nSecțiunea 1 din notițele ședinței despre site. Am discutat structura paginii principale, tonul textelor și felul în care un manager găsește repede evaluarea de burnout. Echipa vrea fraze scurte, un singur îndemn pe ecran și trimiteri clare către legislație, fără jargon medical. Pagina de evaluare rămâne pe scara de la 0 la 10, iar rezultatele nu se salvează nicăieri. Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine citește până la capăt.\n\nSecțiunea 2 din notițele ședinței despre site. Am discutat structura paginii principale, tonul textelor și felul în care un manager găsește repede evaluarea de burnout. Echipa vrea fraze scurte, un singur îndemn pe ecran și trimiteri clare către legislație, fără jargon medical. Pagina de evaluare rămâne pe scara de la 0 la 10, iar rezultatele nu se salvează nicăieri. Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine citește până la capăt.\n\nSecțiunea 3 din notițele ședinței despre site. Am discutat structura paginii principale, tonul textelor și felul în care un manager găsește repede evaluarea de burnout. Echipa vrea fraze scurte, un singur îndemn pe ecran și trimiteri clare către legislație, fără jargon medical. Pagina de evaluare rămâne pe scara de la 0 la 10, iar rezultatele nu se salvează nicăieri. Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine citește până la capăt.\n\nSecțiunea 4 din notițele ședinței despre site. Am discutat structura paginii principale, tonul textelor și felul în care un manager găsește repede evaluarea de burnout. Echipa vrea fraze scurte, un singur îndemn pe ecran și trimiteri clare către legislație, fără jargon medical. Pagina de evaluare rămâne pe scara de la 0 la 10, iar rezultatele nu se salvează nicăieri. Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine citește până la capăt.\n\nSecțiunea 5 din notițele ședinței despre site. Am discutat structura paginii principale, tonul textelor și felul în care un manager găsește repede evaluarea de burnout. Echipa vrea fraze scurte, un singur îndemn pe ecran și trimiteri clare către legislație, fără jargon medical. Pagina de evaluare rămâne pe scara de la 0 la 10, iar rezultatele nu se salvează nicăieri. Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine citește până la capăt.\n\nSecțiunea 6 din notițele ședinței despre site. Am discutat structura paginii principale, tonul textelor și felul în care un manager găsește repede evaluarea de burnout. Echipa vrea fraze scurte, un singur îndemn pe ecran și trimiteri clare către legislație, fără jargon medical. Pagina de evaluare rămâne pe scara de la 0 la 10, iar rezultatele nu se salvează nicăieri. Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine citește până la capăt.\n\nSecțiunea 7 din notițele ședinței despre site. Am discutat structura paginii principale, tonul textelor și felul în care un manager găsește repede evaluarea de burnout. Echipa vrea fraze scurte, un singur îndemn pe ecran și trimiteri clare către legislație, fără jargon medical. Pagina de evaluare rămâne pe scara de la 0 la 10, iar rezultatele nu se salvează nicăieri. Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine citește până la capăt.\n\nSecțiunea 8 din notițele ședinței despre site. Am discutat structura paginii principale, tonul textelor și felul în care un manager găsește repede evaluarea de burnout. Echipa vrea fraze scurte, un singur îndemn pe ecran și trimiteri clare către legislație, fără jargon medical. Pagina de evaluare rămâne pe scara de la 0 la 10, iar rezultatele nu se salvează nicăieri. Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine citește până la capăt.\n\nSecțiunea 9 din notițele ședinței despre site. Am discutat structura paginii principale, tonul textelor și felul în care un manager găsește repede evaluarea de burnout. Echipa vrea fraze scurte, un singur îndemn pe ecran și trimiteri clare către legislație, fără jargon medical. Pagina de evaluare rămâne pe scara de la 0 la 10, iar rezultatele nu se salvează nicăieri. Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine citește până la capăt.\n\nSecțiunea 10 din notițele ședinței despre site. Am discutat structura paginii principale, tonul textelor și felul în care un manager găsește repede evaluarea de burnout. Echipa vrea fraze scurte, un singur îndemn pe ecran și trimiteri clare către legislație, fără jargon medical. Pagina de evaluare rămâne pe scara de la 0 la 10, iar rezultatele nu se salvează nicăieri. Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine citește până la capăt.\n\nSecțiunea 11 din notițele ședinței despre site. Am discutat structura paginii principale, tonul textelor și felul în care un manager găsește repede evaluarea de burnout. Echipa vrea fraze scurte, un singur îndemn pe ecran și trimiteri clare către legislație, fără jargon medical. Pagina de evaluare rămâne pe scara de la 0 la 10, iar rezultatele nu se salvează nicăieri. Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine citește până la capăt.\n\nSecțiunea 12 din notițele ședinței despre site. Am discutat structura paginii principale, tonul textelor și felul în care un manager găsește repede evaluarea de burnout. Echipa vrea fraze scurte, un singur îndemn pe ecran și trimiteri clare către legislație, fără jargon medical. Pagina de evaluare rămâne pe scara de la 0 la 10, iar rezultatele nu se salvează nicăieri. Versiunea în engleză urmează după ce textul românesc e aprobat. Nimic din secțiunea aceasta nu cere vreo modificare acum; e doar context pentru cine citește până la capăt.\n\nCodul acestui mesaj: FARUL-2208",
+    "followUps": [],
+    "answers": [
+      {
+        "source": ".",
+        "flags": "",
+        "text": "Punctul 1: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 2: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 3: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 4: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 5: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 6: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 7: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 8: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 9: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 10: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 11: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 12: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 13: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 14: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 15: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nNumele raportului final: DELTA-5530"
+      }
+    ],
+    "fallback": "Punctul 1: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 2: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 3: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 4: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 5: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 6: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 7: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 8: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 9: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 10: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 11: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 12: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 13: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 14: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nPunctul 15: raportul final îl citesc eu și îl trimit mai departe conducerii. Vreau să fie clar din titlu despre ce e vorba, să nu se confunde cu rapoartele lunare, și să se poată căuta ușor în arhivă după nume. Nu vreau diacritice în nume, nici spații, pentru că arhiva le strică. Am mai avut rapoarte cu nume lungi și s-au pierdut. Numele trebuie să fie scurt, cu majuscule și cu un număr la sfârșit.\n\nNumele raportului final: DELTA-5530",
+    "nudge": null,
+    "quietMs": 180000,
+    "expectations": [
+      "the worker's result is long (8000 characters or more)",
+      "the advisor's advice is long (8000 characters or more)",
+      "the reviewer's review is long (8000 characters or more)",
+      "the owner's long answer went to the chief",
+      "the note holds the worker's code",
+      "the note holds the advisor's code",
+      "the note holds the reviewer's code",
+      "the note holds the report's name from the owner's answer",
+      "the note holds the code at the end of the owner's message",
+      "no file changes"
+    ]
+  },
+  {
+    "id": "question-trip",
+    "title": "A worker, an advisor and a reviewer each ask the chief (cf ask)",
+    "fixture": "questions",
+    "prompt": "Un test de funcționare pentru întrebări, fără să mă întrebi pe mine nimic. Pune pe board trei sarcini, toate --tier standard, și scrie în fiecare brief exact ce să te întrebe și că întrebarea ți-o pune cu cf ask: (1) unui worker: înainte de orice, să te întrebe ce culoare să aibă butonul Contact, apoi să scrie o singură linie cu culoarea în fișierul nou site/notes.md; (2) unui advisor (--advice): înainte de răspuns, să te întrebe pentru ce public e site-ul, apoi să recomande un font; (3) unui reviewer (--review): să verifice site/index.html, iar înainte de concluzii să te întrebe punând în întrebare, întreg și exact, textul din interne/intrebare-reviewer.md (e lung, cu un cod pe ultimul rând). Răspunde-le: workerului „albastru”, advisorului „manageri”, reviewerului „doar versiunea română”. Când ai toate trei rezultatele, acceptă-le și scrie-mi o singură notă cu ce a întrebat fiecare și codul de pe ultimul rând al întrebării reviewerului. Nu modifica alte fișiere.",
+    "followUps": [],
+    "answers": [],
+    "fallback": "Da.",
+    "nudge": null,
+    "quietMs": 120000,
+    "expectations": [
+      "a worker, an advisor and a reviewer each get a task",
+      "the worker asks the chief, and the answer reaches its window",
+      "the advisor asks the chief, and the answer reaches its window",
+      "the reviewer asks the chief, and the answer reaches its window",
+      "the long question reaches the chief whole (over 4000 characters)",
+      "the chief's note holds the long question's code",
+      "all three tasks are accepted",
+      "the owner is not asked anything"
+    ]
+  },
+  {
+    "id": "question-trip-native",
+    "title": "A worker, an advisor and a reviewer each ask the chief with their harness's own question tool",
+    "fixture": "questions",
+    "prompt": "Un test de funcționare pentru întrebări, fără să mă întrebi pe mine nimic. Pune pe board trei sarcini, toate --tier standard, și scrie în fiecare brief exact ce să te întrebe și că întrebarea ți-o pune cu unealta proprie de întrebări a harness-ului lor (nu cu cf ask): (1) unui worker: înainte de orice, să te întrebe ce culoare să aibă butonul Contact, apoi să scrie o singură linie cu culoarea în fișierul nou site/notes.md; (2) unui advisor (--advice): înainte de răspuns, să te întrebe pentru ce public e site-ul, apoi să recomande un font; (3) unui reviewer (--review): să verifice site/index.html, iar înainte de concluzii să te întrebe punând în întrebare, întreg și exact, textul din interne/intrebare-reviewer.md (e lung, cu un cod pe ultimul rând). Răspunde-le: workerului „albastru”, advisorului „manageri”, reviewerului „doar versiunea română”. Când ai toate trei rezultatele, acceptă-le și scrie-mi o singură notă cu ce a întrebat fiecare și codul de pe ultimul rând al întrebării reviewerului. Nu modifica alte fișiere.",
+    "followUps": [],
+    "answers": [],
+    "fallback": "Da.",
+    "nudge": null,
+    "quietMs": 120000,
+    "expectations": [
+      "a worker, an advisor and a reviewer each get a task",
+      "the worker asks the chief, and the answer reaches its window",
+      "the advisor asks the chief, and the answer reaches its window",
+      "the reviewer asks the chief, and the answer reaches its window",
+      "the long question reaches the chief whole (over 4000 characters)",
+      "the chief's note holds the long question's code",
+      "all three tasks are accepted",
+      "the owner is not asked anything"
+    ]
+  },
+  {
+    "id": "round-trip",
+    "title": "A task out, a question back, an answer, a result, a review",
+    "fixture": "site",
+    "prompt": "Un test de funcționare, te rog, fără să mă întrebi pe mine nimic. Pune o singură sarcină unui worker: înainte de a scrie ceva, să te întrebe pe tine (cu cf ask) ce culoare să aibă butonul Contact, iar după răspunsul tău să scrie o singură linie cu culoarea în fișierul nou site/notes.md. Când te întreabă, răspunde-i „albastru”. Când sarcina e gata, cere unui reviewer să verifice site/notes.md, apoi acceptă sarcina. Nu modifica alte fișiere.",
+    "followUps": [],
+    "answers": [],
+    "fallback": "Da.",
+    "nudge": null,
+    "quietMs": 90000,
+    "expectations": [
+      "one task goes to a worker",
+      "the worker asks the chief on the board",
+      "the chief answers on the board",
+      "the finished work goes to a review",
+      "the task is accepted",
+      "only site/notes.md is new",
+      "the owner is not asked anything"
+    ]
+  },
+  {
+    "id": "simple-fix",
+    "title": "One wrong word on one page",
+    "fixture": "site",
+    "prompt": "Pe pagina de evaluare (site/evaluare.html) scrie „un scor între 0 și 100”; scorul e de fapt între 0 și 10. Corectează, te rog.",
+    "followUps": [],
+    "answers": [],
+    "fallback": "Da.",
+    "nudge": null,
+    "quietMs": 90000,
+    "expectations": [
+      "the page is fixed, and nothing else touched",
+      "no advice is asked for a one-word fix",
+      "the owner is not asked anything",
+      "at most one task goes on the board",
+      "the chief says what it did"
+    ]
+  },
+  {
+    "id": "six-decisions",
+    "title": "A new page with owner decisions in it",
+    "fixture": "site",
+    "prompt": "Pe site, în meniul de jos (Despre noi, FAQ, Contact, în română și engleză) vrem și un buton Legislație, care duce la o pagină nouă cu legislația despre burnout la locul de muncă. Textul în română e început în content/legislatie-ro.md, dar trebuie terminat (secțiunile lipsă sunt marcate) și apoi tradus în engleză. Vechiul „Document de referință pentru HR” din docs/ nu mai știu dacă îl păstrăm. Nu publica nimic până nu ne înțelegem; pagina se publică doar când zic eu.",
+    "followUps": [],
+    "answers": [
+      {
+        "source": "document(ul)? de referin|reference document|docs\\/",
+        "flags": "i",
+        "text": "Îl păstrăm, dar pune sus o notă că pagina de legislație e sursa actuală."
+      },
+      {
+        "source": "recomand|recommend",
+        "flags": "i",
+        "text": "Da, cum recomanzi."
+      },
+      {
+        "source": "publica|publish",
+        "flags": "i",
+        "text": "Nu publicăm încă. Vreau să văd pagina întâi; îți spun eu când."
+      }
+    ],
+    "fallback": "Da.",
+    "nudge": "Da, cum recomanzi. Continuă.",
+    "quietMs": 120000,
+    "expectations": [
+      "the owner is asked in the terminal, at least three questions",
+      "nothing is asked on the board",
+      "the chief never tries cf ask",
+      "a finding reaches the owner as a note",
+      "at least two tasks go on the board",
+      "two tasks run side by side at some point",
+      "finished work goes to a review",
+      "the chief's own edits stay under ten (counted for a Claude chief only)"
+    ]
+  },
+  {
+    "id": "terminal-questions",
+    "title": "The chief asks the owner in its terminal, and the answer reaches the work",
+    "fixture": "site",
+    "prompt": "Vreau pe site o pagină nouă, pentru cariere. Înainte să pornești ceva, întreabă-mă două lucruri, fără să ghicești: cum se numește fișierul paginii și în ce limbă o facem întâi, română sau engleză. Apoi pune munca pe board.",
+    "followUps": [],
+    "answers": [
+      {
+        "source": "nume|fișier|fisier|file|name",
+        "flags": "i",
+        "text": "Fișierul e site/cariere.html."
+      },
+      {
+        "source": "limb|român|roman|englez|english|language",
+        "flags": "i",
+        "text": "Întâi în română."
+      }
+    ],
+    "fallback": "Da, continuă.",
+    "nudge": null,
+    "quietMs": 120000,
+    "expectations": [
+      "the owner is asked in the terminal",
+      "nothing is asked on the board",
+      "the chief never tries cf ask",
+      "the work goes on the board",
+      "the owner's answer reaches the work: site/cariere.html exists"
+    ]
+  }
+]

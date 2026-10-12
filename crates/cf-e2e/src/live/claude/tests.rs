@@ -30,17 +30,64 @@ fn the_status_of_a_session_is_in_the_file_named_by_a_process_that_names_the_sess
     assert_eq!(found["pid"], 102);
     assert_eq!(status_of(config.path(), "c"), None);
     assert_eq!(status_of(&config.path().join("not-there"), "b"), None);
-    let look = sample(config.path(), "b");
+    let look = sample(config.path(), "b", false);
     assert_eq!(
         (look.status.as_deref(), look.changed_at_ms),
         (Some("busy"), Some(1_791_711_000_123))
     );
     // A session with no status file is read as having none.
-    let none = sample(config.path(), "c");
+    let none = sample(config.path(), "c", false);
     assert_eq!(
         (none.status, none.waiting_for, none.changed_at_ms),
         (None, None, None)
     );
+}
+
+#[test]
+fn the_file_a_killed_window_left_is_not_the_status_of_the_window_resumed_on_its_conversation() {
+    let config = tempfile::tempdir().unwrap();
+    // The killed window's file sorts first, as the older of two process ids may; its process
+    // is gone (no process has an id this large). The resumed window's is this process's.
+    let (gone, here) = ("004000000000".to_owned(), std::process::id().to_string());
+    for (name, status) in [(&gone, "busy"), (&here, "idle")] {
+        let file = config.path().join("sessions").join(format!("{name}.json"));
+        let text = format!(r#"{{"sessionId":"s","status":"{status}"}}"#);
+        crate::files::write(&file, text).unwrap();
+    }
+    let word = |status: Option<Value>| status.map(|status| status["status"].to_string());
+    // Read as the files come, the dead window's word is the first: a stale `busy`.
+    assert_eq!(
+        word(status_of(config.path(), "s")).as_deref(),
+        Some("\"busy\"")
+    );
+    // Read of the window that runs, the file of a process that is gone says nothing.
+    assert_eq!(
+        word(running_status_of(config.path(), "s")).as_deref(),
+        Some("\"idle\"")
+    );
+    assert_eq!(
+        sample(config.path(), "s", true).status.as_deref(),
+        Some("idle")
+    );
+    assert_eq!(
+        sample(config.path(), "s", false).status.as_deref(),
+        Some("busy")
+    );
+    // A conversation only a dead window names is none at all.
+    crate::files::write(
+        &config.path().join("sessions/004000000001.json"),
+        r#"{"sessionId":"left","status":"busy"}"#,
+    )
+    .unwrap();
+    assert!(status_of(config.path(), "left").is_some());
+    assert_eq!(running_status_of(config.path(), "left"), None);
+    assert_eq!(sample(config.path(), "left", true).status, None);
+    // The watch of the window that runs reads the same.
+    let watch = Status::watch_running(config.path(), "s");
+    let read = super::super::until(Duration::from_secs(10), Duration::from_millis(10), || {
+        watch.samples().into_iter().next()
+    });
+    assert_eq!(read.unwrap().status.as_deref(), Some("idle"));
 }
 
 #[test]
@@ -52,7 +99,7 @@ fn a_time_with_a_fraction_of_a_millisecond_is_that_millisecond() {
     )
     .unwrap();
     assert_eq!(
-        sample(config.path(), "s").changed_at_ms,
+        sample(config.path(), "s", false).changed_at_ms,
         Some(1_791_711_000_124)
     );
 }
