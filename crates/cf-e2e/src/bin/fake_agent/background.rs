@@ -173,14 +173,7 @@ impl Jobs {
     /// Starts the server of the window's harness, which runs past any case, in
     /// `group`, and the browser it launches if it does.
     fn start_server(&self, group: Group) -> Result<(), String> {
-        self.begin(
-            SERVER,
-            SERVER_SECONDS,
-            false,
-            group,
-            self.browser,
-            || {},
-        )
+        self.begin(SERVER, SERVER_SECONDS, false, group, self.browser, || {})
     }
 
     /// Starts the job `label`, which runs `seconds` (and ignores the requests
