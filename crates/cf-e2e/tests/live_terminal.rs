@@ -347,4 +347,45 @@ mod tests {
             "no warning; no OpenConsole.exe beside the pane host (cargo xtask conpty --into its folder); its screen: x"
         );
     }
+
+    /// A window opened as Windows' console host opens Devin's (zeewin, 2026-10-12): a
+    /// line break at once, and the prompt seconds after, on the first look at it being
+    /// "drawn" the check read a screen of blanks and found no warning in it.
+    #[cfg(unix)]
+    #[test]
+    fn a_window_that_prints_a_line_break_first_has_drawn_when_its_prompt_is_there_and_not_before(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        use std::time::{Duration, Instant};
+
+        use cf_e2e::live::window::Open;
+        use cf_e2e::live::{Harness, Installed};
+        use cf_e2e::rig::{Config, Rig};
+
+        // Made before the rig starts, and long before a window runs it.
+        let slow = tempfile::tempdir()?;
+        let program = slow.path().join("slow-prompt");
+        cf_e2e::files::write_executable(
+            &program,
+            "#!/bin/sh\nprintf '\\n'\nsleep 5\necho 'the prompt is drawn'\nsleep 120\n",
+        )?;
+        let rig = Rig::start(Config::new(env!("CARGO_BIN_EXE_fake-agent")))?;
+        let home = rig.var("HOME").unwrap_or_default().to_owned();
+        let install = Installed::at(Harness::Claude, &program, &home);
+        let window = Open::new(&rig, &install, "terminal", "terminal-slow")
+            .without_trust()
+            .open()?;
+        let opened = Instant::now();
+        assert!(window.still(Duration::from_secs(60)));
+        let screen = window.screen();
+        assert!(screen.contains("the prompt is drawn"), "{screen:?}");
+        // Three seconds of stillness after the prompt, which came five seconds in.
+        assert!(
+            opened.elapsed() >= Duration::from_secs(7),
+            "{:?}",
+            opened.elapsed()
+        );
+        drop(window);
+        rig.close()?;
+        Ok(())
+    }
 }

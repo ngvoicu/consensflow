@@ -88,20 +88,101 @@ fn the_harnesses_are_named_as_a_command_line_and_the_roster_name_them() {
     assert_eq!(Harness::Codex.kind(), "codex");
 }
 
+/// Whether `harness` has a login in `home`, on a machine that is Windows or is not,
+/// whose `%APPDATA%` is `appdata`.
+fn held(harness: Harness, home: &Path, appdata: Option<&str>, windows: bool) -> bool {
+    has_login(&login_places(harness, home, appdata, windows))
+}
+
 #[test]
 fn a_home_holds_a_login_when_it_holds_the_place_the_harness_keeps_it() {
     let home = tempfile::tempdir().unwrap();
+    let held = |harness, home: &Path| held(harness, home, None, false);
     for harness in Harness::ALL.into_iter().filter(|h| *h != Harness::Codex) {
-        assert!(!has_login(harness, home.path()), "{harness:?}");
+        assert!(!held(harness, home.path()), "{harness:?}");
     }
     fs::write(home.path().join(".claude.json"), "{}").unwrap();
-    assert!(has_login(Harness::Claude, home.path()));
-    assert!(!has_login(Harness::Pi, home.path()));
+    assert!(held(Harness::Claude, home.path()));
+    assert!(!held(Harness::Pi, home.path()));
     fs::create_dir_all(home.path().join(".config").join("opencode")).unwrap();
-    assert!(has_login(Harness::OpenCode, home.path()));
+    assert!(held(Harness::OpenCode, home.path()));
     // Codex's home is the folder itself: any folder that is there.
-    assert!(has_login(Harness::Codex, home.path()));
-    assert!(!has_login(Harness::Codex, &home.path().join("missing")));
+    assert!(held(Harness::Codex, home.path()));
+    assert!(!held(Harness::Codex, &home.path().join("missing")));
+}
+
+#[test]
+fn devin_keeps_its_login_in_devin_under_appdata_on_windows_and_in_the_xdg_places_elsewhere() {
+    // A Windows profile as zeewin has it: Devin's login, config and sessions are in
+    // `AppData\Roaming\devin`, and `.config` and `.local` are not there at all.
+    let windows = tempfile::tempdir().unwrap();
+    fs::create_dir_all(windows.path().join("AppData/Roaming/devin/cli")).unwrap();
+    assert!(held(Harness::Devin, windows.path(), None, true));
+    assert!(!held(Harness::Devin, windows.path(), None, false));
+    // A Mac's or Linux's: the XDG places, either of them.
+    for place in [".config/devin", ".local/share/devin"] {
+        let unix = tempfile::tempdir().unwrap();
+        assert!(!held(Harness::Devin, unix.path(), None, false), "{place}");
+        fs::create_dir_all(unix.path().join(place)).unwrap();
+        assert!(held(Harness::Devin, unix.path(), None, false), "{place}");
+        assert!(!held(Harness::Devin, unix.path(), None, true), "{place}");
+    }
+}
+
+#[test]
+fn where_windows_names_its_appdata_devin_is_looked_for_there_and_not_in_the_profile() {
+    let profile = tempfile::tempdir().unwrap();
+    let redirected = tempfile::tempdir().unwrap();
+    let appdata = redirected.path().to_string_lossy().into_owned();
+    let own = profile.path().join("AppData").join("Roaming").join("devin");
+    fs::create_dir_all(&own).unwrap();
+    let places =
+        |appdata: Option<&str>| login_places(Harness::Devin, profile.path(), appdata, true);
+    assert_eq!(places(Some(&appdata)), [redirected.path().join("devin")]);
+    assert!(!held(Harness::Devin, profile.path(), Some(&appdata), true));
+    fs::create_dir_all(redirected.path().join("devin")).unwrap();
+    assert!(held(Harness::Devin, profile.path(), Some(&appdata), true));
+    // A machine that names none, or names it empty, has it in the profile's own.
+    assert_eq!(places(None), std::slice::from_ref(&own));
+    assert_eq!(places(Some("")), std::slice::from_ref(&own));
+}
+
+#[test]
+fn every_other_harness_keeps_its_login_in_the_same_places_on_windows_as_anywhere() {
+    let home = Path::new("home");
+    for harness in Harness::ALL.into_iter().filter(|h| *h != Harness::Devin) {
+        assert_eq!(
+            login_places(harness, home, Some("appdata"), true),
+            login_places(harness, home, None, false),
+            "{harness:?}"
+        );
+    }
+}
+
+#[test]
+fn a_machine_with_no_login_is_told_where_the_harness_keeps_it_and_what_to_do() {
+    let home = Path::new("profile");
+    let said = |harness, windows| {
+        no_login(harness, &login_places(harness, home, None, windows)).to_string()
+    };
+    // The folder Devin keeps its login in, and not the profile that holds it.
+    let roaming = home.join("AppData").join("Roaming").join("devin");
+    assert_eq!(
+        said(Harness::Devin, true),
+        format!(
+            "could not find {}: devin keeps its login there: log in with `devin auth login`",
+            roaming.display()
+        )
+    );
+    // Where there are two places, the first is named, and the other after it.
+    assert_eq!(
+        said(Harness::Claude, false),
+        format!(
+            "could not find {}: claude keeps its login there (or in {}): log in by running `claude` once",
+            home.join(".claude.json").display(),
+            home.join(".claude").display()
+        )
+    );
 }
 
 #[test]
