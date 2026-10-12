@@ -3,10 +3,11 @@
 //! host they run, so a command here has nothing to build first and hands its
 //! arguments to `cargo test`: the CLI's (`cli`), the daemon's as a process
 //! (`daemon`), the rig's, with the daemon and the pane host in real terminals
-//! (`rig`), and the daemon under load (`load`, which is ignored unless asked
-//! for). The live tests are ignored too, and what they run is the machine's own
-//! harness on its own login, which spends real quota: they are no part of
-//! `check`, and a person asks for each by name, by [`crate::live`]'s one
+//! (`rig`), the regressions, a rig case for each bug the owner met
+//! (`regressions`), and the daemon under load (`load`, which is ignored unless
+//! asked for). The live tests are ignored too, and what they run is the
+//! machine's own harness on its own login, which spends real quota: they are no
+//! part of `check`, and a person asks for each by name, by [`crate::live`]'s one
 //! command. The packaged smoke (`smoke`) is a test of the same crate, ignored
 //! the same way, and is run by its own command, [`crate::smoke`], which takes
 //! the app to run it on.
@@ -20,13 +21,13 @@ use crate::process::{self, Invocation};
 pub const COMMANDS: &[Command] = &[
     Command {
         words: &["test", "daemons"],
-        about: "Run the daemon suites and the rig's (the daemon and rig tests of cf-e2e) against the native daemon, built for them",
+        about: "Run the daemon suites and the rig's (the daemon, rig and regressions tests of cf-e2e) against the native daemon, built for them",
         usage: "[cargo test arguments: --offline, or a test's name, or -- and libtest's]",
         run: Run::Native(daemons),
     },
     Command {
         words: &["test", "integration"],
-        about: "Run the rig's suites (the rig test of cf-e2e): the daemon and the pane host in real terminals, with stand-in agents in the windows",
+        about: "Run the rig's suites (the rig and regressions tests of cf-e2e): the daemon and the pane host in real terminals, with stand-in agents in the windows",
         usage: "[cargo test arguments: --offline, or a test's name, or -- and libtest's]",
         run: Run::Native(integration),
     },
@@ -63,12 +64,12 @@ pub(crate) struct Suite {
 }
 
 const DAEMONS: Suite = Suite {
-    tests: &["daemon", "rig"],
+    tests: &["daemon", "rig", "regressions"],
     filter: None,
     ignored: false,
 };
 const INTEGRATION: Suite = Suite {
-    tests: &["rig"],
+    tests: &["rig", "regressions"],
     filter: None,
     ignored: false,
 };
@@ -203,19 +204,24 @@ mod tests {
     }
 
     #[test]
-    fn the_daemon_suites_are_the_daemon_and_rig_tests_and_the_integration_suites_the_rigs_alone() {
+    fn the_daemon_suites_are_the_daemon_rig_and_regressions_tests_and_the_integration_suites_the_rigs(
+    ) {
         assert_eq!(
             line(DAEMONS, &[]),
-            "cargo test -p cf-e2e --test daemon --test rig"
+            "cargo test -p cf-e2e --test daemon --test rig --test regressions"
         );
         assert_eq!(
             line(DAEMONS, &["--offline", "core_slice::"]),
-            "cargo test -p cf-e2e --test daemon --test rig --offline core_slice::"
+            "cargo test -p cf-e2e --test daemon --test rig --test regressions --offline core_slice::"
         );
-        assert_eq!(line(INTEGRATION, &[]), "cargo test -p cf-e2e --test rig");
+        // The regressions are rig cases, one for each bug the owner met: wherever the rig runs, they do.
+        assert_eq!(
+            line(INTEGRATION, &[]),
+            "cargo test -p cf-e2e --test rig --test regressions"
+        );
         assert_eq!(
             line(INTEGRATION, &["--", "--nocapture"]),
-            "cargo test -p cf-e2e --test rig -- --nocapture"
+            "cargo test -p cf-e2e --test rig --test regressions -- --nocapture"
         );
     }
 

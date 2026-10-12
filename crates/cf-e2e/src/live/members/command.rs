@@ -63,7 +63,12 @@ fn of_node(found: Vec<Process>) -> Vec<Process> {
         .collect()
 }
 
-/// Processes as `pid (parent) command`, each command cut to 110 characters.
+/// How many characters of a command a line of processes shows.
+const LINE: usize = 110;
+
+/// Processes as `pid (parent) command`, each command cut to 110 characters, the
+/// folder of its program given up first where that is what makes it long (see
+/// [`in_a_line`]).
 pub fn shown(found: &[Process]) -> Vec<String> {
     found
         .iter()
@@ -72,10 +77,26 @@ pub fn shown(found: &[Process]) -> Vec<String> {
                 "{} ({}) {}",
                 process.pid,
                 process.ppid,
-                process.command.chars().take(110).collect::<String>()
+                in_a_line(&process.command)
             )
         })
         .collect()
+}
+
+/// `command` as a line of [`LINE`] characters at most. A program that is named by a
+/// path (the checkout's, which is as long as the folder a person keeps it in) is told by
+/// its file name behind `…/` when the command is longer than a line, so that what ran
+/// is in the line wherever the checkout is, and not the folders it is in.
+fn in_a_line(command: &str) -> String {
+    let (program, rest) = command.split_once(' ').unwrap_or((command, ""));
+    let named = match program.rfind(['/', '\\']) {
+        Some(at) if command.chars().count() > LINE => {
+            let joined = if rest.is_empty() { "" } else { " " };
+            format!("…/{}{joined}{rest}", &program[at + 1..])
+        }
+        _ => command.to_owned(),
+    };
+    named.chars().take(LINE).collect()
 }
 
 #[cfg(test)]
@@ -128,6 +149,47 @@ mod tests {
         let shown = shown(&[process(7, 1, "node -e a"), process(8, 7, &long)]);
         assert_eq!(shown[0], "7 (1) node -e a");
         assert_eq!(shown[1].len(), "8 (7) ".len() + 110);
+    }
+
+    #[test]
+    fn a_program_named_by_a_long_path_is_told_by_its_file_name_so_the_line_holds_what_ran() {
+        // The checkout's folder is as long as a person made it: the program was cut off
+        // behind it, and the test that looked for its flags failed in a long-named worktree.
+        let folder = "/Users/someone/Projects/work/trees/a-long-name-for-a-worktree/app/src-tauri/target/debug";
+        let long = format!("{folder}/fake-agent --background-job 120 /a/job/file");
+        assert!(long.chars().count() > LINE);
+        let shown = shown(&[process(9, 1, &long)]);
+        assert_eq!(
+            shown[0],
+            "9 (1) …/fake-agent --background-job 120 /a/job/file"
+        );
+        // Only a command longer than a line gives its folder up; the others are as they are.
+        let short = process(4, 1, "/bin/sh -c sleep");
+        assert_eq!(shown_line(&short), "4 (1) /bin/sh -c sleep");
+        // A program alone, and a Windows path, are told the same way; one that is no path is cut.
+        let alone = format!("{folder}/{folder}/consensflow-bridge");
+        assert_eq!(
+            shown_line(&process(5, 2, &alone)),
+            "5 (2) …/consensflow-bridge"
+        );
+        let windows = format!(
+            "C:\\Users\\x\\{}\\fake-agent.exe --background-job 5",
+            "y".repeat(100)
+        );
+        assert_eq!(
+            shown_line(&process(6, 1, &windows)),
+            "6 (1) …/fake-agent.exe --background-job 5"
+        );
+        let no_path = format!("node {}", "z".repeat(200));
+        assert_eq!(
+            shown_line(&process(8, 1, &no_path)).len(),
+            "8 (1) ".len() + LINE
+        );
+    }
+
+    /// The one line `shown` makes of one process.
+    fn shown_line(found: &Process) -> String {
+        shown(std::slice::from_ref(found)).remove(0)
     }
 
     #[cfg(unix)]

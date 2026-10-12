@@ -1,0 +1,69 @@
+# The stop of a Devin window (the owner's report of 2026-10-12, ConsensFlow 3.0.1: T-5's
+# Devin window ignored three rounds of Escape and ended its turn by itself 70 s after the
+# pause). The case is `crates/cf-e2e/tests/regressions/devin_pause.rs`: the real daemon and
+# pane host on a stand-in Devin that takes Escape as Devin does (two within half a second
+# stop a turn, one stops nothing), whose store and wire log the Devin adapter reads, with a
+# pause and a question as the chief sent them. Its run builds the native `cf` from the
+# sources as they are planted, so each plant says `builds`: the family builds the `cf`
+# again once each is put back. One plant takes one rule out, or puts one wrong; the case
+# fails.
+#
+# - the adapter asks for one press, which Devin takes for the first of two;
+# - the two presses of a round are further apart than a double press;
+# - a window at work is not interrupted at all;
+# - the daemon does not read a cancelled turn of Devin's as over.
+#
+# Every name holds `devin stop`, so `npm run plants:daemon -- "devin stop"` runs them all.
+
+[run]
+# The case of the regressions that is T-5's, found by the start of its module's name.
+rig-regression-devin-pause = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "devin_pause::"]
+
+[[plant]]
+name = "devin stop: the adapter asks for one press"
+meant = "a_pause_stops_a_devin_window_that_takes_escape_twice_within_the_rounds_and_the_chiefs_question_goes_in"
+runs = ["rig-regression-devin-pause"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''            presses: 2,
+            close_after: Some(Duration::from_secs(1)),'''
+replace = '''            presses: 1,
+            close_after: Some(Duration::from_secs(1)),'''
+
+[[plant]]
+name = "devin stop: the presses of a round are too far apart to be a double press"
+meant = "a_pause_stops_a_devin_window_that_takes_escape_twice_within_the_rounds_and_the_chiefs_question_goes_in"
+runs = ["rig-regression-devin-pause"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "const DOUBLE_PRESS: Duration = Duration::from_millis(150);"
+replace = "const DOUBLE_PRESS: Duration = Duration::from_millis(900);"
+
+[[plant]]
+name = "devin stop: a window at work is not interrupted"
+meant = "a_pause_stops_a_devin_window_that_takes_escape_twice_within_the_rounds_and_the_chiefs_question_goes_in"
+runs = ["rig-regression-devin-pause"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '''                Look::Work => {
+                    self.interrupt_for(project, participant, record, &stop)
+                        .await
+                }'''
+replace = '''                Look::Work => Ok(()),'''
+
+[[plant]]
+name = "devin stop: a cancelled turn of Devin's is not a turn that is over"
+meant = "a_pause_stops_a_devin_window_that_takes_escape_twice_within_the_rounds_and_the_chiefs_question_goes_in"
+runs = ["rig-regression-devin-pause"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = '''        .is_some_and(|outcome| matches!(outcome.cause, Cause::Cancelled | Cause::QuotaExhausted));'''
+replace = '''        .is_some_and(|outcome| matches!(outcome.cause, Cause::QuotaExhausted));'''

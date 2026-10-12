@@ -24,7 +24,9 @@
 //! not yet paid. Control-C once clears what is typed, and twice ends the window.
 //! A window with `CF_TEST_ANSWER_MS` set takes that long to write its answer once
 //! its work is done, so that a case can do something while the turn is still open
-//! in the record: quit the app, as a human may at any moment.
+//! in the record: quit the app, as a human may at any moment. A turn that runs a
+//! command (`RUN`, in `tool`) works until the command ends, and Escape stops it
+//! and, as the line says, the command with it or not.
 //!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
@@ -42,18 +44,19 @@ mod background;
 mod records;
 #[path = "fake_agent/reply.rs"]
 mod reply;
-#[cfg(unix)]
 #[path = "fake_agent/signals.rs"]
 mod signals;
 #[path = "fake_agent/stop.rs"]
 mod stop;
 #[path = "fake_agent/terminal.rs"]
 mod terminal;
+#[path = "fake_agent/tool.rs"]
+mod tool;
 
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::mpsc;
 use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -68,14 +71,10 @@ use background::Jobs;
 use records::{note_process, Records, INTERRUPTED};
 use reply::{is_session_of, reply_to, Reply, Window};
 use stop::Stop;
-use terminal::{Event, Input};
+use terminal::{Event, Keys};
 
 /// How long the server a window starts as it opens runs: past any case.
 const SERVER_SECONDS: u64 = 600;
-
-/// How long an Escape waits for the rest of a paste marker before it is the
-/// Escape key: a TUI's own wait is about as long.
-const ESCAPE_WAIT: Duration = Duration::from_millis(50);
 
 /// What a window with no login says on its screen, as Pi says it on a machine
 /// that has none.
@@ -94,7 +93,7 @@ fn main() -> ExitCode {
     }
     // Signals are waited for on a thread of their own, so they are blocked in
     // this one and in every thread started after it.
-    let signals = block_signals();
+    let signals = signals::block();
     let own = std::env::current_exe().ok();
     let launch = match args::parse(&args, own.as_deref()) {
         Ok(launch) => launch,
@@ -119,7 +118,10 @@ fn leave(status_file: &Path, code: i32) -> ! {
 }
 
 /// The window, from its start to its end, which it does not return from.
-fn run(launch: &args::Launch, signals: Signals) -> Result<std::convert::Infallible, String> {
+fn run(
+    launch: &args::Launch,
+    signals: signals::Signals,
+) -> Result<std::convert::Infallible, String> {
     let config = own_var("CLAUDE_CONFIG_DIR").ok_or("CLAUDE_CONFIG_DIR is not set")?;
     let home = own_var("CONSENSFLOW_HOME").ok_or("CONSENSFLOW_HOME is not set")?;
     let participant = own_var("CONSENSFLOW_PARTICIPANT").unwrap_or_default();
@@ -130,7 +132,10 @@ fn run(launch: &args::Launch, signals: Signals) -> Result<std::convert::Infallib
     // The ids of the processes started, for the test beside the daemon's home.
     let beside = Path::new(&home).parent().unwrap_or(Path::new("."));
     note_process(beside, pid, &launch.session).map_err(|failed| failed.to_string())?;
-    leave_on_signal(signals, status_file.clone());
+    // Ended when its terminal hangs up or it is asked to: the status file goes,
+    // and the code is 0, as the Node stand-in's was.
+    let leaving = status_file.clone();
+    signals::leave_on(signals, move || leave(&leaving, 0));
 
     // A harness with no login, as Pi is on a machine that has none: it says so
     // on its screen and writes no record of a conversation or a status, so the
@@ -197,25 +202,11 @@ fn run(launch: &args::Launch, signals: Signals) -> Result<std::convert::Infallib
 
     // Raw input, like a real TUI: a bracketed paste is text, Enter outside one
     // submits, and an Escape that nothing follows is the key.
-    terminal::raw_mode();
-    let (read, incoming) = mpsc::channel::<Vec<u8>>();
-    thread::spawn(move || {
-        let mut chunk = [0_u8; 4096];
-        let mut stdin = io::stdin().lock();
-        while let Ok(read_now @ 1..) = stdin.read(&mut chunk) {
-            if read.send(chunk[..read_now].to_vec()).is_err() {
-                return;
-            }
-        }
-    });
-    let mut input = Input::default();
-    let mut bytes = Utf8::default();
+    let mut keys = Keys::start();
     loop {
-        let events = match incoming.recv_timeout(ESCAPE_WAIT) {
-            Ok(chunk) => input.feed(&bytes.decode(&chunk)),
-            Err(RecvTimeoutError::Timeout) => input.quiet(),
-            // The terminal is gone.
-            Err(RecvTimeoutError::Disconnected) => leave(&status_file, 0),
+        // The terminal is gone.
+        let Some(events) = keys.read() else {
+            leave(&status_file, 0)
         };
         for event in events {
             match event {
@@ -296,7 +287,10 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
         }
         records.status(pid, "busy").map_err(failed)?;
     }
-    let reply = reply_to(text, window)?;
+    let reply = match tool::reply(text, window) {
+        Some(reply) => reply?,
+        None => reply_to(text, window)?,
+    };
     // The message id numbers the records so far, this one not yet among them.
     let id = format!("{}-message-{pid}-{}", window.session, records.ordinal());
     match reply {
@@ -390,98 +384,9 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
     records.status(pid, status).map_err(failed)
 }
 
-/// Bytes read in pieces, decoded to text as they come: a character cut in two
-/// by the pieces is held until the rest arrives.
-#[derive(Default)]
-struct Utf8 {
-    held: Vec<u8>,
-}
-
-impl Utf8 {
-    fn decode(&mut self, chunk: &[u8]) -> String {
-        self.held.extend_from_slice(chunk);
-        let mut text = String::new();
-        loop {
-            match std::str::from_utf8(&self.held) {
-                Ok(valid) => {
-                    text.push_str(valid);
-                    self.held.clear();
-                    return text;
-                }
-                Err(cut) => {
-                    let (valid, rest) = self.held.split_at(cut.valid_up_to());
-                    text.push_str(&String::from_utf8_lossy(valid));
-                    match cut.error_len() {
-                        // Not a character at all: the replacement character, and on.
-                        Some(length) => {
-                            text.push('\u{fffd}');
-                            self.held = rest[length..].to_vec();
-                        }
-                        // A character cut short at the end: kept for the next piece.
-                        None => {
-                            self.held = rest.to_vec();
-                            return text;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// The signals a window ends on: SIGHUP when its terminal hangs up and SIGTERM
-/// when it is asked to end. Windows has neither.
-#[cfg(unix)]
-type Signals = nix::sys::signal::SigSet;
-#[cfg(not(unix))]
-struct Signals;
-
-/// Blocks SIGHUP and SIGTERM in this thread (and so in every thread it starts),
-/// for [`leave_on_signal`] to wait for.
-#[cfg(unix)]
-fn block_signals() -> Signals {
-    use nix::sys::signal::{SigSet, Signal};
-
-    let mut signals = SigSet::empty();
-    signals.add(Signal::SIGHUP);
-    signals.add(Signal::SIGTERM);
-    let _ = signals.thread_block();
-    signals
-}
-
-#[cfg(not(unix))]
-fn block_signals() -> Signals {
-    Signals
-}
-
-/// Ends the window when its terminal hangs up or it is asked to end: the status
-/// file goes, and the code is 0, as the Node stand-in's was.
-#[cfg(unix)]
-fn leave_on_signal(signals: Signals, status_file: PathBuf) {
-    thread::spawn(move || {
-        if signals::wait(&signals) {
-            leave(&status_file, 0);
-        }
-    });
-}
-
-#[cfg(not(unix))]
-fn leave_on_signal(_: Signals, _: PathBuf) {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn text_read_in_pieces_is_whole_and_a_cut_character_waits_for_its_rest() {
-        let mut bytes = Utf8::default();
-        let text = "a · b";
-        let (first, second) = text.as_bytes().split_at(3);
-        // The middle dot is two bytes; the first piece ends in the middle of it.
-        assert_eq!(bytes.decode(first), "a ");
-        assert_eq!(bytes.decode(second), "· b");
-        assert_eq!(bytes.decode(b""), "");
-    }
 
     #[test]
     fn a_message_stays_in_the_hooks_of_its_prompt_as_long_as_its_line_says() {
@@ -504,11 +409,5 @@ mod tests {
         for text in [None, Some(""), Some("soon"), Some("-5"), Some("1.5")] {
             assert_eq!(wait_of(text), Duration::ZERO, "{text:?}");
         }
-    }
-
-    #[test]
-    fn bytes_that_are_no_character_are_the_replacement_character() {
-        let mut bytes = Utf8::default();
-        assert_eq!(bytes.decode(b"a\xffb"), "a\u{fffd}b");
     }
 }

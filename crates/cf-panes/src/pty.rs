@@ -13,6 +13,8 @@ use crate::ended::{Ended, EndedSlot};
 use crate::screen::PaneScreen;
 
 mod close;
+#[cfg(test)]
+mod keys;
 mod turn;
 
 pub use close::CLOSE_GRACE;
@@ -1236,15 +1238,21 @@ pub(crate) mod conpty_test {
             let chunk = output
                 .recv_timeout(left)
                 .unwrap_or_else(|error| panic!("no {needle:?} in the pane ({error}): {seen:?}"));
-            table.ack(key, chunk.seq).expect("ack output");
-            if chunk.bytes.windows(4).any(|bytes| bytes == b"\x1b[6n") {
-                table
-                    .write(key, b"\x1b[1;1R")
-                    .expect("answer the cursor query");
-            }
-            seen.push_str(&String::from_utf8_lossy(&chunk.bytes));
+            seen.push_str(&take(table, key, &chunk));
         }
         seen
+    }
+
+    /// What the pane printed in `chunk`, as text, once it is acknowledged as read
+    /// and, where it asks where the cursor is, answered.
+    pub fn take(table: &PaneTable, key: &PaneKey, chunk: &PaneOutput) -> String {
+        table.ack(key, chunk.seq).expect("ack output");
+        if chunk.bytes.windows(4).any(|bytes| bytes == b"\x1b[6n") {
+            table
+                .write(key, b"\x1b[1;1R")
+                .expect("answer the cursor query");
+        }
+        String::from_utf8_lossy(&chunk.bytes).into_owned()
     }
 
     /// A child that says READY, reads one line and prints it back as `GOT=[…]#`.

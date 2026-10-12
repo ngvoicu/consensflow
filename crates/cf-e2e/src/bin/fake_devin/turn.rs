@@ -1,0 +1,262 @@
+//! A turn of the window: what a message asks of it, and how it ends. It speaks
+//! the words the other stand-in does: a line `SLEEP <seconds> <words>` is a turn
+//! that works that long before it does what the words say, and `Reply with
+//! exactly: X` is answered with X, as anything else is acknowledged. What Devin
+//! writes of a turn is written in its order: the message in the store and on the
+//! wire, the agent's thought, and then the answer (the store first, so that a
+//! reader that sees the turn end on the wire finds the answer in the store) or,
+//! where an Escape stops the turn, the cancel and what was said so far.
+
+use std::io::{self, Write};
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
+
+use cf_e2e::pattern;
+use regex::Regex;
+
+use crate::said;
+use crate::stop::Stop;
+use crate::store::Store;
+use crate::wire::Wire;
+
+/// What a turn is asked to do.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Plan {
+    /// How long it works before it answers.
+    pub work: Duration,
+    /// What it answers.
+    pub answer: String,
+}
+
+/// What the message `text` asks of a turn.
+pub fn plan_of(text: &str) -> Plan {
+    static SLEEP: OnceLock<Regex> = OnceLock::new();
+    static EXACT: OnceLock<Regex> = OnceLock::new();
+    let (work, words) = match pattern::once(&SLEEP, r"(?m)^SLEEP (\d+) (.+)$").captures(text) {
+        Some(slow) => (
+            Duration::from_secs(slow[1].parse().unwrap_or(0)),
+            slow[2].to_owned(),
+        ),
+        None => (Duration::ZERO, text.to_owned()),
+    };
+    let answer = match pattern::once(&EXACT, r"Reply with exactly: (\S+)").captures(&words) {
+        Some(exact) => exact[1].to_owned(),
+        None => format!("noted: {}", words.split('\n').next().unwrap_or_default()),
+    };
+    Plan { work, answer }
+}
+
+/// The window's turns, one at a time, in the order the messages came.
+pub struct Window<W: Write> {
+    store: Store,
+    wire: Wire,
+    stop: Arc<Stop>,
+    /// What the window says on its screen.
+    screen: W,
+    turns: u64,
+}
+
+impl<W: Write> Window<W> {
+    pub fn new(store: Store, wire: Wire, stop: Arc<Stop>, screen: W) -> Self {
+        Self {
+            store,
+            wire,
+            stop,
+            screen,
+            turns: 0,
+        }
+    }
+
+    /// Says `text` on the window's screen.
+    fn say(&mut self, text: &str) -> io::Result<()> {
+        self.screen.write_all(text.as_bytes())?;
+        self.screen.flush()
+    }
+
+    /// The window takes the message `text`: its turn, from the message to the
+    /// answer or to the Escape that stops it.
+    pub fn take(&mut self, text: &str) -> Result<(), String> {
+        self.stop.begin();
+        let done = self.turn(text);
+        self.stop.end();
+        done
+    }
+
+    fn turn(&mut self, text: &str) -> Result<(), String> {
+        self.turns += 1;
+        let client = format!("client-{}", self.turns);
+        let stream = format!("stream-{}", self.turns);
+        let plan = plan_of(text);
+        self.store.user(text, &client)?;
+        self.wire.prompt(&client).map_err(said)?;
+        self.wire.thinking(&client).map_err(said)?;
+        self.say("working (esc twice to interrupt)\n")
+            .map_err(said)?;
+        if self.stop.work(plan.work) {
+            // The TUI asks its agent to cancel, which keeps what it said so far.
+            self.wire.cancel().map_err(said)?;
+            self.wire
+                .said("Interrupted", &stream, &client)
+                .map_err(said)?;
+            self.store.assistant("Interrupted", false)?;
+            self.wire.ended("cancelled", &client).map_err(said)?;
+            return self.say("Interrupted\n").map_err(said);
+        }
+        self.wire
+            .said(&plan.answer, &stream, &client)
+            .map_err(said)?;
+        self.store.assistant(&plan.answer, true)?;
+        self.wire.ended("complete", &client).map_err(said)?;
+        self.say(&format!("{}\n", plan.answer)).map_err(said)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::thread;
+
+    use rusqlite::Connection;
+    use serde_json::Value;
+
+    use super::*;
+
+    #[test]
+    fn a_message_is_answered_with_the_word_it_asks_for_and_otherwise_acknowledged_by_its_first_line(
+    ) {
+        assert_eq!(
+            plan_of("Reply with exactly: WORKER_OK"),
+            Plan {
+                work: Duration::ZERO,
+                answer: "WORKER_OK".to_owned()
+            }
+        );
+        assert_eq!(
+            plan_of("[ConsensFlow m-4 · T-1 · task from @chief]\nReply with exactly: ONE_DONE")
+                .answer,
+            "ONE_DONE"
+        );
+        assert_eq!(plan_of("hello\nsecond").answer, "noted: hello");
+    }
+
+    #[test]
+    fn a_sleep_line_works_that_long_before_it_does_what_the_words_after_it_say() {
+        let plan = plan_of(
+            "[ConsensFlow m-1 · T-5 · task from @chief]\nSLEEP 120 Reply with exactly: T5_DONE",
+        );
+        assert_eq!(
+            plan,
+            Plan {
+                work: Duration::from_secs(120),
+                answer: "T5_DONE".to_owned()
+            }
+        );
+        // A line that is no sleep is no wait.
+        assert_eq!(plan_of("say SLEEP 5 x").work, Duration::ZERO);
+        assert_eq!(plan_of("SLEEP soon x").work, Duration::ZERO);
+    }
+
+    /// A window on a store and a wire of a folder of its own, and what it said on its screen.
+    struct Case {
+        folder: tempfile::TempDir,
+        window: Window<Vec<u8>>,
+    }
+
+    fn case() -> Case {
+        let folder = tempfile::tempdir().unwrap();
+        let store = Store::open(&folder.path().join("sessions.db"), "calm-river").unwrap();
+        let wire = Wire::open(&folder.path().join("wire.jsonl"), "calm-river").unwrap();
+        let window = Window::new(store, wire, Arc::new(Stop::default()), Vec::new());
+        Case { folder, window }
+    }
+
+    impl Case {
+        fn nodes(&self) -> Vec<Value> {
+            let db = Connection::open(self.folder.path().join("sessions.db")).unwrap();
+            let mut rows = db
+                .prepare("SELECT chat_message FROM message_nodes ORDER BY row_id")
+                .unwrap();
+            rows.query_map([], |row| {
+                let message: String = row.get(0)?;
+                Ok(serde_json::from_str(&message).unwrap())
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+        }
+
+        fn wire(&self) -> Vec<Value> {
+            std::fs::read_to_string(self.folder.path().join("wire.jsonl"))
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect()
+        }
+    }
+
+    #[test]
+    fn a_turn_that_is_answered_is_a_user_and_an_assistant_message_that_ends_it_and_a_complete_on_the_wire(
+    ) {
+        let mut case = case();
+        case.window.take("Reply with exactly: DONE").unwrap();
+        let nodes = case.nodes();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0]["role"], "user");
+        assert_eq!(nodes[1]["content"], "DONE");
+        assert_eq!(nodes[1]["metadata"]["finish_reason"], "stop");
+        let wire = case.wire();
+        assert_eq!(wire.last().unwrap()["cause"], "complete");
+        assert_eq!(
+            wire.last().unwrap()["turnClientMessageId"],
+            nodes[0]["metadata"]["extensions"]["chisel/client-message-id"]
+        );
+        assert!(wire
+            .iter()
+            .any(|record| record["update"]["sessionUpdate"] == "agent_thought_chunk"));
+        let screen = String::from_utf8(case.window.screen.clone()).unwrap();
+        assert_eq!(screen, "working (esc twice to interrupt)\nDONE\n");
+    }
+
+    #[test]
+    fn a_turn_that_is_stopped_is_cancelled_on_the_wire_and_leaves_what_was_said_with_no_end_to_its_turn(
+    ) {
+        let mut case = case();
+        let stop = Arc::clone(&case.window.stop);
+        let presser = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            stop.press();
+        });
+        let started = std::time::Instant::now();
+        case.window
+            .take("SLEEP 30 Reply with exactly: LATE")
+            .unwrap();
+        presser.join().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(20));
+        let nodes = case.nodes();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[1]["content"], "Interrupted");
+        assert!(nodes[1]["metadata"].get("finish_reason").is_none());
+        let wire = case.wire();
+        let cancel = wire
+            .iter()
+            .position(|record| record["method"] == "session/cancel")
+            .unwrap();
+        assert_eq!(wire[cancel + 2]["cause"], "cancelled");
+        assert!(wire.iter().all(|record| record["cause"] != "complete"));
+        let screen = String::from_utf8(case.window.screen.clone()).unwrap();
+        assert_eq!(screen, "working (esc twice to interrupt)\nInterrupted\n");
+    }
+
+    #[test]
+    fn a_window_takes_one_message_after_another_each_a_client_of_its_own() {
+        let mut case = case();
+        case.window.take("Reply with exactly: ONE").unwrap();
+        case.window.take("Reply with exactly: TWO").unwrap();
+        let nodes = case.nodes();
+        assert_eq!(nodes.len(), 4);
+        let clients: Vec<&Value> = [0, 2]
+            .iter()
+            .map(|at| &nodes[*at]["metadata"]["extensions"]["chisel/client-message-id"])
+            .collect();
+        assert_eq!(clients, ["client-1", "client-2"]);
+    }
+}
