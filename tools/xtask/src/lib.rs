@@ -2,31 +2,35 @@
 //! from the root of the checkout or from any folder below it. The alias is in
 //! `.cargo/config.toml`; `cargo xtask --help` lists the commands.
 //!
-//! One module for each landing that ported a script holds the commands it owns as
-//! a table, and the tables are joined in [`dispatch`]. Every command runs in
-//! Rust: the last two that handed their arguments to a Node script and answered
-//! its exit status (`smoke` and `candidate`) were ported at S11. It depends on
-//! no crate of the product, only on `cf-base` for the environment (read once, in
-//! `main`) and on `cf-process` to find a program on the PATH, so it builds with
-//! no staged resources and no GUI toolchain.
+//! Every command runs in Rust. A module holds the commands it owns as a table,
+//! and the tables are joined in `dispatch`. It depends on no crate of the
+//! product, only on `cf-base` for the environment (read once, in `main`), on
+//! `cf-process` to find a program on the PATH, on the release tool `cf-release`
+//! and on the crate `cf-portable` that writes and reads the portable exe, so it
+//! builds with no staged resources and no GUI toolchain.
 //!
-//! Who edits what. The landing that ports a command edits the module that owns
-//! it and that module's tests: `sidecar` (build-cf, stage, conpty) is S1's,
-//! `portable` is S2's, `app`, `clippy_windows`, `departures` and `bench` are
-//! S10's (the thin drivers, which run cargo and nothing else), `suites` is S8's
-//! and S9's, `smoke` (the packaged smoke, which runs the smoke test of
-//! `crates/cf-e2e`) and `candidate` are S11's, `updater_smoke` is S12's: the
-//! updater smoke in Rust, which `smoke` lists as `smoke-updater`, and `plants`
-//! is S13's: the mutation tests, with their data in `tests/plants`. S14 ports
-//! the last JavaScript outside the page and the extensions: `live` (the one
-//! command that runs every live test of `crates/cf-e2e`, whatever its name)
-//! was made whole by S14.0, `windows` (`windows`, `windows-matrix`: the runs on
-//! the Windows machine) and `scrub_transcript` by S14.4, and `evals` (`eval`,
-//! `eval summary`, `watch`) by S14.3, which hands them to `crates/cf-evals`.
-//! The lead's are this list of modules, `dispatch`,
-//! `process`, `context`, `check`, the manifests and the lockfile, the alias, and
-//! the call sites (the npm scripts, the workflows, the drivers that run a
-//! command).
+//! The modules, by what they do:
+//!
+//! - what the app's bundle is made of: `sidecar` (`build-cf`, `stage`, `conpty`),
+//!   `portable` (the portable Windows exe) and `candidate` (this checkout built
+//!   as another app, installed beside the live one);
+//! - the gate, and what runs a part of it or a suite beside it: `check` (the whole
+//!   gate), `app` and `clippy_windows` (the lint and the tests where the app or
+//!   the platform cannot be built as it ships), `suites` (`test daemons`,
+//!   `integration`, `clis`, `agents`, `load`: the black-box suites of
+//!   `crates/cf-e2e`), `departures` and `bench` (thin drivers of cargo);
+//! - the app as built, run as a user would: `smoke` (the packaged smoke, and
+//!   `smoke-updater`, which is `updater_smoke`);
+//! - the mutation tests: `plants`, with their data in `tests/plants`;
+//! - what spends real quota and is no part of the gate: `live` (one command for
+//!   every live test of `crates/cf-e2e`, whatever its name) and `evals` (`eval`,
+//!   `eval summary` and `watch`, which hand their words to `crates/cf-evals`);
+//! - the Windows machine: `windows` (`windows` and `windows-matrix`: a command,
+//!   and the matrix of the chief evals, run there over ssh), with `stops`, what
+//!   ends a run early, which it shares with `plants`;
+//! - `scrub_transcript`: the fixtures that are made of a Claude transcript;
+//! - what every command shares: `dispatch` (the command line), `context` (where
+//!   it works) and `process` (the one place a program starts).
 
 #![forbid(unsafe_code)]
 
@@ -46,6 +50,7 @@ pub mod process;
 mod scrub_transcript;
 mod sidecar;
 mod smoke;
+mod stops;
 mod suites;
 mod updater_smoke;
 mod windows;

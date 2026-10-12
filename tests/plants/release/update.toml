@@ -12,7 +12,7 @@ prepare-update = ["cargo", "test", "--offline", "-p", "cf-release", "--test", "p
 # The pure parts: the signature, the date, the channel, the paths, the trees, the entry.
 release-lib = ["cargo", "test", "--offline", "-p", "cf-release", "--lib"]
 # The workflow's text: where the tool is built, and what runs it.
-release-tool = ["node", "--test", "tests/release-tool.test.mjs"]
+release-tool = ["cargo", "test", "--offline", "-p", "cf-publish", "--test", "release_tool"]
 
 # What an archive is held to.
 [[plant]]
@@ -413,7 +413,7 @@ replace = ".filter(|_| true);"
 # The workflow's use of the tool.
 [[plant]]
 name = "update: the feed entry is made through cargo run"
-meant = "is what the notes step runs, by its path"
+meant = "is_what_the_notes_step_runs_by_its_path"
 runs = ["release-tool"]
 
 [[plant.edit]]
@@ -423,7 +423,7 @@ replace = 'cargo run --release --locked -p cf-release -- prepare-update --repo "
 
 [[plant]]
 name = "update: the version comes from node again"
-meant = "is what the notes step runs, by its path"
+meant = "is_what_the_notes_step_runs_by_its_path"
 runs = ["release-tool"]
 
 [[plant.edit]]
@@ -433,7 +433,7 @@ replace = '''version=$(node -p "require('./package.json').version")'''
 
 [[plant]]
 name = "update: the tool is built in the step that signs the update bundle, where the key is"
-meant = "never has a step that holds a key build or run anything through cargo"
+meant = "never_has_a_step_that_holds_a_key_build_or_run_anything_through_cargo"
 runs = ["release-tool"]
 
 [[plant.edit]]
@@ -445,7 +445,7 @@ cargo build --release --locked -p cf-release
 
 [[plant]]
 name = "update: the tool is built in a step that holds a key"
-meant = "is built with the lockfile in a step of its own that holds no key"
+meant = "is_built_with_the_lockfile_in_a_step_of_its_own_that_holds_no_key"
 runs = ["release-tool"]
 
 [[plant.edit]]
@@ -461,7 +461,7 @@ replace = '''
 
 [[plant]]
 name = "update: the tool is built without the lockfile"
-meant = "is built with the lockfile in a step of its own that holds no key"
+meant = "is_built_with_the_lockfile_in_a_step_of_its_own_that_holds_no_key"
 runs = ["release-tool"]
 
 [[plant.edit]]

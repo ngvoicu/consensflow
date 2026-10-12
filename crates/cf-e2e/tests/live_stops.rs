@@ -103,7 +103,7 @@ use cf_e2e::live::members::{
     question_brief, session_of, stand_in_chief, Account, LongCommand, Members,
 };
 use cf_e2e::live::report::{self, Check};
-use cf_e2e::live::{self, installed, Harness, Log};
+use cf_e2e::live::{self, Harness, Log};
 use cf_e2e::{files, Result};
 
 use options::{options, plan_of, runs_on, Case, Options};
@@ -222,15 +222,6 @@ fn run(case: Case, harness: Harness, options: &Options, log: &Log) -> Result<Acc
     Ok(account)
 }
 
-/// The version of the harness, as it says it; a harness may update itself while it
-/// runs, and the run names it before and after.
-fn version(harness: Harness) -> String {
-    installed(harness).map_or_else(
-        |failed| format!("unknown ({failed})"),
-        |install| install.version(),
-    )
-}
-
 #[test]
 #[ignore = "opt-in: spends the machine's quota on a member of the harness each case runs; cargo xtask live stops (npm run live:stops)"]
 fn a_stop_the_daemon_presses_is_paid_at_rest_and_never_said_to_be_ignored_where_the_window_stopped(
@@ -245,13 +236,13 @@ fn a_stop_the_daemon_presses_is_paid_at_rest_and_never_said_to_be_ignored_where_
     let mut checks = Vec::new();
     for case in options.cases.clone() {
         for harness in runs_on(case, &options.harnesses) {
-            let before = version(harness);
+            let before = live::version_of(harness);
             let account = run(case, harness, &options, &log).unwrap_or_else(|failed| {
                 let mut account = Account::new();
                 account.fail(failed);
                 account
             });
-            let after = version(harness);
+            let after = live::version_of(harness);
             let version = if after == before {
                 before
             } else {
@@ -274,8 +265,7 @@ fn a_stop_the_daemon_presses_is_paid_at_rest_and_never_said_to_be_ignored_where_
             ));
         }
     }
-    log.block("what each case came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::conclude(&log, "what each case came to", &checks)
 }
 
 #[cfg(test)]

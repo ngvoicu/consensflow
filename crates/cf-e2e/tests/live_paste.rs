@@ -30,17 +30,18 @@
 //! another; the run fails when any message was not sent.
 //!
 //! This is the shape of a live test of one window: read what was asked for
-//! ([`live::list`]), find the harnesses on the machine ([`live::installed`]),
-//! start the rig they run in ([`live::rig`]), open a window for each
-//! ([`window::Open`]), say what each check came to ([`report::Check`]), and fail
-//! the run with the checks that did not hold ([`report::verdict`]).
+//! ([`live::list`]), find the harnesses on the machine and say where each is
+//! ([`window::pasted_installs`], [`live::Log::found`]), start the rig they run in
+//! ([`live::rig`]), open a window for each ([`window::Open`]), say what each check
+//! came to ([`report::Check`]), and end the run by saying them all and failing it
+//! with the checks that did not hold ([`report::conclude`]).
 
 use std::time::Duration;
 
 use cf_e2e::live::ask::{self, Item};
 use cf_e2e::live::report::{self, Check};
-use cf_e2e::live::window::{self, Open, ANSWER, READY};
-use cf_e2e::live::{self, last_lines, Harness, Installed, Log};
+use cf_e2e::live::window::{self, Open, ANSWER};
+use cf_e2e::live::{self, Installed, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::{Error, Result};
 
@@ -163,12 +164,9 @@ fn users(window: &window::Window) -> Vec<Item> {
 /// the record holds it whole.
 fn checks_of(rig: &Rig, install: &Installed, cases: &[Case], log: &Log) -> Result<Vec<Check>> {
     let name = install.harness().name();
-    let window = Open::new(rig, install, "paste", &format!("paste-{name}")).open()?;
-    if let Some(trust) = window.trust() {
-        log.say(format!("{name}: trust: {trust}"));
-    }
-    if !window.still(READY) {
-        let screen = last_lines(&window.screen());
+    let window =
+        Open::new(rig, install, "paste", &format!("paste-{name}")).open_telling(log, name)?;
+    if let Err(screen) = window.ready() {
         return Ok(vec![Check::failed(name, "opens", screen)]);
     }
     let mut checks = Vec::new();
@@ -189,11 +187,7 @@ fn checks_of(rig: &Rig, install: &Installed, cases: &[Case], log: &Log) -> Resul
             })
             .is_some();
         let detail = if !sent.shown {
-            format!(
-                "NOT SENT ({}): {}",
-                sent.written,
-                last_lines(&window.screen())
-            )
+            format!("NOT SENT ({}): {}", sent.written, window.tail())
         } else if kept {
             format!("sent and recorded whole, answered in {} s", sent.seconds)
         } else {
@@ -220,25 +214,8 @@ fn a_window_sends_every_message_the_daemon_pastes_into_it() -> Result {
     let log = Log::new("live paste");
     // What a window is opened on is the harness code's to say: built before anything is spent.
     ask::prepare()?;
-    let named = live::list("harness");
-    let harnesses = window::pasted_into(&if named.is_empty() {
-        vec![Harness::Devin.name().to_owned()]
-    } else {
-        named
-    })?;
     let cases = cases(&lengths(&live::list("long"))?);
-    let mut installs = Vec::new();
-    for harness in harnesses {
-        let found = live::installed(harness)?;
-        log.say(format!(
-            "{} is {} ({}); its login is read from {}",
-            harness.name(),
-            found.command().display(),
-            found.version(),
-            found.home().display()
-        ));
-        installs.push(found);
-    }
+    let installs = window::pasted_installs(&log)?;
     let mut rig = Rig::start(live::rig(&installs, FAKE_AGENT))?;
     if live::keep_requested() {
         log.say(format!(
@@ -252,8 +229,7 @@ fn a_window_sends_every_message_the_daemon_pastes_into_it() -> Result {
         checks.extend(checks_of(&rig, install, &cases, &log)?);
     }
     rig.close()?;
-    log.block("what each check came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::conclude(&log, "what each check came to", &checks)
 }
 
 #[cfg(test)]

@@ -28,16 +28,15 @@ cf-process.workspace = true
 # footer, by the library the app unpacks it with.
 cf-portable.workspace = true
 thiserror.workspace = true
-# What the landings that port the scripts use, named here already so that none
-# of them touches the lockfile: S1 the console host's package (its SHA-256 and
-# its zip), S2 and the drivers the sources' version.
+# The version the sources agree on, read by the commands that stage and pack
+# (cf-release), and the console host's package (its SHA-256 and its zip).
 cf-release.workspace = true
 sha2.workspace = true
 zip.workspace = true
-# S14.4, the runner of the Windows machine: the PowerShell script that ssh hands
-# it is the base64 of its UTF-16 (`-EncodedCommand`).
+# The runner of the Windows machine: the PowerShell script that ssh hands it is
+# the base64 of its UTF-16 (`-EncodedCommand`).
 base64.workspace = true
-# The updater smoke (S12): the feed it serves and the evidence it reads. JSON as
+# The updater smoke: the feed it serves and the evidence it reads. JSON as
 # the app and the daemon write it (the feed's document, the build's override, a
 # self-test report, a ledger event); the ledger read from outside (SQLite,
 # built in, as the daemon's is); the feed over HTTPS on the loopback with a
@@ -46,7 +45,7 @@ base64.workspace = true
 # folder of the run's own for each machine.
 serde_json.workspace = true
 rusqlite.workspace = true
-# The plants (S13): their data is TOML (tests/plants), read as the structures that
+# The plants: their data is TOML (tests/plants), read as the structures that
 # say what a plant is; their runs are started by cf-process, which runs on tokio,
 # and a Ctrl-C is heard through tokio's signals, so that the sources are put back.
 serde.workspace = true

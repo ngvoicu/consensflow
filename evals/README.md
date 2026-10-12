@@ -1,10 +1,10 @@
 # Evals — what a chief *does* with its role text
 
-`npm test` checks what the role text says. These runs check what a real chief
-does with it on a toy project: whether it puts work that can run side by side
-on the board, asks advice for a hard call, sends finished work to review, asks
-the owner in its own terminal (never on the board), and puts its findings on
-the board as notes (`cf note --human`).
+The tests (`cargo xtask check`) check what the role text says. These runs check
+what a real chief does with it on a toy project: whether it puts work that can
+run side by side on the board, asks advice for a hard call, sends finished work
+to review, asks the owner in its own terminal (never on the board), and puts its
+findings on the board as notes (`cf note --human`).
 
 ```sh
 cargo xtask eval --scenario six-decisions                       # chief Claude on Opus, staff Claude on Haiku

@@ -1,6 +1,6 @@
 # Chief eval results
 
-One row per report in `evals/reports/`, oldest first; `npm run eval:summary` rewrites this file.
+One row per report in `evals/reports/`, oldest first; `cargo xtask eval summary` rewrites this file.
 Judgment: how many of the scenario's expectations the chief met. Plumbing: how many of the
 board's own checks held (briefs delivered, results back to the chief, members' questions
 answered and the answers delivered, every task on the board). On board: questions put to the

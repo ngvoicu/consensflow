@@ -40,7 +40,7 @@ use cf_e2e::live::members::{
     STAND_IN_WORKER,
 };
 use cf_e2e::live::report::{self, Check};
-use cf_e2e::live::{self, ask, installed, last_lines, seconds, Harness, Log};
+use cf_e2e::live::{self, ask, seconds, Harness, Log};
 use cf_e2e::{Error, Result};
 use serde_json::Value;
 
@@ -234,11 +234,7 @@ fn drive_chief(mut members: Members, log: &Log) -> Result<Account> {
     if at_command.is_none() {
         case.fail(format!(
             "the chief never ran its command: {}",
-            last_lines(
-                &members
-                    .rig()
-                    .screen(pane["id"].as_str().unwrap_or_default())
-            )
+            members.tail(pane["id"].as_str().unwrap_or_default())
         ));
         case.closed(members.close());
         return Ok(case);
@@ -342,11 +338,7 @@ fn drive_chief(mut members: Members, log: &Log) -> Result<Account> {
     let lane = members.lane("chief")?;
     case.say(format!(
         "the chief's screen: {}",
-        last_lines(
-            &members
-                .rig()
-                .screen(lane["pane"]["id"].as_str().unwrap_or_default())
-        )
+        members.tail(lane["pane"]["id"].as_str().unwrap_or_default())
     ));
     case.closed(members.close());
     Ok(case)
@@ -488,10 +480,7 @@ fn checked(
     case: &Account,
     log: &Log,
 ) -> Check {
-    let version = installed(harness).map_or_else(
-        |failed| format!("unknown ({failed})"),
-        |install| install.version(),
-    );
+    let version = live::version_of(harness);
     log.block(
         &format!("== {} {who}: {version}", harness.name()),
         &case.text(),
@@ -546,8 +535,7 @@ fn a_window_the_quit_cut_in_a_turn_comes_back_on_the_humans_resume_told_so_once_
             &log,
         ));
     }
-    log.block("what each case came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::conclude(&log, "what each case came to", &checks)
 }
 
 #[cfg(test)]

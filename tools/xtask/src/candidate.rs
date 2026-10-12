@@ -1,5 +1,5 @@
-//! ConsensFlow Candidate (landing S11): this checkout built as another app and
-//! installed beside the live one, which is proven untouched.
+//! ConsensFlow Candidate: this checkout built as another app and installed
+//! beside the live one, which is proven untouched.
 //!
 //! The candidate is the same source with another identity
 //! (`app/src-tauri/tauri.candidate.conf.json`): its own name, bundle identifier

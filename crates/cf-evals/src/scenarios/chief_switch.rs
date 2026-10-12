@@ -5,21 +5,32 @@
 //! staff's harness (`--switch-to`) and asks the new one. Only `cf history`
 //! holds the answer: the handoff quotes the owner's last words, the notes.
 
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hasher};
 use std::time::Duration;
 
 use super::{expect, FollowUp, Scenario};
-use crate::random;
 
 /// The birds a codeword begins with.
 const BIRDS: [&str; 6] = ["TERN", "LARK", "WREN", "KITE", "ROOK", "SWIFT"];
 
+/// A number from 0 to `limit` (not including it), as `Math.floor(Math.random() *
+/// limit)` draws one; 0 when `limit` is 0. The standard library seeds each hasher
+/// it makes from the system, which is all the chance a codeword needs: nothing of
+/// it is secret, and all of it is different each time.
+fn below(limit: usize) -> usize {
+    match u64::try_from(limit) {
+        Ok(limit) if limit > 0 => {
+            let drawn = RandomState::new().build_hasher().finish();
+            usize::try_from(drawn % limit).unwrap_or(0)
+        }
+        _ => 0,
+    }
+}
+
 /// A codeword for a run: a bird and four digits, as `TERN-4821`.
 pub(super) fn codeword() -> String {
-    format!(
-        "{}-{}",
-        BIRDS[random::below(BIRDS.len())],
-        1000 + random::below(9000)
-    )
+    format!("{}-{}", BIRDS[below(BIRDS.len())], 1000 + below(9000))
 }
 
 /// What the owner pastes after the codeword: seventy notes.
@@ -80,5 +91,35 @@ pub(super) fn with(codeword: &str) -> Scenario {
             ),
             expect("nothing went on the board", |m| m.tasks.is_empty()),
         ],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+
+    #[test]
+    fn a_number_below_a_limit_is_below_it_and_none_is_always_the_same() {
+        let drawn: HashSet<usize> = (0..200).map(|_| below(6)).collect();
+        assert!(drawn.iter().all(|number| *number < 6), "{drawn:?}");
+        assert!(drawn.len() > 1, "{drawn:?}");
+        assert_eq!(below(0), 0);
+        assert_eq!(below(1), 0);
+    }
+
+    #[test]
+    fn a_codeword_is_a_bird_and_four_digits_and_another_each_time() {
+        let words: HashSet<String> = (0..50).map(|_| codeword()).collect();
+        assert!(words.len() > 1, "{words:?}");
+        for word in &words {
+            let (bird, digits) = word.split_once('-').unwrap_or_default();
+            assert!(BIRDS.contains(&bird), "{word}");
+            assert!(
+                digits.len() == 4 && digits.bytes().all(|byte| byte.is_ascii_digit()),
+                "{word}"
+            );
+        }
     }
 }

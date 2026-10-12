@@ -61,7 +61,7 @@ use std::time::Duration;
 
 use cf_e2e::live::members::Account;
 use cf_e2e::live::report::{self, Check};
-use cf_e2e::live::{self, installed, Log};
+use cf_e2e::live::{self, Log};
 use cf_e2e::{Error, Result};
 
 use check::{Asked, Who};
@@ -124,10 +124,7 @@ fn asked() -> Result<Asked> {
 fn version(who: Who) -> String {
     match who {
         Who::StandIn => "stand-in".to_owned(),
-        Who::Harness(harness) => installed(harness).map_or_else(
-            |failed| format!("unknown ({failed})"),
-            |install| install.version(),
-        ),
+        Who::Harness(harness) => live::version_of(harness),
     }
 }
 
@@ -167,8 +164,7 @@ fn a_question_answered_from_the_board_is_received_once_at_the_door_of_the_harnes
             version,
         ));
     }
-    log.block("what each door came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::conclude(&log, "what each door came to", &checks)
 }
 
 #[cfg(test)]

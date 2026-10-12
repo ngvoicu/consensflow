@@ -7,10 +7,10 @@
 use std::thread::sleep;
 use std::time::Duration;
 
+use cf_e2e::live;
 use cf_e2e::live::claude::{self, Status};
 use cf_e2e::live::report::Check;
-use cf_e2e::live::window::{Window, ANSWER, READY};
-use cf_e2e::live::{self, last_lines};
+use cf_e2e::live::window::{Window, ANSWER};
 use cf_e2e::{Error, Result};
 
 use super::record::{
@@ -103,11 +103,8 @@ fn paste_and_read(window: &Window, make: Message, n: u32, word: &str) -> Result<
 /// Runs `strategy` in the open `window`, its messages made by `make`.
 pub fn flow(window: &Window, strategy: &Strategy, make: Message) -> Result<Outcome> {
     let mut lines = Vec::new();
-    if !window.still(READY) {
-        lines.push(format!(
-            "FAIL it did not open: {}",
-            last_lines(&window.screen())
-        ));
+    if let Err(screen) = window.ready() {
+        lines.push(format!("FAIL it did not open: {screen}"));
         return Ok(Outcome { ok: false, lines });
     }
     let (config, session) = (window.claude_config(), session_of(window)?);
@@ -120,7 +117,7 @@ pub fn flow(window: &Window, strategy: &Strategy, make: Message) -> Result<Outco
     drop(status);
     let record = claude::record(&config, &session);
     lines.push(escape_line(idle.as_ref(), pressed, &record));
-    lines.push(format!("its screen: {}", last_lines(&window.screen())));
+    lines.push(format!("its screen: {}", window.tail()));
     if !stopped_at_once(idle.as_ref(), &record) {
         lines.push(
             "FAIL Claude did not stop before it wrote anything: this is not the shape the strategy is for"
@@ -130,11 +127,7 @@ pub fn flow(window: &Window, strategy: &Strategy, make: Message) -> Result<Outco
     }
     press(window, strategy.steps)?;
     sleep(KEYED);
-    lines.push(format!(
-        "after {}: {}",
-        strategy.name,
-        last_lines(&window.screen())
-    ));
+    lines.push(format!("after {}: {}", strategy.name, window.tail()));
     let second = paste_and_read(window, make, 2, "SECOND")?;
     lines.push(arrival_line(&second, alone(second.text.as_deref(), 2)));
     let cleared = taken(&second, 2);
@@ -151,7 +144,7 @@ pub fn flow(window: &Window, strategy: &Strategy, make: Message) -> Result<Outco
             format!(
                 "FAIL the same keys at the empty box of a window at rest: the third message did not: {}; its screen: {}",
                 quoted(third.text.as_deref(), 160),
-                last_lines(&window.screen())
+                window.tail()
             )
         });
     }
@@ -278,7 +271,7 @@ mod tests {
         let window = Open::new(&rig, &install, "input-box", "input-box-keys")
             .without_trust()
             .open()?;
-        assert!(window.still(READY), "{}", window.screen());
+        assert_eq!(window.ready(), Ok(()));
         // These leave the stand-in as it is (which takes no Control-U, and has no turn at
         // work for an Escape to stop); the pause between the Escapes is waited.
         let started = Instant::now();

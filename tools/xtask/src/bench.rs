@@ -1,5 +1,5 @@
-//! `cargo xtask bench records-memory` (landing S10): what a first look at a big
-//! Claude transcript costs, release-built, each measure in a process of its own
+//! `cargo xtask bench records-memory`: what a first look at a big Claude
+//! transcript costs, release-built, each measure in a process of its own
 //! (a process remembers the most memory it ever held). The measures are the
 //! ignored tests of `crates/cf-harness/src/claude/record/tests/memory.rs`, which
 //! say what each reads: a first look and the memory it peaks at; the same look in

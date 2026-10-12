@@ -7,7 +7,6 @@
 mod common;
 
 use std::fs;
-use std::path::Path;
 use std::process::Command;
 
 use common::{checkout, cwds, err, out, programs, xtask};
@@ -275,43 +274,6 @@ fn cargo_finds_the_xtask_alias_from_the_root_and_from_app() {
             "`cargo help xtask` from {} said:\n{}{}\n{missing}",
             cwd.display(),
             out(&ran),
-            err(&ran)
-        );
-    }
-}
-
-/// Every `"name": "cargo xtask <words>"` line of a package.json, as `(name, words)`.
-fn xtask_scripts(package_json: &Path) -> Vec<(String, String)> {
-    let text = fs::read_to_string(package_json).unwrap();
-    text.lines()
-        .filter_map(|line| {
-            let (name, command) = line.trim().strip_prefix('"')?.split_once("\": \"")?;
-            let words = command.strip_prefix("cargo xtask ")?;
-            Some((
-                name.to_string(),
-                words.trim_end_matches([',', '"']).to_string(),
-            ))
-        })
-        .collect()
-}
-
-/// A typo in a script of the package.json files is found here, not by whoever runs it
-/// first: each command they hand over to is one xtask has (asked for its help, which
-/// starts nothing).
-#[test]
-fn every_npm_script_that_hands_over_to_xtask_names_a_command_it_has() {
-    let nowhere = tempfile::tempdir().unwrap();
-    let mut scripts = xtask_scripts(&checkout().join("package.json"));
-    scripts.extend(xtask_scripts(&checkout().join("app").join("package.json")));
-    // The ones that moved at step 5's first landing are there, and `check:all`.
-    assert!(scripts.len() >= 15, "{scripts:?}");
-    for (name, words) in scripts {
-        let mut args: Vec<&str> = words.split(' ').collect();
-        args.push("--help");
-        let ran = xtask(&checkout(), nowhere.path(), &[], &args);
-        assert!(
-            ran.status.success(),
-            "npm run {name} is `cargo xtask {words}`, which is no command:\n{}",
             err(&ran)
         );
     }

@@ -1,11 +1,11 @@
-//! What the app's bundle carries (landing S1): the native `cf` (crates/cf)
-//! built and put in `bin/`, that `cf` staged as the bundle's `cli/bin/cf` with,
-//! on Windows, Microsoft's console host beside it, and the console host fetched
-//! on its own.
+//! What the app's bundle carries: the native `cf` (crates/cf) built and put in
+//! `bin/`, that `cf` staged as the bundle's `cli/bin/cf` with, on Windows,
+//! Microsoft's console host beside it, and the console host fetched on its own.
 //!
 //! - `build-cf` ([`build_cf`]) builds `cf` and replaces the copy in `bin/`,
-//!   which is the checkout's, the test suites' and, through `stage`, the
-//!   bundle's.
+//!   which is the checkout's, the page's Playwright suite's (the suites of
+//!   `crates/cf-e2e` build the `cf` they run themselves) and, through `stage`,
+//!   the bundle's.
 //! - `stage` ([`stage`]) does that, then puts the copy and the console host
 //!   where Tauri bundles them from, `app/src-tauri/resources`.
 //! - `conpty` ([`conpty`]) fetches the console host's package, checks it against

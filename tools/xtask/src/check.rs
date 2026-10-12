@@ -5,9 +5,10 @@
 //!
 //! The steps are rustfmt; clippy for the workspace, for the app and for
 //! Windows; the tests of the workspace, of xtask and of the app; then the
-//! linter, the build of the native `cf` and the Node tests (`npm run lint` and
-//! `npm test`: what `npm run check` runs, with the `cf` those tests run built
-//! again from the sources as they are). The app crate is left out of the
+//! linter, the build of the native `cf` (the `bin/cf` the page's Playwright
+//! suite runs, `npm run test:ui`, which is no part of this gate: it is left as
+//! the sources build it) and the Node tests (`npm run lint` and `npm test`: what
+//! `npm run check` runs). The app crate is left out of the
 //! workspace's lint and tests as the
 //! gates leave it out: its build script wants the resources `cargo xtask stage`
 //! puts in `app/src-tauri`, which a worktree has not, so it is linted and tested
@@ -112,8 +113,9 @@ fn steps(context: &Context, archiver: &Path, windows: bool) -> Vec<Invocation> {
             .arg(context.path(XTASK_TARGET)),
         app::test(context, &[]),
         at("npm", &["run", "lint"]),
-        // The Node tests run the built cf: built again from the sources as they are,
-        // as the `check:all` this replaces did first of all.
+        // The page's Playwright suite runs the built cf (`npm run test:ui`, outside this
+        // gate): built again from the sources as they are, as the `check:all` this
+        // replaces did first of all.
         at("cargo", &["xtask", "build-cf", "--offline"]),
         at("npm", &["test"]),
     ]);
@@ -232,15 +234,15 @@ mod tests {
     }
 
     #[test]
-    fn the_cf_the_node_tests_run_is_built_again_just_before_them() {
+    fn the_cf_the_pages_suite_runs_is_built_again_from_the_sources_after_the_lint() {
         let steps = steps(&context(), Path::new("xtask"), false);
         let lines: Vec<_> = steps.iter().map(Invocation::display).collect();
-        let [.., lint, build, test] = &lines[..] else {
+        let [.., lint, build, _] = &lines[..] else {
             panic!("{lines:?}");
         };
         assert_eq!(
-            [lint.as_str(), build.as_str(), test.as_str()],
-            ["npm run lint", "cargo xtask build-cf --offline", "npm test"]
+            [lint.as_str(), build.as_str()],
+            ["npm run lint", "cargo xtask build-cf --offline"]
         );
     }
 

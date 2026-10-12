@@ -94,6 +94,13 @@ fn a_project_opens_with_the_stand_in_for_its_chief_and_the_chief_gives_its_membe
         .and_then(|messages| messages.iter().find(|message| message["kind"] == "result"))
         .ok_or("the thread holds no result")?;
     assert_eq!(result["body"], "MEMBERS_OK");
+    // What a check says of a window is the end of what it printed, by its pane; a pane never opened printed none.
+    assert!(
+        members.tail(window.id()).contains("fake agent started on"),
+        "{}",
+        members.tail(window.id())
+    );
+    assert_eq!(members.tail("no-such-pane"), "");
     // The human has no note about a stop that never was.
     assert!(members.inbox(None)?.is_empty());
     assert!(members.is_open()?);

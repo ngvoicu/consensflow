@@ -46,7 +46,7 @@ use tempfile::TempDir;
 
 use super::machine::{live_folder_in, Harness, Installed, ISOLATION};
 use super::window::trust_claude;
-use super::{agents, installed, rig, rig_with_stand_ins, Log};
+use super::{agents, installed, last_lines, rig, rig_with_stand_ins, Log};
 use crate::rig::{Config, Project, Rig};
 use crate::{files, Error, Result};
 
@@ -353,6 +353,12 @@ impl Members {
                     .is_some_and(|id| id.starts_with(&prefix))
             })
             .collect()
+    }
+
+    /// The end of the screen of the window whose pane is `pane` (its id), as a
+    /// line ([`last_lines`]): what a check says of a window to say what it saw.
+    pub fn tail(&self, pane: &str) -> String {
+        last_lines(&self.rig.screen(pane))
     }
 
     /// Pastes `body` into the window `pane` as the daemon does (`pane.write_paste`:

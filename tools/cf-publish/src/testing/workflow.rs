@@ -193,10 +193,50 @@ pub fn step(text: &str, name: &str) -> StepText {
     }
 }
 
+/// Every step of `text` (a job's text, or the whole workflow's), in order, with the
+/// comment lines left out: a step is its first line (`      - `) and the lines under
+/// it, up to the next step's or to a line indented less.
+pub fn steps(text: &str) -> Vec<StepText> {
+    let mut found: Vec<StepText> = Vec::new();
+    let mut open = false;
+    for line in live(text).lines() {
+        if line.starts_with("      - ") {
+            found.push(StepText {
+                lines: vec![line.to_string()],
+            });
+            open = true;
+        } else if !line.trim().is_empty() && indent_of(line) < 6 {
+            open = false;
+        } else if open {
+            if let Some(last) = found.last_mut() {
+                last.lines.push(line.to_string());
+            }
+        }
+    }
+    found
+}
+
 impl StepText {
     /// All of it.
     pub fn text(&self) -> String {
         self.lines.join("\n")
+    }
+
+    /// Its name: what its `name:` says, or its first line where it has none.
+    pub fn name(&self) -> String {
+        self.lines
+            .iter()
+            .find_map(|line| {
+                line.strip_prefix("      - name: ")
+                    .or_else(|| line.strip_prefix("        name: "))
+            })
+            .map_or_else(
+                || {
+                    let first = self.lines.first().map_or("", |line| line.trim());
+                    first.strip_prefix("- ").unwrap_or(first).to_string()
+                },
+                str::to_string,
+            )
     }
 
     /// The script of its `run:`, a block (`run: |`) or a line.

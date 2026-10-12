@@ -67,22 +67,14 @@ fn what_clears_the_box_claude_puts_a_message_back_into_clears_it_whole_and_is_ha
     ask::prepare()?;
     let tried = strategy::chosen(&live::list("strategy"))?;
     let needed = strategy::required(&live::list("require"), &tried)?;
-    let claude = live::installed(Harness::Claude)?;
-    log.say(format!(
-        "claude is {} ({}); its login is read from {}",
-        claude.command().display(),
-        claude.version(),
-        claude.home().display()
-    ));
+    let claude = log.found(Harness::Claude)?;
     let rig = Rig::start(live::rig(std::slice::from_ref(&claude), FAKE_AGENT))?;
     let mut checks = Vec::new();
     for strategy in &tried {
         log.say(format!("strategy {}", strategy.name));
         let pane = format!("input-box-{}", strategy.name);
-        let window = Open::new(&rig, &claude, "input-box", &pane).open()?;
-        if let Some(trust) = window.trust() {
-            log.say(format!("{}: trust: {trust}", strategy.name));
-        }
+        let window =
+            Open::new(&rig, &claude, "input-box", &pane).open_telling(&log, strategy.name)?;
         let outcome = flow::flow(&window, strategy, record::message)?;
         drop(window);
         log.block(
@@ -103,6 +95,5 @@ fn what_clears_the_box_claude_puts_a_message_back_into_clears_it_whole_and_is_ha
         }
     }
     rig.close()?;
-    log.block("what each strategy came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::conclude(&log, "what each strategy came to", &checks)
 }

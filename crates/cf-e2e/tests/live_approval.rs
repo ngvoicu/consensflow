@@ -114,15 +114,7 @@ fn machine(plan: &[plan::Planned], log: &Log) -> Result<Machine> {
     }
     let mut installed = Vec::new();
     for harness in needed {
-        let found = live::installed(harness)?;
-        log.say(format!(
-            "{} is {} ({}); its login is read from {}",
-            harness.name(),
-            found.command().display(),
-            found.version(),
-            found.home().display()
-        ));
-        installed.push(found);
+        installed.push(log.found(harness)?);
     }
     let claude = match installed
         .iter()

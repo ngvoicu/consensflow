@@ -1,4 +1,4 @@
-//! The update path, proven end to end on the packaged app (landing S12): an
+//! The update path, proven end to end on the packaged app: an
 //! installed app is given this checkout's app as an update, by its own
 //! updater, from a feed this run serves. This checkout's app ships no Node, and
 //! the update goes to an app of each release that did:
@@ -83,7 +83,7 @@ macro_rules! args {
 
 mod app;
 mod build;
-// What a bundle holds and the process table say are read by the candidate (landing S11) too.
+// What a bundle holds and the process table say are read by the candidate too.
 pub(crate) mod bundle;
 mod case;
 mod cases;
