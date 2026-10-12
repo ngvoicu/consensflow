@@ -1,8 +1,9 @@
 //! The daemon started in process, as the app starts it: over its bridge with
 //! the test as the app's end, on a home of its own. What it says first, what
 //! its start does and in what order, how each way of stopping it ends its log,
-//! and that a restart brings back what was open, opening the window with its
-//! environment. (The same as a process is `crates/cf/tests/daemon_stop.rs`
+//! and that a restart leaves what was open suspended, with no window, until the
+//! human's Resume opens the chief's window with its environment. (The same as a
+//! process is `crates/cf/tests/daemon_stop.rs`
 //! and the black-box cases of `crates/cf-e2e/tests/daemon/core_daemon.rs`.)
 
 use std::cell::Cell;

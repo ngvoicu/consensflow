@@ -20,7 +20,9 @@
 //! the daemon types into a window while the words that were for it wait for the
 //! human, where the stand-in agent stops a turn at the Escape it is pressed. So is
 //! `pending_agents`: what it does with the agents a turn left running, which no
-//! program of the window's tree is.)
+//! program of the window's tree is. So is `start_suspended`: a start opens
+//! nothing, and the human's Resume brings back the chief and the windows at
+//! work, the one whose turn the quit cut told so.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -61,6 +63,8 @@ mod live_support;
 mod pending_agents;
 #[path = "rig/stand_ins.rs"]
 mod stand_ins;
+#[path = "rig/start_suspended.rs"]
+mod start_suspended;
 #[path = "rig/waiting_notes.rs"]
 mod waiting_notes;
 #[path = "rig/window_says_why.rs"]

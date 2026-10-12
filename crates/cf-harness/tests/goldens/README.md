@@ -38,8 +38,9 @@ once, with the reason here and in the commit.
 - **A Claude window opened again on a turn the app's quit cut** (2026-10-11, the
   human's report that the daemon seemed not to send responses; found by
   `npm run live:resume-cut` and `npm run live:restart-cut`). The quit ends a
-  window with its turn at work, and the daemon that starts again resumes the
-  chief on that conversation: a record whose last turn has no end. Claude 2.1.296
+  window with its turn at work, and the daemon that starts again resumed the
+  chief on that conversation (since 2026-10-12 the human's Resume does, and a
+  start opens nothing): a record whose last turn has no end. Claude 2.1.296
   resumed there waits at its prompt, status idle, and writes nothing of the turn;
   Node read such a window at work for good, since its record said the turn was
   in flight, and nothing was delivered to the chief until the human typed to it.

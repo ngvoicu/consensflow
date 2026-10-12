@@ -1,5 +1,6 @@
 //! The engine's operations as a test calls them (the human's, the pane host's
-//! exits, and a restart's engine): each written down where it begins, by its
+//! exits, and a restart's engine, which the human's Resume then brings the
+//! project back on): each written down where it begins, by its
 //! Node name, as the Node recorder marks the dispatcher's operations a test
 //! calls, with what it answered, or failed with, once it ends; and the work
 //! it began run to stillness. Calls a test made without awaiting the first
@@ -17,7 +18,7 @@ use serde_json::{json, Value};
 use super::context::Context;
 use super::executor::Answer;
 use crate::chief_switch::SwitchTo;
-use crate::dispatcher::{Dispatcher, Resumed, SwitchWhen};
+use crate::dispatcher::{Dispatcher, SwitchWhen};
 use crate::seams::EngineError;
 
 /// What a Switch chief is asked, as `switchChief` is given it.
@@ -40,20 +41,6 @@ pub(super) fn answer<T: Serialize>(answer: &T) -> Value {
 /// What an operation that answers nothing answered: JavaScript's `undefined`.
 pub(super) fn nothing(_: &()) -> Value {
     json!({ "$undefined": true })
-}
-
-/// What a restart settled, as `resumeAfterRestart` answers it.
-fn outcomes(resumed: &[Resumed]) -> Value {
-    let outcomes: Vec<Value> = resumed
-        .iter()
-        .map(|resumed| match &resumed.error {
-            None => json!({ "project": resumed.project, "resumed": true }),
-            Some(error) => {
-                json!({ "project": resumed.project, "resumed": false, "error": error })
-            }
-        })
-        .collect();
-    Value::Array(outcomes)
 }
 
 impl Context {
@@ -346,24 +333,33 @@ impl Restarted<'_> {
         self.context.run(switching)
     }
 
-    /// What was on its way is settled, and the projects open before come back.
-    pub fn resume_after_restart(&self) -> Result<Vec<Resumed>, EngineError> {
-        self.context.run(self.resuming())
+    /// What was on its way is settled, and nothing else comes of the projects
+    /// that were open: they wait for the human's Resume.
+    pub fn settle_after_restart(&self) -> Result<(), EngineError> {
+        self.context.run(self.settling())
     }
 
-    /// What was on its way is settled, and the projects open before come
-    /// back, begun where it is called.
-    pub fn begin_resume_after_restart(&self) -> Answer<Result<Vec<Resumed>, EngineError>> {
-        self.context.executor.start_now(self.resuming())
+    /// What was on its way is settled, begun where it is called.
+    pub fn begin_settle_after_restart(&self) -> Answer<Result<(), EngineError>> {
+        self.context.executor.start_now(self.settling())
     }
 
-    fn resuming(&self) -> impl Future<Output = Result<Vec<Resumed>, EngineError>> + 'static {
+    fn settling(&self) -> impl Future<Output = Result<(), EngineError>> + 'static {
         let engine = self.engine();
-        self.context.operation(
-            "resumeAfterRestart",
-            json!([]),
-            |resumed| outcomes(resumed),
-            async move { engine.resume_after_restart().await },
-        )
+        self.context
+            .operation("settleAfterRestart", json!([]), nothing, async move {
+                engine.settle_after_restart().await
+            })
+    }
+
+    /// The human's Resume, of a project this engine's start left suspended.
+    pub fn resume_project(&self, project: i64) -> Result<Option<ProjectView>, EngineError> {
+        let engine = self.engine();
+        let resume =
+            self.context
+                .operation("resumeProject", json!([project]), answer, async move {
+                    engine.resume_project(project).await
+                });
+        self.context.run(resume)
     }
 }

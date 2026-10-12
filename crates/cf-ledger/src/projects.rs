@@ -1,6 +1,7 @@
 //! Projects: each with its human, its chief and its staff, open or suspended,
-//! gated or not; brought back after a restart of the daemon, logged event by
-//! event, and deleted with everything in it once closed.
+//! gated or not; every open one suspended when the daemon starts, for the human
+//! to resume, logged event by event, and deleted with everything in it once
+//! closed.
 
 use cf_base::json::from_slice_lossy;
 use cf_proto::ledger::{DeletedProject, EventView, ProjectView};
@@ -18,7 +19,6 @@ pub(crate) struct ProjectRow {
     pub(crate) directory: String,
     pub(crate) name: String,
     pub(crate) state: String,
-    pub(crate) resume_on_start: i64,
     pub(crate) gate: i64,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
@@ -31,7 +31,6 @@ impl ProjectRow {
             directory: row.get("directory")?,
             name: row.get("name")?,
             state: row.get("state")?,
-            resume_on_start: row.get("resume_on_start")?,
             gate: row.get("gate")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
@@ -248,7 +247,6 @@ pub(crate) fn project(store: &Store, id: i64) -> Result<Option<ProjectView>, Led
         name: row.name,
         state: row.state,
         gate: row.gate == 1,
-        resume_on_start: row.resume_on_start == 1,
         created_at: row.created_at,
         updated_at: row.updated_at,
         participants,
@@ -271,7 +269,7 @@ pub(crate) fn projects(store: &Store) -> Result<Vec<ProjectView>, LedgerError> {
     ids.into_iter().map(|id| known_project(store, id)).collect()
 }
 
-/// Open or suspend a project by hand; either way it is no longer due a resume.
+/// Open or suspend a project.
 pub(crate) fn set_project_state(
     store: &mut Store,
     id: i64,
@@ -287,7 +285,7 @@ pub(crate) fn set_project_state(
         let from = store.project_row(id)?.state;
         let at = store.at();
         store.db.execute(
-            "UPDATE project SET state = ?, resume_on_start = 0, updated_at = ? WHERE id = ?",
+            "UPDATE project SET state = ?, updated_at = ? WHERE id = ?",
             params![state, at, id],
         )?;
         if from != state {
@@ -346,7 +344,9 @@ pub(crate) fn set_gate(store: &mut Store, id: i64, gate: bool) -> Result<Project
 }
 
 /// At daemon start: the panes of every open project died with the previous
-/// process, so each becomes suspended and is marked to come back by itself.
+/// process, so each becomes suspended, as the human's Close leaves it, and
+/// stays so until the human resumes it. Its tasks and its messages are as they
+/// were: the board shows them so, and nothing is delivered meanwhile.
 pub(crate) fn suspend_for_restart(store: &mut Store) -> Result<Vec<ProjectView>, LedgerError> {
     store.write(|store| {
         let open = store
@@ -357,30 +357,18 @@ pub(crate) fn suspend_for_restart(store: &mut Store) -> Result<Vec<ProjectView>,
         for id in &open {
             let at = store.at();
             store.db.execute(
-                "UPDATE project SET state = 'suspended', resume_on_start = 1, updated_at = ?
-                 WHERE id = ?",
+                "UPDATE project SET state = 'suspended', updated_at = ? WHERE id = ?",
                 params![at, id],
             )?;
             store.log(
                 *id,
                 "project.state",
-                json!({ "from": "open", "to": "suspended", "resumeOnStart": true }),
+                json!({ "from": "open", "to": "suspended" }),
             )?;
         }
         open.into_iter()
             .map(|id| known_project(store, id))
             .collect()
-    })
-}
-
-/// A resume on start is tried once: after it, success or not, the mark goes.
-pub(crate) fn forget_resume(store: &mut Store, id: i64) -> Result<(), LedgerError> {
-    store.write(|store| {
-        store.project_row(id)?;
-        store
-            .db
-            .execute("UPDATE project SET resume_on_start = 0 WHERE id = ?", [id])?;
-        Ok(())
     })
 }
 

@@ -125,7 +125,7 @@ fn a_message_the_harness_took_is_found_in_its_record_after_the_records_await_and
         context.pass().unwrap();
         context.ledger.borrow_mut().suspend_for_restart().unwrap();
         let after = context.make();
-        let restarting = after.begin_resume_after_restart();
+        let restarting = after.begin_settle_after_restart();
         tick_after(&context, project.id, turns);
         context.settle();
         restarting.take().unwrap().unwrap();

@@ -12,7 +12,8 @@
 //! after a chief's turn, which waits for them (`switching_agents`), and the time
 //! a launch is told it has for its first message (`launch_wait`), and what a
 //! window is given while the words that were for it wait at the human's gate
-//! (`approval`), and the tester, which Node's staff never had (`testers`).
+//! (`approval`), and the tester, which Node's staff never had (`testers`), and
+//! the human's Resume of what a start suspended (`resume`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -47,6 +48,7 @@ mod pending_agents;
 mod quota;
 mod receipts;
 mod restart;
+mod resume;
 mod review;
 mod separate_callbacks;
 mod session_windows;

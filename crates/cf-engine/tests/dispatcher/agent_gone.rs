@@ -59,7 +59,8 @@ fn after_a_release_drops_the_agent_of_a_working_member_a_restart_sends_its_task_
     context.roster.gone.borrow_mut().insert("zeus".to_owned());
     context.ledger.borrow_mut().suspend_for_restart().unwrap();
     let after = context.make();
-    after.resume_after_restart().unwrap();
+    after.settle_after_restart().unwrap();
+    after.resume_project(tiers.project.id).unwrap();
     after.pass().unwrap();
     let task = tiers.task(1).task;
     assert_eq!((task.state.as_str(), task.assignee), ("open", None));

@@ -200,7 +200,7 @@ fn an_unacknowledged_claim_is_voided_when_the_daemon_starts() {
         .next_delivery(zeus)
         .unwrap()
         .is_none());
-    context.make().resume_after_restart().unwrap();
+    context.make().settle_after_restart().unwrap();
     assert_eq!(unclaimed(&context, project), ["the daemon started again"]);
     assert_eq!(
         context

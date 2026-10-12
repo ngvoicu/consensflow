@@ -449,7 +449,7 @@ export class BoardView {
     this.#shows = shows
     const models = new Map(agents.map((agent) => [agent.name, agent]))
     redraw(this.#root, [
-      ...(acts(board) ? [] : [this.#closed(board.project)]),
+      ...(acts(board) ? [] : [this.#closed(board.resume)]),
       this.#forYou(inbox, board, now),
       this.#kanban(board, models, now),
     ])
@@ -467,16 +467,22 @@ export class BoardView {
     return () => action(this.#lane(participant).participant)
   }
 
-  /** What a closed project shows above its board: why it is still, and the one way on. */
-  #closed(project) {
+  /**
+   * What a closed project shows above its board, in one line: that it waits
+   * for Resume, what Resume will start (the tasks open and the messages
+   * waiting, which the daemon counts), and the one way on.
+   */
+  #closed(resume) {
     const banner = element('section', 'suspended')
     banner.setAttribute('role', 'status')
     banner.append(
-      element('strong', null, `${project.name} is closed.`),
+      element('strong', null, 'Waiting for Resume.'),
       element(
         'span',
         null,
-        ' Its windows are gone, its open work went back to the backlog, and nothing is delivered until you resume it.',
+        resume
+          ? ` ${plural(resume.tasks, 'open task')}, ${plural(resume.messages, 'message')} waiting.`
+          : '',
       ),
       button('Resume project', 'primary-button', () => this.#actions.onResume(this.#board.project)),
     )

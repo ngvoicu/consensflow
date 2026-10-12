@@ -16,7 +16,7 @@ use std::time::Duration;
 use cf_proto::agents::Harness;
 use serde_json::Value;
 
-use crate::records::{Item, Options, Quota, Reading};
+use crate::records::{Item, Options, Quota, Reading, Settlement};
 
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -298,4 +298,19 @@ pub trait Records {
         harness: Harness,
         session: &'a str,
     ) -> Work<'a, Result<bool, String>>;
+
+    /// Whether `harness`'s record of `session` ends in a turn with no end, read
+    /// with no window open: the turn the app's quit cut, or a Close. False where
+    /// the record cannot be read.
+    fn turn_left_open<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, bool> {
+        Box::pin(async move {
+            matches!(
+                &*self.look(harness, session, &Options::default()).await,
+                Reading::Known(record) if record.settlement == Settlement::InFlight
+            )
+        })
+    }
 }
+
+#[cfg(test)]
+mod tests;

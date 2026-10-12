@@ -260,7 +260,8 @@ fn switching_the_chief_opens_a_fresh_window_that_gets_the_handoff_and_reads_what
 }
 
 #[test]
-fn a_restart_brings_the_project_back_on_its_chiefs_own_conversation() -> Outcome {
+fn a_restart_leaves_the_project_suspended_and_the_humans_resume_brings_the_chief_back_on_its_own_conversation(
+) -> Outcome {
     let mut rig = rig()?;
     // The human's own agent, not the rig's: the restart must keep the roster.
     let roster = json!({
@@ -287,10 +288,20 @@ fn a_restart_brings_the_project_back_on_its_chiefs_own_conversation() -> Outcome
     rig.wait_for_daemon_exit(secs(10))?;
     let root = rig.close_keeping_the_root()?;
     let rig = Rig::start(config().existing_root(root))?;
+    // Nothing comes back by itself: the project waits, suspended, for the human.
+    std::thread::sleep(secs(3));
+    assert!(rig.open_frames().is_empty(), "{:?}", rig.open_frames());
+    let board = Project::new(&rig, project).board()?;
+    assert_eq!(board["project"]["state"], "suspended");
+    // Its Resume brings the chief back on the conversation it had, which was at
+    // rest when the app quit: it is told nothing.
+    let resumed = rig.page("project.resume", json!({ "project": project }))?;
+    assert_eq!(resumed["ok"], true, "{resumed}");
     let again = rig.open_frame(&format!("p{project}-chief"), secs(30))?;
     assert_eq!(after(&again, "--resume"), session, "{:?}", again["argv"]);
     let board = Project::new(&rig, project).board()?;
     assert_eq!(board["project"]["state"], "open");
+    assert!(!rig.transcript(&session).contains("ConsensFlow stopped"));
     rig.close()?;
     Ok(())
 }

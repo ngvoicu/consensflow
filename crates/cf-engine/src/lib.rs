@@ -22,6 +22,7 @@ pub mod dispatcher;
 pub mod handoff;
 pub mod host;
 mod record;
+mod resume;
 pub mod roles;
 pub mod runtime;
 mod scheduler;
@@ -35,7 +36,7 @@ mod unstarted;
 mod windows;
 
 pub use chief_switch::SwitchTo;
-pub use dispatcher::{require_chief_agent, require_open, Dispatcher, Resumed, SwitchWhen};
+pub use dispatcher::{require_chief_agent, require_open, Dispatcher, SwitchWhen};
 pub use stops::Unstopped;
 pub use windows::{Activity, ActivityState};
 

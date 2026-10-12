@@ -318,14 +318,16 @@ impl FakeAdapter {
     }
 
     /// What the record of `session` holds (`adapter.record`): the latest
-    /// window's on it, none where no window had it.
-    pub(super) fn items_of(&self, session: &str) -> Option<Vec<Item>> {
+    /// window's on it, none where no window had it, and whether the turn it
+    /// ends in is over (an agent that was never answered is in one still, as a
+    /// window the app's quit cut).
+    pub(super) fn record_of(&self, session: &str) -> Option<(Vec<Item>, bool)> {
         let agents = self.agents.borrow();
         agents
             .iter()
             .rev()
             .find(|agent| agent.native == session)
-            .map(|agent| agent.items.clone())
+            .map(|agent| (agent.items.clone(), agent.settled))
     }
 
     /// A delivery into `launch`'s window, as the fake takes it.

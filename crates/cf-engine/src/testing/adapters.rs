@@ -67,17 +67,22 @@ impl FakeRecords {
     }
 }
 
-/// What the record of `session` holds: the latest window's on it.
+/// What the record of `session` holds: the latest window's on it, its turn
+/// in flight where the agent was not answered.
 fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
-    match fake.items_of(session) {
+    match fake.record_of(session) {
         None => Reading::Unknown("unknown".to_owned()),
-        Some(items) => Reading::Known(Record {
+        Some((items, settled)) => Reading::Known(Record {
             items,
-            in_flight: false,
+            in_flight: !settled,
             asking: false,
             failed: false,
             quota: None,
-            settlement: Settlement::Unknown,
+            settlement: if settled {
+                Settlement::Settled
+            } else {
+                Settlement::InFlight
+            },
             agents_pending: false,
         }),
     }
@@ -120,5 +125,15 @@ impl Records for FakeRecords {
             .fake(harness.kind())
             .is_some_and(|fake| !matches!(record_of(fake, session), Reading::Unknown(_)));
         Box::pin(async move { Ok(known) })
+    }
+
+    /// Whether the agent of `session` was never answered. Asked where Node's
+    /// dispatcher asked nothing, so it is no call of the adapter in a trace.
+    fn turn_left_open<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, bool> {
+        let open = self
+            .adapters
+            .fake(harness.kind())
+            .is_some_and(|fake| fake.record_of(session).is_some_and(|(_, settled)| !settled));
+        Box::pin(async move { open })
     }
 }

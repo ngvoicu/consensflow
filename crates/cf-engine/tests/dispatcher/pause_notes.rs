@@ -12,7 +12,7 @@ use crate::fixtures::{after, exhausted, given, Tiers};
 /// A lone task's note, as every stall always told it.
 const ONE: &str = "T-1 is paused: @zeus's window closed. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation.";
 
-/// What the chief was told of three tasks a restart paused.
+/// What the chief was told of three tasks whose windows were lost in a pass.
 const THREE: &str = "\
 T-1 is paused: @zeus-amber-pine's window is gone. Resume it with: cf task resume T-1 \"…\"
 T-2 is paused: @diana-brisk-birch's window is gone. Resume it with: cf task resume T-2 \"…\"
@@ -30,14 +30,15 @@ fn pause_notes(context: &Context, project: i64) -> Vec<MessageView> {
     notes
 }
 
-/// The app quits and starts again while the chief is in the middle of a turn:
-/// every window of the staff went with it, the first pass pauses their tasks,
-/// and the chief is not given the note until its turn ends.
-fn restart_with_the_chief_at_work(context: &Context) -> Restarted<'_> {
-    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+/// The pane host loses every window of the staff while the project is open (an
+/// engine made again, which knows none of them), and a note of the human's
+/// brings the chief's window up in the middle of a turn: the first pass pauses
+/// the tasks whose windows are gone, and the chief is not given the note until
+/// its turn ends. A restart no longer does this: what it suspends is resumed by
+/// the human, and the windows that had work come back with it.
+fn windows_gone_with_the_chief_at_work(context: &Context, project: i64) -> Restarted<'_> {
     let restarted = context.make();
-    restarted.resume_after_restart().unwrap();
-    context.adapter.busy("chief");
+    context.note(project, "human", "chief", "Where do things stand?");
     restarted.pass().unwrap();
     restarted
 }
@@ -58,14 +59,12 @@ fn working(context: &Context) -> Tiers<'_> {
 }
 
 #[test]
-fn tells_a_chief_once_of_all_the_tasks_a_restart_pauses() {
+fn tells_a_chief_once_of_all_the_tasks_whose_windows_the_pane_host_lost_in_a_pass() {
     let context = Context::new();
     let tiers = working(&context);
 
-    // The app quits and starts again: every window of the staff went with it.
-    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    // The pane host loses every window of the staff: the first pass finds them gone.
     let restarted = context.make();
-    restarted.resume_after_restart().unwrap();
     restarted.pass().unwrap();
     assert_eq!(
         [1, 2, 3].map(|number| tiers.task(number).task.state),
@@ -107,10 +106,8 @@ fn tells_a_lone_stall_in_the_note_it_always_had() {
 fn tells_a_lone_stall_in_a_pass_in_the_note_it_always_had() {
     let context = Context::new();
     let tiers = working(&context);
-    context.ledger.borrow_mut().suspend_for_restart().unwrap();
     let restarted = context.make();
-    restarted.resume_after_restart().unwrap();
-    // The chief paused two of the tasks before the restart took their windows: only T-1 stalls.
+    // The chief paused two of the tasks before the pane host lost their windows: only T-1 stalls.
     context
         .ledger
         .borrow_mut()
@@ -280,8 +277,8 @@ fn leaves_a_note_alone_once_its_reader_has_it_or_is_being_given_it() {
 fn takes_a_resumed_task_out_of_a_note_that_names_several_and_withdraws_it_when_none_is_left() {
     let context = Context::new();
     let tiers = working(&context);
-    let restarted = restart_with_the_chief_at_work(&context);
     let project = tiers.project.id;
+    let restarted = windows_gone_with_the_chief_at_work(&context, project);
     let note = pause_notes(&context, project).remove(0);
     assert_eq!(note.body, THREE);
     assert_eq!(note.state, "queued", "the chief is in the middle of a turn");
@@ -328,8 +325,8 @@ Each window comes back on its own conversation."
 fn gives_what_is_left_of_a_note_whose_other_tasks_were_resumed() {
     let context = Context::new();
     let tiers = working(&context);
-    let restarted = restart_with_the_chief_at_work(&context);
     let project = tiers.project.id;
+    let restarted = windows_gone_with_the_chief_at_work(&context, project);
     context.resume_task(project, 1, "Carry on");
     context.resume_task(project, 3, "Carry on");
     context.adapter.answer("chief", "Resumed two.");
@@ -351,8 +348,8 @@ fn gives_what_is_left_of_a_note_whose_other_tasks_were_resumed() {
 fn takes_a_cancelled_task_out_of_a_note_that_names_several() {
     let context = Context::new();
     let tiers = working(&context);
-    let _restarted = restart_with_the_chief_at_work(&context);
     let project = tiers.project.id;
+    let _restarted = windows_gone_with_the_chief_at_work(&context, project);
     let note = pause_notes(&context, project).remove(0);
     context
         .ledger
