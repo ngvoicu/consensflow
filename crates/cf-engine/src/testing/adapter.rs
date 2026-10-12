@@ -69,6 +69,9 @@ pub struct FakeAgent {
     /// The latest look found the window taken back so, until a message
     /// arrives that begins another turn.
     pub took_back: bool,
+    /// Its record, read with no window open, cannot tell whether its turn was
+    /// cut: Devin's, which reads a turn as going on only while its window shows it.
+    pub cannot_tell_a_cut: bool,
 }
 
 /// What a test makes `ready` answer, where it gives the adapter one.
@@ -262,6 +265,12 @@ impl FakeAdapter {
         });
     }
 
+    /// Its record cannot tell, with no window open, whether its turn was cut,
+    /// as Devin's cannot.
+    pub fn cannot_tell_a_cut(&self, handle: &str) {
+        self.with(handle, |agent| agent.cannot_tell_a_cut = true);
+    }
+
     /// The same, and what it stops it takes back: Claude, stopped before a
     /// word of its answer, has the message of its turn in its input box again
     /// and out of its conversation.
@@ -322,15 +331,29 @@ impl FakeAdapter {
         read(agent)
     }
 
-    /// What the record of `session` holds (`adapter.record`): the latest
-    /// window's on it, none where no window had it.
-    pub(super) fn items_of(&self, session: &str) -> Option<Vec<Item>> {
+    /// Whether the turn `session`'s record ends in was cut, as a harness reads it
+    /// with no window open: none where no window had it, or its record cannot tell.
+    pub(super) fn cut_of(&self, session: &str) -> Option<bool> {
         let agents = self.agents.borrow();
         agents
             .iter()
             .rev()
             .find(|agent| agent.native == session)
-            .map(|agent| agent.items.clone())
+            .filter(|agent| !agent.cannot_tell_a_cut)
+            .map(|agent| !agent.settled)
+    }
+
+    /// What the record of `session` holds (`adapter.record`): the latest
+    /// window's on it, none where no window had it, and whether the turn it
+    /// ends in is over (an agent that was never answered is in one still, as a
+    /// window the app's quit cut).
+    pub(super) fn record_of(&self, session: &str) -> Option<(Vec<Item>, bool)> {
+        let agents = self.agents.borrow();
+        agents
+            .iter()
+            .rev()
+            .find(|agent| agent.native == session)
+            .map(|agent| (agent.items.clone(), agent.settled))
     }
 
     /// A delivery into `launch`'s window, as the fake takes it.
@@ -420,6 +443,7 @@ impl Asked {
             stops_when_interrupted: false,
             takes_back: false,
             took_back: false,
+            cannot_tell_a_cut: false,
         };
         if let Some(message) = launch.message {
             agent.items.push(fake.item(Role::User, message));

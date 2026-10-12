@@ -1,13 +1,12 @@
 //! One task per member session: a window opens with its task and closes with
 //! it; the session and its conversation stay until the human deletes it, and
-//! a follow-up or a restart brings its window back on its conversation.
+//! a follow-up brings its window back on its conversation (so does the human's
+//! Resume after a restart, which `resume` holds).
 
 use cf_engine::testing::{window_of, Context};
 use cf_ledger::NewTask;
 
-use crate::fixtures::{
-    assert_match, finished, last_launch, last_message, native_of, placed, Tiers,
-};
+use crate::fixtures::{assert_match, finished, last_launch, last_message, native_of};
 use crate::traces::held_to;
 
 const SUITES: &[&str] = &["one task per member session"];
@@ -150,100 +149,6 @@ fn never_closes_a_coordinator_the_chief_keeps_its_window_after_its_own_task() {
         context.close(),
         SUITES,
         "never closes a coordinator: the chief keeps its window after its own task",
-    );
-}
-
-#[test]
-fn after_a_restart_pauses_a_member_task_with_no_window_for_the_chief_to_resume_and_resumes_one_whose_answer_is_due(
-) {
-    let context = Context::new();
-    let tiers = Tiers::new(&context, &["zeus", "diana"]);
-    tiers.open();
-    tiers.open_body("Write the lexer");
-    context.pass().unwrap();
-    context.pass().unwrap();
-    assert_eq!(
-        [tiers.assignee(1), tiers.assignee(2)],
-        ["zeus-amber-pine", "diana-brisk-birch"]
-    );
-    let question = context
-        .ledger
-        .borrow_mut()
-        .ask(
-            tiers.project.id,
-            &cf_ledger::NewQuestion {
-                from: Some("diana-brisk-birch".to_owned()),
-                to: "chief".to_owned(),
-                task: Some(2),
-                body: Some("Which dialect?".to_owned()),
-                ..cf_ledger::NewQuestion::default()
-            },
-        )
-        .unwrap();
-    context.adapter.answer("diana", "I asked the chief.");
-    context.pass().unwrap();
-    assert_eq!(
-        [tiers.task(1).task.state, tiers.task(2).task.state],
-        ["working", "waiting"]
-    );
-    let native = native_of(&context, tiers.id("diana-brisk-birch"));
-    let native_zeus = native_of(&context, tiers.id("zeus-amber-pine"));
-
-    context.ledger.borrow_mut().suspend_for_restart().unwrap();
-    let after = context.make();
-    after.resume_after_restart().unwrap();
-    context
-        .ledger
-        .borrow_mut()
-        .answer(
-            question.id,
-            question.recipient_id,
-            Some(&serde_json::json!("ANSI")),
-            None,
-        )
-        .unwrap();
-    after.pass().unwrap();
-    assert_eq!(
-        placed(&tiers.task(1).task),
-        ("paused", Some("zeus-amber-pine")),
-        "its window is gone; its session and conversation wait for the chief"
-    );
-    let thread = tiers.task(1);
-    let note = thread.messages.iter().find(|m| m.kind == "note").unwrap();
-    assert_match(
-        &note.body,
-        r"^T-1 is paused: @zeus-amber-pine's window is gone\. Resume it with: cf task resume T-1",
-    );
-    assert_eq!(
-        last_launch(&context),
-        ("diana-brisk-birch".to_owned(), native),
-        "its own session, with the brief in it"
-    );
-    assert_match(
-        &last_message(&context),
-        r"^\[ConsensFlow m-\d+ · T-2 · answer from @chief\]\nANSI$",
-    );
-    after.pass().unwrap();
-    assert_eq!(tiers.task(2).task.state, "working");
-    context
-        .ledger
-        .borrow_mut()
-        .resume_task(tiers.project.id, 1, Some("chief"), "Go on")
-        .unwrap();
-    after.pass().unwrap();
-    assert_eq!(
-        last_launch(&context),
-        ("zeus-amber-pine".to_owned(), native_zeus),
-        "the same conversation, with its memory"
-    );
-    assert_match(
-        &last_message(&context),
-        r"T-1 · task from @chief\]\nResumed: Go on$",
-    );
-    held_to(
-        context.close(),
-        SUITES,
-        "after a restart, pauses a member task with no window for the chief to resume, and resumes one whose answer is due",
     );
 }
 

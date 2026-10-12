@@ -8,11 +8,29 @@
 //! And what only this one's schema has: migration 0012's tester in the checks
 //! of two tables, and the version it brings (a recording of Node's database
 //! says 11, and its checks do not name a tester).
+//!
+//! What only Node's ledger had is held apart the other way round, on both
+//! sides: the mark that a project comes back by itself after a restart
+//! (`resumeOnStart` in what the ledger answers and logs, `resume_on_start` in
+//! its database), which migration 0013 took away, is taken out of what Node
+//! recorded, where this ledger's has none to take out.
 
 use serde_json::{Map, Value};
 
 /// The last schema version Node's ledger had.
 const NODE_LAST_VERSION: i64 = 11;
+
+/// What Node's ledger said of a project that came back by itself after a
+/// restart, in an answer or an event, and the column that kept it.
+const RESUME_MARK: &str = "resumeOnStart";
+const RESUME_COLUMN: &str = "resume_on_start";
+
+/// The lines that declare that column in the schema of the `project` table,
+/// as Node's migration 0006 wrote them.
+const RESUME_COLUMN_LINES: [&str; 2] = [
+    "    resume_on_start INTEGER NOT NULL DEFAULT 0,\n",
+    "    CONSTRAINT project_resume_on_start_check CHECK (resume_on_start IN (0, 1)),\n",
+];
 
 /// The tester, as migration 0012 put it in the role check of `participant` and
 /// the pool check of `task`, and the words Node's checks had in its place.
@@ -35,24 +53,31 @@ const NODE_NEVER_WRITES: [(&str, &str); 4] = [
 pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
     hold_apart_the_stop_of_logged_pauses(tables);
     for (table, column) in NODE_NEVER_WRITES {
-        let Some(Value::Object(dump)) = tables.get_mut(table) else {
-            continue;
-        };
-        let Some(at) = dump
-            .get("columns")
-            .and_then(Value::as_array)
-            .and_then(|columns| columns.iter().position(|name| name == column))
-        else {
-            continue;
-        };
-        if let Some(Value::Array(columns)) = dump.get_mut("columns") {
-            columns.remove(at);
-        }
-        if let Some(Value::Array(rows)) = dump.get_mut("rows") {
-            for row in rows {
-                if let Value::Array(values) = row {
-                    values.remove(at);
-                }
+        take_column_out(tables, table, column);
+    }
+}
+
+/// `column` of `table`, as the recorder dumps a table (its `columns` and its
+/// `rows`): its name and, in every row, the value at its place. A dump with no
+/// such table or column is left as it is.
+fn take_column_out(tables: &mut Map<String, Value>, table: &str, column: &str) {
+    let Some(Value::Object(dump)) = tables.get_mut(table) else {
+        return;
+    };
+    let Some(at) = dump
+        .get("columns")
+        .and_then(Value::as_array)
+        .and_then(|columns| columns.iter().position(|name| name == column))
+    else {
+        return;
+    };
+    if let Some(Value::Array(columns)) = dump.get_mut("columns") {
+        columns.remove(at);
+    }
+    if let Some(Value::Array(rows)) = dump.get_mut("rows") {
+        for row in rows {
+            if let Value::Array(values) = row {
+                values.remove(at);
             }
         }
     }
@@ -84,6 +109,18 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
 /// The `event` table's pause rows, each value as SQLite quotes it, without the
 /// `"stop"` that ends the quoted JSON of their data.
 fn hold_apart_the_stop_of_logged_pauses(tables: &mut Map<String, Value>) {
+    edit_logged_data(tables, "'task.state'", |text| {
+        if text.contains("\"to\":\"paused\"") {
+            if let Some(without) = without_stop(text) {
+                *text = without;
+            }
+        }
+    });
+}
+
+/// The quoted JSON of the `data` of each row of the `event` table whose `kind`
+/// is `kind` (quoted as SQLite quotes it), `edit`ed in place.
+fn edit_logged_data(tables: &mut Map<String, Value>, kind: &str, edit: impl Fn(&mut String)) {
     let Some(Value::Object(events)) = tables.get_mut("event") else {
         return;
     };
@@ -93,7 +130,7 @@ fn hold_apart_the_stop_of_logged_pauses(tables: &mut Map<String, Value>) {
             .and_then(Value::as_array)
             .and_then(|columns| columns.iter().position(|column| column == name))
     };
-    let (Some(kind), Some(data)) = (position("kind"), position("data")) else {
+    let (Some(kind_at), Some(data)) = (position("kind"), position("data")) else {
         return;
     };
     let Some(Value::Array(rows)) = events.get_mut("rows") else {
@@ -101,14 +138,9 @@ fn hold_apart_the_stop_of_logged_pauses(tables: &mut Map<String, Value>) {
     };
     for row in rows {
         let Value::Array(cells) = row else { continue };
-        let paused = cells.get(kind).and_then(Value::as_str) == Some("'task.state'");
-        let Some(Value::String(text)) = cells.get_mut(data) else {
-            continue;
-        };
-        if paused && text.contains("\"to\":\"paused\"") {
-            if let Some(without) = without_stop(text) {
-                *text = without;
-            }
+        let is_kind = cells.get(kind_at).and_then(Value::as_str) == Some(kind);
+        if let (true, Some(Value::String(text))) = (is_kind, cells.get_mut(data)) {
+            edit(text);
         }
     }
 }
@@ -128,6 +160,65 @@ fn without_stop(text: &str) -> Option<String> {
     text[end..]
         .starts_with('}')
         .then(|| format!("{}{}", &text[..at], &text[end..]))
+}
+
+/// `value`, an answer, an event or a whole recording as the recorder wrote it,
+/// without the mark that a project comes back by itself: the `resumeOnStart` of
+/// every object in it, which Node's projects had, and the event that suspended
+/// one at a start.
+pub fn hold_apart_the_resume_mark(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            fields.shift_remove(RESUME_MARK);
+            fields.values_mut().for_each(hold_apart_the_resume_mark);
+        }
+        Value::Array(items) => items.iter_mut().for_each(hold_apart_the_resume_mark),
+        _ => {}
+    }
+}
+
+/// `text`, as the recorder wrote it (JSON that holds an answer, an event or a
+/// reply), without the mark that a project comes back by itself: each
+/// `"resumeOnStart":false` or `:true`, with the comma that joins it to its
+/// neighbour. For a player that holds text to text, bytes and all.
+pub fn without_the_resume_mark(text: &str) -> String {
+    let mut text = text.to_owned();
+    for mark in ["\"resumeOnStart\":false", "\"resumeOnStart\":true"] {
+        text = text
+            .replace(&format!("{mark},"), "")
+            .replace(&format!(",{mark}"), "");
+    }
+    text
+}
+
+/// `dump`, a database as the recorder dumps it (`userVersion`, `schema` and
+/// `tables`), without what only Node's ledger held of that mark: its lines in
+/// the schema of the `project` table, and what [`hold_apart_the_resume_mark_in_tables`]
+/// takes out of the tables. A dump of this ledger's has none of them, and is
+/// left as it is.
+pub fn hold_apart_the_resume_mark_in_a_dump(dump: &mut Value) {
+    if let Some(Value::Array(schema)) = dump.get_mut("schema") {
+        for entry in schema.iter_mut().filter(|entry| entry["name"] == "project") {
+            if let Some(Value::String(sql)) = entry.get_mut("sql") {
+                for line in RESUME_COLUMN_LINES {
+                    *sql = sql.replace(line, "");
+                }
+            }
+        }
+    }
+    if let Some(Value::Object(tables)) = dump.get_mut("tables") {
+        hold_apart_the_resume_mark_in_tables(tables);
+    }
+}
+
+/// `tables`, a database as the recorder dumps it (each table's `columns` and
+/// its `rows`), without the column of the `project` table that kept the mark
+/// and the mark in the `event` rows that suspended a project at a start.
+pub fn hold_apart_the_resume_mark_in_tables(tables: &mut Map<String, Value>) {
+    take_column_out(tables, "project", RESUME_COLUMN);
+    edit_logged_data(tables, "'project.state'", |text| {
+        *text = text.replace(",\"resumeOnStart\":true", "");
+    });
 }
 
 /// `events`, as the recorder writes what a ledger logged (`kind` and `data`
@@ -253,6 +344,102 @@ mod tests {
         let mut tables_only = json!({ "tables": {} });
         hold_apart_what_node_never_had_in_its_schema(&mut tables_only);
         assert_eq!(tables_only, json!({ "tables": {} }));
+    }
+
+    #[test]
+    fn takes_the_resume_mark_out_of_every_object_of_an_answer_and_nothing_else() {
+        let mut answer = json!({
+            "id": 1,
+            "resumeOnStart": true,
+            "projects": [{ "name": "app", "resumeOnStart": false, "gate": false }],
+            "data": { "from": "open", "to": "suspended", "resumeOnStart": true },
+        });
+        hold_apart_the_resume_mark(&mut answer);
+        assert_eq!(
+            answer,
+            json!({
+                "id": 1,
+                "projects": [{ "name": "app", "gate": false }],
+                "data": { "from": "open", "to": "suspended" },
+            })
+        );
+        let mut without = json!({ "gate": true });
+        hold_apart_the_resume_mark(&mut without);
+        assert_eq!(without, json!({ "gate": true }));
+    }
+
+    #[test]
+    fn takes_the_resume_mark_out_of_text_with_the_comma_that_joined_it_and_nothing_else() {
+        let project = r#"{"id":1,"gate":false,"resumeOnStart":false,"createdAt":"then"}"#;
+        assert_eq!(
+            without_the_resume_mark(project),
+            r#"{"id":1,"gate":false,"createdAt":"then"}"#
+        );
+        let event = r#"{"from":"open","to":"suspended","resumeOnStart":true}"#;
+        assert_eq!(
+            without_the_resume_mark(event),
+            r#"{"from":"open","to":"suspended"}"#
+        );
+        let other = r#"{"resumeOnStartAfter":false,"said":"resumeOnStart"}"#;
+        assert_eq!(without_the_resume_mark(other), other);
+    }
+
+    #[test]
+    fn takes_the_resume_mark_out_of_a_dump_its_column_its_lines_of_schema_and_its_events() {
+        let project = |lines: &str| {
+            format!(
+                "CREATE TABLE project (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n{lines}    gate INTEGER NOT NULL DEFAULT 0,\n    CONSTRAINT project_state_check CHECK (state IN ('open', 'suspended')),\n{}    CONSTRAINT project_gate_check CHECK (gate IN (0, 1))\n  ) STRICT",
+                if lines.is_empty() { "" } else { RESUME_COLUMN_LINES[1] }
+            )
+        };
+        let suspended = r#"'{"from":"open","to":"suspended","resumeOnStart":true}'"#;
+        let opened = r#"'{"from":"suspended","to":"open"}'"#;
+        let mut dump = json!({
+            "userVersion": 11,
+            "schema": [
+                { "name": "project", "sql": project(RESUME_COLUMN_LINES[0]) },
+                { "name": "task", "sql": project(RESUME_COLUMN_LINES[0]) },
+            ],
+            "tables": {
+                "project": {
+                    "columns": ["id", "resume_on_start", "gate"],
+                    "rows": [["1", "0", "1"], ["2", "1", "0"]],
+                },
+                "event": {
+                    "columns": ["id", "kind", "data"],
+                    "rows": [
+                        ["1", "'project.state'", suspended],
+                        ["2", "'project.state'", opened],
+                        ["3", "'task.state'", suspended],
+                    ],
+                },
+            },
+        });
+        hold_apart_the_resume_mark_in_a_dump(&mut dump);
+        assert_eq!(
+            dump,
+            json!({
+                "userVersion": 11,
+                "schema": [
+                    { "name": "project", "sql": project("") },
+                    { "name": "task", "sql": project(RESUME_COLUMN_LINES[0]) },
+                ],
+                "tables": {
+                    "project": { "columns": ["id", "gate"], "rows": [["1", "1"], ["2", "0"]] },
+                    "event": {
+                        "columns": ["id", "kind", "data"],
+                        "rows": [
+                            ["1", "'project.state'", r#"'{"from":"open","to":"suspended"}'"#],
+                            ["2", "'project.state'", opened],
+                            ["3", "'task.state'", suspended],
+                        ],
+                    },
+                },
+            })
+        );
+        let held = dump.clone();
+        hold_apart_the_resume_mark_in_a_dump(&mut dump);
+        assert_eq!(dump, held, "a dump of this ledger's is left as it is");
     }
 
     #[test]

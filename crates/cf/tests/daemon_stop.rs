@@ -170,9 +170,11 @@ fn a_quiet_daemon_starts_its_log_with_its_pid_and_ends_it_with_why_it_stopped() 
 fn a_busy_daemon_is_stopped_within_one_deadline_whatever_is_open() {
     for how in hows() {
         let root = Root::new();
-        let question = root.open_project_with_a_question();
+        let (project, question) = root.open_project_with_a_question();
         let mut daemon = Daemon::start(&root);
         let frames = daemon.frames();
+        // The project starts suspended: its chief's window opens at the human's Resume.
+        daemon.resume(project);
 
         // The app's end: each window it is asked to open opens, and every
         // other request of the daemon's is left unanswered, so that what

@@ -63,7 +63,10 @@ use std::sync::LazyLock;
 
 use cf_base::env::Env;
 use cf_engine::testing::Closed;
-use cf_ledger::testing::{hold_apart_what_node_never_logs, hold_apart_what_node_never_writes};
+use cf_ledger::testing::{
+    hold_apart_the_resume_mark, hold_apart_the_resume_mark_in_tables,
+    hold_apart_what_node_never_logs, hold_apart_what_node_never_writes,
+};
 
 use crate::lanes;
 use flate2::read::GzDecoder;
@@ -146,6 +149,15 @@ const INTERLEAVED: &[&str] = &[];
 /// not been given: the result is withdrawn, where Node pastes it into the
 /// chief's window after the decision it asked for.
 const SENT_BACK_BEFORE_GIVEN: &str = "the chief sends T-1 back while its result is still queued for it: the result is withdrawn, where Node pastes it into the chief's window after the decision";
+
+/// What a start does now: it settles what was on its way into a window and
+/// opens nothing, and the human's Resume brings the project back; Node resumed
+/// the projects that were open at the start, by itself.
+const SUSPENDED_AT_START: &str = "the restart settles what was on its way into a window and opens no window (`settleAfterRestart`), where Node's `resumeAfterRestart` resumed the chief at once: the project waits suspended for the human's Resume (`resumeProject`), which brings the chief back";
+
+/// What the engine does when the human resumes a project whose chief's turn
+/// was cut (its record has a turn with no end): it is told so first.
+const CUT_CHIEF: &str = "the human resumes the project and the chief's turn was cut (the harness took the paste and the window closed before it answered): the chief is given a note from ConsensFlow that says so as its first message, and the paste after it, where Node opens it with the paste alone";
 
 /// What the engine says in a hold note, where Node's said the task goes on at
 /// the reset.
@@ -254,6 +266,46 @@ const DEPARTED: &[(&str, &str)] = &[
         "a note written 6 turns after a pass whose launch cannot take its first message",
         "the engine asks the pane host what the window shows (`pane.snapshot` with `tail`) before it closes a window whose harness could not take its first message, which takes the turns the host's answer takes: the note falls among other effects than in Node's trace",
     ),
+    (
+        "gives a message its window never showed back to the queue with its attempt, and the chief comes back to it and to what follows",
+        SUSPENDED_AT_START,
+    ),
+    (
+        "sends nothing again that its harness took, though the copy of its window missed it",
+        SUSPENDED_AT_START,
+    ),
+    (
+        "confirms a message whose header the copy of its window already shows",
+        SUSPENDED_AT_START,
+    ),
+    (
+        "opens a member's session again on its own conversation with the brief it was opened for",
+        SUSPENDED_AT_START,
+    ),
+    (
+        "gives a paste back to the queue when its window closes while the harness takes it",
+        CUT_CHIEF,
+    ),
+    (
+        "brings back the projects that were open before a restart, on their own conversations",
+        SUSPENDED_AT_START,
+    ),
+    (
+        "after a release drops the agent of a working member, a restart sends its task back to the board",
+        SUSPENDED_AT_START,
+    ),
+    (
+        "switches a chief that had a message on its way when the daemon stopped",
+        SUSPENDED_AT_START,
+    ),
+    (
+        "a note written 2 turns after a restart that finds a message in its harness's record",
+        SUSPENDED_AT_START,
+    ),
+    (
+        "a note written 3 turns after a restart that finds a message in its harness's record",
+        SUSPENDED_AT_START,
+    ),
 ];
 
 /// The variable that asks for the departures to be recorded again, which `npm
@@ -295,7 +347,10 @@ pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
 /// Where the test's effects or the database it left first differ from
 /// `trace`'s, or none when they are the same.
 fn first_difference(closed: &Closed, trace: &Value, name: &str) -> Option<String> {
-    let node = projected(trace["events"].as_array().expect("its events"));
+    // The mark of a project that comes back by itself is Node's alone.
+    let mut recorded = trace["events"].clone();
+    hold_apart_the_resume_mark(&mut recorded);
+    let node = projected(recorded.as_array().expect("its events"));
     let rust = projected(&logged(closed));
     if INTERLEAVED.contains(&name) {
         if let Some(difference) = lanes::first_difference(&node, &rust) {
@@ -327,6 +382,7 @@ fn first_difference(closed: &Closed, trace: &Value, name: &str) -> Option<String
         .map(|mut held| {
             if let Value::Object(tables) = &mut held {
                 hold_apart_what_node_never_writes(tables);
+                hold_apart_the_resume_mark_in_tables(tables);
             }
             held
         });
@@ -553,6 +609,7 @@ fn dump(file: &Path, folder: &Path) -> Value {
         tables.insert(name, json!({ "columns": columns, "rows": rows }));
     }
     hold_apart_what_node_never_writes(&mut tables);
+    hold_apart_the_resume_mark_in_tables(&mut tables);
     let text = Value::Object(tables).to_string();
     let folder = serde_json::to_string(&folder.to_string_lossy()).expect("the folder as JSON");
     serde_json::from_str(&text.replace(&folder[1..folder.len() - 1], "«dir»"))

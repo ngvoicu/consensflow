@@ -10,8 +10,10 @@
 //! takes which task and who is out of quota (`scheduler`), each window's
 //! launch, looks and close (`windows`), what goes into a window and what
 //! comes back out (`deliveries`), the human's Switch chief (`chief_switch`),
-//! the copy of each window's conversation (`transcripts`), and the task whose
-//! window went away, its requester told once for the tasks of a pass (`stalls`).
+//! the copy of each window's conversation (`transcripts`), the task whose
+//! window went away, its requester told once for the tasks of a pass (`stalls`),
+//! and the human's Resume of a project a start suspended, and what a start
+//! leaves for it (`resume`).
 //!
 //! Work runs as Node's did ([`crate::runtime`]): a piece of work is begun
 //! where JavaScript called it, and what JavaScript did not await goes on
@@ -35,6 +37,7 @@ use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 use crate::background::{agent_processes, quote, Left};
 use crate::chief_switch::SwitchTo;
 use crate::record::Record;
+use crate::resume::Coming;
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
 use crate::scheduler::SchedulerState;
 use crate::seams::{EngineError, Seams};
@@ -47,14 +50,6 @@ use crate::windows::{Activity, ActivityState, WindowsState};
 pub enum SwitchWhen {
     Now,
     Turn,
-}
-
-/// What became of a project open when the previous process ended.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Resumed {
-    pub project: i64,
-    /// Why it did not come back, if it did not.
-    pub error: Option<String>,
 }
 
 /// A closed project starts and changes no work, whatever asks: it is resumed first.
@@ -203,29 +198,9 @@ impl Dispatcher {
         }
         let project = self.seams.ledger.borrow_mut().create_project(&request)?;
         if let Some(chief) = project.participants.iter().find(|p| p.handle == "chief") {
-            self.open_soon(chief.id).await;
+            self.open_soon(chief.id, None).await;
         }
         self.project_now(project.id)
-    }
-
-    /// The human's Resume, and the restore after a restart: the chief comes
-    /// back on its conversation.
-    pub async fn resume_project(
-        self: &Rc<Self>,
-        project: i64,
-    ) -> Result<Option<ProjectView>, EngineError> {
-        let resumed = self
-            .seams
-            .ledger
-            .borrow_mut()
-            .set_project_state(project, "open")?;
-        if let Some(chief) = resumed.participants.iter().find(|p| p.role == "chief") {
-            // The human asks for the chief now: a chief that failed before is tried at once.
-            self.record_of(chief.id).window.borrow_mut().relaunch = None;
-            self.open_soon(chief.id).await;
-        }
-        self.changed();
-        self.project_now(project)
     }
 
     /// The human's Close: the project is suspended and every window of it goes.
@@ -339,7 +314,7 @@ impl Dispatcher {
             window.pinned = true;
             window.hidden = false;
         }
-        self.open_soon(participant.id).await;
+        self.open_soon(participant.id, None).await;
         self.changed();
         self.project_now(project)
     }
@@ -500,7 +475,7 @@ impl Dispatcher {
     /// The project as the ledger has it now, which an operation answers
     /// with: none once it was deleted meanwhile, where Node's
     /// `this.#ledger.project(projectId)` answered null.
-    fn project_now(&self, project: i64) -> Result<Option<ProjectView>, EngineError> {
+    pub(crate) fn project_now(&self, project: i64) -> Result<Option<ProjectView>, EngineError> {
         Ok(self.seams.ledger.borrow().project(project)?)
     }
 
@@ -527,32 +502,6 @@ impl Dispatcher {
         });
         self.changed();
         Ok(deleted)
-    }
-
-    /// Once, at start: what was on its way to a window is settled, and the
-    /// projects open when the previous process ended come back.
-    pub async fn resume_after_restart(self: &Rc<Self>) -> Result<Vec<Resumed>, EngineError> {
-        // An `async` method: its answer reaches this a turn after it was made.
-        returning(self.settle_in_flight()).await?;
-        let due: Vec<i64> = self
-            .seams
-            .ledger
-            .borrow()
-            .projects()?
-            .into_iter()
-            .filter(|project| project.resume_on_start)
-            .map(|project| project.id)
-            .collect();
-        let mut outcomes = Vec::new();
-        for project in due {
-            let resumed = self.resume_project(project).await;
-            self.seams.ledger.borrow_mut().forget_resume(project)?;
-            outcomes.push(Resumed {
-                project,
-                error: resumed.err().map(|cause| cause.to_string()),
-            });
-        }
-        Ok(outcomes)
     }
 
     /// The human takes a member off the staff once its step in progress is
@@ -1169,7 +1118,10 @@ impl Dispatcher {
     /// Opens a participant's window once its step in progress is over, apart
     /// from whoever asked. A window open by then, a project closed
     /// meanwhile, or a participant forgotten meanwhile opens nothing.
-    async fn open_soon(self: &Rc<Self>, participant: i64) {
+    ///
+    /// `coming` is for a window the human's Resume brings back (`resume`): it is
+    /// told, as the first thing it is given, that its turn was cut, if it was.
+    pub(crate) async fn open_soon(self: &Rc<Self>, participant: i64, coming: Option<Coming>) {
         let record = self.record_of(participant);
         let (this, held) = (Rc::clone(self), Rc::clone(&record));
         let work = async move {
@@ -1186,9 +1138,13 @@ impl Dispatcher {
             else {
                 return Ok(());
             };
+            let first = match &coming {
+                Some(coming) => this.cut_note(&project, &who, coming).await?,
+                None => None,
+            };
             let (launching, at) = (Rc::clone(&this), Rc::clone(&held));
             this.act(&held, async move {
-                launching.launch(&at, &project, &who, None).await
+                launching.launch(&at, &project, &who, first).await
             })
             .await;
             Ok(())

@@ -136,10 +136,8 @@ runs = ["ledger-replay"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/tests/replay.rs"
-find = '''
-    hold_apart_what_node_never_had_in_its_schema(&mut dump);
-    dump'''
-replace = "    dump"
+find = "    hold_apart_what_node_never_had_in_its_schema(&mut dump);"
+replace = ""
 
 [[plant]]
 name = "tester: the daemon's players of Node's traces do not hold the schema apart, and every recorded database differs"

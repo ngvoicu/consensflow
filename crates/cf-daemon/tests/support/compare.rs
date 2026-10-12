@@ -3,13 +3,17 @@
 
 use std::path::Path;
 
+use cf_ledger::testing::without_the_resume_mark;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};
 
 /// Where two texts first differ, and what is near it: why they are not the
-/// same bytes. None when they are.
+/// same bytes. None when they are. What Node recorded is held without the mark
+/// that a project comes back by itself, which only Node's projects had
+/// (`cf_ledger::testing`).
 pub fn differs(what: &str, ours: impl AsRef<[u8]>, theirs: impl AsRef<[u8]>) -> Option<String> {
-    let (ours, theirs) = (ours.as_ref(), theirs.as_ref());
+    let theirs = without_the_resume_mark(&String::from_utf8_lossy(theirs.as_ref()));
+    let (ours, theirs) = (ours.as_ref(), theirs.as_bytes());
     if ours == theirs {
         return None;
     }
@@ -48,13 +52,15 @@ pub fn left(file: &Path, expected: &Value) -> Option<String> {
     )
 }
 
-/// A dump with what Node's ledger never writes taken out of its tables, and
-/// what its schema never had out of the schema.
+/// A dump with what Node's ledger never writes taken out of its tables, what
+/// its schema never had out of the schema, and what only Node's held of the mark
+/// that a project comes back by itself.
 fn held_apart(mut dump: Value) -> Value {
     if let Some(Value::Object(tables)) = dump.get_mut("tables") {
         cf_ledger::testing::hold_apart_what_node_never_writes(tables);
     }
     cf_ledger::testing::hold_apart_what_node_never_had_in_its_schema(&mut dump);
+    cf_ledger::testing::hold_apart_the_resume_mark_in_a_dump(&mut dump);
     dump
 }
 

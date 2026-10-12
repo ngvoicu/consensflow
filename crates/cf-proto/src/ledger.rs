@@ -38,7 +38,6 @@ pub struct ProjectView {
     pub name: String,
     pub state: String,
     pub gate: bool,
-    pub resume_on_start: bool,
     pub created_at: String,
     pub updated_at: String,
     pub participants: Vec<ParticipantView>,
@@ -393,6 +392,14 @@ pub struct Lane {
     pub tasks: Vec<TaskCard>,
 }
 
+/// What the human's Resume of a suspended project has to start: the tasks not
+/// finished, and the messages waiting for the windows of the project's agents.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Resume {
+    pub tasks: i64,
+    pub messages: i64,
+}
+
 /// The board as the page reads it: the project, the tasks no lane has, each
 /// participant's lane, and what waits for the human's approval.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -404,6 +411,9 @@ pub struct Board {
     pub open: Vec<TaskCard>,
     pub lanes: Vec<Lane>,
     pub gated: Vec<MessageView>,
+    /// What waits for the human's Resume, said of a suspended project alone.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resume: Option<Resume>,
 }
 
 fn is_false(value: &bool) -> bool {

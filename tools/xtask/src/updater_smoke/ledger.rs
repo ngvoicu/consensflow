@@ -22,14 +22,13 @@ use serde_json::{json, Map, Value};
 use super::{Error, Result};
 
 /// The columns a daemon rewrites when it starts, or a window when it ends.
-const REWRITTEN: [&str; 12] = [
+const REWRITTEN: [&str; 11] = [
     "state",
     "updated_at",
     "left_at",
     "ended_at",
     "out_until",
     "out_since",
-    "resume_on_start",
     "attempts",
     "reason",
     "receipt",

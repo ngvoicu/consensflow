@@ -19,3 +19,8 @@ tester in the sentence that names what each role of a tier does, and the line of
 Reviews that says a tester checks work by running it. They were changed by hand, in
 those words alone, when the tester was added (`skill/core/chief.md`), and no row of the
 tester's own text was added: `../text/roles.rs` holds that.
+
+The same twelve rows say "a crash" in the sentence about a window lost, where Node's
+said "a restart or a crash" (`skill/core/chief.md`): a restart pauses no task any
+more, for the project it suspends comes back by the human's Resume, which opens the
+windows that had work. Changed by hand, in those words alone.

@@ -194,7 +194,9 @@ fn a_job_that_ends_with_no_turn_to_wake_leaves_the_last_turns_end_as_the_result_
 #[test]
 fn work_the_window_had_before_its_turn_is_not_the_turns_a_server_the_harness_started_with_it_holds_nothing(
 ) -> Outcome {
-    let rig = Rig::start(settling().var("CF_TEST_MCP_SERVER", "1"))?;
+    // In a group of its own, as Codex starts its helpers: no group tells it from the
+    // turn's work, only that the window had it before its turn.
+    let rig = Rig::start(settling().var("CF_TEST_MCP_SERVER", "apart"))?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
     // A turn of a few seconds: the daemon has marked where it began when it ends.
