@@ -1,6 +1,7 @@
 //! The rig: a real daemon and the real pane host, connected as the app connects
 //! them, in a home of the case's own, with a stand-in `claude` in the windows
-//! it opens. The daemon is `cf ui --json --no-open`; the pane host is
+//! it opens (and a stand-in `devin`, for a case that asks for one:
+//! [`Config::devin`]). The daemon is `cf ui --json --no-open`; the pane host is
 //! `consensflow-bridge`, which gives each window a terminal of its own (a PTY,
 //! or ConPTY); they speak the bridge's frames to each other over their
 //! standard streams, and the rig stands between them ([`route`]). It only
@@ -72,6 +73,7 @@ pub struct Config {
     daemon: Option<PathBuf>,
     stand_in_records: Option<PathBuf>,
     codex: Option<PathBuf>,
+    devin: Option<PathBuf>,
 }
 
 impl Config {
@@ -87,6 +89,7 @@ impl Config {
             daemon: None,
             stand_in_records: None,
             codex: None,
+            devin: None,
         }
     }
 
@@ -98,6 +101,16 @@ impl Config {
     #[must_use]
     pub fn codex(mut self, stand_in: impl Into<PathBuf>) -> Self {
         self.codex = Some(stand_in.into());
+        self
+    }
+
+    /// With the windows of a Devin agent running `program`, the stand-in for Devin
+    /// (the `fake-devin` binary of this crate), which they find first on their
+    /// `PATH` as `devin`, as the windows of a Claude agent find the stand-in
+    /// agent as `claude`.
+    #[must_use]
+    pub fn devin(mut self, program: impl Into<PathBuf>) -> Self {
+        self.devin = Some(program.into());
         self
     }
 

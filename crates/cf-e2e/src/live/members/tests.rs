@@ -18,6 +18,28 @@ fn a_task_is_over_when_it_is_done_accepted_failed_or_cancelled_and_not_before() 
 }
 
 #[test]
+fn the_brief_of_a_task_has_reached_its_window_once_it_is_delivered_or_read() {
+    let thread = |state: &str| {
+        json!({ "messages": [
+            { "id": 1, "kind": "note", "state": "delivered" },
+            { "id": 2, "kind": "task", "state": state },
+            { "id": 3, "kind": "task", "state": "delivered" },
+        ] })
+    };
+    for state in ["delivered", "read"] {
+        assert!(brief_delivered(&thread(state)), "{state}");
+    }
+    // Only the first message of the task is its brief, and a window that has not
+    // shown it has it queued, or on its way in.
+    for state in ["queued", "delivering", "gated", "failed", "cancelled"] {
+        assert!(!brief_delivered(&thread(state)), "{state}");
+    }
+    assert!(!brief_delivered(&json!({ "messages": [] })));
+    assert!(!brief_delivered(&json!({})));
+    assert!(!brief_delivered(&Value::Null));
+}
+
+#[test]
 fn a_thread_is_read_for_its_first_question_its_last_result_and_the_answer_to_a_question() {
     let thread = json!({ "messages": [
         { "id": 1, "kind": "task" },
