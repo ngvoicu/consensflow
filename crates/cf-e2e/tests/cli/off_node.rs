@@ -83,6 +83,10 @@ const UNSOURCED: [&str; 6] = [
     "resources",
 ];
 
+/// The list of the files the Windows machine's runner sent, at the root of its copy
+/// (`cargo xtask windows`: `tools/xtask/src/windows/script.rs`).
+const SYNCED: &str = ".synced-files";
+
 /// `relative`, a path written with `/`, under `root`.
 fn under(root: &Path, relative: &str) -> PathBuf {
     relative
@@ -165,11 +169,12 @@ fn dangling(root: &Path) -> Found<Vec<String>> {
 /// What the deletion took away that the tree `root` has again, and any host
 /// library beside the question door.
 fn revived(root: &Path) -> Found<Vec<String>> {
-    let mut found: Vec<String> = DELETED
-        .iter()
-        .filter(|path| under(root, path).exists())
-        .map(|path| (*path).to_owned())
-        .collect();
+    let mut found = Vec::new();
+    for path in DELETED {
+        if holds_a_file(&under(root, path))? {
+            found.push((*path).to_owned());
+        }
+    }
     let lib = under(root, "hosts/lib");
     if lib.exists() {
         for file in checkout::files_below(&lib, &[])? {
@@ -184,6 +189,13 @@ fn revived(root: &Path) -> Found<Vec<String>> {
         }
     }
     Ok(found)
+}
+
+/// Whether `path` is a file, or a folder with a file somewhere in it: a folder
+/// emptied of its files is no path put back (a copy that is synced file by file,
+/// as the Windows machine's is, keeps the folders of the files it took away).
+fn holds_a_file(path: &Path) -> Found<bool> {
+    Ok(path.is_file() || (path.is_dir() && !checkout::files_below(path, &[])?.is_empty()))
 }
 
 /// Where the `listed` files of the tree `root` name a deleted path but where it is
@@ -220,8 +232,11 @@ fn walked(root: &Path) -> Found<Vec<String>> {
 }
 
 /// Every file of this repository that git knows or would take, as written on this
-/// disk. Where there is no git (the commit gate tests an exported copy), every
-/// file under the root but what is built, installed or fetched ([`walked`]).
+/// disk. Where there is no git: the files the Windows machine's runner sent, as its
+/// list of them says ([`SYNCED`]: a copy it syncs keeps whatever else was put
+/// there, which is none of the repository's), or else (the commit gate tests an
+/// exported copy) every file under the root but what is built, installed or
+/// fetched ([`walked`]).
 fn tree(root: &Path) -> Found<Vec<String>> {
     let listed = Run::new("git")
         .args([
@@ -241,7 +256,15 @@ fn tree(root: &Path) -> Found<Vec<String>> {
             .filter(|file| !file.is_empty() && under(root, file).exists())
             .map(str::to_owned)
             .collect()),
-        _ => walked(root),
+        _ => match files::read_string(&under(root, SYNCED)) {
+            Ok(synced) => Ok(synced
+                .lines()
+                .map(str::trim)
+                .filter(|file| !file.is_empty() && under(root, file).exists())
+                .map(str::to_owned)
+                .collect()),
+            Err(_) => walked(root),
+        },
     }
 }
 
@@ -439,6 +462,31 @@ mod what_the_checks_are_for_planted_in_a_tree_of_their_own {
 
     // The hole of the dangling-import check: the file is there again, so an import
     // of it resolves.
+    #[test]
+    fn a_synced_copy_is_the_files_its_list_names_and_what_else_lies_there_is_none_of_it() -> Outcome
+    {
+        let (root, listed) = on_tree(&[("paste-chars2.mjs", "import '../src/x.js'\n")])?;
+        let sent: Vec<&String> = listed
+            .iter()
+            .filter(|file| *file != "paste-chars2.mjs")
+            .collect();
+        let names: Vec<&str> = sent.iter().map(|file| file.as_str()).collect();
+        files::write(
+            &under(root.path(), SYNCED),
+            format!("{}\n", names.join("\n")),
+        )?;
+        assert_eq!(tree(root.path())?, names);
+        Ok(())
+    }
+
+    #[test]
+    fn a_deleted_folder_emptied_of_its_files_is_not_put_back() -> Outcome {
+        let (root, _) = on_tree(&[])?;
+        std::fs::create_dir_all(under(root.path(), "src/core"))?;
+        assert_eq!(revived(root.path())?, Vec::<String>::new());
+        Ok(())
+    }
+
     #[test]
     fn finds_the_deleted_tree_put_back_even_where_an_import_now_finds_it() -> Outcome {
         let (root, _) = on_tree(&[
