@@ -54,16 +54,17 @@ fn sorted(mut names: Vec<String>) -> Vec<String> {
     names
 }
 
-/// The files `tarball` holds, unpacked into a folder of their own.
+/// The files `tarball` holds, unpacked into a folder of their own. Unpacked there
+/// from a copy named bare: a GNU tar (Git for Windows's, first on the PATH of
+/// GitHub's runners) takes `C:\…` for a host, as an archive and as a folder.
 fn unpacked(context: &Context, tarball: &Path) -> tempfile::TempDir {
     let into = tempfile::tempdir().unwrap();
-    let untar = Invocation::new("tar", &context.root)
-        .arg("xzf")
-        .arg(tarball)
-        .arg("-C")
-        .arg(into.path());
+    let copy = into.path().join("unpacking.tgz");
+    fs::copy(tarball, &copy).unwrap();
+    let untar = Invocation::new("tar", into.path()).args(["xzf", "unpacking.tgz"]);
     let answered = process::capture(&untar, &context.env).unwrap();
     assert_eq!(answered.code, 0, "{}", answered.stderr);
+    fs::remove_file(&copy).unwrap();
     into
 }
 
