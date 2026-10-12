@@ -91,8 +91,6 @@ mod slow;
 mod stop;
 #[path = "live_stops/stuck.rs"]
 mod stuck;
-#[path = "live_stops/tree.rs"]
-mod tree;
 #[path = "live_stops/watch.rs"]
 mod watch;
 

@@ -4,13 +4,13 @@
 //! is none of its lane's after, and what it printed is still here.
 
 use cf_e2e::live::members::{plural, squash, Members};
+use cf_e2e::live::tree::{self, Read, Tree};
 use cf_e2e::live::window::{drawn, raw_end};
 use cf_e2e::live::{cut, text};
 use serde_json::Value;
 
 use super::super::printed::tail_lines;
 use super::super::SCREEN;
-use crate::tree::{self, Read, Tree};
 
 /// How many of the last lines a window printed, and how much of each, are said.
 const RAW_LINES: usize = 12;
@@ -151,7 +151,7 @@ pub fn window_lines(members: &Members, agent: &str) -> Vec<String> {
                     || vec!["its pane host no longer has it".to_owned()],
                     |snapshot| snapshot_lines(&snapshot),
                 );
-                said.push(tree_line(&tree::read(members, open)));
+                said.push(tree_line(&tree::read(members.rig(), open)));
                 said
             }
         };

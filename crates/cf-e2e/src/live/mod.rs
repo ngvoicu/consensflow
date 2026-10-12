@@ -11,7 +11,8 @@
 //! - [`machine`] is this machine: the harnesses it has, found as a shell finds
 //!   them with the home each reads its login from, and the rig whose windows run
 //!   them; the programs Claude Code is started through; the folders a live test
-//!   works in.
+//!   works in. [`who`] says which of them a check runs, a harness or the
+//!   stand-in agent.
 //! - [`agents`] says which model each harness runs on in a live test, and what
 //!   its roster row is.
 //! - [`window`] opens a real harness's window as the app opens one, trusts its
@@ -25,6 +26,9 @@
 //!   takes), through the test binary `harness-ask`.
 //! - [`members`] is the rig of the checks that play the chief with its token and
 //!   run real members.
+//! - [`held`] and [`tree`] say what a worker's task is held back for: what the
+//!   board says of its window ([`held`]), and the processes its window's tree
+//!   started in the turn, as the pane host lists them ([`tree`]).
 //! - [`report`] says what each check of a run came to, and ends the run with
 //!   them ([`report::conclude`]).
 //!
@@ -41,10 +45,13 @@ pub mod agents;
 pub mod ask;
 pub mod claude;
 pub mod codex;
+pub mod held;
 pub mod machine;
 pub mod members;
 pub mod report;
 pub mod trace;
+pub mod tree;
+pub mod who;
 pub mod window;
 
 #[cfg(test)]
@@ -65,6 +72,7 @@ pub use machine::{
     codex, command, installed, isolated_claude, rig, rig_with_stand_ins, shimmed_claude,
     shimmed_claude_with_servers, Harness, Installed, ISOLATION,
 };
+pub use who::{between, Who};
 
 /// What every variable a live run reads its options by begins with: `cargo xtask
 /// live <name> --some-flag value` sets `CONSENSFLOW_LIVE_SOME_FLAG` to `value`
@@ -160,6 +168,11 @@ impl Log {
         let _ = writeln!(io::stderr(), "[{seconds:>6.1} s] {}: {text}", self.name);
     }
 
+    /// The time since the run began, which a check notes what it saw at.
+    pub fn elapsed(&self) -> Duration {
+        self.started.elapsed()
+    }
+
     /// `title`, then `body` a line at a time, indented.
     pub fn block(&self, title: &str, body: &str) {
         let indented: Vec<String> = body.lines().map(|line| format!("    {line}")).collect();
@@ -235,6 +248,11 @@ pub fn last_lines(text: &str) -> String {
 /// A span of milliseconds as seconds with a decimal, `12.3`.
 pub fn seconds(milliseconds: i64) -> String {
     format!("{:.1}", milliseconds as f64 / 1000.0)
+}
+
+/// A span of time as seconds with a decimal, `12.3`.
+pub fn secs(span: Duration) -> String {
+    format!("{:.1}", span.as_secs_f64())
 }
 
 /// A read of the daemon as indented JSON, or why it could not be made.

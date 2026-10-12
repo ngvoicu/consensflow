@@ -43,7 +43,9 @@ use std::time::Duration;
 
 use cf_e2e::live::agents as live_agents;
 use cf_e2e::live::machine::live_folder;
-use cf_e2e::live::{self, cut, text, wait, Harness, Log};
+use cf_e2e::live::members::delivered_result;
+use cf_e2e::live::tree;
+use cf_e2e::live::{self, text, wait, Harness, Log};
 use cf_e2e::rig::{Project, Rig, OPEN};
 use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
@@ -101,21 +103,12 @@ fn board_said(project: &Project) -> Result<String> {
         .to_owned())
 }
 
-/// The result the chief has been given, if it has: its body.
-fn result_of(project: &Project) -> Result<Option<String>> {
-    Ok(project
-        .inbox("chief")?
-        .into_iter()
-        .find(|message| message["kind"] == "result" && message["state"] == "delivered")
-        .map(|message| text(&message["body"])))
-}
-
 /// One look at the worker: the task's state, what the board says of its window,
 /// and whether its Claude has started the server (it writes its process id as it
 /// does). A task that failed or was called off is no use to wait for.
-fn look(project: &Project, server: &Server, seen: &mut Seen) -> Result {
+fn look(project: &Project, server: &Server, seen: &mut Seen, log: &Log) -> Result {
     seen.state = text(&project.task(1)?["state"]);
-    seen.board_said(&board_said(project)?);
+    seen.reasons.note(log.elapsed(), &board_said(project)?);
     seen.server_started |= server.pid().is_some();
     if seen.state == "failed" || seen.state == "cancelled" {
         return Err(Error::Daemon(format!("T-1 is {}", seen.state)));
@@ -123,46 +116,17 @@ fn look(project: &Project, server: &Server, seen: &mut Seen) -> Result {
     Ok(())
 }
 
-/// What the pane host lists as the work the worker's window left running, a line
-/// to each process: the processes the board says the window is held for.
-fn listed(rig: &Rig, pane: &Value) -> String {
-    let asked = rig.host(
-        "pane.background",
-        json!({ "id": pane["id"], "generation": pane["generation"] }),
-    );
-    let Ok(answer) = asked else {
-        return "(the pane host did not answer)".to_owned();
-    };
-    let lines: Vec<String> = answer["processes"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|process| {
-            format!(
-                "{} {}",
-                text(&process["pid"]),
-                cut(&text(&process["command"]), 140)
-            )
-        })
-        .collect();
-    if lines.is_empty() {
-        "(none)".to_owned()
-    } else {
-        lines.join("\n")
-    }
-}
-
 /// Says what the product showed of a task that did not end as it should have.
 fn failure(rig: &Rig, project: &Project, seen: &Seen, log: &Log) {
     log.block("the board", &live::pretty(project.board()));
-    log.say(format!(
-        "the board said of the worker's window: {:?}",
-        seen.reasons
-    ));
+    log.block(
+        "what the board said of the worker's window",
+        &seen.reasons.block(),
+    );
     if let Some(pane) = worker_pane(rig, project.id()) {
         log.block(
             "what the pane host lists as the work the window left running",
-            &listed(rig, &pane),
+            &tree::show(&tree::read(rig, &pane)),
         );
     }
     log.block(
@@ -181,18 +145,18 @@ fn attempt(rig: &Rig, project: &Project, server: &Server, seen: &mut Seen, log: 
     }
     log.say("the chief gave the worker its task: the sum of 1234 and 4321");
     wait(rig, log, "the worker's task to be done", WORK, || {
-        look(project, server, seen)?;
+        look(project, server, seen, log)?;
         Ok(seen.state == "done")
     })?;
     log.say(format!(
-        "T-1 is done; the server (process {:?}) {}; the board said of the window: {:?}",
+        "T-1 is done; the server (process {:?}) {}; what the board said of the window: {}",
         server.pid(),
         if server.runs() {
             "runs"
         } else {
             "has ended with the window"
         },
-        seen.reasons
+        seen.reasons.line()
     ));
     wait(
         rig,
@@ -200,7 +164,7 @@ fn attempt(rig: &Rig, project: &Project, server: &Server, seen: &mut Seen, log: 
         "the result to be delivered to the chief",
         DELIVERS,
         || {
-            seen.result = result_of(project)?;
+            seen.result = delivered_result(&project.inbox("chief")?);
             Ok(seen.result.is_some())
         },
     )?;

@@ -13,7 +13,7 @@ use cf_e2e::live::members::{
     self, answer_to, clock, find, first_question, is_over, judge, last_result, ms_of, Account,
     Members, Plan, STAND_IN_WORKER,
 };
-use cf_e2e::live::{seconds, Harness, Log};
+use cf_e2e::live::{seconds, Harness, Log, Who};
 use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
 
@@ -27,48 +27,24 @@ pub const DONE: Duration = Duration::from_secs(300);
 /// How often the board is looked at while a member is waited for.
 const LOOK: Duration = Duration::from_millis(500);
 
-/// Who is run: a real harness, or the stand-in Claude (no model), which asks
-/// through the hook of its settings when its brief says to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Who {
-    StandIn,
-    Harness(Harness),
+/// The one a word on the command line names: `fake` (the stand-in Claude, with no
+/// model, which asks through the hook of its settings when its brief says to), or a
+/// harness.
+pub fn named(word: &str) -> Result<Who> {
+    Who::named(word, "door")
 }
 
-impl Who {
-    /// The one a word on the command line names: `fake`, or a harness.
-    pub fn named(word: &str) -> Result<Self> {
-        if word == "fake" {
-            return Ok(Self::StandIn);
-        }
-        Harness::from_name(word).map(Self::Harness).ok_or_else(|| {
-            Error::Daemon(format!(
-                "no door is called {word}: fake, {}",
-                Harness::ALL.map(Harness::name).join(", ")
-            ))
+/// How long the chief takes to answer, so that the door is mid-wait when the answer
+/// comes: Claude's wait is longer, for its status is what is read over it, and `given`
+/// (`--hold`) says another.
+pub fn hold(who: Who, given: Option<Duration>) -> Duration {
+    given.unwrap_or_else(|| {
+        Duration::from_secs(if who == Who::Harness(Harness::Claude) {
+            20
+        } else {
+            8
         })
-    }
-
-    /// What it is called.
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::StandIn => "fake",
-            Self::Harness(harness) => harness.name(),
-        }
-    }
-
-    /// How long the chief takes to answer, so that the door is mid-wait when the
-    /// answer comes: Claude's wait is longer, for its status is what is read over
-    /// it, and `given` (`--hold`) says another.
-    pub fn hold(self, given: Option<Duration>) -> Duration {
-        given.unwrap_or_else(|| {
-            Duration::from_secs(if self == Self::Harness(Harness::Claude) {
-                20
-            } else {
-                8
-            })
-        })
-    }
+    })
 }
 
 /// What a run of the check is asked.
@@ -232,12 +208,12 @@ fn observe(
         }
         _ => None,
     };
-    let hold = who.hold(asked.hold);
+    let waits = hold(who, asked.hold);
     log.say(format!(
         "the question is on the board: the chief answers in {} s",
-        hold.as_secs()
+        waits.as_secs()
     ));
-    sleep(hold);
+    sleep(waits);
     let id = format!("m-{}", question["id"]);
     let given = members.as_chief(["answer", id.as_str(), asked.answer.as_str()])?;
     if given.code != Some(0) {
@@ -366,12 +342,9 @@ mod tests {
 
     #[test]
     fn a_door_is_named_by_a_harness_or_by_fake_and_nothing_else() {
-        assert_eq!(Who::named("fake").unwrap(), Who::StandIn);
-        assert_eq!(
-            Who::named("opencode").unwrap(),
-            Who::Harness(Harness::OpenCode)
-        );
-        let failed = Who::named("kimi").unwrap_err().to_string();
+        assert_eq!(named("fake").unwrap(), Who::StandIn);
+        assert_eq!(named("opencode").unwrap(), Who::Harness(Harness::OpenCode));
+        let failed = named("kimi").unwrap_err().to_string();
         assert_eq!(
             failed,
             "no door is called kimi: fake, claude, opencode, pi, devin, codex"
@@ -383,21 +356,21 @@ mod tests {
     #[test]
     fn the_chief_takes_twenty_seconds_to_answer_claude_and_eight_the_others_unless_told() {
         let claude = Who::Harness(Harness::Claude);
-        assert_eq!(claude.hold(None), Duration::from_secs(20));
+        assert_eq!(hold(claude, None), Duration::from_secs(20));
         for other in [
             Who::StandIn,
             Who::Harness(Harness::Codex),
             Who::Harness(Harness::Pi),
         ] {
-            assert_eq!(other.hold(None), Duration::from_secs(8));
+            assert_eq!(hold(other, None), Duration::from_secs(8));
         }
         // `--hold 90` (npm run live:hook-status) is the wait of any.
         assert_eq!(
-            claude.hold(Some(Duration::from_secs(90))),
+            hold(claude, Some(Duration::from_secs(90))),
             Duration::from_secs(90)
         );
         assert_eq!(
-            Who::StandIn.hold(Some(Duration::from_secs(1))),
+            hold(Who::StandIn, Some(Duration::from_secs(1))),
             Duration::from_secs(1)
         );
     }

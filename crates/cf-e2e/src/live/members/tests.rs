@@ -65,6 +65,23 @@ fn a_thread_is_read_for_its_first_question_its_last_result_and_the_answer_to_a_q
 }
 
 #[test]
+fn the_chief_was_given_the_first_result_of_its_inbox_that_was_delivered_and_none_before() {
+    let inbox = [
+        json!({ "id": 1, "kind": "note", "state": "delivered", "body": "a note" }),
+        json!({ "id": 2, "kind": "result", "state": "queued", "body": "on its way" }),
+        json!({ "id": 3, "kind": "result", "state": "delivered", "body": "ZEEWIN" }),
+        json!({ "id": 4, "kind": "result", "state": "delivered", "body": "a later one" }),
+    ];
+    // A result still on its way is not the chief's yet, and a note is no result.
+    assert_eq!(delivered_result(&inbox).as_deref(), Some("ZEEWIN"));
+    assert_eq!(delivered_result(&inbox[..2]), None);
+    assert_eq!(delivered_result(&[]), None);
+    // A body that is no text is said as JSON says it.
+    let counted = [json!({ "kind": "result", "state": "delivered", "body": 7 })];
+    assert_eq!(delivered_result(&counted).as_deref(), Some("7"));
+}
+
+#[test]
 fn a_wait_ends_with_what_it_found_and_says_none_when_the_time_ran_out() {
     let log = Log::new("members test");
     let looks = Cell::new(0);

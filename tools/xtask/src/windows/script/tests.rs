@@ -3,6 +3,7 @@
 //! the script.
 
 mod golden;
+mod unpack;
 
 use super::*;
 use crate::windows::testing::{script_of, strings};

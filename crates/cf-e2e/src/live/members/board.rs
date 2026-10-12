@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::super::{until, Log};
+use super::super::{text, until, Log};
 use crate::Result;
 
 /// What `look` first finds within `within`, looking again every `step`: the wait
@@ -88,6 +88,17 @@ pub fn first_question(thread: &Value) -> Option<Value> {
 /// The last result the member gave in `thread`.
 pub fn last_result(thread: &Value) -> Option<&Value> {
     messages_of(thread, "result").last()
+}
+
+/// What the chief was given of a task's result: the body of the first result in the
+/// chief's `inbox` that has been delivered to it. None until it has, which a task
+/// that is done may be a moment from (the daemon delivers it to the chief's window
+/// as it takes the task's end).
+pub fn delivered_result(inbox: &[Value]) -> Option<String> {
+    inbox
+        .iter()
+        .find(|message| message["kind"] == "result" && message["state"] == "delivered")
+        .map(|message| text(&message["body"]))
 }
 
 /// The first answer given in `thread`, to whichever question.

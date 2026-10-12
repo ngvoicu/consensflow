@@ -29,7 +29,8 @@
 //!   the machine's own harnesses (Claude Code, OpenCode, Pi, Devin and Codex),
 //!   the rig whose windows run them, a real harness's window opened as the app
 //!   opens one, a project of real members whose chief a check plays, what the
-//!   harnesses keep and say and what the daemon wrote as it went, what a run
+//!   harnesses keep and say and what the daemon wrote as it went, what the
+//!   board and the pane host say a worker's task is held back for, what a run
 //!   says and how it waits, and the variables `cargo xtask live` sets from its
 //!   flags.
 //! - [`serial`] has the cases that start a daemon take turns; [`pattern`] builds
@@ -58,7 +59,8 @@
 //! drawing an image, `live_approval` real harnesses in every seat of five
 //! projects sending what the human approves, behind the approval gate, and
 //! `live_mcp` a real Claude Code worker that has an MCP server finishing its
-//! task). Run them with `cargo xtask test clis`, `daemons`, `integration`,
+//! task, and `live_finish` a real worker of any harness running a shell
+//! command and finishing its task with nothing held back). Run them with `cargo xtask test clis`, `daemons`, `integration`,
 //! `regressions`, `agents` and `load`, and `cargo xtask smoke` (the `npm run`
 //! names are the same), a live one with `cargo xtask live <name>`, or one with
 //! `cargo test -p cf-e2e --test cli`.

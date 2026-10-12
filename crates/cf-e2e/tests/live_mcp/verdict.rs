@@ -3,6 +3,8 @@
 //! the chief was given. Every way the task fell short is said together, so that a
 //! run that fails says all that was wrong with it.
 
+use cf_e2e::live::held::Reasons;
+
 /// The sum the task asks for, which the worker's answer says.
 pub const ANSWER: &str = "5555";
 
@@ -11,35 +13,16 @@ pub const ANSWER: &str = "5555";
 pub struct Seen {
     /// The state the task was last seen in.
     pub state: String,
-    /// What the board said the worker's window was doing besides working, in the
-    /// order it said it, each once: a window held for processes says which.
-    pub reasons: Vec<String>,
+    /// What the board said the worker's window was doing besides working, each word
+    /// once with when: a window held for processes says which, which a worker whose
+    /// only other process is its harness's server must never be.
+    pub reasons: Reasons,
     /// Whether the server wrote its process id while the task was at work: the
     /// worker's Claude started it. (It is gone with the window once the task is
     /// done, so a look may well never find it running.)
     pub server_started: bool,
     /// The result the chief was given, if it was.
     pub result: Option<String>,
-}
-
-impl Seen {
-    /// The board's word for a window, noted once.
-    pub fn board_said(&mut self, reason: &str) {
-        if !reason.is_empty() && !self.reasons.iter().any(|said| said == reason) {
-            self.reasons.push(reason.to_owned());
-        }
-    }
-
-    /// What the board said of a window held back for work its turn left (it says
-    /// `background work …`), which a worker whose only other process is its harness's
-    /// server must never be.
-    fn held(&self) -> Vec<&str> {
-        self.reasons
-            .iter()
-            .map(String::as_str)
-            .filter(|reason| reason.starts_with("background work"))
-            .collect()
-    }
 }
 
 /// The task is done, its result reached the chief and says the answer, the board
@@ -51,11 +34,9 @@ pub fn judge(seen: &Seen) -> Result<(), Vec<String>> {
     if seen.state != "done" {
         problems.push(format!("T-1 is {}, not done", seen.state));
     }
-    let held = seen.held();
-    if !held.is_empty() {
+    if let Some(held) = seen.reasons.held() {
         problems.push(format!(
-            "the board said the worker's window was held for work its turn left: {}",
-            held.join(" | ")
+            "the board said the worker's window was held for work its turn left: {held}"
         ));
     }
     if !seen.server_started {
@@ -80,12 +61,14 @@ pub fn judge(seen: &Seen) -> Result<(), Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     fn good() -> Seen {
         Seen {
             state: "done".to_owned(),
-            reasons: Vec::new(),
+            reasons: Reasons::default(),
             server_started: true,
             result: Some("5555".to_owned()),
         }
@@ -96,28 +79,44 @@ mod tests {
         assert_eq!(judge(&good()), Ok(()));
         // The board may say other things of a window; only a hold is wrong.
         let mut seen = good();
-        seen.board_said("waiting for the human");
+        seen.reasons
+            .note(Duration::from_secs(2), "waiting for the human");
         assert_eq!(judge(&seen), Ok(()));
     }
 
     #[test]
     fn a_window_the_board_said_was_held_for_processes_fails_and_names_them() {
         let mut seen = good();
-        seen.board_said(
-            "background work running (2 processes): npm exec @playwright/mcp; node server.js",
-        );
+        let held =
+            "background work running (2 processes): npm exec @playwright/mcp; node server.js";
+        seen.reasons.note(Duration::from_secs(3), held);
         // What was said is kept once, whatever the number of looks.
-        seen.board_said(
-            "background work running (2 processes): npm exec @playwright/mcp; node server.js",
-        );
-        seen.board_said("");
+        seen.reasons.note(Duration::from_secs(4), held);
+        seen.reasons.note(Duration::from_secs(5), "");
         let problems = judge(&seen).unwrap_err();
         assert_eq!(problems.len(), 1, "{problems:?}");
         assert!(
             problems[0].contains("npm exec @playwright/mcp"),
             "{problems:?}"
         );
-        assert_eq!(seen.reasons.len(), 1);
+        assert!(
+            problems[0].contains("said from 3.0 s to 4.0 s"),
+            "{problems:?}"
+        );
+        assert_eq!(seen.reasons.said().len(), 1);
+    }
+
+    #[test]
+    fn a_window_held_for_agents_its_harness_says_are_pending_is_held_too() {
+        let mut seen = good();
+        seen.reasons
+            .note(Duration::from_secs(3), "background agents running");
+        let problems = judge(&seen).unwrap_err();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problems[0].contains("background agents running"),
+            "{problems:?}"
+        );
     }
 
     #[test]
