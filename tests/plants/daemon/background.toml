@@ -100,7 +100,7 @@ runs = ["engine-dispatcher-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '                self.tell_left_running(&project, &participant, left)?;'
+find = '                self.tell_left_running(&project, &participant, &left)?;'
 replace = '                self.tell_left_running(&project, &participant, &[])?;'
 
 [[plant]]
@@ -120,12 +120,12 @@ runs = ["engine-dispatcher-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/background.rs"
-find = '            let hidden = mask(&process.command);'
+find = '    let hidden = mask(&process.command);'
 replace = '''
-            let hidden = crate::shown::mask::Masked {
-                text: process.command.clone(),
-                count: 0,
-            };'''
+    let hidden = crate::shown::mask::Masked {
+        text: process.command.clone(),
+        count: 0,
+    };'''
 
 [[plant]]
 name = "background: what a tree had before the turn is the turn’s"
@@ -134,8 +134,8 @@ runs = ["panes-lib-background", "panes-lib-turn"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background.rs"
-find = '            .filter(|member| !before.contains(&member.key))'
-replace = '            .filter(|member| !before.contains(&member.key) || true)'
+find = '            .filter(|member| !before.contains(&member.key) && !harness.contains(&member.key))'
+replace = '            .filter(|member| (!before.contains(&member.key) || true) && !harness.contains(&member.key))'
 
 [[plant]]
 name = "background: a window’s exit leaves out the work it left running"
@@ -289,8 +289,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background.rs"
-find = '            .filter(|member| !before.contains(&member.key))'
-replace = '            .filter(|member| !before.contains(&member.key) || true)'
+find = '            .filter(|member| !before.contains(&member.key) && !harness.contains(&member.key))'
+replace = '            .filter(|member| (!before.contains(&member.key) || true) && !harness.contains(&member.key))'
 
 [[plant]]
 name = "background rig: a cancelled task’s window closes and says nothing of the work it ended"
@@ -300,7 +300,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '                self.tell_left_running(&project, &participant, left)?;'
+find = '                self.tell_left_running(&project, &participant, &left)?;'
 replace = '                self.tell_left_running(&project, &participant, &[])?;'
 
 [[plant]]
