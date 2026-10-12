@@ -1,6 +1,6 @@
 /**
  * Makes a fixture of a Claude transcript a live check kept (`npm run live:stops
- * -- --keep <folder>`): every record stays, in its order, and what is personal
+ * -- --transcripts <folder>`): every record stays, in its order, and what is personal
  * or opaque in it is replaced. The reader of the records and the tests built
  * on them read what is left, which is each record's type, ids, time and
  * conversation.

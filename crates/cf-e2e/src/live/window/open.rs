@@ -64,6 +64,7 @@ pub struct Open<'a> {
     env: Vec<(String, String)>,
     drop_env: Vec<String>,
     trusting: bool,
+    resume: Option<String>,
 }
 
 impl<'a> Open<'a> {
@@ -80,7 +81,17 @@ impl<'a> Open<'a> {
             env: Vec::new(),
             drop_env: Vec::new(),
             trusting: true,
+            resume: None,
         }
+    }
+
+    /// The window is the one the app opens on the conversation `session`, which
+    /// the harness already keeps, in the same folder: a window a quit cut, opened
+    /// again as the daemon that starts after the quit opens it.
+    #[must_use]
+    pub fn resume(mut self, session: &str) -> Self {
+        self.resume = Some(session.to_owned());
+        self
     }
 
     /// The window runs `agent` (`kind`, `model`, `effort`: [`agents::agent`] is
@@ -130,12 +141,25 @@ impl<'a> Open<'a> {
             .as_str()
             .unwrap_or_else(|| harness.kind())
             .to_owned();
-        // Claude and Pi open on an id they are given; the others name their own.
-        let session = (kind == "claude-code" || kind == "pi").then(new_session);
-        let start = ask::start(&agent, session.as_deref(), None)?.ok_or_else(|| {
+        // Claude and Pi open on an id they are given; the others name their own, which a
+        // window resumed on a conversation is given.
+        let session = self
+            .resume
+            .clone()
+            .or_else(|| (kind == "claude-code" || kind == "pi").then(new_session));
+        let start = match &self.resume {
+            Some(resumed) => ask::resume(&agent, resumed)?,
+            None => ask::start(&agent, session.as_deref(), None)?,
+        }
+        .ok_or_else(|| {
             Error::Daemon(format!(
-                "{} has no window of its own to open on a new conversation",
-                harness.name()
+                "{} has no window of its own to open on {}",
+                harness.name(),
+                if self.resume.is_some() {
+                    "a conversation it keeps"
+                } else {
+                    "a new conversation"
+                }
             ))
         })?;
         let executable = self.install.command().to_string_lossy().into_owned();

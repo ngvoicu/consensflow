@@ -10,12 +10,13 @@ use serde_json::Value;
 
 use crate::agents::{self, DESIGNER, TIER};
 use crate::flow::{accepts, Ctx, ANSWERS, DELIVERS, QUIET};
+use crate::minute;
 use crate::plan::Step;
 use crate::verdict;
 
 /// How long the advisor's window has worked on its task before the human has the
 /// chief pause it: long enough to be in the middle of the command it was asked
-/// to run, which sleeps for a minute.
+/// to run, which works for a minute ([`minute`]).
 const MID_TURN: Duration = Duration::from_secs(15);
 
 /// How long the chief has to pause a task, once the human has told it to, and
@@ -90,11 +91,13 @@ pub fn worker(ctx: &Ctx) -> Result {
 }
 
 /// Step 2: a task for the advisor that takes a minute, paused while it works and
-/// resumed with other words, which are held at the gate too.
+/// resumed with other words, which are held at the gate too. The minute is work
+/// that no role text forbids ([`minute`]), in a script the folder holds.
 pub fn advisor(ctx: &Ctx) -> Result {
     let seats = &ctx.planned.seats;
     let marker = marker(ctx, "ADVISOR");
-    let asked = format!("Run the shell command sleep 60, then reply with exactly: {marker}");
+    minute::write(ctx.folder)?;
+    let asked = minute::brief(&marker);
     let given = ctx.give(
         &format!(
             "Run exactly this command in your shell, then reply with one line and wait for my \

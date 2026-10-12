@@ -168,6 +168,17 @@ pub fn start(agent: &Value, session: Option<&str>, seed: Option<&str>) -> Result
     Ok(start_of(&answer))
 }
 
+/// The window of `agent` on the conversation `session`, which the harness
+/// already keeps (`resume`, as the daemon opens a window on a conversation a quit
+/// cut or a reopened task goes on in). None for a harness with no window of its
+/// own.
+pub fn resume(agent: &Value, session: &str) -> Result<Option<Start>> {
+    let answer = question(&json!({
+        "op": "start", "agent": agent, "session": session, "resume": true,
+    }))?;
+    Ok(start_of(&answer))
+}
+
 /// The window an answer to `start` holds.
 fn start_of(answer: &Value) -> Option<Start> {
     let words = |list: &Value| -> Vec<String> {

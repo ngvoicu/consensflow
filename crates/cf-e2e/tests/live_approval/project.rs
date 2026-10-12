@@ -13,12 +13,11 @@ use serde_json::{json, Value};
 use crate::agents::{self, DESIGNER};
 use crate::plan::Planned;
 
-/// What every folder of the run holds for the agents to read, the bench's: they
+/// What every folder of the run holds for the agents to read, the bench's
+/// ([`cf_e2e::live::members::BENCH_BRIEF`], which the live bench holds too): they
 /// do what each message asks and nothing more, and a message that asks nothing
 /// is answered in a line, so that no delivery waits for an agent exploring.
-pub const BRIEF: &str = "This folder is an automated ConsensFlow bench. Do exactly what each \
-message asks and nothing more. When a ConsensFlow message arrives, reply with one line that \
-names it and run no tools unless the message tells you to run a command.\n";
+pub use cf_e2e::live::members::BENCH_BRIEF as BRIEF;
 
 /// The folder of the project `planned`, in the run's workspace: a git
 /// repository with a README, and [`BRIEF`] where Claude Code reads it

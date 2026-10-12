@@ -29,8 +29,9 @@
 //! 1. a task for the worker, its brief and its result each held at the gate; the
 //!    result is passed on while the chief is at work on a command of
 //!    twenty-five seconds, and is typed into it once its turn is over;
-//! 2. one for the advisor, a minute of work, paused and resumed with other
-//!    words, which are held too;
+//! 2. one for the advisor, a minute of work (a script that hashes for a
+//!    minute: no role text forbids it, as it does `sleep`), paused and resumed
+//!    with other words, which are held too ([`minute`]);
 //! 3. one for the reviewer, whose brief the human declines;
 //! 4. a question the worker asks the chief by its harness's tool, and the
 //!    answer, held (Pi has no such tool);
@@ -58,6 +59,8 @@ mod cleanup;
 mod flow;
 #[path = "live_approval/human.rs"]
 mod human;
+#[path = "live_approval/minute.rs"]
+mod minute;
 #[path = "live_approval/plan.rs"]
 mod plan;
 #[path = "live_approval/project.rs"]
