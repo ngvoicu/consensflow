@@ -10,7 +10,9 @@
 //! started still runs (`background`), and the same of the agents a turn left
 //! running, which a window takes input beside (`pending_agents`), and the switch
 //! after a chief's turn, which waits for them (`switching_agents`), and the time
-//! a launch is told it has for its first message (`launch_wait`), and what a
+//! a launch is told it has for its first message (`launch_wait`), and the
+//! processes a harness keeps of its own, which are no work a turn left (`servers`),
+//! and what a
 //! window is given while the words that were for it wait at the human's gate
 //! (`approval`), and the tester, which Node's staff never had (`testers`).
 
@@ -49,6 +51,7 @@ mod receipts;
 mod restart;
 mod review;
 mod separate_callbacks;
+mod servers;
 mod session_windows;
 mod sessions;
 mod several_roles;

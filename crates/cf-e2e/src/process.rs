@@ -40,6 +40,8 @@ use std::time::{Duration, Instant};
 
 use crate::{Error, Result};
 
+#[cfg(unix)]
+pub use pid::group_of;
 pub use pid::{is_alive, signal, Signal};
 pub use spawned::{Sink, Spawned};
 

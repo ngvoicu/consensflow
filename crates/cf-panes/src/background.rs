@@ -14,12 +14,31 @@
 //! A process is known by its number and by when it began, so a process that
 //! took the number of one that ended is not mistaken for it.
 //!
+//! Time alone is wrong for a server that begins after the mark, and for what a
+//! server starts. Claude Code starts its MCP servers as it takes its first
+//! message, which the daemon marks once it shows in the record, so they began
+//! after the mark and were taken for the turn's work (found on 3.0.1: a worker's
+//! task was never done); and what a server starts (a watchdog, the browser a tool
+//! launches, each in a group of its own) is the same wherever it began, as is
+//! what Codex's plugins started with the window start later. Where the daemon
+//! says how the window's harness keeps its servers (`pane.mark`'s `servers`) the
+//! host also goes by process group and by which process started which
+//! ([`harness`] says how); a process of a harness that is not known to keep them
+//! in a way is told by time alone, as it always was.
+//!
 //! Only looking at the tree is the platform's: the macOS process tree and the
-//! Windows job object each list their members ([`Member`]); the rest is here.
+//! Windows job object each list their members ([`Member`]), with the group each is
+//! in and the process that started it where the platform says (macOS; a job
+//! object has neither, so a Windows window is told by time alone); the rest is
+//! here.
+
+mod harness;
 
 use std::collections::HashSet;
 
 use cf_proto::panes::{Background, BackgroundProcess, BACKGROUND_PROCESSES, COMMAND_CHARS};
+
+pub(crate) use harness::Kept;
 
 /// A process by what tells it from a later one of the same number: the number,
 /// and when it began, in whatever unit its platform keeps that in.
@@ -35,35 +54,63 @@ pub(crate) struct ProcessKey {
 pub(crate) struct Member {
     pub key: ProcessKey,
     pub command: String,
+    /// The process group it is in; none where the platform says none (a Windows
+    /// job object has no groups).
+    pub group: Option<i32>,
+    /// The process that started it, where that is another process of the tree:
+    /// none for the window's program, for a process whose parent has gone (the
+    /// system keeps naming the parent it was started by, which is no process of
+    /// the tree), and where the platform says none (a Windows job object).
+    pub parent: Option<ProcessKey>,
 }
 
 /// The processes of a pane's tree when its turn began; none until the daemon
 /// says one does, and a pane with none has no background work, since nothing
 /// says what came before.
 #[derive(Debug, Default, Clone)]
-pub(crate) struct Baseline(Option<HashSet<ProcessKey>>);
+pub(crate) struct Baseline {
+    /// The processes the tree had when the latest turn began.
+    before: Option<HashSet<ProcessKey>>,
+    /// The processes it had when the first turn began, and has for good: what the
+    /// window opened with.
+    launch: HashSet<ProcessKey>,
+    /// How the window's harness keeps its servers, as the daemon said at the
+    /// latest mark: none where it did not say, or the platform has no groups.
+    kept: Option<Kept>,
+}
 
 impl Baseline {
-    /// A turn begins: every process of the tree now came before it.
-    pub fn mark(&mut self, tree: &[Member]) {
-        self.0 = Some(tree.iter().map(|member| member.key).collect());
+    /// A turn begins: every process of the tree now came before it, and `kept`
+    /// says how the window's harness keeps its servers ([`Kept::of`]).
+    pub fn mark(&mut self, tree: &[Member], kept: Option<Kept>) {
+        let now: HashSet<ProcessKey> = tree.iter().map(|member| member.key).collect();
+        if self.before.is_none() {
+            self.launch.clone_from(&now);
+        }
+        self.before = Some(now);
+        self.kept = kept;
     }
 
     /// Whether a turn was ever said to begin: where it was not, the tree is
     /// not worth looking at.
     pub fn is_marked(&self) -> bool {
-        self.0.is_some()
+        self.before.is_some()
     }
 
     /// What `tree`, the pane's tree now, has that its turn started: the
-    /// processes not in the baseline, the first of them by when they began.
+    /// processes not in the baseline and not the harness's own, the first of them
+    /// by when they began.
     pub fn left_running(&self, tree: Vec<Member>) -> Background {
-        let Some(before) = &self.0 else {
+        let Some(before) = &self.before else {
             return Background::default();
         };
+        let harness = self
+            .kept
+            .map(|kept| harness::own(kept, &self.launch, &tree))
+            .unwrap_or_default();
         let mut started: Vec<Member> = tree
             .into_iter()
-            .filter(|member| !before.contains(&member.key))
+            .filter(|member| !before.contains(&member.key) && !harness.contains(&member.key))
             .collect();
         started.sort_by_key(|member| (member.key.began, member.key.pid));
         Background {
@@ -95,10 +142,13 @@ fn bounded(command: &str) -> String {
 mod tests {
     use super::*;
 
+    /// A process whose group and parent the platform does not say.
     fn member(pid: u32, began: u64, command: &str) -> Member {
         Member {
             key: ProcessKey { pid, began },
             command: command.to_owned(),
+            group: None,
+            parent: None,
         }
     }
 
@@ -110,14 +160,17 @@ mod tests {
             baseline.left_running(vec![member(10, 1, "claude")]),
             Background::default()
         );
-        baseline.mark(&[]);
+        baseline.mark(&[], None);
         assert!(baseline.is_marked());
     }
 
     #[test]
     fn what_the_tree_had_when_the_turn_began_is_not_the_turns() {
         let mut baseline = Baseline::default();
-        baseline.mark(&[member(10, 1, "claude"), member(11, 2, "npx mcp-server")]);
+        baseline.mark(
+            &[member(10, 1, "claude"), member(11, 2, "npx mcp-server")],
+            None,
+        );
         let now = vec![
             member(10, 1, "claude"),
             member(11, 2, "npx mcp-server"),
@@ -137,7 +190,7 @@ mod tests {
     #[test]
     fn a_process_that_took_the_number_of_one_that_ended_is_a_new_process() {
         let mut baseline = Baseline::default();
-        baseline.mark(&[member(11, 2, "npx mcp-server")]);
+        baseline.mark(&[member(11, 2, "npx mcp-server")], None);
         let left = baseline.left_running(vec![member(11, 7, "sleep 600")]);
         assert_eq!(left.total, 1, "the number is the same and the start is not");
     }
@@ -145,17 +198,17 @@ mod tests {
     #[test]
     fn a_new_mark_moves_what_came_before_to_where_the_tree_is() {
         let mut baseline = Baseline::default();
-        baseline.mark(&[member(10, 1, "claude")]);
+        baseline.mark(&[member(10, 1, "claude")], None);
         let tree = vec![member(10, 1, "claude"), member(42, 9, "sleep 600")];
         assert_eq!(baseline.left_running(tree.clone()).total, 1);
-        baseline.mark(&tree);
+        baseline.mark(&tree, None);
         assert_eq!(baseline.left_running(tree).total, 0);
     }
 
     #[test]
     fn the_oldest_processes_come_first_and_only_so_many_are_named_of_a_longer_list() {
         let mut baseline = Baseline::default();
-        baseline.mark(&[]);
+        baseline.mark(&[], None);
         let tree: Vec<Member> = (0..(BACKGROUND_PROCESSES as u32 + 4))
             .rev()
             .map(|n| member(100 + n, u64::from(n), &format!("job {n}")))

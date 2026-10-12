@@ -1,14 +1,12 @@
-//! The stand-ins themselves, where the cases that run them do not reach: the
-//! stand-in Codex's server on loopback, the transport Windows' supervisor uses
-//! (on Unix it listens on a private socket, which the supervisor's cases cover).
-//! A bearer token whose SHA-256 it was given gets in, and any other, or none,
-//! is turned away at the handshake. And the stand-in agent's part in how a
-//! window closes (the cases of `background_work` hold what ConsensFlow does
-//! with the work a window left running): the agent leaves when the pane host
-//! asks it to end, and the job it leaves running writes its process, ends by
-//! itself saying so, says it was asked to end where it is, and a deaf one is
-//! only killed. The asking is Unix's: on Windows a window is ended at once, and
-//! nothing there is asked to end.
+//! The stand-in agent itself, where the cases that run it do not reach (the
+//! stand-in Codex's are `stand_in_codex`): its part in how a window closes (the
+//! cases of `background_work` hold what ConsensFlow does with the work a window
+//! left running): the agent leaves when the pane host asks it to end, and the job
+//! it leaves running writes its process, ends by itself saying so, says it was
+//! asked to end where it is, and a deaf one is only killed. The asking is Unix's:
+//! on Windows a window is ended at once, and nothing there is asked to end. And
+//! what the regressions stand on: the server the stand-in agent has for its
+//! harness, and the browser it launches in a group of its own.
 
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -16,102 +14,12 @@ use std::time::{Duration, Instant};
 
 use cf_e2e::files;
 use cf_e2e::process::{Run, Spawned};
-use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
-use tungstenite::client::IntoClientRequest;
-use tungstenite::http::HeaderValue;
-use tungstenite::Message;
+#[cfg(unix)]
+use serde_json::json;
+#[cfg(unix)]
+use serde_json::Value;
 
 use crate::{Outcome, FAKE_AGENT};
-
-const FAKE_CODEX: &str = env!("CARGO_BIN_EXE_fake-codex");
-
-/// The token the stand-in's server lets in, and the hash it is given.
-const TOKEN: &str = "capability-token-for-the-test";
-
-/// The request to connect to `port` with `authorization` as the header, if any.
-fn request_to(
-    port: u16,
-    authorization: Option<&str>,
-) -> Result<tungstenite::handshake::client::Request, Box<dyn std::error::Error>> {
-    let mut request = format!("ws://127.0.0.1:{port}").into_client_request()?;
-    if let Some(value) = authorization {
-        request
-            .headers_mut()
-            .insert("authorization", HeaderValue::from_str(value)?);
-    }
-    Ok(request)
-}
-
-#[test]
-fn the_stand_in_codexs_server_on_loopback_lets_in_only_the_token_whose_hash_it_was_given() -> Outcome
-{
-    let _turn = cf_e2e::serial::turn();
-    let root = tempfile::tempdir()?;
-    let log = root.path().join("codex.jsonl");
-    let hash: String = Sha256::digest(TOKEN.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    let server = Run::new(FAKE_CODEX)
-        .args(["app-server", "--listen", "ws://127.0.0.1:0"])
-        .args(["--ws-auth", "capability-token", "--ws-token-sha256", &hash])
-        .var("CF_TEST_CODEX_LOG", &log)
-        .closed_input()
-        .spawn()?;
-    // It takes a port, and says which on its error output.
-    let started = Instant::now();
-    let port = loop {
-        let said = server.errors();
-        if let Some(port) = said
-            .split("listening on: ws://127.0.0.1:")
-            .nth(1)
-            .and_then(|rest| rest.split_whitespace().next())
-            .and_then(|port| port.parse::<u16>().ok())
-        {
-            break port;
-        }
-        assert!(
-            started.elapsed() < Duration::from_secs(30),
-            "no port: {said}"
-        );
-        thread::sleep(Duration::from_millis(20));
-    };
-
-    // The token it was given the hash of gets in, and starts a thread.
-    let (mut socket, _) =
-        tungstenite::connect(request_to(port, Some(&format!("Bearer {TOKEN}")))?)?;
-    socket.send(Message::text(
-        json!({ "id": 7, "method": "thread/start", "params": { "ephemeral": false } }).to_string(),
-    ))?;
-    let Message::Text(answer) = socket.read()? else {
-        panic!("the server did not answer with text");
-    };
-    let answer: Value = serde_json::from_str(answer.as_str())?;
-    assert_eq!(answer["id"], 7);
-    assert_eq!(
-        answer["result"]["thread"],
-        json!({ "id": "01a09094-938f-7fd1-a2d3-315cf92b4559", "turns": [], "status": { "type": "idle" } })
-    );
-    let log = files::read_string(&log)?;
-    assert!(log.contains("\"started\":{\"ephemeral\":false}"), "{log}");
-
-    // Any other token, a token that is not a bearer's, and none are turned away.
-    for authorization in [
-        Some("Bearer another-token"),
-        Some("Basic abc"),
-        Some(TOKEN),
-        None,
-    ] {
-        let refused = tungstenite::connect(request_to(port, authorization)?);
-        assert!(
-            matches!(&refused, Err(tungstenite::Error::Http(response)) if response.status() == 401),
-            "{authorization:?}: {:?}",
-            refused.err()
-        );
-    }
-    Ok(())
-}
 
 /// A window the pane host closes: its stand-in agent is asked to end (TERM and
 /// HUP to its group) and leaves by itself, at once and with the code 0, where
@@ -179,8 +87,20 @@ fn start_job(seconds: &str, file: &Path, deaf: bool) -> cf_e2e::Result<Spawned> 
     run.closed_input().spawn()
 }
 
+/// The server a window's stand-in agent has for its harness: a job that stays in
+/// the group of the program that started it (`--in-group`).
+#[cfg(unix)]
+fn start_server(seconds: &str, file: &Path) -> cf_e2e::Result<Spawned> {
+    Run::new(FAKE_AGENT)
+        .args(["--background-job", seconds])
+        .arg(file)
+        .arg("--in-group")
+        .closed_input()
+        .spawn()
+}
+
 /// The file of the kind `kind` the job `file` writes.
-fn beside(file: &Path, kind: &str) -> PathBuf {
+pub(crate) fn beside(file: &Path, kind: &str) -> PathBuf {
     let mut name = file.as_os_str().to_owned();
     name.push(".");
     name.push(kind);
@@ -188,7 +108,7 @@ fn beside(file: &Path, kind: &str) -> PathBuf {
 }
 
 /// Waits until `file` is there, for up to ten seconds.
-fn until_there(file: &Path) -> bool {
+pub(crate) fn until_there(file: &Path) -> bool {
     let started = Instant::now();
     while !file.exists() && started.elapsed() < Duration::from_secs(10) {
         thread::sleep(Duration::from_millis(10));
@@ -246,5 +166,101 @@ fn the_stand_in_agents_job_asked_to_end_says_so_and_goes_and_a_deaf_one_is_only_
     deaf.kill();
     assert!(deaf.has_exited());
     assert!(!beside(&file, "released").exists());
+    Ok(())
+}
+
+/// What the cases of `background_work` that run a harness's server beside a job
+/// stand on: the job leaves the group of the program that started it, as a command
+/// the agent's tool runs does, and the server stays in it, as an MCP server does.
+/// The pane host tells them apart by that group alone.
+#[cfg(unix)]
+#[test]
+fn the_stand_in_agents_job_leaves_the_group_of_its_window_and_its_server_stays_in_it() -> Outcome {
+    use nix::unistd::{getpgid, getpgrp, Pid};
+
+    let group_of = |program: &Spawned| -> Result<Pid, Box<dyn std::error::Error>> {
+        Ok(getpgid(Some(Pid::from_raw(i32::try_from(program.id())?)))?)
+    };
+    let folder = tempfile::tempdir()?;
+    let (job_file, server_file) = (
+        folder.path().join("job-1-1"),
+        folder.path().join("server-1-1"),
+    );
+    let mut job = start_job("60", &job_file, false)?;
+    let mut server = start_server("60", &server_file)?;
+    // Each writes its process once it has set itself up, its group chosen.
+    assert!(
+        until_there(&beside(&job_file, "pid")),
+        "the job says it runs"
+    );
+    assert!(
+        until_there(&beside(&server_file, "pid")),
+        "the server says it runs"
+    );
+
+    // The program that started them is this test's: its group is the window's here.
+    let window = getpgrp();
+    let job_group = group_of(&job)?;
+    assert_eq!(
+        job_group.as_raw(),
+        i32::try_from(job.id())?,
+        "it leads a group of its own"
+    );
+    assert_ne!(job_group, window);
+    assert_eq!(
+        group_of(&server)?,
+        window,
+        "the server stays in its window's group"
+    );
+    job.kill();
+    server.kill();
+    Ok(())
+}
+
+/// The server a window's stand-in agent has for its harness, which launches a
+/// browser of its own (`--browser <file>`): a job that is a child of the server and
+/// leads a group of its own, as the browser of `@playwright/mcp` does.
+#[cfg(unix)]
+#[test]
+fn the_stand_in_agents_server_launches_a_browser_that_is_its_child_in_a_group_of_its_own() -> Outcome
+{
+    use cf_e2e::process::group_of;
+
+    let folder = tempfile::tempdir()?;
+    let (server_file, browser_file) = (
+        folder.path().join("server-1-1"),
+        folder.path().join("browser-1-1"),
+    );
+    let mut server = Run::new(FAKE_AGENT)
+        .args(["--background-job", "60"])
+        .arg(&server_file)
+        .arg("--in-group")
+        .arg("--browser")
+        .arg(&browser_file)
+        .closed_input()
+        .spawn()?;
+    assert!(until_there(&beside(&server_file, "pid")), "the server runs");
+    assert!(
+        until_there(&beside(&browser_file, "pid")),
+        "so does its browser"
+    );
+
+    let browser: u32 = files::read_string(&beside(&browser_file, "pid"))?
+        .trim()
+        .parse()?;
+    assert_eq!(
+        group_of(browser),
+        Some(browser),
+        "the browser leads a group of its own"
+    );
+    assert_ne!(
+        group_of(server.id()),
+        Some(server.id()),
+        "the server does not"
+    );
+    // A server that is killed outright leaves its browser running, as a window's
+    // close finds and ends it (by the marker of its environment): here nothing does.
+    server.kill();
+    cf_e2e::process::signal(browser, cf_e2e::process::Signal::Kill)?;
     Ok(())
 }

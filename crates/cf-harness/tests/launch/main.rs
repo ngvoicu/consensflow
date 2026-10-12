@@ -15,4 +15,5 @@ mod devin;
 mod opencode;
 mod pi;
 mod scenarios;
+mod servers;
 mod tables;

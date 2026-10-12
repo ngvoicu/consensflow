@@ -496,7 +496,10 @@ async fn a_turn_is_marked_and_the_work_it_left_asked_for_by_the_pane_the_engine_
             });
             let host = host_over(&daemon);
 
-            host.mark(&pane("p1-zeus-amber-pine", 7)).await;
+            let said = [Servers::Unknown, Servers::InGroup, Servers::AtLaunch];
+            for servers in said {
+                host.mark(&pane("p1-zeus-amber-pine", 7), servers).await;
+            }
             let left = host.running(&pane("p1-zeus-amber-pine", 7)).await;
 
             assert_eq!(
@@ -505,6 +508,22 @@ async fn a_turn_is_marked_and_the_work_it_left_asked_for_by_the_pane_the_engine_
                     (
                         "pane.mark",
                         json!({ "id": "p1-zeus-amber-pine", "generation": 7 })
+                    ),
+                    (
+                        "pane.mark",
+                        json!({
+                            "id": "p1-zeus-amber-pine",
+                            "generation": 7,
+                            "servers": "inGroup",
+                        })
+                    ),
+                    (
+                        "pane.mark",
+                        json!({
+                            "id": "p1-zeus-amber-pine",
+                            "generation": 7,
+                            "servers": "atLaunch",
+                        })
                     ),
                     (
                         "pane.background",
