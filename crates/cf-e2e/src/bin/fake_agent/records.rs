@@ -122,6 +122,7 @@ impl Records {
         if let Value::Object(fields) = fields {
             record.extend(fields);
         }
+        make_folder_of(&self.transcript)?;
         let mut file = OpenOptions::new()
             .append(true)
             .create(true)
@@ -131,12 +132,22 @@ impl Records {
 
     /// Writes the status the window is in: `idle` or `busy`.
     pub fn status(&self, pid: u32, value: &str) -> io::Result<()> {
+        make_folder_of(&self.status_file)?;
         fs::write(
             &self.status_file,
             json!({ "pid": pid, "sessionId": self.session, "kind": "interactive", "status": value })
                 .to_string(),
         )
     }
+}
+
+/// Makes the folder `file` is in, where it is not: Claude makes its own where it writes. The
+/// folder is the machine's Claude folder's, which every run of the suites shares, and a run
+/// that ends takes the folder of the stand-ins' conversations when it is empty (`rig::forget`),
+/// as it is for a chief that has heard nothing yet: a window that did not make it again ended
+/// itself with the first thing it was told.
+fn make_folder_of(file: &Path) -> io::Result<()> {
+    file.parent().map_or(Ok(()), fs::create_dir_all)
 }
 
 /// Writes `record` and its line break to `out`. `writeln!` of a value writes it
@@ -340,6 +351,23 @@ mod tests {
             status,
             json!({ "pid": 4242, "sessionId": "sess-1", "kind": "interactive", "status": "idle" })
         );
+    }
+
+    #[test]
+    fn a_window_whose_folders_were_taken_makes_them_again_where_it_writes_as_claude_does() {
+        let config = tempfile::tempdir().unwrap();
+        let mut records = Records::new(config.path(), "sess-1", 4242).unwrap();
+        // The folder of the conversations goes with a rig of another run that ends, and the
+        // folder of the status files with whoever tidies the machine's Claude folder.
+        fs::remove_dir_all(config.path().join("projects")).unwrap();
+        fs::remove_dir_all(config.path().join("sessions")).unwrap();
+        records.append(4242, user("heard")).unwrap();
+        records.status(4242, "idle").unwrap();
+        assert_eq!(
+            types(&config.path().join("projects/integration/sess-1.jsonl")),
+            ["user"]
+        );
+        assert!(records.status_file().is_file());
     }
 
     #[test]
