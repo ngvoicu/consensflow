@@ -35,8 +35,8 @@ runs = ["harness-launch-claude-resumed"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '                        idle && (settled || empty || left) || by_press,'
-replace = '                        idle && (settled || empty) || by_press,'
+find = '                        at_prompt && (settled || empty || left) || by_press,'
+replace = '                        at_prompt && (settled || empty) || by_press,'
 
 [[plant]]
 name = "resumed: a window given a message of its own is read at rest by the turn before it"

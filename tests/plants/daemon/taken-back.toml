@@ -113,10 +113,10 @@ runs = ["harness-launch-claude-stops"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
 find = '''
-                        idle && (settled || empty || left) || by_press,
+                        at_prompt && (settled || empty || left) || by_press,
                         waiting,
                         by_press,'''
 replace = '''
-                        idle && (settled || empty || left) || by_press,
+                        at_prompt && (settled || empty || left) || by_press,
                         waiting,
                         false,'''
