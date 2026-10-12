@@ -70,13 +70,13 @@ replace = ".filter((task) => task.requester === lane.participant.handle && task.
 
 [[plant]]
 name = "board: the eval counts as placed only the tasks waiting for a member"
-meant = "are every one it lists: one no lane has, whatever its state, and not one the human deleted"
+meant = "are_every_one_it_lists_one_no_lane_has_whatever_its_state_and_not_one_the_human_deleted"
 runs = ["evals-measure"]
 
 [[plant.edit]]
-file = "evals/measure.mjs"
-find = "placed: count('SELECT COUNT(*) AS n FROM task WHERE deleted_at IS NULL'),"
-replace = '''placed: count("SELECT COUNT(*) AS n FROM task WHERE deleted_at IS NULL AND state = 'open' AND assignee_id IS NULL"),'''
+file = "crates/cf-evals/src/measure/plumbing.rs"
+find = '"SELECT COUNT(*) FROM task WHERE deleted_at IS NULL"'
+replace = '''"SELECT COUNT(*) FROM task WHERE deleted_at IS NULL AND state = 'open' AND assignee_id IS NULL"'''
 
 [[plant]]
 name = "board: cf task list puts every task no lane has under the words for those that wait"

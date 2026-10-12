@@ -7,15 +7,30 @@ the owner in its own terminal (never on the board), and puts its findings on
 the board as notes (`cf note --human`).
 
 ```sh
-npm run eval -- --scenario six-decisions                       # chief Claude on Opus, staff Claude on Haiku
-npm run eval -- --scenario simple-fix --chief codex --staff pi   # a Codex chief, a Pi staff
-npm run eval -- --scenario complex-launch --chief opencode --staff claude,codex,pi,opencode,devin
-npm run eval -- --scenario six-decisions --model claude-sonnet-5 --repeat 3
-npm run eval:summary                                            # every report, one line each, and evals/RESULTS.md
+cargo xtask eval --scenario six-decisions                       # chief Claude on Opus, staff Claude on Haiku
+cargo xtask eval --scenario simple-fix --chief codex --staff pi   # a Codex chief, a Pi staff
+cargo xtask eval --scenario complex-launch --chief opencode --staff claude,codex,pi,opencode,devin
+cargo xtask eval --scenario six-decisions --model claude-sonnet-5 --repeat 3
+cargo xtask eval summary                                         # every report, one line each, and evals/RESULTS.md
+cargo xtask watch --project poker-lab                            # a project that is running, from outside
 ```
 
+(`npm run eval`, `npm run eval:summary` and `npm run watch` are the same commands,
+with the flags after a `--`.)
+
 **This spends real tokens and is not part of any gate.** It needs the
-harnesses named logged in on this machine, and your word for the spend.
+harnesses named logged in on this machine, and your word for the spend. The
+code is `crates/cf-evals`: the run (`src/run.rs` and `src/run/`), the
+scenarios (`src/scenarios/`), the plan (`src/plan.rs`), the measure
+(`src/measure.rs`, which reads the ledger file with SQLite and none of the
+product's crates), the table (`src/results.rs`, `src/summarize.rs`) and
+`watch`. `cargo run -p cf-evals -- help` says what each command takes.
+
+A run against the stand-in agent, which spends nothing, holds that a run gets to its
+end and says and keeps what it always does (the daemon it ran on, the verdict, a
+report), on a home of its own: `cargo test -p cf-evals --test dry_run -- --ignored
+--nocapture --test-threads=1` (a few minutes for each arm; its verdict is mostly
+`FAIL`, since the stand-in does not read the prompt).
 
 ## How a run works
 
@@ -25,18 +40,21 @@ chief's harness (claude, codex, pi, opencode, devin), saved as the chief's
 agent with its model and effort. Every chief but
 Devin takes its model from `--model`; unless given, Claude Code runs Opus,
 Codex its cheap model, and Pi and OpenCode DeepSeek V4 Pro
-(`evals/plan.mjs`). Devin runs its staff's model, SWE-1.6 Slow.
+(`crates/cf-evals/src/plan.rs`). Devin runs its staff's model, SWE-2 Medium.
 Claude and Codex windows start through wrappers the runner writes
 (`~/.consensflow-candidate/evals/bin`) that shut out MCP servers,
 connectors and the browser for every window, the chief's and the staff's
 (ConsensFlow itself leaves them on for every agent), and give Codex the
-chief's model; a Pi wrapper gives Pi its model and thinking level. `--effort` (default `high`) is the chief's
+chief's model; a Pi wrapper gives Pi its model and thinking level. On the Mac a
+wrapper is a shell script; on Windows it is a `.cmd` that names Node and a
+script the runner writes beside it (a window opens on a `.cmd` only in npm's shape),
+and the Pi wrapper is the Mac's alone. `--effort` (default `high`) is the chief's
 reasoning level, through those wrappers; OpenCode's window and Devin have no
 switch for it, and the report says so (`effort: null`). `--staff-effort` (default
 `medium`) is every member's, on its roster agent. Before 2026-09-27 no run
 set either: each window ran at the user's own configured default.
 `--staff` names the staff's harnesses: each gives two
-workers, an advisor and a reviewer on its cheap model (`evals/plan.mjs`), all
+workers, an advisor and a reviewer on its cheap model (`crates/cf-evals/src/plan.rs`), all
 standard tier, so the daemon picks among them by its own rule and any of them
 may get any task. The scenario's fixture is copied into a fixed, trusted
 workspace under the Candidate's home (what Claude Code remembered about that
@@ -68,14 +86,23 @@ harness: asked, answered, delivered, and the longest question. `--gate` opens th
 with the owner's approval required: the scripted owner approves every
 message waiting for it, and the report counts the approvals. The
 scenario's expectations are checked against those numbers; the report goes
-to `evals/reports/` and a verdict to stdout. Reports are kept in git: a run is
-evidence, and a later run beside it is the comparison. `npm run eval:summary`
-lists them and rewrites `evals/RESULTS.md`, the same numbers as a table.
+to `evals/reports/` and a verdict to stdout. Reports are kept: a run is
+evidence, and a later run beside it is the comparison. `cargo xtask eval summary`
+lists them and rewrites `evals/RESULTS.md`, the same numbers as a table (an
+older report is still read: one from before the mechanics were counted has
+none, and one from when the board took questions spelled the board's
+`questionsToHuman`).
+
+The numbers the measure answers are held to the ledgers recorded in
+`tests/fixtures/ledgers` (`crates/cf-evals/tests/measure.rs`), and the prose of
+each scenario to what it said when it was JavaScript
+(`crates/cf-evals/tests/scenarios.rs`).
 
 ## Scenarios
 
-`evals/scenarios/<id>.mjs` exports the prompt, the answers, the fallback, the
-quiet time and the expectations; `evals/fixtures/<name>/` is the toy project
+`crates/cf-evals/src/scenarios/<id>.rs` has the prompt, the answers, the fallback,
+the quiet time and the expectations (a scenario is code, and its expectations are
+closures over the measured numbers); `evals/fixtures/<name>/` is the toy project
 (`site`: a small bilingual site about burnout at work, with a planted
 discrepancy: the guides say "a scale from 1 to 5", the site shows a colour and
 a score).
