@@ -1,13 +1,15 @@
 //! One run of ssh, as it goes: what it writes is written on as it comes, to the
-//! stream it came on; what it exits with is the run's own status; and when this
-//! program is stopped, or what the run says can no longer be written, it is ended
-//! whole before anything else is done.
+//! stream it came on; how the command ended is what the machine says of it in the
+//! last line of the output (`== exit N`), and ssh's own status only where it says
+//! nothing; and when this program is stopped, or what the run says can no longer
+//! be written, it is ended whole before anything else is done.
 //!
 //! ssh's input is closed (the run has none to give it), and its two streams are
 //! pipes, each read on a thread of its own that hands what it reads on, whole, to
 //! the one that waits: the writes to the two streams (`Console`) are made here
-//! alone, in the order they arrived. That one also asks the [`Interrupt`] as it
-//! waits, which no blocked read could.
+//! alone, in the order they arrived, and the last line of the standard output is
+//! kept as it goes by. That one also asks the [`Interrupt`] as it waits, which no
+//! blocked read could.
 
 use std::io::{self, Read, Write};
 use std::process::{Child, Stdio};
@@ -18,6 +20,8 @@ use std::time::Duration;
 use cf_base::env::Env;
 
 use super::interrupt::Interrupt;
+use super::script::{exit_said, EXIT_MARK};
+use super::tail::Tail;
 use super::Error;
 use crate::dispatch::Console;
 use crate::process::{self, Invocation};
@@ -31,7 +35,8 @@ const CHUNK: usize = 16 * 1024;
 /// How a run of ssh ended.
 #[derive(Debug)]
 pub enum Ended {
-    /// With this status, the remote command's own.
+    /// With this status, the remote command's own, as far as it is known: what the
+    /// machine said of it, or else ssh's (`exited` says which, and why).
     Exited(i32),
     /// Because this program was stopped: ssh is gone, the run may not be.
     Stopped,
@@ -89,7 +94,8 @@ pub fn stream(
         pump(stdout, Stream::Out, to.clone()),
         pump(stderr, Stream::Err, to),
     ];
-    match watch(&arriving, console, interrupt) {
+    let mut tail = Tail::default();
+    match watch(&arriving, console, interrupt, &mut tail) {
         Watched::Stop => {
             running.end();
             Ok(Ended::Stopped)
@@ -106,21 +112,67 @@ pub fn stream(
             let Some(status) = wait(&mut running, interrupt)? else {
                 return Ok(Ended::Stopped);
             };
-            Ok(exited(status.code(), interrupt))
+            let said = tail.last_line().as_deref().and_then(exit_said);
+            let (ended, note) = exited(status.code(), said, interrupt);
+            if let Some(note) = note {
+                if let Err(cause) = writeln!(console.err, "windows: {note}") {
+                    return Ok(Ended::Unwritten(cause));
+                }
+            }
+            Ok(ended)
         }
     }
 }
 
-/// What ssh's ending with `code` (none: a signal ended it, which a program that
-/// leaves no code is told as 1) came to. ssh gets the Ctrl-C the terminal gives
-/// this program too, and its own 255, and a signal, are what that leaves: they
-/// are waited on for the stop to be heard. Any other status is the remote
-/// command's, whatever is heard after it.
-fn exited(code: Option<i32>, interrupt: &Interrupt) -> Ended {
+/// What a run that ssh ended by itself came to, and what is to be said of it
+/// besides (for a person, on the error stream).
+///
+/// `said` is the status the machine gave in the last line of the output, if it
+/// gave one: it is the command's own, whatever ssh answered, which the machine's
+/// shell may turn into another (zeewin's PowerShell makes every failure 1). Where
+/// it gave none, nothing is known of how the command ended but what ssh answered,
+/// and that is the answer if it is a failure ssh's own (ssh's 255 and a signal
+/// first wait for the stop that may have made them: ssh gets the Ctrl-C the
+/// terminal gives this program too). Never 0, however: a run that has not said
+/// it ended well did not end well.
+///
+/// The answer is a status a program can end with, 0 to 255: what is outside it
+/// (a Windows status such as -1073741819 is) is answered as 1, for a system that
+/// keeps a byte of one would make a failure of 256 a success. The line in the
+/// output says what it was.
+fn exited(code: Option<i32>, said: Option<i32>, interrupt: &Interrupt) -> (Ended, Option<String>) {
+    let holds = |status: i32| (0..=255).contains(&status);
+    if let Some(said) = said {
+        return if holds(said) {
+            (Ended::Exited(said), None)
+        } else {
+            let note = format!(
+                "the command ended with status {said}, which no status here can hold: answering 1"
+            );
+            (Ended::Exited(1), Some(note))
+        };
+    }
     if matches!(code, None | Some(255)) && interrupt.heard_after_failure() {
-        Ended::Stopped
-    } else {
-        Ended::Exited(code.unwrap_or(1))
+        return (Ended::Stopped, None);
+    }
+    let no_line = format!("no `{EXIT_MARK}N` line ended the output");
+    match code {
+        Some(code) if code != 0 && holds(code) => {
+            let note = format!("{no_line}, so ssh's own status is the answer: {code}");
+            (Ended::Exited(code), Some(note))
+        }
+        Some(0) => {
+            let note = format!("{no_line}, and ssh's status 0 is not taken for a command's without it: answering 1");
+            (Ended::Exited(1), Some(note))
+        }
+        Some(code) => {
+            let note = format!("{no_line}, and ssh's status {code} is no status here: answering 1");
+            (Ended::Exited(1), Some(note))
+        }
+        None => {
+            let note = format!("{no_line}, and ssh was ended by a signal: answering 1");
+            (Ended::Exited(1), Some(note))
+        }
     }
 }
 
@@ -132,14 +184,23 @@ enum Watched {
     Unwritten(io::Error),
 }
 
-/// Writes what arrives until the streams close, a stop is heard, or a write fails.
-fn watch(arriving: &Receiver<Chunk>, console: &mut Console, interrupt: &Interrupt) -> Watched {
+/// Writes what arrives until the streams close, a stop is heard, or a write
+/// fails; what the standard output says is kept at its end in `tail` as it goes.
+fn watch(
+    arriving: &Receiver<Chunk>,
+    console: &mut Console,
+    interrupt: &Interrupt,
+    tail: &mut Tail,
+) -> Watched {
     loop {
         if interrupt.heard() {
             return Watched::Stop;
         }
         match arriving.recv_timeout(LOOK) {
             Ok((stream, bytes)) => {
+                if stream == Stream::Out {
+                    tail.push(&bytes);
+                }
                 let to: &mut dyn Write = match stream {
                     Stream::Out => &mut *console.out,
                     Stream::Err => &mut *console.err,

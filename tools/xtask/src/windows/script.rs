@@ -3,16 +3,29 @@
 //! to ssh encoded; the command to run goes from a file there, so that nothing on
 //! its way (ssh, PowerShell) reads it again.
 //!
-//! The script was written in JavaScript first, and what it sent is held here byte
-//! for byte: a run that names no variable is sent the text it was sent before
-//! `--env` existed, and `tests/golden/windows` has what the JavaScript made of it.
-//! One thing in it is easy to take for a mistake: the batch file the command goes
-//! to is written with a carriage return and a line feed that are *in* the
-//! PowerShell string (`"@echo off<CR><LF>"`), not an escape PowerShell reads, so
-//! the script carries those two bytes where the template says `«crlf»`.
+//! The script says how the command ended, in the last line it writes: `== exit N`
+//! ([`EXIT_MARK`], which [`exit_said`] reads). Every way out of it goes through
+//! one function that writes that line and then exits, because what ssh answers
+//! cannot be taken for the command's status: the module doc of `windows` has what
+//! was measured of it.
+//!
+//! The script was written in JavaScript first, and `tests/golden/windows` holds
+//! its text as recorded: from the JavaScript's own, until the last line was added,
+//! and from this module's since (the test that records them again is
+//! `record_the_goldens`). One thing in it is easy to take for a mistake: the batch
+//! file the command goes to is written with a carriage return and a line feed that
+//! are *in* the PowerShell string (`"@echo off<CR><LF>"`), not an escape
+//! PowerShell reads, so the script carries those two bytes where the template says
+//! `«crlf»`.
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+
+/// What the line that ends the script's output begins with: the number is the
+/// status the command ended with (`== exit 7`), a signed decimal as PowerShell
+/// writes an `[int]`. It is a line of its own, as `== env NAME=VALUE` and
+/// `== <step>` are.
+pub const EXIT_MARK: &str = "== exit ";
 
 /// The list of what went over, kept beside it there, so the next run knows what left the tree.
 pub const SYNCED: &str = ".synced-files";
@@ -123,6 +136,19 @@ pub fn encode_script(script: &str) -> Result<String, Refusal> {
     Ok(encoded)
 }
 
+/// The status a line says the command ended with, if it is the line the script
+/// ends by (`== exit 7`, `== exit -1073741819`): the mark and a signed decimal
+/// that an `i32` holds, and nothing else. Any other line (a command can write
+/// anything, this one too) says nothing.
+pub fn exit_said(line: &str) -> Option<i32> {
+    let number = line.trim_end().strip_prefix(EXIT_MARK)?;
+    let digits = number.strip_prefix('-').unwrap_or(number);
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    number.parse().ok()
+}
+
 /// What a run is, for the script: where its copy is, where in it the command
 /// runs, what runs first, the command, and the variables it is given.
 #[derive(Debug, Clone, Copy)]
@@ -171,6 +197,7 @@ pub fn remote_script(script: &Script) -> String {
             ("inside", script.inside),
             ("command", &script.command.replace('\'', "''")),
             ("crlf", "\r\n"),
+            ("exit", EXIT_MARK),
         ],
     )
 }
@@ -211,26 +238,29 @@ fn fill(template: &str, parts: &[(&str, &str)]) -> String {
 }
 
 /// The script of a run, with a mark where each part of it goes. It begins and
-/// ends with a line feed, as the JavaScript's template did.
+/// ends with a line feed, as the JavaScript's template did. `Exit-Run` is the one
+/// way out: the line that says how the run went, then the exit (the `finally`
+/// that takes the run's record away writes nothing, so the line is the last).
 const REMOTE: &str = r##"
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Stop'
 # What the command prints is UTF-8, and goes back as it came.
 try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false) } catch {}
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
+function Exit-Run([int]$code) { Write-Output "«exit»$code"; exit $code }
 $dir = Join-Path $env:USERPROFILE '«dir»'
 New-Item -ItemType Directory -Force $dir | Out-Null
 $running = Join-Path $dir '«running»'
 if (Test-Path $running) {
   $other = Get-Process -Id (Get-Content $running) -ErrorAction SilentlyContinue
-  if ($other) { Write-Output "A run is still going on this machine (process $($other.Id)): one at a time."; exit 75 }
+  if ($other) { Write-Output "A run is still going on this machine (process $($other.Id)): one at a time."; Exit-Run 75 }
 }
 Set-Content -Path $running -Value $PID
 try {
 $synced = Join-Path $dir '«synced»'
 $before = if (Test-Path $synced) { Get-Content $synced } else { @() }
 tar.exe -xzf (Join-Path $env:USERPROFILE '«dir».tgz') -C $dir
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
 $now = [Collections.Generic.HashSet[string]]::new([string[]](Get-Content $synced))
 foreach ($file in $before) {
   if (-not $now.Contains($file)) { Remove-Item -LiteralPath (Join-Path $dir $file) -Force -ErrorAction SilentlyContinue }
@@ -245,13 +275,13 @@ $ErrorActionPreference = 'Continue'
 foreach ($step in @(«steps»)) {
   Write-Output "== $step"
   cmd /c "$step 2>&1"
-  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
 }
 «given»Set-Location (Join-Path $dir '«inside»')
 $run = Join-Path $dir '.windows-run.cmd'
 [IO.File]::WriteAllText($run, "@echo off«crlf»" + '«command»' + "«crlf»")
 cmd /c "$run 2>&1"
-exit $LASTEXITCODE
+Exit-Run $LASTEXITCODE
 } finally {
   Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue
 }

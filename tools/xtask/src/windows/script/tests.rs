@@ -2,8 +2,7 @@
 //! that the variables a run names get to its command, and no others, is read in
 //! the script.
 
-use std::fs;
-use std::path::Path;
+mod golden;
 
 use super::*;
 use crate::windows::testing::{script_of, strings};
@@ -173,139 +172,138 @@ fn the_command_runs_as_cmd_exe_reads_a_line_from_a_file_with_its_percent_signs_d
     assert!(text.contains(r#"'echo "it''s"'"#), "{text}");
 }
 
-/// What the JavaScript sent (`remoteScript`, and before it `sentBefore`), recorded
-/// before it was deleted: `tests/golden/windows/<name>.ps1`, where each carriage
-/// return the script holds is the mark `␍`, which git's `text=auto` would take out
-/// of a file.
-fn golden(name: &str) -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("golden")
-        .join("windows")
-        .join(format!("{name}.ps1"));
-    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    assert!(!text.contains('\r'), "{name} holds a real carriage return");
-    text.replace('\u{240d}', "\r")
-}
-
-/// A run as the golden files record it: what the command line said, where its
-/// copy was and where in it the command ran, what ran first, the variables named.
-struct Recorded {
-    golden: &'static str,
-    words: &'static [&'static str],
-    dir: &'static str,
-    inside: &'static str,
-    steps: &'static [&'static str],
-    env: &'static [&'static str],
-}
-
-const RECORDED: [Recorded; 7] = [
-    Recorded {
-        golden: "live-paste",
-        words: &["npm", "run", "live:paste"],
-        dir: DIR,
-        inside: ".",
-        steps: &[],
-        env: &[],
-    },
-    Recorded {
-        golden: "eval-with-the-build",
-        words: &[
-            "npm",
-            "run",
-            "eval",
-            "--",
-            "--scenario",
-            "round-trip",
-            "--chief",
-            "devin",
-        ],
-        dir: DIR,
-        inside: ".",
-        steps: &BUILD_STEPS,
-        env: &[],
-    },
-    Recorded {
-        golden: "cargo-test-in-a-folder",
-        words: &["cargo", "test", "it"],
-        dir: "build two",
-        inside: "app/src-tauri",
-        steps: &[],
-        env: &[],
-    },
-    Recorded {
-        golden: "node-e-with-quotes",
-        words: &["node", "-e", r#"console.log("it's 100%")"#],
-        dir: DIR,
-        inside: ".",
-        steps: &[],
-        env: &[],
-    },
-    Recorded {
-        golden: "echo-with-every-quote",
-        words: &["echo", "a'b", "c d", "e\"f", "%PATH%"],
-        dir: DIR,
-        inside: "tests",
-        steps: &[BUILD_STEPS[0], BUILD_STEPS[1]],
-        env: &[],
-    },
-    // The command this landing is proven by on the machine.
-    Recorded {
-        golden: "xtask-test-integration",
-        words: &["cargo", "xtask", "test", "integration"],
-        dir: DIR,
-        inside: ".",
-        steps: &[],
-        env: &[],
-    },
-    // The one with variables: what `--env` added, as the JavaScript wrote it.
-    Recorded {
-        golden: "env-with-the-build",
-        words: &[
-            "cargo",
-            "xtask",
-            "eval",
-            "--scenario",
-            "round-trip",
-            "--chief",
-            "devin",
-        ],
-        dir: DIR,
-        inside: ".",
-        steps: &BUILD_STEPS,
-        env: &[
-            "CONSENSFLOW_TEST_DAEMON=native",
-            "CONSENSFLOW_NOTE=it's 100% $x `y` \"q\" & |",
-        ],
-    },
-];
-
 #[test]
-fn a_run_is_sent_the_script_the_javascript_sent_byte_for_byte() {
-    for run in RECORDED {
-        let env = parse_env(&strings(run.env)).unwrap();
-        let sent = remote_script(&Script {
-            dir: run.dir,
-            inside: run.inside,
-            steps: run.steps,
-            command: &command_line(run.words),
-            env: &env,
-        });
-        let expected = golden(run.golden);
-        assert!(
-            sent == expected,
-            "{}: not what the JavaScript sent\n--- sent\n{sent:?}\n--- recorded\n{expected:?}",
-            run.golden
-        );
+fn the_line_that_ends_the_output_gives_the_status_the_command_ended_with() {
+    for (line, said) in [
+        ("== exit 0", 0),
+        ("== exit 7", 7),
+        ("== exit 75", 75),
+        ("== exit 255", 255),
+        ("== exit 256", 256),
+        ("== exit -1", -1),
+        ("== exit -1073741819", -1_073_741_819),
+        ("== exit 2147483647", i32::MAX),
+        ("== exit -2147483648", i32::MIN),
+        // As a line ends where PowerShell writes it, and as a line may be left.
+        ("== exit 7\r", 7),
+        ("== exit 7\r\n", 7),
+        ("== exit 7  ", 7),
+        ("== exit 007", 7),
+    ] {
+        assert_eq!(exit_said(line), Some(said), "{line:?}");
+    }
+    // Any other line says nothing: one that is nearly it, and one a command wrote.
+    for line in [
+        "",
+        "== exit",
+        "== exit ",
+        "== exit x",
+        "== exit 7 8",
+        "== exit 7x",
+        "== exit 0x7",
+        "== exit 7.0",
+        "== exit +7",
+        "== exit --7",
+        "== exit -",
+        "== exit  7",
+        "== exit \u{661}",
+        "== exit 2147483648",
+        "== exit -2147483649",
+        "==exit 7",
+        "== Exit 7",
+        " == exit 7",
+        "x== exit 7",
+        "== env CF=7",
+        "== exit 7 and the command goes on",
+    ] {
+        assert_eq!(exit_said(line), None, "{line:?}");
     }
 }
 
 #[test]
-fn a_run_that_names_no_variable_is_sent_what_it_was_sent_before_there_was_env() {
-    let without: Vec<_> = RECORDED.iter().filter(|run| run.env.is_empty()).collect();
-    assert_eq!(without.len(), 6, "the six the JavaScript's own test held");
-    for run in without {
-        assert!(!golden(run.golden).contains("== env "), "{}", run.golden);
+fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went() {
+    let text = script(&BUILD_STEPS, "cargo xtask test integration", &[]);
+    // `exit` is a word of the script in one line: the function that writes the
+    // line and exits, whose own words are the mark and the status.
+    let leaving: Vec<&str> = text
+        .lines()
+        .filter(|line| {
+            line.split(|c: char| !c.is_ascii_alphanumeric())
+                .any(|word| word == "exit")
+        })
+        .collect();
+    assert_eq!(
+        leaving,
+        [r#"function Exit-Run([int]$code) { Write-Output "== exit $code"; exit $code }"#]
+    );
+    // And it is what the lock, the unpacking, a step and the command leave by.
+    assert_eq!(text.matches("Exit-Run ").count(), 4, "{text}");
+    assert!(
+        text.contains(r#"$($other.Id)): one at a time."; Exit-Run 75 }"#),
+        "{text}"
+    );
+    // The last of the script is what the command ended with, said, and the record
+    // of the run taken away, which says nothing (so the line is the last).
+    assert!(
+        text.contains(
+            "cmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n} finally {\n  Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue\n}\n"
+        ),
+        "{text}"
+    );
+}
+
+/// The machine's own PowerShell, on a machine that has one: from every place the
+/// script leaves from, the function says the status as the last line the program
+/// writes and the program ends with it. (What ssh then answers is another matter:
+/// `windows`' module doc says.)
+#[cfg(windows)]
+#[test]
+fn powershell_says_how_it_went_in_its_last_line_from_every_place_the_script_leaves_from() {
+    use cf_base::env::Env;
+
+    use crate::process::{self, Invocation};
+    use crate::windows::tail::Tail;
+
+    let text = script(&[], "x", &[]);
+    let function = text
+        .lines()
+        .find(|line| line.starts_with("function Exit-Run"))
+        .unwrap();
+    let way_out = "try { %BODY% } finally { Remove-Item -LiteralPath (Join-Path $env:TEMP 'cf-nothing-here') -Force -ErrorAction SilentlyContinue }";
+    for (body, status) in [
+        // At the top, as the lock's.
+        ("Exit-Run 75".to_owned(), 75),
+        // In a try, as the unpacking's, and in a loop, as a step's.
+        (
+            way_out.replace("%BODY%", r#"cmd /c "exit 7"; if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }"#),
+            7,
+        ),
+        (
+            way_out.replace("%BODY%", r#"foreach ($step in @('a', 'b')) { Write-Output "== $step"; cmd /c "exit 3"; if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE } }"#),
+            3,
+        ),
+        // At the end, as the command's, whether it ended well or not at all as a number.
+        (way_out.replace("%BODY%", r#"cmd /c "exit 0"; Exit-Run $LASTEXITCODE"#), 0),
+        (way_out.replace("%BODY%", r#"cmd /c "exit -1"; Exit-Run $LASTEXITCODE"#), -1),
+    ] {
+        let script = format!("$ProgressPreference = 'SilentlyContinue'\n{function}\n{body}\n");
+        let ran = process::capture(
+            &Invocation::new("powershell", ".")
+                .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+                .arg(encode_script(&script).unwrap()),
+            &Env::from_process(),
+        )
+        .unwrap();
+        let mut tail = Tail::default();
+        tail.push(ran.stdout.as_bytes());
+        assert_eq!(
+            tail.last_line().as_deref().and_then(exit_said),
+            Some(status),
+            "{body}\n{}{}",
+            ran.stdout,
+            ran.stderr
+        );
+        assert_eq!(ran.code, status, "{body}\n{}{}", ran.stdout, ran.stderr);
     }
 }
 

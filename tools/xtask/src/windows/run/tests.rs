@@ -123,9 +123,21 @@ impl Rig {
 /// An scp that keeps what it is sent, and says so.
 const KEEPS: &str = r#"printf 'scp\t%s\t%s\n' "$1" "$3" >> "$CF_LOG"; cp "$2" "$CF_TARBALL""#;
 
-/// An ssh that says a word on each stream and ends with 75, as the machine's lock does.
-const REFUSES: &str =
-    r#"printf 'ssh\t%s\t%s\n' "$1" "$2" >> "$CF_LOG"; echo "out"; echo "err" >&2; exit 75"#;
+/// An ssh as zeewin's is: it says a word on each stream, then how the command
+/// ended (`== exit N`, which is `said`), and then ends with 1 if that was a
+/// failure and 0 if not, for its shell makes every failure 1.
+fn machine(said: i32) -> String {
+    let flattened = i32::from(said != 0);
+    format!(
+        r#"printf 'ssh\t%s\t%s\n' "$1" "$2" >> "$CF_LOG"; echo "out"; echo "err" >&2; echo "== exit {said}"; exit {flattened}"#
+    )
+}
+
+/// An ssh that says a word and ends with `status`, as a machine does that does not
+/// say how the command ended (a connection that was lost is one).
+fn silent(status: i32) -> String {
+    format!(r#"printf 'ssh\t%s\t%s\n' "$1" "$2" >> "$CF_LOG"; echo "out"; exit {status}"#)
+}
 
 /// An ssh that goes on until it is ended (the first time), and that answers
 /// the second time it is asked (the run's end there) with `status`. It writes
@@ -162,10 +174,12 @@ fn run_it(rig: &Rig, interrupt: &Interrupt) -> (Result<Outcome, Error>, String, 
 fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_answered() {
     let rig = Rig::new();
     rig.program("scp", KEEPS);
-    rig.program("ssh", REFUSES);
+    // The machine's lock: 75 said, and ssh ends with 1.
+    rig.program("ssh", &machine(75));
     let (ended, out, err) = run_it(&rig, &Interrupt::default());
     assert_eq!(ended.unwrap(), Outcome::Exited(75));
-    assert_eq!((out.as_str(), err.as_str()), ("out\n", "err\n"));
+    // What the machine said is the run's output, its last line too.
+    assert_eq!((out.as_str(), err.as_str()), ("out\n== exit 75\n", "err\n"));
 
     // The tree went first, to the profile's `consensflow-build.tgz`, then ssh was asked.
     let log = rig.log();
@@ -208,10 +222,50 @@ fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_
 }
 
 #[test]
+fn a_run_answers_what_the_machine_said_of_the_command_whatever_ssh_answered() {
+    // The machine's shell turns a failure into 1 (the lock's 75, the command's 7),
+    // and a success into 0: the run answers what was said, and says nothing more.
+    for (said, ssh) in [(75, 1), (7, 1), (255, 1), (0, 0), (130, 1)] {
+        let rig = Rig::new();
+        rig.program("scp", KEEPS);
+        rig.program("ssh", &machine(said));
+        let (ended, _, err) = run_it(&rig, &Interrupt::default());
+        assert_eq!(ended.unwrap(), Outcome::Exited(said), "ssh {ssh}");
+        assert_eq!(err, "err\n", "{said}");
+    }
+}
+
+#[test]
+fn a_run_whose_machine_said_nothing_of_the_command_answers_what_ssh_did_and_says_so() {
+    // A connection lost, a machine gone: ssh's status is what there is, and 0 is no success.
+    for (ssh, answer, why) in [
+        (255, 255, "so ssh's own status is the answer: 255"),
+        (1, 1, "so ssh's own status is the answer: 1"),
+        (
+            0,
+            1,
+            "and ssh's status 0 is not taken for a command's without it: answering 1",
+        ),
+    ] {
+        let rig = Rig::new();
+        rig.program("scp", KEEPS);
+        rig.program("ssh", &silent(ssh));
+        let (ended, out, err) = run_it(&rig, &Interrupt::default());
+        assert_eq!(ended.unwrap(), Outcome::Exited(answer), "ssh {ssh}");
+        assert_eq!(out, "out\n");
+        assert_eq!(
+            err,
+            format!("windows: no `== exit N` line ended the output, {why}\n"),
+            "ssh {ssh}"
+        );
+    }
+}
+
+#[test]
 fn a_run_asks_nothing_of_the_machine_when_the_tree_could_not_be_sent() {
     let rig = Rig::new();
     rig.program("scp", r#"echo "scp: connection refused" >&2; exit 3"#);
-    rig.program("ssh", REFUSES);
+    rig.program("ssh", &machine(0));
     let (ended, out, err) = run_it(&rig, &Interrupt::default());
     let said = ended.unwrap_err().to_string();
     assert!(said.starts_with("`scp -q "), "{said}");
@@ -232,7 +286,7 @@ fn a_step_that_failed_as_a_stop_ended_it_is_the_stop_when_the_stop_is_heard_a_mo
     let rig = Rig::new();
     // The scp that is ended by the Ctrl-C: it says it ran, and ends badly.
     rig.program("scp", r#": > "$CF_FIRST"; exit 3"#);
-    rig.program("ssh", REFUSES);
+    rig.program("ssh", &machine(0));
     // The grace is long: the wait for the stop ends when the stop is heard.
     let interrupt = Interrupt::graced(std::time::Duration::from_secs(60));
     let late = interrupt.clone();
@@ -334,7 +388,7 @@ fn a_stop_the_machine_could_not_be_asked_to_carry_out_is_said() {
 fn a_stop_heard_before_ssh_has_started_ends_nothing_there_for_nothing_has_started() {
     let rig = Rig::new();
     rig.program("scp", KEEPS);
-    rig.program("ssh", REFUSES);
+    rig.program("ssh", &machine(0));
     let interrupt = Interrupt::default();
     interrupt.raise();
     let (ended, out, err) = run_it(&rig, &interrupt);
@@ -378,7 +432,7 @@ fn a_run_whose_output_cannot_be_written_is_ended_there_too_and_says_why() {
 fn what_cannot_be_sent_is_refused_before_anything_is_done() {
     let rig = Rig::new();
     rig.program("scp", KEEPS);
-    rig.program("ssh", REFUSES);
+    rig.program("ssh", &machine(0));
     let mut options = rig.options();
     options.env = (0..12)
         .map(|at| (format!("CONSENSFLOW_TEST_VARIABLE_{at}"), "x".repeat(40)))

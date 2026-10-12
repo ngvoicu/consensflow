@@ -7,17 +7,38 @@
 //! tarball and are unpacked into a build folder there (a file gone from the tree
 //! since the last run goes from there too; `node_modules` and the Rust build
 //! stay). The command then runs in that folder with Node and Cargo on PATH, its
-//! output streamed back; its exit status is this one's, as ssh answers it (see
-//! below). One run at a time: a second is refused while the first goes on there
-//! (the script says "A run is still going on this machine (process N): one at a
-//! time." and exits 75), and a run stopped here (Ctrl-C, or a `kill`) is ended
-//! there too, which Windows' SSH server does not do (the status is then 130).
+//! output streamed back; its exit status is this one's, as the machine says it in
+//! the last line of the output (below). One run at a time: a second is refused
+//! while the first goes on there (the machine says "A run is still going on this
+//! machine (process N): one at a time." and ends with 75, which is the answer),
+//! and a run stopped here (Ctrl-C, or a `kill`) is ended there too, which
+//! Windows' SSH server does not do (the status is then 130).
 //!
-//! What ssh answers is the machine's: where its SSH server hands the command to
-//! `cmd.exe` it is the script's own status, and where it hands it to PowerShell
-//! (zeewin's is: `HKLM\SOFTWARE\OpenSSH\DefaultShell`) it is 0 or 1, for that
-//! PowerShell answers 1 for any command that failed, 75 and the command's own
-//! status included. The JavaScript this replaced had the same answer there.
+//! The status is said by the script, as the last line it writes (`== exit N`),
+//! and not taken from ssh, because what ssh answers is the machine's shell's.
+//! Measured on zeewin, whose SSH server's default shell is PowerShell
+//! (`HKLM\SOFTWARE\OpenSSH\DefaultShell` is
+//! `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`):
+//!
+//! - `ssh zeewin "cmd /c exit 7"` ends with 1, with no runner involved, and so
+//!   does `ssh zeewin "powershell -NoProfile -NonInteractive -Command exit 75"`;
+//! - a script sent as this one is, which wrote `last=7` and ended with `exit
+//!   $LASTEXITCODE`, ended ssh with 1, and the lock's own `exit 75` did too;
+//! - `ssh zeewin 'powershell -NoProfile -NonInteractive -Command "exit 7"; exit
+//!   $LASTEXITCODE'` ended with 7: the outer PowerShell answers 1 for any
+//!   command whose last program failed, and keeps the status only if it is
+//!   told to.
+//!
+//! A machine whose SSH server hands the command to `cmd.exe` would pass the
+//! status through; the line works wherever. So the run answers the status of the
+//! line, whatever ssh answered. Where the output does not end with that line (a
+//! connection lost, a machine gone) there is only ssh's own status, which is the
+//! answer if it is a failure and never 0 (a run that has not said it ended well
+//! did not end well), or 1 if ssh has none (a signal ended it). A stop is 130.
+//! A status that no program ends with (above 255, or below 0 as Windows' are:
+//! -1073741819) is answered as 1, for a system that keeps a byte of one would
+//! make 256 a success; the line in the output says what it was. Each answer
+//! that is not a plain one said by the machine is said on the error stream.
 //!
 //! ```text
 //! cargo xtask windows --host <ssh host> [--build] -- cargo xtask live paste
@@ -49,7 +70,8 @@
 //! run at the end.
 //!
 //! The modules: [`options`] (the words), [`script`] (the PowerShell that goes, as
-//! text), [`tree`] (the tarball), [`session`] (ssh, as it goes), [`interrupt`]
+//! text, and the line it ends by), [`tree`] (the tarball), [`session`] (ssh, as it
+//! goes, and the answer), [`tail`] (the last line of what it said), [`interrupt`]
 //! (a stop), [`run`] (one run) and [`matrix`].
 
 mod interrupt;
@@ -58,6 +80,7 @@ mod options;
 mod run;
 mod script;
 mod session;
+mod tail;
 #[cfg(test)]
 mod testing;
 mod tree;

@@ -177,7 +177,10 @@ fn a_run_sends_the_tree_as_it_is_and_has_the_machine_run_the_script_the_javascri
     let ran = on(
         &tree,
         fakes.path(),
-        &[("FAKE_CHILD_STDERR", "said")],
+        &[
+            ("FAKE_CHILD_STDERR", "said"),
+            ("FAKE_CHILD_LAST", "== exit 0"),
+        ],
         &[
             "windows",
             "--host",
@@ -209,6 +212,39 @@ fn a_run_sends_the_tree_as_it_is_and_has_the_machine_run_the_script_the_javascri
 }
 
 #[test]
+fn a_run_answers_what_the_machine_says_of_the_command_not_what_ssh_ends_with() {
+    let fakes = programs(&["scp", "ssh"]);
+    let tree = tree(&[("keep.txt", "kept")]);
+    // ssh ends with 0 (the fake child's way), and the line says the command ended with 7.
+    let ran = on(
+        &tree,
+        fakes.path(),
+        &[("FAKE_CHILD_LAST", "== exit 7")],
+        &["windows", "--host", "zeewin", "--", "cmd", "/c", "exit 7"],
+    );
+    assert_eq!(ran.status.code(), Some(7), "{}", err(&ran));
+    assert!(out(&ran).ends_with("== exit 7\n"), "{}", out(&ran));
+    assert_eq!(err(&ran), "");
+}
+
+#[test]
+fn a_run_whose_machine_did_not_say_how_the_command_ended_answers_1_though_ssh_said_0() {
+    let fakes = programs(&["scp", "ssh"]);
+    let tree = tree(&[("keep.txt", "kept")]);
+    let ran = on(
+        &tree,
+        fakes.path(),
+        &[],
+        &["windows", "--host", "zeewin", "--", "cmd", "/c", "exit 0"],
+    );
+    assert_eq!(ran.status.code(), Some(1), "{}", err(&ran));
+    assert_eq!(
+        err(&ran),
+        "windows: no `== exit N` line ended the output, and ssh's status 0 is not taken for a command's without it: answering 1\n"
+    );
+}
+
+#[test]
 fn a_run_starts_no_ssh_when_the_tree_could_not_be_sent() {
     let fakes = programs(&["scp", "ssh"]);
     let tree = tree(&[("keep.txt", "kept")]);
@@ -236,7 +272,7 @@ fn a_run_asks_for_the_folder_the_build_and_the_variables_it_was_given() {
     let ran = on(
         &tree,
         fakes.path(),
-        &[],
+        &[("FAKE_CHILD_LAST", "== exit 0")],
         &[
             "windows",
             "--host",
@@ -275,7 +311,7 @@ fn a_matrix_runs_each_pair_on_the_machine_builds_it_once_and_keeps_a_log_of_each
     let ran = on(
         &tree,
         fakes.path(),
-        &[],
+        &[("FAKE_CHILD_LAST", "== exit 0")],
         &[
             "windows-matrix",
             "--host",
@@ -342,6 +378,33 @@ fn script(folder: &Path, name: &str, body: &str) {
     let path = folder.join(name);
     fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// What zeewin does: the command's own status is said in the last line, and ssh
+/// ends with 1 for any failure, the command's own and the lock's refusal alike.
+#[cfg(unix)]
+#[test]
+fn a_run_answers_the_status_the_machine_says_though_its_ssh_ends_with_1() {
+    for (said, answer) in [(7, 7), (75, 75), (0, 0)] {
+        let fakes = tempfile::tempdir().unwrap();
+        script(fakes.path(), "scp", "exit 0");
+        let flattened = i32::from(said != 0);
+        script(
+            fakes.path(),
+            "ssh",
+            &format!("echo \"in the run\"; echo \"== exit {said}\"; exit {flattened}"),
+        );
+        let tree = tree(&[("keep.txt", "kept")]);
+        let ran = on(
+            &tree,
+            fakes.path(),
+            &[],
+            &["windows", "--host", "zeewin", "--", "cmd", "/c", "x"],
+        );
+        assert_eq!(ran.status.code(), Some(answer), "said {said}");
+        assert_eq!(out(&ran), format!("in the run\n== exit {said}\n"));
+        assert_eq!(err(&ran), "");
+    }
 }
 
 /// What a stop does to a run, as a person causes it: Ctrl-C (the signal it is)

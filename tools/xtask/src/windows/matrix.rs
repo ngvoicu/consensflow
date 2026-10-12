@@ -8,8 +8,10 @@
 //! `cargo xtask eval ...` in the copy (`--build` builds the copy before the first
 //! run that goes). What the eval says is read for its checks (`PASS …` and `FAIL …`
 //! lines) and for the daemon it says it ran against (`daemon: native (rust 3.0.0)`,
-//! which the line of its run ends with). A run that could not even start is a line
-//! of no verdict, and its reason is in its log.
+//! which the line of its run ends with). A run that could not even start, or whose
+//! output has no check in it, is a line of no verdict, which says the status the
+//! run ended with (the command's own, as the machine said it) and where its log
+//! is; the reason of one that could not start is in its log.
 
 use std::cell::RefCell;
 use std::fs::{self, File};
