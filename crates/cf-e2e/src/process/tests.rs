@@ -287,8 +287,13 @@ mod shell {
         let mut program = sh("exec sleep 30").spawn().unwrap();
         let id = program.id();
         assert!(is_alive(id));
-        signal(id, Signal::Interrupt).unwrap();
-        program.wait(Duration::from_secs(10)).unwrap();
+        // Ended by a TERM: a run started in the background of a script (a gate run by
+        // `nohup … &`) has its interrupts ignored, and so has every program under it.
+        signal(id, Signal::Terminate).unwrap();
+        assert!(
+            program.wait(Duration::from_secs(10)).unwrap().is_some(),
+            "the signal did not end it"
+        );
         assert!(!is_alive(id));
         assert!(signal(id, Signal::Terminate).is_err(), "nothing to signal");
         // No such process id at all.
