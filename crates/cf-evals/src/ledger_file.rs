@@ -172,3 +172,114 @@ pub fn load_ledger(
 ) -> Result<Connection> {
     load_rows(file, &fixture_sql(name)?, wal, replacing)
 }
+
+/// The chief of a project written by hand: the harness it runs on, and the
+/// agent of the roster it is, if it is one.
+#[derive(Debug, Clone, Copy)]
+pub struct Chief<'a> {
+    pub harness: &'a str,
+    pub agent: Option<&'a str>,
+}
+
+/// A member of the staff of a project written by hand.
+#[derive(Debug, Clone, Copy)]
+pub struct Member<'a> {
+    pub agent: &'a str,
+    pub harness: &'a str,
+    pub roles: &'a [&'a str],
+    pub tier: &'a str,
+}
+
+/// A project as the ledger's `createProject` leaves it, which [`add_project`]
+/// writes by hand.
+#[derive(Debug, Clone, Copy)]
+pub struct NewProject<'a> {
+    pub directory: &'a str,
+    pub name: &'a str,
+    pub chief: Chief<'a>,
+    pub staff: &'a [Member<'a>],
+}
+
+/// A project with its human, its chief and its staff, as the ledger's
+/// `createProject` leaves it, written by hand into the open ledger `db`: the rows
+/// of the project, of each participant and the log of each member's joining,
+/// which comes before the log of the project, as the ledger has it. All or
+/// nothing: a member that cannot join (one agent twice) leaves no project
+/// behind. The id of the project.
+pub fn add_project(db: &Connection, project: &NewProject) -> Result<i64> {
+    db.execute_batch("BEGIN IMMEDIATE")?;
+    match write_project(db, project) {
+        Ok(id) => {
+            db.execute_batch("COMMIT")?;
+            Ok(id)
+        }
+        Err(failure) => {
+            // The failure is the answer; a rollback that fails too adds nothing to it.
+            let _ = db.execute_batch("ROLLBACK");
+            Err(failure)
+        }
+    }
+}
+
+/// The rows of [`add_project`], in the transaction the caller began.
+fn write_project(db: &Connection, project: &NewProject) -> Result<i64> {
+    let at = crate::clock::now();
+    db.execute(
+        "INSERT INTO project (directory, name, state, gate, created_at, updated_at)
+         VALUES (?1, ?2, 'open', 0, ?3, ?3)",
+        rusqlite::params![project.directory, project.name, at],
+    )?;
+    let id = db.last_insert_rowid();
+    let join = |handle: &str,
+                role: &str,
+                roles: &str,
+                agent: Option<&str>,
+                harness: Option<&str>,
+                tier: Option<&str>| {
+        db.execute(
+            "INSERT INTO participant (project_id, handle, role, roles, agent, harness, designer, tier, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)",
+            rusqlite::params![id, handle, role, roles, agent, harness, tier, at],
+        )
+    };
+    let log = |kind: &str, data: &serde_json::Value| {
+        db.execute(
+            "INSERT INTO event (project_id, at, kind, data) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![id, at, kind, data.to_string()],
+        )
+    };
+    join("human", "human", "[]", None, None, None)?;
+    join(
+        "chief",
+        "chief",
+        "[]",
+        project.chief.agent,
+        Some(project.chief.harness),
+        None,
+    )?;
+    for member in project.staff {
+        let roles = serde_json::json!(member.roles);
+        join(
+            member.agent,
+            member.roles.first().copied().unwrap_or_default(),
+            &roles.to_string(),
+            Some(member.agent),
+            Some(member.harness),
+            Some(member.tier),
+        )?;
+        log(
+            "member.added",
+            &serde_json::json!({
+                "handle": member.agent,
+                "role": member.roles.first().copied().unwrap_or_default(),
+                "roles": member.roles,
+                "harness": member.harness,
+            }),
+        )?;
+    }
+    log(
+        "project.created",
+        &serde_json::json!({ "name": project.name, "directory": project.directory }),
+    )?;
+    Ok(id)
+}

@@ -218,3 +218,108 @@ fn migrations_that_are_not_numbered_one_after_another_from_the_first_are_refused
     );
     assert!(migrations_in(&folder.path().join("missing")).is_err());
 }
+
+/// The project of the tests of [`add_project`].
+fn probe<'a>(staff: &'a [Member<'a>]) -> NewProject<'a> {
+    NewProject {
+        directory: "/work/probe",
+        name: "round trip probe",
+        chief: Chief {
+            harness: "claude-code",
+            agent: Some("probe-chief"),
+        },
+        staff,
+    }
+}
+
+const PROBE: Member = Member {
+    agent: "probe",
+    harness: "claude-code",
+    roles: &["worker"],
+    tier: "standard",
+};
+
+#[test]
+fn a_project_written_by_hand_has_a_human_the_chief_on_its_agent_and_each_member_and_the_log_of_each_members_joining(
+) {
+    let folder = tempfile::tempdir().unwrap();
+    let db = open(&file(&folder, 1), false).unwrap();
+    let id = add_project(&db, &probe(&[PROBE])).unwrap();
+    // Each row as SQLite quotes its columns: a text in quotes, a number as it is, NULL.
+    let lines = |sql: &str| -> Vec<String> {
+        db.prepare(sql)
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .map(|line| line.unwrap())
+            .collect()
+    };
+    assert_eq!(
+        lines(
+            "SELECT quote(handle) || ' ' || quote(role) || ' ' || quote(roles) || ' ' ||
+                    quote(agent) || ' ' || quote(harness) || ' ' || quote(designer) || ' ' ||
+                    quote(tier) || ' ' || quote(left_at)
+             FROM participant ORDER BY id"
+        ),
+        [
+            "'human' 'human' '[]' NULL NULL 0 NULL NULL",
+            "'chief' 'chief' '[]' 'probe-chief' 'claude-code' 0 NULL NULL",
+            "'probe' 'worker' '[\"worker\"]' 'probe' 'claude-code' 0 'standard' NULL",
+        ]
+    );
+    assert_eq!(
+        lines("SELECT quote(id) || ' ' || quote(name) || ' ' || quote(directory) || ' ' || quote(state) || ' ' || quote(gate) FROM project"),
+        [format!("{id} 'round trip probe' '/work/probe' 'open' 0")]
+    );
+    // The member's joining is logged before the project is, as the ledger does.
+    let events: Vec<(i64, String, serde_json::Value)> = db
+        .prepare("SELECT project_id, kind, data FROM event ORDER BY id")
+        .unwrap()
+        .query_map([], |row| {
+            let data: String = row.get(2)?;
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                serde_json::from_str(&data).unwrap(),
+            ))
+        })
+        .unwrap()
+        .map(|row| row.unwrap())
+        .collect();
+    assert_eq!(
+        events,
+        [
+            (
+                id,
+                "member.added".to_owned(),
+                serde_json::json!({
+                    "handle": "probe", "role": "worker", "roles": ["worker"], "harness": "claude-code"
+                })
+            ),
+            (
+                id,
+                "project.created".to_owned(),
+                serde_json::json!({ "name": "round trip probe", "directory": "/work/probe" })
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_project_is_all_or_nothing_a_member_that_cannot_join_leaves_no_project_behind() {
+    let folder = tempfile::tempdir().unwrap();
+    let db = open(&file(&folder, 1), false).unwrap();
+    let twice = add_project(&db, &probe(&[PROBE, PROBE]))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        twice.contains("UNIQUE") || twice.to_lowercase().contains("constraint"),
+        "{twice}"
+    );
+    assert_eq!(count(&db, "project"), 0);
+    assert_eq!(count(&db, "event"), 0);
+    assert_eq!(count(&db, "participant"), 0);
+    // The ledger is as it was: a project can be added after the refusal.
+    add_project(&db, &probe(&[PROBE])).unwrap();
+    assert_eq!(count(&db, "project"), 1);
+}

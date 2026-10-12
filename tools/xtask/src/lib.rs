@@ -20,11 +20,10 @@
 //! is S13's: the mutation tests, with their data in `tests/plants`. S14 ports
 //! the last JavaScript outside the page and the extensions: `live` (the one
 //! command that runs every live test of `crates/cf-e2e`, whatever its name)
-//! was made whole by S14.0, and so were `windows` (`windows`, `windows-matrix`:
-//! the runs on the Windows machine) and `scrub_transcript` by S14.4, which S14.0
-//! had left with rows that say "not ported yet". The one that still says it is
-//! `evals` (`eval`, `eval summary`, `watch`), which S14.3 fills by handing them
-//! to `crates/cf-evals`. The lead's are this list of modules, `dispatch`,
+//! was made whole by S14.0, `windows` (`windows`, `windows-matrix`: the runs on
+//! the Windows machine) and `scrub_transcript` by S14.4, and `evals` (`eval`,
+//! `eval summary`, `watch`) by S14.3, which hands them to `crates/cf-evals`.
+//! The lead's are this list of modules, `dispatch`,
 //! `process`, `context`, `check`, the manifests and the lockfile, the alias, and
 //! the call sites (the npm scripts, the workflows, the drivers that run a
 //! command).

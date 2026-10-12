@@ -34,8 +34,9 @@ daemon-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "page"
 daemon-screens = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "screens"]
 # The engine's dispatcher tests, whole.
 engine-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher"]
-# The chief eval's plumbing counts, over a ledger with a result withdrawn.
-evals-measure = ["node", "--test", "--test-reporter=tap", "tests/evals-measure.test.mjs"]
+# The chief eval's measure of a ledger: its plumbing counts, over a ledger with a result
+# withdrawn, and every number of the eleven ledgers it is held to.
+evals-measure = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "measure"]
 # The one test of what opening the app prepares that a folder's writability breaks.
 harness-install = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "install"]
 # A Claude window on the records of two live runs: its looks and its pastes.
