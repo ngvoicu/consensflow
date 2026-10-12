@@ -13,7 +13,7 @@ use crate::shared::record::reading::Role;
 
 const MARKER: &str = "[Request interrupted by user]";
 
-/// The records of a live run (`tests/live/scrub-transcript.mjs` made them), for
+/// The records of a live run (`cargo xtask scrub-transcript` made them), for
 /// the session of these tests.
 fn live(name: &str) -> Vec<Value> {
     let text = match name {

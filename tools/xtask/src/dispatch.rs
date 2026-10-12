@@ -75,19 +75,6 @@ pub enum Failure {
     /// What it had to say could not be written.
     #[error(transparent)]
     Io(#[from] io::Error),
-    /// The command is one that a later landing of the port to Rust has not
-    /// made yet: the status is 1, and the words say what to run until then.
-    #[error("{command} is not ported yet: {until}")]
-    NotYet {
-        command: &'static str,
-        until: &'static str,
-    },
-}
-
-/// What a command that is not made yet answers: it is [`Failure::NotYet`], for
-/// `command`, saying what `until` the port is made is to be run.
-pub fn not_yet(command: &'static str, until: &'static str) -> Result<i32, Failure> {
-    Err(Failure::NotYet { command, until })
 }
 
 /// Every command, in the order `--help` lists them.

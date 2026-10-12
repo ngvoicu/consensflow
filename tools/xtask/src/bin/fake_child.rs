@@ -5,11 +5,13 @@
 //! On its standard output, one line each: `cwd: <folder>`, then `arg: <word>` for
 //! every argument (as Rust writes a string, so that a space, a quote or an empty
 //! word shows), then, for each variable named in `FAKE_CHILD_REPORT` (comma
-//! apart), `var <NAME>: <value>` or `var <NAME>: unset`. `FAKE_CHILD_STDERR` is
-//! written to its standard error, and `FAKE_CHILD_EXIT` is the code it exits
-//! with (0 when it is not a number or not there). With `FAKE_CHILD_QUIET` set it
-//! reports nothing: for a test that lets it write where the test's own output
-//! goes.
+//! apart), `var <NAME>: <value>` or `var <NAME>: unset`. `FAKE_CHILD_LAST` is a
+//! line it then writes, the last it says on its standard output (`== exit 0`, for
+//! the runs on the Windows machine, which end by saying how the command ended).
+//! `FAKE_CHILD_STDERR` is written to its standard error, and `FAKE_CHILD_EXIT` is
+//! the code it exits with (0 when it is not a number or not there). With
+//! `FAKE_CHILD_QUIET` set it reports nothing: for a test that lets it write where
+//! the test's own output goes.
 
 #![forbid(unsafe_code)]
 
@@ -42,6 +44,9 @@ fn main() -> ExitCode {
                 }
             }
         }
+    }
+    if let Some(last) = env.text("FAKE_CHILD_LAST") {
+        let _ = writeln!(out, "{last}");
     }
     let _ = out.flush();
     if let Some(text) = env.text("FAKE_CHILD_STDERR") {
