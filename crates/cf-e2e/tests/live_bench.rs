@@ -11,9 +11,10 @@
 //! on Sonnet) must run it itself; the daemon opens the worker's window with the task,
 //! the worker must answer in full-permission mode, the core must record the answer as
 //! the task's result and deliver it into the chief's window, and the worker must read
-//! idle. Then the app restarts and the project must come back on its chief's own
-//! conversation. A question's answer must also have been received at its harness's
-//! door (`cargo xtask live door`): claimed, acknowledged, and never pasted.
+//! idle. Then the app restarts, the project waits suspended, and the human's Resume
+//! must bring it back on its chief's own conversation. A question's answer must also
+//! have been received at its harness's door (`cargo xtask live door`): claimed,
+//! acknowledged, and never pasted.
 //!
 //! State lives in a throwaway home; the harnesses use the real logins.
 //!
@@ -170,7 +171,8 @@ fn the_core_delivers_between_a_real_chief_and_real_workers_and_comes_back_after_
     }
 
     // The restart: a new daemon and pane host over the same home, in the app's quit
-    // order. The project must come back on its chief's own conversation.
+    // order. The project waits suspended until the human resumes it, and must come
+    // back on its chief's own conversation.
     let mut checks = bench.into_checks();
     if options.all {
         let before = members

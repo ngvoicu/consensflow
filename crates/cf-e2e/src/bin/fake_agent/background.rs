@@ -33,7 +33,8 @@
 //!
 //! The server a harness starts ([`Server`], told by `CF_TEST_MCP_SERVER`) is such
 //! a job in the window's group, as the window opens or, as Claude Code starts its
-//! servers, after the first message of the window has shown; with
+//! servers, after the first message of the window has shown; or in a group of its
+//! own as the window opens, as Codex starts its helpers; with
 //! `CF_TEST_MCP_BROWSER` set it launches its browser as it starts.
 
 use std::fs;
@@ -83,16 +84,20 @@ pub enum Group {
 }
 
 /// When the harness of a window starts its MCP server, as `CF_TEST_MCP_SERVER`
-/// says: any word but `late` is with the window, before any turn (the server a
-/// window has before the turn is marked); `late` is as the window takes its first
-/// message, which is when Claude Code starts its servers, and so after the
-/// daemon has marked where that turn began.
+/// says: any word but `late` and `apart` is with the window, before any turn (the
+/// server a window has before the turn is marked); `late` is as the window takes
+/// its first message, which is when Claude Code starts its servers, and so after
+/// the daemon has marked where that turn began; `apart` is with the window too,
+/// in a group of its own, as Codex starts its helpers: only what the window had
+/// before its turn tells it from the turn's work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Server {
     /// The harness starts none.
     Never,
     /// It starts one as the window opens, before any turn.
     WithTheWindow,
+    /// It starts one as the window opens, in a group of its own.
+    ApartWithTheWindow,
     /// It starts one as the window takes its first message.
     AfterTheFirstMessage,
 }
@@ -103,6 +108,7 @@ impl Server {
         match variable {
             None | Some("") => Self::Never,
             Some("late") => Self::AfterTheFirstMessage,
+            Some("apart") => Self::ApartWithTheWindow,
             Some(_) => Self::WithTheWindow,
         }
     }
@@ -111,7 +117,8 @@ impl Server {
     /// window begins.
     pub fn as_the_window_opens(self, jobs: &Jobs) -> Result<(), String> {
         match self {
-            Self::WithTheWindow => jobs.start_server(),
+            Self::WithTheWindow => jobs.start_server(Group::Window),
+            Self::ApartWithTheWindow => jobs.start_server(Group::Own),
             Self::Never | Self::AfterTheFirstMessage => Ok(()),
         }
     }
@@ -127,7 +134,7 @@ impl Server {
         let jobs = Arc::clone(jobs);
         thread::spawn(move || {
             thread::sleep(THINKING);
-            if let Err(failed) = jobs.start_server() {
+            if let Err(failed) = jobs.start_server(Group::Window) {
                 let _ = writeln!(io::stderr(), "fake-agent: the server: {failed}");
             }
         });
@@ -163,17 +170,10 @@ impl Jobs {
         self
     }
 
-    /// Starts the server of the window's harness, which runs past any case, in the
-    /// group of the window's program, and the browser it launches if it does.
-    fn start_server(&self) -> Result<(), String> {
-        self.begin(
-            SERVER,
-            SERVER_SECONDS,
-            false,
-            Group::Window,
-            self.browser,
-            || {},
-        )
+    /// Starts the server of the window's harness, which runs past any case, in
+    /// `group`, and the browser it launches if it does.
+    fn start_server(&self, group: Group) -> Result<(), String> {
+        self.begin(SERVER, SERVER_SECONDS, false, group, self.browser, || {})
     }
 
     /// Starts the job `label`, which runs `seconds` (and ignores the requests
@@ -486,6 +486,7 @@ mod tests {
         assert_eq!(Server::of(Some("1")), Server::WithTheWindow);
         assert_eq!(Server::of(Some("yes")), Server::WithTheWindow);
         assert_eq!(Server::of(Some("late")), Server::AfterTheFirstMessage);
+        assert_eq!(Server::of(Some("apart")), Server::ApartWithTheWindow);
     }
 
     #[test]

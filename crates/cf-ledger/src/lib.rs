@@ -39,8 +39,8 @@ pub use cf_proto::ledger::{
     Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationView, Cut,
     DeletedProject, EventView, HeldTask, Lane, LastSwitch, LatestMessages, LatestTranscript,
     MemberView, MessageView, ParticipantView, ProjectView, Question, QuestionOption, RemovedMember,
-    StaffMember, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits, TaskThread,
-    TaskTranscript, TaskView, TierChange,
+    Resume, StaffMember, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits,
+    TaskThread, TaskTranscript, TaskView, TierChange,
 };
 pub use conversations::{ChiefSwitch, TRANSCRIPT_ITEM_MAX};
 #[cfg(feature = "test-support")]

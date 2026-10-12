@@ -8,14 +8,14 @@ use std::collections::{HashMap, HashSet};
 
 use cf_base::text::utf16_len;
 use cf_proto::ledger::{
-    Board, Cut, Lane, LatestMessages, LatestTranscript, MessageView, TaskCard, TaskThatFits,
-    TaskView, TranscriptItem,
+    Board, Cut, Lane, LatestMessages, LatestTranscript, MessageView, Resume, TaskCard,
+    TaskThatFits, TaskView, TranscriptItem,
 };
 use rusqlite::params;
 use serde::Serialize;
 
 use crate::conversations::{transcript, TRANSCRIPT_ITEM_MAX};
-use crate::model::{cut, title_of, LedgerError};
+use crate::model::{cut, title_of, LedgerError, FINISHED_TASK_STATES};
 use crate::projects::project;
 use crate::store::Store;
 use crate::tasks::task;
@@ -194,6 +194,26 @@ pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError
         lane.as_deref()
             .is_some_and(|handle| handles.contains(handle))
     };
+    // What a suspended project waits to start: its tasks not finished, and the
+    // messages for its agents' windows that nothing delivers meanwhile.
+    let resume = if project.state == "suspended" {
+        Some(Resume {
+            tasks: cards
+                .iter()
+                .filter(|(card, _)| !FINISHED_TASK_STATES.contains(&card.state.as_str()))
+                .count()
+                .try_into()
+                .unwrap_or(i64::MAX),
+            messages: store.db.query_row(
+                "SELECT COUNT(*) FROM message m JOIN participant p ON p.id = m.recipient_id
+                 WHERE m.project_id = ? AND m.state = 'queued' AND p.role != 'human'",
+                [project_id],
+                |row| row.get(0),
+            )?,
+        })
+    } else {
+        None
+    };
     Ok(Board {
         // Every task no lane has; one given by name waits in its own lane.
         open: cards
@@ -215,6 +235,7 @@ pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError
             .collect(),
         project,
         gated,
+        resume,
     })
 }
 

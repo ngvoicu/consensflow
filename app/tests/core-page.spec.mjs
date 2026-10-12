@@ -84,13 +84,12 @@ const message = (id, kind, sender, recipient, body, minutesAgo = 1, extra = {}) 
 function model() {
   return {
     projects: [
-      { id: 1, name: 'harbour', directory: '/work/harbour', state: 'open', resumeOnStart: false },
+      { id: 1, name: 'harbour', directory: '/work/harbour', state: 'open' },
       {
         id: 2,
         name: 'foundry',
         directory: '/work/foundry',
         state: 'suspended',
-        resumeOnStart: false,
       },
     ],
     // Every agent, as the roster lists it: the catalog's and the human's own, each with its tier.
@@ -3242,6 +3241,8 @@ function closedFoundry() {
       pane: null,
     },
   )
+  // What its Resume will start: the lexer, not accepted yet, and two messages that wait.
+  board.resume = { tasks: 1, messages: 2 }
   board.gated = [
     {
       id: 30,
@@ -3284,8 +3285,8 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
   await unfold(page)
   const main = page.locator('main.main')
   await expect(main).toHaveAttribute('data-suspended', 'true')
-  const banner = page.getByRole('status').filter({ hasText: 'foundry is closed.' })
-  await expect(banner).toContainText('nothing is delivered until you resume it')
+  const banner = page.getByRole('status').filter({ hasText: 'Waiting for Resume.' })
+  await expect(banner).toContainText('1 open task, 2 messages waiting.')
   await expect(page.getByRole('button', { name: 'Staff' })).toBeDisabled()
   await expect(page.locator('.terminal-card')).toHaveCount(0)
   // Nothing on the board acts: no button for it to be reached by, with the keyboard either.
@@ -3333,6 +3334,33 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
   await unfold(page)
   await expect(main).toHaveAttribute('data-suspended', 'false')
   await expect(page.getByRole('button', { name: 'Staff' })).toBeEnabled()
+})
+
+test('says in one line that a suspended project waits for Resume and what Resume will start', async ({
+  page,
+}) => {
+  const data = closedFoundry()
+  data.boards[2].resume = { tasks: 3, messages: 1 }
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await open(page, data)
+  await chooseProject(page, 'foundry')
+  const banner = page.getByRole('status').filter({ hasText: 'Waiting for Resume.' })
+  await expect(banner.locator('strong')).toHaveText('Waiting for Resume.')
+  await expect(banner.locator('span')).toHaveText('3 open tasks, 1 message waiting.')
+  // One line: the banner is no taller than its button and the padding round it.
+  const [height, button] = await Promise.all([
+    banner.evaluate((node) => node.getBoundingClientRect().height),
+    banner
+      .getByRole('button', { name: 'Resume project' })
+      .evaluate((node) => node.getBoundingClientRect().height),
+  ])
+  expect(height).toBeLessThan(button + 40)
+  // Nothing open and nothing waiting is said as it is.
+  await page.evaluate(() => {
+    window.__model.boards[2].resume = { tasks: 0, messages: 0 }
+    window.__listeners.get('state-changed')()
+  })
+  await expect(banner.locator('span')).toHaveText('0 open tasks, 0 messages waiting.')
 })
 
 test('deletes a closed project for good once the human confirms, never an open one', async ({
@@ -3740,7 +3768,6 @@ test('starts a project while the board shown is on its way, and its windows go o
         name: 'new',
         directory: '/work/fresh',
         state: 'open',
-        resumeOnStart: false,
       })
       window.__listeners.get('state-changed')()
     }, 100)

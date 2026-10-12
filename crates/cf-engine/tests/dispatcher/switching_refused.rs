@@ -276,7 +276,8 @@ fn switches_a_chief_that_had_a_message_on_its_way_when_the_daemon_stopped() {
     context.advance(5_000);
     context.ledger.borrow_mut().suspend_for_restart().unwrap();
     let after = context.make();
-    after.resume_after_restart().unwrap();
+    after.settle_after_restart().unwrap();
+    after.resume_project(project.id).unwrap();
 
     after
         .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Now, false)

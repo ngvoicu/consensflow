@@ -63,10 +63,11 @@ impl Root {
         (self.bin().join("asked"), self.bin().join("helper"))
     }
 
-    /// A project that was open when the last daemon ended, with its chief on
-    /// a saved agent, a worker `zeus`, and a question the chief put to zeus:
-    /// a door's wait. The question's number.
-    pub fn open_project_with_a_question(&self) -> i64 {
+    /// A project that was open when the last daemon ended (the next one starts
+    /// it suspended, until the human resumes it), with its chief on a saved
+    /// agent, a worker `zeus`, and a question the chief put to zeus: a door's
+    /// wait. The project's number, and the question's.
+    pub fn open_project_with_a_question(&self) -> (i64, i64) {
         std::fs::create_dir_all(self.home()).expect("the home");
         std::fs::write(
             self.home().join("agents.json"),
@@ -111,7 +112,7 @@ impl Root {
             )
             .expect("a question");
         ledger.close().expect("the ledger closed");
-        question.id
+        (project.id, question.id)
     }
 }
 
@@ -232,6 +233,15 @@ impl Daemon {
 
     pub fn ping(&mut self, id: &str) {
         self.send(&json!({ "v": 1, "id": id, "kind": "req", "op": "ping", "body": {} }));
+    }
+
+    /// The human's Resume of `project`, as the page asks it: a daemon starts
+    /// with every project suspended, and the chief's window opens only now.
+    pub fn resume(&mut self, project: i64) {
+        self.send(&json!({
+            "v": 1, "id": "r-resume", "kind": "req", "op": "project.resume",
+            "body": { "project": project }
+        }));
     }
 
     /// Its input ended, as the app ends it.

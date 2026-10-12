@@ -14,7 +14,8 @@
 //! processes a harness keeps of its own, which are no work a turn left (`servers`),
 //! and what a
 //! window is given while the words that were for it wait at the human's gate
-//! (`approval`), and the tester, which Node's staff never had (`testers`).
+//! (`approval`), and the tester, which Node's staff never had (`testers`), and
+//! the human's Resume of what a start suspended (`resume`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -49,6 +50,7 @@ mod pending_agents;
 mod quota;
 mod receipts;
 mod restart;
+mod resume;
 mod review;
 mod separate_callbacks;
 mod servers;

@@ -10,7 +10,7 @@ use cf_engine::testing::Context;
 use cf_harness::records::Role;
 use serde_json::json;
 
-use crate::fixtures::assert_match;
+use crate::fixtures::{assert_match, last_message};
 use crate::traces::held_to;
 
 const SUITES: &[&str] = &["a restart while a message is on its way"];
@@ -40,13 +40,15 @@ fn gives_a_message_its_window_never_showed_back_to_the_queue_with_its_attempt_an
     // The app quits with it on its way: the daemon stops before the window does.
     context.ledger.borrow_mut().suspend_for_restart().unwrap();
     let after = context.make();
-    after.resume_after_restart().unwrap();
+    after.settle_after_restart().unwrap();
     let queued = context.message(one.id);
     assert_eq!(
         (queued.state.as_str(), queued.attempts),
         ("queued", 0),
         "its window died before it landed: the attempt comes back"
     );
+    // The human resumes the project, and the chief comes back to it.
+    after.resume_project(project.id).unwrap();
     let two = context.note(project.id, "zeus", "chief", "Two");
     after.pass().unwrap();
     after.pass().unwrap();
@@ -90,10 +92,11 @@ fn sends_nothing_again_that_its_harness_took_though_the_copy_of_its_window_misse
 
     context.ledger.borrow_mut().suspend_for_restart().unwrap();
     let after = context.make();
-    after.resume_after_restart().unwrap();
+    after.settle_after_restart().unwrap();
     let settled = context.message(note.id);
     assert_eq!(settled.state, "delivered");
     assert_eq!(settled.receipt, json!({ "item": &*taken.id }));
+    after.resume_project(project.id).unwrap();
     after.pass().unwrap();
     after.pass().unwrap();
     let again = context
@@ -138,7 +141,7 @@ fn confirms_a_message_whose_header_the_copy_of_its_window_already_shows() {
         .unwrap();
 
     context.ledger.borrow_mut().suspend_for_restart().unwrap();
-    context.make().resume_after_restart().unwrap();
+    context.make().settle_after_restart().unwrap();
     let settled = context.message(note.id);
     assert_eq!(settled.state, "delivered");
     assert_eq!(settled.receipt, json!({ "item": &*shown.id }));
@@ -169,7 +172,8 @@ fn opens_a_members_session_again_on_its_own_conversation_with_the_brief_it_was_o
 
     context.ledger.borrow_mut().suspend_for_restart().unwrap();
     let after = context.make();
-    after.resume_after_restart().unwrap();
+    after.settle_after_restart().unwrap();
+    after.resume_project(project.id).unwrap();
     after.pass().unwrap();
     let launch = context.adapter.prepared().pop().unwrap();
     assert_eq!(
@@ -217,6 +221,15 @@ fn gives_a_paste_back_to_the_queue_when_its_window_closes_while_the_harness_take
 
     *context.adapter.deliver.borrow_mut() = None;
     context.resume_project(project.id).unwrap();
+    // The harness had taken the paste, so the chief's turn was cut with it: it
+    // is told so first, and the message waits behind the turn that answers it.
+    assert_match(
+        &last_message(&context),
+        r"^\[ConsensFlow m-\d+ · note from ConsensFlow\]\nConsensFlow stopped in the middle of your turn",
+    );
+    context.pass().unwrap();
+    assert_eq!(context.message(note.id).state, "queued");
+    context.adapter.answer("chief", "Going on.");
     context.pass().unwrap();
     assert_eq!(context.message(note.id).state, "delivering");
     context.pass().unwrap();

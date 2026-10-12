@@ -32,6 +32,7 @@ use cf_base::js;
 use cf_base::time::{parse, Clock};
 use cf_ledger::model::{parse_gate, parse_roles};
 use cf_ledger::testing::{
+    hold_apart_the_resume_mark, hold_apart_the_resume_mark_in_a_dump,
     hold_apart_what_node_never_had_in_its_schema, hold_apart_what_node_never_logs,
     hold_apart_what_node_never_writes,
 };
@@ -115,6 +116,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-messages-022", 12, DOOR_READ),
     ("ledger-page-reads-009", 44, RESULT_ACCEPTED),
     ("ledger-projects-002", 14, KEPT_IN_BRIEF),
+    ("ledger-projects-011", 8, NO_MARK_TO_FORGET),
     ("ledger-schema-005", 15, KEPT_IN_BRIEF),
     ("ledger-schema-006", 18, KEPT_IN_BRIEF),
     ("ledger-schema-007", 15, KEPT_IN_BRIEF),
@@ -184,6 +186,11 @@ const DOOR_READ: &str =
 /// An answer is received, not read at its creation.
 const READ_AT_ONCE: &str =
     "a choice answer lands queued: Node marked it read and stamped it at its creation, two clock readings more";
+/// A project is suspended at a start with no mark that it comes back by itself,
+/// so there is none to forget, and `forgetResume` of a project that is not there
+/// refuses nothing.
+const NO_MARK_TO_FORGET: &str =
+    "`forgetResume` of a project that is not there answers nothing: no project is marked to come back by itself, so there is no mark to forget, where Node refused it as an unknown project";
 /// What a window kept goes to the next window in the brief, not with the old one.
 const KEPT_IN_BRIEF: &str =
     "a release carries what the old window kept into the task's brief, once (\"Kept from before\"); Node let it go with the window";
@@ -654,7 +661,9 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
         "deleteProject" => encode(ledger.delete_project(id())),
         "setGate" => parse_gate(arg(args, 1)).and_then(|gate| encode(ledger.set_gate(id(), gate))),
         "suspendForRestart" => encode(ledger.suspend_for_restart()),
-        "forgetResume" => ledger.forget_resume(id()).map(|()| undefined()),
+        // Node forgot, once its resume was tried, the mark that a project comes back
+        // by itself: this ledger keeps none.
+        "forgetResume" => Ok(undefined()),
         "events" => {
             let after = field(args, 1, "after").and_then(Value::as_i64);
             let limit = field(args, 1, "limit").and_then(Value::as_i64);
@@ -944,7 +953,12 @@ fn compare(what: &str, actual: &Value, expected: &Value) -> Option<String> {
             json!({ "error": ours["message"] }),
             json!({ "error": theirs["message"] }),
         ),
-        _ => (actual.clone(), expected.clone()),
+        _ => {
+            // The mark of a project that comes back by itself is Node's alone.
+            let mut expected = expected.clone();
+            hold_apart_the_resume_mark(&mut expected);
+            (actual.clone(), expected)
+        }
     };
     let (ours, theirs) = (actual.to_string(), expected.to_string());
     (ours != theirs).then(|| {
@@ -1054,12 +1068,15 @@ fn insert(db: &Connection, table: &str, contents: &Value) {
     }
 }
 
-/// A dump with what only this ledger writes, and only its schema has, held apart.
+/// A dump with what only this ledger writes, and only its schema has, held
+/// apart, and what only Node's held of the mark of a project that comes back by
+/// itself.
 fn held_apart(mut dump: Value) -> Value {
     if let Some(Value::Object(tables)) = dump.get_mut("tables") {
         hold_apart_what_node_never_writes(tables);
     }
     hold_apart_what_node_never_had_in_its_schema(&mut dump);
+    hold_apart_the_resume_mark_in_a_dump(&mut dump);
     dump
 }
 

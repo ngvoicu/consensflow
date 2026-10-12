@@ -561,23 +561,7 @@ impl Dispatcher {
         participant: i64,
         marker: &str,
     ) -> Result<Option<String>, EngineError> {
-        let conversation = self
-            .seams
-            .ledger
-            .borrow()
-            .current_conversation(participant)?;
-        let Some(conversation) = conversation else {
-            return Ok(None);
-        };
-        let Some(session) = conversation
-            .native_session
-            .filter(|session| !session.is_empty())
-        else {
-            return Ok(None);
-        };
-        let Some(harness) = Harness::from_kind(&conversation.harness)
-            .filter(|_| self.seams.adapters.adapter(&conversation.harness).is_some())
-        else {
+        let Some((harness, session)) = self.readable(participant)? else {
             return Ok(None);
         };
         // The adapter's `record` is an `async` function, and `.catch(() =>
@@ -596,5 +580,39 @@ impl Dispatcher {
             .iter()
             .find(|item| item.role == Role::User && item.text.contains(marker))
             .map(|item| item.id.to_string()))
+    }
+
+    /// Whether a participant's harness's record of its current conversation,
+    /// read with no window open, ends in a turn with no end (the one the app's
+    /// quit cut, or a Close), and none where it cannot tell: the record cannot,
+    /// or there is none to read.
+    pub(crate) async fn turn_cut(&self, participant: i64) -> Result<Option<bool>, EngineError> {
+        let Some((harness, session)) = self.readable(participant)? else {
+            return Ok(None);
+        };
+        Ok(self.seams.records.turn_cut(harness, &session).await)
+    }
+
+    /// The harness and the session a participant's current conversation is on,
+    /// where its record can be read with no window open: none when it has no
+    /// conversation, no session yet, or a harness no adapter opens.
+    fn readable(&self, participant: i64) -> Result<Option<(Harness, String)>, EngineError> {
+        let conversation = self
+            .seams
+            .ledger
+            .borrow()
+            .current_conversation(participant)?;
+        let Some(conversation) = conversation else {
+            return Ok(None);
+        };
+        let Some(session) = conversation
+            .native_session
+            .filter(|session| !session.is_empty())
+        else {
+            return Ok(None);
+        };
+        Ok(Harness::from_kind(&conversation.harness)
+            .filter(|_| self.seams.adapters.adapter(&conversation.harness).is_some())
+            .map(|harness| (harness, session)))
     }
 }

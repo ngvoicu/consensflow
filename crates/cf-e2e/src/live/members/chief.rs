@@ -19,9 +19,9 @@ const NO_ACCESS: &str = "has no ConsensFlow access";
 
 impl Members {
     /// `cf` as the chief runs it: the chief's own window's environment and token.
-    /// A chief opened again by a restart is the newest window of its pane. A
-    /// refusal for want of access is an error that says what became of the
-    /// chief's window ([`Members::chief_window`]).
+    /// A chief opened again by the human's Resume after a restart is the newest
+    /// window of its pane. A refusal for want of access is an error that says
+    /// what became of the chief's window ([`Members::chief_window`]).
     pub fn as_chief<I, S>(&self, words: I) -> Result<Ran>
     where
         I: IntoIterator<Item = S>,

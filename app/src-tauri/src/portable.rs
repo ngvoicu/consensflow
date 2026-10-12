@@ -176,7 +176,18 @@ fn remove_aside(root: &Path, path: &Path) {
         return;
     };
     let _ = fs::rename(path, aside.path().join("removed"));
-    // `aside` goes when it drops, with whatever was moved into it.
+    // Windows refuses a removal for a moment while another copy of the app, or an
+    // antivirus, has a file in it open: tried again a few times, and what is left
+    // is a runtime the next start removes.
+    let aside = aside.keep();
+    let mut wait = Duration::from_millis(25);
+    while fs::remove_dir_all(&aside).is_err()
+        && aside.exists()
+        && wait <= Duration::from_millis(800)
+    {
+        thread::sleep(wait);
+        wait *= 2;
+    }
 }
 
 /// Names the runtime folder to Windows' search for libraries: the terminals'

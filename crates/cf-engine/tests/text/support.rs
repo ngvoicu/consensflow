@@ -214,7 +214,6 @@ pub fn project_of(participants: Vec<ParticipantView>) -> ProjectView {
         name: "work".to_owned(),
         state: "open".to_owned(),
         gate: false,
-        resume_on_start: false,
         created_at: "2026-09-19T10:00:01.000Z".to_owned(),
         updated_at: "2026-09-19T10:00:01.000Z".to_owned(),
         participants,

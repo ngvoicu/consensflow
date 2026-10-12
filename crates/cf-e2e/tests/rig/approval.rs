@@ -26,6 +26,10 @@ use crate::{config, rig, secs, session_of, Outcome};
 /// What Claude writes of a turn it was interrupted in.
 const INTERRUPTED: &str = "[Request interrupted by user]";
 
+/// What the chief is told when the app quit in the middle of its turn.
+const CHIEF_CUT: &str =
+    "ConsensFlow stopped in the middle of your turn, which was cut. Go on where you stopped.";
+
 /// A project with a chief and one worker, whose human approves every hand-off.
 fn gated_project(rig: &Rig) -> cf_e2e::Result<Project<'_>> {
     write_staff(rig)?;
@@ -1097,20 +1101,24 @@ fn switching_approval_off_leaves_what_waits_at_the_gate_there_and_what_comes_aft
 
 /// The app quits as it does, the daemon dying first and then the pane host, and
 /// is started again on the same home: the rig it is now.
-fn quit_and_start_again(mut rig: Rig) -> cf_e2e::Result<Rig> {
+pub(crate) fn quit_and_start_again(mut rig: Rig) -> cf_e2e::Result<Rig> {
     rig.kill_daemon();
     rig.wait_for_daemon_exit(secs(10))?;
     let root = rig.close_keeping_the_root()?;
     Rig::start(config().existing_root(root))
 }
 
-/// What the human finds when the app is back, and does: the chief's window is
-/// resumed and at rest, the brief that waited at the gate is still there and
-/// waits, passed on it goes to a window, and its result waits at the gate too
-/// and reaches the chief once passed on.
+/// What the human finds when the app is back, and does: the project waits
+/// suspended, and resumed it brings the chief's window back, at rest; the brief
+/// that waited at the gate is still there and waits, passed on it goes to a
+/// window, and its result waits at the gate too and reaches the chief once
+/// passed on.
 fn goes_on_after_the_restart(rig: &Rig, id: i64, brief: &Value) -> cf_e2e::Result<()> {
-    rig.open_frame(&format!("p{id}-chief"), secs(30))?;
     let project = Project::new(rig, id);
+    assert_eq!(project.board()?["project"]["state"], "suspended");
+    let resumed = rig.page("project.resume", json!({ "project": id }))?;
+    assert_eq!(resumed["ok"], true, "{resumed}");
+    rig.open_frame(&format!("p{id}-chief"), secs(30))?;
     rig.wait_for("the resumed chief to be at rest", secs(30), || {
         Ok(activity(&project, "chief")? == "idle")
     })?;
@@ -1137,7 +1145,7 @@ fn a_restart_of_the_daemon_leaves_what_waits_at_the_gate_there_and_passing_it_on
     // window on a slow machine does (CI's Windows is one): the app is quit once
     // it is written, as it is when the chief is at rest.
     let rig = Rig::start(config().var("CF_TEST_ANSWER_MS", "1500"))?;
-    let (id, brief) = {
+    let (id, brief, session) = {
         let project = gated_project(&rig)?;
         let chief = chief_window(&rig, &project)?;
         rig.tell(
@@ -1152,25 +1160,29 @@ fn a_restart_of_the_daemon_leaves_what_waits_at_the_gate_there_and_passing_it_on
         rig.wait_for("the chief's answer to be written", secs(30), || {
             Ok(rig.transcript(&session).contains("\"text\":\"dispatched:"))
         })?;
-        (project.id(), brief)
+        (project.id(), brief, session)
     };
 
     let rig = quit_and_start_again(rig)?;
     goes_on_after_the_restart(&rig, id, &brief)?;
+    assert!(
+        !rig.transcript(&session).contains(CHIEF_CUT),
+        "its turn was over when the app quit: it is told nothing"
+    );
     rig.close()?;
     Ok(())
 }
 
 #[test]
-fn a_restart_that_cuts_the_chiefs_turn_leaves_its_window_at_rest_and_what_waits_for_it_reaches_it(
-) -> Outcome {
+fn a_restart_that_cuts_the_chiefs_turn_tells_it_so_once_and_what_waits_for_it_reaches_it() -> Outcome
+{
     // The chief's answer is a long way off when the app quits: its turn is cut,
     // and its record ends in the words it was given (the dispatch), with no
-    // answer. Claude resumed on it waits at its prompt and goes on with nothing
-    // (`npm run live:resume-cut`): the window is at rest, and the daemon has to
-    // read it so.
+    // answer. Claude resumed on it goes on with nothing (`cargo xtask live
+    // resume-cut`), so the human's Resume gives it a note that says its turn was
+    // cut as the first thing, and what waits for it follows.
     let rig = Rig::start(config().var("CF_TEST_ANSWER_MS", "20000"))?;
-    let (id, brief) = {
+    let (id, brief, session) = {
         let project = gated_project(&rig)?;
         let chief = chief_window(&rig, &project)?;
         rig.tell(
@@ -1181,16 +1193,22 @@ fn a_restart_that_cuts_the_chiefs_turn_leaves_its_window_at_rest_and_what_waits_
             ),
         )?;
         let brief = the_one_held(&rig, &project, "the brief to be held")?;
-        let record = rig.transcript(&session_of(&chief));
+        let session = session_of(&chief);
+        let record = rig.transcript(&session);
         assert!(
             record.contains("DISPATCH") && !record.contains("\"text\":\"dispatched:"),
             "the chief is at work on its words, with no answer written: {record}"
         );
-        (project.id(), brief)
+        (project.id(), brief, session)
     };
 
     let rig = quit_and_start_again(rig)?;
     goes_on_after_the_restart(&rig, id, &brief)?;
+    assert_eq!(
+        rig.transcript(&session).matches(CHIEF_CUT).count(),
+        1,
+        "its turn was cut when the app quit: it is told so, once"
+    );
     rig.close()?;
     Ok(())
 }

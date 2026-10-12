@@ -536,8 +536,8 @@ fn a_populated_version_11_ledger_is_migrated_to_12_and_again_as_it_was_and_has_r
     assert!(refused(task(9, "tester")).contains("task_pool_check"));
     let before = rows_of(&db, &TABLES);
 
-    migrate(&db, &MIGRATIONS).unwrap();
-    migrate(&db, &MIGRATIONS).unwrap();
+    migrate(&db, &MIGRATIONS[..12]).unwrap();
+    migrate(&db, &MIGRATIONS[..12]).unwrap();
 
     let version: i64 = db
         .query_row("PRAGMA user_version", [], |row| row.get(0))

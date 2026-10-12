@@ -186,7 +186,7 @@ replace = ""
 
 [[plant]]
 name = "start: what was open is not suspended for the restart"
-meant = "what_was_open_comes_back_and_its_window_opens_with_the_environment_the_app_expects"
+meant = "what_was_open_stays_suspended_and_opens_no_window_until_the_human_resumes_it"
 runs = ["daemon-lib-start"]
 
 [[plant.edit]]
