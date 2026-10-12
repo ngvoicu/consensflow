@@ -143,7 +143,7 @@ fn drive(mut members: Members, log: &Log) -> Result<Account> {
                     .screen(pane["id"].as_str().unwrap_or_default())
             )
         ));
-        members.close()?;
+        case.closed(members.close());
         return Ok(case);
     }
     sleep(Duration::from_secs(2));
@@ -223,7 +223,7 @@ fn drive(mut members: Members, log: &Log) -> Result<Account> {
         )
     ));
     case.require(idle.is_some() && delivered.is_some());
-    members.close()?;
+    case.closed(members.close());
     Ok(case)
 }
 

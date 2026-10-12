@@ -7,6 +7,8 @@
 
 use std::path::Path;
 use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 use cf_e2e::live::members::{self, find, judge, Members, Plan};
 use cf_e2e::live::window::Open;
@@ -157,6 +159,214 @@ fn a_question_through_the_hook_is_answered_as_the_chief_and_judged_received_at_i
     assert!(judged.received_at.is_some());
     assert!(judged.notes.is_empty(), "{:?}", judged.notes);
     members.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_chief_that_went_is_said_to_have_gone_and_how_where_its_token_is_refused() -> Outcome {
+    let log = Log::new("live members");
+    let members = open("members-gone", &log)?;
+    let pane = format!("p{}-chief", members.project_id());
+    let frame = members.rig().open_frame(&pane, secs(30))?;
+    // The chief's program is ended, as a chief that crashes is: the daemon revokes its token.
+    members.rig().host(
+        "pane.kill",
+        json!({ "id": frame["id"], "generation": frame["generation"] }),
+    )?;
+    let refused = find(
+        &log,
+        "the chief's token to be refused",
+        secs(30),
+        Duration::from_millis(200),
+        || Ok(members.as_chief(["task", "list"]).err()),
+    )?
+    .ok_or("the chief's token was never refused")?
+    .to_string();
+    assert!(
+        refused.starts_with("cf task list: cf: this window has no ConsensFlow access"),
+        "{refused}"
+    );
+    assert!(
+        refused.contains(&format!(
+            "the chief's window {pane} was opened 1 time: generation {} ended with ",
+            frame["generation"]
+        )),
+        "{refused}"
+    );
+    // What the daemon wrote of it is there too, and what it warned of.
+    assert!(refused.contains("the daemon wrote of it: "), "{refused}");
+    // A stand-in that left takes its status file away; a chief nothing was said to wrote
+    // no conversation.
+    assert!(
+        refused.ends_with(
+            "its warnings: none; its records: the conversation is gone, the status file is gone"
+        ),
+        "{refused}"
+    );
+    members.close()?;
+    Ok(())
+}
+
+/// The runs of a machine share the Claude folder the stand-ins write in
+/// (`projects/integration`), and a rig that ends takes the folder away when it is
+/// empty (`rig::forget`: `remove_dir`). A chief hears nothing until a member says
+/// something, so for a while its folder is empty, and a rig of another run that ends
+/// then leaves it without. The stand-in made the folder only when it started, and
+/// the first thing the chief was told after that ended it (the door check of
+/// 2026-10-12: `cf answer` was refused, "this window has no ConsensFlow access", for
+/// a chief that had gone). It makes its folder again where it writes, as Claude does.
+#[cfg(unix)]
+#[test]
+fn a_chief_that_has_written_nothing_stays_when_another_rig_of_the_machine_takes_its_empty_folder(
+) -> Outcome {
+    use cf_e2e::rig::{Project, Rig};
+
+    // The machine is a folder of the test's own: the rig reads its Claude from there.
+    let machine = tempfile::tempdir()?;
+    let shims = tempfile::tempdir()?;
+    let claude = Installed::at(Harness::Claude, "/nowhere/claude", machine.path());
+    let rig = Rig::start(cf_e2e::live::rig_with_stand_ins(
+        &[claude],
+        shims.path(),
+        Path::new(FAKE_AGENT),
+    )?)?;
+    let work = rig.workspace().join("live-folder");
+    std::fs::create_dir_all(&work)?;
+    let project = Project::open(&rig, "chief", json!({ "directory": work }))?;
+    rig.wait_for("the chief to be idle", secs(60), || {
+        Ok(project.lane("chief")?["activity"]["state"] == "idle")
+    })?;
+    // It has written nothing: its folder is made, and empty.
+    let records = machine.path().join(".claude/projects/integration");
+    assert!(records.is_dir() && std::fs::read_dir(&records)?.next().is_none());
+
+    // Another rig of the machine ends, and takes the folder, which is empty. (One daemon
+    // at a time runs in a test's process: what the other rig does is done here.)
+    std::fs::remove_dir(&records)?;
+
+    // The chief hears something: it writes it, and stays.
+    rig.tell(project.id(), "Reply with exactly: AGAIN")?;
+    rig.wait_for("the chief to write what it heard", secs(30), || {
+        Ok(!rig.exits().is_empty()
+            || records
+                .read_dir()
+                .is_ok_and(|mut folder| folder.next().is_some()))
+    })?;
+    assert!(rig.exits().is_empty(), "the chief ended: {:?}", rig.exits());
+    assert_eq!(project.lane("chief")?["activity"]["state"], "idle");
+    rig.close()?;
+    Ok(())
+}
+
+/// What a stand-in chief says of itself when it cannot write what it heard (the disk
+/// is full, its folder is not its own): it ends itself, its project closes with it,
+/// and the refusal of its token says how it ended.
+#[test]
+fn a_chief_that_cannot_write_what_it_heard_ends_itself_and_the_refusal_says_how_it_ended() -> Outcome
+{
+    let log = Log::new("live members");
+    let members = open("members-records", &log)?;
+    // Its conversation is where the stand-in cannot write: a folder in the place of the file.
+    let config = members.claude_config().join("projects").join("integration");
+    let session = members
+        .rig()
+        .started()
+        .first()
+        .map(|chief| chief.session.clone())
+        .ok_or("the chief started nothing")?;
+    std::fs::create_dir_all(config.join(format!("{session}.jsonl")))?;
+    members
+        .rig()
+        .tell(members.project_id(), "Reply with exactly: RECORDS_OK")?;
+    let refused = find(
+        &log,
+        "the chief's token to be refused",
+        secs(60),
+        Duration::from_millis(200),
+        || Ok(members.as_chief(["task", "list"]).err()),
+    )?
+    .ok_or("the chief's token was never refused")?
+    .to_string();
+    assert!(
+        refused.contains("ended with code 1, its screen ending: "),
+        "{refused}"
+    );
+    assert!(refused.contains("fake-agent: "), "{refused}");
+    members.close()?;
+    Ok(())
+}
+
+/// A project whose worker has left a job that ignores the request to end running,
+/// so that the pane host has to wait out its grace (ten seconds) to close the
+/// worker's window: the project and the job.
+#[cfg(unix)]
+fn with_a_job_that_ignores_the_request_to_end(
+    folder: &str,
+    log: &Log,
+) -> cf_e2e::Result<(Members, cf_e2e::rig::Job)> {
+    let mut members = open(folder, log)?;
+    members.add("worker", &[])?;
+    members.give("worker", "BACKGROUND --deaf 120 started the job")?;
+    members
+        .rig()
+        .wait_for("the worker's job to run", secs(60), || {
+            Ok(members.rig().jobs("job").len() == 1)
+        })?;
+    let job = members
+        .rig()
+        .jobs("job")
+        .into_iter()
+        .next()
+        .ok_or_else(|| cf_e2e::Error::Daemon("the worker's job is gone".to_owned()))?;
+    Ok((members, job))
+}
+
+/// What a real harness's window needs, and a stand-in's never does: the host gives a
+/// program that ignores the request to end ten seconds before it kills it, and the
+/// rig's own close waits five for the host, so a project of harnesses is closed by one
+/// that waits for the grace.
+#[cfg(unix)]
+#[test]
+fn a_project_with_a_window_that_takes_the_hosts_whole_grace_to_leave_is_closed_once_the_host_has_waited(
+) -> Outcome {
+    let log = Log::new("live members");
+    let (members, _job) = with_a_job_that_ignores_the_request_to_end("members-grace", &log)?;
+    let closing = Instant::now();
+    members.close()?;
+    assert!(
+        closing.elapsed() >= secs(9),
+        "the host gave the job its grace: {:?}",
+        closing.elapsed()
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn a_project_that_does_not_end_in_time_says_which_of_the_processes_it_started_were_left() -> Outcome
+{
+    let log = Log::new("live members");
+    let (members, job) = with_a_job_that_ignores_the_request_to_end("members-left", &log)?;
+    let failed = members
+        .close_within(Duration::from_secs(1))
+        .unwrap_err()
+        .to_string();
+    // What it left running is not the test's to leave.
+    let _ = cf_e2e::process::signal(job.pid(), cf_e2e::process::Signal::Kill);
+    assert!(failed.starts_with("process did not exit"), "{failed}");
+    let left = failed
+        .split("the processes it started, left or last looked at: ")
+        .nth(1)
+        .ok_or(failed.as_str())?;
+    // The pane host, waiting for the window to leave, and the job that would not
+    // (its parent gone, it is the machine's: `(1)`; a command is cut to a line).
+    assert!(left.contains("consensflow-bridge"), "{failed}");
+    assert!(
+        left.contains(&format!("{} (1) ", job.pid())),
+        "the job {} is left: {failed}",
+        job.pid()
+    );
+    assert!(left.contains("fake-agent --background-jo"), "{failed}");
     Ok(())
 }
 

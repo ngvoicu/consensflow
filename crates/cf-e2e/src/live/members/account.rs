@@ -58,6 +58,21 @@ impl Account {
         self.held &= ok;
     }
 
+    /// What `other` saw, after what this case saw: its lines, and the case holds
+    /// only if both do. For an attempt that was made apart, and stands.
+    pub fn absorb(&mut self, other: Self) {
+        self.lines.extend(other.lines);
+        self.held &= other.held;
+    }
+
+    /// What came of ending the rig the case ran in: a rig that would not end is a
+    /// check that did not hold, and what the case saw stays beside it.
+    pub fn closed(&mut self, closed: crate::Result) {
+        if let Err(failed) = closed {
+            self.fail(format!("the rig did not end: {failed}"));
+        }
+    }
+
     /// Whether every check held.
     pub const fn held(&self) -> bool {
         self.held
@@ -150,6 +165,47 @@ mod tests {
         quiet.require(false);
         assert!(!quiet.held() && quiet.lines().is_empty());
         assert_eq!(Account::default(), Account::new());
+    }
+
+    #[test]
+    fn an_attempt_made_apart_that_stands_adds_its_lines_and_its_failure_to_the_case() {
+        let mut case = Account::new();
+        case.say("attempt 1 was too late");
+        let mut tried = Account::new();
+        tried.check("the turn stopped", true, "idle at +0.2 s");
+        case.absorb(tried);
+        assert!(case.held());
+        let mut failed = Account::new();
+        failed.fail("the record holds no interrupt");
+        case.absorb(failed);
+        assert!(!case.held());
+        assert_eq!(
+            case.lines(),
+            [
+                "attempt 1 was too late",
+                "ok   the turn stopped: idle at +0.2 s",
+                "FAIL the record holds no interrupt"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_rig_that_would_not_end_fails_the_case_and_leaves_what_it_saw_beside_the_failure() {
+        let mut case = Account::new();
+        case.say("T-1 ended");
+        case.closed(Ok(()));
+        assert!(case.held());
+        case.closed(Err(crate::Error::Timeout(
+            "process did not exit".to_owned(),
+        )));
+        assert!(!case.held());
+        assert_eq!(
+            case.lines(),
+            [
+                "T-1 ended",
+                "FAIL the rig did not end: process did not exit"
+            ]
+        );
     }
 
     #[test]

@@ -30,10 +30,16 @@
 //! stretches: if it ever read idle there, the daemon's look at rest would let an
 //! answer be pasted into a window that is mid-hook ([`status`]).
 //!
+//! The chief is the stand-in, and the runs of a machine share the Claude folder it
+//! writes in, which a rig that ends takes when it is empty. `--tidy true` is that rig
+//! ending while the chief has heard nothing: the stand-in has to write again where it
+//! writes, or it ends with the question, and the answer is refused (2026-10-12).
+//!
 //! ```text
 //! cargo xtask live door                         Claude, Codex, OpenCode, Devin, and Pi's line
 //! cargo xtask live door opencode --hold 10
 //! cargo xtask live door claude --hold 90        Claude's status over a 90 s wait (npm run live:hook-status)
+//! cargo xtask live door claude --tidy true      another run's rig ends before the chief hears the question
 //! cargo xtask live door fake                    the rig's stand-in Claude: no model, which no quota pays for
 //! cargo xtask live door --model opencode=opencode/some-model
 //! ```
@@ -109,6 +115,7 @@ fn asked() -> Result<Asked> {
         hold: hold(live::option("hold").as_deref())?,
         answer: live::option("answer").unwrap_or_else(|| "blue".to_owned()),
         models: models(&live::list("model"))?,
+        tidy: live::option("tidy").as_deref() == Some("true"),
     })
 }
 
@@ -220,6 +227,7 @@ mod tests {
             hold: Some(Duration::from_millis(500)),
             answer: "blue".to_owned(),
             models: BTreeMap::new(),
+            tidy: false,
         };
         let case = check::run(Who::StandIn, &asked, Path::new(FAKE_AGENT), &log).unwrap();
         assert!(case.held(), "{}", case.text());
@@ -238,5 +246,27 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("delivery.claimed"), "{text}");
+    }
+
+    /// Another run's rig ends while the chief has heard nothing, and takes the empty
+    /// folder the stand-ins write in: what the check says of it, and that it holds.
+    #[test]
+    fn the_check_holds_when_the_folder_of_the_chiefs_conversation_is_taken_before_it_hears_anything(
+    ) {
+        let log = Log::new("live door test");
+        let asked = Asked {
+            hold: Some(Duration::from_millis(500)),
+            answer: "blue".to_owned(),
+            models: BTreeMap::new(),
+            tidy: true,
+        };
+        let case = check::run(Who::StandIn, &asked, Path::new(FAKE_AGENT), &log).unwrap();
+        assert!(case.held(), "{}", case.text());
+        let text = case.text();
+        assert!(
+            text.contains("another run's rig ended: ")
+                && text.contains("projects/integration is taken"),
+            "{text}"
+        );
     }
 }

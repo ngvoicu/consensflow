@@ -81,6 +81,9 @@ pub struct Asked {
     /// The model a harness's member runs on, where not its cheap one (`--model
     /// <harness>=<model>`).
     pub models: BTreeMap<String, String>,
+    /// Another run's rig ends while the chief has heard nothing (`--tidy true`): it takes
+    /// the folder the stand-ins write their conversations in, which is empty then.
+    pub tidy: bool,
 }
 
 /// What the board holds of a task a member was given: the question it asked, or
@@ -143,9 +146,25 @@ pub fn run(who: Who, asked: &Asked, stand_in: &Path, log: &Log) -> Result<Accoun
     let mut members = Members::open(&plan, stand_in, &log)?;
     let case = observe(&mut members, &agent, &brief, (who, asked), &log);
     let closed = members.close();
-    let case = case?;
-    closed?;
+    let mut case = case?;
+    case.closed(closed);
     Ok(case)
+}
+
+/// What a rig of another run does as it ends, which the runs of a machine share the
+/// folder for (`rig::forget`): it takes the folder the stand-ins write their
+/// conversations in when it is empty, as the chief's is until it hears something.
+/// The chief makes its folder again where it writes, or it ends with the first thing it
+/// is told, and the check's `cf answer` is refused (2026-10-12).
+fn tidy(members: &Members, case: &mut Account) {
+    let folder = members.claude_config().join("projects").join("integration");
+    case.say(match std::fs::remove_dir(&folder) {
+        Ok(()) => format!(
+            "another run's rig ended: {} is taken, empty as the chief's folder is until it hears something",
+            folder.display()
+        ),
+        Err(failed) => format!("{} was not taken: {failed}", folder.display()),
+    });
 }
 
 /// The question the member asks, answered as the chief, and what the daemon
@@ -162,6 +181,9 @@ fn observe(
         case.say(format!("trust: {trust}"));
     }
     members.add(agent, &[])?;
+    if asked.tidy {
+        tidy(members, &mut case);
+    }
     let number = members.give(agent, brief)?;
     log.say(format!(
         "T-{number} is given: the member is to ask its question"
@@ -276,6 +298,8 @@ fn observe(
             last_lines(&members.rig().screen(window.id()))
         ));
     }
+    // The chief's window, which the check answers as: it has to be the one it was opened as.
+    case.say(format!("     {}", members.chief_window()));
     if let (Some(samples), Some(session)) = (samples, session) {
         // The hook's whole wait: from its question to the answer's receipt, or to the paste that replaced it.
         let from = ms_of(&question["createdAt"]).unwrap_or_default();
@@ -313,6 +337,7 @@ mod tests {
             hold: Some(Duration::ZERO),
             answer: "blue".to_owned(),
             models: BTreeMap::new(),
+            tidy: false,
         };
         let started = Instant::now();
         let case = observe(

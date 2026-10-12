@@ -12,12 +12,12 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use cf_e2e::live::claude::{processes_with, Process};
-use cf_e2e::live::last_lines;
-use cf_e2e::live::members::{find, plus, shown, Account, Members};
+use cf_e2e::live::members::{find, plus, shown, Account, MemberWindow, Members};
+use cf_e2e::live::{last_lines, until};
 use cf_e2e::process::{signal, Signal};
 use cf_e2e::{pattern, Result};
 use regex::Regex;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::stop::pause_text;
 use crate::watch::{say_events, told_the_human, told_the_requester, unstopped};
@@ -37,37 +37,123 @@ pub fn brief() -> String {
     format!("Run exactly this one shell command, then stop: sh ./{SCRIPT}")
 }
 
-/// The command's own processes: the script and its sleep, not the harness whose
-/// launch text names the script. The script is `sh ./<script>` (the shell may be
-/// named by its path), and its sleep is `sleep <seconds>` and a child of it.
-pub fn of_the_command(named_script: Vec<Process>, named_sleep: Vec<Process>) -> Vec<Process> {
+/// The command line of the script: `sh ./<script>`, the shell named by its path or not.
+fn script_pattern() -> &'static Regex {
     static SCRIPT_RE: OnceLock<Regex> = OnceLock::new();
-    static SLEEP_RE: OnceLock<Regex> = OnceLock::new();
-    let script = pattern::once(
+    pattern::once(
         &SCRIPT_RE,
         &format!(r"^(\S*/)?sh\s+\./{}$", regex::escape(SCRIPT)),
-    );
-    let sleeping = pattern::once(&SLEEP_RE, &format!(r"^(\S*/)?sleep\s+{STUCK_S}$"));
+    )
+}
+
+/// The command line of the script's sleep: `sleep <seconds>`, and nothing more.
+fn sleep_pattern() -> &'static Regex {
+    static SLEEP_RE: OnceLock<Regex> = OnceLock::new();
+    pattern::once(&SLEEP_RE, &format!(r"^(\S*/)?sleep\s+{STUCK_S}$"))
+}
+
+/// The command's own processes: the script and its sleep, not the harness whose
+/// launch text names the script. The sleep is a child of the script: one that no
+/// script of ours holds is an earlier run's, and no part of this one.
+pub fn of_the_command(named_script: Vec<Process>, named_sleep: Vec<Process>) -> Vec<Process> {
     let scripts: Vec<Process> = named_script
         .into_iter()
-        .filter(|found| script.is_match(&found.command))
+        .filter(|found| script_pattern().is_match(&found.command))
         .collect();
     let sleeps: Vec<Process> = named_sleep
         .into_iter()
         .filter(|found| {
             scripts.iter().any(|script| script.pid == found.ppid)
-                && sleeping.is_match(&found.command)
+                && sleep_pattern().is_match(&found.command)
         })
         .collect();
     scripts.into_iter().chain(sleeps).collect()
 }
 
-/// The processes of the command as the machine has them now.
-pub fn running() -> Result<Vec<Process>> {
-    Ok(of_the_command(
+/// What the script left, wherever it went: the script, and every sleep of its
+/// seconds, a child of a script or not. A harness that ends the script by its own
+/// pid leaves the sleep to the machine, and the sleep, which took the script's
+/// ignoring of the signals with it, does not go when its window is asked to: the
+/// pane host waits out its whole grace for it, which is longer than the rig waits
+/// for the host to end.
+pub fn of_what_it_left(named_script: Vec<Process>, named_sleep: Vec<Process>) -> Vec<Process> {
+    named_script
+        .into_iter()
+        .filter(|found| script_pattern().is_match(&found.command))
+        .chain(
+            named_sleep
+                .into_iter()
+                .filter(|found| sleep_pattern().is_match(&found.command)),
+        )
+        .collect()
+}
+
+/// The processes the script has named in the command line, and its sleeps.
+fn named() -> Result<(Vec<Process>, Vec<Process>)> {
+    Ok((
         processes_with(SCRIPT)?,
         processes_with(&format!("sleep {STUCK_S}"))?,
     ))
+}
+
+/// The processes of the command as the machine has them now.
+pub fn running() -> Result<Vec<Process>> {
+    let (scripts, sleeps) = named()?;
+    Ok(of_the_command(scripts, sleeps))
+}
+
+/// Everything of the command the machine has now, whoever holds it ([`of_what_it_left`]).
+pub fn left_behind() -> Result<Vec<Process>> {
+    let (scripts, sleeps) = named()?;
+    Ok(of_what_it_left(scripts, sleeps))
+}
+
+/// What the pane host finds under the window (`pane.background`: its tree's processes
+/// that began after the turn did): the daemon's own look at what the window has left
+/// running, and what a close of the window asks to end.
+pub fn host_view(members: &Members, window: &MemberWindow) -> String {
+    let asked = members.rig().host(
+        "pane.background",
+        json!({ "id": window.pane["id"], "generation": window.pane["generation"] }),
+    );
+    match asked {
+        Ok(answer) if answer["ok"] == true => {
+            let found: Vec<String> = answer["processes"]
+                .as_array()
+                .map(|list| {
+                    list.iter()
+                        .map(|process| {
+                            format!(
+                                "{} {}",
+                                process["pid"],
+                                process["command"]
+                                    .as_str()
+                                    .unwrap_or_default()
+                                    .chars()
+                                    .take(90)
+                                    .collect::<String>()
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if found.is_empty() {
+                "none".to_owned()
+            } else {
+                format!("{} ({})", found.join("; "), answer["total"])
+            }
+        }
+        Ok(answer) => format!("(the host said: {answer})"),
+        Err(failed) => format!("(could not be asked: {failed})"),
+    }
+}
+
+/// What of `left` the command does not hold: its sleeps that outlived their script.
+pub fn orphans_of(left: &[Process], held: &[Process]) -> Vec<Process> {
+    left.iter()
+        .filter(|process| !held.iter().any(|own| own.pid == process.pid))
+        .cloned()
+        .collect()
 }
 
 /// What the lane of the window reads as, in a word: its activity, and what the
@@ -86,16 +172,29 @@ pub fn at_rest(lane: &Value) -> bool {
         && unstopped(lane).is_none()
 }
 
-/// Ends what ignores the signals for good, and with it the window.
+/// Ends what ignores the signals for good, and with it the window: every process
+/// the command has left, killed, and waited for until none is there.
 pub fn end_the_command() {
-    for found in running().unwrap_or_default() {
+    for found in left_behind().unwrap_or_default() {
         let _ = signal(found.pid, Signal::Kill);
     }
+    until(Duration::from_secs(5), Duration::from_millis(100), || {
+        left_behind().ok().filter(Vec::is_empty).map(|_| ())
+    });
 }
 
 /// The case, on the harness the member `agent` runs on (`name` is its name).
 pub fn run(ctx: &Ctx, case: &mut Account, name: &str) -> Result<()> {
     let members: &Members = ctx.members;
+    // What an earlier run left, which ignores the signals and outlives it, is none of this one's.
+    let stale = left_behind()?;
+    if !stale.is_empty() {
+        end_the_command();
+        case.say(format!(
+            "     an earlier run left {} behind, ended",
+            shown(&stale).join("; ")
+        ));
+    }
     let number = members.give(ctx.agent, &brief())?;
     let state = || -> Result<String> {
         Ok(members.lane(ctx.agent)?["activity"]["state"]
@@ -209,6 +308,18 @@ pub fn run(ctx: &Ctx, case: &mut Account, name: &str) -> Result<()> {
             |gone| format!("gone at {}", plus(gone, made))
         )
     ));
+    // A harness that ended the script by its pid leaves its sleep, which ignores the signals.
+    let orphans = orphans_of(&left_behind()?, &running()?);
+    if !orphans.is_empty() {
+        case.say(format!(
+            "     its script went and left: {}",
+            shown(&orphans).join("; ")
+        ));
+    }
+    case.say(format!(
+        "     what the pane host finds under the window: {}",
+        host_view(members, &window)
+    ));
     case.say(format!(
         "its screen now: {}",
         last_lines(&members.rig().screen(window.id()))
@@ -292,6 +403,38 @@ mod tests {
             .collect();
         assert_eq!(found, [10, 11, 20, 21]);
         assert!(of_the_command(vec![], vec![process(20, 10, "sleep 200")]).is_empty());
+    }
+
+    #[test]
+    fn what_the_script_left_is_the_script_and_every_sleep_of_it_whoever_holds_it() {
+        let scripts = vec![
+            process(10, 1, "sh ./ignore-signals-cf-stops-live.sh"),
+            process(
+                12,
+                1,
+                "opencode run then stop: sh ./ignore-signals-cf-stops-live.sh",
+            ),
+        ];
+        let sleeps = vec![
+            process(20, 10, "sleep 200"),
+            // A harness that ended the script by its pid leaves its sleep to the machine.
+            process(22, 1, "/bin/sleep 200"),
+            process(23, 10, "sleep 20"),
+            process(24, 10, "sleep 200 and more"),
+        ];
+        let left: Vec<u32> = of_what_it_left(scripts.clone(), sleeps.clone())
+            .iter()
+            .map(|found| found.pid)
+            .collect();
+        assert_eq!(left, [10, 20, 22]);
+        // The command's own are the ones a script holds: the orphan is what the rest of them is.
+        let held = of_the_command(scripts.clone(), sleeps.clone());
+        let orphans: Vec<u32> = orphans_of(&of_what_it_left(scripts, sleeps), &held)
+            .iter()
+            .map(|found| found.pid)
+            .collect();
+        assert_eq!(orphans, [22]);
+        assert!(of_what_it_left(vec![], vec![]).is_empty());
     }
 
     #[test]

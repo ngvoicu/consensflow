@@ -243,7 +243,11 @@ fn check(log: &Log) -> Result<Check> {
             ),
         ),
     };
-    members.close()?;
+    // A rig that would not end fails the check beside what it saw.
+    let (ok, detail) = match members.close() {
+        Ok(()) => (ok, detail),
+        Err(failed) => (false, format!("{detail}; the rig did not end: {failed}")),
+    };
     Ok(Check::new(
         "codex",
         "a window opened again on its thread",

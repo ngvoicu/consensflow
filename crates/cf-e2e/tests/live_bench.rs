@@ -183,7 +183,7 @@ fn the_core_delivers_between_a_real_chief_and_real_workers_and_comes_back_after_
         review::restarted(&mut again, before.as_ref())?;
         checks = again.into_checks();
     }
-    members.close()?;
+    let closed = members.close();
 
     let failed = checks.iter().filter(|check| !check.ok).count();
     log.say(format!(
@@ -192,6 +192,8 @@ fn the_core_delivers_between_a_real_chief_and_real_workers_and_comes_back_after_
         checks.len()
     ));
     log.block("what each check came to", &report::table(&checks));
+    // A rig that would not end fails the run after what the checks came to is said.
+    closed?;
     report::verdict(&checks)
 }
 

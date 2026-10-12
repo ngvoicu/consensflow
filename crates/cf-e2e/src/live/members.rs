@@ -27,6 +27,8 @@
 
 mod account;
 mod board;
+mod chief;
+mod closing;
 mod command;
 mod door;
 mod leftovers;
@@ -36,7 +38,6 @@ mod tests;
 mod words;
 
 use std::collections::BTreeMap;
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -46,7 +47,6 @@ use tempfile::TempDir;
 use super::machine::{live_folder_in, Harness, Installed, ISOLATION};
 use super::window::trust_claude;
 use super::{agents, installed, rig, rig_with_stand_ins, Log};
-use crate::process::Ran;
 use crate::rig::{Config, Project, Rig};
 use crate::{files, Error, Result};
 
@@ -292,24 +292,6 @@ impl Members {
         Ok(tier)
     }
 
-    /// `cf` as the chief runs it: the chief's own window's environment and token.
-    /// A chief opened again by a restart is the newest window of its pane.
-    pub fn as_chief<I, S>(&self, words: I) -> Result<Ran>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        let pane = format!("p{}-chief", self.project);
-        let frame = self
-            .rig
-            .open_frames()
-            .into_iter()
-            .rev()
-            .find(|frame| frame["id"] == pane.as_str())
-            .ok_or_else(|| Error::Daemon(format!("the chief's window {pane} was never opened")))?;
-        self.rig.cf_in_window(&frame, words)
-    }
-
     /// A task for the member `agent`, given by the chief: its number.
     pub fn give(&self, agent: &str, brief: &str) -> Result<i64> {
         let tier = self
@@ -416,9 +398,16 @@ impl Members {
     }
 
     /// Ends the rig: the daemon, the pane host and their windows, and the
-    /// records of the stand-ins.
+    /// records of the stand-ins. The harnesses' windows are given the time the
+    /// host gives them to leave, and a rig that does not end says which of its
+    /// processes were left or last looked at ([`closing`]).
     pub fn close(self) -> Result {
-        self.rig.close()
+        self.close_within(closing::EXIT)
+    }
+
+    /// [`Members::close`], with `within` for the daemon and the pane host to end.
+    pub fn close_within(self, within: Duration) -> Result {
+        closing::end_within(self.rig, within)
     }
 }
 

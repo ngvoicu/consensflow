@@ -191,7 +191,7 @@ fn run(case: Case, harness: Harness, options: &Options, log: &Log) -> Result<Acc
     }
     let closed = members.close();
     body?;
-    closed?;
+    account.closed(closed);
     Ok(account)
 }
 
