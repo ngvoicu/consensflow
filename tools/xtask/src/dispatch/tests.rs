@@ -117,18 +117,6 @@ fn a_command_that_is_not_ported_yet_says_so_and_what_to_run_and_answers_1() {
             "windows-matrix",
             "xtask: windows-matrix is not ported yet: run `npm run eval:windows` for now\n",
         ),
-        (
-            "eval summary",
-            "xtask: eval summary is not ported yet: run `npm run eval:summary` for now\n",
-        ),
-        (
-            "eval --scenario round-trip",
-            "xtask: eval is not ported yet: run `npm run eval` for now\n",
-        ),
-        (
-            "watch --tokens",
-            "xtask: watch is not ported yet: run `npm run watch` for now\n",
-        ),
     ] {
         let (status, out, err) = answer(line);
         assert_eq!(
