@@ -1,12 +1,102 @@
 //! The window's terminal, read the way a TUI reads it: raw, a byte at a time,
 //! a bracketed paste being text and Enter outside one submitting it. A paste
-//! followed by Enter is one message. Escape, alone, stops the turn at work; the
-//! first Control-C clears what is typed, as Claude's does, and a second one in
-//! a row ends the window.
+//! followed by Enter is one message. Escape, alone, is an event of its own (what
+//! it does is the window's: Claude's stops the turn at work, Devin's does so when
+//! it comes twice); the first Control-C clears what is typed, as Claude's does,
+//! and a second one in a row ends the window.
+
+use std::io::{self, Read};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::thread;
+use std::time::Duration;
 
 /// What starts a paste, and what ends it.
 const PASTE_START: &str = "\u{1b}[200~";
 const PASTE_END: &str = "\u{1b}[201~";
+
+/// How long an Escape waits for the rest of a paste marker before it is the
+/// Escape key: a TUI's own wait is about as long.
+const ESCAPE_WAIT: Duration = Duration::from_millis(50);
+
+/// Bytes read in pieces, decoded to text as they come: a character cut in two
+/// by the pieces is held until the rest arrives.
+#[derive(Default)]
+pub struct Utf8 {
+    held: Vec<u8>,
+}
+
+impl Utf8 {
+    pub fn decode(&mut self, chunk: &[u8]) -> String {
+        self.held.extend_from_slice(chunk);
+        let mut text = String::new();
+        loop {
+            match std::str::from_utf8(&self.held) {
+                Ok(valid) => {
+                    text.push_str(valid);
+                    self.held.clear();
+                    return text;
+                }
+                Err(cut) => {
+                    let (valid, rest) = self.held.split_at(cut.valid_up_to());
+                    text.push_str(&String::from_utf8_lossy(valid));
+                    match cut.error_len() {
+                        // Not a character at all: the replacement character, and on.
+                        Some(length) => {
+                            text.push('\u{fffd}');
+                            self.held = rest[length..].to_vec();
+                        }
+                        // A character cut short at the end: kept for the next piece.
+                        None => {
+                            self.held = rest.to_vec();
+                            return text;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The window's keys: the terminal on its standard input in raw mode, read by a
+/// thread of its own, and what it gave as events.
+pub struct Keys {
+    incoming: Receiver<Vec<u8>>,
+    input: Input,
+    bytes: Utf8,
+}
+
+impl Keys {
+    /// Puts the terminal in raw mode, as a TUI does, and starts reading it.
+    pub fn start() -> Self {
+        raw_mode();
+        let (read, incoming) = mpsc::channel::<Vec<u8>>();
+        thread::spawn(move || {
+            let mut chunk = [0_u8; 4096];
+            let mut stdin = io::stdin().lock();
+            while let Ok(read_now @ 1..) = stdin.read(&mut chunk) {
+                if read.send(chunk[..read_now].to_vec()).is_err() {
+                    return;
+                }
+            }
+        });
+        Self {
+            incoming,
+            input: Input::default(),
+            bytes: Utf8::default(),
+        }
+    }
+
+    /// What the terminal gave since the last call, as events, waiting a moment
+    /// for it (an Escape that nothing follows in that moment is the key). None
+    /// when the terminal is gone.
+    pub fn read(&mut self) -> Option<Vec<Event>> {
+        match self.incoming.recv_timeout(ESCAPE_WAIT) {
+            Ok(chunk) => Some(self.input.feed(&self.bytes.decode(&chunk))),
+            Err(RecvTimeoutError::Timeout) => Some(self.input.quiet()),
+            Err(RecvTimeoutError::Disconnected) => None,
+        }
+    }
+}
 
 /// What the input asks of the window as it is read.
 #[derive(Debug, PartialEq, Eq)]
@@ -16,7 +106,7 @@ pub enum Event {
     /// A paste ended, with this many characters in the buffer: a real TUI draws
     /// what was pasted, and a paste's Enter waits for that.
     Pasted(usize),
-    /// Escape, by itself: the turn at work stops.
+    /// Escape, by itself.
     Escape,
     /// Control-C a second time in a row: the window ends.
     Interrupt,
@@ -224,6 +314,23 @@ mod tests {
             [Event::Pasted(1)]
         );
         assert_eq!(feed_all(&["\u{3}", "x", "\u{3}", "\r"]), []);
+    }
+
+    #[test]
+    fn text_read_in_pieces_is_whole_and_a_cut_character_waits_for_its_rest() {
+        let mut bytes = Utf8::default();
+        let text = "a · b";
+        let (first, second) = text.as_bytes().split_at(3);
+        // The middle dot is two bytes; the first piece ends in the middle of it.
+        assert_eq!(bytes.decode(first), "a ");
+        assert_eq!(bytes.decode(second), "· b");
+        assert_eq!(bytes.decode(b""), "");
+    }
+
+    #[test]
+    fn bytes_that_are_no_character_are_the_replacement_character() {
+        let mut bytes = Utf8::default();
+        assert_eq!(bytes.decode(b"a\xffb"), "a\u{fffd}b");
     }
 
     #[test]

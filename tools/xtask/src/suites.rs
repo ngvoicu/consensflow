@@ -27,7 +27,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         words: &["test", "integration"],
-        about: "Run the rig's suites (the rig test of cf-e2e): the daemon and the pane host in real terminals, with stand-in agents in the windows",
+        about: "Run the rig's suites (the rig and regressions tests of cf-e2e): the daemon and the pane host in real terminals, with stand-in agents in the windows",
         usage: "[cargo test arguments: --offline, or a test's name, or -- and libtest's]",
         run: Run::Native(integration),
     },
@@ -75,7 +75,7 @@ const DAEMONS: Suite = Suite {
     ignored: false,
 };
 const INTEGRATION: Suite = Suite {
-    tests: &["rig"],
+    tests: &["rig", "regressions"],
     filter: None,
     ignored: false,
 };
@@ -220,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn the_daemon_suites_are_the_daemon_rig_and_regressions_tests_and_the_integration_suites_the_rigs_alone(
+    fn the_daemon_suites_are_the_daemon_rig_and_regressions_tests_and_the_integration_suites_the_rigs(
     ) {
         assert_eq!(
             line(DAEMONS, &[]),
@@ -230,10 +230,14 @@ mod tests {
             line(DAEMONS, &["--offline", "core_slice::"]),
             "cargo test -p cf-e2e --test daemon --test rig --test regressions --offline core_slice::"
         );
-        assert_eq!(line(INTEGRATION, &[]), "cargo test -p cf-e2e --test rig");
+        // The regressions are rig cases, one for each bug the owner met: wherever the rig runs, they do.
+        assert_eq!(
+            line(INTEGRATION, &[]),
+            "cargo test -p cf-e2e --test rig --test regressions"
+        );
         assert_eq!(
             line(INTEGRATION, &["--", "--nocapture"]),
-            "cargo test -p cf-e2e --test rig -- --nocapture"
+            "cargo test -p cf-e2e --test rig --test regressions -- --nocapture"
         );
     }
 

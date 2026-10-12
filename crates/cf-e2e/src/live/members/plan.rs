@@ -110,6 +110,10 @@ pub struct Plan {
     /// Files written into the folder before anything opens, each a path below it
     /// and its text: a Claude window reads the settings there.
     pub files: Vec<(String, String)>,
+    /// The variables the daemon, the pane host and so every window are given over
+    /// what the rig sets: a name and its value each, the stand-in agent's own
+    /// settings (`CF_TEST_WIND_DOWN_MS`).
+    pub vars: Vec<(String, String)>,
     /// The agents of the roster.
     pub roster: Vec<Value>,
     /// The id of the agent that is the project's chief.
@@ -124,6 +128,7 @@ impl Plan {
             folder: folder.to_owned(),
             brief: BRIEF,
             files: Vec::new(),
+            vars: Vec::new(),
             chief: chief["id"].as_str().unwrap_or_default().to_owned(),
             roster: vec![chief],
         }
@@ -147,6 +152,13 @@ impl Plan {
     #[must_use]
     pub fn with_file(mut self, path: &str, text: impl Into<String>) -> Self {
         self.files.push((path.to_owned(), text.into()));
+        self
+    }
+
+    /// With the variable `name` set to `value` in the environment of the rig.
+    #[must_use]
+    pub fn with_var(mut self, name: &str, value: impl Into<String>) -> Self {
+        self.vars.push((name.to_owned(), value.into()));
         self
     }
 
@@ -274,6 +286,22 @@ mod tests {
         assert_eq!(
             plan.files,
             [(".claude/settings.local.json".to_owned(), "{}".to_owned())]
+        );
+    }
+
+    #[test]
+    fn a_plan_has_the_variables_it_was_given_for_the_rig_in_the_order_given() {
+        let plan = Plan::new("p", stand_in_chief());
+        assert!(plan.vars.is_empty());
+        let plan = plan
+            .with_var("CF_TEST_WIND_DOWN_MS", "60000")
+            .with_var("CF_TEST_ANSWER_MS", String::from("5"));
+        assert_eq!(
+            plan.vars,
+            [
+                ("CF_TEST_WIND_DOWN_MS".to_owned(), "60000".to_owned()),
+                ("CF_TEST_ANSWER_MS".to_owned(), "5".to_owned())
+            ]
         );
     }
 

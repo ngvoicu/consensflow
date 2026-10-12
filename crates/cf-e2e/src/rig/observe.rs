@@ -23,6 +23,40 @@ impl Rig {
         printed.map(|bytes| plain(&bytes)).unwrap_or_default()
     }
 
+    /// Everything the window `pane` printed so far, as the bytes the pane host
+    /// gave and before anything is taken out of them: [`Rig::screen`] is these
+    /// with the control sequences cleaned away. What tells a window that printed
+    /// nothing from one that printed only what Windows' console host prints of its
+    /// own accord (a jump of the cursor, a title), which `screen` reads as blank.
+    /// Nothing of a window that printed nothing, or was never opened.
+    pub fn printed(&self, pane: &str) -> Vec<u8> {
+        self.shared
+            .seen()
+            .printed
+            .get(pane)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// What the pane host says of the window `pane` (`{ id, generation }`, as
+    /// the board has it) now: its answer to `pane.snapshot`, which has how long
+    /// the window printed nothing (`outputQuietMs`, null for a window that never
+    /// did), whether a paste is on its way in and what was typed and not sent, and
+    /// the last `tail` lines of its screen as the host draws it (`tail`). The host
+    /// keeps the cells the program's text, cursor moves and erasures leave, so
+    /// that is the screen a person sees, however the program or the console host
+    /// repaints it. None where the host does not answer or says no: the pane is
+    /// gone.
+    pub fn snapshot(&self, pane: &Value, tail: usize) -> Option<Value> {
+        let answer = self
+            .host(
+                "pane.snapshot",
+                json!({ "id": pane["id"], "generation": pane["generation"], "tail": tail }),
+            )
+            .ok()?;
+        (answer["ok"] == true).then_some(answer)
+    }
+
     /// What the daemon wrote as it went, from its event file (`events.jsonl` in
     /// its home): one object for each event the ledger logged (`at`, `project`,
     /// `kind`, `data`) and each change of a window's activity (`kind`

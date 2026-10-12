@@ -70,6 +70,16 @@ fn messages_of<'t>(thread: &'t Value, kind: &'t str) -> impl Iterator<Item = &'t
         .filter(move |message| message["kind"] == kind)
 }
 
+/// Whether the brief of `thread` (its first message of the kind `task`) has reached
+/// the member's window: the daemon has seen it in the window's record (`delivered`),
+/// or the member has read it. A window the lane reads as working may still be
+/// waiting for it: it is `delivering` for as long as the window has not shown it.
+pub fn brief_delivered(thread: &Value) -> bool {
+    messages_of(thread, "task")
+        .next()
+        .is_some_and(|brief| matches!(brief["state"].as_str(), Some("delivered" | "read")))
+}
+
 /// The first question the member asked in `thread`.
 pub fn first_question(thread: &Value) -> Option<Value> {
     messages_of(thread, "question").next().cloned()

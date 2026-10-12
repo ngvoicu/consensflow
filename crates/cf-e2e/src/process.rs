@@ -114,6 +114,7 @@ pub struct Run {
     cwd: Option<PathBuf>,
     limit: Option<Duration>,
     input: Input,
+    own_group: bool,
 }
 
 impl Run {
@@ -130,6 +131,7 @@ impl Run {
             cwd: None,
             limit: Some(LIMIT),
             input: Input::Default,
+            own_group: false,
         }
     }
 
@@ -242,6 +244,14 @@ impl Run {
         self
     }
 
+    /// In a process group of its own, as Claude Code runs a command it is asked to
+    /// (Unix's; Windows has no groups, and starts it as ever).
+    #[must_use]
+    pub fn own_group(mut self) -> Self {
+        self.own_group = true;
+        self
+    }
+
     /// The program's command, with everything but its streams.
     fn command(&self) -> Command {
         let mut command = Command::new(&self.program);
@@ -256,6 +266,13 @@ impl Run {
         }
         if let Some(dir) = &self.cwd {
             command.current_dir(dir);
+        }
+        if self.own_group {
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                command.process_group(0);
+            }
         }
         command
     }

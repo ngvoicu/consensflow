@@ -1,6 +1,7 @@
 //! Waiting for the requests to end that a window or a job is held ready for:
 //! the signals are blocked in the thread that starts the rest (and so in every
-//! thread started after it), and one thread waits for them here.
+//! thread started after it), and one thread waits for them here. Windows has no
+//! such signals: a window there is ended outright, and nothing waits.
 //!
 //! nix's `SigSet::wait` is not used. It unwraps the number of the signal that
 //! `sigwait` hands back, and on macOS the call returned success with that
@@ -9,10 +10,53 @@
 //! window waited out its whole grace. Here a return of `sigwait` is a request,
 //! whichever number it came with: the set holds nothing else.
 
+#[cfg(unix)]
+use std::thread;
+
+#[cfg(unix)]
 use nix::sys::signal::SigSet;
+
+/// The signals a window ends on: SIGHUP when its terminal hangs up and SIGTERM
+/// when it is asked to end.
+#[cfg(unix)]
+pub type Signals = SigSet;
+#[cfg(not(unix))]
+pub struct Signals;
+
+/// Blocks SIGHUP and SIGTERM in this thread (and so in every thread it starts),
+/// for [`leave_on`] to wait for.
+#[cfg(unix)]
+pub fn block() -> Signals {
+    use nix::sys::signal::Signal;
+
+    let mut signals = SigSet::empty();
+    signals.add(Signal::SIGHUP);
+    signals.add(Signal::SIGTERM);
+    let _ = signals.thread_block();
+    signals
+}
+
+#[cfg(not(unix))]
+pub fn block() -> Signals {
+    Signals
+}
+
+/// Has the window `leave` when its terminal hangs up or it is asked to end.
+#[cfg(unix)]
+pub fn leave_on(signals: Signals, leave: impl FnOnce() + Send + 'static) {
+    thread::spawn(move || {
+        if wait(&signals) {
+            leave();
+        }
+    });
+}
+
+#[cfg(not(unix))]
+pub fn leave_on(_: Signals, _: impl FnOnce() + Send + 'static) {}
 
 /// Waits until one of `signals`, which this thread blocks, is sent to the
 /// program: whether the wait ended by one (a failed wait is not a request).
+#[cfg(unix)]
 pub fn wait(signals: &SigSet) -> bool {
     let mut number = 0;
     // SAFETY: `sigwait` reads the set and writes one `int`, through the
@@ -20,7 +64,7 @@ pub fn wait(signals: &SigSet) -> bool {
     unsafe { nix::libc::sigwait(signals.as_ref(), &mut number) == 0 }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use nix::sys::signal::{raise, Signal};
 

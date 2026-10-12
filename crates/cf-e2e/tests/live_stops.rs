@@ -41,11 +41,32 @@
 //!   human and the requester are told): a command that ignores `INT`, `TERM` and
 //!   `HUP` is run, then the task paused. When the harness stops anyway, it says so,
 //!   and at which press.
+//! - `midturn`   A window in the middle of a turn that runs no command (the member is
+//!   writing a long reply), paused: the daemon's rounds of its harness's interrupt
+//!   must end the turn within them, and the pause be paid. It says for each round the
+//!   keys pressed and what the window showed after them (Devin's wire log too), where
+//!   the turn goes on as where it stops. Written for the Devin window that did not
+//!   stop for a pause on Windows (T-5, 2026-10-12, 3.0.1). A member that never gets to
+//!   write (its window never shows its first message, and the daemon fails the task)
+//!   is said with why: the task and its thread, what the daemon wrote and told, the
+//!   lane, the window as it printed (the bytes too) and as its pane host draws it,
+//!   Devin's own files, and the daemon's log.
+//! - `midtool`   A window in the middle of a shell command (the member is asked to run a
+//!   ping of the machine's own address, a reply a second for a minute, the platform's own
+//!   flags), paused while the command runs: the same rounds must end the turn within them,
+//!   and the pause be paid. It says what the window showed after each round, when the lane
+//!   read idle, and whether the host's process tree (`pane.background`, on every platform)
+//!   still has the command once the stop is paid; the stop is watched until the window has
+//!   rested (`REST`) or `STUCK_WATCH` is up, so that when a turn that waits for its tool
+//!   ends is told. Written for the Devin window of T-5 (3000.10.21, Windows), which was
+//!   running a command.
 //!
 //! ```text
-//! cargo xtask live stops                                  every case, `stuck` on OpenCode
+//! cargo xtask live stops                                  every case, `stuck`, `midturn` and `midtool` on OpenCode
 //! cargo xtask live stops --case command --case hook
 //! cargo xtask live stops --case stuck codex
+//! cargo xtask live stops --case midturn devin
+//! cargo xtask live stops --case midtool devin
 //! cargo xtask live stops --case slowhook --hook prompt
 //! cargo xtask live stops --case early --transcripts /tmp/stops    each Claude transcript is copied there
 //! ```
@@ -58,6 +79,8 @@
 mod cases;
 #[path = "live_stops/hook.rs"]
 mod hook;
+#[path = "live_stops/midturn.rs"]
+mod midturn;
 #[path = "live_stops/options.rs"]
 mod options;
 #[path = "live_stops/resume.rs"]
@@ -68,6 +91,8 @@ mod slow;
 mod stop;
 #[path = "live_stops/stuck.rs"]
 mod stuck;
+#[path = "live_stops/tree.rs"]
+mod tree;
 #[path = "live_stops/watch.rs"]
 mod watch;
 
@@ -179,6 +204,8 @@ fn run(case: Case, harness: Harness, options: &Options, log: &Log) -> Result<Acc
         Case::Escape => hook::escape_case(&ctx, &mut account),
         Case::SlowHook => slow::run(&ctx, &mut account, &options.hook),
         Case::Stuck => stuck::run(&ctx, &mut account, harness.name()),
+        Case::MidTurn => midturn::run(&ctx, &mut account, harness),
+        Case::MidTool => midturn::tool::run(&ctx, &mut account, harness),
     };
     // What ignores the signals is ended for good, and with it the window.
     if case == Case::Stuck {

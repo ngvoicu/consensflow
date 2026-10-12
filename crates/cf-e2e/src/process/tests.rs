@@ -323,4 +323,12 @@ mod shell {
         assert_eq!(group_of(leader.id()), None);
         assert_eq!(group_of(u32::MAX), None, "no such process id at all");
     }
+
+    #[test]
+    fn a_run_told_to_have_a_group_of_its_own_leads_one_and_one_not_told_is_in_the_tests() {
+        let own = sh("sleep 30").own_group().closed_input().spawn().unwrap();
+        let shared = sh("sleep 30").closed_input().spawn().unwrap();
+        assert_eq!(group_of(own.id()), Some(own.id()));
+        assert_eq!(group_of(shared.id()), group_of(std::process::id()));
+    }
 }
