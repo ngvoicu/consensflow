@@ -48,6 +48,20 @@ pub struct Sample {
 /// `config`, as it is now: the first file of `sessions/` named by a process id
 /// that names the session.
 pub fn status_of(config: &Path, session: &str) -> Option<Value> {
+    status_where(config, session, false)
+}
+
+/// [`status_of`] for the window that is running: a file whose process is gone
+/// says nothing, as it says nothing to the daemon. The file a window leaves when
+/// it is killed names the conversation, and so does the one a window resumed on
+/// that conversation writes: only the second is the window's.
+pub fn running_status_of(config: &Path, session: &str) -> Option<Value> {
+    status_where(config, session, true)
+}
+
+/// The first status file that names `session`, and, where `running` is asked
+/// for, whose process is there.
+fn status_where(config: &Path, session: &str, running: bool) -> Option<Value> {
     let mut files: Vec<PathBuf> = fs::read_dir(config.join("sessions"))
         .ok()?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
@@ -55,6 +69,9 @@ pub fn status_of(config: &Path, session: &str) -> Option<Value> {
         .collect();
     files.sort();
     files.into_iter().find_map(|file| {
+        if running && !process_of(&file).is_some_and(crate::process::is_alive) {
+            return None;
+        }
         let status: Value = serde_json::from_str(&fs::read_to_string(file).ok()?).ok()?;
         (status["sessionId"] == session).then_some(status)
     })
@@ -68,9 +85,19 @@ fn names_a_process(file: &Path) -> bool {
         .is_some_and(|stem| !stem.is_empty() && stem.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
-/// A look at the status of `session`, as it is read now.
-fn sample(config: &Path, session: &str) -> Sample {
-    let status = status_of(config, session);
+/// The process a status file is of, by its name `<process id>.json`.
+fn process_of(file: &Path) -> Option<u32> {
+    file.file_name()?
+        .to_string_lossy()
+        .strip_suffix(".json")?
+        .parse()
+        .ok()
+}
+
+/// A look at the status of `session`, as it is read now: of the window that is
+/// running where `running` is asked for.
+fn sample(config: &Path, session: &str, running: bool) -> Sample {
+    let status = status_where(config, session, running);
     let text = |field: &str| status.as_ref()?[field].as_str().map(str::to_owned);
     Sample {
         at_ms: jiff::Timestamp::now().as_millisecond(),
@@ -97,6 +124,16 @@ impl Status {
     /// Begins reading the status of `session` under the Claude config folder
     /// `config`.
     pub fn watch(config: &Path, session: &str) -> Self {
+        Self::begin(config, session, false)
+    }
+
+    /// [`Status::watch`] of the window that is running ([`running_status_of`]):
+    /// the file a killed window left says nothing.
+    pub fn watch_running(config: &Path, session: &str) -> Self {
+        Self::begin(config, session, true)
+    }
+
+    fn begin(config: &Path, session: &str, running: bool) -> Self {
         let samples = Arc::new(Mutex::new(Vec::new()));
         let stopped = Arc::new(AtomicBool::new(false));
         let reader = {
@@ -104,7 +141,7 @@ impl Status {
             let (config, session) = (config.to_path_buf(), session.to_owned());
             thread::spawn(move || {
                 while !stopped.load(Ordering::Relaxed) {
-                    let look = sample(&config, &session);
+                    let look = sample(&config, &session, running);
                     samples
                         .lock()
                         .unwrap_or_else(PoisonError::into_inner)

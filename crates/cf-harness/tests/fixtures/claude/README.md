@@ -1,10 +1,12 @@
 # Claude transcripts of live runs — provenance
 
 Kept 2026-10-07 by `npm run live:stops -- --case <case> --keep <folder>` (Claude
-Code 2.1.292, the native daemon of the receipt branch, the cheap eval model),
-then scrubbed with `cargo xtask scrub-transcript <transcript> <fixture>` (a Node
-script, `tests/live/scrub-transcript.mjs`, made these files; the command that
-replaced it writes the same bytes from the same transcript).
+Code 2.1.292, the native daemon of the receipt branch, the cheap eval model; the
+flag that keeps the transcripts is `--transcripts <folder>` now, and `--keep`
+leaves a run's home where it is), then scrubbed with
+`cargo xtask scrub-transcript <transcript> <fixture>` (a Node script,
+`tests/live/scrub-transcript.mjs`, made these files; the command that replaced
+it writes the same bytes from the same transcript).
 Every record stays, in its order; the session id becomes `$SESSION` (a test puts
 its own there), and what is personal or opaque is replaced: folders, the
 branch, account and organization ids, what an attachment carried, request ids,
@@ -20,9 +22,10 @@ thinking signatures. The user's and the assistant's words stay as written.
   user]`, and no `interruptedMessageId`.
 
 Kept 2026-10-11 by `npm run live:resume-cut -- --keep <folder>` (Claude Code
-2.1.296, on Sonnet), scrubbed the same way. Each case kills the window's
-process with its turn at work, as the app's quit does, and opens a window on
-`--resume` of the conversation with the app's own arguments:
+2.1.296, on Sonnet; `--transcripts <folder>` now), scrubbed the same way. Each
+case kills the window's process with its turn at work, as the app's quit does,
+and opens a window on `--resume` of the conversation with the app's own
+arguments:
 
 - `quit-before-a-word.jsonl` — `--case early`. Killed as soon as Claude's status
   read busy, before a word of its answer. The transcript ends on the user's
