@@ -1,5 +1,5 @@
-//! `cargo xtask app test` and `app clippy` (landing S10): the app crate's tests
-//! and lint where the app cannot be built as it ships. A worktree may not have
+//! `cargo xtask app test` and `app clippy`: the app crate's tests and lint where
+//! the app cannot be built as it ships. A worktree may not have
 //! the resources the app's Tauri configuration names (the bundled `cf`), and its
 //! build script refuses to go on without them. A test or a lint needs none, so
 //! both leave them out of the configuration for the run, through the variable

@@ -1,5 +1,5 @@
-//! `cargo xtask scrub-transcript <transcript.jsonl> <fixture.jsonl>` (landing S14.4):
-//! a fixture of a Claude transcript that a live check kept
+//! `cargo xtask scrub-transcript <transcript.jsonl> <fixture.jsonl>`: a fixture
+//! of a Claude transcript that a live check kept
 //! (`cargo xtask live stops --transcripts <folder>`): every record stays, in its
 //! order, and what is personal or opaque in it is replaced. The reader of the
 //! records and the tests built on them read what is left, which is each record's

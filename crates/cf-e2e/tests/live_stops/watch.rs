@@ -5,7 +5,6 @@
 
 use cf_e2e::live::ask::{self, Record};
 use cf_e2e::live::claude::{self, Entry, Status};
-use cf_e2e::live::last_lines;
 use cf_e2e::live::members::{clock, plus_maybe, squash, Account, MemberWindow, Members};
 use cf_e2e::{Error, Result};
 use serde_json::{json, Map, Value};
@@ -45,7 +44,7 @@ impl Watched {
 
     /// The end of its screen, as a line.
     pub fn screen(&self, members: &Members) -> String {
-        last_lines(&members.rig().screen(self.window.id()))
+        members.tail(self.window.id())
     }
 
     /// What Claude kept of its conversation so far.

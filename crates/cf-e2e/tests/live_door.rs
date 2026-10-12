@@ -151,8 +151,7 @@ fn a_question_answered_from_the_board_is_received_once_at_the_door_of_the_harnes
             version,
         ));
     }
-    log.block("what each door came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::conclude(&log, "what each door came to", &checks)
 }
 
 #[cfg(test)]

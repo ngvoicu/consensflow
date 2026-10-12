@@ -32,10 +32,10 @@ use cf_base::env::Env;
 use cf_process::{capture, CaptureFailed, Captured, Limits, Run};
 use tokio::runtime::Runtime;
 
-use super::stops::Stops;
 use super::Error;
 use crate::context::Context;
 use crate::process;
+use crate::stops::Stops;
 
 /// How much one stream of a run may say: far more than any run of tests does.
 const OUTPUT_LIMIT: usize = 64 * 1024 * 1024;

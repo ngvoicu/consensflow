@@ -4,7 +4,7 @@
 //! checks that did not hold. A check that did not run because one before it
 //! failed is no row: say so in the run's own words.
 
-use super::cut;
+use super::{cut, Log};
 use crate::{Error, Result};
 
 /// How much of what was seen a row shows.
@@ -84,6 +84,13 @@ pub fn verdict(checks: &[Check]) -> Result {
     )))
 }
 
+/// How a run of checks ends: it says what each came to, under `title`, and fails
+/// with the ones that did not hold ([`verdict`]).
+pub fn conclude(log: &Log, title: &str, checks: &[Check]) -> Result {
+    log.block(title, &table(checks));
+    verdict(checks)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,5 +143,19 @@ mod tests {
     fn a_run_that_checked_nothing_proved_nothing() {
         let failed = verdict(&[]).unwrap_err().to_string();
         assert_eq!(failed, "the run made no check: nothing was proved");
+    }
+
+    #[test]
+    fn a_run_ends_by_saying_what_each_check_came_to_and_failing_with_those_that_did_not() {
+        let log = Log::new("live test");
+        let mut checks = sample();
+        let failed = conclude(&log, "what each check came to", &checks).unwrap_err();
+        assert_eq!(
+            failed.to_string(),
+            verdict(&checks).unwrap_err().to_string()
+        );
+        checks.remove(1);
+        conclude(&log, "what each check came to", &checks).unwrap();
+        assert!(conclude(&log, "nothing", &[]).is_err());
     }
 }

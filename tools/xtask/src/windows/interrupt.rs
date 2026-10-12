@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::plants::stops::Stops;
+use crate::stops::Stops;
 
 /// How often a wait for a stop looks again.
 const LOOK: Duration = Duration::from_millis(10);

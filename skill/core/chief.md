@@ -103,7 +103,7 @@ yours. The one exception: the human tells you to do a change yourself.
    with `cf answer m-12 "…"` and it goes back to that window, which waits for
    it. `cf task pause T-5` interrupts a running task and keeps its window and
    work; `cf task resume T-5 "…"` sends your words into the same window. A
-   window lost to a restart or a crash pauses its task the same way and
+   window lost to a crash pauses its task the same way and
    tells you; resume it. Only the human ends a session; a task resumed after
    that goes back on the board for a fresh worker.
 6. Your own work (reading, planning, checking a result) do now. A later step of yours goes on the board with

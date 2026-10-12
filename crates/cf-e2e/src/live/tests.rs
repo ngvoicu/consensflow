@@ -199,3 +199,28 @@ fn a_wait_ends_with_the_first_thing_it_finds_and_with_nothing_when_the_time_runs
     });
     assert_eq!(once.get(), 1);
 }
+
+#[test]
+fn a_harness_that_cannot_be_found_or_run_has_an_unknown_version_and_says_why() {
+    let nowhere = Installed::at(Harness::Pi, "/no/such/folder/pi", "/home/me");
+    assert_eq!(said_version(Ok(nowhere)), "unknown");
+    let refused = Error::Daemon("could not find pi: log in by running `pi` once".to_owned());
+    assert_eq!(
+        said_version(Err(refused)),
+        "unknown (could not find pi: log in by running `pi` once)"
+    );
+}
+
+#[test]
+fn a_harness_found_is_said_with_its_program_its_version_and_where_its_login_is_read_from() {
+    let install = Installed::at(Harness::Pi, "/usr/local/bin/pi", "/home/me");
+    assert_eq!(
+        found_line(&install, "1.2.3"),
+        "pi is /usr/local/bin/pi (1.2.3); its login is read from /home/me"
+    );
+    let codex = Installed::at(Harness::Codex, "/opt/codex", "/home/me/.codex");
+    assert_eq!(
+        found_line(&codex, "unknown"),
+        "codex is /opt/codex (unknown); its login is read from /home/me/.codex"
+    );
+}

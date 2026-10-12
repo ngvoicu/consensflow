@@ -4,7 +4,8 @@
 //!   task, the reviewer takes it in a session of its own, and its findings come
 //!   back to the chief as the result. Nothing is reviewed unless the chief asks.
 //! - The restart: a new daemon and pane host over the same home, in the app's quit
-//!   order. The project must come back on its chief's own conversation.
+//!   order. The project waits suspended, with no window, until the human resumes it,
+//!   and then it comes back on its chief's own conversation.
 
 use std::time::{Duration, Instant};
 
@@ -130,11 +131,15 @@ pub fn review(bench: &mut Bench, reviewer: Harness) -> Result<()> {
     Ok(())
 }
 
-/// What the restart came to: the project is open again, and the chief's window was
-/// opened again. `before` is how the chief's window was opened before the quit.
+/// What the restart came to: the project waits suspended with no window of the new
+/// daemon's opened, and once the human resumes it it is open again and the chief's
+/// window was opened again. `before` is how the chief's window was opened before the quit.
 pub fn restarted(bench: &mut Bench, before: Option<&Value>) -> Result<()> {
     let members: &Members = bench.members;
     let pane = format!("p{}-chief", members.project_id());
+    // Nothing opens by itself: the app started again, and the project waits for the human.
+    let waiting = !members.is_open()? && members.rig().open_frames().is_empty();
+    members.resume()?;
     let back = find(
         bench.log,
         "the project to be open again",
@@ -158,8 +163,9 @@ pub fn restarted(bench: &mut Bench, before: Option<&Value>) -> Result<()> {
     )?;
     bench.record(
         "restart-restores-project",
-        back.is_some() && reopened.is_some(),
+        waiting && back.is_some() && reopened.is_some(),
         &json!({
+            "waited": waiting,
             "back": back.is_some(),
             "before": last_words(before, 4),
             "after": last_words(reopened.as_ref(), 4),

@@ -1,5 +1,5 @@
-//! `cargo xtask plants <family> [words…] [--check]` (landing S13): the repository's
-//! mutation tests. A plant is a bug put into the product on purpose; each is
+//! `cargo xtask plants <family> [words…] [--check]`: the repository's mutation
+//! tests. A plant is a bug put into the product on purpose; each is
 //! planted in the sources, the tests that should notice are run, and the plant is
 //! reported caught or missed. The plants are data, `tests/plants/<family>/`
 //! ([`kit`] tells how they are written); a family is a folder of them, run by the
@@ -20,14 +20,12 @@
 //!
 //! The modules: [`kit`] (what a plant is, and the data), [`driver`] (planting,
 //! putting back, the trial of one plant), [`runs`] (the commands, and what they
-//! wrote), [`stops`] (what ends a run early) and [`report`] (what is said).
+//! wrote, and what ends a run early: `crate::stops`) and [`report`] (what is said).
 
 mod driver;
 mod kit;
 mod report;
 mod runs;
-// What `windows` listens for as well: a run there goes on when this side is stopped.
-pub(crate) mod stops;
 
 use std::ffi::OsString;
 use std::io;

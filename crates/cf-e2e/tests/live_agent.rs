@@ -29,8 +29,8 @@ use std::time::Duration;
 
 use cf_e2e::live::claude::{self, Entry};
 use cf_e2e::live::report::{self, Check};
-use cf_e2e::live::window::{Open, Window, READY};
-use cf_e2e::live::{self, ask, last_lines, Harness, Log};
+use cf_e2e::live::window::{Open, Window};
+use cf_e2e::live::{self, ask, Harness, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::{Error, Result, ScratchHome};
 use serde_json::{json, Value};
@@ -206,14 +206,13 @@ fn outcome(who: &str, model: &str, models: &[String], seconds: &str) -> Check {
 /// Claude Code's record holds it to be.
 fn check_of(window: &Window, opening: &Opening, asked: &Ask) -> Result<Check> {
     let who = opening.who();
-    if !window.still(READY) {
-        let screen = last_lines(&window.screen());
+    if let Err(screen) = window.ready() {
         return Ok(Check::failed(&who, WHAT, format!("did not open: {screen}")));
     }
     let sent = window.send(&window.given(&asked.message)?, &asked.answer)?;
     if !sent.shown {
-        let screen = last_lines(&window.screen());
-        return Ok(Check::failed(&who, WHAT, format!("NOT ANSWERED: {screen}")));
+        let detail = format!("NOT ANSWERED: {}", window.tail());
+        return Ok(Check::failed(&who, WHAT, detail));
     }
     let session = window.session().ok_or_else(|| {
         Error::Daemon("a Claude Code window is opened on a conversation of its own".to_owned())
@@ -244,28 +243,18 @@ fn each_catalog_agent_opens_on_its_model_and_its_record_says_it_answered() -> Re
         .iter()
         .map(|name| row_of(&agents, name))
         .collect::<Result<Vec<_>>>()?;
-    let claude = live::installed(Harness::Claude)?;
-    log.say(format!(
-        "claude is {} ({}); its login is read from {}",
-        claude.command().display(),
-        claude.version(),
-        claude.home().display()
-    ));
+    let claude = log.found(Harness::Claude)?;
     let rig = Rig::start(live::rig(std::slice::from_ref(&claude), FAKE_AGENT))?;
     let asked = Ask::sum(SUM);
     let mut checks = Vec::new();
     for opening in openings(&rows, &live::list("effort")) {
         let window = Open::new(&rig, &claude, "agent", &opening.pane())
             .agent(opening.agent())
-            .open()?;
-        if let Some(trust) = window.trust() {
-            log.say(format!("{}: trust: {trust}", opening.who()));
-        }
+            .open_telling(&log, &opening.who())?;
         checks.push(check_of(&window, &opening, &asked)?);
     }
     rig.close()?;
-    log.block("what each check came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::conclude(&log, "what each check came to", &checks)
 }
 
 #[cfg(test)]

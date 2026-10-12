@@ -1,7 +1,7 @@
 //! The packaged smoke and the updater smoke: the app as it is built, run as a
 //! user would, and the update path proven end to end between apps. The updater
-//! smoke is `updater_smoke` (landing S12); the packaged smoke is the smoke test
-//! of `crates/cf-e2e` (landing S11), run on the app it is given:
+//! smoke is `updater_smoke`; the packaged smoke is the smoke test of
+//! `crates/cf-e2e`, run on the app it is given:
 //!
 //! ```text
 //! cargo xtask smoke                       # the bundle `npm --prefix app run build -- --bundles app` leaves

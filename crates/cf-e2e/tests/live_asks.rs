@@ -23,7 +23,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use cf_e2e::live::report::{self, Check};
-use cf_e2e::live::window::{Open, Window, READY};
+use cf_e2e::live::window::{Open, Window};
 use cf_e2e::live::{self, ask, last_lines, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::{files, Result};
@@ -134,8 +134,8 @@ impl Seen {
 fn run(window: &Window, command: &str, within: Duration) -> Result<Seen> {
     let work = window.workspace().join("windows-work");
     make_labs(&work)?;
-    if !window.still(READY) {
-        return Ok(Seen::unopened(last_lines(&window.screen())));
+    if let Err(screen) = window.ready() {
+        return Ok(Seen::unopened(screen));
     }
     let from = window.mark();
     window.paste(&request(command))?;
@@ -155,10 +155,8 @@ fn run(window: &Window, command: &str, within: Duration) -> Result<Seen> {
 
 /// What a fresh Claude window in the folder `folder` does with `command`.
 fn seen_in(rig: &Rig, install: &Installed, folder: &str, command: &str, log: &Log) -> Result<Seen> {
-    let window = Open::new(rig, install, folder, &format!("asks-{folder}")).open()?;
-    if let Some(trust) = window.trust() {
-        log.say(format!("{folder}: trust: {trust}"));
-    }
+    let window =
+        Open::new(rig, install, folder, &format!("asks-{folder}")).open_telling(log, folder)?;
     run(&window, command, ASK)
 }
 
@@ -207,20 +205,13 @@ fn claude_stops_on_a_removal_whose_path_a_variable_makes_and_runs_the_guarded_on
     let log = Log::new("live asks");
     // What a window is opened on is the harness code's to say: built before anything is spent.
     ask::prepare()?;
-    let claude = live::installed(Harness::Claude)?;
-    log.say(format!(
-        "claude is {} ({}); its login is read from {}",
-        claude.command().display(),
-        claude.version(),
-        claude.home().display()
-    ));
+    let claude = log.found(Harness::Claude)?;
     let rig = Rig::start(live::rig(std::slice::from_ref(&claude), FAKE_AGENT))?;
     let removed = seen_in(&rig, &claude, "asks", BARE, &log)?;
     let guarded_removed = seen_in(&rig, &claude, "asks-guarded", GUARDED, &log)?;
     rig.close()?;
     let checks = [bare(&removed), guarded(&guarded_removed)];
-    log.block("what each check came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::conclude(&log, "what each check came to", &checks)
 }
 
 #[cfg(test)]

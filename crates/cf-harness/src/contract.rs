@@ -17,7 +17,7 @@ use cf_proto::agents::Harness;
 use cf_proto::panes::Servers;
 use serde_json::Value;
 
-use crate::records::{Item, Options, Quota, Reading};
+use crate::records::{Item, Options, Quota, Reading, Record, Role, Settlement};
 
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -318,4 +318,37 @@ pub trait Records {
         harness: Harness,
         session: &'a str,
     ) -> Work<'a, Result<bool, String>>;
+
+    /// Whether `harness`'s record of `session`, read with no window open, ends in
+    /// a turn with no end (the turn the app's quit cut, or a Close): yes, or no
+    /// where it ends at rest, and none where the record cannot tell. Devin's
+    /// cannot: it reads a turn as going on only while its window shows it working,
+    /// and one whose last word is the message it was given as settled, which with
+    /// no window open is a turn never answered as much as one at rest.
+    fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<bool>> {
+        Box::pin(async move {
+            match &*self.look(harness, session, &Options::default()).await {
+                Reading::Known(record) => match record.settlement {
+                    Settlement::InFlight => Some(true),
+                    Settlement::Settled if ends_in_a_reply(record) => Some(false),
+                    Settlement::Settled | Settlement::Unknown => None,
+                },
+                _ => None,
+            }
+        })
+    }
 }
+
+/// Whether the last word of `record` (what the harness put in it itself aside)
+/// is the agent's reply: what a turn at rest ends in.
+fn ends_in_a_reply(record: &Record) -> bool {
+    record
+        .items
+        .iter()
+        .rev()
+        .find(|item| item.role != Role::Custom)
+        .is_some_and(|item| item.role == Role::Assistant)
+}
+
+#[cfg(test)]
+mod tests;

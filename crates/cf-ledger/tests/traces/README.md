@@ -45,8 +45,21 @@ is for) moved two things that Node's recordings hold. Every `final` says
 are not rewritten, and the replay holds the database this ledger left to them
 as Node's schema had it (`cf_ledger::testing::hold_apart_what_node_never_had_in_its_schema`).
 And `ledger-008`, a ledger one version past what the build knows, which it refuses,
-says 13 and 12 where Node's said 12 and 11: it was changed by hand, in those two
-numbers, to stay the probe it was. And the four traces whose refusals list the roles a
-member may hold or the pools a task may be for (`ledger-projects-005`, `-008`,
-`ledger-staff-001` and `ledger-tiered-003`) list the tester too, in the words they
-quote, as the ledger's refusals now do: changed by hand, in those words alone.
+says 14 and 13 where Node's said 12 and 11: it was changed by hand, in those two
+numbers, to stay the probe it was (each migration moves it again). And the four traces
+whose refusals list the roles a member may hold or the pools a task may be for
+(`ledger-projects-005`, `-008`, `ledger-staff-001` and `ledger-tiered-003`) list the
+tester too, in the words they quote, as the ledger's refusals now do: changed by
+hand, in those words alone.
+
+Migration 0013 (a project has no mark that it comes back by itself: the daemon
+suspends what was open when it starts, and the human resumes it) took away what
+Node's projects had of it. Every answer that holds a project says `resumeOnStart`,
+the event that suspended a project at a start says `resumeOnStart: true`, and every
+`final` has the column `resume_on_start` and its lines in the schema of `project`:
+none of them is rewritten, and the replay takes them out of what Node recorded,
+where this ledger's has none to take out (`cf_ledger::testing::hold_apart_the_resume_mark`
+and `hold_apart_the_resume_mark_in_a_dump`). The one call that cannot be held so is
+`forgetResume` of a project that is not there, which Node refused as an unknown
+project and this ledger has no mark to refuse for: `ledger-projects-011` is in
+`DEPARTED` at that call.

@@ -14,7 +14,7 @@ use std::time::Duration;
 use cf_e2e::live::claude::{processes_with, Process};
 use cf_e2e::live::members::{find, plus, shown, Account, MemberWindow, Members};
 use cf_e2e::live::tree;
-use cf_e2e::live::{last_lines, until};
+use cf_e2e::live::until;
 use cf_e2e::process::{signal, Signal};
 use cf_e2e::{pattern, Result};
 use regex::Regex;
@@ -185,11 +185,7 @@ pub fn run(ctx: &Ctx, case: &mut Account, name: &str) -> Result<()> {
         let window = members.window_of(ctx.agent)?;
         case.say(format!(
             "     its screen: {}",
-            last_lines(
-                &members
-                    .rig()
-                    .screen(window.as_ref().map_or("", |window| window.id()))
-            )
+            members.tail(window.as_ref().map_or("", |window| window.id()))
         ));
         return Ok(());
     }
@@ -288,10 +284,7 @@ pub fn run(ctx: &Ctx, case: &mut Account, name: &str) -> Result<()> {
         "     what the pane host finds under the window: {}",
         host_view(members, &window)
     ));
-    case.say(format!(
-        "its screen now: {}",
-        last_lines(&members.rig().screen(window.id()))
-    ));
+    case.say(format!("its screen now: {}", members.tail(window.id())));
     let words = |notes: &[&Value]| {
         notes
             .first()

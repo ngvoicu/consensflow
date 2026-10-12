@@ -1,6 +1,7 @@
 //! Windows that close and projects that end: the chief's window closing by
 //! itself, a member who leaves, a project closed, resumed and deleted, and
-//! one that comes back after a restart (`describe('the dispatcher')`).
+//! one that comes back after a restart and the human's Resume
+//! (`describe('the dispatcher')`).
 
 use cf_engine::testing::{Context, Gate};
 use cf_harness::contract::Pane;
@@ -17,9 +18,14 @@ fn pane_of(context: &Context, handle: &str) -> Pane {
     context.host.last(handle).expect("its window").pane
 }
 
-fn state_of(context: &Context, project: i64) -> (String, bool) {
-    let found = context.ledger.borrow().project(project).unwrap().unwrap();
-    (found.state, found.resume_on_start)
+fn state_of(context: &Context, project: i64) -> String {
+    context
+        .ledger
+        .borrow()
+        .project(project)
+        .unwrap()
+        .unwrap()
+        .state
 }
 
 #[test]
@@ -35,10 +41,7 @@ fn closes_the_project_when_its_chief_window_closes_by_itself_as_close_does() {
     let zeus = pane_of(&context, "zeus");
     // The human types /exit in the chief's terminal, or the chief crashes.
     context.exit("chief");
-    assert_eq!(
-        state_of(&context, project.id),
-        ("suspended".to_owned(), false)
-    );
+    assert_eq!(state_of(&context, project.id), "suspended");
     assert_eq!(context.host.killed(), [zeus]);
     assert_eq!(
         context.dispatcher.pane(context.id(project.id, &session)),
@@ -222,7 +225,7 @@ fn names_the_window_that_would_not_close_when_a_project_closes_and_closes_it_on_
         refused.unwrap_err().to_string(),
         "@chief's window would not close: resume the project and close it again"
     );
-    assert_eq!(state_of(&context, project.id).0, "suspended");
+    assert_eq!(state_of(&context, project.id), "suspended");
     assert_eq!(
         context.dispatcher.pane(context.id(project.id, "chief")),
         Some(chief)
@@ -335,9 +338,19 @@ fn brings_back_the_projects_that_were_open_before_a_restart_on_their_own_convers
         conversation.unwrap().unwrap().native_session.unwrap()
     };
     let before = native();
+    let opened = context.adapter.prepared().len();
     context.ledger.borrow_mut().suspend_for_restart().unwrap();
     let after = context.make();
-    after.resume_after_restart().unwrap();
+    after.settle_after_restart().unwrap();
+    assert_eq!(
+        (
+            state_of(&context, project.id),
+            context.adapter.prepared().len()
+        ),
+        ("suspended".to_owned(), opened),
+        "the start opens no window: the project waits for the human"
+    );
+    after.resume_project(project.id).unwrap();
     let resumed = context.adapter.prepared().pop().unwrap();
     assert_eq!(
         (
@@ -346,7 +359,7 @@ fn brings_back_the_projects_that_were_open_before_a_restart_on_their_own_convers
         ),
         (json!("chief"), json!(before))
     );
-    assert_eq!(state_of(&context, project.id), ("open".to_owned(), false));
+    assert_eq!(state_of(&context, project.id), "open");
     assert_eq!(native(), before);
     held_to(
         context.close(),

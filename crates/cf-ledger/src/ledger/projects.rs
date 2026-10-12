@@ -36,14 +36,9 @@ impl Ledger {
         projects::set_gate(&mut self.store, id, gate)
     }
 
-    /// At daemon start: every open project is suspended, marked to come back by itself.
+    /// At daemon start: every open project is suspended, for the human to resume.
     pub fn suspend_for_restart(&mut self) -> Result<Vec<ProjectView>, LedgerError> {
         projects::suspend_for_restart(&mut self.store)
-    }
-
-    /// A project's resume on start has been tried: the mark goes.
-    pub fn forget_resume(&mut self, id: i64) -> Result<(), LedgerError> {
-        projects::forget_resume(&mut self.store, id)
     }
 
     /// A project's events after the one numbered `after`, oldest first, at most `limit` (Node's defaults: 0 and 500).

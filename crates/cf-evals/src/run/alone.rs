@@ -11,6 +11,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use cf_e2e::live::ask::{self, Item};
+use cf_e2e::live::window::session_for;
 use cf_e2e::rig::Rig;
 use jiff::Timestamp;
 use serde_json::{json, Value};
@@ -23,7 +24,7 @@ use crate::bare::{asking_turn_end, bare_metrics};
 use crate::measure::{changed, OpenQuestion};
 use crate::plan::{harness, last_lines, terminal_answer};
 use crate::scenarios::FollowUp;
-use crate::{js, random, Error, Result};
+use crate::{js, Error, Result};
 
 /// How often the owner looks at the window and its record.
 const LOOK: Duration = Duration::from_secs(5);
@@ -121,7 +122,7 @@ pub fn play(plan: &Plan, index: u32, out: &mut dyn Write) -> Result<bool> {
         workspace: workspace.clone(),
         since_ms,
         // Claude and Pi open on an id they are given; the others name theirs in their stores.
-        session: (kind == "claude-code" || kind == "pi").then(random::uuid),
+        session: session_for(kind),
     };
     let mut said = Said::default();
     let mut items: Vec<Item> = Vec::new();

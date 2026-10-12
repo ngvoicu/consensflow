@@ -5,7 +5,8 @@
 //! stand-in, and say the version of each harness before and after its run
 //! ([`Who::version`], [`between`]): a harness may update itself while it runs.
 
-use super::machine::{installed, Harness};
+use super::machine::Harness;
+use super::version_of;
 use crate::{Error, Result};
 
 /// Who is run: a real harness, or the rig's stand-in agent.
@@ -43,10 +44,7 @@ impl Who {
     pub fn version(self) -> String {
         match self {
             Self::StandIn => "stand-in".to_owned(),
-            Self::Harness(harness) => installed(harness).map_or_else(
-                |failed| format!("unknown ({failed})"),
-                |install| install.version(),
-            ),
+            Self::Harness(harness) => version_of(harness),
         }
     }
 }

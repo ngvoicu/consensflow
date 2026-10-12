@@ -29,14 +29,17 @@
 //! - [`held`] and [`tree`] say what a worker's task is held back for: what the
 //!   board says of its window ([`held`]), and the processes its window's tree
 //!   started in the turn, as the pane host lists them ([`tree`]).
-//! - [`report`] says what each check of a run came to.
+//! - [`report`] says what each check of a run came to, and ends the run with
+//!   them ([`report::conclude`]).
 //!
 //! What a run is asked to do is in variables that `cargo xtask live` sets from
 //! its flags ([`option`], [`list`], and the shared [`KEEP`], [`HARNESS`] and
 //! [`STEPS`]); what a live run says as it goes, and how it waits, is here too:
-//! [`Log`] says what the run is doing with the seconds since it began, [`wait`]
-//! and [`until`] say what they wait for and for how long, and [`text`] and
-//! [`cut`] make what the product answered fit a line.
+//! [`Log`] says what the run is doing with the seconds since it began (and,
+//! with [`Log::found`], which harness it found and where), [`version_of`] names
+//! a harness's version, [`wait`] and [`until`] say what they wait for and for how
+//! long, and [`text`], [`cut`] and [`last_lines`] make what the product answered,
+//! or what a window showed, fit a line.
 
 pub mod agents;
 pub mod ask;
@@ -175,6 +178,41 @@ impl Log {
         let indented: Vec<String> = body.lines().map(|line| format!("    {line}")).collect();
         self.say(format!("{title}:\n{}", indented.join("\n")));
     }
+
+    /// Finds `harness` on the machine as a person's shell does ([`installed`]: one
+    /// that is not there, or not logged in, is the error, before anything is
+    /// spent) and says what was found.
+    pub fn found(&self, harness: Harness) -> Result<Installed> {
+        let install = installed(harness)?;
+        self.say(found_line(&install, &install.version()));
+        Ok(install)
+    }
+}
+
+/// The version of `harness` as its program on this machine says it, or `unknown`
+/// and why where it cannot be found or run. A harness may update itself while a
+/// run goes, so a report names the version before and after.
+pub fn version_of(harness: Harness) -> String {
+    said_version(installed(harness))
+}
+
+/// The version of the harness `found` says it is, or why there is none.
+fn said_version(found: Result<Installed>) -> String {
+    found.map_or_else(
+        |failed| format!("unknown ({failed})"),
+        |install| install.version(),
+    )
+}
+
+/// What a run says of a harness it found: where its program is, the version it
+/// says it is, and where its login is read from.
+fn found_line(install: &Installed, version: &str) -> String {
+    format!(
+        "{} is {} ({version}); its login is read from {}",
+        install.harness().name(),
+        install.command().display(),
+        install.home().display()
+    )
 }
 
 /// A JSON string as the text it is; anything else as JSON writes it.

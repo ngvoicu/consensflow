@@ -1,8 +1,9 @@
 # What the JavaScript evals said
 
 Two files, written once from the JavaScript evals (`evals/scenarios/*.mjs` and
-`evals/measure.mjs`, as they were when the evals became Rust) and not written
-again: the JavaScript is what they hold the Rust to.
+`evals/measure.mjs`, as they were when the evals became Rust: `e30c345a` is the
+last commit that changed either) and not written again: the JavaScript is what
+they hold the Rust to.
 
 - `scenarios.json`: each scenario as data, in the order of the ids: its title,
   fixture, prompt, follow-ups, the pattern (source and flags) and text of each answer,

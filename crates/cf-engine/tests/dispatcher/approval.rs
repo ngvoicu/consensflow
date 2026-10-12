@@ -700,11 +700,12 @@ fn a_restart_leaves_the_words_at_the_gate_where_they_were_and_they_go_in_once_th
     };
     assert_eq!(launches_of_zeus().len(), 1);
 
-    // The app quits and comes back, and its windows are gone: the words wait for
-    // the human still, and no window opens for them.
+    // The app quits and comes back, and its windows are gone: the human resumes
+    // the project, and the words wait for them still: no window opens for them.
     context.ledger.borrow_mut().suspend_for_restart().unwrap();
     let after = context.make();
-    after.resume_after_restart().unwrap();
+    after.settle_after_restart().unwrap();
+    after.resume_project(project).unwrap();
     assert_eq!(context.message(words).state, "gated");
     after.pass().unwrap();
     after.pass().unwrap();
@@ -874,7 +875,8 @@ fn a_result_waiting_at_the_gate_is_there_after_a_restart_and_reaches_the_chief_o
 
     context.ledger.borrow_mut().suspend_for_restart().unwrap();
     let after = context.make();
-    after.resume_after_restart().unwrap();
+    after.settle_after_restart().unwrap();
+    after.resume_project(project).unwrap();
     after.pass().unwrap();
     assert_eq!(context.message(result.id).state, "gated");
     assert_eq!(headed(&context, "chief", result.id), 0);

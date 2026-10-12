@@ -4,7 +4,7 @@
 
 use std::cell::Cell;
 
-use super::open::new_session;
+use super::open::{asked_for, new_session, pasted_into, session_for, trust_line};
 use super::*;
 
 fn item(role: &str, text: &str) -> Item {
@@ -46,6 +46,22 @@ fn the_app_pastes_into_claude_and_devin_and_no_other_harness() {
 }
 
 #[test]
+fn what_came_of_the_trust_asked_of_a_folder_is_said_as_the_window_of_whoever_asked() {
+    assert_eq!(trust_line("claude", "trusted"), "claude: trust: trusted");
+    assert_eq!(
+        trust_line("huginn max", "already trusted"),
+        "huginn max: trust: already trusted"
+    );
+}
+
+#[test]
+fn a_run_that_names_no_harness_is_asked_for_devin_and_one_that_names_some_for_those() {
+    assert_eq!(asked_for(Vec::new()), ["devin"]);
+    let named = vec!["claude".to_owned(), "devin".to_owned()];
+    assert_eq!(asked_for(named.clone()), named);
+}
+
+#[test]
 fn a_conversation_id_is_a_version_4_uuid_and_a_new_one_each_time() {
     let (first, second) = (new_session(), new_session());
     assert_ne!(first, second);
@@ -61,6 +77,16 @@ fn a_conversation_id_is_a_version_4_uuid_and_a_new_one_each_time() {
             id.chars().all(|at| at == '-' || at.is_ascii_hexdigit()),
             "{id}"
         );
+    }
+}
+
+#[test]
+fn claude_code_and_pi_are_opened_on_an_id_they_are_given_and_the_others_name_their_own() {
+    for kind in ["claude-code", "pi"] {
+        assert_eq!(session_for(kind).map(|id| id.len()), Some(36), "{kind}");
+    }
+    for kind in ["devin", "codex", "opencode", "claude", ""] {
+        assert_eq!(session_for(kind), None, "{kind}");
     }
 }
 

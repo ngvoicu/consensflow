@@ -240,8 +240,7 @@ fn a_window_resumed_on_a_conversation_the_quit_cut_is_watched_and_takes_a_second
         }
     }
     rig.close()?;
-    log.block("what each case came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::conclude(&log, "what each case came to", &checks)
 }
 
 #[cfg(test)]

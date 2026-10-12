@@ -150,7 +150,7 @@ replace = "        [_] => None::<i64>,"
 
 [[plant]]
 name = "pause notes: a stall never joins the note of its pass"
-meant = "tells_a_chief_once_of_all_the_tasks_a_restart_pauses"
+meant = "tells_a_chief_once_of_all_the_tasks_whose_windows_the_pane_host_lost_in_a_pass"
 runs = ["pause-notes-engine"]
 
 [[plant.edit]]
@@ -160,7 +160,7 @@ replace = "        let earlier: Option<i64> = None;"
 
 [[plant]]
 name = "pause notes: a pass is no burst"
-meant = "tells_a_chief_once_of_all_the_tasks_a_restart_pauses"
+meant = "tells_a_chief_once_of_all_the_tasks_whose_windows_the_pane_host_lost_in_a_pass"
 runs = ["pause-notes-engine"]
 
 [[plant.edit]]

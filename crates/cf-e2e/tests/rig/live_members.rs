@@ -94,6 +94,13 @@ fn a_project_opens_with_the_stand_in_for_its_chief_and_the_chief_gives_its_membe
         .and_then(|messages| messages.iter().find(|message| message["kind"] == "result"))
         .ok_or("the thread holds no result")?;
     assert_eq!(result["body"], "MEMBERS_OK");
+    // What a check says of a window is the end of what it printed, by its pane; a pane never opened printed none.
+    assert!(
+        members.tail(window.id()).contains("fake agent started on"),
+        "{}",
+        members.tail(window.id())
+    );
+    assert_eq!(members.tail("no-such-pane"), "");
     // The human has no note about a stop that never was.
     assert!(members.inbox(None)?.is_empty());
     assert!(members.is_open()?);
@@ -376,7 +383,7 @@ fn a_project_that_does_not_end_in_time_says_which_of_the_processes_it_started_we
 }
 
 #[test]
-fn the_app_started_again_on_the_same_home_resumes_the_project_and_the_chief_is_a_window_of_its_own(
+fn the_app_started_again_on_the_same_home_leaves_the_project_suspended_and_its_resume_opens_the_chief_a_window_of_its_own(
 ) -> Outcome {
     let log = Log::new("live members");
     let members = open("members-restart", &log)?;
@@ -385,8 +392,9 @@ fn the_app_started_again_on_the_same_home_resumes_the_project_and_the_chief_is_a
     let session = after(&first, "--session-id");
     assert!(!session.is_empty(), "{:?}", first["argv"]);
     let project = members.project_id();
-    // A chief that has a conversation: the daemon that starts again resumes it, and a chief that
-    // never said a word is opened afresh on the id it had.
+    // A chief that has a conversation: the human's Resume of the project, after the app started
+    // again, opens it on that conversation, and a chief that never said a word is opened afresh on
+    // the id it had.
     members
         .rig()
         .tell(project, "Reply with exactly: BEFORE-RESTART")?;
@@ -401,6 +409,10 @@ fn the_app_started_again_on_the_same_home_resumes_the_project_and_the_chief_is_a
 
     let members = members.restart(&log)?;
     assert_eq!(members.project_id(), project);
+    // The app started again opens nothing: the project waits for the human.
+    assert!(!members.is_open()?);
+    assert!(members.rig().open_frames().is_empty());
+    members.resume()?;
     find(
         &log,
         "the project to be open again",
@@ -409,7 +421,7 @@ fn the_app_started_again_on_the_same_home_resumes_the_project_and_the_chief_is_a
         || Ok(members.is_open()?.then_some(())),
     )?
     .ok_or("the project never came back")?;
-    // The daemon that starts resumes the chief's own conversation, in a window of its own.
+    // The Resume brings the chief's own conversation back, in a window of its own.
     let again = members.rig().open_frame(&pane, secs(60))?;
     assert_eq!(after(&again, "--resume"), session, "{:?}", again["argv"]);
     // The chief's token is the new window's: `cf` runs as it, and it is the newest of its pane.

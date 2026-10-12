@@ -3,15 +3,17 @@
 //!
 //! The order matters, and is held: the home and the files with their start
 //! line; the ledger, whose lock refuses a second daemon on the same home; the
-//! launch folders swept and the projects that were open suspended for a
-//! resume, only once this daemon holds the ledger; the agents file folded into
+//! launch folders swept and the projects that were open suspended, only once
+//! this daemon holds the ledger; the agents file folded into
 //! its shape and the members' tiers read again, a failure written down and no
 //! more; the UI token and the HTTP front; the stop armed; then the handle line,
 //! the first thing on the standard output, the app reads it to find the daemon;
 //! the bridge, the host, the engine, the pass loop and its throttles and the
 //! page's operations, every handler on before the bridge is first polled and
-//! the pass timer armed before the resume begins; and last the resume of what
-//! was open, and a kick. The engine's work runs on one executor
+//! the pass timer armed before the start's settling begins; and last the
+//! settling of what was on its way into a window, and a kick. No project comes
+//! back by itself: what was open waits, suspended, for the human's Resume.
+//! The engine's work runs on one executor
 //! ([`DaemonSpawn`]), whose driver is spawned once, and the daemon drains it
 //! where Node's event loop went on to its next callback: after the frames of
 //! one read of the bridge, the first part of an HTTP request, a timer of the
@@ -445,35 +447,27 @@ async fn run(
     });
     errors.spawn("the bridge's task failed", connection);
 
-    // What was open comes back, and the loop is woken either way. It is begun
-    // here, where Node called it, and what its first part woke is run to its end.
-    let (resuming, resumed_console) = (Rc::clone(&dispatcher), Rc::clone(&console));
-    let (resume_errors, resume_kick) = (Rc::clone(&errors), Rc::clone(&kick));
-    let resume = begin(&*spawn, async move {
-        match contain(resuming.resume_after_restart()).await {
-            Ok(Ok(outcomes)) => {
-                for outcome in outcomes {
-                    if let Some(cause) = outcome.error {
-                        resumed_console
-                            .line(&format!("consensflow resume {}: {cause}", outcome.project));
-                        resume_errors.log().error(
-                            &format!("resume of project {} failed", outcome.project),
-                            Some(&cause),
-                        );
-                    }
-                }
-            }
+    // What was on its way into a window is settled, and the loop is woken
+    // either way. Nothing is opened: what was open waits, suspended, for the
+    // human's Resume. It is begun here, where Node began its resume, and what
+    // its first part woke is run to its end.
+    let (settling, settle_errors) = (Rc::clone(&dispatcher), Rc::clone(&errors));
+    let settle_kick = Rc::clone(&kick);
+    let settle = begin(&*spawn, async move {
+        match contain(settling.settle_after_restart()).await {
+            Ok(Ok(())) => {}
             Ok(Err(failed)) => {
-                resume_errors
-                    .log()
-                    .error("the resume failed", Some(&failed.to_string()));
+                settle_errors.log().error(
+                    "settling what was on its way failed",
+                    Some(&failed.to_string()),
+                );
             }
-            Err(panicked) => resume_errors.caught("the resume failed", &panicked),
+            Err(panicked) => settle_errors.caught("settling what was on its way failed", &panicked),
         }
-        resume_kick();
+        settle_kick();
     })
     .await;
-    drop(resume);
+    drop(settle);
     spawn.drain();
 
     Ok(Daemon {

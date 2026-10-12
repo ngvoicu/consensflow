@@ -5,14 +5,14 @@
 # everything for it waited). Claude resumed on such a conversation waits at
 # its prompt, writes nothing of the turn, and closes it with a message of its own
 # when the next one comes (`npm run live:resume-cut`, Claude 2.1.296). One plant
-# takes one rule out; a test of it fails. The first plants run the tests of the
-# harness, which hold each rule apart on the records of two live runs; the
-# `resumed rig:` plants hold that the rule reaches the chief through the real
-# daemon and pane host (`crates/cf-e2e/tests/rig/approval.rs`, the case that cuts the
-# chief's turn), and say `builds`: the family builds the native `cf` again once
-# each is put back. The last plants are of the stand-in agent that makes the
-# cut. Every name holds `resumed`, so `npm run plants:daemon -- resumed` runs
-# them all, and `resumed rig` the end to end ones.
+# takes one rule out; a test of it fails. The plants run the tests of the
+# harness, which hold each rule apart on the records of two live runs, and of
+# the stand-in agent that makes the cut. The chief the quit cuts is no longer
+# opened with no message of its own: the human's Resume gives it a note that
+# says its turn was cut, so the rule reaches a window through the daemon only
+# when the human shows a session's window opened on a cut conversation; the
+# plants of the note and of the Resume are in `start-suspended.toml`. Every
+# name holds `resumed`, so `npm run plants:daemon -- resumed` runs them all.
 
 [run]
 # The turn a record left open, as a window opened on it holds it.
@@ -35,8 +35,8 @@ runs = ["harness-launch-claude-resumed"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '                        idle && (settled || empty || left) || by_press,'
-replace = '                        idle && (settled || empty) || by_press,'
+find = '                        at_prompt && (settled || empty || left) || by_press,'
+replace = '                        at_prompt && (settled || empty) || by_press,'
 
 [[plant]]
 name = "resumed: a window given a message of its own is read at rest by the turn before it"
@@ -137,24 +137,11 @@ file = "crates/cf-harness/src/pi/adapter.rs"
 find = '        *self.left_open.borrow_mut() = None;'
 replace = ''
 
-# --- end to end: through the real daemon and pane host ---
-
-[[plant]]
-name = "resumed rig: a chief the quit cut in its turn is read at work for good once resumed"
-meant = "a_restart_that_cuts_the_chiefs_turn_leaves_its_window_at_rest_and_what_waits_for_it_reaches_it"
-runs = ["rig-resumed-cut"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = '                        idle && (settled || empty || left) || by_press,'
-replace = '                        idle && (settled || empty) || by_press,'
-
 # --- the stand-in agent that makes the cut ---
 
 [[plant]]
 name = "resumed rig: the stand-in answers at once, and the quit cuts no turn"
-meant = "a_restart_that_cuts_the_chiefs_turn_leaves_its_window_at_rest_and_what_waits_for_it_reaches_it"
+meant = "a_restart_that_cuts_the_chiefs_turn_tells_it_so_once_and_what_waits_for_it_reaches_it"
 runs = ["rig-resumed-cut"]
 
 [[plant.edit]]

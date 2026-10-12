@@ -1,7 +1,7 @@
 //! A run of ssh, tried on programs of the tests' own: the test program itself,
 //! started to run one of its ignored tests as the program a case needs (it speaks
 //! on both streams, it holds on to be ended, it exits as it is told), the way
-//! `plants::stops` tries a stop. Which of them runs, and what it waits for, is
+//! `stops` tries a stop. Which of them runs, and what it waits for, is
 //! said by the case in variables and files, so that no case depends on how long
 //! anything takes.
 

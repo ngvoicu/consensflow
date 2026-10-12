@@ -1,0 +1,91 @@
+# Plants in what hands over to `cargo xtask` and what Tauri prepares the app with: the
+# npm scripts of the root and of the app, and the build hooks of Tauri's configuration. A
+# script that names a command xtask does not have, a live script whose test is not there,
+# a script that runs a file that was deleted, a driver that hands over to the wrong
+# command, the npm check that stops short of the tests, and a hook of Tauri's that no
+# longer stages the app. `tools/xtask/tests/scripts.rs` must catch each.
+
+[run]
+# The scripts, as the files say them: each is held to the command it hands over to, and to being a command xtask has (asked for its help, which starts nothing).
+xtask-test-scripts = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "scripts"]
+
+[[plant]]
+name = "wiring: a live script names a test of cf-e2e that is not there"
+meant = "every_live_script_names_a_live_test_of_cf_e2e_that_is_there"
+runs = ["xtask-test-scripts"]
+
+[[plant.edit]]
+file = "package.json"
+find = '"live:stops": "cargo xtask live stops",'
+replace = '"live:stops": "cargo xtask live stop",'
+
+[[plant]]
+name = "wiring: a driver hands over to a command xtask does not have"
+meant = "every_npm_script_that_hands_over_to_xtask_names_a_command_it_has"
+runs = ["xtask-test-scripts"]
+
+[[plant.edit]]
+file = "package.json"
+find = '"test:daemons": "cargo xtask test daemons",'
+replace = '"test:daemons": "cargo xtask test daemon",'
+
+[[plant]]
+name = "wiring: the summary of the evals hands over to the evals themselves"
+meant = "the_root_package_runs_each_driver_and_build_step_through_cargo_xtask"
+runs = ["xtask-test-scripts"]
+
+[[plant.edit]]
+file = "package.json"
+find = '"eval:summary": "cargo xtask eval summary",'
+replace = '"eval:summary": "cargo xtask eval",'
+
+[[plant]]
+name = "wiring: the npm check is the lint alone"
+meant = "the_npm_check_is_the_lint_and_the_tests"
+runs = ["xtask-test-scripts"]
+
+[[plant.edit]]
+file = "package.json"
+find = '"check": "npm run lint && npm test",'
+replace = '"check": "npm run lint",'
+
+[[plant]]
+name = "wiring: a script of the app runs a file that is gone"
+meant = "no_npm_script_runs_a_file_that_is_not_there"
+runs = ["xtask-test-scripts"]
+
+[[plant.edit]]
+file = "app/package.json"
+find = '"bundle:ui": "node scripts/bundle-ui.mjs",'
+replace = '"bundle:ui": "node scripts/bundle-page.mjs",'
+
+[[plant]]
+name = "wiring: the app's packing is Tauri's"
+meant = "the_app_package_stages_and_packs_through_cargo_xtask_and_leaves_building_to_tauri"
+runs = ["xtask-test-scripts"]
+
+[[plant.edit]]
+file = "app/package.json"
+find = '"portable": "cargo xtask portable pack",'
+replace = '"portable": "tauri build",'
+
+[[plant]]
+name = "wiring: Tauri builds the page and no more before a build"
+meant = "tauri_prepares_the_app_before_a_build_and_before_a_dev_run_which_waits_for_it"
+runs = ["xtask-test-scripts"]
+
+[[plant.edit]]
+file = "app/src-tauri/tauri.conf.json"
+find = '"beforeBuildCommand": "npm run prepare:app",'
+replace = '"beforeBuildCommand": "npm run bundle:ui",'
+
+[[plant]]
+name = "wiring: the candidate's configuration has a build of its own"
+meant = "the_candidate_and_windows_configurations_are_merged_over_it_without_a_word_of_build"
+runs = ["xtask-test-scripts"]
+
+[[plant.edit]]
+file = "app/src-tauri/tauri.candidate.conf.json"
+find = '"productName": "ConsensFlow Candidate",'
+replace = '''"productName": "ConsensFlow Candidate",
+  "build": { "beforeBuildCommand": "npm run bundle:ui" },'''

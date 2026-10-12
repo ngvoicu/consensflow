@@ -13,7 +13,7 @@ use cf_e2e::live::members::{
     self, answer_to, clock, find, first_question, is_over, judge, last_result, ms_of, Account,
     Members, Plan, STAND_IN_WORKER,
 };
-use cf_e2e::live::{last_lines, seconds, Harness, Log, Who};
+use cf_e2e::live::{seconds, Harness, Log, Who};
 use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
 
@@ -175,9 +175,9 @@ fn observe(
     })?;
     let window = members.window_of(agent)?;
     let screen = |window: &Option<members::MemberWindow>| {
-        window.as_ref().map_or_else(String::new, |window| {
-            last_lines(&members.rig().screen(window.id()))
-        })
+        window
+            .as_ref()
+            .map_or_else(String::new, |window| members.tail(window.id()))
     };
     let Some(First::Question(question)) = first else {
         let thread = members.task(number)?;
@@ -271,7 +271,7 @@ fn observe(
     if !case.held() {
         case.say(format!(
             "     the member's window: {}",
-            last_lines(&members.rig().screen(window.id()))
+            members.tail(window.id())
         ));
     }
     // The chief's window, which the check answers as: it has to be the one it was opened as.

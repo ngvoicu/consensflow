@@ -46,7 +46,7 @@ use tempfile::TempDir;
 
 use super::machine::{live_folder_in, Harness, Installed, ISOLATION};
 use super::window::trust_claude;
-use super::{agents, installed, rig, rig_with_stand_ins, Log};
+use super::{agents, installed, last_lines, rig, rig_with_stand_ins, Log};
 use crate::rig::{Config, Project, Rig};
 use crate::{files, Error, Result};
 
@@ -355,6 +355,12 @@ impl Members {
             .collect()
     }
 
+    /// The end of the screen of the window whose pane is `pane` (its id), as a
+    /// line ([`last_lines`]): what a check says of a window to say what it saw.
+    pub fn tail(&self, pane: &str) -> String {
+        last_lines(&self.rig.screen(pane))
+    }
+
     /// Pastes `body` into the window `pane` as the daemon does (`pane.write_paste`:
     /// a bracketed paste, then Enter once the window has drawn it).
     pub fn paste(&self, pane: &Value, body: &str) -> Result<Value> {
@@ -376,7 +382,8 @@ impl Members {
         self.rig.events()
     }
 
-    /// Whether the project is open, as the daemon says after it started again.
+    /// Whether the project is open, as the daemon says: it is not after the app
+    /// started again, until the human resumes it ([`Members::resume`]).
     pub fn is_open(&self) -> Result<bool> {
         let listed = self.rig.page("projects.list", json!({}))?;
         Ok(listed["projects"]
@@ -385,9 +392,22 @@ impl Members {
             .is_some_and(|found| found["state"] == "open"))
     }
 
+    /// The human's Resume of the project, as the page asks it (`project.resume`):
+    /// its chief's window comes back, and the window of each member with a task
+    /// at work or waiting, each on its own conversation, a window the quit cut
+    /// told so. The daemon's answer.
+    pub fn resume(&self) -> Result<Value> {
+        let resumed = self.page("project.resume", json!({}))?;
+        if resumed["ok"] != true {
+            return Err(Error::Daemon(format!("project.resume: {resumed}")));
+        }
+        Ok(resumed)
+    }
+
     /// The app's quit, and the app started again on the same home: the daemon
     /// dies first, then the pane host, which ends every window, as the quit
-    /// orders it, and the daemon that starts resumes the project.
+    /// orders it. The daemon that starts suspends the project and opens nothing:
+    /// it waits for the human's Resume ([`Members::resume`]).
     pub fn restart(self, log: &Log) -> Result<Self> {
         let Self {
             mut rig,
@@ -402,7 +422,8 @@ impl Members {
         } = self;
         rig.kill_daemon();
         rig.wait_for_daemon_exit(GONE)?;
-        let root = rig.close_keeping_the_root()?;
+        // Real harnesses' windows: a window stopped in a command takes its time to leave.
+        let root = rig.close_keeping_the_root_within(closing::EXIT)?;
         let mut rig = Rig::start(config.clone().existing_root(root))?;
         if super::keep_requested() {
             rig.keep_home();

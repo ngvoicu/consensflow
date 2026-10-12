@@ -1,7 +1,7 @@
 //! Every report in `evals/reports/`, one line each on the console and one row each
 //! in `evals/RESULTS.md`: scenario, chief, staff, how many expectations held, the
 //! numbers behind them. Reports are kept: a run is evidence, and a later run beside
-//! it is the comparison. `cargo xtask eval summary` (`npm run eval:summary`) runs it.
+//! it is the comparison. `cargo xtask eval summary` runs it.
 
 use std::fs;
 use std::io::Write;

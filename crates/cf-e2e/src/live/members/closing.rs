@@ -207,7 +207,7 @@ mod tests {
             listed(31, 30, 30, "sh ./script"),
             listed(32, 31, 30, "sleep 200"),
             // Another's, which no parent of this rig started.
-            listed(40, 1, 40, "node evals/run.mjs"),
+            listed(40, 1, 40, "vim notes.md"),
             listed(41, 40, 40, "claude"),
         ];
         let found: Vec<u32> = descendants(&all, 10)
@@ -235,7 +235,7 @@ mod tests {
         let alive = [
             listed(21, 10, 10, "consensflow-bridge"),
             listed(33, 1, 30, "fake-agent --background-job 120 job --deaf"),
-            listed(40, 1, 40, "node evals/run.mjs"),
+            listed(40, 1, 40, "vim notes.md"),
             listed(41, 40, 10, "a stranger in the test's own group"),
         ];
         let started: BTreeSet<u32> = [20, 21, 30, 31].into();

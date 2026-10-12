@@ -424,9 +424,15 @@ impl Rig {
 
     /// [`Rig::close`], but the home is left, for a rig that resumes on it
     /// ([`Config::existing_root`]). Where it is.
-    pub fn close_keeping_the_root(mut self) -> Result<PathBuf> {
+    pub fn close_keeping_the_root(self) -> Result<PathBuf> {
+        self.close_keeping_the_root_within(EXIT)
+    }
+
+    /// [`Rig::close_keeping_the_root`], the daemon and the pane host each given
+    /// `within` to end, as [`Rig::close_within`] gives them: for real harnesses.
+    pub fn close_keeping_the_root_within(mut self, within: Duration) -> Result<PathBuf> {
         self.keep_root = true;
-        self.shutdown(EXIT)?;
+        self.shutdown(within)?;
         Ok(self.root.clone())
     }
 
