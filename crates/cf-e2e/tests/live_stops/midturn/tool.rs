@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use cf_e2e::live::ask;
 use cf_e2e::live::members::{plus, Account, MemberWindow, Members};
+use cf_e2e::live::tree::{self, Read};
 use cf_e2e::live::Harness;
 use cf_e2e::live::{command, cut};
 use cf_e2e::Result;
@@ -30,7 +31,6 @@ use cf_e2e::Result;
 use super::begin::{begin, Doing};
 use super::wire::Wire;
 use super::{screen_drawn, stop_it, Hold};
-use crate::tree::{self, Read};
 use crate::{Ctx, STUCK_WATCH, WORK};
 
 /// What the member is asked to do, in the words the case says it in.
@@ -219,7 +219,7 @@ pub fn running(
     devin: bool,
 ) -> impl FnMut(&Members, &MemberWindow, Duration) -> Option<String> + '_ {
     move |members, window, _worked| {
-        let tree = tree::read(members, &window.pane);
+        let tree = tree::read(members.rig(), &window.pane);
         started(
             &tree,
             command,
@@ -290,10 +290,10 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use cf_e2e::live::tree::Tree;
     use serde_json::json;
 
     use super::*;
-    use crate::tree::Tree;
 
     fn tree(processes: &[(u64, &str)]) -> Read {
         Ok(Tree::of(&json!({

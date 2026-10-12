@@ -30,7 +30,8 @@
 //!   with the home each reads its login from, the rig whose windows run them,
 //!   the model each runs on, a real harness's window opened as the app opens
 //!   one, what Claude Code and Codex keep and say, what the daemon wrote as it
-//!   went, what a live run says and how it waits, and the variables
+//!   went, what the board and the pane host say a worker's task is held back
+//!   for, what a live run says and how it waits, and the variables
 //!   `cargo xtask live` sets from its flags. [`png`] reads the structure of a
 //!   PNG file, to say that an image a harness saved is a whole one.
 //!
@@ -45,7 +46,9 @@
 //! the daemon pastes into it, `live_designer` a real Codex drawing an image,
 //! `live_approval` real harnesses in every seat of five projects sending what
 //! the human approves, behind the gate, `live_mcp` a real Claude Code worker
-//! that has an MCP server finishing its task). Run them with
+//! that has an MCP server finishing its task, `live_finish` a real worker of any
+//! harness running a shell command and finishing its task with nothing held
+//! back). Run them with
 //! `cargo xtask test clis`, `daemons`, `integration`, `agents` and `load`, and
 //! `cargo xtask smoke` (the `npm run` names are the same), a live one with
 //! `cargo xtask live <name>`, or one with `cargo test -p cf-e2e --test cli`.

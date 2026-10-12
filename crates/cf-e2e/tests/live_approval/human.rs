@@ -8,6 +8,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use cf_e2e::live::trace::Trace;
+use cf_e2e::live::tree;
 use cf_e2e::live::{cut, text, wait, Log};
 use cf_e2e::rig::{Project, Rig};
 use cf_e2e::{Error, Result};
@@ -197,24 +198,12 @@ impl<'a> Human<'a> {
     /// says it (the work the daemon holds a task's result back for): a line to
     /// each process, after a mark.
     pub fn background(&self, pane: &Value) -> String {
-        let asked = self.rig.host(
-            "pane.background",
-            json!({ "id": pane["id"], "generation": pane["generation"] }),
-        );
-        let Ok(answer) = asked else {
+        let Ok(tree) = tree::read(self.rig, pane) else {
             return String::new();
         };
-        answer["processes"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(|process| {
-                format!(
-                    "\n    ~ {} {}",
-                    text(&process["pid"]),
-                    cut(&text(&process["command"]), 140)
-                )
-            })
+        tree.processes
+            .iter()
+            .map(|process| format!("\n    ~ {} {}", process.pid, cut(&process.command, 140)))
             .collect()
     }
 

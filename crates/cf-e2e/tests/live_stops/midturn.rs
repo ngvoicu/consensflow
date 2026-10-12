@@ -54,13 +54,13 @@ use std::time::Duration;
 
 use cf_e2e::live::ask;
 use cf_e2e::live::members::{plus, squash, Account, MemberWindow, Members};
+use cf_e2e::live::tree;
 use cf_e2e::live::Harness;
 use cf_e2e::Result;
 use serde_json::Value;
 
 use crate::stop::{rested_at, said_pause};
 use crate::stuck::{at_rest, word_of};
-use crate::tree;
 use crate::watch::{say_events, settlement_of, told_the_human, told_the_requester, unstopped};
 use crate::{now_ms, Ctx, STOP, WORK};
 use begin::begin;
@@ -189,7 +189,7 @@ impl Marks<'_> {
                 .map(|line| squash(line, DRAWN_WIDTH))
                 .collect(),
             tree: self.command.map(|command| {
-                let read = tree::read(self.members, &self.window.pane);
+                let read = tree::read(self.members.rig(), &self.window.pane);
                 tool::tree_phrase(&read, command, self.listed)
             }),
             also: self
@@ -236,7 +236,10 @@ fn watch(ctx: &Ctx, marks: &Marks, made: i64, hold: &Hold) -> Result<Watched> {
             command_gone = marks
                 .command
                 .filter(|command| {
-                    tool::is_gone(&tree::read(marks.members, &marks.window.pane), command)
+                    tool::is_gone(
+                        &tree::read(marks.members.rig(), &marks.window.pane),
+                        command,
+                    )
                 })
                 .map(|_| now);
         }

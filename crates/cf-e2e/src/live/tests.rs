@@ -164,6 +164,21 @@ fn a_span_of_milliseconds_is_seconds_with_one_decimal() {
     assert_eq!(seconds(0), "0.0");
     assert_eq!(seconds(12_340), "12.3");
     assert_eq!(seconds(-1_500), "-1.5");
+    // A span of time is said the same way.
+    assert_eq!(secs(Duration::ZERO), "0.0");
+    assert_eq!(secs(Duration::from_millis(12_340)), "12.3");
+    assert_eq!(secs(Duration::from_secs(301)), "301.0");
+}
+
+#[test]
+fn a_run_says_how_long_it_has_gone_on_and_a_scope_of_it_goes_on_as_long() {
+    let log = Log::new("live test");
+    let scoped = log.scoped("claude");
+    std::thread::sleep(Duration::from_millis(20));
+    assert!(log.elapsed() >= Duration::from_millis(20));
+    // One run, whatever the scope that says what it is doing.
+    assert!(scoped.elapsed() >= Duration::from_millis(20));
+    assert!(scoped.elapsed() <= log.elapsed());
 }
 
 #[test]

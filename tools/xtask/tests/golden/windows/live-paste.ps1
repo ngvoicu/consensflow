@@ -16,7 +16,7 @@ Set-Content -Path $running -Value $PID
 try {
 $synced = Join-Path $dir '.synced-files'
 $before = if (Test-Path $synced) { Get-Content $synced } else { @() }
-tar.exe -xzf (Join-Path $env:USERPROFILE 'consensflow-build.tgz') -C $dir
+tar.exe -xmzf (Join-Path $env:USERPROFILE 'consensflow-build.tgz') -C $dir
 if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
 $now = [Collections.Generic.HashSet[string]]::new([string[]](Get-Content $synced))
 foreach ($file in $before) {

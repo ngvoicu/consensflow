@@ -55,8 +55,8 @@ use leftovers::Leftovers;
 
 pub use account::{clock, plural, plus, plus_maybe, squash, Account};
 pub use board::{
-    answer_to, brief_delivered, find, first_answer, first_question, is_over, last_result,
-    session_of, MemberWindow, Paused,
+    answer_to, brief_delivered, delivered_result, find, first_answer, first_question, is_over,
+    last_result, session_of, MemberWindow, Paused,
 };
 pub use command::{shown, LongCommand};
 pub use door::{judge, moves, ms_of, waited_then_worked, Finding, Judged, Seen};

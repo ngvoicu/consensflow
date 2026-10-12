@@ -10,7 +10,11 @@ runner (`tests/live/windows-script.mjs` at 80dbeb5b), which the Rust one
 replaced, and held to it byte for byte. The script has since gained its last
 line (`== exit N`, written by the function `Exit-Run`, which every way out of
 the script goes through: see the module doc of `windows`), and the files were
-recorded again from the template in `script.rs`. The JavaScript is gone, so a
+recorded again from the template in `script.rs`. The unpack has since gained `-m`
+(`tar.exe -xmzf`: each file has the time of the unpack, not the one the Mac kept of
+it, so that cargo there builds the file a switch of the checkout changed even where
+its time is older than the last build), and the files were recorded again. The
+JavaScript is gone, so a
 golden is no longer a proof that the script is as it was: it holds what the
 script is, so that an edit nobody meant to it shows.
 

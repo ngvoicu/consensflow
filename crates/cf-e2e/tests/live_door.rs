@@ -61,10 +61,10 @@ use std::time::Duration;
 
 use cf_e2e::live::members::Account;
 use cf_e2e::live::report::{self, Check};
-use cf_e2e::live::{self, installed, Log};
+use cf_e2e::live::{self, between, Log, Who};
 use cf_e2e::{Error, Result};
 
-use check::{Asked, Who};
+use check::Asked;
 
 /// The stand-in for the chief's window, and for the member of `fake`.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
@@ -75,9 +75,9 @@ const DEFAULT: [&str; 5] = ["claude", "codex", "opencode", "devin", "pi"];
 /// The doors the words of the command line name, or all there are.
 fn doors(named: &[String]) -> Result<Vec<Who>> {
     if named.is_empty() {
-        return DEFAULT.iter().map(|name| Who::named(name)).collect();
+        return DEFAULT.iter().map(|name| check::named(name)).collect();
     }
-    named.iter().map(|name| Who::named(name)).collect()
+    named.iter().map(|name| check::named(name)).collect()
 }
 
 /// `--hold`: the seconds the chief takes to answer.
@@ -119,18 +119,6 @@ fn asked() -> Result<Asked> {
     })
 }
 
-/// The version of the harness `who` runs, as it says it: a harness may update
-/// itself while it runs, and the run names it before and after.
-fn version(who: Who) -> String {
-    match who {
-        Who::StandIn => "stand-in".to_owned(),
-        Who::Harness(harness) => installed(harness).map_or_else(
-            |failed| format!("unknown ({failed})"),
-            |install| install.version(),
-        ),
-    }
-}
-
 #[test]
 #[ignore = "opt-in: spends the machine's quota on a member of each harness named; cargo xtask live door (npm run live:door)"]
 fn a_question_answered_from_the_board_is_received_once_at_the_door_of_the_harness_that_asked(
@@ -140,18 +128,14 @@ fn a_question_answered_from_the_board_is_received_once_at_the_door_of_the_harnes
     let whom = doors(&live::list("harness"))?;
     let mut checks = Vec::new();
     for who in whom {
-        let before = version(who);
+        // A harness may update itself while it runs: the run names its version before and after.
+        let before = who.version();
         let case = check::run(who, &asked, Path::new(FAKE_AGENT), &log).unwrap_or_else(|failed| {
             let mut case = Account::new();
             case.fail(failed);
             case
         });
-        let after = version(who);
-        let version = if after == before {
-            before
-        } else {
-            format!("{before}, then {after}")
-        };
+        let version = between(before, who.version());
         log.block(
             &format!(
                 "== {} {version}: {}",

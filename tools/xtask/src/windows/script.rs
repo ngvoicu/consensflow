@@ -170,6 +170,13 @@ pub struct Script<'a> {
 /// variables `env` given to the process and said in the output, then `command`
 /// run from `inside`, a folder of the copy. The steps do not see the variables:
 /// they are the command's.
+///
+/// The unpack is `tar.exe -xmzf`: each file is given the time of the unpack (`-m`,
+/// which GNU tar and bsdtar both take), not the one the tarball keeps of it, which
+/// is the time it was changed on the machine that packed it. Cargo builds what is
+/// newer than its last build, so a checkout switched to a branch whose file was
+/// changed before that build, there, would leave the file as it was built: a test
+/// that called a function the switch added did not compile against the old crate.
 pub fn remote_script(script: &Script) -> String {
     let steps: Vec<String> = script
         .steps
@@ -259,7 +266,7 @@ Set-Content -Path $running -Value $PID
 try {
 $synced = Join-Path $dir '«synced»'
 $before = if (Test-Path $synced) { Get-Content $synced } else { @() }
-tar.exe -xzf (Join-Path $env:USERPROFILE '«dir».tgz') -C $dir
+tar.exe -xmzf (Join-Path $env:USERPROFILE '«dir».tgz') -C $dir
 if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
 $now = [Collections.Generic.HashSet[string]]::new([string[]](Get-Content $synced))
 foreach ($file in $before) {

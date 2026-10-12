@@ -4,11 +4,13 @@
 //!
 //! `windows` runs a command on a Windows machine, over SSH, on this working tree
 //! as it is now: every tracked file, and new ones not ignored, go over as one
-//! tarball and are unpacked into a build folder there (a file gone from the tree
-//! since the last run goes from there too; `node_modules` and the Rust build
-//! stay). The command then runs in that folder with Node and Cargo on PATH, its
-//! output streamed back; its exit status is this one's, as the machine says it in
-//! the last line of the output (below). One run at a time: a second is refused
+//! tarball and are unpacked into a build folder there, each with the time of the
+//! unpack (a file gone from the tree since the last run goes from there too;
+//! `node_modules` and the Rust build stay), so that cargo builds what a switch of
+//! the checkout changed, whatever time the Mac kept of it. The command then runs
+//! in that folder with Node and Cargo on PATH, its output streamed back; its exit
+//! status is this one's, as the machine says it in the last line of the output
+//! (below). One run at a time: a second is refused
 //! while the first goes on there (the machine says "A run is still going on this
 //! machine (process N): one at a time." and ends with 75, which is the answer),
 //! and a run stopped here (Ctrl-C, or a `kill`) is ended there too, which

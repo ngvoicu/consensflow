@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use cf_e2e::live::claude::{processes_with, Process};
 use cf_e2e::live::members::{find, plus, shown, Account, MemberWindow, Members};
+use cf_e2e::live::tree;
 use cf_e2e::live::{last_lines, until};
 use cf_e2e::process::{signal, Signal};
 use cf_e2e::{pattern, Result};
@@ -20,7 +21,6 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::stop::pause_text;
-use crate::tree;
 use crate::watch::{say_events, told_the_human, told_the_requester, unstopped};
 use crate::{now_ms, Ctx, STUCK_WATCH, WORK};
 
@@ -113,7 +113,7 @@ pub fn left_behind() -> Result<Vec<Process>> {
 /// that began after the turn did): the daemon's own look at what the window has left
 /// running, and what a close of the window asks to end.
 pub fn host_view(members: &Members, window: &MemberWindow) -> String {
-    tree::read(members, &window.pane).map_or_else(|said| said, |tree| tree.line())
+    tree::read(members.rig(), &window.pane).map_or_else(|said| said, |tree| tree.line())
 }
 
 /// What of `left` the command does not hold: its sleeps that outlived their script.
