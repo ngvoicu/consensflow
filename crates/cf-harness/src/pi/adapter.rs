@@ -21,6 +21,7 @@ use std::sync::Arc;
 use cf_base::env::Env;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
+use cf_proto::panes::Servers;
 
 use super::channel::{hex, launch_configuration, send, Channel};
 use super::install::prepare_extension;
@@ -137,6 +138,18 @@ impl Adapter for PiAdapter {
                 }),
             })
         })
+    }
+
+    /// Pi's bash tool starts each command `detached` wherever there are process
+    /// groups to detach in (`process.platform !== "win32"`, in
+    /// `@earendil-works/pi-coding-agent/dist/core/tools/bash.js`): a session of
+    /// its own, which the group of its window does not hold.
+    fn servers(&self) -> Servers {
+        if self.env.on_windows() {
+            Servers::Unknown
+        } else {
+            Servers::InGroup
+        }
     }
 }
 

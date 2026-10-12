@@ -24,6 +24,7 @@ use cf_harness::contract::{
     Adapter, Admission, Interrupt, Launch, Prepared, Readiness, Waiting, Window, Work,
 };
 use cf_harness::records::{Item, Quota, Role};
+use cf_proto::panes::Servers;
 use serde_json::{json, Value};
 
 use super::holds::{Holds, Wrapped};
@@ -123,6 +124,9 @@ pub struct FakeAdapter {
     /// The keys that interrupt a turn in its windows (`adapter.interrupt`):
     /// Escape once, as an adapter that says no more.
     pub interrupt: Cell<Interrupt>,
+    /// How its windows' harness keeps its servers (`adapter.servers`): not known,
+    /// as an adapter that says no more.
+    pub servers: Cell<Servers>,
     /// Launches the test holds (`hold(adapter, 'prepare', ...)`): one let go
     /// fails with the reason, where the test gave one.
     pub prepare_holds: Holds<String>,
@@ -166,6 +170,7 @@ impl FakeAdapter {
                 presses: 1,
                 close_after: None,
             }),
+            servers: Cell::new(Servers::Unknown),
             prepare_holds: Holds::default(),
             observe_holds: Holds::default(),
             start_holds: Holds::default(),
@@ -508,5 +513,9 @@ impl Adapter for Asked {
 
     fn interrupt(&self) -> Interrupt {
         self.fake.interrupt.get()
+    }
+
+    fn servers(&self) -> Servers {
+        self.fake.servers.get()
     }
 }

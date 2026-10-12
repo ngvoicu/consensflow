@@ -47,6 +47,32 @@
 //! the host sees begin after the mark like any job. A process named for the
 //! window's harness (`<harness>-…`) is the harness's, and is not counted.
 //!
+//! So are the servers a harness runs, and what they start, whenever each begins
+//! (found on 3.0.1: Claude Code's MCP servers, which it starts as it takes its
+//! first message, held a worker's task for ever; so did the children of a Codex
+//! designer's plugin servers). The host cannot tell them by when they began, and
+//! tells them by where the window's harness is known to keep them
+//! (`Adapter::servers`, told to the host with each mark), in one of two shapes:
+//!
+//! - Claude Code and Pi keep their servers in the process group of the window's
+//!   program, and run each command their agents start in a group of its own, under
+//!   the program. A process in the window's group is the harness's, and so is
+//!   whatever descends from one, in whatever group: the browser an MCP server
+//!   launches and detaches.
+//! - Codex opens its servers with the window, each in a group of its own, under
+//!   its own process, which is in the window's group and starts what its agent
+//!   runs. A process outside the window's group that the window had when its first
+//!   turn began is a server, and so is whatever descends from one.
+//!
+//! The window's program is no ancestor that counts: it is in the window's group,
+//! and would make everything the harness's. A harness not known to keep its
+//! servers in either way (OpenCode, Devin, and all on Windows) is told by time
+//! alone, as it was.
+//!
+//! The board says which processes the window is held for, the first two of them:
+//! `background work running (2 processes): python3 lock.py record; tail -f run.log`,
+//! with a key or a token in a command hidden, as a note hides it.
+//!
 //! Limits. **On Windows a job the agent left running is ended with its window at
 //! once, with no chance to release what it holds**: the host asks nothing there
 //! and its job object ends the tree. The Ctrl+Break that would ask it escapes the
@@ -54,6 +80,21 @@
 //! installs every harness), reaches the host's own console and ends the host. The
 //! hold, the board's line and the note to whoever gave the task are the same on
 //! every platform: they do not depend on how the window closes.
+//!
+//! **On Windows a harness's servers that begin after the first mark still hold the
+//! first task's result**, and so does what they start: a job object has no process
+//! groups and no parents to look at, so no harness says how it keeps its servers
+//! there and the host tells by time alone.
+//!
+//! On Unix the host looks at who started each process, and a process whose parent
+//! has gone has no one to look at: it is told by its own place alone, so a browser
+//! that outlives the server that launched it, or a daemon a server's child
+//! double-forks, is the turn's work unless it stayed in the window's group.
+//! A Codex server that begins after the window's first turn began (a plugin it
+//! starts only when a tool is called) is no server of its launch, and what it
+//! starts is the turn's. Nor can a program of Codex's own that begins with the
+//! window, outside its group, be told from a server (`codex-code-mode-host` begins
+//! with the first command): what it started would be the harness's.
 //!
 //! Limits of the agents' part. The reading says a turn left agents pending until
 //! the window's next turn says otherwise, and nothing else says they ended:
@@ -91,6 +132,10 @@ use crate::shown::mask::mask;
 const QUOTED: usize = 5;
 /// The most characters of one command a note quotes.
 const COMMAND_CHARS: usize = 160;
+/// The most commands the board names of what a window is held for, and the most
+/// characters of each: its line is short, and its count says how many there are.
+const NAMED: usize = 2;
+const NAMED_CHARS: usize = 60;
 
 /// What a window holds its task's result back for, while it does.
 #[derive(Debug, Default)]
@@ -99,29 +144,35 @@ pub(crate) struct BackgroundPart {
 }
 
 /// The work a window's task is held for: how much of it ran when it was last
-/// looked at, and since when it has ended, if it has.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// looked at, the first of it as the board names it, and since when it has
+/// ended, if it has.
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Held {
     running: usize,
+    named: String,
     ended_at: Option<i64>,
 }
 
 impl Held {
-    fn left(self) -> Left {
+    fn left(&self) -> Left {
         match self.ended_at {
-            None => Left::Running(self.running),
+            None => Left::Running {
+                count: self.running,
+                named: self.named.clone(),
+            },
             Some(_) => Left::Ended,
         }
     }
 }
 
 /// What a settled worker window's turn left, as far as its task's result goes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Left {
     /// None: the turn's end is the result, by the usual rules.
     Nothing,
-    /// This many processes the turn started still run.
-    Running(usize),
+    /// This many processes the turn started still run, `named` the first of
+    /// them as the board says them (empty where the host listed none).
+    Running { count: usize, named: String },
     /// They have ended, a moment ago: the agent may be about to be woken.
     Ended,
     /// The turn ended with background agents or workflows pending, which its
@@ -131,11 +182,21 @@ pub(crate) enum Left {
 
 impl Left {
     /// What the board says the window is doing, where it is held for work.
-    pub(crate) fn reason(self) -> Option<String> {
+    pub(crate) fn reason(&self) -> Option<String> {
         match self {
             Left::Nothing => None,
-            Left::Running(1) => Some("background work running (1 process)".to_owned()),
-            Left::Running(count) => Some(format!("background work running ({count} processes)")),
+            Left::Running { count, named } => {
+                let processes = match count {
+                    1 => "1 process".to_owned(),
+                    count => format!("{count} processes"),
+                };
+                let which = if named.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {named}")
+                };
+                Some(format!("background work running ({processes}){which}"))
+            }
             Left::Ended => Some("background work ended; the agent may go on".to_owned()),
             Left::Agents => Some("background agents running".to_owned()),
         }
@@ -145,7 +206,7 @@ impl Left {
 /// What the window was last found to be held for, or its agents where it was
 /// held for no work: what a look keeps while the window shows a dialog or a
 /// message is going in.
-fn remembered(held: Option<Held>, agents: bool) -> Left {
+fn remembered(held: Option<&Held>, agents: bool) -> Left {
     match (held, agents) {
         (Some(held), _) => held.left(),
         (None, true) => Left::Agents,
@@ -155,13 +216,16 @@ fn remembered(held: Option<Held>, agents: bool) -> Left {
 
 impl Dispatcher {
     /// A turn is about to begin in the window: what its tree runs now came
-    /// before it. Not while the window holds its task's result back for the
-    /// work an earlier turn started, which this message does not begin again.
+    /// before it, and, where its harness is known to keep its own processes (its
+    /// servers), so do they and what they start later. Not while the window holds
+    /// its task's result back for the work an earlier turn started, which this
+    /// message does not begin again.
     pub(crate) async fn mark_turn(&self, record: &Record, pane: &Pane) {
         if record.background.borrow().held.is_some() {
             return;
         }
-        self.seams.background.mark(pane).await;
+        let servers = record.window.borrow().servers;
+        self.seams.background.mark(pane, servers).await;
     }
 
     /// What the settled window of a worker's working task left running, asked
@@ -180,12 +244,12 @@ impl Dispatcher {
             record.background.borrow_mut().held = None;
             return Ok(Left::Nothing);
         }
-        let held = record.background.borrow().held;
+        let held = record.background.borrow().held.clone();
         // Agents are the reading's word, which the host cannot give: a turn
         // that ended with some pending left them running.
         let agents = observed.agents_pending();
         if starting || observed.waiting.is_some() || record.delivery.borrow().delivering.is_some() {
-            return Ok(remembered(held, agents));
+            return Ok(remembered(held.as_ref(), agents));
         }
         let state = self
             .seams
@@ -208,21 +272,27 @@ impl Dispatcher {
             return Ok(Left::Nothing);
         };
         let work = self.seams.background.running(&pane).await;
-        let running = agent_work(participant.harness.as_deref(), &work);
+        let listed = agent_processes(participant.harness.as_deref(), &work.processes);
+        let running = agent_work(&work, &listed);
         let mut part = record.background.borrow_mut();
         if running > 0 {
+            let named = first_named(&listed);
             part.held = Some(Held {
                 running,
+                named: named.clone(),
                 ended_at: None,
             });
-            return Ok(Left::Running(running));
+            return Ok(Left::Running {
+                count: running,
+                named,
+            });
         }
         // No settle time ends a wait for agents: the turn an agent's end wakes
         // is the one whose end is the result, however long they run.
         if agents {
             return Ok(Left::Agents);
         }
-        let Some(mut held) = part.held else {
+        let Some(mut held) = part.held.clone() else {
             return Ok(Left::Nothing);
         };
         let now = self.now();
@@ -290,11 +360,12 @@ pub(crate) fn agent_processes(
         .collect()
 }
 
-/// How many of the processes a window's tree started in the turn are the
-/// agent's work. Of a list the host cut short, the ones it left out are taken
-/// for the agent's.
-fn agent_work(kind: Option<&str>, work: &Background) -> usize {
-    let own = work.processes.len() - agent_processes(kind, &work.processes).len();
+/// How many of the processes a window's tree started in the turn (`work`) are
+/// the agent's work, `agents` being those of its list that are
+/// ([`agent_processes`]). Of a list the host cut short, the ones it left out are
+/// taken for the agent's.
+fn agent_work(work: &Background, agents: &[BackgroundProcess]) -> usize {
+    let own = work.processes.len() - agents.len();
     work.total.saturating_sub(own)
 }
 
@@ -309,6 +380,24 @@ fn harness_own(harness: Harness, command: &str) -> bool {
         .is_some_and(|rest| rest.starts_with('-'))
 }
 
+/// The command of `process` as a note or the board says it: held to one line and
+/// to `most` characters, what looks like a key or a token in it hidden (and
+/// counted in `masked`), a process whose command could not be read named by its
+/// number.
+fn line(process: &BackgroundProcess, most: usize, masked: &mut usize) -> String {
+    let hidden = mask(&process.command);
+    *masked += hidden.count;
+    let words = hidden.text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if words.chars().count() > most {
+        let kept: String = words.chars().take(most - 1).collect();
+        format!("{kept}…")
+    } else if words.is_empty() {
+        format!("process {}", process.pid)
+    } else {
+        words
+    }
+}
+
 /// The commands of what a window left running, as a note quotes them: the first
 /// few, each held to one line and a few characters, what looks like a key or a
 /// token in them hidden, and how many were left out or hidden said after them.
@@ -317,19 +406,7 @@ pub(crate) fn quote(left: &[BackgroundProcess]) -> String {
     let mut commands: Vec<String> = left
         .iter()
         .take(QUOTED)
-        .map(|process| {
-            let hidden = mask(&process.command);
-            masked += hidden.count;
-            let words = hidden.text.split_whitespace().collect::<Vec<_>>().join(" ");
-            if words.chars().count() > COMMAND_CHARS {
-                let kept: String = words.chars().take(COMMAND_CHARS - 1).collect();
-                format!("{kept}…")
-            } else if words.is_empty() {
-                format!("process {}", process.pid)
-            } else {
-                words
-            }
-        })
+        .map(|process| line(process, COMMAND_CHARS, &mut masked))
         .collect();
     if left.len() > QUOTED {
         commands.push(format!("and {} more", left.len() - QUOTED));
@@ -342,144 +419,17 @@ pub(crate) fn quote(left: &[BackgroundProcess]) -> String {
     quoted
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn process(pid: u32, command: &str) -> BackgroundProcess {
-        BackgroundProcess {
-            pid,
-            command: command.to_owned(),
-        }
-    }
-
-    #[test]
-    fn the_board_says_how_many_processes_the_window_waits_for() {
-        assert_eq!(Left::Nothing.reason(), None);
-        assert_eq!(
-            Left::Running(1).reason().as_deref(),
-            Some("background work running (1 process)")
-        );
-        assert_eq!(
-            Left::Running(2).reason().as_deref(),
-            Some("background work running (2 processes)")
-        );
-        assert!(Left::Ended.reason().is_some());
-        assert_eq!(
-            Left::Agents.reason().as_deref(),
-            Some("background agents running")
-        );
-    }
-
-    #[test]
-    fn a_look_that_keeps_what_it_found_keeps_the_work_it_was_held_for_before_the_agents() {
-        let running = Held {
-            running: 2,
-            ended_at: None,
-        };
-        let ended = Held {
-            running: 2,
-            ended_at: Some(5),
-        };
-        assert_eq!(remembered(Some(running), false), Left::Running(2));
-        assert_eq!(remembered(Some(running), true), Left::Running(2));
-        assert_eq!(remembered(Some(ended), true), Left::Ended);
-        // Held for no work, a window whose turn left agents is held for them.
-        assert_eq!(remembered(None, true), Left::Agents);
-        assert_eq!(remembered(None, false), Left::Nothing);
-    }
-
-    #[test]
-    fn a_note_quotes_the_first_commands_and_says_how_many_it_leaves_out() {
-        let left: Vec<_> = (1..=7)
-            .map(|n| process(n, &format!("python3 job.py {n}")))
-            .collect();
-        assert_eq!(
-            quote(&left),
-            "python3 job.py 1; python3 job.py 2; python3 job.py 3; python3 job.py 4; python3 job.py 5; and 2 more"
-        );
-    }
-
-    #[test]
-    fn a_command_is_one_line_and_bounded_and_a_secret_in_it_is_hidden() {
-        let long = format!("tool {}", "x".repeat(400));
-        let quoted = quote(&[process(1, &long)]);
-        assert_eq!(quoted.chars().count(), COMMAND_CHARS);
-        assert!(quoted.ends_with('…'));
-
-        let quoted = quote(&[process(
-            2,
-            "curl -H 'Authorization: Bearer abcdef0123456789abcdef' --data  a\nb",
-        )]);
-        assert!(!quoted.contains("abcdef0123456789abcdef"), "{quoted}");
-        assert!(quoted.contains("[masked]"), "{quoted}");
-        assert!(
-            quoted.ends_with("(1 key- or token-like string masked)"),
-            "{quoted}"
-        );
-        assert!(!quoted.contains('\n'));
-    }
-
-    #[test]
-    fn a_process_whose_command_could_not_be_read_is_named_by_its_number() {
-        assert_eq!(quote(&[process(42, "")]), "process 42");
-    }
-
-    #[test]
-    fn a_program_named_for_the_harness_and_a_dash_is_the_harnesss_own() {
-        // What Codex 0.162 starts when its agent first runs a command.
-        let helper = "/opt/homebrew/Caskroom/codex/0.162.1/bin/codex-code-mode-host";
-        assert!(harness_own(Harness::Codex, helper));
-        assert!(harness_own(
-            Harness::Codex,
-            &format!("{helper} --serve --port 7")
-        ));
-        // On Windows, by its own separators and with its extension.
-        assert!(harness_own(
-            Harness::Codex,
-            r"C:\tools\codex\bin\codex-code-mode-host.exe"
-        ));
-        // Not another harness's, nor a program that only starts with its name,
-        // nor the agent's own jobs.
-        assert!(!harness_own(Harness::Claude, helper));
-        assert!(!harness_own(Harness::Codex, "/usr/bin/codexec --watch"));
-        assert!(!harness_own(
-            Harness::Codex,
-            "python3 lock.py record --run 7"
-        ));
-        assert!(!harness_own(Harness::Codex, "tail -f codex-notes.log"));
-        assert!(!harness_own(Harness::Codex, ""));
-        // The harness's own program, with no dash and nothing after, is the baseline's.
-        assert!(!harness_own(Harness::Codex, "/opt/homebrew/bin/codex"));
-    }
-
-    #[test]
-    fn only_the_agents_work_is_counted_and_a_list_the_host_cut_short_counts_what_it_left_out() {
-        let helper = process(
-            1,
-            "/opt/homebrew/Caskroom/codex/0.162.1/bin/codex-code-mode-host",
-        );
-        let job = process(2, "python3 lock.py record --run 7");
-        let listed = [helper.clone(), job.clone()];
-        assert_eq!(
-            agent_processes(Some("codex"), &listed),
-            std::slice::from_ref(&job)
-        );
-        // A harness the roster does not know, or none, owns nothing.
-        assert_eq!(agent_processes(Some("claude-code"), &listed).len(), 2);
-        assert_eq!(agent_processes(Some("image"), &listed).len(), 2);
-        assert_eq!(agent_processes(None, &listed).len(), 2);
-
-        let work = |total, processes: Vec<BackgroundProcess>| Background { total, processes };
-        assert_eq!(agent_work(Some("codex"), &work(2, listed.to_vec())), 1);
-        assert_eq!(agent_work(Some("codex"), &work(1, vec![helper])), 0);
-        // Twenty processes and sixteen listed, one of them the harness's: the
-        // four the host left out are the agent's.
-        let mut cut_short = vec![job; 15];
-        cut_short.push(process(
-            3,
-            "/opt/homebrew/Caskroom/codex/0.162.1/bin/codex-code-mode-host",
-        ));
-        assert_eq!(agent_work(Some("codex"), &work(20, cut_short)), 19);
-    }
+/// The first commands of what a window is held for, as the board names them: a
+/// shorter line than a note's, the same hiding of a key or a token, and no count
+/// after them, which the board says before.
+fn first_named(left: &[BackgroundProcess]) -> String {
+    let mut masked = 0;
+    left.iter()
+        .take(NAMED)
+        .map(|process| line(process, NAMED_CHARS, &mut masked))
+        .collect::<Vec<_>>()
+        .join("; ")
 }
+
+#[cfg(test)]
+mod tests;

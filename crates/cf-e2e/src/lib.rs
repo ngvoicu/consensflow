@@ -42,7 +42,8 @@
 //! `tests/smoke/`; and the live ones, `tests/live_<name>.rs`: `live_paste` a
 //! real window taking what the daemon pastes into it, `live_designer` a real
 //! Codex drawing an image, `live_approval` real harnesses in every seat of five
-//! projects sending what the human approves, behind the gate). Run them with
+//! projects sending what the human approves, behind the gate, `live_mcp` a real
+//! Claude Code worker that has an MCP server finishing its task). Run them with
 //! `cargo xtask test clis`, `daemons`, `integration`, `agents` and `load`, and
 //! `cargo xtask smoke` (the `npm run` names are the same), a live one with
 //! `cargo xtask live <name>`, or one with `cargo test -p cf-e2e --test cli`.

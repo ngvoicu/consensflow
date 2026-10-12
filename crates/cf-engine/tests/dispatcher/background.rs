@@ -10,13 +10,12 @@
 //! asked the host, so none of these is held to a Node trace: the engine's
 //! asks of the host about it are not in the traces at all.
 
+use crate::fixtures::{closed, given, Tiers};
 use cf_engine::testing::Context;
 use cf_engine::{Activity, ActivityState};
 
-use crate::fixtures::{closed, given, Tiers};
-
-const LOCK: &str = "python3 lock.py record --run 7";
-const LOG: &str = "tail -f run.log";
+pub(crate) const LOCK: &str = "python3 lock.py record --run 7";
+pub(crate) const LOG: &str = "tail -f run.log";
 
 /// A program of the harness's own that it started in the turn and keeps for the
 /// session, as Codex does its `codex-code-mode-host` the first time its agent
@@ -24,7 +23,7 @@ const LOG: &str = "tail -f run.log";
 const HELPER: &str = "/opt/claude/bin/claude-code-mode-host --serve";
 
 /// How long the engine gives a woken agent to begin its turn, in the kit.
-const SETTLE_MS: i64 = 10_000;
+pub(crate) const SETTLE_MS: i64 = 10_000;
 
 /// T-1 given to zeus, whose agent starts what `commands` say, answers that it
 /// did and ends its turn: the pass that looks at it is made.
@@ -41,12 +40,12 @@ fn left_running<'a>(context: &'a Context, commands: &[&str]) -> Tiers<'a> {
 }
 
 /// What the window of T-1 is doing.
-fn doing(context: &Context, tiers: &Tiers<'_>) -> Activity {
+pub(crate) fn doing(context: &Context, tiers: &Tiers<'_>) -> Activity {
     context.dispatcher.activity(tiers.id(&tiers.assignee(1)))
 }
 
 /// The results the chief was given or is to be given.
-fn results(context: &Context, tiers: &Tiers<'_>) -> Vec<String> {
+pub(crate) fn results(context: &Context, tiers: &Tiers<'_>) -> Vec<String> {
     context
         .inbox(tiers.id("chief"))
         .into_iter()
@@ -66,7 +65,7 @@ fn holds_the_end_of_a_turn_while_the_work_it_started_runs() {
         doing(&context, &tiers),
         Activity::because(
             ActivityState::Working,
-            "background work running (2 processes)"
+            format!("background work running (2 processes): {LOCK}; {LOG}")
         )
     );
     let pane = context.host.last("zeus").unwrap().pane;
@@ -81,19 +80,36 @@ fn holds_the_end_of_a_turn_while_the_work_it_started_runs() {
 }
 
 #[test]
-fn says_how_many_processes_run_as_their_number_changes() {
+fn says_how_many_processes_run_as_their_number_changes_and_names_the_first_two() {
     let context = Context::new();
     let tiers = left_running(&context, &[LOCK]);
     assert_eq!(
         doing(&context, &tiers).reason.as_deref(),
-        Some("background work running (1 process)")
+        Some("background work running (1 process): python3 lock.py record --run 7")
     );
     context.background.run("zeus", &[LOCK, LOG, "sleep 600"]);
     context.pass().unwrap();
     assert_eq!(
         doing(&context, &tiers).reason.as_deref(),
-        Some("background work running (3 processes)")
+        Some(
+            "background work running (3 processes): python3 lock.py record --run 7; tail -f run.log"
+        )
     );
+}
+
+#[test]
+fn what_the_board_names_of_the_work_is_held_to_a_line_with_a_secret_in_it_hidden() {
+    let context = Context::new();
+    let secret = "curl -H 'Authorization: Bearer sk-live-0123456789abcdefABCDEF' https://example.test/upload";
+    let tiers = left_running(&context, &[secret]);
+
+    let said = doing(&context, &tiers).reason.unwrap();
+    assert!(
+        said.starts_with("background work running (1 process): curl -H"),
+        "{said}"
+    );
+    assert!(!said.contains("sk-live-0123456789abcdefABCDEF"), "{said}");
+    assert!(said.contains("[masked]"), "{said}");
 }
 
 #[test]
@@ -166,7 +182,7 @@ fn work_that_runs_for_ever_holds_the_result_for_ever() {
     }
     assert_eq!(
         doing(&context, &tiers).reason.as_deref(),
-        Some("background work running (1 process)")
+        Some("background work running (1 process): python3 lock.py record --run 7")
     );
     let pane = context.host.last("zeus").unwrap().pane;
     assert!(!closed(&context, &pane));
@@ -220,7 +236,7 @@ fn beside_the_work_of_the_agent_the_harnesss_own_helper_is_not_counted() {
     assert_eq!(tiers.task(1).task.state, "working", "held for the job");
     assert_eq!(
         doing(&context, &tiers).reason.as_deref(),
-        Some("background work running (1 process)")
+        Some("background work running (1 process): python3 lock.py record --run 7")
     );
 }
 

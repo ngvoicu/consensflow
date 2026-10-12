@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cf_proto::agents::Harness;
+use cf_proto::panes::Servers;
 use serde_json::Value;
 
 use crate::records::{Item, Options, Quota, Reading};
@@ -37,6 +38,25 @@ pub trait Adapter {
             presses: 1,
             close_after: None,
         }
+    }
+
+    /// How the harness keeps its own processes (its MCP servers, its helpers),
+    /// which the pane host tells a turn's work from them by (`pane.mark`'s
+    /// `servers`): what a server is, and so what it starts, is the harness's and
+    /// no work a turn left. Where it is not known the host tells by when each
+    /// process began alone, and a server that begins after the first turn's mark
+    /// is the turn's.
+    ///
+    /// Only what someone has looked at is said: what a window's tree holds with a
+    /// command of its agent running (`ps -axo pid,pgid,ppid,command`). Claude Code
+    /// and Pi keep their servers in the group of the window's program, however
+    /// late each begins, and run every command their agents start in a group of its
+    /// own ([`Servers::InGroup`]). Codex's supervisor opens its servers with the
+    /// window, each in a group of its own, under the harness's own process, which
+    /// starts the agent's commands ([`Servers::AtLaunch`]). Windows has no process
+    /// groups to tell by, and OpenCode and Devin have not been probed.
+    fn servers(&self) -> Servers {
+        Servers::Unknown
     }
 }
 

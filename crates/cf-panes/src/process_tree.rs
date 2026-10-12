@@ -78,9 +78,11 @@ impl ProcessTree {
     /// every descendant of those, by the parent each was started by. A system
     /// binary (`sleep`, `bash`, `tail`) shows no environment to anyone, so it
     /// carries no marker to be found by, and one whose parent has gone is found
-    /// by the parent it was started by only where the system still names it: on
-    /// macOS 26 it named launchd once launchd had taken the job (seen with a
-    /// `sleep` that `sh` left behind), and nothing then finds it.
+    /// by the parent it was started by only where the system still names it. An
+    /// earlier look found it naming launchd once launchd had taken the job (a
+    /// `sleep` that `sh` left behind), and nothing then finds it; a later one, on
+    /// Darwin 25.5 (macOS 26.5), found it naming the process that started it for as
+    /// long as it was watched (twelve seconds), which `members` says.
     fn select(
         &self,
         snapshot: &[Process],
@@ -121,21 +123,35 @@ impl ProcessTree {
     }
 
     /// The processes of the tree now, each with the command line it was
-    /// started with: a look, nothing is signalled or stopped.
+    /// started with, the process group it is in and the process of the tree that
+    /// started it: a look, nothing is signalled or stopped.
+    ///
+    /// The system names the parent a process was started by with a number that
+    /// is the parent's alone, and keeps naming it after the parent has gone (seen
+    /// on macOS 26.x with a `sleep` and a Python that `sh` left running: their
+    /// ordinary parent number becomes launchd's, and this one does not). Such a
+    /// process names a parent that is no process of the tree (as one that named
+    /// launchd would), and has none here: it is told by its own place.
     pub fn members(&self) -> io::Result<Vec<Member>> {
         let snapshot = processes()?;
         let selected = self.select(&snapshot, &HashMap::new());
-        Ok(snapshot
+        let tree: Vec<&Process> = snapshot
             .iter()
             .filter(|p| selected.get(&p.identity.pid) == Some(&p.identity))
+            .collect();
+        let keys: HashMap<u64, ProcessKey> = tree
+            .iter()
+            .map(|p| (p.identity.unique, key_of(p)))
+            .collect();
+        Ok(tree
+            .iter()
             .map(|p| Member {
-                key: ProcessKey {
-                    pid: p.identity.pid.unsigned_abs(),
-                    began: p.identity.born.0 * 1_000_000 + p.identity.born.1,
-                },
+                key: key_of(p),
                 command: procargs(p.identity.pid)
                     .and_then(|bytes| command_line(&bytes))
                     .unwrap_or_else(|| p.name.clone()),
+                group: Some(p.group),
+                parent: keys.get(&p.parent).copied(),
             })
             .collect())
     }
@@ -269,6 +285,14 @@ fn process(pid: i32) -> Option<Process> {
         group: info.pbi_pgid as i32,
         name: name_of(&info),
     })
+}
+
+/// A process as the baseline knows it: its number and when it began.
+fn key_of(p: &Process) -> ProcessKey {
+    ProcessKey {
+        pid: p.identity.pid.unsigned_abs(),
+        began: p.identity.born.0 * 1_000_000 + p.identity.born.1,
+    }
 }
 
 /// What the system calls a process: its long name, or the short one.
@@ -410,51 +434,4 @@ fn command_line(bytes: &[u8]) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// What `KERN_PROCARGS2` answers for `sleep 31` started with `environment`:
-    /// the count, the program's path and its padding, the arguments, the
-    /// environment, and the NULs that end each.
-    fn procargs_of(environment: &[&str]) -> Vec<u8> {
-        let mut bytes = 2i32.to_ne_bytes().to_vec();
-        bytes.extend_from_slice(b"/bin/sleep\0\0\0\0\0");
-        bytes.extend_from_slice(b"sleep\0");
-        bytes.extend_from_slice(b"31\0");
-        for variable in environment {
-            bytes.extend_from_slice(variable.as_bytes());
-            bytes.push(0);
-        }
-        bytes.push(0);
-        bytes
-    }
-
-    #[test]
-    fn a_command_line_is_the_arguments_the_process_was_started_with_and_not_its_environment() {
-        let bytes = procargs_of(&["PATH=/usr/bin", "HOME=/Users/zeus"]);
-        assert_eq!(command_line(&bytes).as_deref(), Some("sleep 31"));
-        assert_eq!(command_line(&procargs_of(&[])).as_deref(), Some("sleep 31"));
-    }
-
-    #[test]
-    fn a_process_the_system_shows_nothing_of_has_no_command_line() {
-        assert_eq!(command_line(&[]), None);
-        assert_eq!(command_line(&0i32.to_ne_bytes()), None);
-        assert_eq!(command_line(b"\x02\0\0\0/bin/sleep"), None);
-    }
-
-    #[test]
-    fn the_marker_is_found_among_the_environment_and_not_among_the_arguments() {
-        let marker = format!("{OWNER_ENV}=abc123");
-        let owned = procargs_of(&["PATH=/usr/bin", &marker]);
-        assert!(environment_has_marker(&owned, "abc123"));
-        assert!(!environment_has_marker(&owned, "abc124"));
-        assert!(!environment_has_marker(&procargs_of(&[]), "abc123"));
-        // A marker typed as an argument is no marker.
-        let mut typed = 2i32.to_ne_bytes().to_vec();
-        typed.extend_from_slice(b"/bin/echo\0\0\0\0echo\0");
-        typed.extend_from_slice(marker.as_bytes());
-        typed.extend_from_slice(b"\0\0");
-        assert!(!environment_has_marker(&typed, "abc123"));
-    }
-}
+mod tests;

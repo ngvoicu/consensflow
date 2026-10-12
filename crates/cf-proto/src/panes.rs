@@ -10,9 +10,9 @@
 //!
 //! The host also says what a window's program started and left running: the
 //! processes of the window's tree that began after the turn did, which
-//! `pane.mark` fixes the start of and `pane.background` answers
-//! ([`BackgroundProcess`]), and which `pane.exit` lists for a window that
-//! closed with some of it running.
+//! `pane.mark` fixes the start of ([`MarkRequest`]) and `pane.background`
+//! answers ([`BackgroundProcess`]), and which `pane.exit` lists for a window
+//! that closed with some of it running.
 
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +27,59 @@ pub const BACKGROUND_PROCESSES: usize = 16;
 /// The most characters of a process's command line the host sends, a mark of
 /// where it was cut at the end: a frame is no place for a build's whole one.
 pub const COMMAND_CHARS: usize = 512;
+
+/// How a window's harness keeps its own processes (its MCP servers, its helpers)
+/// apart from the commands its agent starts, which the host cannot tell by
+/// anything the processes are: a server and a recording run are both children of
+/// the harness. The harness's adapter says it of its windows and every
+/// `pane.mark` carries it. Each shape says what is the harness's, and so no turn's
+/// work, however late it began; what else the window's tree has that the mark did
+/// not is the turn's, as it always was.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Servers {
+    /// In the process group of the window's program, which leads it: the harness
+    /// starts them whenever it likes (Claude Code, as it takes its first message),
+    /// and runs every command its agent starts in a group of its own. What the
+    /// group holds besides the window's program, and what any process in it starts
+    /// (a browser a server launches, in a group of its own too), is the harness's.
+    /// What the window's program itself starts is the agent's.
+    InGroup,
+    /// What the window had outside that group when its first turn began: the
+    /// harness starts them with the window, each in a group of its own (Codex's
+    /// plugins), and the agent's commands are started by the harness's own
+    /// process, which is in the window's group. What any of them starts later is
+    /// the harness's.
+    AtLaunch,
+    /// Not known: the host tells the harness's processes from the turn's by when
+    /// they began alone. What a harness is until someone has looked at what a
+    /// window's tree holds with a command of its agent running; and what a word
+    /// this host does not know reads as.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+impl Servers {
+    /// Whether it is not known how the harness keeps them: what a request says
+    /// by saying nothing.
+    pub fn is_unknown(&self) -> bool {
+        *self == Servers::Unknown
+    }
+}
+
+/// A `pane.mark` request: a turn is about to begin in the pane, and what its
+/// tree has now came before it. `servers` says how the window's harness keeps its
+/// own processes; a request without it (an older daemon's) is one that does not
+/// say.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MarkRequest {
+    pub id: String,
+    pub generation: u64,
+    #[serde(default, skip_serializing_if = "Servers::is_unknown")]
+    pub servers: Servers,
+}
 
 /// A process the window's program started and left running past its turn: its
 /// number, and the command line it was started with, as far as the host could
@@ -201,6 +254,65 @@ mod tests {
         )
         .unwrap();
         assert_eq!(unsaid.background, Vec::new());
+    }
+
+    #[test]
+    fn a_mark_says_how_the_harness_keeps_its_servers_only_when_it_is_known_and_an_older_daemons_says_nothing(
+    ) {
+        let older: MarkRequest =
+            serde_json::from_value(json!({ "id": "p1-zeus", "generation": 4 })).unwrap();
+        assert_eq!(
+            older,
+            MarkRequest {
+                id: "p1-zeus".to_owned(),
+                generation: 4,
+                servers: Servers::Unknown,
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(&older).unwrap(),
+            json!({ "id": "p1-zeus", "generation": 4 }),
+            "the request is what it was for a harness that says no more"
+        );
+
+        for (word, servers) in [
+            ("inGroup", Servers::InGroup),
+            ("atLaunch", Servers::AtLaunch),
+        ] {
+            let body = json!({ "id": "p1-zeus", "generation": 4, "servers": word });
+            let said: MarkRequest = serde_json::from_value(body.clone()).unwrap();
+            assert_eq!(said.servers, servers);
+            assert_eq!(serde_json::to_value(&said).unwrap(), body);
+        }
+    }
+
+    #[test]
+    fn a_way_of_keeping_servers_this_host_does_not_know_is_not_known_and_the_mark_stands() {
+        // A newer daemon's word: the window is marked, told by time alone.
+        let said: MarkRequest = serde_json::from_value(
+            json!({ "id": "p1-zeus", "generation": 4, "servers": "inTheMoon" }),
+        )
+        .unwrap();
+        assert_eq!(said.servers, Servers::Unknown);
+        assert!(said.servers.is_unknown());
+        assert!(!Servers::InGroup.is_unknown() && !Servers::AtLaunch.is_unknown());
+    }
+
+    #[test]
+    fn a_mark_names_its_pane_and_refuses_what_it_does_not_know() {
+        for refused in [
+            json!({ "generation": 4 }),
+            json!({ "id": "p", "generation": "4" }),
+            json!({ "id": "p", "generation": 4, "servers": 7 }),
+            json!({ "id": "p", "generation": 4, "group": true }),
+            // What the field was called before the second way was known.
+            json!({ "id": "p", "generation": 4, "harnessGroup": true }),
+        ] {
+            assert!(
+                serde_json::from_value::<MarkRequest>(refused.clone()).is_err(),
+                "{refused}"
+            );
+        }
     }
 
     #[test]
