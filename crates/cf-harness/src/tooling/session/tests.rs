@@ -87,7 +87,13 @@ fn devins_newest_session_of_a_folder_is_asked_for_by_seconds_and_not_millisecond
     .unwrap();
     drop(db);
     let data = text(root.path());
-    let env = env(&[("XDG_DATA_HOME", &data), ("HOME", "/nowhere")]);
+    // The store is where Devin keeps it on either system: `%APPDATA%` on Windows,
+    // `XDG_DATA_HOME` elsewhere.
+    let env = env(&[
+        ("XDG_DATA_HOME", &data),
+        ("APPDATA", &data),
+        ("HOME", "/nowhere"),
+    ]);
     let newest =
         |since_ms: i64| newest(Harness::Devin, "devin", "/work/a", since_ms, &env).unwrap();
     // Devin keeps seconds: a window opened at 1,500,900 ms is one of 1,500 s or after it,

@@ -4,7 +4,9 @@ Kept 2026-10-07 by `npm run live:stops -- --case <case> --keep <folder>` (Claude
 Code 2.1.292, the native daemon of the receipt branch, the cheap eval model; the
 flag that keeps the transcripts is `--transcripts <folder>` now, and `--keep`
 leaves a run's home where it is), then scrubbed with
-`node tests/live/scrub-transcript.mjs <transcript> <fixture>`.
+`cargo xtask scrub-transcript <transcript> <fixture>` (a Node script,
+`tests/live/scrub-transcript.mjs`, made these files; the command that replaced
+it writes the same bytes from the same transcript).
 Every record stays, in its order; the session id becomes `$SESSION` (a test puts
 its own there), and what is personal or opaque is replaced: folders, the
 branch, account and organization ids, what an attachment carried, request ids,

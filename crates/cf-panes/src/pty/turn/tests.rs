@@ -161,8 +161,11 @@ mod unix {
         let table = Arc::new(PaneTable::new());
         let pane = open(
             &table,
+            // It says it started once the job is Python, and no longer the shell
+            // it was forked as, which a look could catch first.
             "trap '' HUP; printf ready; read go; \
-         /usr/bin/python3 -c 'import time; time.sleep(31)' & printf started",
+         /usr/bin/python3 -c 'import time; time.sleep(31)' & \
+         until ps -o comm= -p $! | grep -q python; do sleep 0.05; done; printf started",
         );
         until_shown(&pane.output, "ready");
         table.mark(&pane.key).expect("mark the turn");

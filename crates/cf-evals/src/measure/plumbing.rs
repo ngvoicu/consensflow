@@ -1,0 +1,187 @@
+//! The board's plumbing, counted from the ledger whatever the chief decided:
+//! briefs delivered to members, results delivered back to the chief, questions
+//! members put to the chief and the answers delivered back, tasks accepted, and
+//! the controls the chief used. Did it hold: every brief delivered, every result
+//! back to the chief, every member's question answered and the answer delivered,
+//! every task shown on the board.
+
+use rusqlite::{Connection, Params};
+
+use super::metrics::{Check, MemberQuestions, Plumbing};
+use crate::Result;
+
+/// How many rows `sql` counts (`COUNT(*)`), with its parameters.
+fn count(db: &Connection, sql: &str, params: impl Params) -> Result<i64> {
+    Ok(db.query_row(sql, params, |row| row.get(0))?)
+}
+
+/// The plumbing of the ledger: `chief` and `human` are the ids of its participants.
+pub(super) fn plumbing(db: &Connection, chief: i64, human: i64) -> Result<Plumbing> {
+    let sent = rusqlite::params![chief, human];
+    Ok(Plumbing {
+        // A brief withdrawn with its cancelled task was rightly never delivered.
+        briefs: count(
+            db,
+            "SELECT COUNT(*) FROM message WHERE kind = 'task' AND state != 'cancelled'",
+            [],
+        )?,
+        briefs_delivered: count(
+            db,
+            "SELECT COUNT(*) FROM message WHERE kind = 'task' AND state IN ('delivered', 'read')",
+            [],
+        )?,
+        // A result withdrawn was rightly never delivered: the chief accepted or sent
+        // back its task before it was given the result (the native daemon withdraws it
+        // then), or the task was called off.
+        results: count(
+            db,
+            "SELECT COUNT(*) FROM message WHERE kind = 'result' AND recipient_id = ?1 AND state != 'cancelled'",
+            [chief],
+        )?,
+        results_delivered: count(
+            db,
+            "SELECT COUNT(*) FROM message WHERE kind = 'result' AND recipient_id = ?1 AND state IN ('delivered', 'read')",
+            [chief],
+        )?,
+        member_questions: count(
+            db,
+            "SELECT COUNT(*) FROM message
+             WHERE kind = 'question' AND recipient_id = ?1
+               AND sender_id IS NOT NULL AND sender_id != ?1 AND sender_id != ?2",
+            sent,
+        )?,
+        member_questions_answered: count(
+            db,
+            "SELECT COUNT(*) FROM message q
+             WHERE q.kind = 'question' AND q.recipient_id = ?1
+               AND q.sender_id IS NOT NULL AND q.sender_id != ?1 AND q.sender_id != ?2
+               AND EXISTS (SELECT 1 FROM message a
+                           WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state != 'cancelled')",
+            sent,
+        )?,
+        answers_delivered: count(
+            db,
+            "SELECT COUNT(*) FROM message a JOIN message q ON q.id = a.reply_to
+             WHERE a.kind = 'answer' AND a.state IN ('delivered', 'read')
+               AND q.kind = 'question' AND q.recipient_id = ?1
+               AND q.sender_id IS NOT NULL AND q.sender_id != ?1 AND q.sender_id != ?2",
+            sent,
+        )?,
+        accepted: count(db, "SELECT COUNT(*) FROM task WHERE state = 'accepted'", [])?,
+        // A tell the chief's own cancel took back is not one owed an answer; an answer a
+        // cancel took back was still given (both daemons withdraw what is queued for a
+        // cancelled task alike: crates/cf-ledger/tests/cancelled.rs).
+        tells: count(
+            db,
+            "SELECT COUNT(*) FROM message
+             WHERE kind = 'question' AND urgent = 1 AND sender_id = ?1 AND state != 'cancelled'",
+            [chief],
+        )?,
+        tells_answered: count(
+            db,
+            "SELECT COUNT(*) FROM message q
+             WHERE q.kind = 'question' AND q.urgent = 1 AND q.sender_id = ?1 AND q.state != 'cancelled'
+               AND EXISTS (SELECT 1 FROM message a
+                           WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state != 'failed')",
+            [chief],
+        )?,
+        // The tasks the board places: every one the human has not deleted. A lane has the
+        // task of its participant (or of its member, once the session ended); every other,
+        // whatever its state (waiting for a member, paused or called off before any had
+        // it, a removed member's), is among the open ones, on both daemons alike
+        // (crates/cf-e2e/tests/rig/core_board.rs).
+        placed: count(db, "SELECT COUNT(*) FROM task WHERE deleted_at IS NULL", [])?,
+        pauses: count(
+            db,
+            "SELECT COUNT(*) FROM event
+             WHERE kind = 'task.state' AND json_extract(data, '$.to') = 'paused'",
+            [],
+        )?,
+        resumes: count(
+            db,
+            "SELECT COUNT(*) FROM event
+             WHERE kind = 'task.state' AND json_extract(data, '$.from') = 'paused'
+               AND json_extract(data, '$.to') IN ('queued', 'working')",
+            [],
+        )?,
+        // A task given straight to a session's window: only `--after` does that.
+        continuations: count(
+            db,
+            "SELECT COUNT(*) FROM event e JOIN participant p
+               ON p.project_id = e.project_id AND p.handle = json_extract(e.data, '$.to')
+             WHERE e.kind = 'task.created' AND p.member_id IS NOT NULL",
+            [],
+        )?,
+    })
+}
+
+/// The questions members put to the chief, by the asker's role and harness: how
+/// many, how many the chief answered, how many answers reached the member's
+/// window, and the longest question in characters.
+pub(super) fn member_questions_by(
+    db: &Connection,
+    chief: i64,
+    human: i64,
+) -> Result<Vec<MemberQuestions>> {
+    let mut statement = db.prepare(
+        "SELECT p.role, p.harness, COUNT(*) AS asked,
+           SUM(EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state != 'cancelled')) AS answered,
+           SUM(EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state IN ('delivered', 'read'))) AS delivered,
+           MAX(LENGTH(q.body)) AS longest
+         FROM message q JOIN participant p ON p.id = q.sender_id
+         WHERE q.kind = 'question' AND q.recipient_id = ?1 AND q.sender_id NOT IN (?1, ?2)
+         GROUP BY p.role, p.harness ORDER BY p.role, p.harness",
+    )?;
+    let asked = statement
+        .query_map([chief, human], |row| {
+            Ok(MemberQuestions {
+                role: row.get(0)?,
+                harness: row.get(1)?,
+                asked: row.get(2)?,
+                answered: row.get(3)?,
+                delivered: row.get(4)?,
+                longest: row.get(5)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(asked)
+}
+
+/// Did the board's plumbing hold, whatever the chief decided: every brief
+/// delivered, every result back to the chief, every member's question answered
+/// and the answer delivered, every task shown on the board (`board_tasks`: how
+/// many the board listed when the run ended).
+pub fn mechanics(plumbing: &Plumbing, board_tasks: i64) -> Vec<Check> {
+    let held = |name: &str, got: i64, of: i64| Check {
+        name: format!("{name} ({got}/{of})"),
+        ok: got == of,
+    };
+    vec![
+        held(
+            "every task brief was delivered",
+            plumbing.briefs_delivered,
+            plumbing.briefs,
+        ),
+        held(
+            "every result reached the chief",
+            plumbing.results_delivered,
+            plumbing.results,
+        ),
+        held(
+            "every question a member asked the chief was answered",
+            plumbing.member_questions_answered,
+            plumbing.member_questions,
+        ),
+        held(
+            "every answer reached the member",
+            plumbing.answers_delivered,
+            plumbing.member_questions_answered,
+        ),
+        held(
+            "every tell the chief sent was answered",
+            plumbing.tells_answered,
+            plumbing.tells,
+        ),
+        held("the board showed every task", board_tasks, plumbing.placed),
+    ]
+}
