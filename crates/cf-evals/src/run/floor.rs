@@ -136,6 +136,7 @@ mod tests {
         // Grows twice, then holds: settled when it has held for the time asked.
         let sizes = Cell::new(0_usize);
         let looks = Cell::new(0_u32);
+        let started = Instant::now();
         settled_within(
             || {
                 looks.set(looks.get() + 1);
@@ -148,11 +149,14 @@ mod tests {
             Duration::from_millis(30),
             Duration::from_secs(5),
         );
+        // It looked again once the output held, and waited the hold out: how many
+        // looks that took is the machine's, which a slow one makes fewer.
         assert!(
-            looks.get() >= 4 + 3,
-            "it held still for a few looks: {}",
+            looks.get() > 4,
+            "it looked after the output held: {}",
             looks.get()
         );
+        assert!(started.elapsed() >= Duration::from_millis(30));
         assert_eq!(sizes.get(), 30);
     }
 

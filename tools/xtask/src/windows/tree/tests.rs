@@ -174,19 +174,17 @@ fn a_directory_that_is_not_a_repository_is_said_with_what_git_said() {
 }
 
 #[test]
-fn the_tarball_is_made_by_tar_in_the_checkout_from_a_list_of_names_and_without_the_resource_files_of_macos(
+fn the_tarball_is_made_by_tar_in_the_scratch_from_the_checkout_by_a_list_of_names_and_without_the_resource_files_of_macos(
 ) {
     let context = Context {
         root: PathBuf::from("checkout"),
         env: Env::default(),
     };
-    let made = tar(
-        &context,
-        Path::new("scratch/tree.tgz"),
-        Path::new("scratch/files"),
-    );
+    let made = tar(&context, Path::new("scratch"), Path::new("scratch/files"));
     assert_eq!(made.program, "tar");
-    assert_eq!(made.cwd, Path::new("checkout"));
+    // The archive is named bare, in the folder tar runs in: a GNU tar takes `C:\…`
+    // for a host (Git for Windows's, first on the PATH of GitHub's runners).
+    assert_eq!(made.cwd, Path::new("scratch"));
     let words: Vec<_> = made
         .args
         .iter()
@@ -194,7 +192,16 @@ fn the_tarball_is_made_by_tar_in_the_checkout_from_a_list_of_names_and_without_t
         .collect();
     assert_eq!(
         words,
-        ["czf", "scratch/tree.tgz", "--null", "-T", "scratch/files"].map(String::from)
+        [
+            "czf",
+            "tree.tgz",
+            "-C",
+            "checkout",
+            "--null",
+            "-T",
+            "scratch/files"
+        ]
+        .map(String::from)
     );
     assert_eq!(made.vars, [("COPYFILE_DISABLE".into(), Some("1".into()))]);
 }

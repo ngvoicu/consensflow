@@ -56,7 +56,7 @@ pub fn pack(context: &Context, files: &[String], scratch: &Path) -> Result<PathB
     let tarball = scratch.join("tree.tgz");
     let named: Vec<&str> = files.iter().map(String::as_str).chain([SYNCED]).collect();
     fs::write(&names, named.join("\0")).map_err(Error::files("write", &names))?;
-    let tar = tar(context, &tarball, &names);
+    let tar = tar(context, scratch, &names);
     let made = {
         let _list = Listed::write(&context.root, files)?;
         process::capture(&tar, &context.env)
@@ -68,11 +68,13 @@ pub fn pack(context: &Context, files: &[String], scratch: &Path) -> Result<PathB
 }
 
 /// The `tar` that packs the names `names` holds (a file of them, each ended by a
-/// NUL) into `tarball`, from the checkout's root.
-fn tar(context: &Context, tarball: &Path, names: &Path) -> Invocation {
-    Invocation::new("tar", &context.root)
-        .arg("czf")
-        .arg(tarball)
+/// NUL), from the checkout's root, into `tree.tgz` in `scratch`. It runs in
+/// `scratch` and names the archive by its bare name: the GNU tar Git for Windows
+/// puts first on a PATH takes an archive named `C:\…` for a host to reach.
+fn tar(context: &Context, scratch: &Path, names: &Path) -> Invocation {
+    Invocation::new("tar", scratch)
+        .args(["czf", "tree.tgz", "-C"])
+        .arg(&context.root)
         .args(["--null", "-T"])
         .arg(names)
         // macOS's tar leaves out its ._ resource files.
