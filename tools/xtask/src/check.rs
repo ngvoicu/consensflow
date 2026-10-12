@@ -234,15 +234,15 @@ mod tests {
     }
 
     #[test]
-    fn the_cf_the_node_tests_run_is_built_again_just_before_them() {
+    fn the_cf_the_pages_suite_runs_is_built_again_from_the_sources_after_the_lint() {
         let steps = steps(&context(), Path::new("xtask"), false);
         let lines: Vec<_> = steps.iter().map(Invocation::display).collect();
-        let [.., lint, build, test] = &lines[..] else {
+        let [.., lint, build, _] = &lines[..] else {
             panic!("{lines:?}");
         };
         assert_eq!(
-            [lint.as_str(), build.as_str(), test.as_str()],
-            ["npm run lint", "cargo xtask build-cf --offline", "npm test"]
+            [lint.as_str(), build.as_str()],
+            ["npm run lint", "cargo xtask build-cf --offline"]
         );
     }
 

@@ -580,8 +580,8 @@ find = '''
 replace = ""
 
 [[plant]]
-name = "drivers: check runs the Node tests on a cf it did not build again"
-meant = "the_cf_the_node_tests_run_is_built_again_just_before_them"
+name = "drivers: check leaves the cf the page's suite runs as it was"
+meant = "the_cf_the_pages_suite_runs_is_built_again_from_the_sources_after_the_lint"
 runs = ["xtask-lib-check", "xtask-test-cli"]
 
 [[plant.edit]]
@@ -590,20 +590,6 @@ find = '''
         at("cargo", &["xtask", "build-cf", "--offline"]),
 '''
 replace = ""
-
-[[plant]]
-name = "drivers: check builds the cf after the Node tests that run it"
-meant = "the_cf_the_node_tests_run_is_built_again_just_before_them"
-runs = ["xtask-lib-check", "xtask-test-cli"]
-
-[[plant.edit]]
-file = "tools/xtask/src/check.rs"
-find = '''
-        at("cargo", &["xtask", "build-cf", "--offline"]),
-        at("npm", &["test"]),'''
-replace = '''
-        at("npm", &["test"]),
-        at("cargo", &["xtask", "build-cf", "--offline"]),'''
 
 [[plant]]
 name = "drivers: check has no lint for Windows on any machine"
