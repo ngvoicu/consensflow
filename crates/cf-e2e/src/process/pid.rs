@@ -46,6 +46,15 @@ pub fn is_alive(pid: u32) -> bool {
     as_pid(pid).is_ok_and(|pid| nix::sys::signal::kill(pid, None).is_ok())
 }
 
+/// The process group the process `pid` is in, or none where it is gone or has no
+/// group to tell: for a case that holds a stand-in to the group it was told to be
+/// in (a server in its window's, a browser in a session of its own).
+#[cfg(unix)]
+pub fn group_of(pid: u32) -> Option<u32> {
+    let group = nix::unistd::getpgid(Some(as_pid(pid).ok()?)).ok()?;
+    u32::try_from(group.as_raw()).ok()
+}
+
 #[cfg(unix)]
 fn as_pid(pid: u32) -> io::Result<nix::unistd::Pid> {
     i32::try_from(pid)

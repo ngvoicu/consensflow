@@ -55,8 +55,8 @@ use leftovers::Leftovers;
 
 pub use account::{clock, plural, plus, plus_maybe, squash, Account};
 pub use board::{
-    answer_to, find, first_answer, first_question, is_over, last_result, session_of, MemberWindow,
-    Paused,
+    answer_to, brief_delivered, find, first_answer, first_question, is_over, last_result,
+    session_of, MemberWindow, Paused,
 };
 pub use command::{shown, LongCommand};
 pub use door::{judge, moves, ms_of, waited_then_worked, Finding, Judged, Seen};
@@ -138,7 +138,10 @@ impl Members {
             path: std::env::temp_dir(),
             source,
         })?;
-        let config = rig_for(&installs, shims.path(), stand_in)?;
+        let config = plan.vars.iter().fold(
+            rig_for(&installs, shims.path(), stand_in)?,
+            |config, (name, value)| config.var(name, value),
+        );
         let mut rig = Rig::start(config.clone())?;
         if super::keep_requested() {
             log.say(format!(
@@ -307,9 +310,14 @@ impl Members {
     /// The window of the member `agent`'s newest session: none until the daemon
     /// has opened one.
     pub fn window_of(&self, agent: &str) -> Result<Option<MemberWindow>> {
-        let lane = self.lane(agent)?;
+        Ok(self.window_in(self.lane(agent)?))
+    }
+
+    /// The window `lane` of the board has: none while it has no pane. For a check
+    /// that has the lane already, and asks the board nothing again.
+    pub fn window_in(&self, lane: Value) -> Option<MemberWindow> {
         if lane["pane"].is_null() {
-            return Ok(None);
+            return None;
         }
         let pane = lane["pane"].clone();
         let open = self
@@ -318,7 +326,7 @@ impl Members {
             .into_iter()
             .rev()
             .find(|frame| frame["id"] == pane["id"]);
-        Ok(Some(MemberWindow {
+        Some(MemberWindow {
             handle: lane["participant"]["handle"]
                 .as_str()
                 .unwrap_or_default()
@@ -327,7 +335,24 @@ impl Members {
             open,
             activity: lane["activity"].clone(),
             lane,
-        }))
+        })
+    }
+
+    /// Every `pane.open` the daemon made for the windows of the member `agent`,
+    /// the oldest first: a member's work runs in a session of its own, and each
+    /// has its window, which is closed when the daemon gives it up and is none
+    /// of the lane's after.
+    pub fn windows_opened_for(&self, agent: &str) -> Vec<Value> {
+        let prefix = format!("p{}-{agent}-", self.project);
+        self.rig
+            .open_frames()
+            .into_iter()
+            .filter(|frame| {
+                frame["id"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with(&prefix))
+            })
+            .collect()
     }
 
     /// The end of the screen of the window whose pane is `pane` (its id), as a

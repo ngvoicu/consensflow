@@ -13,6 +13,7 @@ use cf_harness::contract::{
     Adapter, Admission, Interrupt, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Window,
     Work,
 };
+use cf_proto::panes::Servers;
 
 /// What a look waits for, given the handle of the window looked at.
 type Wait = dyn Fn(&str) -> Work<'static, ()>;
@@ -94,6 +95,10 @@ impl Adapter for LookingAdapter {
 
     fn interrupt(&self) -> Interrupt {
         self.adapter.interrupt()
+    }
+
+    fn servers(&self) -> Servers {
+        self.adapter.servers()
     }
 }
 

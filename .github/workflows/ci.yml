@@ -1,11 +1,12 @@
 # The gate on both platforms the app ships for: lint and the Node tests (the
 # page's units and the extensions'), the black-box suites of crates/cf-e2e
 # (the daemon, and the rig on a real pane host, with stand-in agents in real
-# terminals; the CLI), the page's Playwright suite (on macOS: it needs no app,
-# and once is enough), and the Rust host's tests, headless ones included, and
-# clippy. The packaged smoke needs a built app and stays with the release
-# build. Rust comes from the runner's own rustup; the one third-party action is
-# pinned to a commit. A release runs this same gate on the commit it releases.
+# terminals, and the regressions on it; the CLI), the page's Playwright suite
+# (on macOS: it needs no app, and once is enough), and the Rust host's tests,
+# headless ones included, and clippy. The packaged smoke needs a built app and
+# stays with the release build. Rust comes from the runner's own rustup; the
+# one third-party action is pinned to a commit. A release runs this same gate
+# on the commit it releases.
 name: CI
 
 on:
@@ -57,9 +58,10 @@ jobs:
         run: npx playwright install chromium && npm run test:ui
       # The black-box suites of crates/cf-e2e. Each builds the programs it runs
       # (the native cf, and the pane host consensflow-bridge, a binary of
-      # cf-panes which no Tauri bundle ships). The daemon's, as a process, and
-      # the rig's: the daemon and the pane host in real terminals, with
-      # stand-in agents in the windows.
+      # cf-panes which no Tauri bundle ships). The daemon's, as a process, the
+      # rig's: the daemon and the pane host in real terminals, with
+      # stand-in agents in the windows, and the regressions': a case for each
+      # bug the owner hit in real use, on that rig.
       - run: npm run test:daemons
         timeout-minutes: 30
       # The CLI's suites against the native cf, which answers every verb.

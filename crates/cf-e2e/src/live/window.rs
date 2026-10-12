@@ -11,9 +11,12 @@
 //! browser out, and Claude Code is asked, in a window of its own that is closed
 //! after, to trust the folder first ([`trust_claude`]). What goes in goes in as
 //! the daemon sends it ([`Window::send`]: a bracketed paste, then Enter once the
-//! window has drawn it), and nothing presses Enter a second time.
+//! window has drawn it), and nothing presses Enter a second time. What a window
+//! printed is read as the text of its screen, and as it came ([`raw_end`]), which
+//! tells a blank screen from a window that printed nothing.
 
 mod open;
+mod raw;
 #[cfg(test)]
 mod tests;
 mod trust;
@@ -32,6 +35,7 @@ use crate::rig::Rig;
 use crate::Result;
 
 pub use open::{pasted_installs, session_for, Open};
+pub use raw::{raw_end, RawEnd};
 pub use trust::claude as trust_claude;
 
 /// How long a window may take to draw its prompt, and a sent message its answer.
@@ -317,7 +321,7 @@ fn answered(printed: &str, items: &[Item], answer: &str) -> bool {
 /// screen's text has as a line break, and a harness that takes seconds to start
 /// (Devin) draws nothing after it for as long: a window that printed only that
 /// has not drawn its prompt.
-fn drawn(screen: &str) -> usize {
+pub fn drawn(screen: &str) -> usize {
     screen.chars().filter(|at| !at.is_whitespace()).count()
 }
 

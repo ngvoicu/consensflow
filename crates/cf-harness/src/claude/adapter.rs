@@ -50,6 +50,7 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
+use cf_proto::panes::Servers;
 use serde_json::Value;
 
 use super::install;
@@ -165,6 +166,22 @@ impl Adapter for ClaudeAdapter {
                 }),
             })
         })
+    }
+
+    /// Claude Code runs each command of its Bash tool, in the foreground and in
+    /// the background alike, in a process group of its own (a
+    /// `/bin/zsh -c source …/shell-snapshots/snapshot-zsh-….sh …` that leads its
+    /// group, seen on macOS with 3.0.1's workers), while its MCP servers and its
+    /// own helpers (`caffeinate`) stay in the group of its window. It starts its
+    /// servers as it takes its first message, after the window's turn is marked.
+    /// What a server starts is the harness's whatever group it starts it in: the
+    /// browser of `@playwright/mcp` and `chrome-devtools-mcp` leaves it.
+    fn servers(&self) -> Servers {
+        if self.env.on_windows() {
+            Servers::Unknown
+        } else {
+            Servers::InGroup
+        }
     }
 }
 

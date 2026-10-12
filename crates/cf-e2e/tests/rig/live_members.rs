@@ -202,12 +202,17 @@ fn a_chief_that_went_is_said_to_have_gone_and_how_where_its_token_is_refused() -
     );
     // What the daemon wrote of it is there too, and what it warned of.
     assert!(refused.contains("the daemon wrote of it: "), "{refused}");
-    // A stand-in that left takes its status file away; a chief nothing was said to wrote
-    // no conversation.
+    // A chief nothing was said to wrote no conversation. A stand-in that is asked to leave
+    // takes its status file away; Windows ends a program without asking, so its file stays.
+    let status = if cfg!(windows) {
+        "says idle"
+    } else {
+        "is gone"
+    };
     assert!(
-        refused.ends_with(
-            "its warnings: none; its records: the conversation is gone, the status file is gone"
-        ),
+        refused.ends_with(&format!(
+            "its warnings: none; its records: the conversation is gone, the status file {status}"
+        )),
         "{refused}"
     );
     members.close()?;

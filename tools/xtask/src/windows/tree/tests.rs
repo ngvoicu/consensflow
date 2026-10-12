@@ -54,16 +54,17 @@ fn sorted(mut names: Vec<String>) -> Vec<String> {
     names
 }
 
-/// The files `tarball` holds, unpacked into a folder of their own.
+/// The files `tarball` holds, unpacked into a folder of their own. Unpacked there
+/// from a copy named bare: a GNU tar (Git for Windows's, first on the PATH of
+/// GitHub's runners) takes `C:\…` for a host, as an archive and as a folder.
 fn unpacked(context: &Context, tarball: &Path) -> tempfile::TempDir {
     let into = tempfile::tempdir().unwrap();
-    let untar = Invocation::new("tar", &context.root)
-        .arg("xzf")
-        .arg(tarball)
-        .arg("-C")
-        .arg(into.path());
+    let copy = into.path().join("unpacking.tgz");
+    fs::copy(tarball, &copy).unwrap();
+    let untar = Invocation::new("tar", into.path()).args(["xzf", "unpacking.tgz"]);
     let answered = process::capture(&untar, &context.env).unwrap();
     assert_eq!(answered.code, 0, "{}", answered.stderr);
+    fs::remove_file(&copy).unwrap();
     into
 }
 
@@ -174,19 +175,17 @@ fn a_directory_that_is_not_a_repository_is_said_with_what_git_said() {
 }
 
 #[test]
-fn the_tarball_is_made_by_tar_in_the_checkout_from_a_list_of_names_and_without_the_resource_files_of_macos(
+fn the_tarball_is_made_by_tar_in_the_scratch_from_the_checkout_by_a_list_of_names_and_without_the_resource_files_of_macos(
 ) {
     let context = Context {
         root: PathBuf::from("checkout"),
         env: Env::default(),
     };
-    let made = tar(
-        &context,
-        Path::new("scratch/tree.tgz"),
-        Path::new("scratch/files"),
-    );
+    let made = tar(&context, Path::new("scratch"), Path::new("scratch/files"));
     assert_eq!(made.program, "tar");
-    assert_eq!(made.cwd, Path::new("checkout"));
+    // The archive is named bare, in the folder tar runs in: a GNU tar takes `C:\…`
+    // for a host (Git for Windows's, first on the PATH of GitHub's runners).
+    assert_eq!(made.cwd, Path::new("scratch"));
     let words: Vec<_> = made
         .args
         .iter()
@@ -194,7 +193,16 @@ fn the_tarball_is_made_by_tar_in_the_checkout_from_a_list_of_names_and_without_t
         .collect();
     assert_eq!(
         words,
-        ["czf", "scratch/tree.tgz", "--null", "-T", "scratch/files"].map(String::from)
+        [
+            "czf",
+            "tree.tgz",
+            "-C",
+            "checkout",
+            "--null",
+            "-T",
+            "scratch/files"
+        ]
+        .map(String::from)
     );
     assert_eq!(made.vars, [("COPYFILE_DISABLE".into(), Some("1".into()))]);
 }

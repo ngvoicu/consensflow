@@ -39,31 +39,34 @@
 //! The suites are the tests of the crate, a file for each (`tests/cli.rs` is
 //! the CLI's, with its cases in `tests/cli/`, and the guards of what the
 //! repository's own files say; `tests/daemon.rs` the daemon's as a process;
-//! `tests/rig.rs` the rig's, windows included; `tests/load.rs` the daemon under
-//! load; `tests/smoke.rs` the built app's, which no other suite has: the
-//! packaged smoke, a macOS bundle's, with the parts it is made of in
-//! `tests/smoke/`; and the live ones, `tests/live_<name>.rs`, each of which
-//! spends the machine's quota and runs only when asked for: `live_paste` a real
-//! window taking what the daemon pastes into it,
-//! `live_interrupt` its interrupt at an idle window, `live_agent` a catalog
-//! agent answering as its model, `live_asks` Claude stopping for a removal it
-//! should, `live_input_box` what clears its input box, `live_terminal` Devin's
-//! terminal on Windows, `live_door` a member's question received once at the
-//! door of its harness, `live_stops` the stops the daemon presses,
-//! `live_codex_resume` and `live_codex_interrupt` Codex's thread and its
-//! interrupted question, `live_resume_cut` and `live_restart_cut` a window and a
-//! chief that a quit cut, `live_bench` the board between a real chief and real
-//! workers, `live_designer` a real Codex drawing an image, and `live_approval`
-//! real harnesses in every seat of five projects sending what the human
-//! approves, behind the approval gate). Run them with `cargo xtask test clis`, `daemons`, `integration`,
-//! `agents` and `load`, and `cargo xtask smoke` (the `npm run` names are the
-//! same), a live one with `cargo xtask live <name>`, or one with `cargo test -p
-//! cf-e2e --test cli`.
+//! `tests/rig.rs` the rig's, windows included; `tests/regressions.rs` the bugs
+//! the owner met in the app, a rig case for each, in the shape they were met;
+//! `tests/load.rs` the daemon under load; `tests/smoke.rs` the built app's,
+//! which no other suite has: the packaged smoke, a macOS bundle's, with the
+//! parts it is made of in `tests/smoke/`; and the live ones,
+//! `tests/live_<name>.rs`, each of which spends the machine's quota and runs
+//! only when asked for: `live_paste` a real window taking what the daemon
+//! pastes into it, `live_interrupt` its interrupt at an idle window,
+//! `live_agent` a catalog agent answering as its model, `live_asks` Claude
+//! stopping for a removal it should, `live_input_box` what clears its input
+//! box, `live_terminal` Devin's terminal on Windows, `live_door` a member's
+//! question received once at the door of its harness, `live_stops` the stops
+//! the daemon presses, `live_codex_resume` and `live_codex_interrupt` Codex's
+//! thread and its interrupted question, `live_resume_cut` and
+//! `live_restart_cut` a window and a chief that a quit cut, `live_bench` the
+//! board between a real chief and real workers, `live_designer` a real Codex
+//! drawing an image, `live_approval` real harnesses in every seat of five
+//! projects sending what the human approves, behind the approval gate, and
+//! `live_mcp` a real Claude Code worker that has an MCP server finishing its
+//! task). Run them with `cargo xtask test clis`, `daemons`, `integration`,
+//! `regressions`, `agents` and `load`, and `cargo xtask smoke` (the `npm run`
+//! names are the same), a live one with `cargo xtask live <name>`, or one with
+//! `cargo test -p cf-e2e --test cli`.
 //!
 //! The stand-ins the suites run in place of what ConsensFlow runs are
 //! binaries of this crate, behind the `test-support` feature the crate's own
-//! tests turn on: `fake-agent`, `fake-codex`, `liar-daemon` and the
-//! packaged smoke's `smoke-paste-reader`.
+//! tests turn on: `fake-agent`, `fake-codex`, `fake-devin`, `liar-daemon` and
+//! the packaged smoke's `smoke-paste-reader`.
 
 #![forbid(unsafe_code)]
 

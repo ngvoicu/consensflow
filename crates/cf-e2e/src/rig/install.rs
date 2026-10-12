@@ -53,6 +53,22 @@ pub(super) fn environment(root: &Path, fake_bin: &Path, config: &Config) -> Vec<
         env.push(("USERPROFILE".to_owned(), text(&home)));
     }
     env.push(("CF_TEST_HARNESS".to_owned(), text(&config.stand_in)));
+    if let Some(codex) = &config.codex {
+        // The stand-in Codex's own: what it runs, what it writes down, how its
+        // windows go (each on a thread of its own, the TUI waiting to be ended).
+        env.extend([
+            ("CF_TEST_CODEX".to_owned(), text(codex)),
+            (
+                "CF_TEST_CODEX_LOG".to_owned(),
+                text(&root.join("codex.jsonl")),
+            ),
+            ("CF_TEST_CODEX_TUI".to_owned(), "wait".to_owned()),
+            ("CF_TEST_CODEX_THREADS".to_owned(), "unique".to_owned()),
+        ]);
+    }
+    if let Some(devin) = &config.devin {
+        env.push(("CF_TEST_DEVIN".to_owned(), text(devin)));
+    }
     env.push(("TERM".to_owned(), "xterm-256color".to_owned()));
     env.extend(config.vars.iter().cloned());
     env.retain(|(name, _)| !config.unset.contains(name));
@@ -78,12 +94,13 @@ fn path(fake_bin: &Path, config: &Config) -> String {
         .join(if cfg!(windows) { ";" } else { ":" })
 }
 
-/// The stand-in `claude` the windows find on their `PATH`, and the folder
-/// the stand-in agent writes its conversations in. On Windows it has the shape
-/// of an npm shim ([`stand_in::window_shim`]), which is how a window opens on
-/// it: it names the stand-in `agent` as both program and script, and the
-/// stand-in knows its own file when it is given it first. The folder it is in.
-pub(super) fn write_fake_install(root: &Path, agent: &Path) -> Result<PathBuf> {
+/// The stand-in `claude` the windows find on their `PATH`, and the folder the
+/// stand-in agent writes its conversations in. On Windows it has the shape of an
+/// npm shim ([`stand_in::window_shim`]), which is how a window opens on it: it
+/// names the stand-in as both program and script, and the stand-in knows its own
+/// file when it is given it first. The stand-in `devin` beside it, where the rig
+/// has one, and the stand-in `codex` (Unix's). The folder they are in.
+pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf> {
     let fake_bin = root.join("fake-bin");
     let projects = root
         .join("home")
@@ -91,13 +108,26 @@ pub(super) fn write_fake_install(root: &Path, agent: &Path) -> Result<PathBuf> {
         .join("projects")
         .join("integration");
     files::make_dir(&projects)?;
-    let claude = fake_bin.join(stand_in::program_name("claude"));
-    if cfg!(windows) {
-        files::write_executable(&claude, stand_in::window_shim(agent))?;
-    } else {
-        files::write_executable(&claude, "#!/bin/sh\nexec \"$CF_TEST_HARNESS\" \"$@\"\n")?;
+    write_shim(&fake_bin, "claude", "CF_TEST_HARNESS", &config.stand_in)?;
+    if let Some(devin) = &config.devin {
+        write_shim(&fake_bin, "devin", "CF_TEST_DEVIN", devin)?;
+    }
+    // The stand-in Codex's is a script, so Unix's.
+    if let Some(codex) = config.codex.as_ref().filter(|_| !cfg!(windows)) {
+        write_shim(&fake_bin, "codex", "CF_TEST_CODEX", codex)?;
     }
     Ok(fake_bin)
+}
+
+/// The command `name` in `dir`, which starts `program`: a script that runs the
+/// program the variable `var` names, or on Windows the shim of `program`.
+fn write_shim(dir: &Path, name: &str, var: &str, program: &Path) -> Result {
+    let shim = dir.join(stand_in::program_name(name));
+    if cfg!(windows) {
+        files::write_executable(&shim, stand_in::window_shim(program))
+    } else {
+        files::write_executable(&shim, format!("#!/bin/sh\nexec \"${var}\" \"$@\"\n"))
+    }
 }
 
 /// The roster a fresh rig starts with: a chief and a worker, on the stand-in.
@@ -207,10 +237,39 @@ mod tests {
     }
 
     #[test]
+    fn a_rig_given_a_devin_has_its_stand_in_found_as_devin_beside_claudes_and_named_in_the_environment(
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let devin = Path::new("/the/stand-in-devin");
+        let given = Config::new("/the/stand-in").devin(devin);
+        let fake_bin = write_fake_install(root.path(), &given).unwrap();
+        let script = files::read_string(&fake_bin.join(stand_in::program_name("devin"))).unwrap();
+        if cfg!(windows) {
+            assert_eq!(
+                script,
+                "@echo off\r\n\"/the/stand-in-devin\" \"/the/stand-in-devin\" %*\r\n"
+            );
+        } else {
+            assert_eq!(script, "#!/bin/sh\nexec \"$CF_TEST_DEVIN\" \"$@\"\n");
+        }
+        // Claude's is still there, and the environment names the one and the other.
+        assert!(fake_bin.join(stand_in::program_name("claude")).is_file());
+        let env = environment(root.path(), &fake_bin, &config().devin(devin));
+        assert_eq!(var(&env, "CF_TEST_DEVIN"), "/the/stand-in-devin");
+        assert_eq!(var(&env, "CF_TEST_HARNESS"), "/the/stand-in");
+        let plain = environment(root.path(), &fake_bin, &config());
+        assert!(!plain.iter().any(|(name, _)| name == "CF_TEST_DEVIN"));
+    }
+
+    #[test]
     fn the_stand_in_claude_runs_the_program_the_environment_names_and_the_roster_has_two_agents() {
         let root = tempfile::tempdir().unwrap();
-        let fake_bin = write_fake_install(root.path(), Path::new("/the/stand-in")).unwrap();
+        let fake_bin = write_fake_install(root.path(), &Config::new("/the/stand-in")).unwrap();
         assert_eq!(fake_bin, root.path().join("fake-bin"));
+        assert!(
+            !fake_bin.join("codex").exists(),
+            "a rig that is given no stand-in Codex has none"
+        );
         let claude = fake_bin.join(stand_in::program_name("claude"));
         let script = files::read_string(&claude).unwrap();
         if cfg!(windows) {
@@ -221,6 +280,8 @@ mod tests {
         } else {
             assert_eq!(script, "#!/bin/sh\nexec \"$CF_TEST_HARNESS\" \"$@\"\n");
         }
+        // No Devin unless the rig is given one.
+        assert!(!fake_bin.join(stand_in::program_name("devin")).exists());
         // The folder the agent writes its conversations in is there to write in.
         assert!(root
             .path()
@@ -234,5 +295,42 @@ mod tests {
         assert_eq!(roster["schemaVersion"], 1);
         assert_eq!(roster["agents"][0]["id"], "chief");
         assert_eq!(roster["agents"][1]["model"], "fake");
+    }
+
+    #[test]
+    fn a_rig_given_a_stand_in_codex_has_it_on_its_path_and_its_windows_go_as_the_daemons_do() {
+        let config = config().codex("/the/fake-codex");
+        let root = Path::new("root");
+        let env = environment(root, &root.join("fake-bin"), &config);
+        assert_eq!(var(&env, "CF_TEST_CODEX"), "/the/fake-codex");
+        assert_eq!(
+            var(&env, "CF_TEST_CODEX_LOG"),
+            root.join("codex.jsonl").to_string_lossy()
+        );
+        assert_eq!(var(&env, "CF_TEST_CODEX_TUI"), "wait");
+        assert_eq!(var(&env, "CF_TEST_CODEX_THREADS"), "unique");
+        // A case's own word is still the last.
+        let env = environment(
+            root,
+            &root.join("fake-bin"),
+            &config.var("CF_TEST_CODEX_TUI", "x"),
+        );
+        assert_eq!(var(&env, "CF_TEST_CODEX_TUI"), "x");
+        // And none of it where the rig has no stand-in Codex.
+        let plain = environment(root, &root.join("fake-bin"), &self::config());
+        assert!(!plain
+            .iter()
+            .any(|(name, _)| name.starts_with("CF_TEST_CODEX")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_stand_in_codex_runs_the_program_the_environment_names() {
+        let root = tempfile::tempdir().unwrap();
+        let fake_bin = write_fake_install(root.path(), &config().codex("/the/fake-codex")).unwrap();
+        assert_eq!(
+            files::read_string(&fake_bin.join("codex")).unwrap(),
+            "#!/bin/sh\nexec \"$CF_TEST_CODEX\" \"$@\"\n"
+        );
     }
 }

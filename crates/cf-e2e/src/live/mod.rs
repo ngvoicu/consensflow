@@ -62,8 +62,8 @@ use crate::rig::Rig;
 use crate::{files, Error, Result};
 
 pub use machine::{
-    codex, command, installed, isolated_claude, rig, rig_with_stand_ins, shimmed_claude, Harness,
-    Installed, ISOLATION,
+    codex, command, installed, isolated_claude, rig, rig_with_stand_ins, shimmed_claude,
+    shimmed_claude_with_servers, Harness, Installed, ISOLATION,
 };
 
 /// What every variable a live run reads its options by begins with: `cargo xtask

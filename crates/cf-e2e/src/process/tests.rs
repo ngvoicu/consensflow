@@ -287,11 +287,48 @@ mod shell {
         let mut program = sh("exec sleep 30").spawn().unwrap();
         let id = program.id();
         assert!(is_alive(id));
-        signal(id, Signal::Interrupt).unwrap();
-        program.wait(Duration::from_secs(10)).unwrap();
+        // Ended by a TERM: a run started in the background of a script (a gate run by
+        // `nohup … &`) has its interrupts ignored, and so has every program under it.
+        signal(id, Signal::Terminate).unwrap();
+        assert!(
+            program.wait(Duration::from_secs(10)).unwrap().is_some(),
+            "the signal did not end it"
+        );
         assert!(!is_alive(id));
         assert!(signal(id, Signal::Terminate).is_err(), "nothing to signal");
         // No such process id at all.
         assert!(!is_alive(u32::MAX));
+    }
+
+    #[test]
+    fn the_group_of_a_process_is_the_one_it_was_started_in_and_one_that_is_gone_has_none() {
+        use std::os::unix::process::CommandExt;
+
+        let mut leader = Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let mut follower = Command::new("sleep").arg("30").spawn().unwrap();
+        assert_eq!(group_of(leader.id()), Some(leader.id()), "it leads its own");
+        assert_eq!(
+            group_of(follower.id()),
+            group_of(std::process::id()),
+            "the other is in the group of the process that started it"
+        );
+        leader.kill().unwrap();
+        leader.wait().unwrap();
+        follower.kill().unwrap();
+        follower.wait().unwrap();
+        assert_eq!(group_of(leader.id()), None);
+        assert_eq!(group_of(u32::MAX), None, "no such process id at all");
+    }
+
+    #[test]
+    fn a_run_told_to_have_a_group_of_its_own_leads_one_and_one_not_told_is_in_the_tests() {
+        let own = sh("sleep 30").own_group().closed_input().spawn().unwrap();
+        let shared = sh("sleep 30").closed_input().spawn().unwrap();
+        assert_eq!(group_of(own.id()), Some(own.id()));
+        assert_eq!(group_of(shared.id()), group_of(std::process::id()));
     }
 }
