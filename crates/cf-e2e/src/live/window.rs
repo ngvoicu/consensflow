@@ -147,11 +147,12 @@ impl Window<'_> {
         self.rig.exits().iter().any(|exit| exit["id"] == self.id)
     }
 
-    /// Until the window has printed and then held still for three seconds, or
-    /// `within` has passed: whether it did. A window that ended did not.
+    /// Until the window has drawn something and then held still for three
+    /// seconds, or `within` has passed: whether it did. A window that ended did
+    /// not, and one that printed only blanks has drawn nothing ([`drawn`]).
     pub fn still(&self, within: Duration) -> bool {
         held_still(
-            || self.screen().len(),
+            || drawn(&self.screen()),
             || self.closed(),
             within,
             STILL,
@@ -291,6 +292,15 @@ fn answered(printed: &str, items: &[Item], answer: &str) -> bool {
         || items
             .iter()
             .any(|item| item.role == "assistant" && item.text.contains(answer))
+}
+
+/// How much of a window's screen is drawn: its characters that are not blanks.
+/// Windows' console host opens a window with a jump of the cursor, which the
+/// screen's text has as a line break, and a harness that takes seconds to start
+/// (Devin) draws nothing after it for as long: a window that printed only that
+/// has not drawn its prompt.
+fn drawn(screen: &str) -> usize {
+    screen.chars().filter(|at| !at.is_whitespace()).count()
 }
 
 /// Whether a window held still: its output (`length`, read every `step`) has

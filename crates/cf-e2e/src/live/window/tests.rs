@@ -118,6 +118,34 @@ fn an_answer_is_on_the_screen_since_the_paste_or_in_an_answer_of_the_record() {
 }
 
 #[test]
+fn a_screen_of_blanks_has_drawn_nothing_and_one_with_text_has_drawn_its_characters() {
+    // What Windows' console host prints at once: a jump of the cursor, a line break
+    // in the screen's text. Devin draws its first frame seconds after it.
+    assert_eq!(drawn(""), 0);
+    assert_eq!(drawn("\n"), 0);
+    assert_eq!(drawn(" \n   \t\r\n "), 0);
+    assert_eq!(drawn("\nDevin CLI  v3000\n"), 13);
+    assert_eq!(drawn("é ü\n"), 2);
+    // A window that printed only that has not held still with something printed.
+    let tiny = Duration::from_millis(1);
+    let hold = Duration::from_millis(30);
+    assert!(!held_still(
+        || drawn("\n"),
+        || false,
+        Duration::from_millis(100),
+        hold,
+        tiny
+    ));
+    assert!(held_still(
+        || drawn("\nDevin CLI\n"),
+        || false,
+        Duration::from_secs(10),
+        hold,
+        tiny
+    ));
+}
+
+#[test]
 fn a_window_has_held_still_when_its_output_stopped_growing_with_something_printed() {
     let tiny = Duration::from_millis(1);
     let hold = Duration::from_millis(30);
