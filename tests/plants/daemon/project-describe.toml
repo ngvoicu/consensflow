@@ -642,8 +642,8 @@ runs = ["page-project-menu"]
 
 [[plant.edit]]
 file = "app/ui/core/project-menu.js"
-find = "    if (project === null || this.#saving) return"
-replace = "    if (project === null) return"
+find = "    if (opening === null || opening.saving) return"
+replace = "    if (opening === null) return"
 
 [[plant]]
 name = "describe dialog: a refusal closes the dialog"
@@ -653,10 +653,10 @@ runs = ["page-project-menu"]
 [[plant.edit]]
 file = "app/ui/core/project-menu.js"
 find = '''    if (refused !== null) {
-      this.#say(refused)
+      if (current) this.#say(refused)
       return
     }'''
-replace = '''    if (refused !== null) this.#say(refused)'''
+replace = '''    if (refused !== null && current) this.#say(refused)'''
 
 [[plant]]
 name = "describe dialog: a refusal is not said"
@@ -665,8 +665,8 @@ runs = ["page-project-menu"]
 
 [[plant.edit]]
 file = "app/ui/core/project-menu.js"
-find = "      this.#say(refused)"
-replace = "      this.#say('')"
+find = "      if (current) this.#say(refused)"
+replace = "      if (current) this.#say('')"
 
 [[plant]]
 name = "describe dialog: the dialog opens on what was typed in it the last time"
@@ -685,8 +685,149 @@ runs = ["page-project-menu"]
 
 [[plant.edit]]
 file = "app/ui/core/project-menu.js"
-find = "      if (this.#project !== null) back(this.#project.id)"
-replace = "      if (this.#project !== null && false) back(this.#project.id)"
+find = "      if (opening !== null) back(opening.project.id)"
+replace = "      if (opening !== null && false) back(opening.project.id)"
+
+[[plant]]
+name = "describe dialog: the answer to a save the human cancelled closes the dialog opened after it"
+meant = "project menu: a rename saved and cancelled before the daemon answers does not close the dialog opened next on another project"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    if (current) this.#dialog.close()"
+replace = "    this.#dialog.close()"
+
+[[plant]]
+name = "describe dialog: the refusal of a save the human cancelled is said in the dialog opened after it"
+meant = "project menu: a rename that the daemon refuses after the human cancelled it is not said in the dialog opened next on another project"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "      if (current) this.#say(refused)"
+replace = "      this.#say(refused)"
+
+[[plant]]
+name = "describe dialog: the answer to a save is taken for the dialog's when it is of the same project"
+meant = "project menu: a rename saved and cancelled before the daemon answers does not close the dialog opened next on the same project"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    const current = opening === this.#opening"
+replace = "    const current = this.#opening !== null && opening.project.id === this.#opening.project.id"
+
+[[plant]]
+name = "describe dialog: a save the human cancelled and the daemon has not answered keeps the dialog opened next from saving"
+meant = "project menu: a rename saved and cancelled, not yet answered, does not keep the dialog opened next from saving"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "class FieldDialog {"
+replace = '''let saving = false
+
+class FieldDialog {'''
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''    if (opening === null || opening.saving) return
+    opening.saving = true'''
+replace = '''    if (opening === null || saving) return
+    saving = true'''
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "      opening.saving = false"
+replace = "      saving = false"
+
+[[plant]]
+name = "describe menu: an open menu keeps the name it opened with"
+meant = "project menu: an open menu follows a rename made elsewhere, and is for the project as the page has it now"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''    this.#adopt(project)
+  }'''
+replace = '''    this.#at = this.#placeOf(id)
+  }'''
+
+[[plant]]
+name = "describe menu: an open menu stays open when its project is gone"
+meant = "project menu: an open menu shuts when its project is gone, and the keyboard goes to the project that took its place, or the one before it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''    if (project === undefined) {
+      this.#lose()
+      return
+    }'''
+replace = '''    if (project === undefined) return'''
+
+[[plant]]
+name = "describe menu: the keyboard of an open menu whose project is gone is left on nothing"
+meant = "project menu: an open menu shuts when its project is gone, and the keyboard goes to the project that took its place, or the one before it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    if (!held) return"
+replace = "    return"
+
+[[plant]]
+name = "describe menu: the keyboard of an open menu whose project is gone goes to the first project"
+meant = "project menu: an open menu shuts when its project is gone, and the keyboard goes to the project that took its place, or the one before it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    const near = cards[Math.min(this.#at, cards.length - 1)]?.querySelector('.project-select')"
+replace = "    const near = cards[0]?.querySelector('.project-select')"
+
+[[plant]]
+name = "describe menu: the keyboard of an open menu whose last project is gone goes past the end"
+meant = "project menu: an open menu shuts when its project is gone, and the keyboard goes to the project that took its place, or the one before it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "cards[Math.min(this.#at, cards.length - 1)]"
+replace = "cards[this.#at]"
+
+[[plant]]
+name = "describe menu: with no project left the keyboard of an open menu is left on nothing"
+meant = "project menu: with no project left an open menu shuts and the keyboard goes to New project"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''    const target = near ?? this.#fallback
+    target.focus()'''
+replace = '''    near?.focus()'''
+
+[[plant]]
+name = "describe menu: the keyboard of an open menu whose project is gone is taken from where the human put it"
+meant = "project menu: an open menu whose project is gone leaves the keyboard where the human had put it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    const held = focused === null || focused === document.body || this.#menu.contains(focused)"
+replace = "    const held = true"
+
+[[plant]]
+name = "describe app: the page does not tell an open menu it was drawn again"
+meant = "project menu: an open menu follows a rename made elsewhere, and is for the project as the page has it now"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = '''      projectMenu.follow()
+'''
+replace = ""
 
 [[plant]]
 name = "describe dialog: the field takes a name of any length"

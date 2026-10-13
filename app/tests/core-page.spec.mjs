@@ -257,6 +257,12 @@ async function open(page, data = model()) {
     // How long an operation takes to answer, in ms, set by a test while it runs:
     // the real core answers when it can, and a page that assumes at once races.
     window.__delay = {}
+    // The answer to an operation, held by a test until it lets it go (`__hold[operation]`
+    // is a promise, `__release[operation]` what lets it go); it holds the next request
+    // for that operation, and only that one. And every operation answered, in order.
+    window.__hold = {}
+    window.__release = {}
+    window.__answered = []
     // Why the daemon is down, while a test has it down: the app answers every
     // core request with this, as Rust does with no bridge to the daemon.
     window.__down = null
@@ -401,6 +407,11 @@ async function open(page, data = model()) {
         const handle = operations[args.operation]
         const ms = window.__delay[args.operation] ?? 0
         if (ms > 0) await new Promise((wake) => setTimeout(wake, ms))
+        const held = window.__hold[args.operation]
+        if (held !== undefined) {
+          delete window.__hold[args.operation]
+          await held
+        }
         if (window.__down !== null) {
           return {
             ok: false,
@@ -409,7 +420,9 @@ async function open(page, data = model()) {
             detail: window.__down,
           }
         }
-        return handle ? handle(args.body) : { ok: true }
+        const result = handle ? handle(args.body) : { ok: true }
+        window.__answered.push(args.operation)
+        return result
       }
       if (command === 'subscribe_output') {
         window.__output = args.onOutput
@@ -4000,6 +4013,79 @@ test('project menu: a board drawn again leaves the menu open, and Escape then go
   await expect(projectButton(page, 1)).toBeFocused()
 })
 
+/** `project` gone from what the daemon lists, as when it is deleted from elsewhere. */
+const goneFrom = (project) => {
+  window.__model.projects = window.__model.projects.filter((listed) => listed.id !== project)
+}
+
+test('project menu: an open menu follows a rename made elsewhere, and is for the project as the page has it now', async ({
+  page,
+}) => {
+  await open(page)
+  await menuOn(page, 1)
+  await expect(projectMenu(page)).toHaveAccessibleName('harbour')
+  await changed(page, () => {
+    for (const shown of [window.__model.projects[0], window.__model.boards[1].project]) {
+      shown.name = 'harbour two'
+    }
+  })
+  await expect(projectMenu(page)).toHaveAccessibleName('harbour two')
+  await expect(projectMenu(page)).toBeVisible()
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  // What it opens is on the name the project has now.
+  await itemNamed(page, 'Rename…').click()
+  await expect(page.getByRole('dialog', { name: 'Rename project' }).getByLabel('Name')).toHaveValue(
+    'harbour two',
+  )
+})
+
+test('project menu: an open menu shuts when its project is gone, and the keyboard goes to the project that took its place, or the one before it', async ({
+  page,
+}) => {
+  const data = model()
+  data.projects.push({ id: 3, name: 'quarry', directory: '/work/quarry', state: 'suspended' })
+  await open(page, data)
+  // The one in the middle goes: the one after it is where it was.
+  await menuOn(page, 2)
+  await changed(page, goneFrom, 2)
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(projectCard(page, 2)).toHaveCount(0)
+  await expect(projectButton(page, 3)).toBeFocused()
+  // The last one goes: the one before it.
+  await menuOn(page, 3)
+  await changed(page, goneFrom, 3)
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(projectCard(page, 3)).toHaveCount(0)
+  await expect(projectButton(page, 1)).toBeFocused()
+})
+
+test('project menu: with no project left an open menu shuts and the keyboard goes to New project', async ({
+  page,
+}) => {
+  await open(page)
+  await menuOn(page, 1)
+  await page.evaluate(() => {
+    window.__model.projects = []
+    window.__listeners.get('state-changed')()
+  })
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(page.locator('li.project')).toHaveCount(0)
+  await expect(page.locator('#new-project')).toBeFocused()
+})
+
+test('project menu: an open menu whose project is gone leaves the keyboard where the human had put it', async ({
+  page,
+}) => {
+  await open(page)
+  await menuOn(page, 2)
+  // The keyboard is elsewhere (the menu is still open: nothing was pressed outside it).
+  await page.locator('#inbox-button').focus()
+  await expect(projectMenu(page)).toBeVisible()
+  await changed(page, goneFrom, 2)
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(page.locator('#inbox-button')).toBeFocused()
+})
+
 test('project menu: Rename… saves with Enter, and the new name is in the list, over the board and in the buttons named after it', async ({
   page,
 }) => {
@@ -4250,6 +4336,184 @@ test('project menu: a closed project is renamed and described from its menu as a
   await expect(page.locator('#project-title')).toHaveText('harbour')
   await expect(projectButton(page, 1).locator('.project-name')).toHaveText('harbour')
 })
+
+/**
+ * The daemon's next answer to `operation` is held until `letGo`: what the page asked
+ * is on its way, and the page goes on meanwhile. `answers` counts what it answered.
+ */
+const hold = (page, operation) =>
+  page.evaluate((operation) => {
+    window.__hold[operation] = new Promise((go) => {
+      window.__release[operation] = go
+    })
+  }, operation)
+const letGo = (page, operation) =>
+  page.evaluate((operation) => window.__release[operation](), operation)
+const answers = (page, operation) =>
+  page.evaluate(
+    (operation) => window.__answered.filter((answered) => answered === operation).length,
+    operation,
+  )
+
+/**
+ * What differs between the two dialogs where the human saves and cancels before the daemon
+ * answers: the item that opens each; what is typed for harbour, which is saved, and for
+ * foundry, which is not; a text the daemon refuses (spaces for a name, over two hundred
+ * characters for a line: the field's own limit is lifted for it); what the list shows of
+ * a save; what the status line says of harbour's; and how the human leaves the dialog.
+ */
+const CANCELLED = [
+  {
+    what: 'rename',
+    item: 'Rename…',
+    title: 'Rename project',
+    label: 'Name',
+    operation: 'project.rename',
+    body: (project, text) => ({ project, name: text }),
+    saved: 'Quay',
+    typed: 'forge',
+    refused: '   ',
+    told: 'harbour is now Quay.',
+    leaves: 'Cancel',
+    shows: (page, project, text) =>
+      expect(projectButton(page, project).locator('.project-name')).toHaveText(text),
+  },
+  {
+    what: 'description',
+    item: 'Description…',
+    title: 'Project description',
+    label: 'Description',
+    operation: 'project.describe',
+    body: (project, text) => ({ project, description: text }),
+    saved: 'Moves the cargo',
+    typed: 'Where the iron goes',
+    refused: 'a'.repeat(201),
+    told: 'The description of harbour is saved.',
+    leaves: 'Escape',
+    shows: (page, project, text) =>
+      expect(projectButton(page, project).locator('.project-description')).toHaveText(text),
+  },
+]
+
+/** The dialog of `spec` opened on project `id`, with `text` typed in its field. */
+async function typedIn(page, spec, id, text, { unlimited = false } = {}) {
+  const dialog = await dialogFrom(page, id, spec.item, spec.title)
+  const field = dialog.getByLabel(spec.label)
+  if (unlimited) await field.evaluate((input) => input.removeAttribute('maxlength'))
+  await field.fill(text)
+  return { dialog, field }
+}
+
+/** The human leaves the dialog without saving, as `spec` says. */
+async function leave(page, spec, dialog) {
+  if (spec.leaves === 'Cancel') await dialog.getByRole('button', { name: 'Cancel' }).click()
+  else await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+}
+
+for (const spec of CANCELLED) {
+  test(`project menu: a ${spec.what} saved and cancelled before the daemon answers does not close the dialog opened next on another project`, async ({
+    page,
+  }) => {
+    await open(page)
+    await hold(page, spec.operation)
+    const first = await typedIn(page, spec, 1, spec.saved)
+    await first.field.press('Enter')
+    await expect.poll(() => calls(page, spec.operation)).toEqual([spec.body(1, spec.saved)])
+    await leave(page, spec, first.dialog)
+    // foundry's dialog, opened after it, with its own text typed and not saved.
+    const next = await typedIn(page, spec, 2, spec.typed)
+    // The daemon answers harbour's save now, and the list shows what it did.
+    await letGo(page, spec.operation)
+    await spec.shows(page, 1, spec.saved)
+    await settled(page)
+    // foundry's dialog is as the human left it, and theirs to save. Cancelling did not
+    // take harbour's change back, and the status line tells it.
+    await expect(next.dialog).toBeVisible()
+    await expect(next.field).toHaveValue(spec.typed)
+    await expect(next.field).toBeFocused()
+    await expect(page.locator('#status')).toHaveText(spec.told)
+    await next.field.press('Enter')
+    await expect
+      .poll(() => calls(page, spec.operation))
+      .toEqual([spec.body(1, spec.saved), spec.body(2, spec.typed)])
+    await expect(next.dialog).toBeHidden()
+    await spec.shows(page, 2, spec.typed)
+  })
+
+  test(`project menu: a ${spec.what} that the daemon refuses after the human cancelled it is not said in the dialog opened next on another project`, async ({
+    page,
+  }) => {
+    await open(page)
+    await hold(page, spec.operation)
+    const first = await typedIn(page, spec, 1, spec.refused, { unlimited: true })
+    await first.field.press('Enter')
+    await expect
+      .poll(() => calls(page, spec.operation))
+      .toEqual([spec.body(1, spec.refused.trim())])
+    await leave(page, spec, first.dialog)
+    const next = await typedIn(page, spec, 2, spec.typed)
+    await letGo(page, spec.operation)
+    await expect.poll(() => answers(page, spec.operation)).toBe(1)
+    await settled(page)
+    // The refusal was of a dialog the human had left: foundry's has nothing of it, and its text.
+    await expect(next.dialog).toBeVisible()
+    await expect(next.dialog.getByRole('alert')).toBeHidden()
+    await expect(next.field).toHaveValue(spec.typed)
+    await next.field.press('Enter')
+    await expect(next.dialog).toBeHidden()
+    await spec.shows(page, 2, spec.typed)
+  })
+
+  test(`project menu: a ${spec.what} saved and cancelled before the daemon answers does not close the dialog opened next on the same project`, async ({
+    page,
+  }) => {
+    await open(page)
+    await hold(page, spec.operation)
+    const first = await typedIn(page, spec, 1, spec.saved)
+    await first.field.press('Enter')
+    await expect.poll(() => calls(page, spec.operation)).toEqual([spec.body(1, spec.saved)])
+    await leave(page, spec, first.dialog)
+    // The same dialog on the same project: an opening of its own, with its own text.
+    const again = await typedIn(page, spec, 1, spec.typed)
+    await letGo(page, spec.operation)
+    await spec.shows(page, 1, spec.saved)
+    await settled(page)
+    await expect(again.dialog).toBeVisible()
+    await expect(again.field).toHaveValue(spec.typed)
+    await expect(again.field).toBeFocused()
+    await again.field.press('Enter')
+    await expect
+      .poll(() => calls(page, spec.operation))
+      .toEqual([spec.body(1, spec.saved), spec.body(1, spec.typed)])
+    await expect(again.dialog).toBeHidden()
+    await spec.shows(page, 1, spec.typed)
+  })
+
+  test(`project menu: a ${spec.what} saved and cancelled, not yet answered, does not keep the dialog opened next from saving`, async ({
+    page,
+  }) => {
+    await open(page)
+    await hold(page, spec.operation)
+    const first = await typedIn(page, spec, 1, spec.saved)
+    await first.field.press('Enter')
+    await expect.poll(() => calls(page, spec.operation)).toEqual([spec.body(1, spec.saved)])
+    await leave(page, spec, first.dialog)
+    // harbour's save is still not answered: foundry's dialog saves all the same.
+    const next = await typedIn(page, spec, 2, spec.typed)
+    await next.field.press('Enter')
+    await expect
+      .poll(() => calls(page, spec.operation))
+      .toEqual([spec.body(1, spec.saved), spec.body(2, spec.typed)])
+    await expect(next.dialog).toBeHidden()
+    await spec.shows(page, 2, spec.typed)
+    expect(await answers(page, spec.operation)).toBe(1)
+    // And harbour's answer, when it comes, is the list's as well.
+    await letGo(page, spec.operation)
+    await spec.shows(page, 1, spec.saved)
+    await expect(page.locator('#status')).toHaveText(spec.told)
+  })
+}
 
 test("counts the human's unread notes on Inbox, and opens For you with it, from a folded board too", async ({
   page,

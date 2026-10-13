@@ -397,6 +397,7 @@ async function refresh() {
       )
       render()
       staff.render()
+      projectMenu.follow()
       await rereadTask()
     } catch (cause) {
       report(cause)
@@ -561,13 +562,16 @@ function renderProjects() {
 }
 
 // A right-click on a project (or the context-menu key, or Shift+F10, on the one the
-// keyboard is on) opens its menu: rename it, or write a line under its name.
-new ProjectMenu(
+// keyboard is on) opens its menu: rename it, or write a line under its name. An open
+// menu follows each refresh; with its project gone and no other in the list, the
+// keyboard goes to New project.
+const projectMenu = new ProjectMenu(
   {
     list: projectList,
     menu: $('#project-menu'),
     rename: $('#rename-dialog'),
     describe: $('#describe-dialog'),
+    fallback: $('#new-project'),
   },
   {
     project: (id) => state.projects.find((project) => project.id === id),
