@@ -140,8 +140,8 @@ fn can_go_on_with_a_session_whose_store_holds_a_message_of_the_users_and_not_wit
     let store = home.store();
     assert_eq!(
         finished(devin.resumable("calm-river")),
-        None,
-        "the store has no row of the session"
+        Some(false),
+        "the store has no row of the session: Devin writes it with the first message"
     );
     store.begins("calm-river");
     assert_eq!(

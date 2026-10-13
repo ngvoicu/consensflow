@@ -23,6 +23,7 @@ use serde_json::Value;
 
 use super::channel;
 use super::install;
+use super::record;
 use super::wire::selected_session;
 use super::wire_log::WireLog;
 use crate::contract::{
@@ -133,11 +134,12 @@ impl Adapter for DevinAdapter {
 
     /// Devin keeps a session's messages in its store, which is read with no window
     /// open as with one: a session with a message of the user's in it had a turn
-    /// and is gone on with, and one the store holds with none has nothing to go on
-    /// with. A store that cannot be read, or has no row of the session, tells
-    /// nothing, and the engine goes on with the session as it did before it asked.
-    /// What Devin does with `--resume` of a session with no messages has not been
-    /// probed, and the engine does not ask it to.
+    /// and is gone on with, and one the store holds with none, or holds no row of
+    /// (Devin writes the row with the first message), has nothing to go on with. A
+    /// store that cannot be read tells nothing, and the engine goes on with the
+    /// session as it did before it asked. Devin resumed on a session it has no
+    /// row of opens idle and drops what is typed to it (live, 3000.11.3,
+    /// 2026-10-14).
     fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
         Box::pin(async move {
             let looked = self
@@ -148,6 +150,9 @@ impl Adapter for DevinAdapter {
             match &*looked {
                 Reading::Known(record) => {
                     Some(record.items.iter().any(|item| item.role == Role::User))
+                }
+                Reading::Unknown(reason) if reason.ends_with(record::MISSING_SESSION) => {
+                    Some(false)
                 }
                 Reading::Unknown(_) => None,
             }
