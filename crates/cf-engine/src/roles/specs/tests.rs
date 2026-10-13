@@ -95,8 +95,11 @@ fn the_section_says_when_to_use_a_spec_what_goes_to_the_board_and_how_a_spec_bec
         // When: the human asks, or the ask is big enough for phases; a small ask goes straight on the board.
         "when the human asks for one, or when an ask is big enough that its work comes in phases",
         "A small ask is no spec: it goes straight on the board as a task",
-        // Writing the specs is the chief's own work; research, subagents and implementation are the board's.
-        "Writing in `docs/specs` is your own work",
+        // Writing the spec is the chief's own work, the second exception to changing nothing
+        // itself, and comes before its tasks; research, subagents and implementation are the board's.
+        "The spec is a second exception to changing nothing yourself",
+        "you write the spec and its registry in `docs/specs` with your own tools, and never give that writing to the staff",
+        "Write the spec before any of its tasks go on the board",
         "Everything Specmint calls research, a subagent or implementation goes on the board as tasks for the staff",
         // From a spec: phase order, `--needs`, the spec item in each brief, progress marked after an acceptance.
         "in phase order",

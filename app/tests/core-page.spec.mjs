@@ -2991,6 +2991,19 @@ async function openSpecs(page) {
   }
 }
 
+test('saves the specs on Enter in the folder and adds nobody to the staff', async ({ page }) => {
+  await open(page)
+  const specs = await openSpecs(page)
+  await specs.mode.selectOption('on')
+  await specs.folder.fill('docs/specs')
+  await specs.folder.press('Enter')
+  await expect
+    .poll(() => calls(page, 'project.specs'))
+    .toEqual([{ project: 1, on: true, folder: 'docs/specs', variant: 'core' }])
+  expect(await calls(page, 'member.add')).toEqual([])
+  expect(await calls(page, 'member.roles')).toEqual([])
+})
+
 test('a project follows the app’s setting for specs until it says on or off, and the dialog says when a change takes hold', async ({
   page,
 }) => {

@@ -46,6 +46,12 @@ export class SpecsGroup {
     this.#folder.placeholder = DEFAULT_FOLDER
     this.#mode.addEventListener('change', () => this.#enable())
     group.querySelector('#staff-specs-save').addEventListener('click', () => this.#save())
+    // Enter in the folder saves the specs, and sends nothing else the form holds.
+    this.#folder.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return
+      event.preventDefault()
+      void this.#save()
+    })
   }
 
   /**

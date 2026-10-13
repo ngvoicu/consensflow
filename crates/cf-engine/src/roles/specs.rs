@@ -45,9 +45,9 @@ impl ProjectSpecs<'_> {
              \n\
              Use a spec when the human asks for one, or when an ask is big enough that its work comes in phases. A small ask is no spec: it goes straight on the board as a task.\n\
              \n\
-             Writing in `{folder}` is your own work: the one change in this project that is yours. Everything Specmint calls research, a subagent or implementation goes on the board as tasks for the staff, and you do none of it yourself or in a subagent.\n\
+             The spec is a second exception to changing nothing yourself: you write the spec and its registry in `{folder}` with your own tools, and never give that writing to the staff. Everything Specmint calls research, a subagent or implementation goes on the board as tasks for the staff, and you do none of it yourself or in a subagent.\n\
              \n\
-             From a spec, put its tasks on the board in phase order: each task of a later phase has `--needs` the tasks of the phase before it, and each brief names the spec item it comes from and carries all its worker needs, since a member never reads the spec. After you accept a task, mark the spec's progress as the skill says: its checkbox in SPEC.md and its count in the registry.\n"
+             Write the spec before any of its tasks go on the board. Then put them on the board in phase order: each task of a later phase has `--needs` the tasks of the phase before it, and each brief names the spec item it comes from and carries all its worker needs, since a member never reads the spec. After you accept a task, mark the spec's progress as the skill says: its checkbox in SPEC.md and its count in the registry.\n"
         )
     }
 }
