@@ -8,6 +8,8 @@
 //! window that stayed at rest and that the record never shows is still tried
 //! again (`deliveries`), whatever turns the window went through since: the wait is
 //! bounded by the window's rest, and nothing a window does stops the queue behind it.
+//! However often the window goes into a turn, a paste its record never showed is
+//! pasted again at the first rest past half an hour from its hand-over.
 //! The one more Enter a paste is given (`deliveries`) is pressed in the first arrival
 //! window only, whatever the wait after it.
 //!
@@ -151,6 +153,40 @@ fn counts_the_arrival_window_in_the_time_its_window_is_at_rest_and_begins_it_aga
     assert_eq!(
         why_retried(&context, project),
         "the harness record never showed it in the 30 s its window was at rest since its last turn"
+    );
+}
+
+#[test]
+fn pastes_again_at_its_next_rest_a_paste_never_shown_in_half_an_hour_of_short_turns() {
+    let context = Context::new();
+    let project = holding(&context);
+    let pasted = counting(&context);
+    let note = context.note(project, "zeus", "chief", "hello");
+    context.pass().unwrap();
+
+    // Twenty seconds of rest and a short turn, over and over: no rest is ever a
+    // whole arrival window, and nothing shows the paste.
+    for _ in 0..60 {
+        context.adapter.with("chief", |agent| agent.settled = true);
+        context.advance(20_000);
+        context.pass().unwrap();
+        context.adapter.busy("chief");
+        context.advance(10_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(note.id).attempts, 1);
+    assert_eq!(pasted.get(), 1);
+
+    // Past half an hour, the next look at rest pastes it again and says why.
+    context.adapter.with("chief", |agent| agent.settled = true);
+    context.advance(1_000);
+    context.pass().unwrap();
+    let again = context.message(note.id);
+    assert_eq!((again.state.as_str(), again.attempts), ("delivering", 2));
+    assert_eq!(pasted.get(), 2, "pasted again once");
+    assert_eq!(
+        why_retried(&context, project),
+        "the harness record never showed it in the 30 min since it was handed over"
     );
 }
 

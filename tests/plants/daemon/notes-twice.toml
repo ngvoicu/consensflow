@@ -184,3 +184,13 @@ runs = ["harness-devin"]
 file = "crates/cf-harness/src/devin/adapter.rs"
 find = "            .is_ok_and(|wire| wire.sent)"
 replace = "            .is_ok_and(|_| false)"
+
+[[plant]]
+name = "notes twice: a paste never shown waits for good while its window's rest is cut by short turns"
+meant = "pastes_again_at_its_next_rest_a_paste_never_shown_in_half_an_hour_of_short_turns"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        let overdue = waited > RECONCILE_MS && at_rest;"
+replace = "        let overdue = false && waited > RECONCILE_MS && at_rest;"

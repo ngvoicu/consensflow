@@ -9,6 +9,18 @@
 //! write it to its record when it gets to it, so only the window's rest counts
 //! towards the record's time: a record gets a whole arrival window of rest, from
 //! the hand-over or from the end of the last turn the window went into since.
+//! However often the window goes into a turn, a paste the record has not shown
+//! within [`RECONCILE_MS`] of its hand-over is pasted again at the window's next
+//! rest, so unrelated turns never hold the queue behind it for good.
+//!
+//! Limits (Astraeus, 2026-10-14). A harness's word that its queue holds the
+//! message is not withdrawn: a Devin wire log that named the pasted header and
+//! then refused it leaves the message waited for until the window closes; the
+//! header is the message's own, so no other text matches it. The one Enter is
+//! pressed whatever the window shows, as it was before (a quiet dialog may take
+//! it), and the screen is looked at apart from the press, so a human's typing in
+//! between can meet it.
+//!
 //! What a hand-over is and how it fails are `deliveries`'; the wait is the part of
 //! the record's delivery part this owns.
 
@@ -32,6 +44,9 @@ const ENTER_AGAIN_MS: i64 = 10_000;
 /// How long the window must have printed nothing first: one being typed into,
 /// or drawing, is left be.
 const ENTER_AGAIN_QUIET_MS: f64 = 3_000.0;
+/// How long after its hand-over a paste the record never showed is pasted again
+/// at the window's next rest, however its rest was cut by turns.
+const RECONCILE_MS: i64 = 30 * 60_000;
 
 impl Dispatcher {
     /// Whether the message on its way shows in the window's record; it is
@@ -130,7 +145,9 @@ impl Dispatcher {
         }
         let waited = self.now() - delivering.since;
         let (rested, turned) = self.rested(record, observed);
-        if rested <= self.seams.limits.arrival_ms {
+        let at_rest = observed.settled && observed.waiting.is_none();
+        let overdue = waited > RECONCILE_MS && at_rest;
+        if rested <= self.seams.limits.arrival_ms && !overdue {
             if waited > ENTER_AGAIN_MS
                 && waited <= self.seams.limits.arrival_ms
                 && !delivering.entered_again
@@ -144,7 +161,12 @@ impl Dispatcher {
         // window at rest all of it, did not land: sending it again is how it
         // reaches the reader. (A message the harness queued itself waits for
         // the record, or for the window to close.)
-        let because = if turned {
+        let because = if overdue && rested <= self.seams.limits.arrival_ms {
+            format!(
+                "the harness record never showed it in the {} min since it was handed over",
+                RECONCILE_MS / 60_000
+            )
+        } else if turned {
             format!(
                 "the harness record never showed it in the {} s its window was at rest since its last turn",
                 self.seams.limits.arrival_ms / 1000
