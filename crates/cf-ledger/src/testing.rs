@@ -7,7 +7,9 @@
 //! stop a pause counted, which it never says in the event that moved the task.
 //! And what only this one's schema has: migration 0012's tester in the checks
 //! of two tables, and the version it brings (a recording of Node's database
-//! says 11, and its checks do not name a tester).
+//! says 11, and its checks do not name a tester). And migration 0014's three
+//! columns of the `project` table (the wake-up calls), which Node's schema never
+//! had, in its rows and in the text of its schema.
 //!
 //! And migration 0015's three columns of the `project` table (what a project
 //! says of specs), which Node's projects never had: in the rows of that table
@@ -51,16 +53,32 @@ const NODE_NEVER_WRITES: [(&str, &str); 4] = [
     ("message", "door_closed_at"),
 ];
 
+/// The columns migration 0014 added to the `project` table, each as the
+/// migration says it (`wake_up_on INTEGER NOT NULL DEFAULT 0 CONSTRAINT …`,
+/// one to a line there): what Node's schema never had.
+fn wake_up_columns() -> impl Iterator<Item = &'static str> {
+    include_str!("../migrations/0014.sql")
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .strip_prefix("ALTER TABLE project ADD COLUMN ")?
+                .strip_suffix(';')
+        })
+}
+
 /// `tables`, a database as the recorder dumps it (each table's `columns`
 /// and its `rows`), without what Node's ledger never writes: the four
-/// columns of migration 0011 and the three of migration 0015 (their name and,
-/// in every row, the value at its place), and the stop in the event rows that
-/// paused a task. A dump from before the migrations has none of them, and is
-/// left as it is.
+/// columns of migration 0011, the three wake-up columns of migration 0014 and
+/// the three of migration 0015 (their name and, in every row, the value at its
+/// place), and the stop in the event rows that paused a task. A dump from
+/// before the migrations has none of them, and is left as it is.
 pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
     hold_apart_the_stop_of_logged_pauses(tables);
     for (table, column) in NODE_NEVER_WRITES.into_iter().chain(specs::COLUMNS) {
         take_column_out(tables, table, column);
+    }
+    for column in wake_up_columns().filter_map(|definition| definition.split_whitespace().next()) {
+        take_column_out(tables, "project", column);
     }
 }
 
@@ -93,8 +111,9 @@ fn take_column_out(tables: &mut Map<String, Value>, table: &str, column: &str) {
 /// `dump`, a database as the recorder dumps it (`userVersion`, `schema` and
 /// `tables`), with the schema as Node's ledger had it: no version past the
 /// last Node's ledger had, no tester in the checks of the two tables that
-/// name the roles and the pools, and no column of what a project says of specs
-/// in the table of the projects. A dump of Node's is left as it is.
+/// name the roles and the pools, and none of the columns of a project's wake-up
+/// calls or of what it says of specs in the table of the projects. A dump of
+/// Node's is left as it is.
 pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
     if let Some(version) = dump.get_mut("userVersion") {
         if version.as_i64().is_some_and(|at| at > NODE_LAST_VERSION) {
@@ -105,15 +124,23 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
         return;
     };
     for entry in schema {
-        let table = entry["name"].as_str().map(str::to_owned);
+        let name = entry["name"].as_str().map(str::to_owned);
         let Some(Value::String(sql)) = entry.get_mut("sql") else {
             continue;
         };
-        match table.as_deref() {
+        match name.as_deref() {
             Some("participant" | "task") => {
                 *sql = sql.replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1);
             }
-            Some("project") => *sql = sql.replace(specs::COLUMN_LINES, ""),
+            Some("project") => {
+                // SQLite wrote each column after the last one, as a comma and the
+                // column's text: the wake-up calls' columns one by one, then the
+                // three of specs, which `specs` holds as the one piece they are.
+                for column in wake_up_columns() {
+                    *sql = sql.replace(&format!(", {column}"), "");
+                }
+                *sql = sql.replace(specs::COLUMN_LINES, "");
+            }
             _ => {}
         }
     }

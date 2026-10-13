@@ -1,7 +1,7 @@
 //! The ledger as its callers hold it: opened on a file, it answers one
 //! operation at a time, each its concern's, and runs it on its store, which no
 //! caller reaches. Its operations are in a file per concern: projects, staff,
-//! conversations, tasks, messages, and what the page reads.
+//! conversations, tasks, messages, wake-up calls, and what the page reads.
 
 mod conversations;
 mod messages;
@@ -9,6 +9,7 @@ mod page_reads;
 mod projects;
 mod staff;
 mod tasks;
+mod wake_ups;
 
 use std::path::Path;
 use std::time::Duration;

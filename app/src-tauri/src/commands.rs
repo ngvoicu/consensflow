@@ -227,6 +227,8 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "message.decline",
     "agents.list",
     "staff.last",
+    "wakeup.get",
+    "wakeup.set",
     "project.specs",
 ];
 

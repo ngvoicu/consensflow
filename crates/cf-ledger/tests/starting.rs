@@ -263,6 +263,7 @@ fn a_populated_version_12_ledger_loses_the_mark_in_migration_13_and_every_row_an
     let (project_before, others_before, sequences_before) =
         (rows(&db, project), others(&db), rows(&db, sequences));
 
+    // Up to migration 13, which is what this test is of: later ones are theirs.
     migrate(&db, &MIGRATIONS[..13]).unwrap();
     migrate(&db, &MIGRATIONS[..13]).unwrap();
 

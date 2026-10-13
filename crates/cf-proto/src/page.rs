@@ -1,6 +1,6 @@
 //! What the board page asks of the daemon, and what the daemon says first.
 //!
-//! The page names an operation and its body; the app forwards the 29 names
+//! The page names an operation and its body; the app forwards the names
 //! below and nothing else (`DAEMON_OPERATIONS` in `commands.rs`), and the
 //! daemon answers each over the bridge. The daemon's first line on its standard
 //! output is the [`HandleLine`] the app reads to find it.
@@ -40,6 +40,8 @@ pub enum PageOperation {
     MessageRead,
     MessageApprove,
     MessageDecline,
+    WakeUpGet,
+    WakeUpSet,
     /// What a project says of specs: whether they are on, the folder and the
     /// Specmint variant its chief plans with.
     ProjectSpecs,
@@ -47,8 +49,8 @@ pub enum PageOperation {
 
 impl PageOperation {
     /// Every operation, in the order Node's page listed them, then those this
-    /// build added.
-    pub const ALL: [PageOperation; 29] = [
+    /// build added, in the order it added them.
+    pub const ALL: [PageOperation; 31] = [
         Self::ProjectsList,
         Self::ProjectOpen,
         Self::ProjectResume,
@@ -77,6 +79,8 @@ impl PageOperation {
         Self::MessageRead,
         Self::MessageApprove,
         Self::MessageDecline,
+        Self::WakeUpGet,
+        Self::WakeUpSet,
         Self::ProjectSpecs,
     ];
 
@@ -111,6 +115,8 @@ impl PageOperation {
             Self::MessageRead => "message.read",
             Self::MessageApprove => "message.approve",
             Self::MessageDecline => "message.decline",
+            Self::WakeUpGet => "wakeup.get",
+            Self::WakeUpSet => "wakeup.set",
             Self::ProjectSpecs => "project.specs",
         }
     }
@@ -136,6 +142,7 @@ impl PageOperation {
                 | Self::InboxGet
                 | Self::TaskGet
                 | Self::TaskTranscript
+                | Self::WakeUpGet
         )
     }
 }
@@ -155,7 +162,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_operations_are_the_twenty_nine_the_app_forwards() {
+    fn the_operations_are_the_ones_the_app_forwards() {
         let source = include_str!("../../../app/src-tauri/src/commands.rs");
         let list = source
             .split("const DAEMON_OPERATIONS: &[&str] = &[")
@@ -164,7 +171,7 @@ mod tests {
             .unwrap();
         let mut forwarded: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         let mut named: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(named.len(), 29);
+        assert_eq!(named.len(), 31);
         forwarded.sort_unstable();
         named.sort_unstable();
         assert_eq!(named, forwarded);
@@ -219,7 +226,7 @@ mod tests {
             "message.approve",
             "message.decline",
         ];
-        const ADDED: [&str; 1] = ["project.specs"];
+        const ADDED: [&str; 3] = ["wakeup.get", "wakeup.set", "project.specs"];
         let listed: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
         assert_eq!(listed[..RECORDED.len()], RECORDED);
         assert_eq!(listed[RECORDED.len()..], ADDED);
@@ -242,6 +249,7 @@ mod tests {
                 "inbox.get",
                 "task.get",
                 "task.transcript",
+                "wakeup.get",
             ]
         );
     }

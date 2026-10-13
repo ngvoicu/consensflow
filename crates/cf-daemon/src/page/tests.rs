@@ -372,3 +372,4 @@ mod scripted;
 mod specs;
 mod stopping;
 mod turns;
+mod wake_up;

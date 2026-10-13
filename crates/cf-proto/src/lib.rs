@@ -14,3 +14,4 @@ pub mod panes;
 pub mod questions;
 pub mod specs;
 pub mod trace;
+pub mod wake_ups;

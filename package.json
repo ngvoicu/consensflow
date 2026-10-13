@@ -54,6 +54,7 @@
     "live:approval": "cargo xtask live approval",
     "live:mcp": "cargo xtask live mcp",
     "live:finish": "cargo xtask live finish",
+    "live:wake-ups": "cargo xtask live wake-ups",
     "live:specs": "cargo xtask live specs",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"

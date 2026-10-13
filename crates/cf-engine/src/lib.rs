@@ -34,6 +34,7 @@ mod stops;
 mod taken_back;
 mod transcripts;
 mod unstarted;
+mod wake_ups;
 mod windows;
 
 pub use chief_switch::SwitchTo;

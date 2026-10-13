@@ -47,7 +47,7 @@ mod tests {
     }
 
     #[test]
-    fn takes_the_columns_of_specs_out_of_the_text_sqlite_wrote_for_the_project_table_and_of_no_other(
+    fn takes_the_columns_of_specs_and_of_the_wake_up_calls_out_of_the_text_sqlite_wrote_for_the_project_table_and_of_no_other(
     ) {
         use crate::schema::{migrate, MIGRATIONS};
         let project_text = |migrations: &[&str]| {
@@ -60,16 +60,12 @@ mod tests {
             )
             .unwrap()
         };
-        // The table as every migration but 0015 left it, and as all of them did.
-        let without: Vec<&str> = MIGRATIONS
-            .iter()
-            .copied()
-            .filter(|sql| !sql.contains("project_specs_check"))
-            .collect();
-        assert_eq!(without.len(), MIGRATIONS.len() - 1);
-        let before = project_text(&without);
-        let after = project_text(&MIGRATIONS);
-        assert_ne!(before, after, "the migration changed the table's text");
+        // The table as migration 13 left it, and as 0015 left it on top of 0014
+        // (the wake-up calls' three columns): one function holds both sets of
+        // columns apart, so what is left of the text is the first.
+        let before = project_text(&MIGRATIONS[..13]);
+        let after = project_text(&MIGRATIONS[..15]);
+        assert_ne!(before, after, "the migrations changed the table's text");
         let mut dump = json!({
             "userVersion": 15,
             "schema": [

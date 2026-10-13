@@ -28,6 +28,8 @@
     "message.read",
     "message.approve",
     "message.decline",
+    "wakeup.get",
+    "wakeup.set",
     "project.specs"
   ],
   "ping": "{\"ok\":true}"

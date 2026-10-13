@@ -12,8 +12,9 @@
 //! comes back out (`deliveries`), the human's Switch chief (`chief_switch`),
 //! the copy of each window's conversation (`transcripts`), the task whose
 //! window went away, its requester told once for the tasks of a pass (`stalls`),
-//! and the human's Resume of a project a start suspended, and what a start
-//! leaves for it (`resume`).
+//! the human's Resume of a project a start suspended, and what a start
+//! leaves for it (`resume`), and the human's wake-up calls, which nudge a chief
+//! at rest (`wake_ups`).
 //!
 //! Work runs as Node's did ([`crate::runtime`]): a piece of work is begun
 //! where JavaScript called it, and what JavaScript did not await goes on
@@ -214,6 +215,7 @@ impl Dispatcher {
             .borrow_mut()
             .set_project_state(project, "suspended")?;
         let kept = self.close_windows(&suspended.participants).await?;
+        self.withdraw_wake_up(project)?;
         self.changed();
         if !kept.is_empty() {
             let windows: Vec<String> = kept
@@ -935,6 +937,11 @@ impl Dispatcher {
                 .await;
         }
         if idle {
+            // A chief at rest may be due a wake-up: queued here, it is the next
+            // message of its queue, delivered by the rules of every message.
+            if participant.role == "chief" {
+                self.queue_wake_up_if_due(project, participant)?;
+            }
             let next = self.seams.ledger.borrow().next_delivery(participant.id)?;
             if let Some(next) = next {
                 let (this, held) = (Rc::clone(self), Rc::clone(record));

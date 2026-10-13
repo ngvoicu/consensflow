@@ -571,7 +571,7 @@ const staff = new StaffDialog($('#staff-dialog'), {
 staffButton.addEventListener('click', () =>
   act(async () => {
     await readAgents()
-    staff.open()
+    await staff.open()
   }),
 )
 

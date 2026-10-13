@@ -261,6 +261,23 @@ async function open(page, data = model()) {
     // core request with this, as Rust does with no bridge to the daemon.
     window.__down = null
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
+    // A project's wake-up calls as the daemon says them: the interval in the
+    // largest unit that holds it whole, the default words where none were written.
+    const UNIT_MS = { days: 86_400_000, hours: 3_600_000, minutes: 60_000 }
+    const DEFAULT_WORDS =
+      'Do you still have work to do? If tasks are left on the board or in your plan, carry on.'
+    const wakeUpOf = (project) => {
+      const saved = data.wakeUps?.[project] ?? { on: false, everyMs: 3_600_000, text: null }
+      const [unit, size] = Object.entries(UNIT_MS).find(([, ms]) => saved.everyMs % ms === 0)
+      return {
+        on: saved.on,
+        everyMs: saved.everyMs,
+        every: saved.everyMs / size,
+        unit,
+        text: saved.text ?? DEFAULT_WORDS,
+        defaultText: saved.text === null,
+      }
+    }
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
       'agents.list': () => answer({ agents: data.agents, missing: data.missing ?? [] }),
@@ -274,6 +291,24 @@ async function open(page, data = model()) {
       'project.gate': ({ project, gate }) => {
         data.boards[project].project.gate = gate
         return answer({ project: data.boards[project].project })
+      },
+      'wakeup.get': ({ project }) => answer({ wakeUp: wakeUpOf(project) }),
+      'wakeup.set': ({ project, on, every, unit, text }) => {
+        if (!(unit in UNIT_MS) || !Number.isInteger(every) || every < 1) {
+          const error = `a wake-up comes every whole number of minutes, hours or days, not ${every} "${unit}"`
+          return { ok: false, error }
+        }
+        if (text.trim() === '') {
+          const error = 'the wake-up text must be text, not empty, at most 1000000 characters'
+          return { ok: false, error }
+        }
+        data.wakeUps ??= {}
+        data.wakeUps[project] = {
+          on,
+          everyMs: every * UNIT_MS[unit],
+          text: text === DEFAULT_WORDS ? null : text,
+        }
+        return answer({ wakeUp: wakeUpOf(project) })
       },
       // What a project says of specs: kept as it was said, each part left out when
       // it says none, and the daemon's own refusal where a test has it refuse.
@@ -3057,6 +3092,183 @@ test('a board drawn again while the dialog is open leaves what the human is typi
   await expect(specs.folder).toHaveValue('plans')
   await expect(specs.folder).toBeDisabled()
   await expect(specs.variant).toHaveValue('core-html')
+})
+
+const DEFAULT_WAKE_UP_WORDS =
+  'Do you still have work to do? If tasks are left on the board or in your plan, carry on.'
+
+/** The staff dialog open on project 1, and its group of wake-up calls. */
+async function wakeUpGroup(page) {
+  await page.getByRole('button', { name: 'Staff' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  const group = dialog.getByRole('group', { name: 'Wake-up calls' })
+  return {
+    dialog,
+    group,
+    on: group.getByRole('checkbox'),
+    // A label that wraps its control is named with the control's value as well.
+    every: group.getByLabel('Every'),
+    unit: group.getByLabel('Unit'),
+    words: group.getByLabel('What it says'),
+    save: group.getByRole('button', { name: 'Save wake-up calls' }),
+  }
+}
+
+test('shows the wake-up calls of the project in the staff dialog: off, an hour apart, and the default words', async ({
+  page,
+}) => {
+  await open(page)
+  const calling = await wakeUpGroup(page)
+  await expect(calling.on).not.toBeChecked()
+  await expect(calling.every).toHaveValue('1')
+  await expect(calling.unit).toHaveValue('hours')
+  await expect(calling.words).toHaveValue(DEFAULT_WAKE_UP_WORDS)
+  expect(await calls(page, 'wakeup.get')).toEqual([{ project: 1 }])
+  expect(await calls(page, 'wakeup.set')).toEqual([])
+})
+
+test('saves the wake-up calls as a number, a unit and the words, shows them as the daemon says them, and shows what was saved when the dialog opens again', async ({
+  page,
+}) => {
+  await open(page)
+  const calling = await wakeUpGroup(page)
+  await calling.on.check()
+  await calling.every.fill('120')
+  await calling.unit.selectOption('minutes')
+  await calling.words.fill('Anything left? Carry on, or say what is.')
+  await calling.save.click()
+  await expect
+    .poll(() => calls(page, 'wakeup.set'))
+    .toEqual([
+      {
+        project: 1,
+        on: true,
+        every: 120,
+        unit: 'minutes',
+        text: 'Anything left? Carry on, or say what is.',
+      },
+    ])
+  // The daemon says the interval in the largest unit that holds it: 120 minutes are 2 hours.
+  await expect(calling.every).toHaveValue('2')
+  await expect(calling.unit).toHaveValue('hours')
+  await expect(page.locator('#status')).toHaveText(
+    'Wake-up calls are on: the chief is asked every 2 hours.',
+  )
+  // Closed and opened again, it shows what was saved.
+  await calling.dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(calling.dialog).toBeHidden()
+  await page.getByRole('button', { name: 'Staff' }).click()
+  await expect(calling.on).toBeChecked()
+  await expect(calling.every).toHaveValue('2')
+  await expect(calling.unit).toHaveValue('hours')
+  await expect(calling.words).toHaveValue('Anything left? Carry on, or say what is.')
+  // And what the daemon has when it opens, not what the page last drew: the
+  // setting was changed elsewhere meanwhile.
+  await calling.dialog.getByRole('button', { name: 'Close' }).click()
+  await page.evaluate(() => {
+    window.__model.wakeUps[1] = { on: false, everyMs: 5_400_000, text: null }
+  })
+  await page.getByRole('button', { name: 'Staff' }).click()
+  await expect(calling.on).not.toBeChecked()
+  await expect(calling.every).toHaveValue('90')
+  await expect(calling.unit).toHaveValue('minutes')
+  await expect(calling.words).toHaveValue(DEFAULT_WAKE_UP_WORDS)
+  expect(await calls(page, 'wakeup.get')).toHaveLength(3)
+})
+
+test('converts the wake-up interval the human picks in minutes, hours and days as the daemon counts it, and says it in the largest unit that holds it whole', async ({
+  page,
+}) => {
+  await open(page)
+  const calling = await wakeUpGroup(page)
+  await calling.on.check()
+  for (const [every, unit, shown, saidUnit, said] of [
+    ['90', 'minutes', '90', 'minutes', 'every 90 minutes'],
+    ['60', 'minutes', '1', 'hours', 'every 1 hour'],
+    ['24', 'hours', '1', 'days', 'every 1 day'],
+    ['36', 'hours', '36', 'hours', 'every 36 hours'],
+    ['3', 'days', '3', 'days', 'every 3 days'],
+    ['1', 'minutes', '1', 'minutes', 'every 1 minute'],
+  ]) {
+    await calling.every.fill(every)
+    await calling.unit.selectOption(unit)
+    await calling.save.click()
+    await expect(calling.every).toHaveValue(shown)
+    await expect(calling.unit).toHaveValue(saidUnit)
+    await expect(page.locator('#status')).toHaveText(
+      `Wake-up calls are on: the chief is asked ${said}.`,
+    )
+  }
+  expect((await calls(page, 'wakeup.set')).map(({ every, unit }) => [every, unit])).toEqual([
+    [90, 'minutes'],
+    [60, 'minutes'],
+    [24, 'hours'],
+    [36, 'hours'],
+    [3, 'days'],
+    [1, 'minutes'],
+  ])
+})
+
+test('turns the wake-up calls off with the same Save, and sends no save for a number that is no whole number of at least one', async ({
+  page,
+}) => {
+  const data = model()
+  data.wakeUps = { 1: { on: true, everyMs: 7_200_000, text: 'Still there?' } }
+  await open(page, data)
+  const calling = await wakeUpGroup(page)
+  await expect(calling.on).toBeChecked()
+  await expect(calling.words).toHaveValue('Still there?')
+  // The browser holds back a number under one or none: nothing is sent.
+  for (const bad of ['0', '-3', '1.5', '']) {
+    await calling.every.fill(bad)
+    await calling.save.click()
+    await expect(calling.every).toHaveJSProperty('validity.valid', false)
+  }
+  expect(await calls(page, 'wakeup.set')).toEqual([])
+  await calling.every.fill('2')
+  await calling.on.uncheck()
+  await calling.save.click()
+  await expect(page.locator('#status')).toHaveText('Wake-up calls are off.')
+  expect(await calls(page, 'wakeup.set')).toEqual([
+    { project: 1, on: false, every: 2, unit: 'hours', text: 'Still there?' },
+  ])
+})
+
+test('says the daemon refusal of a wake-up in the dialog and keeps what the human typed', async ({
+  page,
+}) => {
+  await open(page)
+  const calling = await wakeUpGroup(page)
+  await calling.on.check()
+  await calling.words.fill('   ')
+  await calling.save.click()
+  const hint = calling.group.locator('.wakeup-hint')
+  await expect(hint).toHaveText(
+    'the wake-up text must be text, not empty, at most 1000000 characters',
+  )
+  await expect(calling.words).toHaveValue('   ')
+  await expect(calling.on).toBeChecked()
+  // Written again, it saves and the refusal goes.
+  await calling.words.fill('Go on?')
+  await calling.save.click()
+  await expect(hint).toBeHidden()
+  await expect(calling.words).toHaveValue('Go on?')
+})
+
+test('saves the wake-up calls on Enter in the number and adds nobody to the staff', async ({
+  page,
+}) => {
+  await open(page)
+  const calling = await wakeUpGroup(page)
+  await calling.on.check()
+  await calling.every.fill('5')
+  await calling.unit.selectOption('minutes')
+  await calling.every.press('Enter')
+  await expect
+    .poll(() => calls(page, 'wakeup.set'))
+    .toEqual([{ project: 1, on: true, every: 5, unit: 'minutes', text: DEFAULT_WAKE_UP_WORDS }])
+  expect(await calls(page, 'member.add')).toEqual([])
+  expect(await calls(page, 'member.roles')).toEqual([])
 })
 
 test('lists what waits for approval in For you, and approves or declines it, writing to no agent', async ({

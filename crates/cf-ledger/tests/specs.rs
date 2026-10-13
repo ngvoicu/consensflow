@@ -259,7 +259,7 @@ fn rows(db: &Connection, sql: &str) -> Vec<String> {
 fn a_ledger_of_the_version_before_gains_the_three_columns_empty_and_loses_nothing() {
     let db = Connection::open_in_memory().expect("a database");
     db.execute_batch("PRAGMA foreign_keys = ON").expect("keys");
-    migrate(&db, &MIGRATIONS[..13]).expect("the version before");
+    migrate(&db, &MIGRATIONS[..14]).expect("the version before");
     db.execute_batch(&format!(
         "INSERT INTO project (id, directory, name, state, gate, created_at, updated_at) VALUES
            (1, '/work/app', 'app', 'suspended', 0, '{AT}', '{AT}'),
@@ -275,42 +275,36 @@ fn a_ledger_of_the_version_before_gains_the_three_columns_empty_and_loses_nothin
         ["participant", "event", "task", "message"]
             .map(|table| rows(db, &format!("SELECT * FROM {table} ORDER BY rowid")))
     };
+    let columns_of = |db: &Connection| -> Vec<String> {
+        db.prepare("SELECT name FROM pragma_table_info('project') ORDER BY cid")
+            .expect("the columns")
+            .query_map([], |row| row.get(0))
+            .expect("the columns")
+            .map(|name| name.expect("a name"))
+            .collect()
+    };
     let before = (
         rows(
             &db,
             "SELECT id, directory, name, state, gate, created_at, updated_at FROM project ORDER BY rowid",
         ),
         others(&db),
+        columns_of(&db),
     );
 
-    migrate(&db, &MIGRATIONS).expect("migrated");
-    migrate(&db, &MIGRATIONS).expect("and again");
+    // Through 0015 and no further: what a later migration does is its own test's.
+    migrate(&db, &MIGRATIONS[..15]).expect("migrated");
+    migrate(&db, &MIGRATIONS[..15]).expect("and again");
 
     let version: i64 = db
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("the version");
-    assert_eq!(version, i64::try_from(MIGRATIONS.len()).expect("a count"));
-    let columns: Vec<String> = db
-        .prepare("SELECT name FROM pragma_table_info('project') ORDER BY cid")
-        .expect("the columns")
-        .query_map([], |row| row.get(0))
-        .expect("the columns")
-        .map(|name| name.expect("a name"))
-        .collect();
+    assert_eq!(version, 15);
+    let mut columns = before.2.clone();
+    columns.extend(["specs", "specs_folder", "specs_variant"].map(String::from));
     assert_eq!(
+        columns_of(&db),
         columns,
-        [
-            "id",
-            "directory",
-            "name",
-            "state",
-            "gate",
-            "created_at",
-            "updated_at",
-            "specs",
-            "specs_folder",
-            "specs_variant"
-        ],
         "the three come last, and every column is where it was"
     );
     assert_eq!(
